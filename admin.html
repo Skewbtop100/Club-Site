@@ -2297,6 +2297,7 @@
         <div class="solve-group">
           <span class="solve-label">S1</span>
           <input type="text" class="solve-input" id="er_solve_1" autocomplete="off"
+            inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*"
             oninput="erSyncInput(1)" />
           <div class="solve-btns">
             <button class="solve-btn solve-btn-plus2" id="er_plus2_1" type="button" onclick="erTogglePlus2(1)">+2</button>
@@ -2306,6 +2307,7 @@
         <div class="solve-group">
           <span class="solve-label">S2</span>
           <input type="text" class="solve-input" id="er_solve_2" autocomplete="off"
+            inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*"
             oninput="erSyncInput(2)" />
           <div class="solve-btns">
             <button class="solve-btn solve-btn-plus2" id="er_plus2_2" type="button" onclick="erTogglePlus2(2)">+2</button>
@@ -2315,6 +2317,7 @@
         <div class="solve-group">
           <span class="solve-label">S3</span>
           <input type="text" class="solve-input" id="er_solve_3" autocomplete="off"
+            inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*"
             oninput="erSyncInput(3)" />
           <div class="solve-btns">
             <button class="solve-btn solve-btn-plus2" id="er_plus2_3" type="button" onclick="erTogglePlus2(3)">+2</button>
@@ -2324,6 +2327,7 @@
         <div class="solve-group">
           <span class="solve-label">S4</span>
           <input type="text" class="solve-input" id="er_solve_4" autocomplete="off"
+            inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*"
             oninput="erSyncInput(4)" />
           <div class="solve-btns">
             <button class="solve-btn solve-btn-plus2" id="er_plus2_4" type="button" onclick="erTogglePlus2(4)">+2</button>
@@ -2333,6 +2337,7 @@
         <div class="solve-group">
           <span class="solve-label">S5</span>
           <input type="text" class="solve-input" id="er_solve_5" autocomplete="off"
+            inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*"
             oninput="erSyncInput(5)" />
           <div class="solve-btns">
             <button class="solve-btn solve-btn-plus2" id="er_plus2_5" type="button" onclick="erTogglePlus2(5)">+2</button>
@@ -3506,7 +3511,7 @@ function buildResultPanels() {
         ${[1,2,3,4,5].map(n => `
           <div class="solve-group">
             <span class="solve-label">S${n}</span>
-            <input type="text" class="solve-input" id="solve${i}_${n}" placeholder="\u2014" autocomplete="off" />
+            <input type="text" class="solve-input" id="solve${i}_${n}" placeholder="\u2014" autocomplete="off" inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*" />
             <div class="solve-btns">
               <button class="solve-btn solve-btn-plus2" id="plus2_${i}_${n}" type="button">+2</button>
               <button class="solve-btn solve-btn-dnf"   id="dnf_${i}_${n}"   type="button">DNF</button>
@@ -5272,7 +5277,7 @@ function renderImportPreview() {
     const avg   = calcAo5(valid);
     const best  = bestSingle(valid);
     const solveCells = r.solves.map((s, si) =>
-      `<td style="padding:0.2rem 0.3rem;"><input class="imp-solve-input" id="imp-s${si+1}-${i}" type="text" value="${s !== null ? escHtml(fmtTime(s)) : ''}" oninput="recomputeImportRow(${i})" autocomplete="off" spellcheck="false"></td>`
+      `<td style="padding:0.2rem 0.3rem;"><input class="imp-solve-input" id="imp-s${si+1}-${i}" type="text" value="${s !== null ? escHtml(fmtTime(s)) : ''}" oninput="recomputeImportRow(${i})" autocomplete="off" spellcheck="false" inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*"></td>`
     ).join('');
     const rowTitle = isNonQual ? ` title="Did not qualify from previous round — will be skipped"` : (isDupName ? ` title="Duplicate name in this batch"` : '');
     return `<tr class="${st.cls}" id="imp-row-${i}">
