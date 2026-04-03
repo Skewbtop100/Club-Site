@@ -2298,7 +2298,7 @@
           <span class="solve-label">S1</span>
           <input type="text" class="solve-input" id="er_solve_1" autocomplete="off"
             inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*"
-            oninput="erSyncInput(1)" />
+            oninput="erSyncInput(1)" onblur="formatSolveInput(this);erSyncInput(1)" />
           <div class="solve-btns">
             <button class="solve-btn solve-btn-plus2" id="er_plus2_1" type="button" onclick="erTogglePlus2(1)">+2</button>
             <button class="solve-btn solve-btn-dnf"   id="er_dnf_1"   type="button" onclick="erToggleDnf(1)">DNF</button>
@@ -2308,7 +2308,7 @@
           <span class="solve-label">S2</span>
           <input type="text" class="solve-input" id="er_solve_2" autocomplete="off"
             inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*"
-            oninput="erSyncInput(2)" />
+            oninput="erSyncInput(2)" onblur="formatSolveInput(this);erSyncInput(2)" />
           <div class="solve-btns">
             <button class="solve-btn solve-btn-plus2" id="er_plus2_2" type="button" onclick="erTogglePlus2(2)">+2</button>
             <button class="solve-btn solve-btn-dnf"   id="er_dnf_2"   type="button" onclick="erToggleDnf(2)">DNF</button>
@@ -2318,7 +2318,7 @@
           <span class="solve-label">S3</span>
           <input type="text" class="solve-input" id="er_solve_3" autocomplete="off"
             inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*"
-            oninput="erSyncInput(3)" />
+            oninput="erSyncInput(3)" onblur="formatSolveInput(this);erSyncInput(3)" />
           <div class="solve-btns">
             <button class="solve-btn solve-btn-plus2" id="er_plus2_3" type="button" onclick="erTogglePlus2(3)">+2</button>
             <button class="solve-btn solve-btn-dnf"   id="er_dnf_3"   type="button" onclick="erToggleDnf(3)">DNF</button>
@@ -2328,7 +2328,7 @@
           <span class="solve-label">S4</span>
           <input type="text" class="solve-input" id="er_solve_4" autocomplete="off"
             inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*"
-            oninput="erSyncInput(4)" />
+            oninput="erSyncInput(4)" onblur="formatSolveInput(this);erSyncInput(4)" />
           <div class="solve-btns">
             <button class="solve-btn solve-btn-plus2" id="er_plus2_4" type="button" onclick="erTogglePlus2(4)">+2</button>
             <button class="solve-btn solve-btn-dnf"   id="er_dnf_4"   type="button" onclick="erToggleDnf(4)">DNF</button>
@@ -2338,7 +2338,7 @@
           <span class="solve-label">S5</span>
           <input type="text" class="solve-input" id="er_solve_5" autocomplete="off"
             inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*"
-            oninput="erSyncInput(5)" />
+            oninput="erSyncInput(5)" onblur="formatSolveInput(this);erSyncInput(5)" />
           <div class="solve-btns">
             <button class="solve-btn solve-btn-plus2" id="er_plus2_5" type="button" onclick="erTogglePlus2(5)">+2</button>
             <button class="solve-btn solve-btn-dnf"   id="er_dnf_5"   type="button" onclick="erToggleDnf(5)">DNF</button>
@@ -2665,6 +2665,35 @@ function parseTime(str) {
   }
   if (isNaN(cs)) return null;
   return plus2 ? cs + 200 : cs;
+}
+
+// Convert a pure-digit string to a formatted time string.
+// Rule: last 2 = hundredths, prev 2 = seconds, rest = minutes.
+// e.g. "5" → "0.05", "123" → "1.23", "12345" → "1:23.45"
+function rawDigitsToTimeStr(digits) {
+  var cc   = digits.slice(-2).padStart(2, '0');
+  var rest = digits.length > 2 ? digits.slice(0, -2) : '';
+  var ss   = rest.slice(-2);
+  var mm   = rest.length > 2 ? rest.slice(0, -2) : '';
+  var sNum = ss ? parseInt(ss, 10) : 0;
+  if (mm) {
+    return parseInt(mm, 10) + ':' + String(sNum).padStart(2, '0') + '.' + cc;
+  }
+  return sNum + '.' + cc;
+}
+
+// If a solve input contains only raw digits (no dot/colon), auto-format it.
+// Preserves trailing +, and leaves DNF/DNS/already-formatted values untouched.
+function formatSolveInput(inp) {
+  var raw = inp.value.trim();
+  if (!raw) return;
+  var upper = raw.toUpperCase();
+  if (upper === 'DNF' || upper === 'DNS') return;
+  var hasPlus = raw.endsWith('+');
+  var core = hasPlus ? raw.slice(0, -1).trim() : raw;
+  if (/^\d+$/.test(core)) {
+    inp.value = rawDigitsToTimeStr(core) + (hasPlus ? '+' : '');
+  }
 }
 
 function calcAo5(solves) {
@@ -3550,12 +3579,22 @@ function buildResultPanels() {
         document.getElementById(`dnf_${i}_${n}`).classList.toggle('active', v === 'DNF');
         updateCalc(i);
       });
+      panel.querySelector(`#solve${i}_${n}`).addEventListener('blur', function() {
+        formatSolveInput(this);
+        const v = this.value.trim().toUpperCase();
+        this.classList.toggle('dnf-val', v === 'DNF' || v === 'DNS');
+        updateCalc(i);
+      });
       panel.querySelector(`#plus2_${i}_${n}`).addEventListener('click', () => togglePlus2(i, n));
       panel.querySelector(`#dnf_${i}_${n}`).addEventListener('click',   () => toggleDnf(i, n));
-      // Enter advances to next solve field without triggering Save
+      // Enter formats then advances to next solve field without triggering Save
       panel.querySelector(`#solve${i}_${n}`).addEventListener('keydown', function(e) {
         if (e.key !== 'Enter') return;
         e.preventDefault();
+        formatSolveInput(this);
+        const v = this.value.trim().toUpperCase();
+        this.classList.toggle('dnf-val', v === 'DNF' || v === 'DNS');
+        updateCalc(i);
         const next = panel.querySelector(`#solve${i}_${n + 1}`);
         if (next) { next.focus(); next.select(); }
       });
