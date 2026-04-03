@@ -1285,6 +1285,21 @@
     }
     .wca-round-tab:hover { background: rgba(255,255,255,0.06); color: var(--text); }
     .wca-round-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .cr-complete-btn {
+      font-size: 0.72rem; font-weight: 700; padding: 0.22rem 0.65rem;
+      border-radius: 6px; cursor: pointer; white-space: nowrap;
+      border: 1px solid; font-family: inherit; transition: background 0.13s, color 0.13s, border-color 0.13s;
+    }
+    .cr-complete-btn.not-done {
+      background: transparent; border-color: rgba(255,255,255,0.12); color: var(--muted);
+    }
+    .cr-complete-btn.not-done:hover { background: rgba(255,255,255,0.06); color: var(--text); }
+    .cr-complete-btn.done {
+      background: rgba(74,222,128,0.1); border-color: rgba(74,222,128,0.32); color: #4ade80;
+    }
+    .cr-complete-btn.done:hover {
+      background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.32); color: #f87171;
+    }
     .wca-group-tabs { display: flex; gap: 0.25rem; flex-wrap: wrap; padding: 0.4rem 1.3rem 0; }
     .wca-group-tab {
       padding: 0.15rem 0.5rem; border-radius: 14px;
@@ -1624,6 +1639,169 @@
     @media (max-width: 480px) {
       .insp-time { font-size: 2rem; }
       .insp-btn  { flex: 1; padding: 0.4rem 0.5rem; }
+    }
+
+    /* ===== ROLE ASSIGNMENTS ===== */
+    .ra-controls {
+      display: flex; flex-wrap: wrap; gap: 0.6rem 0.9rem;
+      align-items: flex-end; margin-bottom: 1.1rem;
+    }
+    .ra-controls .form-group { margin-bottom: 0; min-width: 150px; flex: 1; }
+    .ra-num-wrap {
+      display: flex; flex-direction: column; gap: 0.22rem;
+      min-width: 120px; flex: 0 0 auto;
+    }
+    .ra-num-wrap label {
+      font-size: 0.72rem; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    .ra-num-input {
+      width: 80px; padding: 0.38rem 0.5rem;
+      background: var(--input-bg); border: 1px solid var(--input-border);
+      border-radius: 7px; color: var(--text); font-size: 0.88rem;
+      font-family: inherit;
+    }
+    .ra-num-input:focus { outline: none; border-color: var(--accent); }
+    .ra-btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-bottom: 1.2rem; }
+    .ra-warning {
+      font-size: 0.78rem; color: #fb923c;
+      background: rgba(249,115,22,0.08); border: 1px solid rgba(249,115,22,0.25);
+      border-radius: 7px; padding: 0.45rem 0.8rem; margin-bottom: 0.9rem;
+    }
+    .ra-summary-bar {
+      display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 1rem;
+    }
+    .ra-sum-chip {
+      font-size: 0.72rem; font-weight: 600;
+      padding: 0.2rem 0.55rem; border-radius: 5px;
+      background: rgba(124,58,237,0.1); border: 1px solid rgba(124,58,237,0.25);
+      color: #a78bfa;
+    }
+    .ra-heats { display: flex; flex-direction: column; gap: 0.6rem; }
+    .ra-heat-card {
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 9px; overflow: hidden;
+      background: rgba(255,255,255,0.015);
+    }
+    .ra-heat-header {
+      display: flex; align-items: center; gap: 0.6rem;
+      padding: 0.52rem 0.9rem;
+      background: rgba(124,58,237,0.07);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .ra-heat-label {
+      font-size: 0.75rem; font-weight: 700;
+      color: #c4b5fd; letter-spacing: 0.04em; text-transform: uppercase;
+    }
+    .ra-quality-badge {
+      font-size: 0.63rem; font-weight: 700; padding: 0.1rem 0.4rem;
+      border-radius: 4px; margin-left: auto;
+    }
+    .ra-quality-ok      { background: rgba(74,222,128,0.12); color: #4ade80; border: 1px solid rgba(74,222,128,0.25); }
+    .ra-quality-warn    { background: rgba(251,191,36,0.12); color: #fbbf24; border: 1px solid rgba(251,191,36,0.25); }
+    .ra-quality-reduced { background: rgba(249,115,22,0.12); color: #fb923c; border: 1px solid rgba(249,115,22,0.28); }
+    .ra-heat-body { padding: 0.55rem 0.9rem 0.65rem; display: flex; flex-wrap: wrap; gap: 0.4rem 1.2rem; }
+    .ra-role-group { min-width: 140px; flex: 1; }
+    .ra-role-title {
+      font-size: 0.62rem; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 0.3rem;
+    }
+    .ra-role-competitor .ra-role-title { color: #818cf8; }
+    .ra-role-judge      .ra-role-title { color: #4ade80; }
+    .ra-role-scrambler  .ra-role-title { color: #fbbf24; }
+    .ra-role-standby    .ra-role-title { color: var(--muted); }
+    .ra-name-list { display: flex; flex-direction: column; gap: 0.12rem; }
+    .ra-name-tag {
+      font-size: 0.82rem; font-weight: 500; color: var(--text);
+      padding: 0.18rem 0; white-space: nowrap;
+    }
+    .ra-name-tag.overlap { color: #fb923c; font-style: italic; }
+    .ra-empty-tag { font-size: 0.78rem; color: var(--muted); font-style: italic; }
+    .ra-duty-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-top: 0.4rem; }
+    .ra-duty-table th {
+      padding: 0.3rem 0.55rem; font-size: 0.63rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+      border-bottom: 1px solid rgba(255,255,255,0.07); text-align: left;
+    }
+    .ra-duty-table th.th-r { text-align: right; }
+    .ra-duty-table td { padding: 0.3rem 0.55rem; border-bottom: 1px solid rgba(255,255,255,0.04); }
+    .ra-duty-table td.td-r { text-align: right; font-family: monospace; }
+    .ra-duty-table tr:last-child td { border-bottom: none; }
+
+    .ra-ev-tabs {
+      display: flex; gap: 0.3rem; flex-wrap: wrap;
+      padding-bottom: 0.75rem; margin-bottom: 0.75rem;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .ra-ev-pill {
+      padding: 0.26rem 0.7rem; border-radius: 6px;
+      font-size: 0.75rem; font-weight: 700;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: transparent; color: var(--muted);
+      cursor: pointer; white-space: nowrap;
+      transition: background 0.13s, color 0.13s, border-color 0.13s;
+    }
+    .ra-ev-pill:hover { background: rgba(255,255,255,0.06); color: var(--text); }
+    .ra-ev-pill.active {
+      background: rgba(124,58,237,0.18);
+      border-color: rgba(124,58,237,0.42);
+      color: #c4b5fd;
+    }
+
+    /* Eligibility grids */
+    .ra-elig-section { margin: 0.9rem 0; }
+    .ra-elig-header-row {
+      display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.45rem;
+    }
+    .ra-elig-title {
+      font-size: 0.72rem; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.07em; flex: 1;
+    }
+    .ra-elig-all-btn {
+      font-size: 0.68rem; padding: 0.14rem 0.42rem; border-radius: 5px;
+      background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+      color: var(--muted); cursor: pointer;
+    }
+    .ra-elig-all-btn:hover { background: rgba(255,255,255,0.1); color: var(--text); }
+    .ra-elig-wrap { overflow-x: auto; }
+    .ra-elig-table { border-collapse: collapse; font-size: 0.8rem; }
+    .ra-elig-table th {
+      padding: 0.25rem 0.45rem; font-size: 0.63rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted);
+      border-bottom: 1px solid rgba(255,255,255,0.07); text-align: center;
+    }
+    .ra-elig-table th.th-name { text-align: left; }
+    .ra-elig-table td { padding: 0.22rem 0.45rem; border-bottom: 1px solid rgba(255,255,255,0.04); text-align: center; }
+    .ra-elig-table td.td-name { text-align: left; white-space: nowrap; font-size: 0.82rem; }
+    .ra-elig-table tr:last-child td { border-bottom: none; }
+    .ra-elig-check { width: 15px; height: 15px; cursor: pointer; accent-color: var(--accent); }
+    .ra-elig-divider {
+      border: none; border-top: 1px solid rgba(255,255,255,0.06); margin: 1rem 0;
+    }
+
+    /* Round sections inside event content */
+    .ra-round-section { margin-bottom: 1.1rem; }
+    .ra-round-header {
+      display: flex; align-items: center; gap: 0.6rem;
+      padding: 0.3rem 0; margin-bottom: 0.55rem;
+      border-bottom: 1px solid rgba(124,58,237,0.18);
+    }
+    .ra-round-label {
+      font-size: 0.72rem; font-weight: 700; color: #c4b5fd;
+      text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    .ra-round-badge {
+      font-size: 0.62rem; font-weight: 600; padding: 0.1rem 0.4rem; border-radius: 4px;
+      background: rgba(124,58,237,0.12); border: 1px solid rgba(124,58,237,0.28); color: #a78bfa;
+    }
+
+    @media (max-width: 640px) {
+      .ra-heat-body { gap: 0.6rem 0.8rem; }
+      .ra-role-group { min-width: 100%; flex: 0 0 100%; }
+      .ra-heat-header { padding: 0.45rem 0.75rem; }
+      .ra-heat-body { padding: 0.5rem 0.75rem 0.6rem; }
+      .ra-ev-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 0.6rem; }
+      .ra-ev-tabs::-webkit-scrollbar { display: none; }
     }
 
     /* ===== MISC ===== */
@@ -2071,6 +2249,7 @@
     <button class="tab-btn" data-tab="tabWcaImport">🌍 WCA Import</button>
     <button class="tab-btn" data-tab="tabEventSettings">⚙ Events</button>
     <button class="tab-btn" data-tab="tabAnalytics" data-i18n="tab.analytics">📊 Analytics</button>
+    <button class="tab-btn" data-tab="tabAssignments">👥 Assignments</button>
   </div>
 
   <!-- ======= TAB 1: ATHLETES ======= -->
@@ -2383,6 +2562,7 @@
         <div class="wca-event-round-bar" id="crEventRoundBar" style="display:none;">
           <div class="wca-event-round-title" id="crEventRoundTitle"></div>
           <div class="wca-round-tabs" id="crRoundTabs"></div>
+          <div id="crRoundCompleteArea"></div>
         </div>
         <div class="wca-group-tabs" id="crGroupTabs" style="display:none;"></div>
         <div class="wca-table-wrap">
@@ -2570,6 +2750,79 @@
     </div><!-- /anContent -->
 
   </div><!-- /tabAnalytics -->
+
+  <!-- ======= TAB: ASSIGNMENTS ======= -->
+  <div id="tabAssignments" class="tab-panel">
+    <div class="card">
+      <div class="card-title"><span class="title-accent"></span> Role Assignments</div>
+      <p style="font-size:0.82rem;color:var(--muted);margin-bottom:1.1rem;">
+        Generate competitor / judge / scrambler rotations across all registered athletes in a competition.
+        Roles are distributed as evenly as possible — no athlete judges or scrambles their own heat.
+      </p>
+
+      <!-- Controls -->
+      <div class="ra-controls">
+        <div class="form-group">
+          <label>Competition</label>
+          <select id="raComp" onchange="raOnCompChange()"></select>
+        </div>
+        <div class="ra-num-wrap">
+          <label>Stations</label>
+          <input class="ra-num-input" id="raStations" type="number" min="1" max="20" value="2">
+        </div>
+        <div class="ra-num-wrap">
+          <label>Scramblers</label>
+          <input class="ra-num-input" id="raScramblers" type="number" min="1" max="4" value="1">
+        </div>
+      </div>
+
+      <!-- Eligibility grids (hidden until competition selected) -->
+      <div id="raEligSections" style="display:none;">
+        <hr class="ra-elig-divider">
+        <div class="ra-elig-section">
+          <div class="ra-elig-header-row">
+            <span class="ra-elig-title">Scrambler Eligibility</span>
+            <button class="ra-elig-all-btn" onclick="raToggleAllElig('scrambler',true)">All</button>
+            <button class="ra-elig-all-btn" onclick="raToggleAllElig('scrambler',false)">None</button>
+          </div>
+          <div class="ra-elig-wrap" id="raEligScramblerWrap"></div>
+        </div>
+        <div class="ra-elig-section">
+          <div class="ra-elig-header-row">
+            <span class="ra-elig-title">Judge Eligibility</span>
+            <button class="ra-elig-all-btn" onclick="raToggleAllElig('judge',true)">All</button>
+            <button class="ra-elig-all-btn" onclick="raToggleAllElig('judge',false)">None</button>
+          </div>
+          <div class="ra-elig-wrap" id="raEligJudgeWrap"></div>
+        </div>
+        <hr class="ra-elig-divider">
+      </div>
+
+      <div class="ra-btn-row">
+        <button class="btn-sm-primary" id="raGenBtn" onclick="raGenerate()">⚙ Generate Assignments</button>
+        <button class="btn-sm-secondary" id="raRegenBtn" onclick="raGenerate()" style="display:none;">↻ Regenerate</button>
+        <button class="btn-sm-secondary" id="raCopyBtn" onclick="raCopyText()" style="display:none;">⎘ Copy</button>
+        <button class="btn-sm-secondary" id="raSaveBtn" onclick="raSave()" style="display:none;">💾 Save</button>
+      </div>
+
+      <div id="raWarning" class="ra-warning" style="display:none;"></div>
+      <div id="raOutput" style="display:none;">
+        <!-- Event tabs -->
+        <div class="ra-ev-tabs" id="raEvTabs"></div>
+        <!-- Active event content -->
+        <div id="raEvContent">
+          <div class="ra-summary-bar" id="raSummaryBar"></div>
+          <div class="ra-heats" id="raHeats"></div>
+          <details style="margin-top:1.1rem;">
+            <summary style="font-size:0.78rem;color:var(--muted);cursor:pointer;margin-bottom:0.5rem;">Duty Totals</summary>
+            <div style="overflow-x:auto;">
+              <table class="ra-duty-table" id="raDutyTable"></table>
+            </div>
+          </details>
+        </div>
+      </div>
+    </div>
+  </div><!-- /tabAssignments -->
 
 </div><!-- /dashboard -->
 
@@ -2793,7 +3046,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
     this.classList.add('active');
     document.getElementById(this.dataset.tab).classList.add('active');
-    if (this.dataset.tab === 'tabCompResults') { startCompResultsFeed(); renderCompResultsTab(); }
+    if (this.dataset.tab === 'tabCompResults') { startCompResultsFeed(); renderCompResultsTab(); if (crCompId) crLoadRoundCompletions(crCompId); }
     if (this.dataset.tab === 'tabUsers') loadUsers();
     if (this.dataset.tab === 'tabWcaImport') loadWcaRecordsList();
     if (this.dataset.tab === 'tabAnalytics') loadAnalytics();
@@ -2803,6 +3056,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
       if (grid && grid.querySelectorAll('.compact-panel').length !== numPanels) buildResultPanels();
       updateEntryPanelVisibility();
     }
+    if (this.dataset.tab === 'tabAssignments') { startCompResultsFeed(); raPopulateCompSelect(); }
   });
 });
 
@@ -4415,6 +4669,40 @@ function crUpdateSidebar() {
   }).join('');
 }
 
+// ---- Round completion state ----
+var _roundCompletionsCache = {}; // compId -> { "evId_round": { completed, completedAt } }
+
+async function crLoadRoundCompletions(compId) {
+  if (!compId) return;
+  try {
+    const snap = await window.db.collection('roundCompletions').doc(compId).get();
+    _roundCompletionsCache[compId] = snap.exists ? (snap.data() || {}) : {};
+  } catch(e) { _roundCompletionsCache[compId] = {}; }
+  crRenderTable();
+}
+
+function crIsRoundComplete(compId, evId, round) {
+  const data = _roundCompletionsCache[compId] || {};
+  const v = data[evId + '_' + round];
+  return !!(v && v.completed);
+}
+
+async function crToggleRoundComplete(compId, evId, round) {
+  if (!_roundCompletionsCache[compId]) _roundCompletionsCache[compId] = {};
+  const data = _roundCompletionsCache[compId];
+  const key = evId + '_' + round;
+  const cur = data[key] && data[key].completed;
+  data[key] = { completed: !cur, completedAt: !cur ? new Date().toISOString() : null };
+  const btn = document.getElementById('crRoundCompleteArea') &&
+    document.getElementById('crRoundCompleteArea').querySelector('.cr-complete-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    await window.db.collection('roundCompletions').doc(compId).set(data);
+  } catch(e) { console.error('crToggleRoundComplete error:', e); }
+  crRenderTable();
+}
+// ---- end round completion ----
+
 function crSelectComp(id) {
   crCompId = id || null;
   crEvId   = null;
@@ -4422,6 +4710,7 @@ function crSelectComp(id) {
   crGroup  = null;
   crUpdateSidebar();
   crRenderTable();
+  if (crCompId) crLoadRoundCompletions(crCompId);
 }
 
 function crSelectEvent(evId) {
@@ -4507,6 +4796,19 @@ function crRenderTable() {
       const rName = crRoundNames[rd - 1] || `Round ${rd}`;
       return `<button class="wca-round-tab${rd === crRound ? ' active' : ''}" onclick="crSelectRound(${rd})">${escHtml(rName)}</button>`;
     }).join('');
+  }
+
+  // Mark Round Complete button
+  const completeArea = document.getElementById('crRoundCompleteArea');
+  if (completeArea && crCompId && crEvId) {
+    const isDone = crIsRoundComplete(crCompId, crEvId, crRound);
+    completeArea.innerHTML = `<button class="cr-complete-btn ${isDone ? 'done' : 'not-done'}"
+      onclick="crToggleRoundComplete('${escHtml(crCompId)}','${escHtml(crEvId)}',${crRound})"
+      title="${isDone ? 'Click to unmark' : 'Mark this round as complete'}">
+      ${isDone ? '&#10003; Round Complete' : 'Mark Complete'}
+    </button>`;
+  } else if (completeArea) {
+    completeArea.innerHTML = '';
   }
 
   // All results for this round (no group filtering)
@@ -6890,6 +7192,799 @@ function getRecordBadge(eventId, type, resultValue, wcaRecordData) {
   const btn = document.getElementById('themeSwitchBtn');
   if(btn) btn.textContent = LABELS[saved] || '🌑 Dark';
 })();
+
+
+// ===========================
+// ROLE ASSIGNMENTS
+// ===========================
+// _raLastAssignment = {
+//   compId, stations, scramblers,
+//   byEvent: { eid: { rounds: { 1: { heats, athletes, duty, roundName, roundType }, ... } } },
+//   activeEid, warnings
+// }
+var _raLastAssignment = null;
+
+function raPopulateCompSelect() {
+  var sel = document.getElementById('raComp');
+  var prev = sel.value;
+  sel.innerHTML = '<option value="">— Competition —</option>';
+  competitionsCache.forEach(function(c) {
+    var opt = document.createElement('option');
+    opt.value = c.id;
+    opt.textContent = c.name + (c.status === 'finished' ? ' (finished)' : c.status === 'live' ? ' (live)' : '');
+    sel.appendChild(opt);
+  });
+  if (prev && sel.querySelector('option[value="' + prev + '"]')) sel.value = prev;
+  raOnCompChange();
+}
+
+function raOnCompChange() {
+  var compId = document.getElementById('raComp').value;
+  document.getElementById('raOutput').style.display  = 'none';
+  document.getElementById('raWarning').style.display = 'none';
+  document.getElementById('raRegenBtn').style.display = 'none';
+  document.getElementById('raCopyBtn').style.display  = 'none';
+  document.getElementById('raSaveBtn').style.display  = 'none';
+  _raLastAssignment = null;
+
+  if (!compId) {
+    document.getElementById('raEligSections').style.display = 'none';
+    return;
+  }
+  var comp = competitionsCache.find(function(c) { return c.id === compId; });
+  if (!comp) { document.getElementById('raEligSections').style.display = 'none'; return; }
+  raBuildEligGrid('scrambler', comp);
+  raBuildEligGrid('judge', comp);
+  document.getElementById('raEligSections').style.display = 'block';
+  // Load persisted eligibility + saved assignments asynchronously
+  raInitForComp(compId);
+}
+
+async function raInitForComp(compId) {
+  await Promise.all([
+    crLoadRoundCompletions(compId),
+    raLoadEligSettings(compId),
+    raLoadSavedAssignments(compId)
+  ]);
+}
+
+// --- Eligibility persistence ---
+
+async function raLoadEligSettings(compId) {
+  if (!compId) return;
+  try {
+    var snap = await window.db.collection('assignmentSettings').doc(compId).get();
+    if (!snap.exists) return;
+    var data = snap.data() || {};
+    // Apply to checkboxes
+    ['scrambler', 'judge'].forEach(function(role) {
+      var saved = data[role] || {};
+      Object.keys(saved).forEach(function(key) {
+        var cb = document.getElementById('raElig_' + role + '_' + key);
+        if (cb) cb.checked = !!saved[key];
+      });
+    });
+  } catch(e) { /* silent — grid defaults still apply */ }
+}
+
+async function raSaveEligSettings(compId) {
+  if (!compId) return;
+  var payload = { scrambler: {}, judge: {} };
+  ['scrambler', 'judge'].forEach(function(role) {
+    var wrapId = role === 'scrambler' ? 'raEligScramblerWrap' : 'raEligJudgeWrap';
+    var wrap = document.getElementById(wrapId);
+    if (!wrap) return;
+    wrap.querySelectorAll('.ra-elig-check').forEach(function(cb) {
+      // id format: raElig_{role}_{athleteId}_{eventId}
+      var parts = cb.id.replace('raElig_' + role + '_', '');
+      payload[role][parts] = cb.checked;
+    });
+  });
+  try {
+    await window.db.collection('assignmentSettings').doc(compId).set(payload);
+  } catch(e) { console.error('raSaveEligSettings error:', e); }
+}
+
+// --- Saved assignments persistence ---
+
+// Reconstruct a duty summary from saved heats (for duty table display)
+function raReconstructDuty(athletes, heats) {
+  var duty = {};
+  athletes.forEach(function(a) { duty[a.id] = { comp: 0, judge: 0, scramble: 0, standby: 0 }; });
+  heats.forEach(function(h) {
+    (h.competitors || []).forEach(function(a) { if (!duty[a.id]) duty[a.id]={comp:0,judge:0,scramble:0,standby:0}; duty[a.id].comp++; });
+    (h.judges      || []).forEach(function(a) { if (!duty[a.id]) duty[a.id]={comp:0,judge:0,scramble:0,standby:0}; duty[a.id].judge++; });
+    (h.scramblers  || []).forEach(function(a) { if (!duty[a.id]) duty[a.id]={comp:0,judge:0,scramble:0,standby:0}; duty[a.id].scramble++; });
+    (h.standby     || []).forEach(function(a) { if (!duty[a.id]) duty[a.id]={comp:0,judge:0,scramble:0,standby:0}; duty[a.id].standby++; });
+  });
+  return duty;
+}
+
+async function raLoadSavedAssignments(compId) {
+  if (!compId) return;
+  try {
+    var snap = await window.db.collection('assignments').doc(compId).get();
+    if (!snap.exists) return;
+    var saved = snap.data();
+    if (!saved || !saved.byEvent) return;
+
+    var comp = competitionsCache.find(function(c) { return c.id === compId; });
+    var byEvent = {};
+
+    Object.keys(saved.byEvent).forEach(function(eid) {
+      var savedEv = saved.byEvent[eid];
+      if (!savedEv.rounds) return;
+
+      var evAthletes = comp ? raGetEventAthletes(comp, eid) : [];
+      var evData = comp && comp.events && comp.events[eid];
+      var numRnds = evData ? (parseInt(evData.rounds) || 1) : 1;
+      var rNames = getRoundNames(numRnds);
+
+      var rounds = {};
+
+      // Restore saved (unlocked) rounds
+      Object.keys(savedEv.rounds).forEach(function(rd) {
+        var rnd = savedEv.rounds[rd];
+        var rdNum = parseInt(rd);
+        var allHeatsAthletes = [];
+        (rnd.heats || []).forEach(function(h) {
+          ['competitors','judges','scramblers','standby'].forEach(function(role) {
+            (h[role] || []).forEach(function(a) {
+              if (!allHeatsAthletes.some(function(x){ return x.id === a.id; })) allHeatsAthletes.push(a);
+            });
+          });
+        });
+        var athletes = evAthletes.length ? evAthletes : allHeatsAthletes;
+        rounds[rdNum] = {
+          roundName: rnd.roundName || rNames[rdNum - 1] || ('Round ' + rdNum),
+          roundType: rnd.roundType || (rdNum === numRnds ? 'final' : rdNum === 1 ? 'r1' : 'r2'),
+          heats: rnd.heats || [],
+          athletes: athletes,
+          competitors: [],
+          duty: raReconstructDuty(athletes, rnd.heats || [])
+        };
+      });
+
+      // Add locked placeholders for rounds not yet generated
+      for (var rd = 1; rd <= numRnds; rd++) {
+        if (rounds[rd]) continue; // already restored
+        var roundName = rNames[rd - 1] || ('Round ' + rd);
+        var isFinal = rd === numRnds;
+        var prevName = rNames[rd - 2] || ('Round ' + (rd - 1));
+        rounds[rd] = { locked: true, roundName: roundName, roundType: isFinal ? 'final' : 'r2', lockReason: 'Available after ' + prevName + ' is marked complete' };
+      }
+
+      byEvent[eid] = { rounds: rounds, athletes: evAthletes };
+    });
+
+    var activeEids = Object.keys(byEvent);
+    if (!activeEids.length) return;
+
+    _raLastAssignment = {
+      compId: compId,
+      stations: saved.stations || 2,
+      scramblers: saved.scramblers || 1,
+      byEvent: byEvent,
+      activeEid: activeEids[0],
+      warnings: []
+    };
+    raRenderOutput();
+  } catch(e) { console.error('raLoadSavedAssignments error:', e); }
+}
+
+// Build athlete × event eligibility checkbox grid
+function raBuildEligGrid(role, comp) {
+  var wrapId = role === 'scrambler' ? 'raEligScramblerWrap' : 'raEligJudgeWrap';
+  var wrap = document.getElementById(wrapId);
+  if (!wrap) return;
+
+  var eventIds = comp.events ? Object.keys(comp.events) : [];
+  var athletes = raGetAllCompAthletes(comp);
+
+  if (!athletes.length || !eventIds.length) {
+    wrap.innerHTML = '<span style="font-size:0.78rem;color:var(--muted);">No athletes / events found.</span>';
+    return;
+  }
+
+  var html = '<table class="ra-elig-table"><thead><tr><th class="th-name">Athlete</th>';
+  eventIds.forEach(function(eid) {
+    var evMeta = WCA_EVENTS.find(function(e) { return e.id === eid; });
+    html += '<th>' + escHtml(evMeta ? evMeta.short : eid) + '</th>';
+  });
+  html += '</tr></thead><tbody>';
+
+  athletes.forEach(function(a) {
+    html += '<tr><td class="td-name">' + escHtml(a.name || a.id) + '</td>';
+    eventIds.forEach(function(eid) {
+      var chkId = 'raElig_' + role + '_' + a.id + '_' + eid;
+      // Default checked = true only if athlete is registered for that event
+      var regd = raAthleteRegisteredForEvent(comp, a.id, eid);
+      var chk = regd ? ' checked' : '';
+      html += '<td><input type="checkbox" class="ra-elig-check" id="' + escHtml(chkId) + '"' + chk + '></td>';
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+function raToggleAllElig(role, checked) {
+  var wrapId = role === 'scrambler' ? 'raEligScramblerWrap' : 'raEligJudgeWrap';
+  var wrap = document.getElementById(wrapId);
+  if (!wrap) return;
+  wrap.querySelectorAll('.ra-elig-check').forEach(function(cb) { cb.checked = checked; });
+}
+
+// Read eligibility state from the grid
+function raIsEligible(role, athleteId, eventId) {
+  var chkId = 'raElig_' + role + '_' + athleteId + '_' + eventId;
+  var cb = document.getElementById(chkId);
+  return cb ? cb.checked : true; // default true if grid not built
+}
+
+// All athletes in the competition (union of all event registrations)
+function raGetAllCompAthletes(comp) {
+  if (!comp) return [];
+  if (comp.athleteEvents) {
+    var ids = new Set();
+    Object.values(comp.athleteEvents).forEach(function(evs) {
+      // athleteEvents is { athleteId: [eid, eid, ...] }
+    });
+    // Correct: athleteEvents is keyed by athleteId
+    Object.keys(comp.athleteEvents).forEach(function(aid) { ids.add(aid); });
+    return athletesCache.filter(function(a) { return ids.has(a.id); });
+  }
+  if (comp.athleteIds && comp.athleteIds.length) {
+    return athletesCache.filter(function(a) { return comp.athleteIds.includes(a.id); });
+  }
+  return athletesCache.slice();
+}
+
+function raAthleteRegisteredForEvent(comp, athleteId, eventId) {
+  if (comp.athleteEvents) {
+    var evs = comp.athleteEvents[athleteId];
+    return evs && evs.includes(eventId);
+  }
+  if (comp.athleteIds) return comp.athleteIds.includes(athleteId);
+  return true;
+}
+
+// Returns athletes registered for a specific event
+function raGetEventAthletes(comp, eventId) {
+  if (!comp) return [];
+  if (comp.athleteEvents) {
+    return athletesCache.filter(function(a) {
+      var allowed = comp.athleteEvents[a.id];
+      return allowed && allowed.includes(eventId);
+    });
+  }
+  if (comp.athleteIds && comp.athleteIds.length) {
+    return athletesCache.filter(function(a) { return comp.athleteIds.includes(a.id); });
+  }
+  return athletesCache.slice();
+}
+
+// Rotation mode: N heats, one competitor per heat, roles rotate through all athletes.
+// Used when the group is too small for normal batch heats (competitors.length <= stations * 2).
+// supportPool = eliminated athletes (R2+) who fill roles first; remaining slots go to other competitors.
+function raBuildRotationHeats(competitors, supportPool, eligJudges, eligScramblers, scramblerCount, duty) {
+  var heats = [];
+  var N = competitors.length;
+
+  for (var i = 0; i < N; i++) {
+    var sole = competitors[i];
+
+    // Per-heat support: external pool first, then other competitors (not this athlete).
+    var otherComps = competitors.filter(function(a) { return a.id !== sole.id; });
+    var heatSupport = supportPool.concat(
+      otherComps.filter(function(a) {
+        return !supportPool.some(function(s) { return s.id === a.id; });
+      })
+    );
+
+    // Judge pool: eligible, sorted by least duty burden.
+    var judgePool = heatSupport.filter(function(a) { return eligJudges.has(a.id); });
+    judgePool.sort(function(a, b) {
+      var da = duty[a.id] || { judge: 0, scramble: 0 };
+      var db = duty[b.id] || { judge: 0, scramble: 0 };
+      return (da.judge + da.scramble) - (db.judge + db.scramble) || da.judge - db.judge;
+    });
+    var judgeSlice = judgePool.slice(0, 1); // exactly 1 judge per sole competitor
+
+    var judgeIds = {};
+    judgeSlice.forEach(function(a) { judgeIds[a.id] = true; });
+
+    // Scrambler pool: eligible, not already judging, sorted by duty.
+    var scramblerPool = heatSupport.filter(function(a) {
+      return eligScramblers.has(a.id) && !judgeIds[a.id];
+    });
+    scramblerPool.sort(function(a, b) {
+      var da = duty[a.id] || { judge: 0, scramble: 0 };
+      var db = duty[b.id] || { judge: 0, scramble: 0 };
+      return (da.judge + da.scramble) - (db.judge + db.scramble) || da.scramble - db.scramble;
+    });
+    var scramblerSlice = scramblerPool.slice(0, scramblerCount);
+
+    var activeIds = {};
+    activeIds[sole.id] = true;
+    judgeSlice.forEach(function(a)    { activeIds[a.id] = true; });
+    scramblerSlice.forEach(function(a){ activeIds[a.id] = true; });
+    var standbySlice = heatSupport.filter(function(a) { return !activeIds[a.id]; });
+
+    var overlap = judgeSlice.length < 1 || scramblerSlice.length < scramblerCount;
+
+    if (!duty[sole.id]) duty[sole.id] = { comp: 0, judge: 0, scramble: 0, standby: 0 };
+    duty[sole.id].comp++;
+    judgeSlice.forEach(function(a)    { if (!duty[a.id]) duty[a.id]={comp:0,judge:0,scramble:0,standby:0}; duty[a.id].judge++; });
+    scramblerSlice.forEach(function(a){ if (!duty[a.id]) duty[a.id]={comp:0,judge:0,scramble:0,standby:0}; duty[a.id].scramble++; });
+    standbySlice.forEach(function(a)  { if (!duty[a.id]) duty[a.id]={comp:0,judge:0,scramble:0,standby:0}; duty[a.id].standby++; });
+
+    heats.push({
+      label:       'Heat ' + (i + 1),
+      competitors: [sole],
+      judges:      judgeSlice,
+      scramblers:  scramblerSlice,
+      standby:     standbySlice,
+      overlap:     overlap,
+      full:        !overlap
+    });
+  }
+  return heats;
+}
+
+// Build heats for one round.
+// RULES:
+//   - One judge per competitor (judgeCount = compSlice.length, not stations).
+//   - A competitor in this heat can NEVER be a judge, scrambler, or standby for the same heat.
+//   - Per-heat support pool = external supportPool  +  competitors from OTHER heats.
+//     This lets R1 heats use athletes from different heats as support without self-judging.
+//   - No fallback that puts current-heat competitors into judge/scramble slots.
+function raBuildRoundHeats(competitors, supportPool, eligJudges, eligScramblers, stations, scramblerCount, duty) {
+  var heats    = [];
+  var heatIdx  = 0;
+  var compPtr  = 0;
+  var n        = competitors.length;
+
+  while (compPtr < n) {
+    var compSlice = competitors.slice(compPtr, compPtr + stations);
+    compPtr += compSlice.length;
+    if (!compSlice.length) break;
+
+    // IDs of athletes competing in THIS heat — they are off-limits for all support roles.
+    var heatCompIds = {};
+    compSlice.forEach(function(a) { heatCompIds[a.id] = true; });
+
+    // Per-heat support pool:
+    //   1. External support (eliminated / non-competing athletes in this round) — first priority.
+    //   2. Competitors from OTHER heats — secondary source so R1 still gets judges.
+    var otherCompetitors = competitors.filter(function(a) { return !heatCompIds[a.id]; });
+    var heatSupport = supportPool.concat(
+      otherCompetitors.filter(function(a) {
+        return !supportPool.some(function(s) { return s.id === a.id; });
+      })
+    );
+    // Safety: strip any current-heat competitor that somehow ended up in the pool.
+    heatSupport = heatSupport.filter(function(a) { return !heatCompIds[a.id]; });
+
+    // One judge per competitor.
+    var neededJudges = compSlice.length;
+
+    // Judge pool: eligible + not in this heat.
+    var judgePool = heatSupport.filter(function(a) { return eligJudges.has(a.id); });
+    judgePool.sort(function(a, b) {
+      var da = duty[a.id] || { judge: 0, scramble: 0 };
+      var db = duty[b.id] || { judge: 0, scramble: 0 };
+      return (da.judge + da.scramble) - (db.judge + db.scramble) || da.judge - db.judge;
+    });
+    var judgeSlice = judgePool.slice(0, neededJudges);
+
+    // Scrambler pool: eligible + not in this heat + not already judging.
+    var judgeIdSet = {};
+    judgeSlice.forEach(function(a) { judgeIdSet[a.id] = true; });
+    var scramblerPool = heatSupport.filter(function(a) {
+      return eligScramblers.has(a.id) && !judgeIdSet[a.id];
+    });
+    scramblerPool.sort(function(a, b) {
+      var da = duty[a.id] || { judge: 0, scramble: 0 };
+      var db = duty[b.id] || { judge: 0, scramble: 0 };
+      return (da.judge + da.scramble) - (db.judge + db.scramble) || da.scramble - db.scramble;
+    });
+    var scramblerSlice = scramblerPool.slice(0, scramblerCount);
+
+    // Standby: support pool members not assigned to any active role.
+    var activeIds = {};
+    compSlice.forEach(function(a)     { activeIds[a.id] = true; });
+    judgeSlice.forEach(function(a)    { activeIds[a.id] = true; });
+    scramblerSlice.forEach(function(a){ activeIds[a.id] = true; });
+    var standbySlice = heatSupport.filter(function(a) { return !activeIds[a.id]; });
+
+    // overlap = true when there aren't enough support people for full coverage.
+    // We NEVER add current-heat competitors to fill gaps — flag it instead.
+    var overlap = judgeSlice.length < neededJudges || scramblerSlice.length < scramblerCount;
+
+    compSlice.forEach(function(a)     { if (!duty[a.id]) duty[a.id]={comp:0,judge:0,scramble:0,standby:0}; duty[a.id].comp++; });
+    judgeSlice.forEach(function(a)    { if (!duty[a.id]) duty[a.id]={comp:0,judge:0,scramble:0,standby:0}; duty[a.id].judge++; });
+    scramblerSlice.forEach(function(a){ if (!duty[a.id]) duty[a.id]={comp:0,judge:0,scramble:0,standby:0}; duty[a.id].scramble++; });
+    standbySlice.forEach(function(a)  { if (!duty[a.id]) duty[a.id]={comp:0,judge:0,scramble:0,standby:0}; duty[a.id].standby++; });
+
+    heats.push({
+      label: 'Heat ' + (++heatIdx),
+      competitors: compSlice,
+      judges:      judgeSlice,
+      scramblers:  scramblerSlice,
+      standby:     standbySlice,
+      overlap:     overlap,
+      full:        judgeSlice.length >= neededJudges && scramblerSlice.length >= scramblerCount
+    });
+  }
+  return heats;
+}
+
+async function raGenerate() {
+  var compId     = document.getElementById('raComp').value;
+  var stations   = Math.max(1, parseInt(document.getElementById('raStations').value)   || 2);
+  var scramblers = Math.max(1, parseInt(document.getElementById('raScramblers').value) || 1);
+
+  var warnEl = document.getElementById('raWarning');
+  var outEl  = document.getElementById('raOutput');
+  warnEl.style.display = 'none';
+  outEl.style.display  = 'none';
+
+  if (!compId) {
+    warnEl.textContent = 'Select a competition first.';
+    warnEl.style.display = 'block';
+    return;
+  }
+
+  var comp = competitionsCache.find(function(c) { return c.id === compId; });
+  var eventIds = comp && comp.events ? Object.keys(comp.events) : [];
+  if (!eventIds.length) {
+    warnEl.textContent = 'No events found for this competition.';
+    warnEl.style.display = 'block';
+    return;
+  }
+
+  // Ensure round completion data is loaded
+  if (!_roundCompletionsCache[compId]) {
+    await crLoadRoundCompletions(compId);
+  }
+  // Persist eligibility settings at generate-time too
+  raSaveEligSettings(compId);
+
+  var warnings = [];
+  var byEvent = {};
+
+  eventIds.forEach(function(eid) {
+    var allAthletes = raGetEventAthletes(comp, eid);
+    if (!allAthletes.length) return;
+
+    var evData  = comp.events[eid];
+    var numRnds = evData ? (parseInt(evData.rounds) || 1) : 1;
+    var rNames  = getRoundNames(numRnds);
+
+    // Build Sets of eligible judges/scramblers for this event
+    var eligJudges     = new Set(allAthletes.filter(function(a) { return raIsEligible('judge',     a.id, eid); }).map(function(a){ return a.id; }));
+    var eligScramblers = new Set(allAthletes.filter(function(a) { return raIsEligible('scrambler', a.id, eid); }).map(function(a){ return a.id; }));
+
+    var rounds = {};
+    // duty is shared across rounds — athletes who staffed more in R1 get fewer duties in R2
+    var duty = {};
+    allAthletes.forEach(function(a) { duty[a.id] = { comp: 0, judge: 0, scramble: 0, standby: 0 }; });
+
+    for (var rd = 1; rd <= numRnds; rd++) {
+      var roundName = rNames[rd - 1] || ('Round ' + rd);
+      var isFinal   = rd === numRnds;
+      var roundType = isFinal ? 'final' : (rd === 1 ? 'r1' : 'r2');
+
+      // --- ROUND LOCKING ---
+      // R1 is always available. R2+ requires previous round to be marked complete.
+      if (rd > 1 && !crIsRoundComplete(compId, eid, rd - 1)) {
+        var prevName = rNames[rd - 2] || ('Round ' + (rd - 1));
+        rounds[rd] = { locked: true, roundName: roundName, roundType: roundType, lockReason: 'Available after ' + prevName + ' is marked complete' };
+        continue;
+      }
+
+      var competitors, supportPool;
+
+      if (rd === 1) {
+        // Round 1: all registered athletes compete
+        competitors = allAthletes.slice();
+        supportPool = [];
+      } else {
+        // Round 2+: ONLY qualified/advanced athletes may compete.
+        // Eliminated athletes fill the support pool (judge/scramble) but are NEVER competitors.
+        var qualSet = computeQualifiedSet(compId, eid, rd - 1, allAdminResults, comp);
+        var prevRdResults = allAdminResults.filter(function(r) {
+          return r.competitionId === compId && r.eventId === eid && (r.round || 1) === (rd - 1);
+        });
+        var evShort = (WCA_EVENTS.find(function(e){ return e.id === eid; }) || { short: eid }).short;
+
+        if (qualSet && qualSet.ids.size > 0) {
+          // Explicit advancement rule: qualified set only
+          competitors = allAthletes.filter(function(a) { return qualSet.ids.has(a.id); });
+        } else if (prevRdResults.length > 0) {
+          // No explicit cutoff: athletes who have a result in the previous round advance
+          var resultIds = new Set(prevRdResults.map(function(r) { return r.athleteId; }).filter(Boolean));
+          competitors = allAthletes.filter(function(a) { return resultIds.has(a.id); });
+          if (!competitors.length) {
+            // Fallback: match by name if IDs don't align
+            var resultNames = new Set(prevRdResults.map(function(r) {
+              return (r.athleteName || '').trim().toLowerCase();
+            }).filter(Boolean));
+            competitors = allAthletes.filter(function(a) {
+              return resultNames.has((a.name || '').trim().toLowerCase());
+            });
+          }
+          if (!competitors.length) {
+            competitors = allAthletes.slice();
+            warnings.push(evShort + ' ' + roundName + ': could not match qualifiers by ID or name — used all athletes.');
+          }
+        } else {
+          // No results for previous round at all
+          competitors = allAthletes.slice();
+          warnings.push(evShort + ' ' + roundName + ': no R' + (rd - 1) + ' results found yet — used all athletes.');
+        }
+
+        // Support pool = everyone not competing (non-advanced athletes fill roles first)
+        var advancedIds = new Set(competitors.map(function(a) { return a.id; }));
+        supportPool = allAthletes.filter(function(a) { return !advancedIds.has(a.id); });
+      }
+
+      // Fill supportPool with any remaining non-competitors
+      var compIdSet = new Set(competitors.map(function(a){ return a.id; }));
+      allAthletes.forEach(function(a) {
+        if (!compIdSet.has(a.id) && !supportPool.some(function(s){ return s.id === a.id; })) {
+          supportPool.push(a);
+        }
+      });
+
+      // Rotation mode: when the competitor count is too small for proper batch heats
+      // (i.e. not enough athletes to fill competitors + separate judges), each athlete
+      // takes one heat as sole competitor while the others rotate through support roles.
+      var useRotation = competitors.length > 0 && competitors.length <= stations * 2;
+      var heats = useRotation
+        ? raBuildRotationHeats(competitors, supportPool, eligJudges, eligScramblers, scramblers, duty)
+        : raBuildRoundHeats(competitors, supportPool, eligJudges, eligScramblers, stations, scramblers, duty);
+      rounds[rd] = { heats: heats, athletes: allAthletes, competitors: competitors, duty: duty, roundName: roundName, roundType: roundType };
+    }
+
+    byEvent[eid] = { rounds: rounds, athletes: allAthletes };
+  });
+
+  var activeEids = Object.keys(byEvent);
+  if (!activeEids.length) {
+    warnEl.textContent = 'No athletes registered for any event in this competition.';
+    warnEl.style.display = 'block';
+    return;
+  }
+
+  _raLastAssignment = { compId: compId, stations: stations, scramblers: scramblers, byEvent: byEvent, activeEid: activeEids[0], warnings: warnings };
+
+  if (warnings.length) {
+    warnEl.innerHTML = warnings.map(function(w){ return escHtml(w); }).join('<br>');
+    warnEl.style.display = 'block';
+  }
+  raRenderOutput();
+}
+
+async function raSave() {
+  if (!_raLastAssignment) return;
+  var btn = document.getElementById('raSaveBtn');
+  btn.disabled = true;
+  btn.textContent = '…Saving';
+
+  // Serialize: strip DOM objects, keep only ids + names
+  function serializeHeat(h) {
+    function serArr(arr) { return arr.map(function(a){ return { id: a.id, name: a.name || a.id }; }); }
+    return {
+      label: h.label, overlap: h.overlap, full: h.full,
+      competitors: serArr(h.competitors), judges: serArr(h.judges),
+      scramblers: serArr(h.scramblers), standby: serArr(h.standby)
+    };
+  }
+
+  var payload = {
+    compId: _raLastAssignment.compId,
+    stations: _raLastAssignment.stations,
+    scramblers: _raLastAssignment.scramblers,
+    generatedAt: new Date().toISOString(),
+    byEvent: {}
+  };
+
+  Object.keys(_raLastAssignment.byEvent).forEach(function(eid) {
+    payload.byEvent[eid] = { rounds: {} };
+    var evData = _raLastAssignment.byEvent[eid];
+    Object.keys(evData.rounds).forEach(function(rd) {
+      var rnd = evData.rounds[rd];
+      if (rnd.locked) return; // don't persist locked rounds
+      payload.byEvent[eid].rounds[rd] = {
+        roundName: rnd.roundName,
+        roundType: rnd.roundType,
+        heats: rnd.heats.map(serializeHeat)
+      };
+    });
+  });
+
+  try {
+    await Promise.all([
+      window.db.collection('assignments').doc(_raLastAssignment.compId).set(payload),
+      raSaveEligSettings(_raLastAssignment.compId)
+    ]);
+    btn.textContent = '✓ Saved';
+    setTimeout(function() { btn.textContent = '💾 Save'; btn.disabled = false; }, 2000);
+  } catch(err) {
+    console.error('raSave error:', err);
+    btn.textContent = '✗ Error';
+    setTimeout(function() { btn.textContent = '💾 Save'; btn.disabled = false; }, 2500);
+  }
+}
+
+function raRenderOutput() {
+  var asgn   = _raLastAssignment;
+  var outEl  = document.getElementById('raOutput');
+  var tabsEl = document.getElementById('raEvTabs');
+  var eids   = Object.keys(asgn.byEvent);
+
+  tabsEl.innerHTML = eids.map(function(eid) {
+    var evMeta = WCA_EVENTS.find(function(e) { return e.id === eid; });
+    var label  = evMeta ? evMeta.short : eid;
+    var active = eid === asgn.activeEid ? ' active' : '';
+    return '<button class="ra-ev-pill' + active + '" onclick="raSelectEvent(\'' + escHtml(eid) + '\')">' + escHtml(label) + '</button>';
+  }).join('');
+
+  outEl.style.display = 'block';
+  document.getElementById('raRegenBtn').style.display = '';
+  document.getElementById('raCopyBtn').style.display  = '';
+  document.getElementById('raSaveBtn').style.display  = '';
+  raRenderEventContent(asgn.activeEid);
+}
+
+function raSelectEvent(eid) {
+  if (!_raLastAssignment || !_raLastAssignment.byEvent[eid]) return;
+  _raLastAssignment.activeEid = eid;
+  var eids = Object.keys(_raLastAssignment.byEvent);
+  document.getElementById('raEvTabs').innerHTML = eids.map(function(e) {
+    var evMeta = WCA_EVENTS.find(function(x) { return x.id === e; });
+    var label  = evMeta ? evMeta.short : e;
+    var active = e === eid ? ' active' : '';
+    return '<button class="ra-ev-pill' + active + '" onclick="raSelectEvent(\'' + escHtml(e) + '\')">' + escHtml(label) + '</button>';
+  }).join('');
+  raRenderEventContent(eid);
+}
+
+function raRenderEventContent(eid) {
+  var data = _raLastAssignment && _raLastAssignment.byEvent[eid];
+  if (!data) return;
+
+  var summaryEl = document.getElementById('raSummaryBar');
+  var heatsEl   = document.getElementById('raHeats');
+  var dutyEl    = document.getElementById('raDutyTable');
+
+  var rounds    = data.rounds;
+  var rdNums    = Object.keys(rounds).map(Number).sort(function(a,b){return a-b;});
+  var unlockedRds = rdNums.filter(function(rd){ return !rounds[rd].locked; });
+  var lockedRds   = rdNums.filter(function(rd){ return  rounds[rd].locked; });
+  var totalHeats  = unlockedRds.reduce(function(s,rd){ return s + rounds[rd].heats.length; }, 0);
+
+  summaryEl.innerHTML =
+    '<span class="ra-sum-chip">' + unlockedRds.length + ' round' + (unlockedRds.length !== 1 ? 's' : '') +
+      (lockedRds.length ? ' (+' + lockedRds.length + ' locked)' : '') + '</span>' +
+    '<span class="ra-sum-chip">' + totalHeats + ' heat' + (totalHeats !== 1 ? 's' : '') + '</span>' +
+    '<span class="ra-sum-chip">' + data.athletes.length + ' athlete' + (data.athletes.length !== 1 ? 's' : '') + '</span>';
+
+  function nameList(arr) {
+    if (!arr.length) return '<span class="ra-empty-tag">—</span>';
+    return '<div class="ra-name-list">' + arr.map(function(a) {
+      return '<span class="ra-name-tag">' + escHtml(a.name || a.wcaId || a.id) + '</span>';
+    }).join('') + '</div>';
+  }
+
+  function renderHeat(h) {
+    var quality = h.overlap ? 'reduced' : h.full ? 'ok' : 'warn';
+    var qualityLabel = h.overlap ? 'Role overlap' : h.full ? 'Full coverage' : 'Partial';
+    var html = '<div class="ra-heat-card">';
+    html += '<div class="ra-heat-header"><span class="ra-heat-label">' + escHtml(h.label) + '</span>';
+    html += '<span class="ra-quality-badge ra-quality-' + quality + '">' + escHtml(qualityLabel) + '</span></div>';
+    html += '<div class="ra-heat-body">';
+    html += '<div class="ra-role-group ra-role-competitor"><div class="ra-role-title">Competitors</div>' + nameList(h.competitors) + '</div>';
+    html += '<div class="ra-role-group ra-role-judge"><div class="ra-role-title">Judges</div>'           + nameList(h.judges)      + '</div>';
+    html += '<div class="ra-role-group ra-role-scrambler"><div class="ra-role-title">Scramblers</div>'   + nameList(h.scramblers)  + '</div>';
+    if (h.standby.length) {
+      html += '<div class="ra-role-group ra-role-standby"><div class="ra-role-title">Standby</div>'     + nameList(h.standby)     + '</div>';
+    }
+    html += '</div></div>';
+    return html;
+  }
+
+  var roundTypeBadge = { r1: 'All athletes', r2: 'Qualified compete', final: 'Finalists only' };
+
+  heatsEl.innerHTML = rdNums.map(function(rd) {
+    var rnd = rounds[rd];
+    // --- Locked round placeholder ---
+    if (rnd.locked) {
+      return '<div class="ra-round-section">' +
+        '<div class="ra-round-header">' +
+        '<span class="ra-round-label">' + escHtml(rnd.roundName) + '</span>' +
+        '<span class="ra-round-badge" style="background:rgba(255,255,255,0.04);color:var(--muted);border-color:rgba(255,255,255,0.07);">&#128274; Locked</span>' +
+        '</div>' +
+        '<div style="font-size:0.78rem;color:var(--muted);padding:0.4rem 0 0.3rem;font-style:italic;">' + escHtml(rnd.lockReason) + '</div>' +
+        '</div>';
+    }
+    var badge = roundTypeBadge[rnd.roundType] || '';
+    var html = '<div class="ra-round-section">';
+    html += '<div class="ra-round-header">';
+    html += '<span class="ra-round-label">' + escHtml(rnd.roundName) + '</span>';
+    if (badge) html += '<span class="ra-round-badge">' + escHtml(badge) + '</span>';
+    html += '<span class="ra-round-badge">' + rnd.heats.length + ' heat' + (rnd.heats.length !== 1 ? 's' : '') + '</span>';
+    html += '</div>';
+    html += '<div class="ra-heats">' + rnd.heats.map(renderHeat).join('') + '</div>';
+    html += '</div>';
+    return html;
+  }).join('');
+
+  // Aggregate duty across all rounds for this event (skip locked)
+  var allAthletes = data.athletes;
+  var aggDuty = {};
+  allAthletes.forEach(function(a) { aggDuty[a.id] = { comp: 0, judge: 0, scramble: 0, standby: 0 }; });
+  rdNums.forEach(function(rd) {
+    if (rounds[rd].locked) return;
+    var d = rounds[rd].duty;
+    Object.keys(d).forEach(function(aid) {
+      if (!aggDuty[aid]) aggDuty[aid] = { comp: 0, judge: 0, scramble: 0, standby: 0 };
+      aggDuty[aid].comp     += d[aid].comp     || 0;
+      aggDuty[aid].judge    += d[aid].judge    || 0;
+      aggDuty[aid].scramble += d[aid].scramble || 0;
+      aggDuty[aid].standby  += d[aid].standby  || 0;
+    });
+  });
+
+  dutyEl.innerHTML = '<thead><tr><th>Athlete</th><th class="th-r">Competed</th><th class="th-r">Judged</th><th class="th-r">Scrambled</th><th class="th-r">Standby</th></tr></thead><tbody>' +
+    allAthletes.map(function(a) {
+      var d = aggDuty[a.id] || { comp: 0, judge: 0, scramble: 0, standby: 0 };
+      return '<tr><td>' + escHtml(a.name || a.id) + '</td>' +
+        '<td class="td-r">' + d.comp + '</td><td class="td-r">' + d.judge +
+        '</td><td class="td-r">' + d.scramble + '</td><td class="td-r">' + d.standby + '</td></tr>';
+    }).join('') + '</tbody>';
+}
+
+function raCopyText() {
+  if (!_raLastAssignment) return;
+  var eid  = _raLastAssignment.activeEid;
+  var data = _raLastAssignment.byEvent[eid];
+  if (!data) return;
+  var evMeta = WCA_EVENTS.find(function(e) { return e.id === eid; });
+  var lines  = [(evMeta ? evMeta.name : eid), ''];
+
+  var rdNums = Object.keys(data.rounds).map(Number).sort(function(a,b){return a-b;});
+  rdNums.forEach(function(rd) {
+    var rnd = data.rounds[rd];
+    if (rnd.locked) return;
+    lines.push('=== ' + rnd.roundName + ' ===');
+    rnd.heats.forEach(function(h) {
+      lines.push(h.label);
+      lines.push('  Competitors: ' + h.competitors.map(function(a){ return a.name || a.id; }).join(', '));
+      lines.push('  Judges:      ' + (h.judges.length    ? h.judges.map(function(a){ return a.name||a.id; }).join(', ')    : '—'));
+      lines.push('  Scramblers:  ' + (h.scramblers.length ? h.scramblers.map(function(a){ return a.name||a.id; }).join(', ') : '—'));
+      if (h.standby.length) lines.push('  Standby:     ' + h.standby.map(function(a){ return a.name||a.id; }).join(', '));
+      lines.push('');
+    });
+  });
+
+  var text = lines.join('\n');
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(function() {
+      var btn = document.getElementById('raCopyBtn');
+      var orig = btn.textContent;
+      btn.textContent = '✓ Copied';
+      setTimeout(function() { btn.textContent = orig; }, 1600);
+    });
+  } else {
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+    document.body.removeChild(ta);
+  }
+}
 
 </script>
 </body>
