@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My Profile — Cube MN</title>
+  <style>
+    :root {
+      --bg: #080810; --surface: #0f0f1a; --card: #131325;
+      --accent: #7c3aed; --accent2: #ec4899;
+      --glow: rgba(124,58,237,0.35);
+      --text: #e2e8f0; --muted: #64748b;
+      --nav-bg: rgba(8,8,16,0.75);
+      --text-primary: #ffffff; --text-secondary: #cbd5f5; --text-muted: #8b90b3;
+      --input-bg: rgba(255,255,255,0.04); --input-border: rgba(255,255,255,0.08);
+    }
+    html[data-theme="soft-light"] {
+      --bg: #f5f6fa; --surface: #eaecf4; --card: #ffffff;
+      --glow: rgba(124,58,237,0.1);
+      --text: #1e1b4b; --muted: #6b7280;
+      --nav-bg: rgba(245,246,250,0.92);
+      --text-primary: #1c1d2a; --text-secondary: #4b5563; --text-muted: #9ca3af;
+      --input-bg: rgba(0,0,0,0.04); --input-border: rgba(0,0,0,0.1);
+    }
+    html[data-theme="purple-light"] {
+      --bg: #f0ebff; --surface: #e6dfff; --card: #faf8ff;
+      --glow: rgba(124,58,237,0.15);
+      --text: #2d1b69; --muted: #7c6fa0;
+      --nav-bg: rgba(240,235,255,0.94);
+      --text-primary: #2d1b69; --text-secondary: #5b4a9e; --text-muted: #7c6fa0;
+      --input-bg: rgba(0,0,0,0.04); --input-border: rgba(0,0,0,0.1);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh; overflow-x: hidden;
+    }
+    a { color: inherit; text-decoration: none; }
+
+    /* NAV */
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      background: var(--nav-bg);
+      backdrop-filter: blur(18px);
+      border-bottom: 1px solid rgba(124,58,237,0.3);
+      padding: 0 2rem; height: 58px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    html[data-theme="soft-light"] nav,
+    html[data-theme="purple-light"] nav { border-bottom-color: rgba(124,58,237,0.2); }
+    .nav-logo {
+      font-size: 1.25rem; font-weight: 800; letter-spacing: 2px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .nav-right { display: flex; align-items: center; gap: 0.75rem; }
+    .nav-username { font-size: 0.82rem; color: var(--muted); }
+    .btn-homepage {
+      padding: 0.38rem 0.85rem; border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.06); color: var(--text);
+      font-size: 0.78rem; font-weight: 600; text-decoration: none;
+      transition: background 0.2s; white-space: nowrap;
+      display: inline-flex; align-items: center; gap: 0.3rem;
+    }
+    .btn-homepage:hover { background: rgba(255,255,255,0.12); }
+    html[data-theme="soft-light"] .btn-homepage,
+    html[data-theme="purple-light"] .btn-homepage {
+      border-color: rgba(0,0,0,0.15); background: rgba(0,0,0,0.04);
+    }
+    .btn-logout {
+      padding: 0.38rem 0.85rem; border-radius: 8px;
+      border: 1px solid rgba(244,63,94,0.35);
+      background: rgba(244,63,94,0.1); color: #f87171;
+      font-size: 0.78rem; font-weight: 600; cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn-logout:hover { background: rgba(244,63,94,0.2); }
+    .theme-btn {
+      background: rgba(124,58,237,0.12); border: 1px solid rgba(124,58,237,0.3);
+      color: #a78bfa; border-radius: 8px; padding: 0.35rem 0.65rem;
+      font-size: 0.76rem; font-weight: 600; cursor: pointer; transition: background 0.2s;
+    }
+    .theme-btn:hover { background: rgba(124,58,237,0.22); }
+    html[data-theme="soft-light"] .theme-btn,
+    html[data-theme="purple-light"] .theme-btn { color: #7c3aed; }
+
+    /* LANG SWITCHER */
+    .lang-switcher {
+      position: relative; display: inline-flex; align-items: center;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 999px; padding: 3px;
+    }
+    .lang-switcher::before {
+      content: ''; position: absolute;
+      left: 3px; top: 3px; bottom: 3px;
+      width: calc(50% - 3px);
+      background: linear-gradient(135deg, #7c3aed, #ec4899);
+      border-radius: 999px;
+      transition: transform 0.28s cubic-bezier(.4,0,.2,1);
+      box-shadow: 0 0 10px rgba(124,58,237,0.4);
+    }
+    .lang-switcher:has(.lang-opt[data-lang="mn"].active)::before {
+      transform: translateX(100%);
+    }
+    .lang-opt {
+      position: relative; z-index: 1; flex: 1;
+      background: transparent; border: none;
+      color: var(--muted); border-radius: 999px;
+      padding: 0.2rem 0.7rem;
+      font-size: 0.72rem; font-weight: 700; letter-spacing: 0.05em;
+      cursor: pointer; transition: color 0.2s; text-align: center; white-space: nowrap;
+    }
+    .lang-opt.active { color: #fff; }
+    html[data-theme="soft-light"] .lang-switcher,
+    html[data-theme="purple-light"] .lang-switcher {
+      background: rgba(0,0,0,0.05); border-color: rgba(0,0,0,0.1);
+    }
+    html[data-theme="soft-light"] .lang-opt.active,
+    html[data-theme="purple-light"] .lang-opt.active { color: #fff; }
+
+    /* MAIN */
+    .main { max-width: 900px; margin: 0 auto; padding: 2.5rem 1.5rem 4rem; }
+
+    /* LOADING / ERROR */
+    .state-msg {
+      text-align: center; padding: 5rem 2rem;
+      font-size: 1rem; color: var(--muted);
+    }
+    .state-msg.error { color: #f87171; }
+
+    /* PROFILE HEADER */
+    .profile-header {
+      display: flex; align-items: center; gap: 1.6rem;
+      margin-bottom: 2rem; flex-wrap: wrap;
+    }
+    .avatar {
+      width: 88px; height: 88px; border-radius: 50%; flex-shrink: 0;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      display: flex; align-items: center; justify-content: center;
+      font-size: 2rem; font-weight: 800; color: #fff;
+      overflow: hidden;
+    }
+    .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .profile-info { flex: 1; min-width: 0; }
+    .profile-name {
+      font-size: 1.7rem; font-weight: 800; color: var(--text-primary);
+      line-height: 1.15; word-break: break-word;
+    }
+    .profile-meta { display: flex; gap: 1.2rem; flex-wrap: wrap; margin-top: 0.5rem; }
+    .profile-meta-item { font-size: 0.82rem; color: var(--muted); }
+    .profile-meta-item b { color: #a78bfa; font-weight: 600; font-family: monospace; }
+
+    /* STATS BAR */
+    .stats-bar {
+      display: flex; gap: 0; border-radius: 14px; overflow: hidden;
+      background: var(--surface); border: 1px solid rgba(255,255,255,0.06);
+      margin-bottom: 2rem;
+    }
+    html[data-theme="soft-light"] .stats-bar,
+    html[data-theme="purple-light"] .stats-bar { border-color: rgba(0,0,0,0.08); }
+    .stat-item {
+      flex: 1; text-align: center; padding: 1.2rem 1rem;
+      border-right: 1px solid rgba(255,255,255,0.06);
+    }
+    html[data-theme="soft-light"] .stat-item,
+    html[data-theme="purple-light"] .stat-item { border-right-color: rgba(0,0,0,0.08); }
+    .stat-item:last-child { border-right: none; }
+    .stat-val {
+      font-size: 1.8rem; font-weight: 800;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .stat-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 0.15rem; }
+
+    /* SECTION */
+    .section-title {
+      font-size: 1rem; font-weight: 700; color: var(--text-primary);
+      text-transform: uppercase; letter-spacing: 0.1em;
+      margin-bottom: 1rem; padding-bottom: 0.5rem;
+      border-bottom: 1px solid rgba(124,58,237,0.2);
+      display: flex; align-items: center; gap: 0.5rem;
+    }
+    .section-title::before { content: ''; display: inline-block; width: 3px; height: 1em; background: linear-gradient(180deg,var(--accent),var(--accent2)); border-radius: 2px; }
+
+    /* TABLES */
+    .table-wrap { overflow-x: auto; margin-bottom: 2rem; }
+    table { width: 100%; border-collapse: collapse; }
+    thead th {
+      text-align: left; padding: 0.65rem 0.9rem;
+      font-size: 0.71rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.08em; color: var(--muted);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      white-space: nowrap;
+    }
+    html[data-theme="soft-light"] thead th,
+    html[data-theme="purple-light"] thead th { border-bottom-color: rgba(0,0,0,0.1); }
+    tbody td {
+      padding: 0.7rem 0.9rem; font-size: 0.88rem;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    html[data-theme="soft-light"] tbody td,
+    html[data-theme="purple-light"] tbody td { border-bottom-color: rgba(0,0,0,0.06); }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr:hover td { background: rgba(124,58,237,0.05); }
+    .time-val { font-family: monospace; font-weight: 600; }
+    .time-dnf { font-family: monospace; color: #f87171; }
+    .muted { color: var(--muted); font-size: 0.8rem; }
+
+    /* COMP HISTORY BLOCK */
+    .comp-block { margin-bottom: 2rem; }
+    .comp-block-title {
+      font-size: 0.88rem; font-weight: 700; color: #c4b5fd;
+      margin-bottom: 0.6rem;
+    }
+
+    /* EMPTY */
+    .empty {
+      text-align: center; padding: 3rem 2rem;
+      color: var(--muted); font-size: 0.9rem;
+    }
+    .empty-icon { font-size: 2rem; margin-bottom: 0.6rem; }
+
+    /* CARD */
+    .card {
+      background: var(--card); border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 14px; padding: 1.5rem; margin-bottom: 1.5rem;
+    }
+    html[data-theme="soft-light"] .card,
+    html[data-theme="purple-light"] .card { border-color: rgba(0,0,0,0.08); box-shadow: 0 2px 12px rgba(0,0,0,0.05); }
+
+    @media (max-width: 600px) {
+      .profile-header { flex-direction: column; align-items: flex-start; }
+      .stats-bar { flex-wrap: wrap; }
+      .stat-item { min-width: 33%; border-bottom: 1px solid rgba(255,255,255,0.06); }
+    }
+  </style>
+  <script>(function(){var t=localStorage.getItem('cubeTheme')||'dark';document.documentElement.setAttribute('data-theme',t);})();</script>
+</head>
+<body>
+
+<nav>
+  <div class="nav-logo">CUBEMN</div>
+  <div class="nav-right">
+    <span class="nav-username" id="navUsername"></span>
+    <a href="index.html" class="btn-homepage" data-i18n="nav.homepage">⌂ Homepage</a>
+    <div class="lang-switcher">
+      <button class="lang-opt active" data-lang="en" onclick="applyLang('en')">EN</button>
+      <button class="lang-opt" data-lang="mn" onclick="applyLang('mn')">MN</button>
+    </div>
+    <button class="theme-btn" id="themeSwitchBtn" onclick="cycleTheme()">🌑 Dark</button>
+    <button class="btn-logout" onclick="doLogout()" data-i18n="nav.sign-out">Sign Out</button>
+  </div>
+</nav>
+
+<div class="main">
+  <div id="pageContent" class="state-msg" data-i18n="dash.loading">Loading your profile…</div>
+</div>
+
+<script src="i18n.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script>
+const WCA_EVENTS = [
+  { id: '333', name: '3x3x3 Cube', short: '3x3' },
+  { id: '222', name: '2x2x2 Cube', short: '2x2' },
+  { id: '444', name: '4x4x4 Cube', short: '4x4' },
+  { id: '555', name: '5x5x5 Cube', short: '5x5' },
+  { id: '666', name: '6x6x6 Cube', short: '6x6' },
+  { id: '777', name: '7x7x7 Cube', short: '7x7' },
+  { id: '333bf', name: '3x3 Blindfolded', short: '3BLD' },
+  { id: '333fm', name: '3x3 Fewest Moves', short: 'FMC' },
+  { id: '333oh', name: '3x3 One-Handed', short: '3OH' },
+  { id: 'clock', name: 'Clock', short: 'CLK' },
+  { id: 'minx', name: 'Megaminx', short: 'MINX' },
+  { id: 'pyram', name: 'Pyraminx', short: 'PYR' },
+  { id: 'skewb', name: 'Skewb', short: 'SKWB' },
+  { id: 'sq1', name: 'Square-1', short: 'SQ1' },
+  { id: '444bf', name: '4x4 Blindfolded', short: '4BLD' },
+  { id: '555bf', name: '5x5 Blindfolded', short: '5BLD' },
+  { id: '333mbf', name: 'Multi-Blind', short: 'MBLD' },
+];
+
+function escHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function fmtTime(cs) {
+  if (cs === -1) return 'DNF';
+  if (cs === -2) return 'DNS';
+  if (cs === null || cs === undefined) return '—';
+  if (cs >= 6000) {
+    var m = Math.floor(cs / 6000);
+    var s = Math.floor((cs % 6000) / 100);
+    var c = cs % 100;
+    return m + ':' + String(s).padStart(2,'0') + '.' + String(c).padStart(2,'0');
+  }
+  var s2 = Math.floor(cs / 100);
+  var c2 = cs % 100;
+  return s2 + '.' + String(c2).padStart(2,'0');
+}
+
+// ---- SESSION ----
+var session = null;
+try {
+  session = JSON.parse(localStorage.getItem('cubeAthleteUser') || 'null');
+} catch(e) { session = null; }
+
+if (!session || !session.athleteId) {
+  window.location.href = 'athlete-login.html';
+}
+
+function doLogout() {
+  localStorage.removeItem('cubeAthleteUser');
+  window.location.href = 'athlete-login.html';
+}
+
+// ---- BOOT ----
+document.addEventListener('DOMContentLoaded', function() {
+  if (window.initLang) initLang();
+  var usernameEl = document.getElementById('navUsername');
+  if (usernameEl && session) usernameEl.textContent = session.username || '';
+
+  if (!window.db) {
+    setTimeout(function() {
+      if (window.db) loadDashboard();
+      else showError('Database not initialized. Check firebase-config.js.');
+    }, 600);
+    return;
+  }
+  loadDashboard();
+});
+
+function showError(msg) {
+  document.getElementById('pageContent').className = 'state-msg error';
+  document.getElementById('pageContent').textContent = msg;
+}
+
+async function loadDashboard() {
+  try {
+    // Load athlete doc
+    var athleteDoc = await window.db.collection('athletes').doc(session.athleteId).get();
+    if (!athleteDoc.exists) {
+      showError('Athlete profile not found. Contact your admin.');
+      return;
+    }
+    var athlete = Object.assign({ id: athleteDoc.id }, athleteDoc.data());
+
+    // Load published club results for this athlete
+    var resultsSnap = await window.db.collection('results')
+      .where('athleteId', '==', session.athleteId)
+      .where('status', '==', 'published')
+      .get();
+    var results = resultsSnap.docs
+      .map(function(d) { return Object.assign({ id: d.id }, d.data()); })
+      .filter(function(r) { return r.source !== 'imported'; });
+
+    renderDashboard(athlete, results);
+  } catch(e) {
+    showError('Failed to load: ' + e.message);
+  }
+}
+
+function renderDashboard(athlete, results) {
+  var initials = (athlete.name || '?').split(' ').map(function(w){ return w[0]||''; }).join('').toUpperCase().slice(0,2);
+  var fullName  = (athlete.lastName ? athlete.lastName + ' ' : '') + (athlete.name || '');
+
+  // Personal bests
+  var pbByEvent = {};
+  results.forEach(function(r) {
+    var eid = r.eventId;
+    if (!pbByEvent[eid]) pbByEvent[eid] = { name: r.eventName || eid, single: null, average: null };
+    if (r.single > 0 && (pbByEvent[eid].single === null || r.single < pbByEvent[eid].single))
+      pbByEvent[eid].single = r.single;
+    if (r.average && r.average > 0 && (pbByEvent[eid].average === null || r.average < pbByEvent[eid].average))
+      pbByEvent[eid].average = r.average;
+  });
+
+  // Competition history
+  var compHistory = {};
+  results.forEach(function(r) {
+    var cid = r.competitionId || 'unknown';
+    if (!compHistory[cid]) compHistory[cid] = { name: r.competitionName || r.competitionId || 'Unknown', results: [] };
+    compHistory[cid].results.push(r);
+  });
+
+  var compsCount  = Object.keys(compHistory).length;
+  var eventsCount = Object.keys(pbByEvent).length;
+  var solvesCount = results.reduce(function(acc, r) {
+    return acc + (r.solves || []).filter(function(s){ return s !== null && s > 0; }).length;
+  }, 0);
+
+  // Avatar
+  var avatarHtml = athlete.imageUrl
+    ? '<div class="avatar"><img src="' + escHtml(athlete.imageUrl) + '" alt="' + escHtml(athlete.name) + '" onerror="this.parentElement.textContent=\'' + escHtml(initials) + '\'"></div>'
+    : '<div class="avatar">' + escHtml(initials) + '</div>';
+
+  var html = '';
+
+  // Profile header
+  html += '<div class="profile-header">'
+    + avatarHtml
+    + '<div class="profile-info">'
+    + '<div class="profile-name">' + escHtml(fullName) + '</div>'
+    + '<div class="profile-meta">'
+    + (athlete.wcaId ? '<div class="profile-meta-item">' + t('dash.meta.wca-id') + ' &nbsp;<b>' + escHtml(athlete.wcaId) + '</b></div>' : '')
+    + '<div class="profile-meta-item">' + t('dash.meta.country') + ' &nbsp;<b>Mongolia</b></div>'
+    + (athlete.birthDate ? '<div class="profile-meta-item">' + t('dash.meta.born') + ' &nbsp;<b>' + escHtml(athlete.birthDate) + '</b></div>' : '')
+    + '</div>'
+    + '</div>'
+    + '</div>';
+
+  // Stats bar
+  html += '<div class="stats-bar">'
+    + '<div class="stat-item"><div class="stat-val">' + compsCount  + '</div><div class="stat-label">' + t('dash.stat.competitions') + '</div></div>'
+    + '<div class="stat-item"><div class="stat-val">' + eventsCount + '</div><div class="stat-label">' + t('dash.stat.events') + '</div></div>'
+    + '<div class="stat-item"><div class="stat-val">' + solvesCount + '</div><div class="stat-label">' + t('dash.stat.solves') + '</div></div>'
+    + '</div>';
+
+  // Personal Records
+  if (eventsCount) {
+    var evOrder = WCA_EVENTS.map(function(e){ return e.id; });
+    var sortedEvIds = Object.keys(pbByEvent).sort(function(a, b) {
+      var ai = evOrder.indexOf(a); var bi = evOrder.indexOf(b);
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    });
+
+    html += '<div class="section-title">' + t('dash.personal-records') + '</div>';
+    html += '<div class="table-wrap"><table><thead><tr>'
+      + '<th>' + t('dash.col.event') + '</th><th>' + t('dash.col.single') + '</th><th>' + t('dash.col.average') + '</th>'
+      + '</tr></thead><tbody>';
+    sortedEvIds.forEach(function(eid) {
+      var pb = pbByEvent[eid];
+      html += '<tr>'
+        + '<td>' + escHtml(pb.name) + '</td>'
+        + '<td><span class="' + (pb.single === -1 ? 'time-dnf' : 'time-val') + '">' + (pb.single !== null ? fmtTime(pb.single) : '—') + '</span></td>'
+        + '<td><span class="' + (pb.average === -1 ? 'time-dnf' : 'time-val') + '">' + (pb.average !== null ? fmtTime(pb.average) : '—') + '</span></td>'
+        + '</tr>';
+    });
+    html += '</tbody></table></div>';
+  }
+
+  // Competition History
+  if (compsCount) {
+    html += '<div class="section-title">' + t('dash.comp-history') + '</div>';
+    var evOrder2 = WCA_EVENTS.map(function(e){ return e.id; });
+    Object.values(compHistory).forEach(function(comp) {
+      var sortedRows = comp.results.slice().sort(function(a, b) {
+        var ai = evOrder2.indexOf(a.eventId); var bi = evOrder2.indexOf(b.eventId);
+        var evDiff = (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+        return evDiff !== 0 ? evDiff : (a.round || 1) - (b.round || 1);
+      });
+      html += '<div class="comp-block">'
+        + '<div class="comp-block-title">' + escHtml(comp.name) + '</div>'
+        + '<div class="table-wrap"><table><thead><tr>'
+        + '<th>' + t('dash.col.event') + '</th><th>' + t('dash.col.round') + '</th><th>' + t('dash.col.group') + '</th>'
+        + '<th>S1</th><th>S2</th><th>S3</th><th>S4</th><th>S5</th>'
+        + '<th>' + t('dash.col.single') + '</th><th>' + t('dash.col.average') + '</th>'
+        + '</tr></thead><tbody>';
+      sortedRows.forEach(function(r) {
+        var solves = r.solves || [null,null,null,null,null];
+        html += '<tr>'
+          + '<td style="white-space:nowrap">' + escHtml(r.eventName || r.eventId || '') + '</td>'
+          + '<td class="muted">' + escHtml(String(r.round || 1)) + '</td>'
+          + '<td class="muted">' + escHtml(r.group || '') + '</td>'
+          + solves.slice(0,5).map(function(s){ return '<td class="muted">' + fmtTime(s) + '</td>'; }).join('')
+          + '<td><span class="time-val">' + fmtTime(r.single) + '</span></td>'
+          + '<td><span class="' + (r.average === -1 ? 'time-dnf' : 'time-val') + '">' + fmtTime(r.average) + '</span></td>'
+          + '</tr>';
+      });
+      html += '</tbody></table></div></div>';
+    });
+  }
+
+  if (!eventsCount && !compsCount) {
+    html += '<div class="empty"><div class="empty-icon">&#128202;</div>' + t('dash.no-results') + '</div>';
+  }
+
+  document.getElementById('pageContent').className = '';
+  document.getElementById('pageContent').innerHTML = html;
+}
+
+// ---- THEME ----
+(function() {
+  var THEMES = ['dark', 'soft-light', 'purple-light'];
+  var LABELS  = { dark: '🌑 Dark', 'soft-light': '☀ Light', 'purple-light': '💜 Purple' };
+  window.cycleTheme = function() {
+    var cur  = document.documentElement.getAttribute('data-theme') || 'dark';
+    var next = THEMES[(THEMES.indexOf(cur) + 1) % THEMES.length];
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('cubeTheme', next);
+    var btn = document.getElementById('themeSwitchBtn');
+    if (btn) btn.textContent = LABELS[next];
+  };
+  var saved = localStorage.getItem('cubeTheme') || 'dark';
+  var btn   = document.getElementById('themeSwitchBtn');
+  if (btn) btn.textContent = LABELS[saved] || '🌑 Dark';
+})();
+</script>
+</body>
+</html>

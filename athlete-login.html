@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Athlete Login — Cube MN</title>
+  <style>
+    :root {
+      --bg: #080810; --surface: #0f0f1a; --card: #131325;
+      --accent: #7c3aed; --accent2: #ec4899;
+      --text: #e2e8f0; --muted: #64748b;
+      --input-bg: rgba(255,255,255,0.04);
+      --input-border: rgba(255,255,255,0.08);
+      --text-primary: #ffffff;
+    }
+    html[data-theme="soft-light"] {
+      --bg: #f5f6fa; --surface: #eaecf4; --card: #ffffff;
+      --text: #1e1b4b; --muted: #6b7280;
+      --input-bg: rgba(0,0,0,0.04); --input-border: rgba(0,0,0,0.1);
+      --text-primary: #1c1d2a;
+    }
+    html[data-theme="purple-light"] {
+      --bg: #f0ebff; --surface: #e6dfff; --card: #faf8ff;
+      --text: #2d1b69; --muted: #7c6fa0;
+      --input-bg: rgba(0,0,0,0.04); --input-border: rgba(0,0,0,0.1);
+      --text-primary: #2d1b69;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 2rem 1rem;
+      position: relative; overflow: hidden;
+    }
+    body::before {
+      content: '';
+      position: fixed; inset: 0; pointer-events: none;
+      background:
+        radial-gradient(ellipse 60% 50% at 30% 30%, rgba(124,58,237,0.18) 0%, transparent 70%),
+        radial-gradient(ellipse 50% 40% at 70% 70%, rgba(236,72,153,0.12) 0%, transparent 70%);
+    }
+
+    .login-wrap {
+      position: relative; z-index: 1;
+      width: 100%; max-width: 400px;
+    }
+    .back-link {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      font-size: 0.8rem; color: var(--muted);
+      text-decoration: none; margin-bottom: 1.5rem;
+      transition: color 0.2s;
+    }
+    .back-link:hover { color: var(--text); }
+
+    .login-card {
+      background: var(--card);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 20px;
+      padding: 2.4rem 2.2rem;
+      box-shadow: 0 25px 60px rgba(0,0,0,0.4), 0 0 0 1px rgba(124,58,237,0.1);
+    }
+    html[data-theme="soft-light"] .login-card,
+    html[data-theme="purple-light"] .login-card { border-color: rgba(0,0,0,0.09); box-shadow: 0 8px 30px rgba(0,0,0,0.08); }
+
+    .brand { text-align: center; margin-bottom: 1.8rem; }
+    .brand-icon { font-size: 2.4rem; display: block; margin-bottom: 0.35rem; }
+    .brand-name {
+      font-size: 1.8rem; font-weight: 800; letter-spacing: 0.05em;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .brand-sub { font-size: 0.82rem; color: var(--muted); margin-top: 0.3rem; }
+
+    .form-group { margin-bottom: 1.1rem; }
+    .form-group label {
+      display: block; font-size: 0.78rem; font-weight: 600;
+      color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em;
+      margin-bottom: 0.4rem;
+    }
+    .form-group input {
+      width: 100%; padding: 0.72rem 0.95rem;
+      background: var(--input-bg); border: 1px solid var(--input-border);
+      border-radius: 9px; color: var(--text); font-size: 0.95rem;
+      outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+      font-family: inherit;
+    }
+    .form-group input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(124,58,237,0.15);
+    }
+
+    .btn-login {
+      width: 100%; padding: 0.8rem;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border: none; border-radius: 9px; color: #fff;
+      font-size: 0.96rem; font-weight: 600; cursor: pointer;
+      transition: opacity 0.2s, transform 0.15s; letter-spacing: 0.03em;
+      margin-top: 0.4rem;
+    }
+    .btn-login:hover { opacity: 0.88; transform: translateY(-1px); }
+    .btn-login:active { transform: translateY(0); }
+    .btn-login:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+
+    .error-msg {
+      margin-top: 0.9rem; padding: 0.65rem 0.9rem;
+      background: rgba(244,63,94,0.12); border: 1px solid rgba(244,63,94,0.3);
+      border-radius: 8px; color: #f87171; font-size: 0.84rem; display: none;
+    }
+    .spinner-line {
+      text-align: center; margin-top: 0.9rem;
+      font-size: 0.82rem; color: var(--muted); display: none;
+    }
+
+    .theme-row {
+      display: flex; justify-content: flex-end; margin-top: 1.4rem;
+    }
+    .theme-btn {
+      background: rgba(124,58,237,0.12); border: 1px solid rgba(124,58,237,0.3);
+      color: #a78bfa; border-radius: 8px; padding: 0.35rem 0.65rem;
+      font-size: 0.76rem; font-weight: 600; cursor: pointer;
+      transition: background 0.2s;
+    }
+    .theme-btn:hover { background: rgba(124,58,237,0.22); }
+    html[data-theme="soft-light"] .theme-btn,
+    html[data-theme="purple-light"] .theme-btn { color: #7c3aed; }
+
+    .lang-switcher {
+      position: relative; display: inline-flex; align-items: center;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 999px; padding: 3px;
+    }
+    .lang-switcher::before {
+      content: ''; position: absolute;
+      left: 3px; top: 3px; bottom: 3px;
+      width: calc(50% - 3px);
+      background: linear-gradient(135deg, #7c3aed, #ec4899);
+      border-radius: 999px;
+      transition: transform 0.28s cubic-bezier(.4,0,.2,1);
+      box-shadow: 0 0 10px rgba(124,58,237,0.4);
+    }
+    .lang-switcher:has(.lang-opt[data-lang="mn"].active)::before {
+      transform: translateX(100%);
+    }
+    .lang-opt {
+      position: relative; z-index: 1; flex: 1;
+      background: transparent; border: none;
+      color: var(--muted); border-radius: 999px;
+      padding: 0.2rem 0.7rem;
+      font-size: 0.72rem; font-weight: 700; letter-spacing: 0.05em;
+      cursor: pointer; transition: color 0.2s; text-align: center; white-space: nowrap;
+    }
+    .lang-opt.active { color: #fff; }
+    html[data-theme="soft-light"] .lang-switcher,
+    html[data-theme="purple-light"] .lang-switcher {
+      background: rgba(0,0,0,0.05); border-color: rgba(0,0,0,0.1);
+    }
+    html[data-theme="soft-light"] .lang-opt.active,
+    html[data-theme="purple-light"] .lang-opt.active { color: #fff; }
+  </style>
+  <script>(function(){var t=localStorage.getItem('cubeTheme')||'dark';document.documentElement.setAttribute('data-theme',t);})();</script>
+</head>
+<body>
+
+<div class="login-wrap">
+  <a href="index.html" class="back-link">&#8592; Back to main site</a>
+
+  <div class="login-card">
+    <div class="brand">
+      <span class="brand-icon">&#129413;</span>
+      <div class="brand-name">CUBE MN</div>
+      <div class="brand-sub">Athlete Portal</div>
+    </div>
+
+    <div class="form-group">
+      <label data-i18n="login.username">Username</label>
+      <input type="text" id="loginUsername" placeholder="Enter your username" autocomplete="username" data-i18n-ph="login.username" />
+    </div>
+    <div class="form-group">
+      <label data-i18n="login.password">Password</label>
+      <input type="password" id="loginPassword" placeholder="Enter your password" autocomplete="current-password" />
+    </div>
+
+    <button class="btn-login" id="loginBtn" onclick="doLogin()" data-i18n="login.athlete-btn">Sign In to My Profile</button>
+    <div class="error-msg" id="loginError"></div>
+    <div class="spinner-line" id="loginSpinner" data-i18n="login.spinner">Checking credentials…</div>
+
+    <div class="theme-row" style="justify-content:space-between;align-items:center;">
+      <div class="lang-switcher">
+        <button class="lang-opt active" data-lang="en" onclick="applyLang('en')">EN</button>
+        <button class="lang-opt" data-lang="mn" onclick="applyLang('mn')">MN</button>
+      </div>
+      <button class="theme-btn" id="themeSwitchBtn" onclick="cycleTheme()">🌑 Dark</button>
+    </div>
+  </div>
+</div>
+
+<script src="i18n.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script>
+// ---- AUTO-LOGIN CHECK ----
+(function() {
+  try {
+    var session = JSON.parse(localStorage.getItem('cubeAthleteUser') || 'null');
+    if (session && session.athleteId) {
+      window.location.href = 'athlete-dashboard.html';
+    }
+  } catch(e) { localStorage.removeItem('cubeAthleteUser'); }
+})();
+
+if (window.initLang) initLang();
+
+// ---- LOGIN ----
+document.getElementById('loginPassword').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') doLogin();
+});
+document.getElementById('loginUsername').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') document.getElementById('loginPassword').focus();
+});
+
+async function doLogin() {
+  var username = document.getElementById('loginUsername').value.trim();
+  var password = document.getElementById('loginPassword').value;
+  var btn      = document.getElementById('loginBtn');
+  var errEl    = document.getElementById('loginError');
+  var spinner  = document.getElementById('loginSpinner');
+
+  errEl.style.display = 'none';
+
+  if (!username || !password) {
+    showError('Please enter your username and password.');
+    return;
+  }
+
+  btn.disabled = true;
+  spinner.style.display = 'block';
+
+  try {
+    if (!window.db) throw new Error('Database not initialized. Check firebase-config.js.');
+    var snap = await window.db.collection('users').where('username', '==', username).get();
+    if (snap.empty) {
+      showError('Invalid username or password.');
+      return;
+    }
+    var userDoc  = snap.docs[0];
+    var userData = userDoc.data();
+    if (userData.password !== password) {
+      showError('Invalid username or password.');
+      return;
+    }
+    // Save session
+    localStorage.setItem('cubeAthleteUser', JSON.stringify({
+      uid:       userDoc.id,
+      username:  userData.username,
+      athleteId: userData.athleteId,
+      role:      userData.role || 'athlete'
+    }));
+    window.location.href = 'athlete-dashboard.html';
+  } catch(e) {
+    showError('Login failed: ' + e.message);
+  } finally {
+    btn.disabled        = false;
+    spinner.style.display = 'none';
+  }
+}
+
+function showError(msg) {
+  var el = document.getElementById('loginError');
+  el.textContent  = msg;
+  el.style.display = 'block';
+}
+
+// ---- THEME ----
+(function() {
+  var THEMES = ['dark', 'soft-light', 'purple-light'];
+  var LABELS  = { dark: '🌑 Dark', 'soft-light': '☀ Light', 'purple-light': '💜 Purple' };
+  window.cycleTheme = function() {
+    var cur  = document.documentElement.getAttribute('data-theme') || 'dark';
+    var next = THEMES[(THEMES.indexOf(cur) + 1) % THEMES.length];
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('cubeTheme', next);
+    var btn = document.getElementById('themeSwitchBtn');
+    if (btn) btn.textContent = LABELS[next];
+  };
+  var saved = localStorage.getItem('cubeTheme') || 'dark';
+  var btn   = document.getElementById('themeSwitchBtn');
+  if (btn) btn.textContent = LABELS[saved] || '🌑 Dark';
+})();
+</script>
+</body>
+</html>
