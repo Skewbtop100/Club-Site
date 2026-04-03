@@ -1554,9 +1554,6 @@
     }
 
     /* ===== INSPECTION TIMER ===== */
-    .insp-toggle-wrap {
-      margin-bottom: 0.55rem;
-    }
     .insp-toggle-btn {
       font-size: 0.73rem; font-weight: 600;
       padding: 0.22rem 0.65rem; border-radius: 6px;
@@ -1574,6 +1571,7 @@
       border-radius: 10px;
       background: rgba(255,255,255,0.025);
       padding: 0.8rem 1rem 0.7rem;
+      margin-top: 0.55rem;
       margin-bottom: 0.7rem;
     }
     .insp-box.visible { display: block; }
@@ -2189,15 +2187,12 @@
         <span style="font-size:0.8rem;color:var(--muted);">Panels: <strong id="panelCountLabel">1</strong></span>
         <button type="button" class="btn-xs" id="addPanelBtn" onclick="addPanel()">+ Add Panel</button>
         <button type="button" class="btn-xs" id="removePanelBtn" onclick="removePanel()">− Remove</button>
+        <button class="insp-toggle-btn" id="inspToggleBtn" onclick="inspToggle()">&#9201; Inspection Timer</button>
       </div>
       <div id="entrySelectPrompt" style="
         padding:1.5rem 1rem; text-align:center;
         color:var(--muted); font-size:0.88rem;">
         Select a competition above to start entering results.
-      </div>
-      <!-- Inspection Timer -->
-      <div class="insp-toggle-wrap">
-        <button class="insp-toggle-btn" id="inspToggleBtn" onclick="inspToggle()">&#9201; Inspection Timer</button>
       </div>
       <div class="insp-box" id="inspBox">
         <div class="insp-time-row">
@@ -4974,6 +4969,16 @@ function _hcRenderTable(ranked) {
     var state = 'normal', label = '', cls = '';
     if (sec >= 17) {
       state = 'dnf';   label = 'DNF';           cls = 'dnf';
+      // Auto-stop at DNF
+      if (_inspRunning) {
+        _inspRunning = false;
+        clearInterval(_inspInterval);
+        _inspInterval = null;
+        var sb = document.getElementById('inspStartBtn');
+        var tb = document.getElementById('inspStopBtn');
+        if (sb) sb.disabled = false;
+        if (tb) tb.disabled = true;
+      }
     } else if (sec >= 15) {
       state = 'plus2'; label = '+2 Penalty';    cls = 'plus2';
     } else if (sec >= 12) {
