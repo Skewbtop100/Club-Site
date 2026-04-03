@@ -881,7 +881,7 @@
     }
     .wca-sidebar-events { flex: 1; overflow-y: auto; padding: 0.35rem 0; }
     .wca-event-item {
-      display: flex; align-items: center; gap: 0.55rem;
+      display: flex; align-items: center;
       padding: 0.65rem 0.9rem; cursor: pointer;
       font-size: 0.83rem; color: var(--muted);
       border-left: 3px solid transparent;
@@ -892,11 +892,9 @@
       background: rgba(124,58,237,0.12); border-left-color: var(--accent);
       color: #c4b5fd; font-weight: 600;
     }
-    .wca-event-short {
-      font-size: 0.68rem; font-weight: 800; letter-spacing: 0.04em;
-      width: 32px; text-align: center; flex-shrink: 0; color: #7c3aed;
+    .wca-event-full-name {
+      font-size: 0.82rem; font-weight: 700; letter-spacing: 0.01em;
     }
-    .wca-event-item.active .wca-event-short { color: #a78bfa; }
     .wca-main { flex: 1; min-width: 0; background: var(--card); display: flex; flex-direction: column; }
     .wca-event-round-bar {
       padding: 0.75rem 1.4rem 0;
@@ -3157,8 +3155,7 @@ function renderLiveUI(comp, eventIds) {
   var eventItemsHtml = eventsInComp.map(function(ev) {
     var active = ev.id === currentLiveEventId ? ' active' : '';
     return '<div class="wca-event-item' + active + '" data-live-event="' + escHtml(ev.id) + '">'
-      + '<span class="wca-event-short">' + escHtml(ev.short || ev.id.toUpperCase().slice(0, 4)) + '</span>'
-      + '<span>' + escHtml(ev.name) + '</span>'
+      + '<span class="wca-event-full-name">' + escHtml(ev.name) + '</span>'
       + '</div>';
   }).join('');
 
