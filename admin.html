@@ -1424,68 +1424,134 @@
       .wca-event-item { border-left: none; border-radius: 8px; padding: 0.35rem 0.55rem; flex-direction: column; gap: 0.1rem; }
     }
 
-    /* ===== HISTORY ===== */
-    .history-row { border-bottom: 1px solid rgba(255,255,255,0.04); }
-    .history-row:last-child { border-bottom: none; }
+    /* ===== HISTORY (redesigned) ===== */
+    .hc-list { display: flex; flex-direction: column; gap: 0.85rem; }
 
-    .history-main {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      padding: 0.9rem 1rem;
-      flex-wrap: wrap;
+    .hc-card {
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 10px; overflow: hidden;
+      background: rgba(255,255,255,0.01);
+      transition: border-color 0.2s;
+    }
+    .hc-card:hover { border-color: rgba(124,58,237,0.22); }
+
+    .hc-header {
+      display: flex; align-items: center; gap: 1rem;
+      padding: 1rem 1.2rem; flex-wrap: wrap;
+    }
+    .hc-info { flex: 1; min-width: 0; }
+    .hc-name { font-size: 0.97rem; font-weight: 700; color: var(--text); margin-bottom: 0.38rem; }
+    .hc-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+    .hc-chip {
+      font-size: 0.69rem; font-weight: 600;
+      padding: 0.16rem 0.48rem; border-radius: 5px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: var(--muted); white-space: nowrap;
     }
 
-    .history-info { flex: 1; min-width: 150px; }
-    .history-name { font-size: 0.95rem; font-weight: 600; color: var(--text); }
-    .history-meta { font-size: 0.78rem; color: var(--muted); margin-top: 0.1rem; }
-
-    .history-expand {
-      padding: 0.35rem 0.9rem;
-      background: transparent;
-      border: 1px solid rgba(124,58,237,0.35);
-      border-radius: 7px;
-      color: #a78bfa;
-      font-size: 0.82rem;
-      cursor: pointer;
-      transition: background 0.2s;
+    .hc-toggle-btn {
+      padding: 0.38rem 1rem;
+      background: rgba(124,58,237,0.1);
+      border: 1px solid rgba(124,58,237,0.32);
+      border-radius: 7px; color: #a78bfa;
+      font-size: 0.8rem; font-weight: 600;
+      cursor: pointer; flex-shrink: 0;
+      transition: background 0.15s, border-color 0.15s;
       white-space: nowrap;
     }
+    .hc-toggle-btn:hover { background: rgba(124,58,237,0.2); border-color: rgba(124,58,237,0.5); }
+    .hc-toggle-btn.open { background: rgba(124,58,237,0.18); border-color: rgba(124,58,237,0.45); }
 
-    .history-expand:hover { background: rgba(124,58,237,0.1); }
+    .hc-body { display: none; border-top: 1px solid rgba(255,255,255,0.06); }
+    .hc-body.open { display: block; }
 
-    .history-results-panel {
-      display: none;
-      padding: 1rem 1rem 1.2rem;
-      background: rgba(255,255,255,0.015);
-      border-top: 1px solid rgba(255,255,255,0.04);
+    .hc-loading, .hc-empty { padding: 1.1rem 1.4rem; font-size: 0.83rem; color: var(--muted); }
+    .hc-error { padding: 1.1rem 1.4rem; font-size: 0.83rem; color: #f43f5e; }
+
+    /* Event selector pills */
+    .hc-ev-tabs {
+      display: flex; gap: 0.28rem; flex-wrap: wrap;
+      padding: 0.7rem 1.2rem;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
     }
-
-    .history-results-panel.open { display: block; }
-
-    .results-event-block { margin-bottom: 1.2rem; }
-
-    .results-event-title {
-      font-size: 0.82rem;
-      font-weight: 700;
+    .hc-ev-pill {
+      padding: 0.26rem 0.68rem; border-radius: 6px;
+      font-size: 0.73rem; font-weight: 700;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: transparent; color: var(--muted);
+      cursor: pointer; white-space: nowrap;
+      transition: background 0.13s, color 0.13s, border-color 0.13s;
+    }
+    .hc-ev-pill:hover { background: rgba(255,255,255,0.06); color: var(--text); }
+    .hc-ev-pill.active {
+      background: rgba(124,58,237,0.18);
+      border-color: rgba(124,58,237,0.42);
       color: #c4b5fd;
-      text-transform: uppercase;
-      letter-spacing: 0.07em;
-      margin-bottom: 0.5rem;
-      padding-bottom: 0.3rem;
-      border-bottom: 1px solid rgba(124,58,237,0.2);
     }
 
-    .results-round-title {
-      font-size: 0.77rem;
-      color: var(--muted);
-      font-weight: 600;
-      margin: 0.4rem 0 0.3rem;
+    /* Event content + accordion */
+    .hc-ev-content { padding: 0.55rem 1.2rem 1rem; }
+    .hc-acc-item {
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 7px; overflow: hidden;
+      margin-bottom: 0.38rem;
     }
+    .hc-acc-trigger {
+      width: 100%; display: flex; align-items: center; gap: 0.55rem;
+      padding: 0.52rem 0.85rem;
+      background: rgba(255,255,255,0.025); border: none;
+      color: var(--text); font-size: 0.82rem; font-weight: 600;
+      text-align: left; cursor: pointer;
+      transition: background 0.13s;
+    }
+    .hc-acc-trigger:hover { background: rgba(255,255,255,0.05); }
+    .hc-acc-trigger.open { background: rgba(124,58,237,0.07); color: #c4b5fd; }
+    .hc-acc-icon { font-size: 0.55rem; color: var(--muted); width: 0.65rem; flex-shrink: 0; }
+    .hc-acc-label { flex: 1; }
+    .hc-acc-count { font-size: 0.7rem; color: var(--muted); font-weight: 400; }
+    .hc-acc-panel { display: none; }
+    .hc-acc-panel.open { display: block; }
 
-    .results-mini-table { font-size: 0.8rem; width: 100%; }
-    .results-mini-table th { font-size: 0.7rem; padding: 0.3rem 0.5rem; }
-    .results-mini-table td { padding: 0.35rem 0.5rem; font-family: monospace; }
+    /* Results table */
+    .hc-tbl-wrap {
+      overflow-x: auto; -webkit-overflow-scrolling: touch;
+      padding: 0.5rem 0.85rem 0.75rem;
+    }
+    .hc-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; min-width: 400px; }
+    .hc-table thead th {
+      padding: 0.38rem 0.55rem;
+      font-size: 0.66rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--muted);
+      border-bottom: 1px solid rgba(255,255,255,0.07);
+      text-align: left; white-space: nowrap;
+    }
+    .hc-table thead th.th-r { text-align: right; }
+    .hc-table tbody tr { border-bottom: 1px solid rgba(255,255,255,0.035); transition: background 0.1s; }
+    .hc-table tbody tr:last-child { border-bottom: none; }
+    .hc-table tbody tr:hover { background: rgba(255,255,255,0.03); }
+    .hc-table td { padding: 0.4rem 0.55rem; vertical-align: middle; }
+    .hc-td-rank { font-size: 0.75rem; font-weight: 700; color: var(--muted); min-width: 22px; }
+    .hc-td-rank.r1 { color: #fbbf24; }
+    .hc-td-rank.r2 { color: #94a3b8; }
+    .hc-td-rank.r3 { color: #c2773d; }
+    .hc-td-name { font-weight: 600; color: var(--text); font-size: 0.84rem; white-space: nowrap; }
+    .hc-td-solve { font-family: monospace; font-size: 0.82rem; text-align: right; color: var(--muted); white-space: nowrap; }
+    .hc-td-solve.best { color: var(--text); font-weight: 700; }
+    .hc-td-solve.dnf  { color: #f43f5e; }
+    .hc-td-avg  { font-family: monospace; font-size: 0.87rem; font-weight: 700; text-align: right; color: #a78bfa; white-space: nowrap; }
+    .hc-td-avg.dnf { color: #f43f5e; }
+    .hc-td-best { font-family: monospace; font-size: 0.83rem; font-weight: 700; text-align: right; color: var(--text); white-space: nowrap; }
+
+    @media (max-width: 640px) {
+      .hc-header { padding: 0.85rem; gap: 0.65rem; }
+      .hc-toggle-btn { width: 100%; text-align: center; }
+      .hc-ev-tabs { padding: 0.6rem 0.85rem; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+      .hc-ev-tabs::-webkit-scrollbar { display: none; }
+      .hc-ev-content { padding: 0.45rem 0.85rem 0.85rem; }
+      .hc-acc-trigger { padding: 0.58rem 0.75rem; }
+      .hc-tbl-wrap { padding: 0.4rem 0 0.55rem; }
+    }
 
     /* ===== MISC ===== */
     .monospace { font-family: monospace; }
@@ -4610,31 +4676,37 @@ async function publishCompResults(compId) {
 // ===========================
 // HISTORY
 // ===========================
+const _historyData      = {};   // compId -> { byEvent: { eid: { name, rounds: { rd: [rows] } } } }
+const _historyActiveEv  = {};   // compId -> eid
+const _historyOpenRound = {};   // `${compId}__${eid}__${rd}` -> bool
+
 function refreshHistoryList() {
   const wrap     = document.getElementById('historyWrap');
   const finished = competitionsCache.filter(c => c.status === 'finished');
-
   if (!finished.length) {
-    wrap.innerHTML = `<div class="empty-state">No finished competitions yet.</div>`;
+    wrap.innerHTML = '<div class="empty-state">No finished competitions yet.</div>';
     return;
   }
-
-  let html = '<div>';
+  let html = '<div class="hc-list">';
   finished.forEach(c => {
     const evCount = c.events     ? Object.keys(c.events).length : 0;
     const atCount = c.athleteIds ? c.athleteIds.length          : 0;
+    const cid = escHtml(c.id);
     html += `
-      <div class="history-row" id="hrow_${escHtml(c.id)}">
-        <div class="history-main">
-          <div class="history-info">
-            <div class="history-name">${escHtml(c.name)}</div>
-            <div class="history-meta">${escHtml(c.country)} &bull; ${escHtml(c.date)} &bull; ${evCount} event${evCount !== 1 ? 's' : ''} &bull; ${atCount} athlete${atCount !== 1 ? 's' : ''}</div>
+      <div class="hc-card" id="hc_card_${cid}">
+        <div class="hc-header">
+          <div class="hc-info">
+            <div class="hc-name">${escHtml(c.name)}</div>
+            <div class="hc-chips">
+              ${c.country ? `<span class="hc-chip">${escHtml(c.country)}</span>` : ''}
+              ${c.date    ? `<span class="hc-chip">${escHtml(c.date)}</span>` : ''}
+              <span class="hc-chip">${evCount} event${evCount !== 1 ? 's' : ''}</span>
+              <span class="hc-chip">${atCount} athlete${atCount !== 1 ? 's' : ''}</span>
+            </div>
           </div>
-          <button class="history-expand" onclick="toggleHistoryResults('${escHtml(c.id)}')">View Results</button>
+          <button class="hc-toggle-btn" id="hc_btn_${cid}" onclick="toggleHistoryCard('${cid}')">View Results</button>
         </div>
-        <div class="history-results-panel" id="hrpanel_${escHtml(c.id)}">
-          <div style="color:var(--muted);font-size:0.83rem;">Loading...</div>
-        </div>
+        <div class="hc-body" id="hc_body_${cid}"></div>
       </div>
     `;
   });
@@ -4642,25 +4714,28 @@ function refreshHistoryList() {
   wrap.innerHTML = html;
 }
 
-async function toggleHistoryResults(compId) {
-  const panel = document.getElementById(`hrpanel_${compId}`);
-  if (panel.classList.contains('open')) {
-    panel.classList.remove('open');
+async function toggleHistoryCard(compId) {
+  const body = document.getElementById(`hc_body_${compId}`);
+  const btn  = document.getElementById(`hc_btn_${compId}`);
+  if (body.classList.contains('open')) {
+    body.classList.remove('open');
+    btn.classList.remove('open');
+    btn.textContent = 'View Results';
     return;
   }
-  panel.classList.add('open');
-  panel.innerHTML = '<div style="color:var(--muted);font-size:0.83rem;padding:0.5rem;">Loading results...</div>';
+  body.classList.add('open');
+  btn.classList.add('open');
+  btn.textContent = 'Hide';
+  if (_historyData[compId]) { _hcRenderBody(compId); return; }
 
+  body.innerHTML = '<div class="hc-loading">Loading results…</div>';
   try {
     const snap    = await window.db.collection('results').where('competitionId','==',compId).get();
     const results = snap.docs.map(d => d.data());
-
     if (!results.length) {
-      panel.innerHTML = '<div style="color:var(--muted);font-size:0.83rem;padding:0.5rem;">No results recorded yet.</div>';
+      body.innerHTML = '<div class="hc-empty">No results recorded yet.</div>';
       return;
     }
-
-    // Group: eventId -> round -> results[]
     const byEvent = {};
     results.forEach(r => {
       const eid = r.eventId || 'unknown';
@@ -4669,59 +4744,109 @@ async function toggleHistoryResults(compId) {
       if (!byEvent[eid].rounds[rd]) byEvent[eid].rounds[rd] = [];
       byEvent[eid].rounds[rd].push(r);
     });
-
-    const histComp = competitionsCache.find(c => c.id === compId);
-    let html = '';
-    Object.entries(byEvent).forEach(([eid, evData]) => {
-      html += `<div class="results-event-block">
-        <div class="results-event-title">${escHtml(evData.name)}</div>`;
-
-      const histEvData   = histComp && histComp.events && histComp.events[eid] ? histComp.events[eid] : null;
-      const histTotalRnd = histEvData ? (parseInt(histEvData.rounds) || Object.keys(evData.rounds).length) : Object.keys(evData.rounds).length;
-      const histRndNames = getRoundNames(histTotalRnd);
-      Object.entries(evData.rounds).sort(([a],[b]) => Number(a) - Number(b)).forEach(([rd, rows]) => {
-        const ranked = [...rows].sort((a, b) => {
-          const aAvg = a.average, bAvg = b.average;
-          if (aAvg === -1 && bAvg === -1) return (a.single || 0) - (b.single || 0);
-          if (aAvg === -1) return 1;
-          if (bAvg === -1) return -1;
-          if (aAvg === null && bAvg === null) return (a.single || 0) - (b.single || 0);
-          if (aAvg === null) return 1;
-          if (bAvg === null) return -1;
-          return aAvg - bAvg;
-        });
-
-        const histRdLabel = histRndNames[Number(rd) - 1] || `Round ${rd}`;
-        html += `<div class="results-round-title">${histRdLabel}</div>
-          <div class="table-wrap"><table class="results-mini-table">
-            <thead><tr>
-              <th>Rank</th><th>Athlete</th>
-              <th>S1</th><th>S2</th><th>S3</th><th>S4</th><th>S5</th>
-              <th>Single</th><th>Average</th>
-            </tr></thead><tbody>`;
-
-        ranked.forEach((r, idx) => {
-          const solves = r.solves || [null, null, null, null, null];
-          const avgCls = r.average === -1 ? ' style="color:#f43f5e;"' : '';
-          html += `<tr>
-            <td>${idx + 1}</td>
-            <td>${escHtml(r.athleteName || '')}</td>
-            ${solves.slice(0,5).map(s => `<td>${escHtml(fmtTime(s))}</td>`).join('')}
-            <td>${escHtml(fmtTime(r.single))}</td>
-            <td${avgCls}>${escHtml(fmtTime(r.average))}</td>
-          </tr>`;
-        });
-
-        html += `</tbody></table></div>`;
-      });
-
-      html += `</div>`;
-    });
-
-    panel.innerHTML = html;
+    _historyData[compId] = { byEvent };
+    if (!_historyActiveEv[compId]) _historyActiveEv[compId] = Object.keys(byEvent)[0];
+    _hcRenderBody(compId);
   } catch(e) {
-    panel.innerHTML = `<div style="color:#f43f5e;font-size:0.83rem;padding:0.5rem;">Error: ${escHtml(e.message)}</div>`;
+    body.innerHTML = `<div class="hc-error">Error: ${escHtml(e.message)}</div>`;
   }
+}
+
+function historySelectEvent(compId, eid) {
+  _historyActiveEv[compId] = eid;
+  _hcRenderBody(compId);
+}
+
+function historyToggleRound(compId, eid, rd) {
+  const key = `${compId}__${eid}__${rd}`;
+  _historyOpenRound[key] = !_historyOpenRound[key];
+  _hcRenderEventContent(compId, eid);
+}
+
+function _hcRenderBody(compId) {
+  const body    = document.getElementById(`hc_body_${compId}`);
+  const data    = _historyData[compId];
+  const eids    = Object.keys(data.byEvent);
+  const activeEid = _historyActiveEv[compId] || eids[0];
+  const pills   = eids.map(eid => {
+    const evMeta = WCA_EVENTS.find(e => e.id === eid);
+    const label  = evMeta ? evMeta.short : escHtml(data.byEvent[eid].name || eid);
+    const active = eid === activeEid ? ' active' : '';
+    return `<button class="hc-ev-pill${active}" onclick="historySelectEvent('${escHtml(compId)}','${escHtml(eid)}')">${escHtml(label)}</button>`;
+  }).join('');
+  body.innerHTML = `<div class="hc-ev-tabs">${pills}</div><div class="hc-ev-content" id="hc_evc_${escHtml(compId)}"></div>`;
+  _hcRenderEventContent(compId, activeEid);
+}
+
+function _hcRenderEventContent(compId, eid) {
+  const container = document.getElementById(`hc_evc_${compId}`);
+  if (!container) return;
+  const data   = _historyData[compId];
+  const evData = data && data.byEvent[eid];
+  if (!evData) return;
+  const comp       = competitionsCache.find(c => c.id === compId);
+  const histEvData = comp && comp.events && comp.events[eid] ? comp.events[eid] : null;
+  const totalRnd   = histEvData ? (parseInt(histEvData.rounds) || Object.keys(evData.rounds).length) : Object.keys(evData.rounds).length;
+  const rndNames   = getRoundNames(totalRnd);
+  let html = '';
+  Object.entries(evData.rounds).sort(([a],[b]) => Number(a)-Number(b)).forEach(([rd, rows]) => {
+    const key     = `${compId}__${eid}__${rd}`;
+    const isOpen  = !!_historyOpenRound[key];
+    const rdLabel = rndNames[Number(rd)-1] || `Round ${rd}`;
+    const ranked  = [...rows].sort((a, b) => {
+      const aAvg = a.average, bAvg = b.average;
+      if (aAvg === -1 && bAvg === -1) return (a.single||0) - (b.single||0);
+      if (aAvg === -1) return 1; if (bAvg === -1) return -1;
+      if (aAvg === null && bAvg === null) return (a.single||0) - (b.single||0);
+      if (aAvg === null) return 1; if (bAvg === null) return -1;
+      return aAvg - bAvg;
+    });
+    html += `<div class="hc-acc-item">
+      <button class="hc-acc-trigger${isOpen ? ' open' : ''}" onclick="historyToggleRound('${escHtml(compId)}','${escHtml(eid)}',${Number(rd)})">
+        <span class="hc-acc-icon">${isOpen ? '▾' : '▸'}</span>
+        <span class="hc-acc-label">${escHtml(rdLabel)}</span>
+        <span class="hc-acc-count">${rows.length} athlete${rows.length !== 1 ? 's' : ''}</span>
+      </button>
+      ${isOpen ? `<div class="hc-acc-panel open">${_hcRenderTable(ranked)}</div>` : ''}
+    </div>`;
+  });
+  container.innerHTML = html || '<div class="hc-empty">No round data.</div>';
+}
+
+function _hcRenderTable(ranked) {
+  const hasAvg = ranked.some(r => r.average !== null && r.average !== undefined);
+  const solveCount = ranked.reduce((mx, r) => Math.max(mx, (r.solves||[]).length), 0);
+  const showSolves = solveCount > 0;
+  let thead = '<tr><th>Rank</th><th>Athlete</th>';
+  if (showSolves) for (let i = 1; i <= Math.min(solveCount,5); i++) thead += `<th class="th-r">S${i}</th>`;
+  thead += '<th class="th-r">Single</th>';
+  if (hasAvg) thead += '<th class="th-r">Average</th>';
+  thead += '</tr>';
+  let tbody = '';
+  ranked.forEach((r, idx) => {
+    const rank = idx + 1;
+    const rkCls = rank === 1 ? ' r1' : rank === 2 ? ' r2' : rank === 3 ? ' r3' : '';
+    const solves = r.solves || [];
+    const bestSolveVal = r.single;
+    let solveCells = '';
+    if (showSolves) {
+      for (let i = 0; i < Math.min(solveCount,5); i++) {
+        const sv = solves[i] !== undefined ? solves[i] : null;
+        const isBest = sv !== null && sv !== -1 && sv !== -2 && sv === bestSolveVal;
+        const isDnf  = sv === -1 || sv === -2;
+        solveCells += `<td class="hc-td-solve${isBest ? ' best' : ''}${isDnf ? ' dnf' : ''}">${escHtml(fmtTime(sv))}</td>`;
+      }
+    }
+    const avgDnf = r.average === -1 || r.average === -2;
+    tbody += `<tr>
+      <td class="hc-td-rank${rkCls}">${rank}</td>
+      <td class="hc-td-name">${escHtml(r.athleteName || '—')}</td>
+      ${solveCells}
+      <td class="hc-td-best">${escHtml(fmtTime(r.single))}</td>
+      ${hasAvg ? `<td class="hc-td-avg${avgDnf ? ' dnf' : ''}">${escHtml(fmtTime(r.average))}</td>` : ''}
+    </tr>`;
+  });
+  return `<div class="hc-tbl-wrap"><table class="hc-table"><thead>${thead}</thead><tbody>${tbody}</tbody></table></div>`;
 }
 
 // ===========================
