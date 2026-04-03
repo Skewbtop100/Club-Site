@@ -1553,6 +1553,81 @@
       .hc-tbl-wrap { padding: 0.4rem 0 0.55rem; }
     }
 
+    /* ===== INSPECTION TIMER ===== */
+    .insp-toggle-wrap {
+      margin-bottom: 0.55rem;
+    }
+    .insp-toggle-btn {
+      font-size: 0.73rem; font-weight: 600;
+      padding: 0.22rem 0.65rem; border-radius: 6px;
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.12);
+      color: var(--muted); cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+    .insp-toggle-btn:hover { background: rgba(255,255,255,0.06); color: var(--text); }
+    .insp-toggle-btn.active { background: rgba(124,58,237,0.12); border-color: rgba(124,58,237,0.35); color: #a78bfa; }
+
+    .insp-box {
+      display: none;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.025);
+      padding: 0.8rem 1rem 0.7rem;
+      margin-bottom: 0.7rem;
+    }
+    .insp-box.visible { display: block; }
+
+    .insp-time-row {
+      display: flex; align-items: baseline; gap: 0.55rem;
+      margin-bottom: 0.45rem;
+    }
+    .insp-time {
+      font-family: monospace; font-size: 2.4rem; font-weight: 700;
+      letter-spacing: 0.02em; color: var(--text); line-height: 1;
+      min-width: 5ch;
+    }
+    .insp-status {
+      font-size: 0.8rem; font-weight: 700; letter-spacing: 0.06em;
+      padding: 0.18rem 0.5rem; border-radius: 5px;
+      border: 1px solid transparent;
+      display: none;
+    }
+    .insp-status.visible { display: inline-block; }
+    .insp-status.warn   { background: rgba(251,191,36,0.12); border-color: rgba(251,191,36,0.3); color: #fbbf24; }
+    .insp-status.warn2  { background: rgba(249,115,22,0.12); border-color: rgba(249,115,22,0.3); color: #fb923c; }
+    .insp-status.plus2  { background: rgba(251,191,36,0.15); border-color: rgba(251,191,36,0.4); color: #fde68a; }
+    .insp-status.dnf    { background: rgba(244,63,94,0.15);  border-color: rgba(244,63,94,0.4);  color: #f43f5e; }
+
+    .insp-time.state-warn  { color: #fbbf24; }
+    .insp-time.state-warn2 { color: #fb923c; }
+    .insp-time.state-plus2 { color: #fde68a; }
+    .insp-time.state-dnf   { color: #f43f5e; }
+
+    .insp-btns {
+      display: flex; gap: 0.35rem; flex-wrap: wrap;
+    }
+    .insp-btn {
+      font-size: 0.76rem; font-weight: 600;
+      padding: 0.32rem 0.85rem; border-radius: 6px;
+      cursor: pointer; font-family: inherit;
+      transition: background 0.13s, border-color 0.13s;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.05); color: var(--text);
+      min-width: 56px; text-align: center;
+    }
+    .insp-btn:hover { background: rgba(255,255,255,0.1); }
+    .insp-btn.primary {
+      background: rgba(124,58,237,0.2); border-color: rgba(124,58,237,0.45); color: #c4b5fd;
+    }
+    .insp-btn.primary:hover { background: rgba(124,58,237,0.32); }
+    .insp-btn:disabled { opacity: 0.38; cursor: default; }
+
+    @media (max-width: 480px) {
+      .insp-time { font-size: 2rem; }
+      .insp-btn  { flex: 1; padding: 0.4rem 0.5rem; }
+    }
+
     /* ===== MISC ===== */
     .monospace { font-family: monospace; }
     select option { background: var(--option-bg); color: var(--text); }
@@ -2120,6 +2195,22 @@
         color:var(--muted); font-size:0.88rem;">
         Select a competition above to start entering results.
       </div>
+      <!-- Inspection Timer -->
+      <div class="insp-toggle-wrap">
+        <button class="insp-toggle-btn" id="inspToggleBtn" onclick="inspToggle()">&#9201; Inspection Timer</button>
+      </div>
+      <div class="insp-box" id="inspBox">
+        <div class="insp-time-row">
+          <span class="insp-time" id="inspTime">0.00</span>
+          <span class="insp-status" id="inspStatus"></span>
+        </div>
+        <div class="insp-btns">
+          <button class="insp-btn primary" id="inspStartBtn" onclick="inspStart()">Start</button>
+          <button class="insp-btn" id="inspStopBtn"  onclick="inspStop()"  disabled>Stop</button>
+          <button class="insp-btn" id="inspClearBtn" onclick="inspClear()">Clear</button>
+        </div>
+      </div>
+
       <div id="resultPanels" class="multi-entry-grid" style="display:none;">
         <!-- Injected by JS -->
       </div>
@@ -4848,6 +4939,90 @@ function _hcRenderTable(ranked) {
   });
   return `<div class="hc-tbl-wrap"><table class="hc-table"><thead>${thead}</thead><tbody>${tbody}</tbody></table></div>`;
 }
+
+// ===========================
+// INSPECTION TIMER
+// ===========================
+(function() {
+  var _inspInterval = null;
+  var _inspStart    = 0;
+  var _inspElapsed  = 0;   // centiseconds
+  var _inspRunning  = false;
+
+  function _inspUpdate() {
+    _inspElapsed = Math.round((Date.now() - _inspStart) / 10);
+    _inspDraw();
+  }
+
+  function _inspDraw() {
+    var cs  = _inspElapsed;
+    var sec = cs / 100;
+    var timeEl   = document.getElementById('inspTime');
+    var statusEl = document.getElementById('inspStatus');
+    if (!timeEl) return;
+
+    // Format: 0.00 → 9.99 → 10.00 …
+    var disp;
+    if (sec < 10) {
+      disp = sec.toFixed(2);
+    } else {
+      disp = sec.toFixed(2);
+    }
+    timeEl.textContent = disp;
+
+    // Determine state
+    var state = 'normal', label = '', cls = '';
+    if (sec >= 17) {
+      state = 'dnf';   label = 'DNF';           cls = 'dnf';
+    } else if (sec >= 15) {
+      state = 'plus2'; label = '+2 Penalty';    cls = 'plus2';
+    } else if (sec >= 12) {
+      state = 'warn2'; label = 'Final Warning'; cls = 'warn2';
+    } else if (sec >= 8) {
+      state = 'warn';  label = 'Warning';       cls = 'warn';
+    }
+
+    // Apply classes to time display
+    timeEl.className = 'insp-time' + (cls ? ' state-' + cls : '');
+
+    // Status badge
+    statusEl.textContent  = label;
+    statusEl.className    = 'insp-status' + (cls ? ' visible ' + cls : '');
+  }
+
+  window.inspToggle = function() {
+    var box = document.getElementById('inspBox');
+    var btn = document.getElementById('inspToggleBtn');
+    var open = box.classList.toggle('visible');
+    btn.classList.toggle('active', open);
+  };
+
+  window.inspStart = function() {
+    if (_inspRunning) return;
+    _inspRunning = true;
+    _inspStart   = Date.now() - _inspElapsed * 10;
+    _inspInterval = setInterval(_inspUpdate, 30);
+    document.getElementById('inspStartBtn').disabled = true;
+    document.getElementById('inspStopBtn').disabled  = false;
+  };
+
+  window.inspStop = function() {
+    if (!_inspRunning) return;
+    _inspRunning = false;
+    clearInterval(_inspInterval);
+    _inspInterval = null;
+    document.getElementById('inspStartBtn').disabled = false;
+    document.getElementById('inspStopBtn').disabled  = true;
+  };
+
+  window.inspClear = function() {
+    inspStop();
+    _inspElapsed = 0;
+    _inspDraw();
+    document.getElementById('inspStartBtn').disabled = false;
+    document.getElementById('inspStopBtn').disabled  = true;
+  };
+})();
 
 // ===========================
 // UTILITY
