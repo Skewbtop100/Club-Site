@@ -951,6 +951,14 @@
       border-bottom: 1px solid rgba(255,255,255,0.04);
     }
     .live-table tr:hover td { background: rgba(124,58,237,0.05); }
+    /* Solve detail row — hidden by default, shown on mobile only */
+    .live-solve-detail { display: none; }
+    .live-solve-detail td { padding: 0.25rem 0.6rem 0.45rem; background: rgba(255,255,255,0.02); border-bottom: 1px solid rgba(255,255,255,0.04); font-family: sans-serif; }
+    .live-solve-list { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+    .live-s-chip { font-size: 0.74rem; font-weight: 600; padding: 0.15rem 0.45rem; border-radius: 5px; background: rgba(255,255,255,0.07); color: var(--text); }
+    .live-s-chip.time-dnf { color: #f87171; }
+    /* Tap hint arrow — hidden on desktop */
+    .live-avg-tap-hint { display: none; }
     .live-placeholder {
       text-align: center; padding: 4rem 2rem;
       border: 1px solid rgba(255,255,255,0.06); border-radius: 14px;
@@ -1591,6 +1599,10 @@
       .live-table th:nth-child(n+3):nth-child(-n+7),
       .live-table td:nth-child(n+3):nth-child(-n+7) { display: none; }
       .live-table th, .live-table td { padding: 0.5rem 0.6rem; font-size: 0.82rem; }
+      /* Enable expandable solve detail row and tap hint */
+      .live-solve-detail.open { display: table-row; }
+      .live-avg-cell { cursor: pointer; user-select: none; }
+      .live-avg-tap-hint { display: inline-block; font-size: 0.65rem; color: var(--muted); margin-left: 0.25rem; opacity: 0.55; vertical-align: middle; }
 
       /* Competition Results overlay tables */
       .cro-table th:nth-child(n+3):nth-child(-n+7),
@@ -2208,7 +2220,11 @@ function renderRankings(eventId) {
   });
 
   var wcaLookup = {};
-  allAthletes.forEach(function(a) { wcaLookup[a.id] = a.wcaId || null; });
+  var rankNameLookup = {};
+  allAthletes.forEach(function(a) {
+    wcaLookup[a.id] = a.wcaId || null;
+    rankNameLookup[a.id] = (a.name || '') + (a.lastName ? ' ' + a.lastName : '');
+  });
   var compNames = {};
   allCompetitions.forEach(function(c) { compNames[c.id] = c.name || c.id; });
 
@@ -2224,7 +2240,7 @@ function renderRankings(eventId) {
     var avgClass = row.average === -1 ? 'time-dnf' : 'time-val';
     return '<tr>'
       + '<td><span class="rank-num ' + rankClass + '">' + rank + '</span></td>'
-      + '<td><div style="font-weight:600">' + escHtml(row.athleteName) + '</div>'
+      + '<td><div style="font-weight:600">' + escHtml(rankNameLookup[row.athleteId] || row.athleteName) + '</div>'
       + (wcaId ? '<div class="wca-id" onclick="openAthleteProfileByWcaId(\'' + escHtml(wcaId) + '\')">' + escHtml(wcaId) + '</div>' : '') + '</td>'
       + '<td><span class="' + singleClass + '">' + resultCellHtml(row.single, 'single', eventId, '', row.athleteId) + '</span></td>'
       + '<td><span class="' + avgClass + '">' + resultCellHtml(row.average, 'average', eventId, '', row.athleteId) + '</span></td>'
@@ -2586,17 +2602,21 @@ function renderRecords() {
   var bestSingle = {};
   var bestAverage = {};
   var wcaIdByDocId = {};
-  allAthletes.forEach(function(a) { wcaIdByDocId[a.id] = a.wcaId || null; });
+  var recNameLookup = {};
+  allAthletes.forEach(function(a) {
+    wcaIdByDocId[a.id] = a.wcaId || null;
+    recNameLookup[a.id] = (a.name || '') + (a.lastName ? ' ' + a.lastName : '');
+  });
   allResults.forEach(function(r) {
     var ev = r.eventId;
     if (r.single !== undefined && r.single !== null) {
       if (!bestSingle[ev] || betterTime(r.single, bestSingle[ev].time)) {
-        bestSingle[ev] = { time: r.single, name: r.athleteName || r.athleteId, athleteId: r.athleteId };
+        bestSingle[ev] = { time: r.single, name: recNameLookup[r.athleteId] || r.athleteName || r.athleteId, athleteId: r.athleteId };
       }
     }
     if (r.average !== undefined && r.average !== null) {
       if (!bestAverage[ev] || betterTime(r.average, bestAverage[ev].time)) {
-        bestAverage[ev] = { time: r.average, name: r.athleteName || r.athleteId, athleteId: r.athleteId };
+        bestAverage[ev] = { time: r.average, name: recNameLookup[r.athleteId] || r.athleteName || r.athleteId, athleteId: r.athleteId };
       }
     }
   });
@@ -2677,7 +2697,11 @@ function showEventRecordHistory(eventId) {
   var evName = ev ? ev.name : eventId;
   var history = computeEventRecordHistory(eventId);
   var wcaIdByDocId = {};
-  allAthletes.forEach(function(a) { wcaIdByDocId[a.id] = a.wcaId || null; });
+  var rclNameLookup = {};
+  allAthletes.forEach(function(a) {
+    wcaIdByDocId[a.id] = a.wcaId || null;
+    rclNameLookup[a.id] = (a.name || '') + (a.lastName ? ' ' + a.lastName : '');
+  });
   var panel = document.getElementById('rcl-panel');
   var bodyHtml;
   if (!history.length) {
@@ -2690,9 +2714,10 @@ function showEventRecordHistory(eventId) {
       var r = entry.r;
       var dateStr = entry.date ? escHtml(entry.date) : '\u2014';
       var wcaId = wcaIdByDocId[r.athleteId] || '';
+      var rclFullName = rclNameLookup[r.athleteId] || r.athleteName || r.athleteId || '\u2014';
       var athleteHtml = wcaId
-        ? '<span class="rcl-athlete" onclick="event.stopPropagation();openAthleteProfileByWcaId(\'' + escHtml(wcaId) + '\')">' + escHtml(r.athleteName || r.athleteId || '\u2014') + '</span>'
-        : '<span class="rcl-athlete" style="cursor:default">' + escHtml(r.athleteName || r.athleteId || '\u2014') + '</span>';
+        ? '<span class="rcl-athlete" onclick="event.stopPropagation();openAthleteProfileByWcaId(\'' + escHtml(wcaId) + '\')">' + escHtml(rclFullName) + '</span>'
+        : '<span class="rcl-athlete" style="cursor:default">' + escHtml(rclFullName) + '</span>';
       var sHtml = entry.singleVal !== null
         ? '<span class="rcl-single">' + resultCellHtml(entry.singleVal, 'single', eventId, '', r.athleteId) + '</span>'
         : '<span class="rcl-single"></span>';
@@ -3282,7 +3307,11 @@ function renderLiveTable(results, wrap) {
     return;
   }
   var liveWcaLookup = {};
-  allAthletes.forEach(function(a) { liveWcaLookup[a.id] = a.wcaId || null; });
+  var liveNameLookup = {};
+  allAthletes.forEach(function(a) {
+    liveWcaLookup[a.id] = a.wcaId || null;
+    liveNameLookup[a.id] = (a.name || '') + (a.lastName ? ' ' + a.lastName : '');
+  });
 
   var ranked = results.slice().sort(function(a, b) {
     var ac = compareTime(a.average, b.average);
@@ -3308,14 +3337,18 @@ function renderLiveTable(results, wrap) {
     var isAdv = _liveAdvCutoff !== null && rank <= _liveAdvCutoff;
     var rankClass = i === 0 ? 'rank-1' : i === 1 ? 'rank-2' : i === 2 ? 'rank-3' : 'rank-other';
     var liveWca = liveWcaLookup[r.athleteId] || '';
-    var athleteCell = '<div style="font-weight:600">' + escHtml(r.athleteName || r.athleteId || '\u2014') + '</div>'
+    var athleteCell = '<div style="font-weight:600">' + escHtml(liveNameLookup[r.athleteId] || r.athleteName || r.athleteId || '\u2014') + '</div>'
       + (liveWca ? '<div class="wca-id" onclick="openAthleteProfileByWcaId(\'' + escHtml(liveWca) + '\')">' + escHtml(liveWca) + '</div>' : '');
+    var solvesEncoded = solves.map(function(s) { return s === null ? '' : String(s); }).join(',');
     return '<tr' + (isAdv ? ' class="row-advancing"' : '') + '>'
       + '<td><span class="rank-num ' + rankClass + '">' + rank + '</span></td>'
       + '<td style="font-family:sans-serif">' + athleteCell + '</td>'
       + solveCells
       + '<td class="' + sc + '">' + resultCellHtml(r.single, 'single', r.eventId, '', r.athleteId) + '</td>'
-      + '<td class="' + ac + '">' + resultCellHtml(r.average, 'average', r.eventId, '', r.athleteId) + '</td>'
+      + '<td class="' + ac + ' live-avg-cell" onclick="toggleLiveSolves(this)" data-solves="' + escHtml(solvesEncoded) + '">'
+      + resultCellHtml(r.average, 'average', r.eventId, '', r.athleteId)
+      + '<span class="live-avg-tap-hint">\u25be</span>'
+      + '</td>'
       + '</tr>';
   });
 
@@ -3328,6 +3361,26 @@ function renderLiveTable(results, wrap) {
     + '<table class="live-table"><thead><tr>'
     + '<th>#</th><th>Athlete</th><th>S1</th><th>S2</th><th>S3</th><th>S4</th><th>S5</th><th>Single</th><th>Average</th>'
     + '</tr></thead><tbody>' + tbodyRows.join('') + '</tbody></table>';
+}
+
+// ---- MOBILE SOLVE DETAIL TOGGLE ----
+function toggleLiveSolves(cell) {
+  if (window.innerWidth > 700) return;
+  var tr = cell.parentNode;
+  var next = tr.nextElementSibling;
+  if (next && next.classList.contains('live-solve-detail')) {
+    next.classList.toggle('open');
+    return;
+  }
+  var parts = (cell.getAttribute('data-solves') || '').split(',');
+  var chips = parts.map(function(s, i) {
+    var v = s === '' ? null : parseInt(s, 10);
+    var str = v === null ? '\u2014' : fmtTime(v);
+    var cls = (v === -1 || v === -2) ? ' time-dnf' : '';
+    return '<span class="live-s-chip' + cls + '">' + escHtml(str) + '</span>';
+  }).join('');
+  tr.insertAdjacentHTML('afterend',
+    '<tr class="live-solve-detail open"><td colspan="4"><div class="live-solve-list">' + chips + '</div></td></tr>');
 }
 
 // ---- SESSION NAV ----
