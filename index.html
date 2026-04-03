@@ -954,7 +954,7 @@
     /* Solve detail row — hidden by default, shown on mobile only */
     .live-solve-detail { display: none; }
     .live-solve-detail td { padding: 0.25rem 0.6rem 0.45rem; background: rgba(255,255,255,0.02); border-bottom: 1px solid rgba(255,255,255,0.04); font-family: sans-serif; }
-    .live-solve-list { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+    .live-solve-list { display: flex; flex-wrap: nowrap; justify-content: space-evenly; width: 100%; }
     .live-s-chip { font-size: 0.74rem; font-weight: 600; padding: 0.15rem 0.45rem; border-radius: 5px; background: rgba(255,255,255,0.07); color: var(--text); }
     .live-s-chip.time-dnf { color: #f87171; }
     /* Tap hint arrow — hidden on desktop */
@@ -1249,19 +1249,20 @@
 
     @media (max-width: 700px) {
       .profile-quick-stats { grid-template-columns: repeat(3, 1fr); }
+      /* Competition history: scroll container — tabs stay fixed, table scrolls as one unit */
+      .ph-table { overflow-x: auto; -webkit-overflow-scrolling: touch; }
       .ph-table-head,
-      .ph-table-row { grid-template-columns: minmax(100px,1fr) 80px 36px 56px 56px repeat(5,32px); gap: 0 0.2rem; }
+      .ph-table-row { min-width: 700px; grid-template-columns: minmax(120px,1fr) 88px 44px 72px 72px repeat(5,44px); gap: 0 0.3rem; }
+      .ph-td-comp { max-width: none; }
       .prh-table-head,
       .prh-row { grid-template-columns: 72px 72px minmax(120px,1fr) 90px repeat(5,36px); gap: 0 0.2rem; }
-      .ph-solve:nth-child(n+12) { display: none; }
     }
     @media (max-width: 480px) {
       .profile-quick-stats { grid-template-columns: repeat(3, 1fr); }
       .ph-table-head,
-      .ph-table-row { grid-template-columns: minmax(80px,1fr) 64px 34px 48px 48px repeat(3,28px); font-size: 0.72rem; gap: 0 0.15rem; }
+      .ph-table-row { min-width: 700px; grid-template-columns: minmax(120px,1fr) 88px 44px 72px 72px repeat(5,44px); font-size: 0.78rem; gap: 0 0.3rem; }
       .prh-table-head,
       .prh-row { grid-template-columns: 66px 66px minmax(100px,1fr) 80px repeat(3,32px); gap: 0 0.15rem; }
-      .ph-solve:nth-child(n+11) { display: none; }
     }
 
     /* FOOTER */
@@ -1603,6 +1604,10 @@
       .live-solve-detail.open { display: table-row; }
       .live-avg-cell { cursor: pointer; user-select: none; }
       .live-avg-tap-hint { display: inline-block; font-size: 0.65rem; color: var(--muted); margin-left: 0.25rem; opacity: 0.55; vertical-align: middle; }
+      /* Full-width live overlay on mobile */
+      #liveOverlay { padding: 0; }
+      .lro-panel { border-radius: 0; border-left: none; border-right: none; width: 100%; max-width: 100%; }
+      .live-table th:nth-child(2), .live-table td:nth-child(2) { max-width: none; overflow: visible; text-overflow: unset; white-space: normal; }
 
       /* Competition Results overlay tables */
       .cro-table th:nth-child(n+3):nth-child(-n+7),
@@ -1644,7 +1649,7 @@
       .live-table th:nth-child(6), .live-table td:nth-child(6),
       .live-table th:nth-child(7), .live-table td:nth-child(7) { display: none; }
       .live-table th, .live-table td { padding: 0.4rem 0.45rem; font-size: 0.78rem; }
-      .live-table th:nth-child(2), .live-table td:nth-child(2) { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .live-table th:nth-child(2), .live-table td:nth-child(2) { max-width: none; overflow: visible; }
 
       /* Athlete profile overlay */
       #athlete-profile-overlay .profile-header { padding: 1rem; gap: 0.75rem; }
