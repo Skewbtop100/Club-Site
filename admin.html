@@ -847,11 +847,9 @@
 
     /* ===== ATHLETES CHECK GRID ===== */
     .athletes-check-grid {
-      display: flex;
-      flex-direction: column;
-      gap: 0.2rem;
-      max-height: 320px;
-      overflow-y: auto;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.3rem;
       padding: 0.5rem;
       background: rgba(255,255,255,0.02);
       border: 1px solid rgba(255,255,255,0.05);
@@ -3945,7 +3943,7 @@ function filterAthletes(idx) {
 
   drop.innerHTML = matches.map(a => `
     <div class="autocomplete-item" data-id="${escHtml(a.id)}">
-      <div class="ai-name">${escHtml((a.lastName ? a.lastName + ' ' : '') + a.name)}</div>
+      <div class="ai-name">${escHtml(a.name + (a.lastName ? ' ' + a.lastName : ''))}</div>
       <div class="ai-id">${escHtml(a.wcaId || '')}</div>
     </div>
   `).join('');
@@ -3971,7 +3969,7 @@ function selectAthlete(idx, docId) {
   closeDropdown(idx);
   const info = document.getElementById(`selAthlInfo${idx}`);
   info.style.display = 'block';
-  info.textContent = (athl.lastName ? athl.lastName + ' ' : '') + athl.name +
+  info.textContent = athl.name + (athl.lastName ? ' ' + athl.lastName : '') +
     (athl.wcaId ? `  |  WCA: ${athl.wcaId}` : '');
 }
 
@@ -4104,7 +4102,7 @@ function checkShowEntryPanel() {
   const round = document.getElementById('resRound').value;
   const group = document.getElementById('resGroup').value;
   const info  = document.getElementById('entryPanelInfo');
-  info.textContent = (athl ? (athl.lastName ? athl.lastName + ' ' : '') + athl.name : '')
+  info.textContent = (athl ? athl.name + (athl.lastName ? ' ' + athl.lastName : '') : '')
     + (evDef ? '  —  ' + evDef.name : '')
     + (round ? '  —  Round ' + round : '')
     + (group ? ',  Group ' + group   : '');
@@ -4126,7 +4124,7 @@ function updatePanelAthletes(idx) {
   pool.forEach(a => {
     const opt = document.createElement('option');
     opt.value = a.id;
-    opt.textContent = (a.lastName ? a.lastName + ' ' : '') + a.name + (a.wcaId ? ` (${a.wcaId})` : '');
+    opt.textContent = a.name + (a.lastName ? ' ' + a.lastName : '') + (a.wcaId ? ` (${a.wcaId})` : '');
     if (a.id === prev) opt.selected = true;
     sel.appendChild(opt);
   });
@@ -4282,7 +4280,7 @@ function refreshPanelAthletesByEligibility(idx) {
     const eligible = athleteEligibleForRound(compId, a.id, eventId, round);
     const opt = document.createElement('option');
     opt.value = a.id;
-    opt.textContent = (a.lastName ? a.lastName + ' ' : '') + a.name +
+    opt.textContent = a.name + (a.lastName ? ' ' + a.lastName : '') +
       (a.wcaId ? ` (${a.wcaId})` : '');
     opt.disabled = !eligible;
     if (!eligible) opt.style.color = 'var(--muted)';
@@ -4418,7 +4416,7 @@ function updateResAthleteDropdown() {
   pool.forEach(a => {
     const opt = document.createElement('option');
     opt.value = a.id;
-    opt.textContent = (a.lastName ? a.lastName + ' ' : '') + a.name +
+    opt.textContent = a.name + (a.lastName ? ' ' + a.lastName : '') +
       (a.wcaId ? ` (${a.wcaId})` : '');
     sel.appendChild(opt);
   });
@@ -6497,7 +6495,7 @@ function openAnAthleteProfile(docId) {
 
   // Header
   const initials  = (athlete.name || '?').split(' ').map(w => w[0] || '').join('').toUpperCase().slice(0, 2);
-  const fullName  = (athlete.lastName ? athlete.lastName + ' ' : '') + (athlete.name || '');
+  const fullName  = (athlete.name || '') + (athlete.lastName ? ' ' + athlete.lastName : '');
   const avatarHtml = athlete.imageUrl
     ? `<div class="an-pro-avatar"><img src="${escHtml(athlete.imageUrl)}" alt="${escHtml(athlete.name)}" onerror="this.parentElement.innerHTML='${escHtml(initials)}'"></div>`
     : `<div class="an-pro-avatar">${escHtml(initials)}</div>`;

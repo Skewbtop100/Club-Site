@@ -316,7 +316,7 @@
 
     /* SECTION COMMON */
     section { padding: 6rem 2rem; }
-    .container { max-width: 1100px; margin: 0 auto; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 0 2rem; }
     .section-header { text-align: center; margin-bottom: 3rem; }
     .section-tag {
       display: inline-block;
@@ -347,6 +347,12 @@
       padding-bottom: 0.5rem; margin-bottom: 1.5rem;
       scrollbar-width: thin; scrollbar-color: var(--accent) transparent;
     }
+    #rankings-tabs {
+      justify-content: center; flex-wrap: wrap;
+    }
+    @media (max-width: 700px) {
+      #rankings-tabs { justify-content: flex-start; flex-wrap: nowrap; }
+    }
     .tab-btn {
       flex-shrink: 0;
       padding: 0.4rem 0.95rem; border-radius: 999px; font-size: 0.8rem; font-weight: 600;
@@ -358,6 +364,10 @@
       background: linear-gradient(135deg, var(--accent), var(--accent2));
       color: #fff; border-color: transparent;
     }
+    #rankings-type-row { display: flex; justify-content: center; gap: 0.4rem; margin-bottom: 1rem; }
+    .rnk-solve { font-family: monospace; font-size: 0.82rem; color: var(--muted); }
+    .rnk-solve.best-s { color: var(--text); font-weight: 700; }
+    .rnk-solve.dnf-s { color: #f87171; }
 
     /* SPINNER */
     .spinner {
@@ -412,14 +422,14 @@
     #records { background: var(--bg); }
     .records-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
       gap: 1rem;
     }
     .record-card {
       background: var(--card);
       border: 1px solid rgba(255,255,255,0.06);
       border-radius: 14px;
-      padding: 1.2rem;
+      padding: 1.4rem;
       cursor: pointer;
       transition: border-color 0.25s, box-shadow 0.25s;
     }
@@ -434,10 +444,11 @@
     .record-event-name {
       font-size: 0.95rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.9rem;
     }
-    .record-row { margin-bottom: 0.6rem; }
-    .record-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 0.15rem; }
-    .record-time { font-size: 1.15rem; font-weight: 700; font-family: monospace; color: #a78bfa; }
-    .record-holder { font-size: 0.75rem; color: var(--muted); margin-top: 0.1rem; }
+    .record-row { margin-bottom: 0; }
+    .record-row:last-child { border-top: 1px solid rgba(255,255,255,0.08); padding-top: 0.8rem; margin-top: 0.8rem; }
+    .record-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 0.2rem; }
+    .record-time { font-size: 1.6rem; font-weight: 700; font-family: monospace; color: #a78bfa; margin-bottom: 0.2rem; }
+    .record-holder { font-size: 0.82rem; color: var(--muted); margin-top: 0; margin-bottom: 0; }
     .record-empty { color: var(--muted); font-family: monospace; font-size: 1.1rem; }
 
     /* Club Record History Panel */
@@ -461,13 +472,13 @@
       font-size: 1rem; padding: 0.2rem 0.45rem; border-radius: 5px; transition: color 0.1s, background 0.1s;
     }
     .rcl-close:hover { color: var(--text); background: rgba(255,255,255,0.08); }
-    .rcl-body { padding: 0.5rem 1.4rem 1.2rem; }
+    .rcl-body { padding: 0.5rem 1.6rem 1.4rem; }
     .rcl-table-head {
       display: grid;
-      grid-template-columns: 92px 120px 76px 76px minmax(140px,240px) repeat(5,44px);
-      gap: 0 0.55rem;
-      padding: 0.3rem 0.3rem;
-      color: var(--muted); font-size: 0.65rem; font-weight: 700;
+      grid-template-columns: 100px 150px 90px 90px minmax(160px,1fr) repeat(5,52px);
+      gap: 0 0.65rem;
+      padding: 0.4rem 0.4rem;
+      color: var(--muted); font-size: 0.7rem; font-weight: 700;
       text-transform: uppercase; letter-spacing: 0.06em;
       border-bottom: 1px solid rgba(255,255,255,0.06);
       margin-bottom: 0.05rem;
@@ -478,19 +489,19 @@
     .rcl-table-head span:nth-child(5) { text-align: left; }
     .rcl-row {
       display: grid;
-      grid-template-columns: 92px 120px 76px 76px minmax(140px,240px) repeat(5,44px);
-      gap: 0 0.55rem; align-items: center;
-      padding: 0.52rem 0.3rem; border-radius: 5px;
+      grid-template-columns: 100px 150px 90px 90px minmax(160px,1fr) repeat(5,52px);
+      gap: 0 0.65rem; align-items: center;
+      padding: 0.7rem 0.4rem; border-radius: 5px;
       transition: background 0.1s;
     }
     .rcl-row:hover { background: rgba(255,255,255,0.035); }
-    .rcl-date   { font-size: 0.74rem; color: var(--muted); }
-    .rcl-athlete { font-size: 0.8rem; color: var(--text); font-weight: 600; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rcl-date   { font-size: 0.82rem; color: var(--muted); }
+    .rcl-athlete { font-size: 0.9rem; color: var(--text); font-weight: 600; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .rcl-athlete:hover { color: #a78bfa; }
-    .rcl-single  { font-family: monospace; font-size: 0.84rem; font-weight: 700; color: var(--text); text-align: right; }
-    .rcl-average { font-family: monospace; font-size: 0.84rem; font-weight: 700; color: #a78bfa; text-align: right; }
-    .rcl-comp   { font-size: 0.76rem; color: #c4b5fd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .rcl-solve  { font-family: monospace; font-size: 0.76rem; color: var(--muted); text-align: right; }
+    .rcl-single  { font-family: monospace; font-size: 1rem; font-weight: 700; color: var(--text); text-align: right; }
+    .rcl-average { font-family: monospace; font-size: 1rem; font-weight: 700; color: #a78bfa; text-align: right; }
+    .rcl-comp   { font-size: 0.85rem; color: #c4b5fd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rcl-solve  { font-family: monospace; font-size: 0.84rem; color: var(--muted); text-align: right; }
     .rcl-solve.best-s { color: var(--text); font-weight: 700; }
     .rcl-solve.dnf-s  { color: #f43f5e; }
 
@@ -1483,6 +1494,7 @@
     .gs-wrap { position: relative; display: flex; align-items: center; }
     .gs-trigger {
       display: flex; align-items: center; gap: 0.5rem;
+      width: 260px;
       background: rgba(255,255,255,0.05);
       border: 1px solid rgba(255,255,255,0.09);
       border-radius: 22px; padding: 0.42rem 1rem 0.42rem 0.75rem;
@@ -1550,8 +1562,8 @@
     html[data-theme="soft-light"] .gs-result-item.gs-active,
     html[data-theme="purple-light"] .gs-result-item:hover,
     html[data-theme="purple-light"] .gs-result-item.gs-active { background: rgba(124,58,237,0.08); }
-    @media (max-width: 768px) { .gs-input { width: 200px; } }
-    @media (max-width: 640px) { .gs-input { width: 160px; } }
+    @media (max-width: 768px) { .gs-input { width: 200px; } .gs-trigger { width: 200px; } }
+    @media (max-width: 640px) { .gs-input { width: 160px; } .gs-trigger { width: 160px; } }
     @media (max-width: 480px) { .gs-wrap { display: none; } }
 
     /* ===== RESPONSIVE ADDITIONS ===== */
@@ -1793,6 +1805,7 @@
       <h2 class="section-title" data-i18n="section-title.rankings">Event Rankings</h2>
       <p class="section-desc" data-i18n="section-desc.rankings">Best single and average results across all WCA events. Ranked by single time, lowest first.</p>
     </div>
+    <div id="rankings-type-row"></div>
     <div class="tab-row" id="rankings-tabs"></div>
     <div id="rankings-content">
       <div class="loading-wrap"><div class="spinner"></div></div>
@@ -2003,6 +2016,7 @@ var allWcaRecords = {}; // keyed by eventId
 var eventVisibility = {}; // eventId -> 'auto' | 'show' | 'hide', loaded from settings/eventVisibility
 var athleteMap = {};
 var currentRankingEvent = '333';
+var currentRankingType  = 'single';
 
 // Returns true if an event should appear in Rankings and Records.
 // auto (default): visible only if allResults contains data for this event
@@ -2061,6 +2075,7 @@ function bootApp() {
   loadCompetitions();
   loadWcaRecords();
   setupRankingsTabs();
+  setupRankingsTypeToggle();
   setupCompTabs();
 }
 
@@ -2181,6 +2196,21 @@ function setupRankingsTabs() {
   });
 }
 
+function setupRankingsTypeToggle() {
+  var row = document.getElementById('rankings-type-row');
+  row.innerHTML = ['single', 'average'].map(function(t) {
+    return '<button class="tab-btn' + (t === currentRankingType ? ' active' : '') + '" data-type="' + t + '">'
+      + (t === 'single' ? 'Single' : 'Average') + '</button>';
+  }).join('');
+  row.addEventListener('click', function(e) {
+    var btn = e.target.closest('[data-type]');
+    if (!btn) return;
+    currentRankingType = btn.getAttribute('data-type');
+    row.querySelectorAll('[data-type]').forEach(function(b) { b.classList.toggle('active', b === btn); });
+    renderRankings(currentRankingEvent);
+  });
+}
+
 function renderRankings(eventId) {
   var content = document.getElementById('rankings-content');
   var filtered = allResults.filter(function(r) { return r.eventId === eventId; });
@@ -2188,41 +2218,6 @@ function renderRankings(eventId) {
     content.innerHTML = '<div class="empty-state"><div class="empty-icon">&#128202;</div>No results yet for this event.</div>';
     return;
   }
-  var bestSingle = {};
-  var bestAverage = {};
-  filtered.forEach(function(r) {
-    var key = r.athleteId;
-    if (r.single !== undefined && r.single !== null) {
-      if (!bestSingle[key] || betterTime(r.single, bestSingle[key].single)) {
-        bestSingle[key] = r;
-      }
-    }
-    if (r.average !== undefined && r.average !== null) {
-      if (!bestAverage[key] || betterTime(r.average, bestAverage[key].average)) {
-        bestAverage[key] = { average: r.average };
-      }
-    }
-  });
-  var rows = Object.keys(bestSingle).map(function(athleteId) {
-    var r = bestSingle[athleteId];
-    return {
-      athleteId: athleteId,
-      athleteName: r.athleteName || athleteId,
-      single: r.single,
-      average: bestAverage[athleteId] ? bestAverage[athleteId].average : null,
-      competitionId: r.competitionId,
-      submittedAt: r.submittedAt,
-    };
-  });
-  // Sort: average ascending first; athletes with no average ranked after by single
-  rows.sort(function(a, b) {
-    var aAvg = (a.average !== null && a.average !== undefined) ? a.average : null;
-    var bAvg = (b.average !== null && b.average !== undefined) ? b.average : null;
-    if (aAvg !== null && bAvg !== null) return compareTime(aAvg, bAvg);
-    if (aAvg !== null) return -1;
-    if (bAvg !== null) return 1;
-    return compareTime(a.single, b.single);
-  });
 
   var wcaLookup = {};
   var rankNameLookup = {};
@@ -2233,31 +2228,76 @@ function renderRankings(eventId) {
   var compNames = {};
   allCompetitions.forEach(function(c) { compNames[c.id] = c.name || c.id; });
 
-  var tbody = rows.map(function(row, i) {
-    var rank = i + 1;
-    var rankClass = rank === 1 ? 'rank-1' : rank === 2 ? 'rank-2' : rank === 3 ? 'rank-3' : 'rank-other';
-    var singleStr = fmtTime(row.single);
-    var avgStr = fmtTime(row.average);
-    var wcaId = wcaLookup[row.athleteId] || '';
-    var compName = compNames[row.competitionId] || (row.competitionId || '\u2014');
-    var dateStr = row.submittedAt ? formatDate(row.submittedAt) : '\u2014';
-    var singleClass = row.single === -1 ? 'time-dnf' : 'time-val';
-    var avgClass = row.average === -1 ? 'time-dnf' : 'time-val';
-    return '<tr>'
-      + '<td><span class="rank-num ' + rankClass + '">' + rank + '</span></td>'
-      + '<td><div style="font-weight:600">' + escHtml(rankNameLookup[row.athleteId] || row.athleteName) + '</div>'
-      + (wcaId ? '<div class="wca-id" onclick="openAthleteProfileByWcaId(\'' + escHtml(wcaId) + '\')">' + escHtml(wcaId) + '</div>' : '') + '</td>'
-      + '<td><span class="' + singleClass + '">' + resultCellHtml(row.single, 'single', eventId, '', row.athleteId) + '</span></td>'
-      + '<td><span class="' + avgClass + '">' + resultCellHtml(row.average, 'average', eventId, '', row.athleteId) + '</span></td>'
-      + '<td><span class="comp-name">' + escHtml(compName) + '</span></td>'
-      + '<td><span class="comp-date">' + escHtml(dateStr) + '</span></td>'
-      + '</tr>';
-  }).join('');
+  function nameCell(r) {
+    var wcaId = wcaLookup[r.athleteId] || '';
+    return '<div style="font-weight:600">' + escHtml(rankNameLookup[r.athleteId] || r.athleteName || r.athleteId) + '</div>'
+      + (wcaId ? '<div class="wca-id" onclick="openAthleteProfileByWcaId(\'' + escHtml(wcaId) + '\')">' + escHtml(wcaId) + '</div>' : '');
+  }
 
-  content.innerHTML = '<div style="overflow-x:auto">'
-    + '<table class="leaderboard-table"><thead><tr>'
-    + '<th>#</th><th>Athlete</th><th>Single</th><th>Average</th><th>Competition</th><th>Date</th>'
-    + '</tr></thead><tbody>' + tbody + '</tbody></table></div>';
+  if (currentRankingType === 'single') {
+    var best = {};
+    filtered.forEach(function(r) {
+      if (r.single !== undefined && r.single !== null) {
+        if (!best[r.athleteId] || betterTime(r.single, best[r.athleteId].single)) best[r.athleteId] = r;
+      }
+    });
+    var rows = Object.values(best).sort(function(a, b) { return compareTime(a.single, b.single); });
+    var tbody = rows.map(function(r, i) {
+      var rank = i + 1;
+      var rc = rank === 1 ? 'rank-1' : rank === 2 ? 'rank-2' : rank === 3 ? 'rank-3' : 'rank-other';
+      var sc = r.single === -1 ? 'time-dnf' : 'time-val';
+      var compName = compNames[r.competitionId] || (r.competitionId || '\u2014');
+      var dateStr = r.submittedAt ? formatDate(r.submittedAt) : '\u2014';
+      return '<tr>'
+        + '<td><span class="rank-num ' + rc + '">' + rank + '</span></td>'
+        + '<td>' + nameCell(r) + '</td>'
+        + '<td><span class="' + sc + '">' + resultCellHtml(r.single, 'single', eventId, '', r.athleteId) + '</span></td>'
+        + '<td><span class="comp-name">' + escHtml(compName) + '</span></td>'
+        + '<td><span class="comp-date">' + escHtml(dateStr) + '</span></td>'
+        + '</tr>';
+    }).join('');
+    content.innerHTML = '<div style="overflow-x:auto"><table class="leaderboard-table"><thead><tr>'
+      + '<th>#</th><th>Athlete</th><th>Single</th><th>Competition</th><th>Date</th>'
+      + '</tr></thead><tbody>' + tbody + '</tbody></table></div>';
+
+  } else {
+    var bestAvg = {};
+    filtered.forEach(function(r) {
+      if (r.average !== undefined && r.average !== null && r.average !== -1) {
+        if (!bestAvg[r.athleteId] || betterTime(r.average, bestAvg[r.athleteId].average)) bestAvg[r.athleteId] = r;
+      }
+    });
+    var avgRows = Object.values(bestAvg).sort(function(a, b) { return compareTime(a.average, b.average); });
+    var avgTbody = avgRows.map(function(r, i) {
+      var rank = i + 1;
+      var rc = rank === 1 ? 'rank-1' : rank === 2 ? 'rank-2' : rank === 3 ? 'rank-3' : 'rank-other';
+      var ac = r.average === -1 ? 'time-dnf' : 'time-val';
+      var compName = compNames[r.competitionId] || (r.competitionId || '\u2014');
+      var dateStr = r.submittedAt ? formatDate(r.submittedAt) : '\u2014';
+      var solves = (r.solves || []).slice(0, 5);
+      while (solves.length < 5) solves.push(null);
+      var bestVal = null, bestIdx = -1;
+      solves.forEach(function(s, idx) {
+        if (s !== null && s > 0 && s !== -1 && s !== -2 && (bestVal === null || s < bestVal)) { bestVal = s; bestIdx = idx; }
+      });
+      var solveCells = solves.map(function(s, idx) {
+        var cls = 'rnk-solve' + (idx === bestIdx ? ' best-s' : '') + (s === -1 || s === -2 ? ' dnf-s' : '');
+        return '<td><span class="' + cls + '">' + escHtml(fmtTime(s)) + '</span></td>';
+      }).join('');
+      return '<tr>'
+        + '<td><span class="rank-num ' + rc + '">' + rank + '</span></td>'
+        + '<td>' + nameCell(r) + '</td>'
+        + '<td><span class="' + ac + '">' + resultCellHtml(r.average, 'average', eventId, '', r.athleteId) + '</span></td>'
+        + '<td><span class="comp-name">' + escHtml(compName) + '</span></td>'
+        + '<td><span class="comp-date">' + escHtml(dateStr) + '</span></td>'
+        + solveCells
+        + '</tr>';
+    }).join('');
+    content.innerHTML = '<div style="overflow-x:auto"><table class="leaderboard-table"><thead><tr>'
+      + '<th>#</th><th>Athlete</th><th>Average</th><th>Competition</th><th>Date</th>'
+      + '<th>1</th><th>2</th><th>3</th><th>4</th><th>5</th>'
+      + '</tr></thead><tbody>' + avgTbody + '</tbody></table></div>';
+  }
 }
 
 // ---- ATHLETE PROFILE ----
@@ -2348,7 +2388,7 @@ function openAthleteProfile(docId) {
 
   // ── Header ──
   var initials = (athlete.name || '?').split(' ').map(function(w){ return w[0]||''; }).join('').toUpperCase().slice(0,2);
-  var fullName  = (athlete.lastName ? athlete.lastName + ' ' : '') + (athlete.name || '');
+  var fullName  = (athlete.name || '') + (athlete.lastName ? ' ' + athlete.lastName : '');
   var avatarLg = athlete.imageUrl
     ? '<div class="profile-avatar-lg profile-avatar-photo"><img src="' + escHtml(athlete.imageUrl) + '" alt="' + escHtml(athlete.name) + '" onerror="this.parentElement.classList.remove(\'profile-avatar-photo\');this.parentElement.textContent=\'' + escHtml(initials) + '\'"></div>'
     : '<div class="profile-avatar-lg">' + escHtml(initials) + '</div>';
@@ -3706,12 +3746,12 @@ function gsSearch() {
 
   var results = [];
   (allAthletes || []).forEach(function(a) {
-    var full = ((a.lastName || '') + ' ' + (a.name || '')).trim().toLowerCase();
+    var full = ((a.name || '') + ' ' + (a.lastName || '')).trim().toLowerCase();
     var wca  = (a.wcaId || '').toLowerCase();
     if (full.includes(q) || wca.includes(q)) {
       results.push({
         type: 'athlete', id: a.id, wcaId: a.wcaId || null,
-        name: (a.lastName ? a.lastName + ' ' : '') + (a.name || ''),
+        name: (a.name || '') + (a.lastName ? ' ' + a.lastName : ''),
         sub: a.wcaId || ''
       });
     }
