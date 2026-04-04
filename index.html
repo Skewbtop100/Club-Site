@@ -351,7 +351,15 @@
       justify-content: center; flex-wrap: wrap;
     }
     @media (max-width: 700px) {
-      #rankings-tabs { justify-content: flex-start; flex-wrap: nowrap; }
+      #rankings .container { padding-left: 1rem; padding-right: 1rem; }
+      #rankings-tabs {
+        justify-content: flex-start; flex-wrap: nowrap;
+        width: calc(100% + 2rem);
+        margin-left: -1rem; margin-right: -1rem;
+        padding-left: 1rem; padding-right: 1rem;
+        -webkit-overflow-scrolling: touch; scrollbar-width: none;
+      }
+      #rankings-tabs::-webkit-scrollbar { display: none; }
     }
     .tab-btn {
       flex-shrink: 0;
@@ -1216,38 +1224,38 @@
     /* Competition History — event-grouped table */
     .ph-event-section { margin-bottom: 0; }
     .ph-ev-header { display: none; } /* header replaced by tab row */
-    .ph-table { font-size: 0.82rem; }
+    .ph-table { font-size: 0.9rem; width: 100%; }
     .ph-table-head {
       display: grid;
-      grid-template-columns: minmax(140px,1fr) 100px 44px 66px 66px repeat(5,42px);
+      grid-template-columns: minmax(140px,1fr) 90px 60px 90px 90px repeat(5,70px);
       gap: 0 0.35rem;
       padding: 0.3rem 0.6rem;
       color: var(--muted);
-      font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+      font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
       border-bottom: 1px solid rgba(255,255,255,0.06);
       margin-bottom: 0.1rem;
     }
     .ph-table-head span:nth-child(n+3) { text-align: right; }
     .ph-table-row {
       display: grid;
-      grid-template-columns: minmax(140px,1fr) 100px 44px 66px 66px repeat(5,42px);
+      grid-template-columns: minmax(140px,1fr) 90px 60px 90px 90px repeat(5,70px);
       gap: 0 0.35rem;
       align-items: center;
-      padding: 0.46rem 0.6rem;
+      padding: 0.52rem 0.6rem;
       border-radius: 6px;
       transition: background 0.1s;
     }
     .ph-table-row:hover { background: rgba(255,255,255,0.035); }
     .ph-row-first { margin-top: 0.2rem; }
     .ph-table-row + .ph-row-first { margin-top: 0.6rem; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 0.55rem; }
-    .ph-td-comp { font-size: 0.83rem; font-weight: 600; color: #c4b5fd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .ph-td-round { font-size: 0.78rem; color: var(--muted); }
+    .ph-td-comp { font-size: 0.9rem; font-weight: 600; color: #c4b5fd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ph-td-round { font-size: 0.9rem; color: var(--muted); }
     .ph-td-place { text-align: right; }
-    .ph-place { font-size: 0.8rem; color: var(--muted); }
-    .ph-td-single { font-family: monospace; font-size: 0.84rem; font-weight: 700; color: var(--text); text-align: right; }
-    .ph-td-avg { font-family: monospace; font-size: 0.84rem; font-weight: 700; color: #a78bfa; text-align: right; }
+    .ph-place { font-size: 0.9rem; color: var(--muted); }
+    .ph-td-single { font-family: monospace; font-size: 1rem; font-weight: 700; color: var(--text); display: flex; align-items: center; justify-content: flex-end; gap: 0.3rem; }
+    .ph-td-avg { font-family: monospace; font-size: 1rem; font-weight: 700; color: #a78bfa; display: flex; align-items: center; justify-content: flex-end; gap: 0.3rem; }
     .ph-td-avg.is-dnf { color: #f43f5e; }
-    .ph-solve { font-family: monospace; font-size: 0.78rem; color: var(--muted); text-align: right; }
+    .ph-solve { font-family: monospace; font-size: 0.85rem; color: var(--muted); text-align: center; width: 100%; }
     .ph-solve.best-s { color: var(--text); font-weight: 700; }
     .ph-solve.dnf-s  { color: #f43f5e; }
     .ph-rank-badge {
@@ -1261,9 +1269,9 @@
     @media (max-width: 700px) {
       .profile-quick-stats { grid-template-columns: repeat(3, 1fr); }
       /* Competition history: scroll container — tabs stay fixed, table scrolls as one unit */
-      .ph-table { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      .ph-table { overflow-x: auto; -webkit-overflow-scrolling: touch; font-size: 0.85rem; }
       .ph-table-head,
-      .ph-table-row { min-width: 700px; grid-template-columns: minmax(120px,1fr) 88px 44px 72px 72px repeat(5,44px); gap: 0 0.3rem; }
+      .ph-table-row { min-width: 750px; grid-template-columns: minmax(130px,1fr) 90px 60px 90px 90px repeat(5,64px); gap: 0 0.3rem; }
       .ph-td-comp { max-width: none; }
       .prh-table-head,
       .prh-row { grid-template-columns: 72px 72px minmax(120px,1fr) 90px repeat(5,36px); gap: 0 0.2rem; }
@@ -1271,7 +1279,7 @@
     @media (max-width: 480px) {
       .profile-quick-stats { grid-template-columns: repeat(3, 1fr); }
       .ph-table-head,
-      .ph-table-row { min-width: 700px; grid-template-columns: minmax(120px,1fr) 88px 44px 72px 72px repeat(5,44px); font-size: 0.78rem; gap: 0 0.3rem; }
+      .ph-table-row { min-width: 750px; grid-template-columns: minmax(130px,1fr) 90px 60px 90px 90px repeat(5,64px); font-size: 0.85rem; gap: 0 0.3rem; }
       .prh-table-head,
       .prh-row { grid-template-columns: 66px 66px minmax(100px,1fr) 80px repeat(3,32px); gap: 0 0.15rem; }
     }
@@ -2157,8 +2165,10 @@ function renderAthletes() {
 // ---- RESULTS ----
 function loadResults() {
   window.db.collection('results').onSnapshot(function(snap) {
-    _allResultsRaw = snap.docs.map(function(d) { return Object.assign({ id: d.id }, d.data()); })
-      .filter(function(r) { return r.status === 'published' && r.source !== 'imported'; });
+    var _allResultsPublished = snap.docs.map(function(d) { return Object.assign({ id: d.id }, d.data()); })
+      .filter(function(r) { return r.status === 'published'; });
+    _allResultsRaw = _allResultsPublished.filter(function(r) { return r.source !== 'imported'; });
+    window._placementPool = _allResultsPublished;
     _rebuildResults();
     refreshRankingsTabs();
     renderRankings(currentRankingEvent);
@@ -2343,7 +2353,7 @@ function openAthleteProfile(docId) {
 
   // ── Compute placement per result (rank among all athletes in same event+round) ──
   function computePlacement(r) {
-    var pool = allResults.filter(function(x) {
+    var pool = (window._placementPool || _allResultsRaw || allResults).filter(function(x) {
       return x.competitionId === r.competitionId && x.eventId === r.eventId && (x.round||1) === (r.round||1);
     });
     pool.sort(function(a,b) { return compareTime(a.average !== null ? a.average : a.single, b.average !== null ? b.average : b.single); });

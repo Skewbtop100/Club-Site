@@ -3810,7 +3810,7 @@ function buildResultPanels() {
           <div class="calc-value accent" id="calcAvg${i}">\u2014</div>
         </div>
       </div>
-      <button class="btn-sm-primary" style="width:100%;padding:0.4rem;" id="saveResBtn${i}">Save</button>
+      <button class="btn-sm-primary" style="width:100%;padding:0.4rem;" id="saveResBtn${i}" disabled>Save</button>
       <div class="msg" id="resPanelMsg${i}"></div>
     `;
     container.appendChild(panel);
@@ -4004,6 +4004,24 @@ function updateCalc(idx) {
     avgEl.textContent = fmtTime(avg);
     avgEl.className   = 'calc-value accent';
   }
+
+  syncSaveBtn(idx);
+}
+
+function allSolvesFilled(idx) {
+  for (let n = 1; n <= 5; n++) {
+    const inp = document.getElementById(`solve${idx}_${n}`);
+    if (!inp || inp.value.trim() === '') return false;
+  }
+  return true;
+}
+
+function syncSaveBtn(idx) {
+  const saveBtn = document.getElementById(`saveResBtn${idx}`);
+  if (!saveBtn) return;
+  const msgEl = document.getElementById(`resPanelMsg${idx}`);
+  const ineligible = msgEl && msgEl.classList.contains('warn') && msgEl.style.display !== 'none';
+  saveBtn.disabled = ineligible || !allSolvesFilled(idx);
 }
 
 async function saveResult(idx) {
@@ -4046,18 +4064,17 @@ async function saveResult(idx) {
   const single      = bestSingle(validSolves);
   const average     = calcAo5(validSolves);
 
-  // Duplicate check — block if athlete already has a result in this round slot
+  // Duplicate check — block if athlete already has a result in this event+round (any group)
   try {
     const existSnap = await window.db.collection('results')
       .where('competitionId', '==', compId)
       .get();
     const dup = existSnap.docs.find(d => {
       const r = d.data();
-      return r.athleteId === athl.id && r.eventId === eventId
-        && r.round === round && r.group === group;
+      return r.athleteId === athl.id && r.eventId === eventId && r.round === round;
     });
     if (dup) {
-      showMsg(msg, 'error', `${athl.name} already has a result for this event / round. Delete the existing entry first if you need to re-enter it.`);
+      showMsg(msg, 'error', `${athl.name} already has a result in this round. Edit the existing entry instead.`);
       return;
     }
   } catch(_) { /* proceed on error */ }
@@ -4231,8 +4248,8 @@ function checkPanelEligibility(idx) {
   const msgEl     = document.getElementById(`resPanelMsg${idx}`);
 
   if (!athlDocId || !eventId || round <= 1) {
-    if (saveBtn) saveBtn.disabled = false;
     if (msgEl && msgEl.classList.contains('warn')) msgEl.style.display = 'none';
+    syncSaveBtn(idx);
     return true;
   }
 
@@ -4256,7 +4273,7 @@ function checkPanelEligibility(idx) {
     return false;
   }
   if (msgEl && msgEl.classList.contains('warn')) msgEl.style.display = 'none';
-  if (saveBtn) saveBtn.disabled = false;
+  syncSaveBtn(idx);
   return true;
 }
 
@@ -4316,6 +4333,7 @@ function clearPanelFull(idx) {
   if (evSel)   { evSel.innerHTML = '<option value="">— Event —</option>'; evSel.disabled = true; }
   updatePanelRoundGroup(idx);
   clearPanel(idx);
+  syncSaveBtn(idx);
 }
 
 // Results selectors
