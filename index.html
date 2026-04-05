@@ -1327,8 +1327,10 @@
       .comp-grid { grid-template-columns: 1fr; }
       .footer-inner { flex-direction: column; }
     }
+    @media (max-width: 700px) {
+      .nav-links a { display: none; }
+    }
     @media (max-width: 480px) {
-      .nav-links .hide-sm { display: none; }
       .hero-btns { flex-direction: column; align-items: center; }
     }
 
@@ -1692,6 +1694,111 @@
       .lro-close { font-size: 0.9rem; padding: 0.15rem 0.35rem; }
     }
 
+    /* =====================================================
+       MOBILE CONTENT ENHANCEMENTS (≤700px)
+       All changes below only affect mobile — no desktop impact
+       ===================================================== */
+    @media (max-width: 700px) {
+
+      /* 5. General cleanup */
+      section { padding: 3rem 0.75rem; }
+      .section-title { font-size: 1.4rem !important; }
+      .section-header { margin-bottom: 1.5rem; }
+      .container { padding: 0 0.75rem; }
+
+      /* 1. Rankings — show-more button */
+      .mob-show-more {
+        display: block;
+        margin: 1rem auto 0;
+        padding: 0.48rem 1.5rem;
+        background: rgba(124,58,237,0.12);
+        border: 1px solid rgba(124,58,237,0.3);
+        color: var(--accent);
+        border-radius: 20px;
+        font-size: 0.82rem; font-weight: 600;
+        cursor: pointer; transition: background 0.2s;
+      }
+      .mob-show-more:hover { background: rgba(124,58,237,0.22); }
+
+      /* 2. Records — horizontal scroll carousel */
+      .records-grid {
+        display: flex !important;
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+        -webkit-overflow-scrolling: touch;
+        gap: 1rem;
+        padding: 0.25rem 0 1rem;
+        scrollbar-width: none;
+      }
+      .records-grid::-webkit-scrollbar { display: none; }
+      .records-grid .record-card {
+        min-width: 82vw;
+        flex-shrink: 0;
+        scroll-snap-align: start;
+      }
+
+      /* 3. Competitions — full-page snap slider */
+      #competitions { overflow: hidden; }
+      .comp-grid {
+        display: flex !important;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        gap: 0;
+        padding: 0;
+      }
+      .comp-grid::-webkit-scrollbar { display: none; }
+      .comp-grid .comp-card {
+        flex: 0 0 100%;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        scroll-snap-align: start;
+        box-sizing: border-box;
+        transform: none !important;
+      }
+      .comp-grid .event-pills { flex-wrap: wrap !important; overflow: hidden; max-width: 100%; }
+      .comp-grid .event-pill { white-space: normal; }
+      .comp-grid .comp-action-row { flex-wrap: wrap !important; }
+
+      /* 4. Athletes — carousel wrapper + slides */
+      /* athletes-grid becomes a plain block when carousel is active */
+      #athletes-grid.mob-carousel-active {
+        display: block !important;
+        gap: 0 !important;
+      }
+      .mob-athletes-wrap { overflow: hidden; width: 100%; position: relative; }
+      .mob-athletes-track {
+        display: flex;
+        transition: transform 0.45s cubic-bezier(.4,0,.2,1);
+        will-change: transform;
+      }
+      .mob-athletes-slide {
+        flex-shrink: 0;
+        /* width set in px by JS after layout */
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.75rem;
+        padding: 0;
+        box-sizing: border-box;
+        min-width: 0;
+      }
+      .mob-athletes-slide .athlete-card { min-width: 0; }
+      .mob-carousel-dots {
+        display: flex; justify-content: center;
+        gap: 0.4rem; margin-top: 0.9rem;
+      }
+      .mob-dot {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: rgba(255,255,255,0.22);
+        border: none; cursor: pointer; padding: 0;
+        transition: background 0.2s, transform 0.2s;
+      }
+      .mob-dot.active { background: var(--accent); transform: scale(1.4); }
+    }
+
   </style>
   <script>(function(){var t=localStorage.getItem('cubeTheme')||'dark';document.documentElement.setAttribute('data-theme',t);})();</script>
 </head>
@@ -1737,8 +1844,8 @@
       </button>
       <div class="nav-dropdown" id="navDropdown">
         <!-- Conditional profile / admin links -->
-        <a href="athlete-dashboard.html" class="nd-link" id="ndProfileLink" style="display:none;">🐣 <span data-i18n="nav.my-profile-short">My Profile</span></a>
-        <a href="admin.html" class="nd-link" id="ndAdminLink" style="display:none;">⚡ <span data-i18n="nav.admin-short">Admin Dashboard</span></a>
+        <a href="athlete-dashboard.html" class="nd-link" id="ndProfileLink" style="display:none;"><span data-i18n="nav.my-profile-short">My Profile</span></a>
+        <a href="admin.html" class="nd-link" id="ndAdminLink" style="display:none;"><span data-i18n="nav.admin-short">Admin Dashboard</span></a>
         <div class="nd-divider" id="ndTopDivider" style="display:none;"></div>
         <!-- Language -->
         <div class="nd-row">
@@ -3457,7 +3564,7 @@ function updateNavSession() {
   if (isAdmin) {
     if (signInBtn)   signInBtn.style.display  = 'none';
     if (menuWrap)    menuWrap.style.display    = 'flex';
-    if (menuIcon)    menuIcon.textContent      = '⚡';
+    if (menuIcon)    menuIcon.textContent      = '';
     if (menuLabel)   menuLabel.textContent     = 'Admin';
     if (profileLink) profileLink.style.display = 'none';
     if (adminLink)   adminLink.style.display   = 'flex';
@@ -3466,7 +3573,7 @@ function updateNavSession() {
   } else if (isAthlete) {
     if (signInBtn)   signInBtn.style.display  = 'none';
     if (menuWrap)    menuWrap.style.display    = 'flex';
-    if (menuIcon)    menuIcon.textContent      = '🐣';
+    if (menuIcon)    menuIcon.textContent      = '';
     if (menuLabel)   menuLabel.textContent     = athleteSession.username || 'Profile';
     if (profileLink) profileLink.style.display = 'flex';
     if (adminLink)   adminLink.style.display   = 'none';
@@ -4133,6 +4240,150 @@ function croRenderAthleteView() {
   var saved = localStorage.getItem('cubeTheme') || 'dark';
   var btn = document.getElementById('themeSwitchBtn');
   if(btn) btn.textContent = LABELS[saved] || '🌑 Dark';
+})();
+
+// =====================================================
+// MOBILE CONTENT ENHANCEMENTS (≤700px only)
+// =====================================================
+(function() {
+  if (window.innerWidth > 700) return;
+
+  // ── 1. Rankings: show first 5 rows, "Show N more" button ──────────
+  var _origRR = typeof renderRankings === 'function' ? renderRankings : null;
+  if (_origRR) {
+    renderRankings = function(eventId) {
+      _origRR(eventId);
+      (function applyLimit() {
+        var content = document.getElementById('rankings-content');
+        if (!content) return;
+        var rows = content.querySelectorAll('tbody tr');
+        var old  = content.querySelector('.mob-show-more');
+        if (old) old.remove();
+        if (rows.length <= 5) { rows.forEach(function(r){ r.style.display=''; }); return; }
+        rows.forEach(function(r, i){ r.style.display = i >= 5 ? 'none' : ''; });
+        var btn = document.createElement('button');
+        btn.className = 'mob-show-more';
+        btn.textContent = 'Show ' + (rows.length - 5) + ' more';
+        btn.addEventListener('click', function(){
+          rows.forEach(function(r){ r.style.display=''; });
+          btn.remove();
+        });
+        content.appendChild(btn);
+      })();
+    };
+  }
+
+  // ── 2. Records: reorder cards — filled first, then by priority ────
+  var RECORD_PRIORITY = ['333','222','pyra','444','555','666','777','minx','sq1','clock','skewb','333oh','333bf','444bf','555bf','333mbf'];
+  var _origRecords = typeof renderRecords === 'function' ? renderRecords : null;
+  if (_origRecords) {
+    renderRecords = function() {
+      _origRecords();
+      var grid = document.getElementById('records-grid');
+      if (!grid) return;
+      var cards = Array.from(grid.querySelectorAll('.record-card'));
+      if (!cards.length) return;
+      cards.sort(function(a, b) {
+        var aHasData = !!a.querySelector('.record-time');
+        var bHasData = !!b.querySelector('.record-time');
+        if (aHasData !== bHasData) return aHasData ? -1 : 1;
+        var aIdx = RECORD_PRIORITY.indexOf(a.dataset.event || '');
+        var bIdx = RECORD_PRIORITY.indexOf(b.dataset.event || '');
+        if (aIdx < 0) aIdx = 999;
+        if (bIdx < 0) bIdx = 999;
+        return aIdx - bIdx;
+      });
+      cards.forEach(function(c){ grid.appendChild(c); });
+    };
+  }
+
+  // ── 4. Athletes: auto-sliding 2×3 carousel ───────────────────────
+  var _origAthletes = typeof renderAthletes === 'function' ? renderAthletes : null;
+  var carouselTimer = null;
+
+  if (_origAthletes) {
+    renderAthletes = function() {
+      _origAthletes();
+      setTimeout(function() {
+        var grid = document.getElementById('athletes-grid');
+        if (!grid) return;
+        var cards = Array.from(grid.querySelectorAll('.athlete-card'));
+        if (cards.length < 7) return;
+
+        var PER_SLIDE = 6;
+        var slideCount = Math.ceil(cards.length / PER_SLIDE);
+        var current = 0;
+
+        // Build slides
+        var wrap  = document.createElement('div'); wrap.className  = 'mob-athletes-wrap';
+        var track = document.createElement('div'); track.className = 'mob-athletes-track';
+        for (var s = 0; s < slideCount; s++) {
+          var slide = document.createElement('div');
+          slide.className = 'mob-athletes-slide';
+          for (var c = s * PER_SLIDE; c < Math.min((s + 1) * PER_SLIDE, cards.length); c++) {
+            slide.appendChild(cards[c]);
+          }
+          track.appendChild(slide);
+        }
+        wrap.appendChild(track);
+
+        // Dots
+        var dotsEl = document.createElement('div');
+        dotsEl.className = 'mob-carousel-dots';
+        var dots = [];
+        for (var d = 0; d < slideCount; d++) {
+          var dot = document.createElement('button');
+          dot.className = 'mob-dot' + (d === 0 ? ' active' : '');
+          dot.setAttribute('aria-label', 'Slide ' + (d + 1));
+          (function(idx) { dot.addEventListener('click', function() { go(idx); }); })(d);
+          dots.push(dot);
+          dotsEl.appendChild(dot);
+        }
+
+        // Reset grid to block so wrap fills full width (grid would constrain it to 1 column)
+        grid.innerHTML = '';
+        grid.classList.add('mob-carousel-active');
+        grid.appendChild(wrap);
+        grid.appendChild(dotsEl);
+
+        // Measure slide width AFTER the wrap is in the DOM and grid is block
+        var slideW = wrap.getBoundingClientRect().width || wrap.offsetWidth || window.innerWidth;
+
+        // Set each slide to exact pixel width so the track doesn't overflow
+        var slides = track.querySelectorAll('.mob-athletes-slide');
+        slides.forEach(function(sl) { sl.style.width = slideW + 'px'; });
+
+        function go(idx) {
+          current = idx;
+          // Recalculate in case of reflow
+          var w = wrap.getBoundingClientRect().width || wrap.offsetWidth || slideW;
+          slides.forEach(function(sl) { sl.style.width = w + 'px'; });
+          track.style.transform = 'translateX(-' + (idx * w) + 'px)';
+          dots.forEach(function(dt, i) { dt.classList.toggle('active', i === idx); });
+        }
+
+        // Auto-advance every 5.5s
+        if (carouselTimer) clearInterval(carouselTimer);
+        carouselTimer = setInterval(function() {
+          go((current + 1) % slideCount);
+        }, 5500);
+
+        // Swipe support
+        var swipeStartX = 0;
+        track.addEventListener('touchstart', function(e) {
+          swipeStartX = e.touches[0].clientX;
+          clearInterval(carouselTimer);
+        }, { passive: true });
+        track.addEventListener('touchend', function(e) {
+          var diff = swipeStartX - e.changedTouches[0].clientX;
+          if (Math.abs(diff) > 40) {
+            go(diff > 0 ? Math.min(current + 1, slideCount - 1) : Math.max(current - 1, 0));
+          }
+          carouselTimer = setInterval(function() { go((current + 1) % slideCount); }, 5500);
+        }, { passive: true });
+      }, 0);
+    };
+  }
 })();
 </script>
 
