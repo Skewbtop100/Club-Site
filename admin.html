@@ -51,7 +51,7 @@
       flex-direction: column;
       align-items: center;
       min-height: 100vh;
-      padding: 2.5rem 1.5rem;
+      padding: 2rem 1rem;
       position: relative;
     }
 
@@ -222,7 +222,8 @@
     /* ===== DASHBOARD ===== */
     #dashboard {
       display: none;
-      max-width: 1100px;
+      max-width: 1380px;
+      width: 100%;
       margin: 0 auto;
     }
 
@@ -827,10 +828,13 @@
       color: var(--text);
     }
 
-    /* Advancing row in results table */
+    /* Advancing row in results table — green matches .btn-publish tone */
     .wca-results-table tbody tr.row-advancing .wca-td-rank {
-      background: rgba(34,197,94,0.1);
+      background: rgba(34,197,94,0.18);
+      border: 1px solid rgba(34,197,94,0.38);
       border-radius: 4px;
+      color: #4ade80;
+      font-weight: 700;
     }
     .adv-cutoff-row td {
       height: 2px !important;
@@ -1222,7 +1226,7 @@
       border: 1px solid rgba(255,255,255,0.07);
     }
     .wca-sidebar {
-      width: 210px; flex-shrink: 0;
+      width: 185px; flex-shrink: 0;
       background: var(--sidebar-bg);
       border-right: 1px solid rgba(255,255,255,0.06);
       display: flex; flex-direction: column;
@@ -1252,15 +1256,10 @@
       background: rgba(124,58,237,0.12); border-left-color: var(--accent);
       color: #c4b5fd; font-weight: 600;
     }
-    .wca-event-short {
-      font-size: 0.68rem; font-weight: 800; letter-spacing: 0.04em;
-      width: 32px; text-align: center; flex-shrink: 0;
-      color: #7c3aed;
-    }
     .wca-event-item.active .wca-event-short { color: #a78bfa; }
     .wca-main { flex: 1; min-width: 0; background: var(--card); display: flex; flex-direction: column; }
     .wca-main-header {
-      padding: 1rem 1.3rem 0.8rem;
+      padding: 1rem 0.85rem 0.8rem;
       border-bottom: 1px solid rgba(255,255,255,0.06);
       display: flex; align-items: flex-start;
       justify-content: space-between; gap: 1rem; flex-wrap: wrap;
@@ -1298,7 +1297,7 @@
     .cr-complete-btn.done:hover {
       background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.32); color: #f87171;
     }
-    .wca-group-tabs { display: flex; gap: 0.25rem; flex-wrap: wrap; padding: 0.4rem 1.3rem 0; }
+    .wca-group-tabs { display: flex; gap: 0.25rem; flex-wrap: wrap; padding: 0.4rem 0.85rem 0; }
     .wca-group-tab {
       padding: 0.15rem 0.5rem; border-radius: 14px;
       font-size: 0.72rem; font-weight: 600; cursor: pointer;
@@ -1307,7 +1306,7 @@
     }
     .wca-group-tab:hover { background: rgba(255,255,255,0.06); color: var(--text); }
     .wca-group-tab.active { background: rgba(124,58,237,0.18); border-color: rgba(124,58,237,0.45); color: #c4b5fd; }
-    .wca-table-wrap { flex: 1; overflow-x: auto; padding: 0.6rem 1.3rem 1.2rem; }
+    .wca-table-wrap { flex: 1; overflow-x: auto; padding: 0.6rem 0.85rem 1.2rem; }
     .wca-results-table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
     .wca-results-table thead th {
       padding: 0.5rem 0.55rem; text-align: left;
@@ -1821,6 +1820,84 @@
     }
     .theme-btn:hover { background: rgba(124,58,237,0.22); }
 
+    /* ── HEADER DROPDOWN MENU ──────────────────────────────────── */
+    .nav-menu-wrap { position: relative; display: flex; align-items: center; }
+    .nav-menu-btn {
+      display: flex; align-items: center; gap: 0.45rem;
+      padding: 0.38rem 0.75rem 0.38rem 0.65rem; border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.05);
+      color: var(--text); font-size: 0.83rem; font-weight: 600;
+      cursor: pointer; transition: background 0.2s, border-color 0.2s; white-space: nowrap;
+    }
+    .nav-menu-btn:hover { background: rgba(255,255,255,0.09); border-color: rgba(124,58,237,0.4); }
+    .nav-menu-wrap.open .nav-menu-btn { background: rgba(124,58,237,0.12); border-color: rgba(124,58,237,0.45); }
+    .nav-menu-caret {
+      width: 13px; height: 13px; opacity: 0.5; flex-shrink: 0;
+      transition: transform 0.22s;
+    }
+    .nav-menu-wrap.open .nav-menu-caret { transform: rotate(180deg); opacity: 0.8; }
+    .nav-dropdown {
+      position: absolute; top: calc(100% + 9px); right: 0;
+      min-width: 220px;
+      background: var(--card);
+      border: 1px solid rgba(255,255,255,0.09);
+      border-radius: 14px; padding: 5px;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.45), 0 0 0 1px rgba(124,58,237,0.08);
+      display: none; flex-direction: column; gap: 2px;
+      z-index: 1100;
+      animation: ndFadeIn 0.14s cubic-bezier(.4,0,.2,1);
+    }
+    @keyframes ndFadeIn {
+      from { opacity:0; transform:translateY(-6px); }
+      to   { opacity:1; transform:translateY(0); }
+    }
+    .nav-menu-wrap.open .nav-dropdown { display: flex; }
+    .nd-link {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.58rem 0.65rem; border-radius: 9px;
+      font-size: 0.86rem; font-weight: 600; color: var(--text);
+      text-decoration: none; transition: background 0.15s;
+    }
+    .nd-link:hover { background: rgba(124,58,237,0.1); }
+    .nd-divider { height: 1px; background: rgba(255,255,255,0.07); margin: 3px 6px; }
+    .nd-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.42rem 0.65rem; border-radius: 9px;
+      transition: background 0.15s; gap: 0.75rem;
+    }
+    .nd-row:hover { background: rgba(255,255,255,0.03); }
+    .nd-label { font-size: 0.77rem; color: var(--muted); font-weight: 500; white-space: nowrap; }
+    .nd-signout {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.58rem 0.65rem; border-radius: 9px;
+      font-size: 0.86rem; font-weight: 600; color: #f87171;
+      background: none; border: none; cursor: pointer;
+      width: 100%; text-align: left; transition: background 0.15s;
+    }
+    .nd-signout:hover { background: rgba(244,63,94,0.1); }
+    html[data-theme="soft-light"] .nav-menu-btn,
+    html[data-theme="purple-light"] .nav-menu-btn {
+      border-color: rgba(0,0,0,0.1); background: rgba(0,0,0,0.04);
+    }
+    html[data-theme="soft-light"] .nav-menu-wrap.open .nav-menu-btn,
+    html[data-theme="purple-light"] .nav-menu-wrap.open .nav-menu-btn {
+      background: rgba(124,58,237,0.08); border-color: rgba(124,58,237,0.3);
+    }
+    html[data-theme="soft-light"] .nav-dropdown,
+    html[data-theme="purple-light"] .nav-dropdown {
+      border-color: rgba(0,0,0,0.08);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05);
+    }
+    html[data-theme="soft-light"] .nd-divider,
+    html[data-theme="purple-light"] .nd-divider { background: rgba(0,0,0,0.08); }
+    html[data-theme="soft-light"] .nd-row:hover,
+    html[data-theme="purple-light"] .nd-row:hover { background: rgba(0,0,0,0.03); }
+    html[data-theme="soft-light"] .nd-signout:hover,
+    html[data-theme="purple-light"] .nd-signout:hover { background: rgba(244,63,94,0.08); }
+    html[data-theme="soft-light"] .theme-btn,
+    html[data-theme="purple-light"] .theme-btn { color: #7c3aed; }
+
     /* LIGHT THEME ADJUSTMENTS */
     html[data-theme="soft-light"] body::before,
     html[data-theme="purple-light"] body::before { opacity: 0.25; }
@@ -2110,43 +2187,10 @@
     @media (max-width: 700px) {
       body { padding: 0.75rem 0.6rem; }
 
-      /* Header: two-row layout
-         Row 1: title (flex:1) + Sign Out (right)
-         Row 2: EN/MN + Dark + Homepage (left-aligned)
-         Achieved with display:contents on .dash-header-right so its children
-         become direct flex items of .dash-header, then ordered via `order`. */
-      .dash-header {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        padding: 0.6rem 0.8rem;
-        gap: 0.3rem 0.4rem;
-      }
-      /* Invisible full-width spacer forces a line break after row 1 */
-      .dash-header::after {
-        content: '';
-        flex: 0 0 100%;
-        order: 3;
-        height: 0;
-      }
-      /* Row 1 — title side */
-      .dash-header-left {
-        flex: 1 1 auto;
-        min-width: 0;
-        order: 1;
-      }
+      /* Header: compact single row — title left, menu button right */
+      .dash-header { padding: 0.6rem 0.8rem; }
       .dash-header-left h1 { font-size: 0.92rem; }
-      .dash-header-left p   { font-size: 0.7rem; margin-top: 0; }
-      /* Dissolve .dash-header-right so children participate in .dash-header's flex layout */
-      .dash-header-right { display: contents; }
-      .nd-sep { display: none; }
-      /* Row 1 — Sign Out (right side) */
-      .btn-signout { order: 2; font-size: 0.8rem; padding: 0.3rem 0.8rem; }
-      /* Row 2 — EN/MN + Dark + Homepage */
-      .lang-switcher { order: 4; }
-      .lang-opt      { font-size: 0.75rem; padding: 0.2rem 0.45rem; }
-      .theme-btn     { order: 5; font-size: 0.75rem; padding: 0.25rem 0.6rem; }
-      .btn-homepage  { order: 6; font-size: 0.75rem; padding: 0.25rem 0.6rem; }
+      .dash-header-left p  { font-size: 0.7rem; margin-top: 0; }
 
       /* Tab nav: horizontal scroll, no wrap */
       .tab-nav {
@@ -2260,14 +2304,35 @@
       <p data-i18n="admin.subtitle">Cube MN Competition Management</p>
     </div>
     <div class="dash-header-right">
-      <div class="lang-switcher">
-        <button class="lang-opt active" data-lang="en" onclick="applyLang('en')">EN</button>
-        <button class="lang-opt" data-lang="mn" onclick="applyLang('mn')">MN</button>
+      <div class="nav-menu-wrap" id="adminMenuWrap">
+        <button class="nav-menu-btn" onclick="toggleAdminMenu()">
+          <span data-i18n="admin.title">Admin</span>
+          <svg class="nav-menu-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="nav-dropdown" id="adminDropdown">
+          <a href="index.html" class="nd-link">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            <span>Homepage</span>
+          </a>
+          <div class="nd-divider"></div>
+          <div class="nd-row">
+            <span class="nd-label">Language</span>
+            <div class="lang-switcher">
+              <button class="lang-opt active" data-lang="en" onclick="applyLang('en')">EN</button>
+              <button class="lang-opt" data-lang="mn" onclick="applyLang('mn')">MN</button>
+            </div>
+          </div>
+          <div class="nd-row">
+            <span class="nd-label">Theme</span>
+            <button class="theme-btn" id="themeSwitchBtn" onclick="cycleTheme()">🌑 Dark</button>
+          </div>
+          <div class="nd-divider"></div>
+          <button class="nd-signout" id="signOutBtn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+            <span>Sign Out</span>
+          </button>
+        </div>
       </div>
-      <button class="theme-btn" id="themeSwitchBtn" onclick="cycleTheme()">🌑 Dark</button>
-      <div class="nd-sep"></div>
-      <a class="btn-homepage" href="index.html">&#8962; Homepage</a>
-      <button class="btn-signout" id="signOutBtn">Sign Out</button>
     </div>
   </div>
 
@@ -3057,6 +3122,18 @@ function doLogin() {
 // ===========================
 // SIGN OUT
 // ===========================
+// ---- ADMIN HEADER MENU ----
+function toggleAdminMenu() {
+  var wrap = document.getElementById('adminMenuWrap');
+  if (wrap) wrap.classList.toggle('open');
+}
+document.addEventListener('click', function(e) {
+  var wrap = document.getElementById('adminMenuWrap');
+  if (wrap && wrap.classList.contains('open') && !wrap.contains(e.target)) {
+    wrap.classList.remove('open');
+  }
+});
+
 document.getElementById('signOutBtn').addEventListener('click', () => {
   localStorage.removeItem('isAdmin');
   if (unsubAthletes)    { unsubAthletes();    unsubAthletes = null; }
@@ -4135,6 +4212,7 @@ async function saveResult(idx) {
     });
     showPanelToast(msg, 'success', t('result.saved'));
     clearPanel(idx);
+    recalcAndSaveTR(eventId);
   } catch(e) {
     showPanelToast(msg, 'error', t('result.save-failed'));
   }
@@ -4710,11 +4788,9 @@ function crUpdateSidebar() {
 
   eventList.innerHTML = evIds.map(evId => {
     const evDef  = WCA_EVENTS.find(e => e.id === evId);
-    const short  = evDef ? evDef.short : evId.toUpperCase();
-    const name   = evMap[evId] || evId;
+    const name   = evMap[evId] || (evDef ? evDef.name : evId);
     const active = evId === crEvId ? ' active' : '';
     return `<div class="wca-event-item${active}" onclick="crSelectEvent('${escHtml(evId)}')">
-      <span class="wca-event-short">${escHtml(short)}</span>
       <span>${escHtml(name)}</span>
     </div>`;
   }).join('');
@@ -4939,19 +5015,31 @@ function crRenderTable() {
     const badge      = isImported
       ? `<span class="badge-imported">imported</span>`
       : r.status === 'published'
-        ? `<span class="badge-published" style="font-size:0.65rem;">pub</span>`
+        ? `<span class="badge-published" style="font-size:0.65rem;">Published</span>`
         : `<span class="badge-draft" style="font-size:0.65rem;">draft</span>`;
-    const nameEsc  = escHtml((r.athleteName||'').replace(/'/g,"\\'"));
+
+    // Full name: for club athletes look up lastName from cache
+    const cachedAth = !isImported && r.athleteId
+      ? athletesCache.find(a => a.id === r.athleteId) : null;
+    const fullName = cachedAth && cachedAth.lastName
+      ? (r.athleteName || '') + ' ' + cachedAth.lastName
+      : (r.athleteName || '—');
+    // Country: imported rows use stored country; club rows show Mongolia
+    const countryLine = isImported
+      ? (r.country ? `<div class="wca-country">${escHtml(r.country)}</div>` : '')
+      : `<div class="wca-country">Mongolia</div>`;
+
+    const nameEsc  = escHtml(fullName.replace(/'/g,"\\'"));
     const dupBadge = isDup      ? `<span class="badge-dup-warn" title="Duplicate entry — this athlete appears more than once in this round">&#9888; dup</span>` : '';
     const nqBadge  = isNonQual ? `<span class="badge-nonqual" title="This athlete did not qualify from the previous round">&#9888; not qualified</span>` : '';
     const rowActions = `<button class="btn-edit" onclick="startEditResult('${escHtml(r.id)}')">Edit</button>
-         <button class="btn-delete" onclick="deleteResult('${escHtml(r.id)}','${nameEsc}')">Del</button>`;
+         <button class="btn-delete" onclick="deleteResult('${escHtml(r.id)}','${nameEsc}')">Delete</button>`;
 
     return `<tr class="${rowCls} wca-fade-in">
       <td class="wca-td-rank${rankCls}">${rank}</td>
       <td class="wca-td-name">
-        <div class="wca-name">${escHtml(r.athleteName||'—')}</div>
-        ${r.country ? `<div class="wca-country">${escHtml(r.country)}</div>` : ''}
+        <div class="wca-name">${escHtml(fullName)}</div>
+        ${countryLine}
       </td>
       ${solveCells}
       <td class="wca-td-avg${avgCls}">${escHtml(fmtTime(r.average))}</td>
@@ -5119,6 +5207,7 @@ async function saveEditedResult() {
   try {
     await window.db.collection('results').doc(editingResultDocId).update(updateData);
     showMsg(msg, 'success', 'Result updated.');
+    if (r) recalcAndSaveTR(r.eventId);
     cancelResultEdit();
   } catch(e) {
     showMsg(msg, 'error', 'Error: ' + e.message);
@@ -5132,7 +5221,10 @@ function cancelResultEdit() {
 
 function deleteResult(docId, name) {
   if (!confirm(`Delete result for "${name}"? This cannot be undone.`)) return;
+  var r = allAdminResults.find(function(x) { return x.id === docId; });
+  var eventId = r ? r.eventId : null;
   window.db.collection('results').doc(docId).delete()
+    .then(function() { if (eventId) recalcAndSaveTR(eventId); })
     .catch(e => alert('Error: ' + e.message));
 }
 
@@ -7078,8 +7170,11 @@ async function loadWcaRecordsList() {
     container.innerHTML = '<div style="color:#f87171;font-size:0.85rem;padding:1rem 0;">Firebase not initialized.</div>';
     return;
   }
-  container.innerHTML = '<div style="padding:1.5rem 0;color:var(--muted);font-size:0.85rem;text-align:center;">Loading…</div>';
+  container.innerHTML = '<div style="padding:1.5rem 0;color:var(--muted);font-size:0.85rem;text-align:center;">Syncing TR from results…</div>';
   try {
+    // Always recalculate TR from saved results before rendering
+    await recalcAllTR();
+
     const snap = await window.db.collection('wcaRecords').get();
     if (snap.empty) {
       container.innerHTML = '<div style="padding:2rem 0;color:var(--muted);font-size:0.88rem;text-align:center;">No records found. Import WCA records first.</div>';
@@ -7136,6 +7231,28 @@ function renderWcaRecordsList(docs) {
         ? entry.holders.join(', ')
         : ((entry && entry.holders) || ''));
       const pid = `rec_${lvl}_${typeShort}_`;   // prefix for input IDs
+
+      // TR is auto-calculated — read-only, sized to match input rows exactly
+      if (lvl === 'TR') {
+        const inputBase = 'display:inline-block;padding:0.2rem 0.38rem;border-radius:5px;' +
+          'border:1px solid transparent;box-sizing:border-box;vertical-align:middle;';
+        return `<tr>
+          <td style="${subTd}white-space:nowrap;">
+            <span style="display:inline-block;font-size:0.66rem;font-weight:700;letter-spacing:0.06em;
+              padding:0.1rem 0.35rem;border-radius:4px;${BADGE_STYLE[lvl]}">${lvl}</span>
+          </td>
+          <td style="${subTd}white-space:nowrap;">
+            <span style="${inputBase}width:80px;font-family:monospace;font-size:0.8rem;
+              color:var(--text);">${raw || '—'}</span><span style="font-size:0.62rem;
+              color:var(--muted);margin-left:0.25rem;vertical-align:middle;opacity:0.75;">auto</span>
+          </td>
+          <td style="${subTd}min-width:110px;">
+            <span style="${inputBase}width:100%;font-size:0.73rem;
+              color:var(--muted);">${holders || ''}</span>
+          </td>
+        </tr>`;
+      }
+
       return `<tr>
         <td style="${subTd}white-space:nowrap;">
           <span style="display:inline-block;font-size:0.66rem;font-weight:700;letter-spacing:0.06em;
@@ -7183,7 +7300,7 @@ async function saveWcaRecordEdits(eventId) {
   const msgEl = document.getElementById('wr_msg_' + eventId);
   if (!window.db) { if (msgEl) showMsg(msgEl, 'error', 'Firebase not ready.'); return; }
 
-  const LEVELS = ['WR', 'CR', 'NR', 'TR'];
+  const LEVELS = ['WR', 'CR', 'NR']; // TR is auto-calculated, excluded from manual save
   const TYPES  = [['single','s'], ['average','a']];
   const splitHolders = str => str.split(',').map(s => s.trim()).filter(Boolean);
 
@@ -7208,6 +7325,113 @@ async function saveWcaRecordEdits(eventId) {
     if (msgEl) showMsg(msgEl, 'success', '✓ Saved');
   } catch(e) {
     if (msgEl) showMsg(msgEl, 'error', 'Error: ' + e.message);
+  }
+}
+
+// ---- TR AUTO-CALCULATION ----
+// Shared helper: scan a flat array of result objects (each with .eventId, .single,
+// .average, .athleteName, .source) for one eventId, return TR data for single & average.
+function _calcTRFromResults(results, eventId) {
+  var bestSingleCs = null, bestSingleName = null, bestSingleId = null;
+  var bestAvgCs    = null, bestAvgName    = null, bestAvgId    = null;
+  results.forEach(function(r) {
+    if (r.eventId !== eventId) return;
+    if (r.source === 'imported') return; // club results only
+    var s = r.single;
+    var a = r.average;
+    if (s !== null && s !== undefined && s > 0 && s !== -1 && s !== -2) {
+      if (bestSingleCs === null || s < bestSingleCs) {
+        bestSingleCs   = s;
+        bestSingleName = r.athleteName || '';
+        bestSingleId   = r.athleteId   || null;
+      }
+    }
+    if (a !== null && a !== undefined && a > 0 && a !== -1 && a !== -2) {
+      if (bestAvgCs === null || a < bestAvgCs) {
+        bestAvgCs   = a;
+        bestAvgName = r.athleteName || '';
+        bestAvgId   = r.athleteId   || null;
+      }
+    }
+  });
+  // Enrich with lastName from athletesCache (global in admin.html)
+  function fullName(firstName, athleteId) {
+    var cached = athleteId && athletesCache.find(function(a) { return a.id === athleteId; });
+    if (cached && cached.lastName) return firstName + ' ' + cached.lastName;
+    return firstName;
+  }
+  if (bestSingleName) bestSingleName = fullName(bestSingleName, bestSingleId);
+  if (bestAvgName)    bestAvgName    = fullName(bestAvgName,    bestAvgId);
+  return { bestSingleCs, bestSingleName, bestAvgCs, bestAvgName };
+}
+
+// Build a Firestore update payload for TR fields from centisecond values + holder names.
+function _buildTRUpdate(eventId, bestSingleCs, bestSingleName, bestAvgCs, bestAvgName) {
+  var update = { updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
+  if (bestSingleCs !== null) {
+    var sRaw = fmtTime(bestSingleCs);
+    update['single.TR.raw']     = sRaw;
+    update['single.TR.value']   = parseRecordValue(sRaw, eventId);
+    update['single.TR.holders'] = bestSingleName ? [bestSingleName] : [];
+  } else {
+    update['single.TR.raw']     = '';
+    update['single.TR.value']   = null;
+    update['single.TR.holders'] = [];
+  }
+  if (bestAvgCs !== null) {
+    var aRaw = fmtTime(bestAvgCs);
+    update['average.TR.raw']     = aRaw;
+    update['average.TR.value']   = parseRecordValue(aRaw, eventId);
+    update['average.TR.holders'] = bestAvgName ? [bestAvgName] : [];
+  } else {
+    update['average.TR.raw']     = '';
+    update['average.TR.value']   = null;
+    update['average.TR.holders'] = [];
+  }
+  return update;
+}
+
+// Recalc TR for a single event. Queries Firestore for all results for that event.
+async function recalcAndSaveTR(eventId) {
+  if (!window.db || !eventId) return;
+  try {
+    const snap = await window.db.collection('results')
+      .where('eventId', '==', eventId)
+      .get();
+    var results = snap.docs.map(function(d) { return d.data(); });
+    var tr = _calcTRFromResults(results, eventId);
+    var update = _buildTRUpdate(eventId, tr.bestSingleCs, tr.bestSingleName, tr.bestAvgCs, tr.bestAvgName);
+    var docRef = window.db.collection('wcaRecords').doc(eventId);
+    var docSnap = await docRef.get();
+    if (docSnap.exists) await docRef.update(update);
+  } catch(e) {
+    console.warn('recalcAndSaveTR failed for', eventId, e.message);
+  }
+}
+
+// Recalc TR for ALL events that have a wcaRecords document.
+// Fetches all results in one pass, then batch-writes TR for each event.
+// Called on every loadWcaRecordsList() to keep TR in sync with saved results.
+async function recalcAllTR() {
+  if (!window.db) return;
+  try {
+    // Fetch all club results and all wcaRecords docs in parallel
+    var [resultsSnap, recordsSnap] = await Promise.all([
+      window.db.collection('results').get(),
+      window.db.collection('wcaRecords').get()
+    ]);
+    if (recordsSnap.empty) return;
+    var results = resultsSnap.docs.map(function(d) { return d.data(); });
+    var batch = window.db.batch();
+    recordsSnap.docs.forEach(function(recDoc) {
+      var eventId = recDoc.id;
+      var tr = _calcTRFromResults(results, eventId);
+      var update = _buildTRUpdate(eventId, tr.bestSingleCs, tr.bestSingleName, tr.bestAvgCs, tr.bestAvgName);
+      batch.update(recDoc.ref, update);
+    });
+    await batch.commit();
+  } catch(e) {
+    console.warn('recalcAllTR failed:', e.message);
   }
 }
 

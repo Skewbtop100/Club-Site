@@ -563,7 +563,7 @@
     }
 
     /* ── NAV DROPDOWN (mobile menu) ─────────────────────────────── */
-    .nav-menu-wrap { position: relative; display: none; align-items: center; }
+    .nav-menu-wrap { position: relative; display: flex; align-items: center; }
     .nav-menu-btn {
       display: flex; align-items: center; gap: 0.45rem;
       padding: 0.38rem 0.75rem 0.38rem 0.6rem; border-radius: 10px;
@@ -630,9 +630,7 @@
 
     /* ── MOBILE NAV (≤700px) ────────────────────────────────────── */
     @media (max-width: 700px) {
-      nav { padding: 0 1rem; }
-      .nd-desktop { display: none !important; }
-      .nav-menu-wrap { display: flex; }
+      nav { padding: 0 0.75rem; }
       /* Tab nav inside results_entry dash: horizontal scroll */
       #resultsEntryDash .tab-nav {
         flex-wrap: nowrap;
@@ -653,36 +651,28 @@
 <nav>
   <div class="nav-logo">CUBEMN</div>
   <div class="nav-right">
-    <!-- Desktop controls (hidden on mobile) -->
-    <span class="nav-username nd-desktop" id="navUsername"></span>
-    <a href="index.html" class="btn-homepage nd-desktop" data-i18n="nav.homepage">⌂ Homepage</a>
-    <div class="lang-switcher nd-desktop">
-      <button class="lang-opt active" data-lang="en" onclick="applyLang('en')">EN</button>
-      <button class="lang-opt" data-lang="mn" onclick="applyLang('mn')">MN</button>
-    </div>
-    <button class="theme-btn nd-desktop" id="themeSwitchBtn" onclick="cycleTheme()">🌑 Dark</button>
-    <button class="btn-logout nd-desktop" onclick="doLogout()" data-i18n="nav.sign-out">Sign Out</button>
-
-    <!-- Mobile dropdown menu -->
     <div class="nav-menu-wrap" id="navMenuWrap">
       <button class="nav-menu-btn" onclick="toggleNavMenu()">
         <span id="navMenuLabel">Menu</span>
         <svg class="nav-menu-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
       </button>
       <div class="nav-dropdown" id="navDropdown">
+        <a href="index.html" class="nd-link">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+          <span data-i18n="nav.homepage">Homepage</span>
+        </a>
+        <div class="nd-divider"></div>
         <div class="nd-row">
           <span class="nd-label">Language</span>
           <div class="lang-switcher">
-            <button class="lang-opt" data-lang="en" onclick="applyLang('en')">EN</button>
+            <button class="lang-opt active" data-lang="en" onclick="applyLang('en')">EN</button>
             <button class="lang-opt" data-lang="mn" onclick="applyLang('mn')">MN</button>
           </div>
         </div>
         <div class="nd-row">
           <span class="nd-label">Theme</span>
-          <button class="theme-btn" onclick="cycleTheme()">🌑 Dark</button>
+          <button class="theme-btn" id="themeSwitchBtn" onclick="cycleTheme()">🌑 Dark</button>
         </div>
-        <div class="nd-divider"></div>
-        <a href="index.html" class="nd-link">&#8962; <span data-i18n="nav.homepage">Homepage</span></a>
         <div class="nd-divider"></div>
         <button class="nd-signout" onclick="doLogout()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
@@ -961,8 +951,8 @@ var crCompId = null, crEvId = null, crRound = 1, crGroup = null;
 // ================================================================
 document.addEventListener('DOMContentLoaded', function() {
   if (window.initLang) initLang();
-  var usernameEl = document.getElementById('navUsername');
-  if (usernameEl && session) usernameEl.textContent = session.username || '';
+  var menuLabelEl = document.getElementById('navMenuLabel');
+  if (menuLabelEl && session) menuLabelEl.textContent = session.username || 'Menu';
 
   var tryBoot = function() {
     if (window.db) {

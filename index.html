@@ -1832,10 +1832,7 @@
     <a href="#" onclick="event.preventDefault();openLiveOverlay();" data-i18n="nav.live">Live</a>
     <a href="#athletes" class="hide-sm" data-i18n="nav.athletes">Athletes</a>
 
-    <!-- Sign In CTA (logged out) -->
-    <button class="nav-signin-btn" id="navSignInBtn" onclick="openLoginModal()" data-i18n="nav.sign-in">Sign In</button>
-
-    <!-- Unified account menu (logged in) -->
+    <!-- Unified nav menu — always visible, content adapts to auth state -->
     <div class="nav-menu-wrap" id="navMenuWrap">
       <button class="nav-menu-btn" id="navMenuBtn" onclick="toggleNavMenu()">
         <span id="navMenuIcon"></span>
@@ -1843,7 +1840,15 @@
         <svg class="nav-menu-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
       </button>
       <div class="nav-dropdown" id="navDropdown">
-        <!-- Conditional profile / admin links -->
+        <!-- Sign In (logged-out only) -->
+        <div id="ndSignInRow" style="display:none;">
+          <button class="nd-link" style="width:100%;text-align:left;background:none;border:none;cursor:pointer;font-family:inherit;" onclick="closeNavMenu();openLoginModal();">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg>
+            <span data-i18n="nav.sign-in">Sign In</span>
+          </button>
+          <div class="nd-divider"></div>
+        </div>
+        <!-- Profile / Admin links (logged-in only) -->
         <a href="athlete-dashboard.html" class="nd-link" id="ndProfileLink" style="display:none;"><span data-i18n="nav.my-profile-short">My Profile</span></a>
         <a href="admin.html" class="nd-link" id="ndAdminLink" style="display:none;"><span data-i18n="nav.admin-short">Admin Dashboard</span></a>
         <div class="nd-divider" id="ndTopDivider" style="display:none;"></div>
@@ -1860,7 +1865,7 @@
           <span class="nd-label">Theme</span>
           <button class="theme-btn" id="themeSwitchBtn" onclick="cycleTheme()">🌑 Dark</button>
         </div>
-        <!-- Sign Out -->
+        <!-- Sign Out (logged-in only) -->
         <div id="ndSignOutRow" style="display:none;">
           <div class="nd-divider"></div>
           <button class="nd-signout" onclick="doSignOut()">
@@ -2484,18 +2489,6 @@ function openAthleteProfile(docId) {
     else if (place === 3) bronze++;
   });
 
-  // ── Record counts ──
-  var wrCount = 0, crCount = 0, nrCount = 0, trCount = 0;
-  athleteResults.forEach(function(r) {
-    ['single', 'average'].forEach(function(type) {
-      var b = getResultRecordBadges(r.eventId, type, r[type], docId).find(function(x) { return x !== 'PR'; });
-      if (b === 'WR') wrCount++;
-      else if (b === 'CR') crCount++;
-      else if (b === 'NR') nrCount++;
-      else if (b === 'TR') trCount++;
-    });
-  });
-
   // ── Basic counts ──
   var compsCount  = Object.keys(compHistory).length;
   var eventsCount = Object.keys(pbByEvent).length;
@@ -2530,15 +2523,21 @@ function openAthleteProfile(docId) {
     + '</div>';
 
   // ── Record History (WR / CR / NR / TR / PR) ──
+  // Each badge level stored independently: a WR achievement also appears in CR and NR tabs.
   var recordHistory = { WR: [], CR: [], NR: [], TR: [], PR: [] };
   athleteResults.forEach(function(r) {
     ['single', 'average'].forEach(function(type) {
       var val = r[type];
       if (val === null || val === undefined || val <= 0 || val === -1 || val === -2) return;
       var allBadgesForResult = getResultRecordBadges(r.eventId, type, val, docId);
-      var highestBadge = allBadgesForResult.find(function(b) { return b !== 'PR'; });
-      if (highestBadge) recordHistory[highestBadge].push({ r: r, type: type, value: val });
-      if (allBadgesForResult.indexOf('PR') !== -1) recordHistory.PR.push({ r: r, type: type, value: val });
+      ['WR', 'CR', 'NR', 'TR'].forEach(function(lvl) {
+        if (allBadgesForResult.indexOf(lvl) !== -1) {
+          recordHistory[lvl].push({ r: r, type: type, value: val, badge: lvl });
+        }
+      });
+      if (allBadgesForResult.indexOf('PR') !== -1) {
+        recordHistory.PR.push({ r: r, type: type, value: val, badge: 'PR' });
+      }
     });
   });
   var allBadges = ['WR', 'CR', 'NR', 'TR', 'PR'];
@@ -2595,9 +2594,17 @@ function openAthleteProfile(docId) {
             if (s === -1 || s === -2) cls += ' dnf-s';
             return '<span class="' + cls + '">' + (s !== null ? escHtml(fmtTime(s)) : '') + '</span>';
           }).join('');
+          // Show the value with this tab's own badge (WR/CR/NR/TR/PR)
+          var prhValHtml = function(val) {
+            var bHtml = recordBadgesHtml([badge]);
+            return '<span style="display:inline-flex;align-items:center;gap:3px;white-space:nowrap;">'
+              + escHtml(fmtTime(val))
+              + '<span style="display:inline-flex;gap:2px;">' + bHtml + '</span>'
+              + '</span>';
+          };
           html += '<div class="prh-row">'
-            + '<span class="prh-single">' + (type === 'single' ? resultCellHtml(value, 'single', eid, '', docId) : '') + '</span>'
-            + '<span class="prh-average">' + (type === 'average' ? resultCellHtml(value, 'average', eid, '', docId) : '') + '</span>'
+            + '<span class="prh-single">' + (type === 'single' ? prhValHtml(value) : '') + '</span>'
+            + '<span class="prh-average">' + (type === 'average' ? prhValHtml(value) : '') + '</span>'
             + '<span class="prh-comp">' + escHtml(r.competitionName || r.competitionId || '\u2014') + '</span>'
             + '<span class="prh-round">' + escHtml(roundLabel) + '</span>'
             + solvesHtml
@@ -2992,12 +2999,14 @@ function recordBadgesHtml(badges) {
   }).join('');
 }
 
-// Wraps a result value + highest badge in an inline-flex container
-// Full badge array is computed for history/analytics; only the top badge is shown visibly.
+// Wraps a result value + highest badge in an inline-flex container.
+// Only TR and PR are shown as site-wide active badges; WR/CR/NR are tracked for
+// the athlete profile Records section but not displayed in rankings/competition views.
 function resultCellHtml(value, type, eventId, extraCls, athleteId) {
   var timeStr = escHtml(fmtTime(value));
   var badges = getResultRecordBadges(eventId, type, value, athleteId);
-  var bHtml = recordBadgesHtml(badges.length ? [badges[0]] : []);
+  var visibleBadge = badges.find(function(b) { return b === 'TR' || b === 'PR'; });
+  var bHtml = recordBadgesHtml(visibleBadge ? [visibleBadge] : []);
   if (bHtml) {
     return '<span style="display:inline-flex;align-items:center;gap:3px;white-space:nowrap;">' + timeStr + '<span style="display:inline-flex;gap:2px;">' + bHtml + '</span></span>';
   }
@@ -3552,36 +3561,42 @@ function updateNavSession() {
   try { athleteSession = JSON.parse(localStorage.getItem('cubeAthleteUser') || 'null'); } catch(e) {}
   var isAthlete = !!(athleteSession && athleteSession.athleteId);
 
-  var signInBtn    = document.getElementById('navSignInBtn');
   var menuWrap     = document.getElementById('navMenuWrap');
   var menuIcon     = document.getElementById('navMenuIcon');
   var menuLabel    = document.getElementById('navMenuLabel');
+  var ndSignInRow  = document.getElementById('ndSignInRow');
   var profileLink  = document.getElementById('ndProfileLink');
   var adminLink    = document.getElementById('ndAdminLink');
   var topDivider   = document.getElementById('ndTopDivider');
   var signOutRow   = document.getElementById('ndSignOutRow');
 
+  // Menu wrap is always visible; contents change based on auth state
+  if (menuWrap) menuWrap.style.display = 'flex';
+
   if (isAdmin) {
-    if (signInBtn)   signInBtn.style.display  = 'none';
-    if (menuWrap)    menuWrap.style.display    = 'flex';
-    if (menuIcon)    menuIcon.textContent      = '';
-    if (menuLabel)   menuLabel.textContent     = 'Admin';
+    if (menuIcon)    menuIcon.textContent           = '';
+    if (menuLabel) { menuLabel.removeAttribute('data-i18n'); menuLabel.textContent = 'Admin'; }
+    if (ndSignInRow) ndSignInRow.style.display = 'none';
     if (profileLink) profileLink.style.display = 'none';
     if (adminLink)   adminLink.style.display   = 'flex';
     if (topDivider)  topDivider.style.display  = 'block';
     if (signOutRow)  signOutRow.style.display  = 'block';
   } else if (isAthlete) {
-    if (signInBtn)   signInBtn.style.display  = 'none';
-    if (menuWrap)    menuWrap.style.display    = 'flex';
-    if (menuIcon)    menuIcon.textContent      = '';
-    if (menuLabel)   menuLabel.textContent     = athleteSession.username || 'Profile';
+    if (menuIcon)    menuIcon.textContent           = '';
+    if (menuLabel) { menuLabel.removeAttribute('data-i18n'); menuLabel.textContent = athleteSession.username || 'Profile'; }
+    if (ndSignInRow) ndSignInRow.style.display = 'none';
     if (profileLink) profileLink.style.display = 'flex';
     if (adminLink)   adminLink.style.display   = 'none';
     if (topDivider)  topDivider.style.display  = 'block';
     if (signOutRow)  signOutRow.style.display  = 'block';
   } else {
-    if (signInBtn)   signInBtn.style.display  = 'inline-flex';
-    if (menuWrap)    menuWrap.style.display    = 'none';
+    if (menuIcon)    menuIcon.textContent           = '';
+    if (menuLabel) { menuLabel.setAttribute('data-i18n', 'nav.sign-in'); menuLabel.textContent = (window.t ? window.t('nav.sign-in') : 'Sign In'); }
+    if (ndSignInRow) ndSignInRow.style.display = 'block';
+    if (profileLink) profileLink.style.display = 'none';
+    if (adminLink)   adminLink.style.display   = 'none';
+    if (topDivider)  topDivider.style.display  = 'none';
+    if (signOutRow)  signOutRow.style.display  = 'none';
   }
 }
 
@@ -4394,13 +4409,12 @@ function croRenderAthleteView() {
     <button class="lm-close" onclick="closeLoginModal()" aria-label="Close">&#10005;</button>
 
     <div class="lm-tabs">
-      <button class="lm-tab active" id="lmTabAdmin" onclick="switchLoginTab('admin')" data-i18n="login.tab-admin">⚡ Admin</button>
-      <button class="lm-tab" id="lmTabAthlete" onclick="switchLoginTab('athlete')" data-i18n="login.tab-athlete">🐣 Athlete</button>
+      <button class="lm-tab active" id="lmTabAdmin" onclick="switchLoginTab('admin')" data-i18n="login.tab-admin">Admin</button>
+      <button class="lm-tab" id="lmTabAthlete" onclick="switchLoginTab('athlete')" data-i18n="login.tab-athlete">Athlete</button>
     </div>
 
     <!-- Admin panel -->
     <div id="lmAdminPanel">
-      <div class="lm-icon">&#9889;</div>
       <div class="lm-heading" data-i18n="login.admin-heading">Admin Sign In</div>
       <div class="lm-group">
         <label data-i18n="login.username">Username</label>
@@ -4410,13 +4424,12 @@ function croRenderAthleteView() {
         <label data-i18n="login.password">Password</label>
         <input type="password" id="lmAdminPass" placeholder="&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;" autocomplete="current-password" />
       </div>
-      <button class="lm-btn" id="lmAdminBtn" onclick="doModalAdminLogin()" data-i18n="login.admin-btn">Sign In to Dashboard</button>
+      <button class="lm-btn" id="lmAdminBtn" onclick="doModalAdminLogin()" data-i18n="login.admin-btn">Sign In</button>
       <div class="lm-error" id="lmAdminError"></div>
     </div>
 
     <!-- Athlete panel -->
     <div id="lmAthletePanel" style="display:none;">
-      <div class="lm-icon">&#129413;</div>
       <div class="lm-heading" data-i18n="login.athlete-heading">Athlete Sign In</div>
       <div class="lm-group">
         <label data-i18n="login.username">Username</label>
@@ -4426,7 +4439,7 @@ function croRenderAthleteView() {
         <label data-i18n="login.password">Password</label>
         <input type="password" id="lmAthletePass" placeholder="&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;" autocomplete="current-password" />
       </div>
-      <button class="lm-btn" id="lmAthleteBtn" onclick="doModalAthleteLogin()" data-i18n="login.athlete-btn">Sign In to My Profile</button>
+      <button class="lm-btn" id="lmAthleteBtn" onclick="doModalAthleteLogin()" data-i18n="login.athlete-btn">Sign In</button>
       <div class="lm-error" id="lmAthleteError"></div>
       <div class="lm-spinner" id="lmAthleteSpinner" data-i18n="login.spinner">Checking credentials…</div>
     </div>

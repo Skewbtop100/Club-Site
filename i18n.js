@@ -55,14 +55,14 @@ window.I18N = {
     'section-desc.athletes':     'Our competitive speedcubers.',
 
     // ── LOGIN MODAL ──────────────────────────────────────────
-    'login.tab-admin':       '⚡ Admin',
-    'login.tab-athlete':     '🐣 Athlete',
+    'login.tab-admin':       'Admin',
+    'login.tab-athlete':     'Athlete',
     'login.admin-heading':   'Admin Sign In',
     'login.athlete-heading': 'Athlete Sign In',
     'login.username':        'Username',
     'login.password':        'Password',
-    'login.admin-btn':       'Sign In to Dashboard',
-    'login.athlete-btn':     'Sign In to My Profile',
+    'login.admin-btn':       'Sign In',
+    'login.athlete-btn':     'Sign In',
     'login.spinner':         'Checking credentials…',
 
     // ── ADMIN TABS ───────────────────────────────────────────
@@ -257,14 +257,14 @@ window.I18N = {
     'section-desc.athletes':     'Манай өрсөлдөгч speedcuber-ууд.',
 
     // ── LOGIN MODAL ──────────────────────────────────────────
-    'login.tab-admin':       '⚡ Админ',
-    'login.tab-athlete':     '🐣 Тамирчин',
+    'login.tab-admin':       'Админ',
+    'login.tab-athlete':     'Тамирчин',
     'login.admin-heading':   'Админ нэвтрэх',
     'login.athlete-heading': 'Тамирчин нэвтрэх',
     'login.username':        'Нэвтрэх нэр',
     'login.password':        'Нууц үг',
-    'login.admin-btn':       'Хянах самбарт нэвтрэх',
-    'login.athlete-btn':     'Профайлд нэвтрэх',
+    'login.admin-btn':       'Нэвтрэх',
+    'login.athlete-btn':     'Нэвтрэх',
     'login.spinner':         'Шалгаж байна…',
 
     // ── ADMIN TABS ───────────────────────────────────────────
