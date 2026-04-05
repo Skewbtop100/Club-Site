@@ -2106,27 +2106,61 @@
       .dash-header-left h1 { font-size: 1.15rem; }
     }
 
-    /* Phablet / large mobile (≤640px) */
-    @media (max-width: 640px) {
+    /* Mobile (≤700px) */
+    @media (max-width: 700px) {
       body { padding: 0.75rem 0.6rem; }
 
-      /* Header: stack branding and action buttons */
-      .dash-header { flex-direction: column; align-items: flex-start; gap: 0.4rem; }
-      .dash-header-left h1 { font-size: 1rem; }
-      .dash-header-left p { font-size: 0.72rem; }
-      .dash-header-right { flex-wrap: wrap; gap: 0.3rem; }
-      .btn-homepage, .btn-signout { font-size: 0.74rem; padding: 0.3rem 0.65rem; }
+      /* Header: two-row layout
+         Row 1: title (flex:1) + Sign Out (right)
+         Row 2: EN/MN + Dark + Homepage (left-aligned)
+         Achieved with display:contents on .dash-header-right so its children
+         become direct flex items of .dash-header, then ordered via `order`. */
+      .dash-header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        padding: 0.6rem 0.8rem;
+        gap: 0.3rem 0.4rem;
+      }
+      /* Invisible full-width spacer forces a line break after row 1 */
+      .dash-header::after {
+        content: '';
+        flex: 0 0 100%;
+        order: 3;
+        height: 0;
+      }
+      /* Row 1 — title side */
+      .dash-header-left {
+        flex: 1 1 auto;
+        min-width: 0;
+        order: 1;
+      }
+      .dash-header-left h1 { font-size: 0.92rem; }
+      .dash-header-left p   { font-size: 0.7rem; margin-top: 0; }
+      /* Dissolve .dash-header-right so children participate in .dash-header's flex layout */
+      .dash-header-right { display: contents; }
       .nd-sep { display: none; }
+      /* Row 1 — Sign Out (right side) */
+      .btn-signout { order: 2; font-size: 0.8rem; padding: 0.3rem 0.8rem; }
+      /* Row 2 — EN/MN + Dark + Homepage */
+      .lang-switcher { order: 4; }
+      .lang-opt      { font-size: 0.75rem; padding: 0.2rem 0.45rem; }
+      .theme-btn     { order: 5; font-size: 0.75rem; padding: 0.25rem 0.6rem; }
+      .btn-homepage  { order: 6; font-size: 0.75rem; padding: 0.25rem 0.6rem; }
 
       /* Tab nav: horizontal scroll, no wrap */
       .tab-nav {
-        overflow-x: auto; flex-wrap: nowrap;
+        display: flex;
+        flex-wrap: nowrap;
+        overflow-x: auto;
         -webkit-overflow-scrolling: touch;
-        scrollbar-width: none; padding: 0.2rem;
+        scrollbar-width: none;
+        gap: 0.3rem;
+        padding: 0.5rem;
         margin-bottom: 0.9rem;
       }
       .tab-nav::-webkit-scrollbar { display: none; }
-      .tab-btn { white-space: nowrap; flex-shrink: 0; font-size: 0.74rem; padding: 0.35rem 0.7rem; }
+      .tab-btn { white-space: nowrap; flex-shrink: 0; font-size: 0.75rem; padding: 0.4rem 0.7rem; }
 
       /* Cards */
       .card { padding: 0.85rem 0.75rem; border-radius: 10px; }
@@ -2175,7 +2209,8 @@
     /* Small mobile (≤420px) */
     @media (max-width: 420px) {
       body { padding: 0.5rem 0.4rem; }
-      .tab-btn { font-size: 0.68rem; padding: 0.3rem 0.55rem; }
+      .dash-header-left h1 { font-size: 0.82rem; }
+      .tab-btn { font-size: 0.68rem; padding: 0.3rem 0.5rem; }
 
       /* Compact panel: allow solves to be 2-per-row on tiny screens */
       .compact-solves-row .solve-group { flex: 0 0 calc(33.3% - 0.15rem); }
@@ -3639,7 +3674,7 @@ function refreshCompAthleteGrid() {
         <input type="checkbox" id="cathl_${escHtml(a.id)}" value="${escHtml(a.id)}" class="comp-athl-cb"
           onchange="toggleAthleteEvents('${escHtml(a.id)}')" />
         <label for="cathl_${escHtml(a.id)}">
-          ${escHtml(a.name)}
+          ${escHtml(a.name + (a.lastName ? ' ' + a.lastName : ''))}
           <span>${escHtml(a.wcaId || '')}</span>
         </label>
       </div>

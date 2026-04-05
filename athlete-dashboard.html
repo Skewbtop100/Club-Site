@@ -561,6 +561,90 @@
       .cao-event-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
       .cao-event-tabs::-webkit-scrollbar { display: none; }
     }
+
+    /* ── NAV DROPDOWN (mobile menu) ─────────────────────────────── */
+    .nav-menu-wrap { position: relative; display: none; align-items: center; }
+    .nav-menu-btn {
+      display: flex; align-items: center; gap: 0.45rem;
+      padding: 0.38rem 0.75rem 0.38rem 0.6rem; border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.05);
+      color: var(--text); font-size: 0.83rem; font-weight: 600;
+      cursor: pointer; transition: background 0.2s, border-color 0.2s; white-space: nowrap;
+    }
+    .nav-menu-btn:hover { background: rgba(255,255,255,0.09); border-color: rgba(124,58,237,0.4); }
+    .nav-menu-wrap.open .nav-menu-btn { background: rgba(124,58,237,0.12); border-color: rgba(124,58,237,0.45); }
+    .nav-menu-caret {
+      width: 13px; height: 13px; opacity: 0.5; flex-shrink: 0;
+      transition: transform 0.22s;
+    }
+    .nav-menu-wrap.open .nav-menu-caret { transform: rotate(180deg); opacity: 0.8; }
+    .nav-dropdown {
+      position: absolute; top: calc(100% + 9px); right: 0;
+      min-width: 216px;
+      background: var(--card);
+      border: 1px solid rgba(255,255,255,0.09);
+      border-radius: 14px; padding: 5px;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.45), 0 0 0 1px rgba(124,58,237,0.08);
+      display: none; flex-direction: column; gap: 2px;
+      z-index: 1100;
+      animation: navDropdownIn 0.18s cubic-bezier(.4,0,.2,1);
+    }
+    @keyframes navDropdownIn {
+      from { opacity:0; transform:translateY(-6px); }
+      to   { opacity:1; transform:translateY(0); }
+    }
+    .nav-menu-wrap.open .nav-dropdown { display: flex; }
+    .nd-link {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.58rem 0.65rem; border-radius: 9px;
+      font-size: 0.86rem; font-weight: 600; color: var(--text);
+      text-decoration: none; transition: background 0.15s;
+    }
+    .nd-link:hover { background: rgba(124,58,237,0.1); }
+    .nd-divider { height: 1px; background: rgba(255,255,255,0.07); margin: 3px 6px; }
+    .nd-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.42rem 0.65rem; border-radius: 9px;
+      transition: background 0.15s; gap: 0.75rem;
+    }
+    .nd-row:hover { background: rgba(255,255,255,0.03); }
+    .nd-label { font-size: 0.77rem; color: var(--muted); font-weight: 500; white-space: nowrap; }
+    .nd-signout {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.58rem 0.65rem; border-radius: 9px;
+      background: transparent; border: none; color: #f87171;
+      font-size: 0.86rem; font-weight: 600; cursor: pointer;
+      transition: background 0.15s; width: 100%; text-align: left;
+    }
+    .nd-signout:hover { background: rgba(244,63,94,0.15); }
+    html[data-theme="soft-light"] .nav-dropdown,
+    html[data-theme="purple-light"] .nav-dropdown {
+      border-color: rgba(0,0,0,0.08);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05);
+    }
+    html[data-theme="soft-light"] .nd-divider,
+    html[data-theme="purple-light"] .nd-divider { background: rgba(0,0,0,0.08); }
+    html[data-theme="soft-light"] .nd-signout:hover,
+    html[data-theme="purple-light"] .nd-signout:hover { background: rgba(244,63,94,0.08); }
+
+    /* ── MOBILE NAV (≤700px) ────────────────────────────────────── */
+    @media (max-width: 700px) {
+      nav { padding: 0 1rem; }
+      .nd-desktop { display: none !important; }
+      .nav-menu-wrap { display: flex; }
+      /* Tab nav inside results_entry dash: horizontal scroll */
+      #resultsEntryDash .tab-nav {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        gap: 0.3rem;
+        padding: 0.3rem;
+      }
+      #resultsEntryDash .tab-nav::-webkit-scrollbar { display: none; }
+      #resultsEntryDash .tab-btn { flex-shrink: 0; font-size: 0.75rem; padding: 0.38rem 0.7rem; }
+    }
   </style>
   <script>(function(){var t=localStorage.getItem('cubeTheme')||'dark';document.documentElement.setAttribute('data-theme',t);})();</script>
 </head>
@@ -569,14 +653,43 @@
 <nav>
   <div class="nav-logo">CUBEMN</div>
   <div class="nav-right">
-    <span class="nav-username" id="navUsername"></span>
-    <a href="index.html" class="btn-homepage" data-i18n="nav.homepage">⌂ Homepage</a>
-    <div class="lang-switcher">
+    <!-- Desktop controls (hidden on mobile) -->
+    <span class="nav-username nd-desktop" id="navUsername"></span>
+    <a href="index.html" class="btn-homepage nd-desktop" data-i18n="nav.homepage">⌂ Homepage</a>
+    <div class="lang-switcher nd-desktop">
       <button class="lang-opt active" data-lang="en" onclick="applyLang('en')">EN</button>
       <button class="lang-opt" data-lang="mn" onclick="applyLang('mn')">MN</button>
     </div>
-    <button class="theme-btn" id="themeSwitchBtn" onclick="cycleTheme()">🌑 Dark</button>
-    <button class="btn-logout" onclick="doLogout()" data-i18n="nav.sign-out">Sign Out</button>
+    <button class="theme-btn nd-desktop" id="themeSwitchBtn" onclick="cycleTheme()">🌑 Dark</button>
+    <button class="btn-logout nd-desktop" onclick="doLogout()" data-i18n="nav.sign-out">Sign Out</button>
+
+    <!-- Mobile dropdown menu -->
+    <div class="nav-menu-wrap" id="navMenuWrap">
+      <button class="nav-menu-btn" onclick="toggleNavMenu()">
+        <span id="navMenuLabel">Menu</span>
+        <svg class="nav-menu-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div class="nav-dropdown" id="navDropdown">
+        <div class="nd-row">
+          <span class="nd-label">Language</span>
+          <div class="lang-switcher">
+            <button class="lang-opt" data-lang="en" onclick="applyLang('en')">EN</button>
+            <button class="lang-opt" data-lang="mn" onclick="applyLang('mn')">MN</button>
+          </div>
+        </div>
+        <div class="nd-row">
+          <span class="nd-label">Theme</span>
+          <button class="theme-btn" onclick="cycleTheme()">🌑 Dark</button>
+        </div>
+        <div class="nd-divider"></div>
+        <a href="index.html" class="nd-link">&#8962; <span data-i18n="nav.homepage">Homepage</span></a>
+        <div class="nd-divider"></div>
+        <button class="nd-signout" onclick="doLogout()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+          <span data-i18n="nav.sign-out">Sign Out</span>
+        </button>
+      </div>
+    </div>
   </div>
 </nav>
 
@@ -2082,12 +2195,22 @@ document.addEventListener('DOMContentLoaded', function() {
     var next = THEMES[(THEMES.indexOf(cur) + 1) % THEMES.length];
     document.documentElement.setAttribute('data-theme', next);
     localStorage.setItem('cubeTheme', next);
-    var btn = document.getElementById('themeSwitchBtn');
-    if (btn) btn.textContent = LABELS[next];
+    document.querySelectorAll('.theme-btn').forEach(function(b) { b.textContent = LABELS[next]; });
   };
   var saved = localStorage.getItem('cubeTheme') || 'dark';
-  var btn   = document.getElementById('themeSwitchBtn');
-  if (btn) btn.textContent = LABELS[saved] || '🌑 Dark';
+  document.querySelectorAll('.theme-btn').forEach(function(b) { b.textContent = LABELS[saved] || '🌑 Dark'; });
+
+  // Nav dropdown toggle
+  window.toggleNavMenu = function() {
+    var wrap = document.getElementById('navMenuWrap');
+    if (wrap) wrap.classList.toggle('open');
+  };
+  document.addEventListener('click', function(e) {
+    var wrap = document.getElementById('navMenuWrap');
+    if (wrap && wrap.classList.contains('open') && !wrap.contains(e.target)) {
+      wrap.classList.remove('open');
+    }
+  });
 })();
 </script>
 </body>
