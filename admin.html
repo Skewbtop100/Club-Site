@@ -2353,10 +2353,10 @@
   <div id="tabResults" class="tab-panel">
 
     <div class="card">
-      <div class="card-title"><span class="title-accent"></span> Results Entry</div>
+      <div class="card-title"><span class="title-accent"></span> <span data-i18n="re.title">Results Entry</span></div>
       <div class="result-selectors" style="margin-bottom:0.8rem;">
         <div class="form-group" style="max-width:340px;margin-bottom:0;">
-          <label>Competition</label>
+          <label data-i18n="re.comp-label">Competition</label>
           <select id="resComp"></select>
         </div>
       </div>
@@ -2369,7 +2369,7 @@
       <div id="entrySelectPrompt" style="
         padding:1.5rem 1rem; text-align:center;
         color:var(--muted); font-size:0.88rem;">
-        Select a competition above to start entering results.
+        Үр дүнг оруулахын тулд дээрх тэмцээнийг сонгоно уу.
       </div>
       <div class="insp-box" id="inspBox">
         <div class="insp-time-row">
@@ -3779,10 +3779,10 @@ function buildResultPanels() {
         </div>
       </div>
       <select id="p${i}_athlete" class="compact-select">
-        <option value="">— Athlete —</option>
+        <option value="">— Тамирчид —</option>
       </select>
       <select id="p${i}_event" class="compact-select" disabled>
-        <option value="">— Event —</option>
+        <option value="">— Төрөл —</option>
       </select>
       <div class="compact-rg-row">
         <select id="p${i}_round" class="compact-select" style="margin-bottom:0;"></select>
@@ -4133,7 +4133,7 @@ function updatePanelAthletes(idx) {
   const sel    = document.getElementById(`p${idx}_athlete`);
   if (!sel) return;
   const prev   = sel.value;
-  sel.innerHTML = '<option value="">— Athlete —</option>';
+  sel.innerHTML = '<option value="">— Тамирчид —</option>';
   if (!compId) { sel.disabled = true; updatePanelEvents(idx); return; }
   const comp    = competitionsCache.find(c => c.id === compId);
   const athlIds = comp ? (comp.athleteIds || []) : [];
@@ -4159,7 +4159,7 @@ function updatePanelEvents(idx) {
   const sel       = document.getElementById(`p${idx}_event`);
   if (!sel) return;
   const prev = sel.value;
-  sel.innerHTML = '<option value="">— Event —</option>';
+  sel.innerHTML = '<option value="">— Төрөл —</option>';
   if (!compId || !athlDocId) { sel.disabled = true; updatePanelRoundGroup(idx); return; }
   const comp = competitionsCache.find(c => c.id === compId);
   if (!comp || !comp.events) { sel.disabled = true; updatePanelRoundGroup(idx); return; }
@@ -4292,7 +4292,7 @@ function refreshPanelAthletesByEligibility(idx) {
   const athlIds = comp ? (comp.athleteIds || []) : [];
   const pool    = athletesCache.filter(a => athlIds.includes(a.id));
 
-  sel.innerHTML = '<option value="">— Athlete —</option>';
+  sel.innerHTML = '<option value="">— Тамирчид —</option>';
   pool.forEach(a => {
     const eligible = athleteEligibleForRound(compId, a.id, eventId, round);
     const opt = document.createElement('option');
@@ -4330,7 +4330,7 @@ function clearPanelFull(idx) {
   const athlSel = document.getElementById(`p${idx}_athlete`);
   const evSel   = document.getElementById(`p${idx}_event`);
   if (athlSel) athlSel.value = '';
-  if (evSel)   { evSel.innerHTML = '<option value="">— Event —</option>'; evSel.disabled = true; }
+  if (evSel)   { evSel.innerHTML = '<option value="">— Төрөл —</option>'; evSel.disabled = true; }
   updatePanelRoundGroup(idx);
   clearPanel(idx);
   syncSaveBtn(idx);
@@ -4340,7 +4340,7 @@ function clearPanelFull(idx) {
 function refreshResultsCompDropdown() {
   const sel  = document.getElementById('resComp');
   const prev = sel.value;
-  sel.innerHTML = '<option value="">— Select Competition —</option>';
+  sel.innerHTML = '<option value="">— Тэмцээн сонгох —</option>';
 
   const order = { live: 0, upcoming: 1, finished: 2 };
   const sorted = [...competitionsCache].sort((a, b) =>

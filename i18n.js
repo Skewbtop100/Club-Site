@@ -99,6 +99,12 @@ window.I18N = {
     // ── RESULTS ENTRY ────────────────────────────────────────
     'result.saved':           'Saved',
     'result.save-failed':     'Save failed',
+    're.title':               'Results Entry',
+    're.comp-label':          'Competition',
+    're.prompt':              'Select a competition above to start entering results.',
+    're.comp-select':         '— Select Competition —',
+    're.athlete-select':      '— Athlete —',
+    're.event-select':        '— Event —',
 
     // ── ATHLETE DASHBOARD ─────────────────────────────────────
     'dash.loading':           'Loading your profile…',
@@ -295,6 +301,12 @@ window.I18N = {
     // ── RESULTS ENTRY ────────────────────────────────────────
     'result.saved':           'Хадгаллаа',
     'result.save-failed':     'Хадгалж чадсангүй',
+    're.title':               'Үр дүн оруулах',
+    're.comp-label':          'Тэмцааний',
+    're.prompt':              'Үр дүнг оруулахын тулд дээрх тэмцаанийг сонгоно уу.',
+    're.comp-select':         '— Тэмцааний сонгох —',
+    're.athlete-select':      '— Тамирчид —',
+    're.event-select':        '— Төрөл —',
 
     // ── ATHLETE DASHBOARD ─────────────────────────────────────
     'dash.loading':           'Профайл ачаалж байна…',

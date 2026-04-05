@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(del \"c:\\\\Users\\\\Uuganaa\\\\Club Site\\\\results-entry-extracted.js\")",
+      "Bash(python3 -c ':*)"
+    ]
+  }
+}
