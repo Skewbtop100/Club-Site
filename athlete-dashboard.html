@@ -643,6 +643,63 @@
       #resultsEntryDash .tab-nav::-webkit-scrollbar { display: none; }
       #resultsEntryDash .tab-btn { flex-shrink: 0; font-size: 0.75rem; padding: 0.38rem 0.7rem; }
     }
+    /* ===== RECORD CELEBRATION MODAL ===== */
+    #rc-overlay {
+      position: fixed; inset: 0; z-index: 9999;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.72); backdrop-filter: blur(6px);
+      animation: rcFadeIn 0.25s ease both;
+    }
+    @keyframes rcFadeIn { from { opacity: 0; } to { opacity: 1; } }
+    #rc-overlay.rc-out { animation: rcFadeOut 0.22s ease forwards; }
+    @keyframes rcFadeOut { to { opacity: 0; } }
+    .rc-modal {
+      position: relative; overflow: hidden;
+      width: min(580px, calc(100vw - 2rem));
+      border-radius: 22px; padding: 2.8rem 2.4rem 2.4rem;
+      display: flex; flex-direction: column; align-items: center; text-align: center; gap: 0;
+      animation: rcPop 0.45s cubic-bezier(.2,1.4,.4,1) both;
+    }
+    @keyframes rcPop { from { transform: scale(0.82) translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+    .rc-wr { background: linear-gradient(145deg, #78350f 0%, #b45309 60%, #d97706 100%); }
+    .rc-cr { background: linear-gradient(145deg, #1e3a8a 0%, #1d4ed8 60%, #3b82f6 100%); }
+    .rc-nr { background: linear-gradient(145deg, #14532d 0%, #166534 60%, #16a34a 100%); }
+    .rc-tr { background: linear-gradient(145deg, #3b0764 0%, #6d28d9 60%, #8b5cf6 100%); }
+    .rc-modal::before {
+      content: ''; position: absolute; inset: 0; pointer-events: none;
+      background: linear-gradient(110deg, transparent 30%, rgba(255,255,255,0.12) 50%, transparent 70%);
+      animation: rcShimmer 1.8s ease-out 0.3s both;
+    }
+    @keyframes rcShimmer { from { transform: translateX(-130%); } to { transform: translateX(160%); } }
+    .rc-close {
+      position: absolute; top: 1rem; right: 1rem;
+      background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25);
+      color: #fff; font-size: 1rem; line-height: 1; width: 2rem; height: 2rem;
+      border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: background 0.15s; z-index: 1;
+    }
+    .rc-close:hover { background: rgba(255,255,255,0.28); }
+    .rc-icon { font-size: 3.5rem; line-height: 1; margin-bottom: 0.6rem; animation: rcIconPop 0.6s cubic-bezier(.2,1.6,.4,1) 0.2s both; }
+    @keyframes rcIconPop { from { transform: scale(0) rotate(-20deg); opacity: 0; } to { transform: none; opacity: 1; } }
+    .rc-badge-label { font-size: 0.72rem; font-weight: 900; letter-spacing: 0.14em; text-transform: uppercase; padding: 0.3rem 0.9rem; border-radius: 20px; color: #fff; margin-bottom: 1rem; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.35); }
+    .rc-record-type { font-size: 1.75rem; font-weight: 800; color: #fff; letter-spacing: -0.01em; margin-bottom: 0.25rem; line-height: 1.15; }
+    .rc-name { font-size: 1.2rem; font-weight: 700; color: rgba(255,255,255,0.92); margin-bottom: 1.4rem; }
+    .rc-divider { width: 100%; height: 1px; background: rgba(255,255,255,0.18); margin-bottom: 1.2rem; }
+    .rc-meta { display: flex; flex-direction: column; gap: 0.35rem; width: 100%; }
+    .rc-meta-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+    .rc-meta-label { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255,255,255,0.5); }
+    .rc-meta-val { font-size: 0.92rem; font-weight: 600; color: rgba(255,255,255,0.9); text-align: right; }
+    .rc-meta-time { font-family: monospace; font-size: 1.35rem; font-weight: 800; color: #fff; }
+    .rc-particles { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+    .rc-p { position: absolute; border-radius: 50%; animation: rcParticle ease-out forwards; opacity: 0; }
+    @keyframes rcParticle { 0% { transform: translate(0,0) scale(1); opacity: 0.9; } 100% { transform: translate(var(--dx),var(--dy)) scale(0); opacity: 0; } }
+    @media (max-width: 480px) {
+      .rc-modal { width: calc(100vw - 2rem); border-radius: 20px; padding: 2.2rem 1.4rem 1.8rem; }
+      .rc-icon { font-size: 2.8rem; }
+      .rc-record-type { font-size: 1.4rem; }
+      .rc-name { font-size: 1rem; }
+      .rc-meta-time { font-size: 1.1rem; }
+    }
   </style>
   <script>(function(){var t=localStorage.getItem('cubeTheme')||'dark';document.documentElement.setAttribute('data-theme',t);})();</script>
 </head>
@@ -2202,6 +2259,73 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   });
 })();
+
+// ---- RECORD CELEBRATION MODAL ----
+var _RC_ICONS  = { WR: '🌍', CR: '🌐', NR: '🏴', TR: '🏆' };
+var _RC_LABELS = { WR: 'World Record', CR: 'Continental Record', NR: 'National Record', TR: 'Club Record' };
+var _rcSeenIds = {};
+
+function showRecordModal(data) {
+  var existing = document.getElementById('rc-overlay');
+  if (existing) existing.parentNode.removeChild(existing);
+  var pHTML = '', pColors = ['#fbbf24','#f9a8d4','#a5f3fc','#86efac','#c4b5fd','#fff','#fde68a'];
+  for (var i = 0; i < 28; i++) {
+    var dx = ((Math.random() - 0.5) * 400).toFixed(0), dy = ((Math.random() - 0.5) * 300).toFixed(0);
+    var sz = (5 + Math.random() * 8).toFixed(1), del = (Math.random() * 0.6).toFixed(2), dur = (1.2 + Math.random() * 1).toFixed(2);
+    pHTML += '<div class="rc-p" style="left:' + (5 + Math.random() * 90).toFixed(0) + '%;top:' + (5 + Math.random() * 90).toFixed(0) + '%;width:' + sz + 'px;height:' + sz + 'px;background:' + pColors[i % pColors.length] + ';--dx:' + dx + 'px;--dy:' + dy + 'px;animation-duration:' + dur + 's;animation-delay:' + del + 's"></div>';
+  }
+  var overlay = document.createElement('div');
+  overlay.id = 'rc-overlay';
+  overlay.innerHTML = '<div class="rc-modal rc-' + data.badge.toLowerCase() + '">'
+    + '<div class="rc-particles">' + pHTML + '</div>'
+    + '<button class="rc-close" onclick="closeRecordModal()">&#10005;</button>'
+    + '<div class="rc-icon">' + (_RC_ICONS[data.badge] || '★') + '</div>'
+    + '<div class="rc-badge-label">' + escHtml(_RC_LABELS[data.badge] || data.badge) + '</div>'
+    + '<div class="rc-record-type">New ' + escHtml(_RC_LABELS[data.badge] || data.badge) + '!</div>'
+    + '<div class="rc-name">' + escHtml(data.fullName) + '</div>'
+    + '<div class="rc-divider"></div>'
+    + '<div class="rc-meta">'
+    + '<div class="rc-meta-row"><span class="rc-meta-label">Event</span><span class="rc-meta-val">' + escHtml(data.evName) + '</span></div>'
+    + (data.compName ? '<div class="rc-meta-row"><span class="rc-meta-label">Competition</span><span class="rc-meta-val">' + escHtml(data.compName) + '</span></div>' : '')
+    + '<div class="rc-meta-row"><span class="rc-meta-label">' + (data.type === 'average' ? 'Average' : 'Single') + '</span><span class="rc-meta-val rc-meta-time">' + escHtml(data.timeStr) + '</span></div>'
+    + '</div></div>';
+  document.body.appendChild(overlay);
+}
+
+function closeRecordModal() {
+  var el = document.getElementById('rc-overlay');
+  if (!el) return;
+  el.classList.add('rc-out');
+  setTimeout(function() { if (el.parentNode) el.parentNode.removeChild(el); }, 230);
+}
+
+function _startCelebrationListener() {
+  if (!window.db) { console.warn('[Records] db not ready (athlete)'); return; }
+  console.log('[Records] Starting celebration listener (athlete)');
+  var _listenerReady = false;
+  window.db.collection('recordCelebrations')
+    .orderBy('triggeredAt', 'desc').limit(10)
+    .onSnapshot(function(snap) {
+      console.log('[Records] Snapshot (athlete), changes:', snap.docChanges().length, 'ready:', _listenerReady);
+      snap.docChanges().forEach(function(change) {
+        if (change.type !== 'added') return;
+        var d = change.doc.data();
+        if (_rcSeenIds[change.doc.id]) return;
+        _rcSeenIds[change.doc.id] = true;
+        if (!_listenerReady) return;
+        console.log('[Records] Showing modal (athlete):', change.doc.id, d);
+        showRecordModal(d);
+      });
+      _listenerReady = true;
+    }, function(err) { console.error('[Records] Listener error (athlete):', err.message); });
+}
+
+// Start listener once db is ready
+(function _waitForDb() {
+  if (window.db) { _startCelebrationListener(); }
+  else { setTimeout(_waitForDb, 300); }
+})();
+
 </script>
 </body>
 </html>
