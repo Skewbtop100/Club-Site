@@ -1285,6 +1285,14 @@
       .ph-table-row { min-width: 750px; grid-template-columns: minmax(130px,1fr) 90px 60px 90px 90px repeat(5,64px); font-size: 0.85rem; gap: 0 0.3rem; }
       .prh-table-head,
       .prh-row { min-width: 640px; }
+      /* Badge tabs: 5 equal columns, count above badge label */
+      .prh-tabs { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.3rem; }
+      .prh-tab {
+        display: flex; flex-direction: column-reverse; align-items: center;
+        gap: 0.2rem; padding: 0.45rem 0.2rem;
+      }
+      .prh-tab-count { font-size: 1rem; line-height: 1; }
+      .prh-tab-badge { font-size: 0.6rem; padding: 0.12rem 0.3rem; }
     }
 
     /* FOOTER */
@@ -1780,6 +1788,7 @@
         /* width set in px by JS after layout */
         display: grid;
         grid-template-columns: 1fr 1fr;
+        align-content: start;
         gap: 0.75rem;
         padding: 0;
         box-sizing: border-box;
@@ -2249,14 +2258,28 @@ function renderAthletes() {
     grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">&#128100;</div>No athletes registered yet.</div>';
     return;
   }
-  var best333 = {};
+  var best333 = {}, compCount = {}, resultCount = {};
   allResults.forEach(function(r) {
+    var key = r.athleteId;
+    if (!key) return;
     if (r.eventId === '333' && r.single && r.single > 0) {
-      var key = r.athleteId;
       if (!best333[key] || r.single < best333[key]) best333[key] = r.single;
     }
+    resultCount[key] = (resultCount[key] || 0) + 1;
+    if (r.competitionId) {
+      if (!compCount[key]) compCount[key] = {};
+      compCount[key][r.competitionId] = true;
+    }
   });
-  grid.innerHTML = allAthletes.map(function(a) {
+  var sortedAthletes = allAthletes.slice().sort(function(a, b) {
+    var aKey = a.athleteId || a.id, bKey = b.athleteId || b.id;
+    var aC = compCount[aKey] ? Object.keys(compCount[aKey]).length : 0;
+    var bC = compCount[bKey] ? Object.keys(compCount[bKey]).length : 0;
+    if (aC !== bC) return bC - aC;
+    var aR = resultCount[aKey] || 0, bR = resultCount[bKey] || 0;
+    return bR - aR;
+  });
+  grid.innerHTML = sortedAthletes.map(function(a) {
     var initials = (a.name || '?').split(' ').map(function(w){ return w[0]; }).join('').toUpperCase().slice(0,2);
     var aKey = a.athleteId || a.id;
     var bestStr = best333[aKey] ? 'Best 3x3: <span>' + fmtTime(best333[aKey]) + '</span>' : 'No results yet';
@@ -2544,7 +2567,7 @@ function openAthleteProfile(docId) {
   html += '<div class="profile-section-title">Records</div>';
   html += '<div class="prh-tabs">';
   allBadges.forEach(function(badge, i) {
-    html += '<button class="prh-tab' + (i === 0 ? ' active' : '') + '" data-badge="' + badge + '" onclick="prhSelectBadge(this)">'
+    html += '<button class="prh-tab' + (badge === 'PR' ? ' active' : '') + '" data-badge="' + badge + '" onclick="prhSelectBadge(this)">'
       + '<span class="prh-tab-badge prh-' + badge.toLowerCase() + '">' + badge + '</span>'
       + '<span class="prh-tab-count">' + recordHistory[badge].length + '</span>'
       + '</button>';
@@ -2555,7 +2578,7 @@ function openAthleteProfile(docId) {
       var ai = evOrder.indexOf(a.r.eventId), bi = evOrder.indexOf(b.r.eventId);
       return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
     });
-    html += '<div class="prh-section" id="prh-' + badge + '"' + (i !== 0 ? ' style="display:none"' : '') + '>';
+    html += '<div class="prh-section" id="prh-' + badge + '"' + (badge !== 'PR' ? ' style="display:none"' : '') + '>';
     if (entries.length === 0) {
       html += '<div style="padding:0.7rem 0.5rem;color:var(--muted);font-size:0.78rem;">No results</div>';
     } else {
