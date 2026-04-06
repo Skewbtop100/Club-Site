@@ -553,19 +553,23 @@
       background: rgba(124,58,237,0.1); border: 1px solid rgba(124,58,237,0.2); color: #a78bfa;
       display: inline-flex; align-items: center;
     }
-    .comp-action-row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; }
+    .comp-action-row { display: flex; gap: 0.5rem; flex-wrap: nowrap; margin-top: 0.5rem; align-items: center; }
+    .comp-action,
+    .comp-action-outline {
+      height: 2.2rem; padding: 0 1.1rem;
+      border-radius: 8px; font-size: 0.82rem; font-weight: 600;
+      cursor: pointer; white-space: nowrap;
+      display: inline-flex; align-items: center; justify-content: center;
+      box-sizing: border-box;
+    }
     .comp-action {
-      padding: 0.5rem 1rem; border-radius: 8px; font-size: 0.82rem; font-weight: 600;
       background: linear-gradient(135deg, var(--accent), var(--accent2));
-      color: #fff; border: none; cursor: pointer; transition: opacity 0.2s;
-      display: inline-block;
+      color: #fff; border: none; transition: opacity 0.2s;
     }
     .comp-action:hover { opacity: 0.85; }
     .comp-action-outline {
-      padding: 0.5rem 1rem; border-radius: 8px; font-size: 0.82rem; font-weight: 600;
       background: transparent; color: #a78bfa;
-      border: 1px solid rgba(124,58,237,0.38); cursor: pointer; transition: all 0.2s;
-      display: inline-block;
+      border: 1px solid rgba(124,58,237,0.38); transition: all 0.2s;
     }
     .comp-action-outline:hover { background: rgba(124,58,237,0.12); border-color: rgba(124,58,237,0.65); }
 
@@ -648,43 +652,37 @@
     /* ===== COMPETITION RESULTS OVERLAY ===== */
     #compResultsOverlay {
       position: fixed; inset: 0; z-index: 1500;
-      display: flex; align-items: center; justify-content: center;
-      padding: 1.5rem;
+      display: flex;
     }
-    .cro-backdrop {
-      position: absolute; inset: 0;
-      background: rgba(0,0,0,0.65); backdrop-filter: blur(4px);
-      cursor: pointer;
-    }
+    .cro-backdrop { display: none; }
     .cro-panel {
       position: relative; z-index: 1;
-      width: min(1100px, 96vw);
-      max-height: calc(100vh - 3rem);
-      background: var(--card);
-      border: 1px solid rgba(255,255,255,0.08);
-      border-radius: 14px;
+      width: 100%; height: 100%;
+      background: var(--bg);
       display: flex; flex-direction: column;
       overflow: hidden;
-      box-shadow: 0 24px 60px rgba(0,0,0,0.55);
     }
     .cro-header {
       display: flex; align-items: flex-start; justify-content: space-between;
-      padding: 1.4rem 1.4rem 1rem;
+      padding: 1rem 1.6rem 0.9rem;
       border-bottom: 1px solid rgba(255,255,255,0.07);
+      background: var(--card);
       flex-shrink: 0;
     }
     .cro-name { font-size: 1.2rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.2rem; }
     .cro-meta { font-size: 0.8rem; color: var(--muted); }
     .cro-close {
-      background: transparent; border: none; color: var(--muted);
-      font-size: 1.1rem; cursor: pointer; padding: 0.2rem 0.4rem; line-height: 1;
-      transition: color 0.15s; flex-shrink: 0; margin-top: -0.1rem;
+      background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+      color: var(--muted); font-size: 0.82rem; font-weight: 600;
+      cursor: pointer; padding: 0.35rem 0.9rem; line-height: 1;
+      border-radius: 7px; transition: all 0.15s; flex-shrink: 0;
     }
-    .cro-close:hover { color: var(--text); }
+    .cro-close:hover { background: rgba(255,255,255,0.1); color: var(--text); }
     .cro-event-tabs {
       display: flex; gap: 0.35rem; flex-wrap: wrap;
-      padding: 0.7rem 1.2rem;
+      padding: 0.7rem 1.6rem;
       border-bottom: 1px solid rgba(255,255,255,0.06);
+      background: var(--card);
       flex-shrink: 0;
     }
     .cro-event-btn {
@@ -695,8 +693,9 @@
     .cro-event-btn.active { background: rgba(124,58,237,0.2); border-color: rgba(124,58,237,0.4); color: #a78bfa; }
     .cro-round-tabs {
       display: flex; gap: 0.3rem; flex-wrap: wrap;
-      padding: 0.45rem 1.2rem;
+      padding: 0.45rem 1.6rem;
       border-bottom: 1px solid rgba(255,255,255,0.04);
+      background: var(--card);
       flex-shrink: 0; min-height: 36px;
     }
     .cro-round-btn {
@@ -707,13 +706,13 @@
     .cro-round-btn.active { background: rgba(124,58,237,0.15); border-color: rgba(124,58,237,0.3); color: #c4b5fd; }
     .cro-body { display: flex; flex: 1; overflow: hidden; min-height: 0; }
     .cro-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
-    .cro-table-wrap { flex: 1; overflow-y: auto; padding: 0.75rem 1.2rem 1.5rem; }
+    .cro-table-wrap { flex: 1; overflow-y: auto; padding: 1rem 2rem 2rem; }
 
     /* Club Athletes sidebar */
     .cro-club-sidebar {
-      width: 148px; flex-shrink: 0;
+      width: 190px; flex-shrink: 0;
       border-left: 1px solid rgba(255,255,255,0.06);
-      overflow-y: auto; padding: 0.7rem 0.6rem;
+      overflow-y: auto; padding: 1rem 0.75rem;
     }
     .cro-sb-title {
       font-size: 0.65rem; font-weight: 700; color: var(--muted);
@@ -819,6 +818,10 @@
     .cro-rank-3  { color: #c2773d; }
     .cro-td-name .cro-ath-name { font-weight: 600; color: var(--text); font-size: 0.86rem; }
     .cro-td-name .cro-ath-country { font-size: 0.68rem; color: var(--muted); }
+    .cro-table tbody tr.row-club { background: rgba(124,58,237,0.08); box-shadow: inset 3px 0 0 rgba(124,58,237,0.7); }
+    .cro-table tbody tr.row-club:hover { background: rgba(124,58,237,0.13); }
+    .cro-table tbody tr.row-club .cro-ath-name { color: #c4b5fd; }
+    .cro-table tbody tr.row-club .cro-ath-country { color: #a78bfa; }
     .cro-td-solve { font-family: monospace; font-size: 0.84rem; text-align: right; color: var(--muted); white-space: nowrap; }
     .cro-td-solve.best-solve { color: var(--text); font-weight: 700; }
     .cro-td-solve.dnf-solve  { color: #f43f5e; }
@@ -1168,7 +1171,7 @@
     .prh-pr { background:#0f766e; color:#ccfbf1; border:1px solid #2dd4bf; }
     .prh-tab-count { font-size: 0.82rem; font-weight: 700; color: var(--muted); }
     .prh-tab.active .prh-tab-count { color: var(--text); }
-    .prh-section { font-size: 0.82rem; margin-bottom: 0.4rem; }
+    .prh-section { font-size: 0.82rem; margin-bottom: 0.4rem; overflow-x: auto; -webkit-overflow-scrolling: touch; }
     .prh-ev-header {
       font-size: 0.86rem; font-weight: 700; color: var(--text);
       padding: 0.6rem 0.5rem 0.25rem;
@@ -1274,14 +1277,14 @@
       .ph-table-row { min-width: 750px; grid-template-columns: minmax(130px,1fr) 90px 60px 90px 90px repeat(5,64px); gap: 0 0.3rem; }
       .ph-td-comp { max-width: none; }
       .prh-table-head,
-      .prh-row { grid-template-columns: 72px 72px minmax(120px,1fr) 90px repeat(5,36px); gap: 0 0.2rem; }
+      .prh-row { min-width: 640px; }
     }
     @media (max-width: 480px) {
       .profile-quick-stats { grid-template-columns: repeat(3, 1fr); }
       .ph-table-head,
       .ph-table-row { min-width: 750px; grid-template-columns: minmax(130px,1fr) 90px 60px 90px 90px repeat(5,64px); font-size: 0.85rem; gap: 0 0.3rem; }
       .prh-table-head,
-      .prh-row { grid-template-columns: 66px 66px minmax(100px,1fr) 80px repeat(3,32px); gap: 0 0.15rem; }
+      .prh-row { min-width: 640px; }
     }
 
     /* FOOTER */
@@ -1636,8 +1639,7 @@
       .cro-table td:nth-child(n+3):nth-child(-n+7) { display: none; }
 
       /* Competition Results overlay layout on tablet */
-      #compResultsOverlay { padding: 0.75rem; }
-      .cro-club-sidebar { width: 120px; }
+      .cro-club-sidebar { width: 150px; }
     }
 
     /* Mobile (≤480px) */
@@ -1677,14 +1679,12 @@
       #athlete-profile-overlay .profile-header { padding: 1rem; gap: 0.75rem; }
       .profile-panel { padding: 1rem 0.85rem 3rem; }
 
-      /* Competition Results overlay on mobile: hide club sidebar, full-width */
-      #compResultsOverlay { padding: 0; align-items: flex-end; }
-      .cro-panel { width: 100%; max-height: 94vh; border-radius: 14px 14px 0 0; border-left: none; border-right: none; border-bottom: none; }
+      /* Competition Results overlay on mobile: hide club sidebar */
       .cro-club-sidebar { display: none; }
-      .cro-header { padding: 1rem; }
-      .cro-event-tabs { padding: 0.6rem 1rem; }
-      .cro-round-tabs { padding: 0.4rem 1rem; }
-      .cro-table-wrap { padding: 0.6rem 0.85rem 2rem; }
+      .cro-header { padding: 0.75rem 1rem; }
+      .cro-event-tabs { padding: 0.5rem 1rem; }
+      .cro-round-tabs { padding: 0.35rem 1rem; }
+      .cro-table-wrap { padding: 0.6rem 1rem 2rem; }
     }
 
     /* Small mobile (≤360px) */
@@ -2030,7 +2030,7 @@
         <div class="cro-name" id="croName"></div>
         <div class="cro-meta" id="croMeta"></div>
       </div>
-      <button class="cro-close" onclick="closeCompResults()">&#10005;</button>
+      <button class="cro-close" onclick="closeCompResults()">&#8592; Back</button>
     </div>
     <div class="cro-body">
       <div class="cro-main">
@@ -2573,8 +2573,27 @@ function openAthleteProfile(docId) {
         html += '<div class="prh-table-head"><span>Single</span><span>Average</span>'
           + '<span>Competition</span><span>Round</span>'
           + '<span>1</span><span>2</span><span>3</span><span>4</span><span>5</span></div>';
+        // Merge single+average entries that come from the same competition+round
+        var mergedRows = [], mergeMap = {};
         byEvent[eid].forEach(function(entry) {
-          var r = entry.r, type = entry.type, value = entry.value;
+          var key = (entry.r.competitionId || '') + '|' + (entry.r.round || 1);
+          if (!mergeMap[key]) {
+            mergeMap[key] = { singleVal: null, avgVal: null, r: entry.r };
+            mergedRows.push(mergeMap[key]);
+          }
+          if (entry.type === 'single') mergeMap[key].singleVal = entry.value;
+          else mergeMap[key].avgVal = entry.value;
+        });
+        // Show the value with this tab's own badge (WR/CR/NR/TR/PR)
+        var prhValHtml = function(val) {
+          var bHtml = recordBadgesHtml([badge]);
+          return '<span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;">'
+            + '<span style="display:inline-flex;gap:2px;">' + bHtml + '</span>'
+            + escHtml(fmtTime(val))
+            + '</span>';
+        };
+        mergedRows.forEach(function(merged) {
+          var r = merged.r;
           var allRoundsForCompEv = allResults.filter(function(x) {
             return x.competitionId === r.competitionId && x.eventId === r.eventId;
           });
@@ -2594,17 +2613,9 @@ function openAthleteProfile(docId) {
             if (s === -1 || s === -2) cls += ' dnf-s';
             return '<span class="' + cls + '">' + (s !== null ? escHtml(fmtTime(s)) : '') + '</span>';
           }).join('');
-          // Show the value with this tab's own badge (WR/CR/NR/TR/PR)
-          var prhValHtml = function(val) {
-            var bHtml = recordBadgesHtml([badge]);
-            return '<span style="display:inline-flex;align-items:center;gap:3px;white-space:nowrap;">'
-              + escHtml(fmtTime(val))
-              + '<span style="display:inline-flex;gap:2px;">' + bHtml + '</span>'
-              + '</span>';
-          };
           html += '<div class="prh-row">'
-            + '<span class="prh-single">' + (type === 'single' ? prhValHtml(value) : '') + '</span>'
-            + '<span class="prh-average">' + (type === 'average' ? prhValHtml(value) : '') + '</span>'
+            + '<span class="prh-single">' + (merged.singleVal !== null ? prhValHtml(merged.singleVal) : '') + '</span>'
+            + '<span class="prh-average">' + (merged.avgVal !== null ? prhValHtml(merged.avgVal) : '') + '</span>'
             + '<span class="prh-comp">' + escHtml(r.competitionName || r.competitionId || '\u2014') + '</span>'
             + '<span class="prh-round">' + escHtml(roundLabel) + '</span>'
             + solvesHtml
@@ -3008,9 +3019,9 @@ function resultCellHtml(value, type, eventId, extraCls, athleteId) {
   var visibleBadge = badges.find(function(b) { return b === 'TR' || b === 'PR'; });
   var bHtml = recordBadgesHtml(visibleBadge ? [visibleBadge] : []);
   if (bHtml) {
-    return '<span style="display:inline-flex;align-items:center;gap:3px;white-space:nowrap;">' + timeStr + '<span style="display:inline-flex;gap:2px;">' + bHtml + '</span></span>';
+    return '<span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;"><span style="display:inline-flex;gap:2px;">' + bHtml + '</span>' + timeStr + '</span>';
   }
-  return '<span>' + timeStr + '</span>';
+  return timeStr;
 }
 
 // ---- COMPETITIONS ----
@@ -4010,6 +4021,14 @@ function croSelectRound(round) {
   croRenderTable();
 }
 
+// Returns full name for a result: looks up lastName from allAthletes by athleteId,
+// falls back to r.athleteName if the athlete isn't in the cache.
+function croFullName(r) {
+  var cached = r.athleteId && allAthletes.find(function(a) { return a.id === r.athleteId; });
+  if (cached) return (cached.name || '') + (cached.lastName ? ' ' + cached.lastName : '');
+  return r.athleteName || r.athleteId || '\u2014';
+}
+
 function croRenderTable() {
   var rows = croResults.filter(function(r) { return r.eventId === croEventId && (r.round || 1) === croRound; });
   var wrap = document.getElementById('croTableWrap');
@@ -4061,11 +4080,14 @@ function croRenderTable() {
       return '<td class="' + cls + '">' + escHtml(fmtTime(s)) + '</td>';
     }).join('');
 
+    var isClub = r.source === 'club';
+    if (isClub) rowCls += ' row-club';
+    var countryLabel = isClub ? 'Mongolia' : (r.country || '');
     var avgCls = r.average === -1 ? ' dnf-avg' : '';
     return '<tr class="' + rowCls + '">'
       + '<td class="cro-td-rank' + rankCls + '">' + rank + '</td>'
-      + '<td class="cro-td-name"><div class="cro-ath-name">' + escHtml(r.athleteName || '\u2014') + '</div>'
-      + (r.country ? '<div class="cro-ath-country">' + escHtml(r.country) + '</div>' : '') + '</td>'
+      + '<td class="cro-td-name"><div class="cro-ath-name">' + escHtml(croFullName(r)) + '</div>'
+      + (countryLabel ? '<div class="cro-ath-country">' + escHtml(countryLabel) + '</div>' : '') + '</td>'
       + solveCells
       + '<td class="cro-td-avg' + avgCls + '">' + resultCellHtml(r.average, 'average', r.eventId, '', r.athleteId) + '</td>'
       + '<td class="cro-td-best">' + resultCellHtml(r.single, 'single', r.eventId, '', r.athleteId) + '</td>'
@@ -4092,7 +4114,7 @@ function croRenderClubSidebar() {
   croResults.forEach(function(r) {
     if (r.source === 'club' && r.athleteId && !seen[r.athleteId]) {
       seen[r.athleteId] = true;
-      clubAthletes.push({ id: r.athleteId, name: r.athleteName || r.athleteId });
+      clubAthletes.push({ id: r.athleteId, name: croFullName(r) });
     }
   });
   var titleText = window.t ? t('cro.club-athletes') : 'Club Athletes';
