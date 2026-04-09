@@ -64,6 +64,11 @@ node_modules/
 
 # dotenv environment variables file
 .env
+.env.local
+.env*.local
+
+# Next.js build output
+.next/
 
 # dataconnect generated files
 .dataconnect
