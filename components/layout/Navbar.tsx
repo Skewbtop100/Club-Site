@@ -2,11 +2,13 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import ThemeToggle from './ThemeToggle';
 import LangToggle from './LangToggle';
 
 export default function Navbar() {
   const [open, setOpen] = useState(false);
+  const router = useRouter();
 
   return (
     <nav style={{
@@ -80,7 +82,7 @@ export default function Navbar() {
               }}>
                 {/* Sign In */}
                 <button
-                  onClick={() => setOpen(false)}
+                  onClick={() => { setOpen(false); router.push('/login'); }}
                   style={{
                     display: 'flex', alignItems: 'center', gap: '0.5rem',
                     padding: '0.58rem 0.65rem', borderRadius: '9px',
