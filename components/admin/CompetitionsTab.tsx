@@ -36,6 +36,9 @@ export default function CompetitionsTab() {
   const [msgType, setMsgType] = useState('');
   const [allAthletes, setAllAthletes] = useState<Athlete[]>([]);
   const [athleteReg, setAthleteReg] = useState<Record<string, AthleteReg>>({});
+  const [deleteModal, setDeleteModal] = useState<{ id: string; name: string } | null>(null);
+  const [deleteInput, setDeleteInput] = useState('');
+  const [deleteMsg, setDeleteMsg] = useState('');
 
   useEffect(() => {
     getAthletes().then(data => setAllAthletes([...data].sort((a, b) => a.name.localeCompare(b.name))));
@@ -123,9 +126,27 @@ export default function CompetitionsTab() {
     try { await updateCompetition(id, { status: status as Status }); } catch { /* ignore */ }
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm('Delete this competition?')) return;
-    try { await deleteCompetition(id); } catch { /* ignore */ }
+  function openDeleteModal(c: Competition) {
+    setDeleteModal({ id: c.id, name: c.name });
+    setDeleteInput('');
+    setDeleteMsg('');
+  }
+
+  function closeDeleteModal() {
+    setDeleteModal(null);
+    setDeleteInput('');
+    setDeleteMsg('');
+  }
+
+  async function confirmDelete() {
+    if (!deleteModal || deleteInput !== deleteModal.name) return;
+    try {
+      await deleteCompetition(deleteModal.id);
+      setDeleteMsg('success');
+      setTimeout(() => closeDeleteModal(), 1200);
+    } catch (e: unknown) {
+      setDeleteMsg('error: ' + (e instanceof Error ? e.message : String(e)));
+    }
   }
 
   const statusColors: Record<string, string> = {
@@ -361,7 +382,7 @@ export default function CompetitionsTab() {
                           <td>
                             <div style={{ display: 'flex', gap: '0.35rem' }}>
                               <button className="btn-edit" onClick={() => startEdit(c)}>Edit</button>
-                              <button className="btn-delete" onClick={() => handleDelete(c.id)}>Delete</button>
+                              <button className="btn-delete" onClick={() => openDeleteModal(c)}>Delete</button>
                             </div>
                           </td>
                         </tr>
@@ -372,6 +393,109 @@ export default function CompetitionsTab() {
             )
         }
       </div>
+
+      {/* Delete confirmation modal */}
+      {deleteModal && (
+        <div
+          onClick={closeDeleteModal}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(0,0,0,0.72)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '1rem',
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: 'var(--card, #1a1730)',
+              border: '1px solid rgba(239,68,68,0.45)',
+              borderRadius: '14px',
+              padding: '1.75rem',
+              maxWidth: '440px',
+              width: '100%',
+              boxShadow: '0 24px 60px rgba(0,0,0,0.7)',
+            }}
+          >
+            {deleteMsg === 'success' ? (
+              <div style={{ textAlign: 'center', padding: '1rem 0' }}>
+                <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>✓</div>
+                <div style={{ color: '#4ade80', fontWeight: 600 }}>Competition deleted.</div>
+              </div>
+            ) : (
+              <>
+                {/* Header */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', marginBottom: '1rem' }}>
+                  <span style={{ fontSize: '1.5rem', lineHeight: 1, flexShrink: 0 }}>⚠️</span>
+                  <div>
+                    <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text)', marginBottom: '0.4rem' }}>
+                      Delete Competition?
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--muted)', lineHeight: 1.55 }}>
+                      This will permanently delete <strong style={{ color: 'var(--text)' }}>{deleteModal.name}</strong> and ALL its results, assignments, and data. This cannot be undone.
+                    </div>
+                  </div>
+                </div>
+
+                {/* Name confirmation input */}
+                <div style={{ marginBottom: '1.1rem' }}>
+                  <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.4rem' }}>
+                    Type <strong style={{ color: 'var(--text)' }}>{deleteModal.name}</strong> to confirm:
+                  </label>
+                  <input
+                    type="text"
+                    value={deleteInput}
+                    onChange={e => { setDeleteInput(e.target.value); setDeleteMsg(''); }}
+                    placeholder={deleteModal.name}
+                    autoFocus
+                    style={{
+                      width: '100%', boxSizing: 'border-box',
+                      padding: '0.55rem 0.75rem', borderRadius: '8px', fontSize: '0.88rem',
+                      background: 'rgba(255,255,255,0.04)',
+                      border: `1px solid ${deleteInput === deleteModal.name ? 'rgba(239,68,68,0.55)' : 'rgba(255,255,255,0.1)'}`,
+                      color: 'var(--text)', fontFamily: 'inherit',
+                      outline: 'none',
+                    }}
+                  />
+                </div>
+
+                {/* Error message */}
+                {deleteMsg && deleteMsg !== 'success' && (
+                  <div style={{ fontSize: '0.8rem', color: '#f87171', marginBottom: '0.8rem' }}>{deleteMsg}</div>
+                )}
+
+                {/* Buttons */}
+                <div style={{ display: 'flex', gap: '0.6rem', justifyContent: 'flex-end' }}>
+                  <button
+                    onClick={closeDeleteModal}
+                    style={{
+                      padding: '0.5rem 1.1rem', borderRadius: '8px', fontSize: '0.88rem',
+                      background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+                      color: 'var(--text)', cursor: 'pointer', fontFamily: 'inherit',
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={confirmDelete}
+                    disabled={deleteInput !== deleteModal.name}
+                    style={{
+                      padding: '0.5rem 1.1rem', borderRadius: '8px', fontSize: '0.88rem',
+                      fontFamily: 'inherit', fontWeight: 600, cursor: deleteInput === deleteModal.name ? 'pointer' : 'not-allowed',
+                      background: deleteInput === deleteModal.name ? 'rgba(239,68,68,0.85)' : 'rgba(239,68,68,0.2)',
+                      border: `1px solid ${deleteInput === deleteModal.name ? 'rgba(239,68,68,0.9)' : 'rgba(239,68,68,0.3)'}`,
+                      color: deleteInput === deleteModal.name ? '#fff' : 'rgba(239,68,68,0.5)',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    Delete Forever
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
