@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { subscribeCompetitions } from '@/lib/firebase/services/competitions';
 import { getAthletes } from '@/lib/firebase/services/athletes';
 import { saveResult } from '@/lib/firebase/services/results';
@@ -37,12 +37,24 @@ export default function ResultsEntryTab() {
   const [comps, setComps]         = useState<Competition[]>([]);
   const [compId, setCompId]       = useState('');
   const [panels, setPanels]       = useState<PanelState[]>([emptyPanel(0)]);
-  const [numCols, setNumCols]     = useState(1);
+
+  // Inspection timer state
+  const [timerOpen, setTimerOpen]       = useState(false);
+  const [timerMs, setTimerMs]           = useState(0);
+  const [timerRunning, setTimerRunning] = useState(false);
+  const timerIntervalRef  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timerStartRef     = useRef<number>(0);
+  const timerAccRef       = useRef<number>(0);
+  const lastMilestoneRef  = useRef<number>(0);
 
   useEffect(() => {
     getAthletes().then(setAthletes);
     const unsub = subscribeCompetitions((data) => setComps(data));
     return unsub;
+  }, []);
+
+  useEffect(() => {
+    return () => { if (timerIntervalRef.current) clearInterval(timerIntervalRef.current); };
   }, []);
 
   function updatePanel(id: number, patch: Partial<PanelState>) {
@@ -87,6 +99,84 @@ export default function ResultsEntryTab() {
     }
   }
 
+  // ── Inspection timer helpers ─────────────────────────────────────────────────
+
+  function playBeep(freq: number, dur: number) {
+    try {
+      const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = freq;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.35, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + dur);
+      osc.onended = () => ctx.close();
+    } catch { /* audio unavailable */ }
+  }
+
+  function startTimer() {
+    if (timerIntervalRef.current) return;
+    timerStartRef.current = Date.now() - timerAccRef.current;
+    setTimerRunning(true);
+    timerIntervalRef.current = setInterval(() => {
+      const elapsed = Date.now() - timerStartRef.current;
+      timerAccRef.current = elapsed;
+      setTimerMs(elapsed);
+      const s = elapsed / 1000;
+      if (s >= 8  && lastMilestoneRef.current < 8)  { lastMilestoneRef.current = 8;  playBeep(880,  0.18); }
+      if (s >= 12 && lastMilestoneRef.current < 12) { lastMilestoneRef.current = 12; playBeep(1100, 0.18); }
+      if (s >= 17) {
+        clearInterval(timerIntervalRef.current!);
+        timerIntervalRef.current = null;
+        setTimerRunning(false);
+      }
+    }, 30);
+  }
+
+  function stopTimer() {
+    if (timerIntervalRef.current) { clearInterval(timerIntervalRef.current); timerIntervalRef.current = null; }
+    setTimerRunning(false);
+  }
+
+  function resetTimer() {
+    stopTimer();
+    timerAccRef.current    = 0;
+    lastMilestoneRef.current = 0;
+    setTimerMs(0);
+  }
+
+  function closeTimerModal() { resetTimer(); setTimerOpen(false); }
+
+  function fmtInspection(ms: number) {
+    const s  = Math.floor(ms / 1000);
+    const cs = Math.floor((ms % 1000) / 10);
+    return `${s}.${String(cs).padStart(2, '0')}`;
+  }
+
+  function timerColor(ms: number) {
+    const s = ms / 1000;
+    if (s >= 17) return '#7f1d1d';
+    if (s >= 15) return '#ef4444';
+    if (s >= 12) return '#f97316';
+    if (s >= 8)  return '#fbbf24';
+    return '#f8fafc';
+  }
+
+  function timerStatus(ms: number) {
+    const s = ms / 1000;
+    if (s >= 17) return 'DNF!';
+    if (s >= 15) return '+2 Penalty!';
+    if (s >= 12) return '12 seconds';
+    if (s >= 8)  return '8 seconds';
+    return '';
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+
   const selComp = comps.find(c => c.id === compId);
   const evList = selComp?.events ? WCA_EVENTS.filter(e => (selComp.events as Record<string,boolean>)?.[e.id]) : WCA_EVENTS;
   const liveComps = comps.filter(c => c.status === 'live' || c.status === 'upcoming');
@@ -105,19 +195,22 @@ export default function ResultsEntryTab() {
             {liveComps.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
-        {compId && (
-          <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', paddingTop: '1.5rem', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>Panels: <strong>{panels.length}</strong></span>
-            <button className="btn-xs" onClick={() => { const np = panels.length + 1; setPanels(p => [...p, emptyPanel(p.length)]); setNumCols(Math.min(np, 3)); }}>+ Add Panel</button>
-            <button className="btn-xs" onClick={() => { if (panels.length <= 1) return; setPanels(p => p.slice(0, -1)); setNumCols(Math.min(panels.length - 1, 3)); }}>− Remove</button>
-            <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>Cols:</span>
-            {[1,2,3].map(n => (
-              <button key={n} className={`btn-xs${numCols === n ? ' active' : ''}`}
-                style={numCols === n ? { background: 'rgba(124,58,237,0.18)', borderColor: 'rgba(124,58,237,0.4)', color: '#a78bfa' } : {}}
-                onClick={() => setNumCols(n)}>{n}</button>
-            ))}
-          </div>
-        )}
+        <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', paddingTop: compId ? '1.5rem' : 0, flexWrap: 'wrap' }}>
+          {compId && (
+            <>
+              <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>Panels: <strong>{panels.length}</strong></span>
+              <button className="btn-xs" onClick={() => setPanels(p => [...p, emptyPanel(p.length)])}>+ Add Panel</button>
+              <button className="btn-xs" onClick={() => { if (panels.length <= 1) return; setPanels(p => p.slice(0, -1)); }}>− Remove</button>
+            </>
+          )}
+          <button
+            className="btn-xs"
+            onClick={() => setTimerOpen(true)}
+            style={{ background: 'rgba(16,185,129,0.12)', borderColor: 'rgba(16,185,129,0.35)', color: '#34d399' }}
+          >
+            ⏱ Inspection Timer
+          </button>
+        </div>
       </div>
 
       {!compId && (
@@ -126,8 +219,135 @@ export default function ResultsEntryTab() {
         </div>
       )}
 
+      {/* Inspection timer modal */}
+      {timerOpen && (() => {
+        const color  = timerColor(timerMs);
+        const status = timerStatus(timerMs);
+        const isDnf  = timerMs / 1000 >= 17;
+        return (
+          <div
+            onClick={closeTimerModal}
+            style={{
+              position: 'fixed', inset: 0, zIndex: 1000,
+              background: 'rgba(0,0,0,0.82)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: '1rem',
+            }}
+          >
+            <div
+              onClick={e => e.stopPropagation()}
+              style={{
+                background: 'var(--card, #1a1730)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: '18px',
+                padding: '2.5rem 2rem 2rem',
+                minWidth: '320px',
+                maxWidth: '420px',
+                width: '100%',
+                boxShadow: '0 28px 70px rgba(0,0,0,0.75)',
+                textAlign: 'center',
+              }}
+            >
+              {/* Title */}
+              <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '1.5rem' }}>
+                WCA Inspection Timer
+              </div>
+
+              {/* Timer display */}
+              <div style={{
+                fontSize: '5rem', fontWeight: 700, lineHeight: 1, letterSpacing: '-0.02em',
+                color, transition: 'color 0.3s',
+                fontVariantNumeric: 'tabular-nums',
+                marginBottom: '0.6rem',
+              }}>
+                {fmtInspection(timerMs)}
+              </div>
+
+              {/* Status text */}
+              <div style={{
+                fontSize: '1.1rem', fontWeight: 700, color,
+                minHeight: '1.6rem', transition: 'color 0.3s',
+                marginBottom: '2rem',
+              }}>
+                {status}
+              </div>
+
+              {/* Milestone markers */}
+              <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', marginBottom: '2rem' }}>
+                {[
+                  { s: 8,  label: '8s',  active: timerMs / 1000 >= 8,  col: '#fbbf24' },
+                  { s: 12, label: '12s', active: timerMs / 1000 >= 12, col: '#f97316' },
+                  { s: 15, label: '+2',  active: timerMs / 1000 >= 15, col: '#ef4444' },
+                  { s: 17, label: 'DNF', active: isDnf,                col: '#7f1d1d' },
+                ].map(m => (
+                  <div key={m.s} style={{
+                    padding: '0.2rem 0.55rem', borderRadius: '999px', fontSize: '0.72rem', fontWeight: 700,
+                    border: `1px solid ${m.active ? m.col : 'rgba(255,255,255,0.1)'}`,
+                    background: m.active ? `${m.col}22` : 'transparent',
+                    color: m.active ? m.col : 'rgba(255,255,255,0.25)',
+                    transition: 'all 0.2s',
+                  }}>
+                    {m.label}
+                  </div>
+                ))}
+              </div>
+
+              {/* Buttons: Start | Stop | Reset */}
+              <div style={{ display: 'flex', gap: '0.6rem', justifyContent: 'center' }}>
+                <button
+                  onClick={startTimer}
+                  disabled={timerRunning || isDnf}
+                  style={{
+                    padding: '0.55rem 1.3rem', borderRadius: '9px', fontSize: '0.9rem',
+                    fontFamily: 'inherit', fontWeight: 600, cursor: timerRunning || isDnf ? 'not-allowed' : 'pointer',
+                    background: timerRunning || isDnf ? 'rgba(16,185,129,0.1)' : 'rgba(16,185,129,0.25)',
+                    border: `1px solid ${timerRunning || isDnf ? 'rgba(16,185,129,0.2)' : 'rgba(16,185,129,0.55)'}`,
+                    color: timerRunning || isDnf ? 'rgba(52,211,153,0.35)' : '#34d399',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  Start
+                </button>
+                <button
+                  onClick={stopTimer}
+                  disabled={!timerRunning}
+                  style={{
+                    padding: '0.55rem 1.3rem', borderRadius: '9px', fontSize: '0.9rem',
+                    fontFamily: 'inherit', fontWeight: 600, cursor: !timerRunning ? 'not-allowed' : 'pointer',
+                    background: !timerRunning ? 'rgba(251,191,36,0.07)' : 'rgba(251,191,36,0.18)',
+                    border: `1px solid ${!timerRunning ? 'rgba(251,191,36,0.15)' : 'rgba(251,191,36,0.5)'}`,
+                    color: !timerRunning ? 'rgba(251,191,36,0.3)' : '#fbbf24',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  Stop
+                </button>
+                <button
+                  onClick={resetTimer}
+                  style={{
+                    padding: '0.55rem 1.3rem', borderRadius: '9px', fontSize: '0.9rem',
+                    fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer',
+                    background: 'rgba(255,255,255,0.06)',
+                    border: '1px solid rgba(255,255,255,0.12)',
+                    color: 'var(--muted)',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  Reset
+                </button>
+              </div>
+
+              {/* Close hint */}
+              <div style={{ marginTop: '1.5rem', fontSize: '0.72rem', color: 'rgba(255,255,255,0.2)' }}>
+                Click outside to close
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {compId && (
-        <div className="multi-entry-grid" style={{ gridTemplateColumns: `repeat(${numCols}, 1fr)` }}>
+        <div className="multi-entry-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
           {panels.map(panel => {
             const { single, average } = computeResult(panel);
             const panelAthletes = compAthletes
