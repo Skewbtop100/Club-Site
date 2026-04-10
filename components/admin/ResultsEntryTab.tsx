@@ -27,6 +27,8 @@ interface PanelState {
   id: number; athleteId: string; eventId: string; round: number; group: number;
   solves: string[]; penalties: ('none' | '+2' | 'dnf')[];
   currentSolveIdx: number; rawInput: string;
+  selectedChip: number | null;   // which prior-solve chip is showing Edit button
+  editReturnIdx: number | null;  // where to return after editing a prior solve
   msg: string; msgType: string;
 }
 function emptyPanel(id: number): PanelState {
@@ -34,8 +36,16 @@ function emptyPanel(id: number): PanelState {
     id, athleteId: '', eventId: '', round: 1, group: 1,
     solves: ['', '', '', '', ''], penalties: ['none', 'none', 'none', 'none', 'none'],
     currentSolveIdx: 0, rawInput: '',
+    selectedChip: null, editReturnIdx: null,
     msg: '', msgType: '',
   };
+}
+
+/** Strip formatting to get back the raw digit string for re-editing.
+ *  "8.11" → "811", "1:11.11" → "11111", "11:11.11" → "111111"
+ */
+function timeToRawDigits(timeStr: string): string {
+  return timeStr.replace(/[^0-9]/g, '');
 }
 
 function getRoundNames(totalRounds: number): string[] {
@@ -109,7 +119,22 @@ export default function ResultsEntryTab() {
       if (idx >= 5) return p;
       const newSolves = [...p.solves];
       newSolves[idx] = p.penalties[idx] === 'dnf' ? '' : formatRawDigits(p.rawInput);
-      return { ...p, solves: newSolves, currentSolveIdx: idx + 1, rawInput: '' };
+      // If we were editing a prior solve, return to the original position
+      const nextIdx = p.editReturnIdx !== null ? p.editReturnIdx : idx + 1;
+      return { ...p, solves: newSolves, currentSolveIdx: nextIdx, rawInput: '', editReturnIdx: null, selectedChip: null };
+    }));
+  }
+
+  function startEditPriorSolve(panelId: number, solveIdx: number) {
+    setPanels(prev => prev.map(p => {
+      if (p.id !== panelId) return p;
+      return {
+        ...p,
+        currentSolveIdx: solveIdx,
+        rawInput: p.penalties[solveIdx] === 'dnf' ? '' : timeToRawDigits(p.solves[solveIdx]),
+        editReturnIdx: p.currentSolveIdx,
+        selectedChip: null,
+      };
     }));
   }
 
@@ -324,7 +349,8 @@ export default function ResultsEntryTab() {
             const cfg        = eventConfig[panel.eventId] || { rounds: 1, groups: 1 };
             const roundNames = getRoundNames(cfg.rounds);
             const groupCount = cfg.groups;
-            const allEntered = panel.currentSolveIdx >= 5;
+            // In edit mode we're not "all entered" even if currentSolveIdx reached 5
+            const allEntered = panel.currentSolveIdx >= 5 && panel.editReturnIdx === null;
             const { single, average } = computeResult(panel);
 
             const panelAthletes = compAthletes
@@ -340,6 +366,7 @@ export default function ResultsEntryTab() {
             const curPenalty = curIdx < 5 ? panel.penalties[curIdx] : 'none';
             const preview    = curIdx < 5 && curPenalty !== 'dnf' ? formatRawDigits(panel.rawInput) : '';
             const canAdvance = curPenalty === 'dnf' || panel.rawInput.length > 0;
+            const isEditMode = panel.editReturnIdx !== null;
 
             return (
               <div className="compact-panel" key={panel.id}>
@@ -387,11 +414,12 @@ export default function ResultsEntryTab() {
                   <div style={{ marginTop: '0.5rem' }}>
                     {/* Progress label */}
                     <div style={{
-                      fontSize: '0.72rem', fontWeight: 700, color: 'var(--muted)',
+                      fontSize: '0.72rem', fontWeight: 700,
+                      color: isEditMode ? '#a78bfa' : 'var(--muted)',
                       textTransform: 'uppercase', letterSpacing: '0.08em',
                       textAlign: 'center', marginBottom: '0.4rem',
                     }}>
-                      Solve {curIdx + 1} of 5
+                      {isEditMode ? `Editing Solve ${curIdx + 1}` : `Solve ${curIdx + 1} of 5`}
                     </div>
 
                     {/* Large input */}
@@ -405,6 +433,12 @@ export default function ResultsEntryTab() {
                       onChange={e => {
                         const raw = e.target.value.replace(/\D/g, '').slice(0, 6);
                         updatePanel(panel.id, { rawInput: raw });
+                      }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && canAdvance) {
+                          e.preventDefault();
+                          advanceSolve(panel.id);
+                        }
                       }}
                       style={{
                         width: '100%', boxSizing: 'border-box',
@@ -459,40 +493,121 @@ export default function ResultsEntryTab() {
                           color: canAdvance ? '#a78bfa' : 'rgba(167,139,250,0.3)',
                         }}
                       >
-                        {curIdx === 4 ? 'Done →' : '→ Next'}
+                        {isEditMode ? '✓ Update' : curIdx === 4 ? 'Done →' : '→ Next'}
                       </button>
                     </div>
 
-                    {/* Solves entered so far (mini summary) */}
-                    {curIdx > 0 && (
-                      <div style={{ display: 'flex', gap: '0.2rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
-                        {panel.solves.slice(0, curIdx).map((sv, i) => (
-                          <div key={i} style={{
-                            flex: 1, minWidth: '44px', textAlign: 'center',
-                            padding: '0.25rem 0.15rem', borderRadius: '6px',
-                            background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.07)',
-                            fontSize: '0.65rem',
-                          }}>
-                            <div style={{ color: 'rgba(255,255,255,0.3)', marginBottom: '1px' }}>S{i+1}</div>
-                            <div style={{ color: panel.penalties[i] === 'dnf' ? '#f87171' : 'var(--text)', fontWeight: 600 }}>
-                              {panel.penalties[i] === 'dnf' ? 'DNF' : (sv || '—')}
-                              {panel.penalties[i] === '+2' ? '+' : ''}
+                    {/* Solves entered so far (tappable chips) */}
+                    {(() => {
+                      // Determine count of "completed" solves for this view
+                      // If in edit mode (editReturnIdx set), the "already done" ones are up to editReturnIdx
+                      const completedCount = panel.editReturnIdx !== null ? panel.editReturnIdx : curIdx;
+                      // Partial live stats
+                      const partialVals = panel.solves.slice(0, completedCount).map((s, i) => {
+                        if (panel.penalties[i] === 'dnf') return -1 as number;
+                        const v = parseTime(s);
+                        if (v === null) return null;
+                        return panel.penalties[i] === '+2' ? (v < 0 ? v : v + 200) : v;
+                      });
+                      const liveBest = bestOf(partialVals);
+                      const liveAo5  = completedCount >= 5 ? calcAo5(partialVals) : null;
+                      return (
+                        <>
+                          <div style={{ display: 'flex', gap: '0.2rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                            {panel.solves.slice(0, completedCount).map((sv, i) => {
+                              const isSelected = panel.selectedChip === i;
+                              const isBeingEdited = panel.editReturnIdx !== null && curIdx === i;
+                              return (
+                                <div key={i} style={{ flex: 1, minWidth: '44px', position: 'relative' }}>
+                                  <div
+                                    onClick={() => updatePanel(panel.id, {
+                                      selectedChip: isSelected ? null : i,
+                                    })}
+                                    style={{
+                                      textAlign: 'center',
+                                      padding: '0.28rem 0.15rem', borderRadius: '6px',
+                                      fontSize: '0.65rem', cursor: 'pointer',
+                                      background: isBeingEdited
+                                        ? 'rgba(124,58,237,0.18)'
+                                        : isSelected
+                                          ? 'rgba(255,255,255,0.07)'
+                                          : 'rgba(255,255,255,0.025)',
+                                      border: `1px solid ${
+                                        isBeingEdited
+                                          ? 'rgba(124,58,237,0.5)'
+                                          : isSelected
+                                            ? 'rgba(255,255,255,0.2)'
+                                            : 'rgba(255,255,255,0.07)'
+                                      }`,
+                                      transition: 'background 0.12s, border-color 0.12s',
+                                    }}
+                                  >
+                                    <div style={{ color: 'rgba(255,255,255,0.3)', marginBottom: '1px' }}>S{i+1}</div>
+                                    <div style={{ color: panel.penalties[i] === 'dnf' ? '#f87171' : 'var(--text)', fontWeight: 600 }}>
+                                      {panel.penalties[i] === 'dnf' ? 'DNF' : (sv || '—')}
+                                      {panel.penalties[i] === '+2' ? '+' : ''}
+                                    </div>
+                                  </div>
+                                  {isSelected && !isBeingEdited && (
+                                    <button
+                                      onClick={e => { e.stopPropagation(); startEditPriorSolve(panel.id, i); }}
+                                      style={{
+                                        position: 'absolute', top: '100%', left: '50%',
+                                        transform: 'translateX(-50%)',
+                                        marginTop: '2px', zIndex: 10,
+                                        padding: '0.18rem 0.45rem', borderRadius: '5px',
+                                        fontSize: '0.62rem', fontWeight: 700,
+                                        whiteSpace: 'nowrap', cursor: 'pointer',
+                                        fontFamily: 'inherit',
+                                        background: 'rgba(124,58,237,0.85)',
+                                        border: '1px solid rgba(124,58,237,0.9)',
+                                        color: '#fff',
+                                        boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+                                      }}
+                                    >
+                                      Edit
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            {Array.from({ length: 5 - completedCount }, (_, i) => {
+                              const slotIdx = completedCount + i;
+                              const isCurrent = slotIdx === curIdx;
+                              return (
+                                <div key={slotIdx} style={{
+                                  flex: 1, minWidth: '44px', textAlign: 'center',
+                                  padding: '0.28rem 0.15rem', borderRadius: '6px',
+                                  fontSize: '0.65rem',
+                                  background: isCurrent ? 'rgba(124,58,237,0.08)' : 'rgba(255,255,255,0.015)',
+                                  border: `1px solid ${isCurrent ? 'rgba(124,58,237,0.3)' : 'rgba(255,255,255,0.04)'}`,
+                                }}>
+                                  <div style={{ color: isCurrent ? 'rgba(167,139,250,0.6)' : 'rgba(255,255,255,0.2)', marginBottom: '1px' }}>S{slotIdx+1}</div>
+                                  <div style={{ color: isCurrent ? 'rgba(167,139,250,0.5)' : 'rgba(255,255,255,0.15)' }}>
+                                    {isCurrent ? '▸' : '—'}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          {/* Live Best / Ao5 */}
+                          {completedCount > 0 && (
+                            <div style={{
+                              display: 'flex', justifyContent: 'center', gap: '0.5rem',
+                              marginTop: '0.45rem', fontSize: '0.75rem', color: 'var(--muted)',
+                              fontVariantNumeric: 'tabular-nums',
+                            }}>
+                              <span>Best: <strong style={{ color: liveBest > 0 ? 'var(--text)' : 'var(--muted)' }}>{liveBest > 0 ? fmtTime(liveBest) : '—'}</strong></span>
+                              <span style={{ opacity: 0.35 }}>|</span>
+                              <span>Ao5: <strong style={{ color: liveAo5 !== null ? (liveAo5 < 0 ? '#f87171' : 'var(--text)') : 'var(--muted)' }}>
+                                {liveAo5 !== null ? (liveAo5 < 0 ? 'DNF' : fmtTime(liveAo5)) : '—'}
+                              </strong></span>
                             </div>
-                          </div>
-                        ))}
-                        {Array.from({ length: 5 - curIdx }, (_, i) => (
-                          <div key={curIdx + i} style={{
-                            flex: 1, minWidth: '44px', textAlign: 'center',
-                            padding: '0.25rem 0.15rem', borderRadius: '6px',
-                            background: 'rgba(255,255,255,0.015)', border: '1px solid rgba(255,255,255,0.04)',
-                            fontSize: '0.65rem',
-                          }}>
-                            <div style={{ color: 'rgba(255,255,255,0.2)', marginBottom: '1px' }}>S{curIdx+i+1}</div>
-                            <div style={{ color: 'rgba(255,255,255,0.15)' }}>—</div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 ) : (
                   /* ── All 5 entered — summary + save ─────────────────────── */
@@ -549,6 +664,7 @@ export default function ResultsEntryTab() {
                         solves: ['', '', '', '', ''],
                         penalties: ['none', 'none', 'none', 'none', 'none'],
                         rawInput: '', msg: '', msgType: '',
+                        editReturnIdx: null, selectedChip: null,
                       })}
                       style={{
                         width: '100%', padding: '0.4rem', borderRadius: '8px',
