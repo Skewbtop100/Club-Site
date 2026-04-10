@@ -463,6 +463,35 @@ html[data-theme="purple-light"] .wca-sidebar { background: var(--surface); borde
 /* Compact multi-panel grid */
 .multi-entry-grid { display: grid; grid-template-columns: 1fr; gap: 0.75rem; margin-top: 1rem; }
 @media (max-width: 640px) { .multi-entry-grid { grid-template-columns: 1fr !important; } }
+
+/* Mobile improvements for Results Entry panels */
+@media (max-width: 640px) {
+  .compact-select {
+    font-size: 16px;
+    min-height: 44px;
+    padding: 0.65rem 0.6rem;
+  }
+  .compact-solves-row .solve-input {
+    font-size: 16px;
+    min-height: 48px;
+    padding: 0.7rem 0.2rem;
+  }
+  .solve-btn {
+    font-size: 0.72rem;
+    padding: 0.45rem 0.25rem;
+    min-height: 38px;
+  }
+  .btn-sm-primary {
+    font-size: 16px;
+    min-height: 48px;
+  }
+  .compact-panel {
+    padding: 0.85rem 0.75rem 0.85rem;
+  }
+  .compact-solves-row {
+    gap: 0.28rem;
+  }
+}
 .compact-panel {
   background: var(--card); border: 1px solid rgba(124,58,237,0.2);
   border-radius: 12px; padding: 0.85rem 0.9rem 0.75rem;

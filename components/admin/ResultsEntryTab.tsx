@@ -39,7 +39,6 @@ export default function ResultsEntryTab() {
   const [panels, setPanels]       = useState<PanelState[]>([emptyPanel(0)]);
 
   // Inspection timer state
-  const [timerOpen, setTimerOpen]       = useState(false);
   const [timerMs, setTimerMs]           = useState(0);
   const [timerRunning, setTimerRunning] = useState(false);
   const timerIntervalRef  = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -149,12 +148,8 @@ export default function ResultsEntryTab() {
     setTimerMs(0);
   }
 
-  function closeTimerModal() { resetTimer(); setTimerOpen(false); }
-
   function fmtInspection(ms: number) {
-    const s  = Math.floor(ms / 1000);
-    const cs = Math.floor((ms % 1000) / 10);
-    return `${s}.${String(cs).padStart(2, '0')}`;
+    return (ms / 1000).toFixed(1) + 's';
   }
 
   function timerColor(ms: number) {
@@ -203,13 +198,6 @@ export default function ResultsEntryTab() {
               <button className="btn-xs" onClick={() => { if (panels.length <= 1) return; setPanels(p => p.slice(0, -1)); }}>− Remove</button>
             </>
           )}
-          <button
-            className="btn-xs"
-            onClick={() => setTimerOpen(true)}
-            style={{ background: 'rgba(16,185,129,0.12)', borderColor: 'rgba(16,185,129,0.35)', color: '#34d399' }}
-          >
-            ⏱ Inspection Timer
-          </button>
         </div>
       </div>
 
@@ -219,128 +207,89 @@ export default function ResultsEntryTab() {
         </div>
       )}
 
-      {/* Inspection timer modal */}
-      {timerOpen && (() => {
+      {/* ── Inline Inspection Timer ─────────────────────────────────────────── */}
+      {(() => {
         const color  = timerColor(timerMs);
         const status = timerStatus(timerMs);
         const isDnf  = timerMs / 1000 >= 17;
+        const btnBase: React.CSSProperties = {
+          padding: '0.38rem 0.85rem', borderRadius: '8px', fontSize: '0.82rem',
+          fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer',
+          minHeight: '36px', transition: 'all 0.15s',
+        };
         return (
-          <div
-            onClick={closeTimerModal}
-            style={{
-              position: 'fixed', inset: 0, zIndex: 1000,
-              background: 'rgba(0,0,0,0.82)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              padding: '1rem',
-            }}
-          >
-            <div
-              onClick={e => e.stopPropagation()}
-              style={{
-                background: 'var(--card, #1a1730)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                borderRadius: '18px',
-                padding: '2.5rem 2rem 2rem',
-                minWidth: '320px',
-                maxWidth: '420px',
-                width: '100%',
-                boxShadow: '0 28px 70px rgba(0,0,0,0.75)',
-                textAlign: 'center',
-              }}
-            >
-              {/* Title */}
-              <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '1.5rem' }}>
-                WCA Inspection Timer
-              </div>
+          <div className="insp-timer-bar" style={{
+            display: 'flex', alignItems: 'center', gap: '0.75rem',
+            padding: '0.55rem 0.85rem', marginBottom: '0.85rem',
+            borderRadius: '10px',
+            background: 'rgba(255,255,255,0.03)',
+            border: '1px solid rgba(255,255,255,0.07)',
+          }}>
+            {/* Label */}
+            <span style={{ fontSize: '0.65rem', fontWeight: 700, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.09em', flexShrink: 0 }}>
+              Inspection
+            </span>
 
-              {/* Timer display */}
-              <div style={{
-                fontSize: '5rem', fontWeight: 700, lineHeight: 1, letterSpacing: '-0.02em',
-                color, transition: 'color 0.3s',
-                fontVariantNumeric: 'tabular-nums',
-                marginBottom: '0.6rem',
-              }}>
-                {fmtInspection(timerMs)}
-              </div>
+            {/* Timer value */}
+            <span className="insp-timer-val" style={{
+              fontSize: '1.85rem', fontWeight: 700, lineHeight: 1,
+              color, transition: 'color 0.25s',
+              fontVariantNumeric: 'tabular-nums',
+              minWidth: '5rem', flexShrink: 0,
+            }}>
+              {fmtInspection(timerMs)}
+            </span>
 
-              {/* Status text */}
-              <div style={{
-                fontSize: '1.1rem', fontWeight: 700, color,
-                minHeight: '1.6rem', transition: 'color 0.3s',
-                marginBottom: '2rem',
-              }}>
-                {status}
-              </div>
+            {/* Status */}
+            <span style={{
+              fontSize: '0.82rem', fontWeight: 700,
+              color, transition: 'color 0.25s',
+              minWidth: '5.5rem', flexShrink: 0,
+            }}>
+              {status}
+            </span>
 
-              {/* Milestone markers */}
-              <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', marginBottom: '2rem' }}>
-                {[
-                  { s: 8,  label: '8s',  active: timerMs / 1000 >= 8,  col: '#fbbf24' },
-                  { s: 12, label: '12s', active: timerMs / 1000 >= 12, col: '#f97316' },
-                  { s: 15, label: '+2',  active: timerMs / 1000 >= 15, col: '#ef4444' },
-                  { s: 17, label: 'DNF', active: isDnf,                col: '#7f1d1d' },
-                ].map(m => (
-                  <div key={m.s} style={{
-                    padding: '0.2rem 0.55rem', borderRadius: '999px', fontSize: '0.72rem', fontWeight: 700,
-                    border: `1px solid ${m.active ? m.col : 'rgba(255,255,255,0.1)'}`,
-                    background: m.active ? `${m.col}22` : 'transparent',
-                    color: m.active ? m.col : 'rgba(255,255,255,0.25)',
-                    transition: 'all 0.2s',
-                  }}>
-                    {m.label}
-                  </div>
-                ))}
-              </div>
+            <div style={{ flex: 1 }} />
 
-              {/* Buttons: Start | Stop | Reset */}
-              <div style={{ display: 'flex', gap: '0.6rem', justifyContent: 'center' }}>
-                <button
-                  onClick={startTimer}
-                  disabled={timerRunning || isDnf}
-                  style={{
-                    padding: '0.55rem 1.3rem', borderRadius: '9px', fontSize: '0.9rem',
-                    fontFamily: 'inherit', fontWeight: 600, cursor: timerRunning || isDnf ? 'not-allowed' : 'pointer',
-                    background: timerRunning || isDnf ? 'rgba(16,185,129,0.1)' : 'rgba(16,185,129,0.25)',
-                    border: `1px solid ${timerRunning || isDnf ? 'rgba(16,185,129,0.2)' : 'rgba(16,185,129,0.55)'}`,
-                    color: timerRunning || isDnf ? 'rgba(52,211,153,0.35)' : '#34d399',
-                    transition: 'all 0.15s',
-                  }}
-                >
-                  Start
-                </button>
-                <button
-                  onClick={stopTimer}
-                  disabled={!timerRunning}
-                  style={{
-                    padding: '0.55rem 1.3rem', borderRadius: '9px', fontSize: '0.9rem',
-                    fontFamily: 'inherit', fontWeight: 600, cursor: !timerRunning ? 'not-allowed' : 'pointer',
-                    background: !timerRunning ? 'rgba(251,191,36,0.07)' : 'rgba(251,191,36,0.18)',
-                    border: `1px solid ${!timerRunning ? 'rgba(251,191,36,0.15)' : 'rgba(251,191,36,0.5)'}`,
-                    color: !timerRunning ? 'rgba(251,191,36,0.3)' : '#fbbf24',
-                    transition: 'all 0.15s',
-                  }}
-                >
-                  Stop
-                </button>
-                <button
-                  onClick={resetTimer}
-                  style={{
-                    padding: '0.55rem 1.3rem', borderRadius: '9px', fontSize: '0.9rem',
-                    fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer',
-                    background: 'rgba(255,255,255,0.06)',
-                    border: '1px solid rgba(255,255,255,0.12)',
-                    color: 'var(--muted)',
-                    transition: 'all 0.15s',
-                  }}
-                >
-                  Reset
-                </button>
-              </div>
-
-              {/* Close hint */}
-              <div style={{ marginTop: '1.5rem', fontSize: '0.72rem', color: 'rgba(255,255,255,0.2)' }}>
-                Click outside to close
-              </div>
+            {/* Buttons */}
+            <div style={{ display: 'flex', gap: '0.35rem', flexShrink: 0 }}>
+              <button
+                onClick={startTimer}
+                disabled={timerRunning || isDnf}
+                style={{
+                  ...btnBase,
+                  cursor: timerRunning || isDnf ? 'not-allowed' : 'pointer',
+                  background: timerRunning || isDnf ? 'rgba(16,185,129,0.07)' : 'rgba(16,185,129,0.2)',
+                  border: `1px solid ${timerRunning || isDnf ? 'rgba(16,185,129,0.15)' : 'rgba(16,185,129,0.5)'}`,
+                  color: timerRunning || isDnf ? 'rgba(52,211,153,0.3)' : '#34d399',
+                }}
+              >
+                Start
+              </button>
+              <button
+                onClick={stopTimer}
+                disabled={!timerRunning}
+                style={{
+                  ...btnBase,
+                  cursor: !timerRunning ? 'not-allowed' : 'pointer',
+                  background: !timerRunning ? 'rgba(251,191,36,0.05)' : 'rgba(251,191,36,0.15)',
+                  border: `1px solid ${!timerRunning ? 'rgba(251,191,36,0.12)' : 'rgba(251,191,36,0.45)'}`,
+                  color: !timerRunning ? 'rgba(251,191,36,0.28)' : '#fbbf24',
+                }}
+              >
+                Stop
+              </button>
+              <button
+                onClick={resetTimer}
+                style={{
+                  ...btnBase,
+                  background: 'rgba(255,255,255,0.05)',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  color: 'var(--muted)',
+                }}
+              >
+                Reset
+              </button>
             </div>
           </div>
         );
@@ -399,14 +348,12 @@ export default function ResultsEntryTab() {
                         value={panel.penalties[i] === 'dnf' ? 'DNF' : sv}
                         readOnly={panel.penalties[i] === 'dnf'}
                         onChange={e => setSolve(panel.id, i, e.target.value)}
-                        style={{ width: '100%', padding: '0.5rem 0.15rem', fontSize: '0.82rem' }}
+                        style={{ width: '100%' }}
                       />
                       <div className="solve-btns">
                         <button className={`solve-btn solve-btn-plus2${panel.penalties[i] === '+2' ? ' active' : ''}`}
-                          style={{ fontSize: '0.58rem', padding: '0.15rem 0.1rem' }}
                           onClick={() => setPenalty(panel.id, i, '+2')}>+2</button>
                         <button className={`solve-btn solve-btn-dnf${panel.penalties[i] === 'dnf' ? ' active' : ''}`}
-                          style={{ fontSize: '0.58rem', padding: '0.15rem 0.1rem' }}
                           onClick={() => setPenalty(panel.id, i, 'dnf')}>DNF</button>
                       </div>
                     </div>
