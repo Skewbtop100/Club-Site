@@ -91,7 +91,7 @@ export default function CompetitionsSection({ competitions, loading }: Props) {
           background: rgba(124,58,237,0.12); border: 1px solid rgba(124,58,237,0.25);
           padding: 0.28rem 0.8rem; border-radius: 999px; margin-bottom: 0.9rem;
         }
-        .section-title { font-size: clamp(1.8rem, 4vw, 2.6rem); font-weight: 800; color: var(--text-primary); margin-bottom: 0.6rem; }
+        .section-title { font-size: clamp(1.8rem, 4vw, 2.6rem); font-weight: 800; color: var(--text-primary); margin-bottom: 0.6rem; text-align: center; }
         .tab-btn {
           flex-shrink: 0; padding: 0.4rem 0.95rem; border-radius: 999px;
           font-size: 0.8rem; font-weight: 600; border: 1px solid rgba(255,255,255,0.1);

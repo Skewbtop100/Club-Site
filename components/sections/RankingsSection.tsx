@@ -184,7 +184,7 @@ export default function RankingsSection({ results, athletes, wcaRecords, eventVi
         }
         .section-title {
           font-size: clamp(1.8rem, 4vw, 2.6rem); font-weight: 800;
-          color: var(--text-primary); margin-bottom: 0.6rem;
+          color: var(--text-primary); margin-bottom: 0.6rem; text-align: center;
         }
         .section-desc { font-size: 1rem; color: var(--muted); max-width: 580px; margin: 0 auto; line-height: 1.65; }
         .tab-row { display: flex; gap: 0.5rem; overflow-x: auto; padding-bottom: 0.5rem; margin-bottom: 1.5rem; scrollbar-width: thin; scrollbar-color: var(--accent) transparent; }

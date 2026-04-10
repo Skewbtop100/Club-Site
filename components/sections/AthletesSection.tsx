@@ -105,7 +105,7 @@ export default function AthletesSection({ athletes, results, loading }: Props) {
           background: rgba(124,58,237,0.12); border: 1px solid rgba(124,58,237,0.25);
           padding: 0.28rem 0.8rem; border-radius: 999px; margin-bottom: 0.9rem;
         }
-        .section-title { font-size: clamp(1.8rem, 4vw, 2.6rem); font-weight: 800; color: var(--text-primary); margin-bottom: 0.6rem; }
+        .section-title { font-size: clamp(1.8rem, 4vw, 2.6rem); font-weight: 800; color: var(--text-primary); margin-bottom: 0.6rem; text-align: center; }
         .section-desc { font-size: 1rem; color: var(--muted); max-width: 580px; margin: 0 auto; line-height: 1.65; }
         .athletes-grid-desktop {
           display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem;

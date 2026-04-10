@@ -88,7 +88,7 @@ export default function RecordsSection({ results, athletes, eventVisibility }: P
         }
         .section-title {
           font-size: clamp(1.8rem, 4vw, 2.6rem); font-weight: 800;
-          color: var(--text-primary); margin-bottom: 0.6rem;
+          color: var(--text-primary); margin-bottom: 0.6rem; text-align: center;
         }
         .section-desc { font-size: 1rem; color: var(--muted); max-width: 580px; margin: 0 auto; line-height: 1.65; }
         .record-card {
