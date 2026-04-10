@@ -11,7 +11,9 @@ type SessionRole = 'admin' | 'athlete' | 'results_entry' | null;
 function getSessionRole(): SessionRole {
   try {
     if (localStorage.getItem('isAdmin') === 'true') return 'admin';
-    const user = JSON.parse(localStorage.getItem('cubeAthleteUser') || 'null');
+    const user =
+      JSON.parse(localStorage.getItem('cubeAthleteUser') || 'null') ??
+      JSON.parse(localStorage.getItem('currentUser') || 'null');
     if (user?.role === 'admin') return 'admin';
     if (user?.role === 'results_entry') return 'results_entry';
     if (user?.athleteId) return 'athlete';
@@ -31,6 +33,7 @@ export default function Navbar() {
   function signOut() {
     localStorage.removeItem('isAdmin');
     localStorage.removeItem('cubeAthleteUser');
+    localStorage.removeItem('currentUser');
     setRole(null);
     setOpen(false);
     router.push('/');
@@ -80,7 +83,11 @@ export default function Navbar() {
             }}
           >
             <span>
-              {role === 'admin' ? '⚡ Admin' : role === 'athlete' || role === 'results_entry' ? '👤 My Profile' : '⚡ Admin'}
+              {role === 'admin'
+                ? '⚡ Admin'
+                : role === 'athlete' || role === 'results_entry'
+                ? '👤 My Profile'
+                : 'Sign In'}
             </span>
             <svg
               viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}
