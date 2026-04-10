@@ -219,45 +219,47 @@ export default function CompetitionsTab() {
               {allAthletes.length === 0 ? (
                 <div style={{ color: 'var(--muted)', fontSize: '0.85rem', fontStyle: 'italic' }}>No athletes in club yet.</div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '0.4rem' }}>
                   {allAthletes.map(athlete => {
                     const reg = athleteReg[athlete.id];
                     const isSelected = reg?.selected || false;
+                    const fullName = [athlete.name, athlete.lastName].filter(Boolean).join(' ');
                     return (
                       <div key={athlete.id} style={{
                         borderRadius: '10px',
                         border: `1px solid ${isSelected ? 'rgba(124,58,237,0.45)' : 'rgba(255,255,255,0.06)'}`,
                         background: isSelected ? 'rgba(124,58,237,0.07)' : 'rgba(255,255,255,0.02)',
                         transition: 'border-color 0.15s, background 0.15s',
+                        display: 'flex', flexDirection: 'column',
                       }}>
                         <div
                           onClick={() => toggleAthlete(athlete.id)}
-                          style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', padding: '0.5rem 0.75rem', cursor: 'pointer' }}
+                          style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', padding: '0.5rem', cursor: 'pointer' }}
                         >
                           <div style={{
-                            width: 16, height: 16, borderRadius: '4px', flexShrink: 0,
+                            width: 15, height: 15, borderRadius: '3px', flexShrink: 0, marginTop: '0.1rem',
                             border: `2px solid ${isSelected ? '#7c3aed' : 'rgba(255,255,255,0.2)'}`,
                             background: isSelected ? '#7c3aed' : 'transparent',
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
                             transition: 'all 0.12s',
                           }}>
                             {isSelected && (
-                              <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+                              <svg width="9" height="7" viewBox="0 0 10 8" fill="none">
                                 <path d="M1 4l3 3 5-6" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
                               </svg>
                             )}
                           </div>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text)' }}>{athlete.name}</div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text)', lineHeight: 1.3 }}>{fullName}</div>
                             {athlete.wcaId && (
-                              <div style={{ fontSize: '0.72rem', color: 'var(--muted)', marginTop: '0.05rem' }}>{athlete.wcaId}</div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--muted)', opacity: 0.6, marginTop: '0.1rem' }}>{athlete.wcaId}</div>
                             )}
                           </div>
                         </div>
                         {isSelected && competitionEvents.length > 0 && (
                           <div style={{
-                            display: 'flex', flexWrap: 'wrap', gap: '0.3rem',
-                            padding: '0.3rem 0.75rem 0.5rem 2.9rem',
+                            display: 'flex', flexWrap: 'wrap', gap: '0.25rem',
+                            padding: '0.3rem 0.5rem 0.45rem',
                             borderTop: '1px solid rgba(255,255,255,0.04)',
                           }}>
                             {competitionEvents.map(ev => {
@@ -268,10 +270,10 @@ export default function CompetitionsTab() {
                                   type="button"
                                   onClick={e => { e.stopPropagation(); toggleAthleteEvent(athlete.id, ev.id, !evSelected); }}
                                   style={{
-                                    padding: '0.18rem 0.55rem', borderRadius: '999px',
-                                    cursor: 'pointer', fontSize: '0.73rem', fontFamily: 'inherit',
-                                    border: `1px solid ${evSelected ? 'rgba(124,58,237,0.6)' : 'rgba(255,255,255,0.1)'}`,
-                                    background: evSelected ? 'rgba(124,58,237,0.22)' : 'rgba(255,255,255,0.03)',
+                                    padding: '0.15rem 0.45rem', borderRadius: '999px',
+                                    cursor: 'pointer', fontSize: '0.7rem', fontFamily: 'inherit',
+                                    border: `1px solid ${evSelected ? 'rgba(124,58,237,0.6)' : 'rgba(255,255,255,0.12)'}`,
+                                    background: evSelected ? 'rgba(124,58,237,0.22)' : 'transparent',
                                     color: evSelected ? '#c4b5fd' : 'var(--muted)',
                                     transition: 'all 0.12s',
                                   }}
@@ -284,11 +286,11 @@ export default function CompetitionsTab() {
                         )}
                         {isSelected && competitionEvents.length === 0 && (
                           <div style={{
-                            padding: '0.3rem 0.75rem 0.4rem 2.9rem',
+                            padding: '0.25rem 0.5rem 0.4rem',
                             borderTop: '1px solid rgba(255,255,255,0.04)',
-                            fontSize: '0.73rem', color: 'var(--muted)', fontStyle: 'italic',
+                            fontSize: '0.7rem', color: 'var(--muted)', fontStyle: 'italic',
                           }}>
-                            No events selected for this competition yet.
+                            No events selected yet.
                           </div>
                         )}
                       </div>
