@@ -1,14 +1,40 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import ThemeToggle from './ThemeToggle';
 import LangToggle from './LangToggle';
 
+type SessionRole = 'admin' | 'athlete' | 'results_entry' | null;
+
+function getSessionRole(): SessionRole {
+  try {
+    if (localStorage.getItem('isAdmin') === 'true') return 'admin';
+    const user = JSON.parse(localStorage.getItem('cubeAthleteUser') || 'null');
+    if (user?.role === 'admin') return 'admin';
+    if (user?.role === 'results_entry') return 'results_entry';
+    if (user?.athleteId) return 'athlete';
+  } catch {}
+  return null;
+}
+
 export default function Navbar() {
   const [open, setOpen] = useState(false);
+  const [role, setRole] = useState<SessionRole>(null);
   const router = useRouter();
+
+  useEffect(() => {
+    setRole(getSessionRole());
+  }, []);
+
+  function signOut() {
+    localStorage.removeItem('isAdmin');
+    localStorage.removeItem('cubeAthleteUser');
+    setRole(null);
+    setOpen(false);
+    router.push('/');
+  }
 
   return (
     <nav style={{
@@ -38,7 +64,7 @@ export default function Navbar() {
         <Link href="/#live" className="nav-link">Live</Link>
         <Link href="/#athletes" className="nav-link hide-mobile">Athletes</Link>
 
-        {/* Admin dropdown */}
+        {/* Auth dropdown */}
         <div style={{ position: 'relative' }}>
           <button
             onClick={() => setOpen((v) => !v)}
@@ -53,7 +79,9 @@ export default function Navbar() {
               transition: 'background 0.2s, border-color 0.2s',
             }}
           >
-            <span>⚡ Admin</span>
+            <span>
+              {role === 'admin' ? '⚡ Admin' : role === 'athlete' || role === 'results_entry' ? '👤 My Profile' : '⚡ Admin'}
+            </span>
             <svg
               viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}
               style={{ width: 13, height: 13, opacity: 0.5, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.22s' }}
@@ -80,24 +108,94 @@ export default function Navbar() {
                 zIndex: 1100,
                 animation: 'ndFadeIn 0.14s cubic-bezier(.4,0,.2,1)',
               }}>
-                {/* Sign In */}
-                <button
-                  onClick={() => { setOpen(false); router.push('/login'); }}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: '0.5rem',
-                    padding: '0.58rem 0.65rem', borderRadius: '9px',
-                    fontSize: '0.86rem', fontWeight: 600, color: 'var(--text)',
-                    background: 'none', border: 'none', cursor: 'pointer',
-                    fontFamily: 'inherit', width: '100%', textAlign: 'left',
-                    transition: 'background 0.15s',
-                  }}
-                  className="nd-link"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
-                    <path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3" />
-                  </svg>
-                  Sign In
-                </button>
+
+                {role === null && (
+                  /* Not logged in — show Sign In */
+                  <button
+                    onClick={() => { setOpen(false); router.push('/login'); }}
+                    className="nd-link"
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '0.5rem',
+                      padding: '0.58rem 0.65rem', borderRadius: '9px',
+                      fontSize: '0.86rem', fontWeight: 600, color: 'var(--text)',
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      fontFamily: 'inherit', width: '100%', textAlign: 'left',
+                    }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
+                      <path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3" />
+                    </svg>
+                    Sign In
+                  </button>
+                )}
+
+                {role === 'admin' && (
+                  /* Logged in as admin */
+                  <>
+                    <a
+                      href="/admin/dashboard"
+                      className="nd-link"
+                      style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.58rem 0.65rem', borderRadius: '9px', fontSize: '0.86rem', fontWeight: 600, color: 'var(--text)', textDecoration: 'none' }}
+                      onClick={() => setOpen(false)}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
+                        <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+                      </svg>
+                      Admin Dashboard
+                    </a>
+                    <div style={{ height: '1px', background: 'rgba(255,255,255,0.07)', margin: '3px 6px' }} />
+                    <button
+                      onClick={signOut}
+                      className="nd-link"
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '0.5rem',
+                        padding: '0.58rem 0.65rem', borderRadius: '9px',
+                        fontSize: '0.86rem', fontWeight: 600, color: '#f87171',
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        fontFamily: 'inherit', width: '100%', textAlign: 'left',
+                      }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>
+                      </svg>
+                      Sign Out
+                    </button>
+                  </>
+                )}
+
+                {(role === 'athlete' || role === 'results_entry') && (
+                  /* Logged in as athlete / results entry */
+                  <>
+                    <a
+                      href="/dashboard"
+                      className="nd-link"
+                      style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.58rem 0.65rem', borderRadius: '9px', fontSize: '0.86rem', fontWeight: 600, color: 'var(--text)', textDecoration: 'none' }}
+                      onClick={() => setOpen(false)}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
+                        <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/>
+                      </svg>
+                      My Profile
+                    </a>
+                    <div style={{ height: '1px', background: 'rgba(255,255,255,0.07)', margin: '3px 6px' }} />
+                    <button
+                      onClick={signOut}
+                      className="nd-link"
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '0.5rem',
+                        padding: '0.58rem 0.65rem', borderRadius: '9px',
+                        fontSize: '0.86rem', fontWeight: 600, color: '#f87171',
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        fontFamily: 'inherit', width: '100%', textAlign: 'left',
+                      }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>
+                      </svg>
+                      Sign Out
+                    </button>
+                  </>
+                )}
 
                 <div style={{ height: '1px', background: 'rgba(255,255,255,0.07)', margin: '3px 6px' }} />
 
