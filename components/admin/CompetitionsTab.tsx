@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import {
   subscribeCompetitions,
   addCompetition,
@@ -9,6 +9,7 @@ import {
 } from '@/lib/firebase/services/competitions';
 import type { Competition } from '@/lib/types';
 import { WCA_EVENTS } from '@/lib/wca-events';
+import COUNTRIES from '@/lib/countries';
 
 type Status = 'upcoming' | 'live' | 'finished';
 const emptyForm: { name: string; country: string; date: string; status: Status } = { name: '', country: '', date: '', status: 'upcoming' };
@@ -69,6 +70,7 @@ export default function CompetitionsTab() {
     finished: 'rgba(100,116,139,0.35)',
   };
 
+  // ── render ──────────────────────────────────────────────────────────────────
   return (
     <div>
       {/* Form */}
@@ -82,8 +84,10 @@ export default function CompetitionsTab() {
           </div>
           <div className="form-group">
             <label>Country *</label>
-            <input type="text" value={form.country} placeholder="e.g. Mongolia"
-              onChange={e => setForm(f => ({ ...f, country: e.target.value }))} />
+            <CountryDropdown
+              value={form.country}
+              onChange={country => setForm(f => ({ ...f, country }))}
+            />
           </div>
           <div className="form-group">
             <label>Date</label>
@@ -186,6 +190,132 @@ export default function CompetitionsTab() {
             )
         }
       </div>
+    </div>
+  );
+}
+
+// ── CountryDropdown ────────────────────────────────────────────────────────────
+
+function CountryDropdown({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [query, setQuery] = useState(value);
+  const [open, setOpen] = useState(false);
+  const [highlighted, setHighlighted] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+
+  const filtered = query.trim() === ''
+    ? COUNTRIES
+    : COUNTRIES.filter(c => c.toLowerCase().includes(query.toLowerCase()));
+
+  // Sync input text when parent changes value (e.g. Edit button)
+  const prevValue = useRef(value);
+  if (prevValue.current !== value) {
+    prevValue.current = value;
+    if (query !== value) setQuery(value);
+  }
+
+  const select = useCallback((country: string) => {
+    onChange(country);
+    setQuery(country);
+    setOpen(false);
+    setHighlighted(0);
+  }, [onChange]);
+
+  // Close on outside click
+  useEffect(() => {
+    function onPointerDown(e: PointerEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, []);
+
+  // Scroll highlighted item into view
+  useEffect(() => {
+    if (!open || !listRef.current) return;
+    const item = listRef.current.children[highlighted] as HTMLElement | undefined;
+    item?.scrollIntoView({ block: 'nearest' });
+  }, [highlighted, open]);
+
+  function onKeyDown(e: React.KeyboardEvent) {
+    if (!open) {
+      if (e.key === 'ArrowDown' || e.key === 'Enter') { setOpen(true); e.preventDefault(); }
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      setHighlighted(h => Math.min(h + 1, filtered.length - 1));
+      e.preventDefault();
+    } else if (e.key === 'ArrowUp') {
+      setHighlighted(h => Math.max(h - 1, 0));
+      e.preventDefault();
+    } else if (e.key === 'Enter') {
+      if (filtered[highlighted]) select(filtered[highlighted]);
+      e.preventDefault();
+    } else if (e.key === 'Escape') {
+      setOpen(false);
+    }
+  }
+
+  return (
+    <div ref={containerRef} style={{ position: 'relative' }}>
+      <input
+        type="text"
+        value={query}
+        placeholder="Search country…"
+        autoComplete="off"
+        onFocus={() => { setOpen(true); setHighlighted(0); }}
+        onChange={e => {
+          setQuery(e.target.value);
+          setOpen(true);
+          setHighlighted(0);
+          // If cleared, also clear the form value
+          if (e.target.value === '') onChange('');
+        }}
+        onKeyDown={onKeyDown}
+      />
+
+      {open && filtered.length > 0 && (
+        <ul
+          ref={listRef}
+          style={{
+            position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
+            zIndex: 200,
+            background: 'var(--card, #1e1b2e)',
+            border: '1px solid rgba(124,58,237,0.35)',
+            borderRadius: '9px',
+            padding: '4px',
+            margin: 0,
+            listStyle: 'none',
+            maxHeight: '220px',
+            overflowY: 'auto',
+            boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
+            scrollbarWidth: 'thin',
+            scrollbarColor: 'rgba(124,58,237,0.4) transparent',
+          }}
+        >
+          {filtered.map((country, i) => (
+            <li
+              key={country}
+              onPointerDown={e => { e.preventDefault(); select(country); }}
+              style={{
+                padding: '0.38rem 0.7rem',
+                borderRadius: '6px',
+                fontSize: '0.88rem',
+                cursor: 'pointer',
+                color: i === highlighted ? '#fff' : 'var(--text)',
+                background: i === highlighted ? 'rgba(124,58,237,0.4)' : 'transparent',
+                fontWeight: i === highlighted ? 600 : 400,
+                transition: 'background 0.1s',
+              }}
+              onPointerEnter={() => setHighlighted(i)}
+            >
+              {country}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
