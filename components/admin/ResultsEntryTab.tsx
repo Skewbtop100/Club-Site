@@ -263,6 +263,19 @@ export default function ResultsEntryTab() {
             <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>Panels: <strong>{panels.length}</strong></span>
             <button className="btn-xs" onClick={() => setPanels(p => [...p, emptyPanel(p.length)])}>+ Add Panel</button>
             <button className="btn-xs" onClick={() => { if (panels.length <= 1) return; setPanels(p => p.slice(0, -1)); }}>− Remove</button>
+            <button
+              className="btn-xs"
+              onClick={() => { if (showTimer) { resetTimer(); setShowTimer(false); } else setShowTimer(true); }}
+              style={{
+                background: showTimer
+                  ? 'linear-gradient(135deg, rgba(45,212,191,0.35), rgba(6,182,212,0.35))'
+                  : 'linear-gradient(135deg, rgba(45,212,191,0.15), rgba(6,182,212,0.15))',
+                border: `1px solid ${showTimer ? 'rgba(45,212,191,0.65)' : 'rgba(45,212,191,0.35)'}`,
+                color: showTimer ? '#5eead4' : '#2dd4bf',
+              }}
+            >
+              Inspection Timer
+            </button>
           </div>
         )}
       </div>
@@ -325,38 +338,30 @@ export default function ResultsEntryTab() {
                   {evList.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
                 </select>
 
-                {/* Round */}
-                <select className="compact-select" value={panel.round}
-                  onChange={e => updatePanel(panel.id, { round: Number(e.target.value) })}>
-                  {roundNames.map((name, idx) => (
-                    <option key={idx} value={idx + 1}>{name}</option>
-                  ))}
-                </select>
+                {/* Round + Group */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '0.3rem' }}>
+                  <div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.2rem', paddingLeft: '0.1rem' }}>Round</div>
+                    <select className="compact-select" value={panel.round} style={{ marginBottom: 0 }}
+                      onChange={e => updatePanel(panel.id, { round: Number(e.target.value) })}>
+                      {roundNames.map((name, idx) => (
+                        <option key={idx} value={idx + 1}>{name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.2rem', paddingLeft: '0.1rem' }}>Group</div>
+                    <select className="compact-select" value={panel.group} style={{ marginBottom: 0 }}
+                      onChange={e => updatePanel(panel.id, { group: Number(e.target.value) })}>
+                      {Array.from({ length: Math.max(1, groupCount) }, (_, i) => (
+                        <option key={i} value={i + 1}>Group {String.fromCharCode(65 + i)}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
 
-                {/* Group */}
-                <select className="compact-select" value={panel.group}
-                  onChange={e => updatePanel(panel.id, { group: Number(e.target.value) })}>
-                  {Array.from({ length: Math.max(1, groupCount) }, (_, i) => (
-                    <option key={i} value={i + 1}>Group {String.fromCharCode(65 + i)}</option>
-                  ))}
-                </select>
-
-                {/* ── Inspection Timer ─────────────────────────────────────── */}
-                <div style={{ marginBottom: '0.4rem' }}>
-                  <button
-                    className="btn-xs"
-                    onClick={() => { if (showTimer) { resetTimer(); setShowTimer(false); } else setShowTimer(true); }}
-                    style={{
-                      width: '100%', marginBottom: showTimer ? '0.4rem' : 0,
-                      ...(showTimer ? {
-                        background: 'rgba(251,191,36,0.15)',
-                        borderColor: 'rgba(251,191,36,0.45)',
-                        color: '#fbbf24',
-                      } : {}),
-                    }}
-                  >
-                    Inspection Timer
-                  </button>
+                {/* ── Inspection Timer (shown when toggled from toolbar) ────── */}
+                <div style={{ marginBottom: showTimer ? '0.4rem' : 0 }}>
                   {showTimer && (() => {
                     const color  = timerColor(timerMs);
                     const isDnf  = timerMs / 1000 >= 17;
