@@ -257,16 +257,18 @@ function AthleteProfileModal({
 
   return (
     <div style={{
-      position: 'fixed', inset: 0, zIndex: 2000,
+      position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', zIndex: 2000,
       background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)',
-      display: 'flex', alignItems: 'stretch',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: '1rem',
       animation: 'overlayIn 0.18s ease',
     }} onClick={onClose}>
       <div style={{
         position: 'relative', width: '100%', maxWidth: '680px',
-        marginLeft: 'auto', background: 'var(--bg)',
-        borderLeft: '1px solid rgba(124,58,237,0.25)',
-        overflowY: 'auto', height: '100%',
+        maxHeight: '90vh', background: 'var(--bg)',
+        border: '1px solid rgba(124,58,237,0.25)',
+        borderRadius: '16px',
+        overflowY: 'auto',
         animation: 'slideIn 0.22s cubic-bezier(.4,0,.2,1)',
       }} onClick={(e) => e.stopPropagation()}>
 
@@ -421,7 +423,7 @@ function AthleteProfileModal({
 
       <style>{`
         @keyframes overlayIn { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes slideIn { from { transform: translateX(40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes slideIn { from { transform: scale(0.95) translateY(10px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
       `}</style>
     </div>
   );

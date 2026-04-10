@@ -42,7 +42,13 @@ export default function AdminDashboardPage() {
   const [menuOpen, setMenuOpen]   = useState(false);
 
   useEffect(() => {
-    if (localStorage.getItem('isAdmin') !== 'true') {
+    const isAdmin = localStorage.getItem('isAdmin') === 'true';
+    let sessionIsAdmin = false;
+    try {
+      const user = JSON.parse(localStorage.getItem('cubeAthleteUser') || 'null');
+      sessionIsAdmin = user?.role === 'admin';
+    } catch {}
+    if (!isAdmin && !sessionIsAdmin) {
       router.replace('/admin');
     }
   }, [router]);
