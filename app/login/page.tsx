@@ -17,7 +17,9 @@ export default function LoginPage() {
   useEffect(() => {
     try {
       const session = JSON.parse(localStorage.getItem('cubeAthleteUser') || 'null');
-      if (session?.athleteId || session?.role === 'results_entry') {
+      if (session?.role === 'admin') {
+        router.replace('/admin/dashboard');
+      } else if (session?.athleteId || session?.role === 'results_entry') {
         router.replace('/dashboard');
       }
     } catch {
@@ -44,7 +46,7 @@ export default function LoginPage() {
         athleteId: user.athleteId || null,
         role: user.role || 'athlete',
       }));
-      router.push('/dashboard');
+      router.push(user.role === 'admin' ? '/admin/dashboard' : '/dashboard');
     } catch (e: unknown) {
       setError('Login failed: ' + (e instanceof Error ? e.message : String(e)));
     } finally {

@@ -2,7 +2,13 @@
   "permissions": {
     "allow": [
       "Bash(del \"c:\\\\Users\\\\Uuganaa\\\\Club Site\\\\results-entry-extracted.js\")",
-      "Bash(python3 -c ':*)"
+      "Bash(python3 -c ':*)",
+      "Read(//c/Users/Uuganaa/**)",
+      "Bash(npx create-next-app@latest cube-mn --typescript --tailwind --app --eslint --no-src-dir --import-alias \"@/*\")",
+      "Bash(npx shadcn@latest init --defaults)",
+      "Bash(npm install:*)",
+      "Bash(mkdir -p \"c:\\\\Users\\\\Uuganaa\\\\cube-mn\\\\lib\\\\firebase\")",
+      "Bash(mkdir -p \"c:\\\\Users\\\\Uuganaa\\\\cube-mn\\\\types\")"
     ]
   }
 }
