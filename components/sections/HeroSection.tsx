@@ -1,18 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
-import { getAthleteCount } from '@/lib/firebase/services/athletes';
-import { getCompetitionCount } from '@/lib/firebase/services/competitions';
+import { useAthletes } from '@/lib/hooks/useAthletes';
+import { useCompetitions } from '@/lib/hooks/useCompetitions';
 
 export default function HeroSection() {
-  const [athleteCount, setAthleteCount] = useState<number | null>(null);
-  const [compCount, setCompCount] = useState<number | null>(null);
-
-  useEffect(() => {
-    getAthleteCount().then(setAthleteCount).catch(() => {});
-    getCompetitionCount().then(setCompCount).catch(() => {});
-  }, []);
+  const { athletes, loading: athletesLoading } = useAthletes();
+  const { competitions, loading: compsLoading } = useCompetitions();
 
   return (
     <section style={{
@@ -103,8 +97,8 @@ export default function HeroSection() {
           background: 'var(--surface)', border: '1px solid rgba(255,255,255,0.06)',
           borderRadius: 14, backdropFilter: 'blur(12px)',
         }}>
-          <StatItem value={athleteCount} label="Athletes" />
-          <StatItem value={compCount} label="Competitions" />
+          <StatItem value={athletesLoading ? '...' : athletes.length} label="Athletes" />
+          <StatItem value={compsLoading ? '...' : competitions.length} label="Competitions" />
           <StatItem value={17} label="Events Supported" />
         </div>
       </div>
@@ -132,7 +126,7 @@ export default function HeroSection() {
   );
 }
 
-function StatItem({ value, label }: { value: number | null; label: string }) {
+function StatItem({ value, label }: { value: string | number; label: string }) {
   return (
     <div style={{ textAlign: 'center' }}>
       <div style={{
@@ -140,7 +134,7 @@ function StatItem({ value, label }: { value: number | null; label: string }) {
         background: 'linear-gradient(135deg, var(--accent), var(--accent2))',
         WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
       }}>
-        {value === null ? '—' : value}
+        {value}
       </div>
       <div style={{ fontSize: '0.72rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginTop: '0.15rem' }}>
         {label}
