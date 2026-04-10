@@ -97,7 +97,7 @@ export default function RankingsSection({ results, athletes, wcaRecords, eventVi
               onClick={() => setActiveEvent(ev.id)}
               className={`tab-btn${safeEvent === ev.id ? ' active' : ''}`}
             >
-              <span style={{ fontSize: '0.85em', fontWeight: 600 }}>{ev.short}</span>
+              {ev.name}
             </button>
           ))}
         </div>
