@@ -24,12 +24,42 @@ function bestOf(solves: (number | null)[]): number {
 }
 
 interface PanelState {
-  id: number; athleteId: string; eventId: string; round: number;
+  id: number; athleteId: string; eventId: string; round: number; group: number;
   solves: string[]; penalties: ('none' | '+2' | 'dnf')[];
+  currentSolveIdx: number; rawInput: string;
   msg: string; msgType: string;
 }
 function emptyPanel(id: number): PanelState {
-  return { id, athleteId: '', eventId: '', round: 1, solves: ['','','','',''], penalties: ['none','none','none','none','none'], msg: '', msgType: '' };
+  return {
+    id, athleteId: '', eventId: '', round: 1, group: 1,
+    solves: ['', '', '', '', ''], penalties: ['none', 'none', 'none', 'none', 'none'],
+    currentSolveIdx: 0, rawInput: '',
+    msg: '', msgType: '',
+  };
+}
+
+function getRoundNames(totalRounds: number): string[] {
+  if (totalRounds <= 1) return ['Final'];
+  if (totalRounds === 2) return ['First Round', 'Final'];
+  if (totalRounds === 3) return ['First Round', 'Second Round', 'Final'];
+  return ['First Round', 'Second Round', 'Semi Final', 'Final'];
+}
+
+/** Convert raw digit string to parseable time string.
+ *  "11" → "0.11", "111" → "1.11", "1111" → "11.11",
+ *  "11111" → "1:11.11", "111111" → "11:11.11"
+ */
+function formatRawDigits(raw: string): string {
+  const d = raw.replace(/\D/g, '');
+  if (!d) return '';
+  const padded = d.length < 2 ? d.padStart(2, '0') : d;
+  const cs = padded.slice(-2);
+  const rest = padded.slice(0, -2);
+  if (!rest || parseInt(rest, 10) === 0) return `0.${cs}`;
+  const secsStr = rest.slice(-2).padStart(2, '0');
+  const minsStr = rest.slice(0, -2);
+  if (!minsStr || parseInt(minsStr, 10) === 0) return `${parseInt(secsStr, 10)}.${cs}`;
+  return `${parseInt(minsStr, 10)}:${secsStr}.${cs}`;
 }
 
 export default function ResultsEntryTab() {
@@ -39,8 +69,10 @@ export default function ResultsEntryTab() {
   const [panels, setPanels]       = useState<PanelState[]>([emptyPanel(0)]);
 
   // Inspection timer state
+  const [showTimer, setShowTimer]       = useState(false);
   const [timerMs, setTimerMs]           = useState(0);
   const [timerRunning, setTimerRunning] = useState(false);
+  const [timerStopped, setTimerStopped] = useState(false);
   const timerIntervalRef  = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerStartRef     = useRef<number>(0);
   const timerAccRef       = useRef<number>(0);
@@ -51,7 +83,6 @@ export default function ResultsEntryTab() {
     const unsub = subscribeCompetitions((data) => setComps(data));
     return unsub;
   }, []);
-
   useEffect(() => {
     return () => { if (timerIntervalRef.current) clearInterval(timerIntervalRef.current); };
   }, []);
@@ -59,11 +90,27 @@ export default function ResultsEntryTab() {
   function updatePanel(id: number, patch: Partial<PanelState>) {
     setPanels(prev => prev.map(p => p.id === id ? { ...p, ...patch } : p));
   }
-  function setSolve(panelId: number, i: number, val: string) {
-    setPanels(prev => prev.map(p => { if (p.id !== panelId) return p; const s = [...p.solves]; s[i] = val; return { ...p, solves: s }; }));
+
+  function setPenaltyCurrent(panelId: number, pen: 'none' | '+2' | 'dnf') {
+    setPanels(prev => prev.map(p => {
+      if (p.id !== panelId) return p;
+      const ps = [...p.penalties];
+      const idx = p.currentSolveIdx;
+      if (idx >= 5) return p;
+      ps[idx] = ps[idx] === pen ? 'none' : pen;
+      return { ...p, penalties: ps };
+    }));
   }
-  function setPenalty(panelId: number, i: number, pen: 'none' | '+2' | 'dnf') {
-    setPanels(prev => prev.map(p => { if (p.id !== panelId) return p; const ps = [...p.penalties]; ps[i] = ps[i] === pen ? 'none' : pen; return { ...p, penalties: ps }; }));
+
+  function advanceSolve(panelId: number) {
+    setPanels(prev => prev.map(p => {
+      if (p.id !== panelId) return p;
+      const idx = p.currentSolveIdx;
+      if (idx >= 5) return p;
+      const newSolves = [...p.solves];
+      newSolves[idx] = p.penalties[idx] === 'dnf' ? '' : formatRawDigits(p.rawInput);
+      return { ...p, solves: newSolves, currentSolveIdx: idx + 1, rawInput: '' };
+    }));
   }
 
   function computeResult(p: PanelState) {
@@ -98,7 +145,7 @@ export default function ResultsEntryTab() {
     }
   }
 
-  // ── Inspection timer helpers ─────────────────────────────────────────────────
+  // ── Inspection timer helpers ──────────────────────────────────────────────────
 
   function playBeep(freq: number, dur: number) {
     try {
@@ -117,40 +164,42 @@ export default function ResultsEntryTab() {
     } catch { /* audio unavailable */ }
   }
 
-  function startTimer() {
-    if (timerIntervalRef.current) return;
-    timerStartRef.current = Date.now() - timerAccRef.current;
-    setTimerRunning(true);
-    timerIntervalRef.current = setInterval(() => {
-      const elapsed = Date.now() - timerStartRef.current;
-      timerAccRef.current = elapsed;
-      setTimerMs(elapsed);
-      const s = elapsed / 1000;
-      if (s >= 8  && lastMilestoneRef.current < 8)  { lastMilestoneRef.current = 8;  playBeep(880,  0.18); }
-      if (s >= 12 && lastMilestoneRef.current < 12) { lastMilestoneRef.current = 12; playBeep(1100, 0.18); }
-      if (s >= 17) {
-        clearInterval(timerIntervalRef.current!);
-        timerIntervalRef.current = null;
-        setTimerRunning(false);
-      }
-    }, 30);
-  }
-
-  function stopTimer() {
-    if (timerIntervalRef.current) { clearInterval(timerIntervalRef.current); timerIntervalRef.current = null; }
-    setTimerRunning(false);
+  function tapTimer() {
+    if (timerRunning) {
+      if (timerIntervalRef.current) { clearInterval(timerIntervalRef.current); timerIntervalRef.current = null; }
+      setTimerRunning(false);
+      setTimerStopped(true);
+    } else {
+      timerStartRef.current = Date.now() - timerAccRef.current;
+      setTimerRunning(true);
+      setTimerStopped(false);
+      timerIntervalRef.current = setInterval(() => {
+        const elapsed = Date.now() - timerStartRef.current;
+        timerAccRef.current = elapsed;
+        setTimerMs(elapsed);
+        const s = elapsed / 1000;
+        if (s >= 8  && lastMilestoneRef.current < 8)  { lastMilestoneRef.current = 8;  playBeep(880,  0.18); }
+        if (s >= 12 && lastMilestoneRef.current < 12) { lastMilestoneRef.current = 12; playBeep(1100, 0.18); }
+        if (s >= 17) {
+          clearInterval(timerIntervalRef.current!);
+          timerIntervalRef.current = null;
+          setTimerRunning(false);
+          setTimerStopped(true);
+        }
+      }, 30);
+    }
   }
 
   function resetTimer() {
-    stopTimer();
+    if (timerIntervalRef.current) { clearInterval(timerIntervalRef.current); timerIntervalRef.current = null; }
+    setTimerRunning(false);
+    setTimerStopped(false);
     timerAccRef.current    = 0;
     lastMilestoneRef.current = 0;
     setTimerMs(0);
   }
 
-  function fmtInspection(ms: number) {
-    return (ms / 1000).toFixed(1) + 's';
-  }
+  function fmtInspection(ms: number) { return (ms / 1000).toFixed(1) + 's'; }
 
   function timerColor(ms: number) {
     const s = ms / 1000;
@@ -161,21 +210,13 @@ export default function ResultsEntryTab() {
     return '#f8fafc';
   }
 
-  function timerStatus(ms: number) {
-    const s = ms / 1000;
-    if (s >= 17) return 'DNF!';
-    if (s >= 15) return '+2 Penalty!';
-    if (s >= 12) return '12 seconds';
-    if (s >= 8)  return '8 seconds';
-    return '';
-  }
-
   // ─────────────────────────────────────────────────────────────────────────────
 
-  const selComp = comps.find(c => c.id === compId);
-  const evList = selComp?.events ? WCA_EVENTS.filter(e => (selComp.events as Record<string,boolean>)?.[e.id]) : WCA_EVENTS;
-  const liveComps = comps.filter(c => c.status === 'live' || c.status === 'upcoming');
+  const selComp     = comps.find(c => c.id === compId);
+  const evList      = selComp?.events ? WCA_EVENTS.filter(e => (selComp.events as Record<string,boolean>)?.[e.id]) : WCA_EVENTS;
+  const liveComps   = comps.filter(c => c.status === 'live' || c.status === 'upcoming');
   const compAthletes = selComp?.athletes;
+  const eventConfig = selComp?.eventConfig || {};
 
   return (
     <div className="card">
@@ -183,22 +224,31 @@ export default function ResultsEntryTab() {
 
       {/* Competition selector + controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.8rem', flexWrap: 'wrap' }}>
-        <div className="form-group" style={{ maxWidth: '340px', marginBottom: 0, flex: 1 }}>
+        <div className="form-group" style={{ maxWidth: '340px', marginBottom: 0, flex: 1, minWidth: '200px' }}>
           <label>Competition</label>
-          <select value={compId} onChange={e => { setCompId(e.target.value); setPanels([emptyPanel(0)]); }}>
+          <select value={compId} onChange={e => { setCompId(e.target.value); setPanels([emptyPanel(0)]); resetTimer(); setShowTimer(false); }}>
             <option value="">— Select competition —</option>
             {liveComps.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
-        <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', paddingTop: compId ? '1.5rem' : 0, flexWrap: 'wrap' }}>
-          {compId && (
-            <>
-              <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>Panels: <strong>{panels.length}</strong></span>
-              <button className="btn-xs" onClick={() => setPanels(p => [...p, emptyPanel(p.length)])}>+ Add Panel</button>
-              <button className="btn-xs" onClick={() => { if (panels.length <= 1) return; setPanels(p => p.slice(0, -1)); }}>− Remove</button>
-            </>
-          )}
-        </div>
+        {compId && (
+          <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', paddingTop: '1.5rem', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>Panels: <strong>{panels.length}</strong></span>
+            <button className="btn-xs" onClick={() => setPanels(p => [...p, emptyPanel(p.length)])}>+ Add Panel</button>
+            <button className="btn-xs" onClick={() => { if (panels.length <= 1) return; setPanels(p => p.slice(0, -1)); }}>− Remove</button>
+            <button
+              className="btn-xs"
+              onClick={() => { if (showTimer) { resetTimer(); setShowTimer(false); } else setShowTimer(true); }}
+              style={showTimer ? {
+                background: 'rgba(251,191,36,0.15)',
+                borderColor: 'rgba(251,191,36,0.45)',
+                color: '#fbbf24',
+              } : {}}
+            >
+              Inspection Timer
+            </button>
+          </div>
+        )}
       </div>
 
       {!compId && (
@@ -207,98 +257,76 @@ export default function ResultsEntryTab() {
         </div>
       )}
 
-      {/* ── Inline Inspection Timer ─────────────────────────────────────────── */}
-      {(() => {
-        const color  = timerColor(timerMs);
-        const status = timerStatus(timerMs);
-        const isDnf  = timerMs / 1000 >= 17;
-        const btnBase: React.CSSProperties = {
-          padding: '0.38rem 0.85rem', borderRadius: '8px', fontSize: '0.82rem',
-          fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer',
-          minHeight: '36px', transition: 'all 0.15s',
-        };
+      {/* ── Inspection Timer (tap to start/stop) ─────────────────────────────── */}
+      {showTimer && (() => {
+        const color = timerColor(timerMs);
+        const isDnf = timerMs / 1000 >= 17;
+        const isPlus2 = timerMs / 1000 >= 15 && !isDnf;
         return (
-          <div className="insp-timer-bar" style={{
-            display: 'flex', alignItems: 'center', gap: '0.75rem',
-            padding: '0.55rem 0.85rem', marginBottom: '0.85rem',
-            borderRadius: '10px',
-            background: 'rgba(255,255,255,0.03)',
-            border: '1px solid rgba(255,255,255,0.07)',
-          }}>
-            {/* Label */}
-            <span style={{ fontSize: '0.65rem', fontWeight: 700, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.09em', flexShrink: 0 }}>
-              Inspection
-            </span>
-
-            {/* Timer value */}
-            <span className="insp-timer-val" style={{
-              fontSize: '1.85rem', fontWeight: 700, lineHeight: 1,
-              color, transition: 'color 0.25s',
-              fontVariantNumeric: 'tabular-nums',
-              minWidth: '5rem', flexShrink: 0,
+          <div
+            onClick={() => !timerStopped && tapTimer()}
+            style={{
+              marginBottom: '0.85rem', borderRadius: '12px', overflow: 'hidden',
+              border: `1px solid ${color === '#f8fafc' ? 'rgba(255,255,255,0.1)' : color + '55'}`,
+              cursor: timerStopped ? 'default' : 'pointer',
+              userSelect: 'none',
+              WebkitUserSelect: 'none',
+            }}
+          >
+            <div style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              padding: '1.75rem 1rem',
+              background: `${color}11`,
+              transition: 'background 0.25s',
+              minHeight: '110px',
             }}>
-              {fmtInspection(timerMs)}
-            </span>
-
-            {/* Status */}
-            <span style={{
-              fontSize: '0.82rem', fontWeight: 700,
-              color, transition: 'color 0.25s',
-              minWidth: '5.5rem', flexShrink: 0,
-            }}>
-              {status}
-            </span>
-
-            <div style={{ flex: 1 }} />
-
-            {/* Buttons */}
-            <div style={{ display: 'flex', gap: '0.35rem', flexShrink: 0 }}>
-              <button
-                onClick={startTimer}
-                disabled={timerRunning || isDnf}
-                style={{
-                  ...btnBase,
-                  cursor: timerRunning || isDnf ? 'not-allowed' : 'pointer',
-                  background: timerRunning || isDnf ? 'rgba(16,185,129,0.07)' : 'rgba(16,185,129,0.2)',
-                  border: `1px solid ${timerRunning || isDnf ? 'rgba(16,185,129,0.15)' : 'rgba(16,185,129,0.5)'}`,
-                  color: timerRunning || isDnf ? 'rgba(52,211,153,0.3)' : '#34d399',
-                }}
-              >
-                Start
-              </button>
-              <button
-                onClick={stopTimer}
-                disabled={!timerRunning}
-                style={{
-                  ...btnBase,
-                  cursor: !timerRunning ? 'not-allowed' : 'pointer',
-                  background: !timerRunning ? 'rgba(251,191,36,0.05)' : 'rgba(251,191,36,0.15)',
-                  border: `1px solid ${!timerRunning ? 'rgba(251,191,36,0.12)' : 'rgba(251,191,36,0.45)'}`,
-                  color: !timerRunning ? 'rgba(251,191,36,0.28)' : '#fbbf24',
-                }}
-              >
-                Stop
-              </button>
-              <button
-                onClick={resetTimer}
-                style={{
-                  ...btnBase,
-                  background: 'rgba(255,255,255,0.05)',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  color: 'var(--muted)',
-                }}
-              >
-                Reset
-              </button>
+              <div style={{
+                fontSize: '3.5rem', fontWeight: 800, lineHeight: 1,
+                color, transition: 'color 0.25s',
+                fontVariantNumeric: 'tabular-nums',
+              }}>
+                {fmtInspection(timerMs)}
+              </div>
+              {isDnf && (
+                <div style={{ fontSize: '1.05rem', fontWeight: 700, color, marginTop: '0.5rem' }}>DNF!</div>
+              )}
+              {isPlus2 && (
+                <div style={{ fontSize: '1.05rem', fontWeight: 700, color, marginTop: '0.5rem' }}>+2 Penalty!</div>
+              )}
+              {!timerStopped && (
+                <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.35)', marginTop: '0.6rem' }}>
+                  {timerRunning ? 'TAP TO STOP' : 'TAP TO START'}
+                </div>
+              )}
             </div>
+            {timerStopped && (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: '0.55rem', background: 'rgba(0,0,0,0.25)' }}>
+                <button
+                  onClick={e => { e.stopPropagation(); resetTimer(); }}
+                  style={{
+                    padding: '0.35rem 1.4rem', borderRadius: '8px', fontSize: '0.82rem',
+                    background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)',
+                    color: 'var(--muted)', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600,
+                  }}
+                >
+                  Reset
+                </button>
+              </div>
+            )}
           </div>
         );
       })()}
 
+      {/* ── Entry Panels ─────────────────────────────────────────────────────── */}
       {compId && (
         <div className="multi-entry-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
           {panels.map(panel => {
+            const cfg        = eventConfig[panel.eventId] || { rounds: 1, groups: 1 };
+            const roundNames = getRoundNames(cfg.rounds);
+            const groupCount = cfg.groups;
+            const allEntered = panel.currentSolveIdx >= 5;
             const { single, average } = computeResult(panel);
+
             const panelAthletes = compAthletes
               ? athletes.filter(a => {
                   const ca = compAthletes.find(x => x.id === a.id);
@@ -307,6 +335,12 @@ export default function ResultsEntryTab() {
                   return ca.events.includes(panel.eventId);
                 })
               : athletes;
+
+            const curIdx     = panel.currentSolveIdx;
+            const curPenalty = curIdx < 5 ? panel.penalties[curIdx] : 'none';
+            const preview    = curIdx < 5 && curPenalty !== 'dnf' ? formatRawDigits(panel.rawInput) : '';
+            const canAdvance = curPenalty === 'dnf' || panel.rawInput.length > 0;
+
             return (
               <div className="compact-panel" key={panel.id}>
                 <div className="compact-panel-header">
@@ -325,57 +359,213 @@ export default function ResultsEntryTab() {
                   ))}
                 </select>
 
-                {/* Event + Round */}
+                {/* Event */}
+                <select className="compact-select" value={panel.eventId}
+                  onChange={e => updatePanel(panel.id, { eventId: e.target.value, round: 1, group: 1 })}>
+                  <option value="">— Event —</option>
+                  {evList.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                </select>
+
+                {/* Round + Group */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.3rem', marginBottom: '0.3rem' }}>
-                  <select className="compact-select" value={panel.eventId} style={{ marginBottom: 0 }}
-                    onChange={e => updatePanel(panel.id, { eventId: e.target.value })}>
-                    <option value="">— Event —</option>
-                    {evList.map(e => <option key={e.id} value={e.id}>{e.short}</option>)}
-                  </select>
                   <select className="compact-select" value={panel.round} style={{ marginBottom: 0 }}
                     onChange={e => updatePanel(panel.id, { round: Number(e.target.value) })}>
-                    {[1,2,3,4].map(r => <option key={r} value={r}>R{r}</option>)}
+                    {roundNames.map((name, idx) => (
+                      <option key={idx} value={idx + 1}>{name}</option>
+                    ))}
+                  </select>
+                  <select className="compact-select" value={panel.group} style={{ marginBottom: 0 }}
+                    onChange={e => updatePanel(panel.id, { group: Number(e.target.value) })}>
+                    {Array.from({ length: Math.max(1, groupCount) }, (_, i) => (
+                      <option key={i} value={i + 1}>Group {String.fromCharCode(65 + i)}</option>
+                    ))}
                   </select>
                 </div>
 
-                {/* Solves */}
-                <div className="compact-solves-row">
-                  {panel.solves.map((sv, i) => (
-                    <div className="solve-group" key={i}>
-                      <div className="solve-label">S{i+1}</div>
-                      <input
-                        className={`solve-input${panel.penalties[i] === 'dnf' ? ' dnf-val' : ''}`}
-                        value={panel.penalties[i] === 'dnf' ? 'DNF' : sv}
-                        readOnly={panel.penalties[i] === 'dnf'}
-                        onChange={e => setSolve(panel.id, i, e.target.value)}
-                        style={{ width: '100%' }}
-                      />
-                      <div className="solve-btns">
-                        <button className={`solve-btn solve-btn-plus2${panel.penalties[i] === '+2' ? ' active' : ''}`}
-                          onClick={() => setPenalty(panel.id, i, '+2')}>+2</button>
-                        <button className={`solve-btn solve-btn-dnf${panel.penalties[i] === 'dnf' ? ' active' : ''}`}
-                          onClick={() => setPenalty(panel.id, i, 'dnf')}>DNF</button>
+                {/* ── Solve Entry: one at a time ───────────────────────────── */}
+                {!allEntered ? (
+                  <div style={{ marginTop: '0.5rem' }}>
+                    {/* Progress label */}
+                    <div style={{
+                      fontSize: '0.72rem', fontWeight: 700, color: 'var(--muted)',
+                      textTransform: 'uppercase', letterSpacing: '0.08em',
+                      textAlign: 'center', marginBottom: '0.4rem',
+                    }}>
+                      Solve {curIdx + 1} of 5
+                    </div>
+
+                    {/* Large input */}
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={curPenalty === 'dnf' ? '' : panel.rawInput}
+                      placeholder={curPenalty === 'dnf' ? 'DNF' : '0'}
+                      readOnly={curPenalty === 'dnf'}
+                      onChange={e => {
+                        const raw = e.target.value.replace(/\D/g, '').slice(0, 6);
+                        updatePanel(panel.id, { rawInput: raw });
+                      }}
+                      style={{
+                        width: '100%', boxSizing: 'border-box',
+                        fontSize: '2.2rem', fontWeight: 700, textAlign: 'center',
+                        padding: '0.65rem 0.5rem', borderRadius: '10px',
+                        marginBottom: '0.3rem', minHeight: '68px',
+                        background: curPenalty === 'dnf' ? 'rgba(239,68,68,0.08)' : 'rgba(255,255,255,0.05)',
+                        border: `1px solid ${curPenalty === 'dnf' ? 'rgba(239,68,68,0.4)' : 'rgba(255,255,255,0.13)'}`,
+                        color: curPenalty === 'dnf' ? '#f87171' : 'var(--text)',
+                        fontFamily: 'inherit', outline: 'none',
+                      }}
+                    />
+
+                    {/* Parsed preview */}
+                    <div style={{
+                      fontSize: '0.82rem', color: 'var(--muted)', textAlign: 'center',
+                      minHeight: '1.3em', marginBottom: '0.5rem',
+                    }}>
+                      {curPenalty === 'dnf' ? 'DNF' : (preview ? `→ ${preview}` : '')}
+                    </div>
+
+                    {/* +2 / DNF / Next buttons */}
+                    <div style={{ display: 'flex', gap: '0.4rem' }}>
+                      <button
+                        onClick={() => setPenaltyCurrent(panel.id, '+2')}
+                        style={{
+                          flex: 1, padding: '0.6rem 0', borderRadius: '8px', fontSize: '0.88rem',
+                          fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer', minHeight: '48px',
+                          background: curPenalty === '+2' ? 'rgba(251,191,36,0.18)' : 'rgba(255,255,255,0.04)',
+                          border: `1px solid ${curPenalty === '+2' ? 'rgba(251,191,36,0.5)' : 'rgba(255,255,255,0.1)'}`,
+                          color: curPenalty === '+2' ? '#fbbf24' : 'var(--muted)',
+                        }}
+                      >+2</button>
+                      <button
+                        onClick={() => setPenaltyCurrent(panel.id, 'dnf')}
+                        style={{
+                          flex: 1, padding: '0.6rem 0', borderRadius: '8px', fontSize: '0.88rem',
+                          fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer', minHeight: '48px',
+                          background: curPenalty === 'dnf' ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.04)',
+                          border: `1px solid ${curPenalty === 'dnf' ? 'rgba(239,68,68,0.45)' : 'rgba(255,255,255,0.1)'}`,
+                          color: curPenalty === 'dnf' ? '#f87171' : 'var(--muted)',
+                        }}
+                      >DNF</button>
+                      <button
+                        onClick={() => canAdvance && advanceSolve(panel.id)}
+                        style={{
+                          flex: 2, padding: '0.6rem 0', borderRadius: '8px', fontSize: '0.9rem',
+                          fontFamily: 'inherit', fontWeight: 700, minHeight: '48px',
+                          cursor: canAdvance ? 'pointer' : 'not-allowed',
+                          background: canAdvance ? 'rgba(124,58,237,0.22)' : 'rgba(124,58,237,0.06)',
+                          border: `1px solid ${canAdvance ? 'rgba(124,58,237,0.5)' : 'rgba(124,58,237,0.15)'}`,
+                          color: canAdvance ? '#a78bfa' : 'rgba(167,139,250,0.3)',
+                        }}
+                      >
+                        {curIdx === 4 ? 'Done →' : '→ Next'}
+                      </button>
+                    </div>
+
+                    {/* Solves entered so far (mini summary) */}
+                    {curIdx > 0 && (
+                      <div style={{ display: 'flex', gap: '0.2rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                        {panel.solves.slice(0, curIdx).map((sv, i) => (
+                          <div key={i} style={{
+                            flex: 1, minWidth: '44px', textAlign: 'center',
+                            padding: '0.25rem 0.15rem', borderRadius: '6px',
+                            background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.07)',
+                            fontSize: '0.65rem',
+                          }}>
+                            <div style={{ color: 'rgba(255,255,255,0.3)', marginBottom: '1px' }}>S{i+1}</div>
+                            <div style={{ color: panel.penalties[i] === 'dnf' ? '#f87171' : 'var(--text)', fontWeight: 600 }}>
+                              {panel.penalties[i] === 'dnf' ? 'DNF' : (sv || '—')}
+                              {panel.penalties[i] === '+2' ? '+' : ''}
+                            </div>
+                          </div>
+                        ))}
+                        {Array.from({ length: 5 - curIdx }, (_, i) => (
+                          <div key={curIdx + i} style={{
+                            flex: 1, minWidth: '44px', textAlign: 'center',
+                            padding: '0.25rem 0.15rem', borderRadius: '6px',
+                            background: 'rgba(255,255,255,0.015)', border: '1px solid rgba(255,255,255,0.04)',
+                            fontSize: '0.65rem',
+                          }}>
+                            <div style={{ color: 'rgba(255,255,255,0.2)', marginBottom: '1px' }}>S{curIdx+i+1}</div>
+                            <div style={{ color: 'rgba(255,255,255,0.15)' }}>—</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  /* ── All 5 entered — summary + save ─────────────────────── */
+                  <div style={{ marginTop: '0.5rem' }}>
+                    {/* Solve summary */}
+                    <div style={{ display: 'flex', gap: '0.2rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
+                      {panel.solves.map((sv, i) => (
+                        <div key={i} style={{
+                          flex: 1, minWidth: '44px', textAlign: 'center',
+                          padding: '0.3rem 0.15rem', borderRadius: '6px',
+                          background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)',
+                          fontSize: '0.68rem',
+                        }}>
+                          <div style={{ color: 'var(--muted)', marginBottom: '2px' }}>S{i+1}</div>
+                          <div style={{ color: panel.penalties[i] === 'dnf' ? '#f87171' : 'var(--text)', fontWeight: 600 }}>
+                            {panel.penalties[i] === 'dnf' ? 'DNF' : (sv || '—')}
+                            {panel.penalties[i] === '+2' ? '+' : ''}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Single / Ao5 */}
+                    <div className="compact-calc-row" style={{ marginBottom: '0.5rem' }}>
+                      <div className="calc-item">
+                        <div className="calc-label">Single</div>
+                        <div className={`calc-value${single < 0 ? ' dnf' : ' accent'}`}>{fmtTime(single)}</div>
+                      </div>
+                      <div className="calc-item">
+                        <div className="calc-label">Ao5</div>
+                        <div className={`calc-value${average !== null && average < 0 ? ' dnf' : ' accent'}`}>{fmtTime(average)}</div>
                       </div>
                     </div>
-                  ))}
-                </div>
 
-                {/* Calculated */}
-                <div className="compact-calc-row">
-                  <div className="calc-item">
-                    <div className="calc-label">Single</div>
-                    <div className={`calc-value${single < 0 ? ' dnf' : ' accent'}`}>{fmtTime(single < 0 ? single : single)}</div>
-                  </div>
-                  <div className="calc-item">
-                    <div className="calc-label">Ao5</div>
-                    <div className={`calc-value${average !== null && average < 0 ? ' dnf' : ' accent'}`}>{fmtTime(average)}</div>
-                  </div>
-                </div>
+                    {/* Save Result button (green, full width) */}
+                    <button
+                      onClick={() => submit(panel.id)}
+                      style={{
+                        width: '100%', minHeight: '52px', borderRadius: '10px',
+                        fontSize: '1rem', fontWeight: 700, cursor: 'pointer',
+                        fontFamily: 'inherit', marginBottom: '0.35rem',
+                        background: 'rgba(34,197,94,0.2)',
+                        border: '1px solid rgba(34,197,94,0.5)',
+                        color: '#4ade80',
+                      }}
+                    >
+                      Save Result
+                    </button>
 
-                <button className="btn-sm-primary" style={{ width: '100%' }} onClick={() => submit(panel.id)}>
-                  Submit Result
-                </button>
-                {panel.msg && <div className={`msg ${panel.msgType}`} style={{ display: 'block', marginTop: '0.5rem' }}>{panel.msg}</div>}
+                    {/* Re-enter link */}
+                    <button
+                      onClick={() => updatePanel(panel.id, {
+                        currentSolveIdx: 0,
+                        solves: ['', '', '', '', ''],
+                        penalties: ['none', 'none', 'none', 'none', 'none'],
+                        rawInput: '', msg: '', msgType: '',
+                      })}
+                      style={{
+                        width: '100%', padding: '0.4rem', borderRadius: '8px',
+                        background: 'transparent', border: '1px solid rgba(255,255,255,0.07)',
+                        color: 'var(--muted)', cursor: 'pointer', fontSize: '0.78rem', fontFamily: 'inherit',
+                      }}
+                    >
+                      Re-enter Solves
+                    </button>
+                  </div>
+                )}
+
+                {panel.msg && (
+                  <div className={`msg ${panel.msgType}`} style={{ display: 'block', marginTop: '0.5rem' }}>
+                    {panel.msg}
+                  </div>
+                )}
               </div>
             );
           })}

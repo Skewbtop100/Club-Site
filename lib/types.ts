@@ -14,6 +14,11 @@ export interface CompetitionAthlete {
   events: string[];
 }
 
+export interface EventConfig {
+  rounds: number;
+  groups: number;
+}
+
 export interface Competition {
   id: string;
   name: string;
@@ -23,6 +28,7 @@ export interface Competition {
   country?: string;
   events?: Record<string, boolean>;
   athletes?: CompetitionAthlete[];
+  eventConfig?: Record<string, EventConfig>;
 }
 
 export interface Result {

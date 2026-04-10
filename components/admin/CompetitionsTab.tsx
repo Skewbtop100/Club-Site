@@ -8,7 +8,7 @@ import {
   deleteCompetition,
 } from '@/lib/firebase/services/competitions';
 import { getAthletes } from '@/lib/firebase/services/athletes';
-import type { Athlete, Competition, CompetitionAthlete } from '@/lib/types';
+import type { Athlete, Competition, CompetitionAthlete, EventConfig } from '@/lib/types';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import COUNTRIES from '@/lib/countries';
 
@@ -32,6 +32,7 @@ export default function CompetitionsTab() {
   const [form, setForm] = useState<FormShape>({ ...emptyForm });
   const [editId, setEditId] = useState<string | null>(null);
   const [events, setEvents] = useState<Record<string, boolean>>({});
+  const [eventConfig, setEventConfig] = useState<Record<string, EventConfig>>({});
   const [msg, setMsg] = useState('');
   const [msgType, setMsgType] = useState('');
   const [allAthletes, setAllAthletes] = useState<Athlete[]>([]);
@@ -60,6 +61,7 @@ export default function CompetitionsTab() {
       status: c.status,
     });
     setEvents((c.events as Record<string, boolean>) || {});
+    setEventConfig(c.eventConfig || {});
     const reg: Record<string, AthleteReg> = {};
     if (c.athletes) {
       c.athletes.forEach(a => {
@@ -72,7 +74,7 @@ export default function CompetitionsTab() {
     setAthleteReg(reg);
   }
 
-  function cancelEdit() { setEditId(null); setForm({ ...emptyForm }); setEvents({}); setAthleteReg({}); }
+  function cancelEdit() { setEditId(null); setForm({ ...emptyForm }); setEvents({}); setEventConfig({}); setAthleteReg({}); }
 
   function toggleAthlete(athleteId: string) {
     setAthleteReg(prev => {
@@ -110,10 +112,10 @@ export default function CompetitionsTab() {
       }));
     try {
       if (editId) {
-        await updateCompetition(editId, { ...form, events, athletes: athletesData });
+        await updateCompetition(editId, { ...form, events, athletes: athletesData, eventConfig });
         showMsg('success', 'Competition updated.');
       } else {
-        await addCompetition({ ...form, events, athletes: athletesData });
+        await addCompetition({ ...form, events, athletes: athletesData, eventConfig });
         showMsg('success', 'Competition created.');
       }
       cancelEdit();
@@ -211,19 +213,64 @@ export default function CompetitionsTab() {
           <label>Events</label>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '0.4rem', marginTop: '0.25rem' }}>
             {WCA_EVENTS.map(ev => (
-              <label key={ev.id} style={{
-                display: 'flex', alignItems: 'center', gap: '0.5rem',
-                padding: '0.42rem 0.7rem', borderRadius: '8px', cursor: 'pointer',
+              <div key={ev.id} style={{
+                borderRadius: '8px', overflow: 'hidden',
                 border: `1px solid ${events[ev.id] ? 'rgba(124,58,237,0.35)' : 'rgba(255,255,255,0.05)'}`,
                 background: events[ev.id] ? 'rgba(124,58,237,0.06)' : 'rgba(255,255,255,0.02)',
               }}>
-                <input
-                  type="checkbox" checked={!!events[ev.id]}
-                  onChange={e => setEvents(prev => ({ ...prev, [ev.id]: e.target.checked }))}
-                  style={{ accentColor: 'var(--accent)', width: 15, height: 15, cursor: 'pointer' }}
-                />
-                <span style={{ fontSize: '0.85rem', color: 'var(--text)' }}>{ev.name}</span>
-              </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.42rem 0.7rem', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox" checked={!!events[ev.id]}
+                    onChange={e => {
+                      setEvents(prev => ({ ...prev, [ev.id]: e.target.checked }));
+                      if (e.target.checked) {
+                        setEventConfig(prev => prev[ev.id] ? prev : { ...prev, [ev.id]: { rounds: 1, groups: 1 } });
+                      }
+                    }}
+                    style={{ accentColor: 'var(--accent)', width: 15, height: 15, cursor: 'pointer' }}
+                  />
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text)' }}>{ev.name}</span>
+                </label>
+                {events[ev.id] && (
+                  <div style={{
+                    display: 'flex', gap: '0.75rem', padding: '0.3rem 0.7rem 0.5rem',
+                    borderTop: '1px solid rgba(255,255,255,0.05)', flexWrap: 'wrap',
+                  }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: 'var(--muted)' }}>
+                      Rounds:
+                      <input
+                        type="number" min={1} max={4}
+                        value={eventConfig[ev.id]?.rounds ?? 1}
+                        onChange={e => setEventConfig(prev => ({
+                          ...prev,
+                          [ev.id]: { ...(prev[ev.id] || { rounds: 1, groups: 1 }), rounds: Math.min(4, Math.max(1, Number(e.target.value))) },
+                        }))}
+                        style={{
+                          width: '3rem', padding: '0.2rem 0.3rem', fontSize: '0.8rem',
+                          borderRadius: '5px', textAlign: 'center', fontFamily: 'inherit',
+                          background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: 'var(--text)',
+                        }}
+                      />
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: 'var(--muted)' }}>
+                      Groups/round:
+                      <input
+                        type="number" min={1} max={10}
+                        value={eventConfig[ev.id]?.groups ?? 1}
+                        onChange={e => setEventConfig(prev => ({
+                          ...prev,
+                          [ev.id]: { ...(prev[ev.id] || { rounds: 1, groups: 1 }), groups: Math.min(10, Math.max(1, Number(e.target.value))) },
+                        }))}
+                        style={{
+                          width: '3rem', padding: '0.2rem 0.3rem', fontSize: '0.8rem',
+                          borderRadius: '5px', textAlign: 'center', fontFamily: 'inherit',
+                          background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: 'var(--text)',
+                        }}
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         </div>
