@@ -7,7 +7,8 @@ import {
   updateCompetition,
   deleteCompetition,
 } from '@/lib/firebase/services/competitions';
-import type { Competition } from '@/lib/types';
+import { getAthletes } from '@/lib/firebase/services/athletes';
+import type { Athlete, Competition, CompetitionAthlete } from '@/lib/types';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import COUNTRIES from '@/lib/countries';
 
@@ -23,6 +24,8 @@ interface FormShape {
 
 const emptyForm: FormShape = { name: '', country: '', date: '', clubDate: '', status: 'upcoming' };
 
+type AthleteReg = { selected: boolean; events: Record<string, boolean> };
+
 export default function CompetitionsTab() {
   const [comps, setComps] = useState<Competition[]>([]);
   const [loading, setLoading] = useState(true);
@@ -31,8 +34,11 @@ export default function CompetitionsTab() {
   const [events, setEvents] = useState<Record<string, boolean>>({});
   const [msg, setMsg] = useState('');
   const [msgType, setMsgType] = useState('');
+  const [allAthletes, setAllAthletes] = useState<Athlete[]>([]);
+  const [athleteReg, setAthleteReg] = useState<Record<string, AthleteReg>>({});
 
   useEffect(() => {
+    getAthletes().then(data => setAllAthletes([...data].sort((a, b) => a.name.localeCompare(b.name))));
     const unsub = subscribeCompetitions((data) => { setComps(data); setLoading(false); });
     return unsub;
   }, []);
@@ -51,18 +57,60 @@ export default function CompetitionsTab() {
       status: c.status,
     });
     setEvents((c.events as Record<string, boolean>) || {});
+    const reg: Record<string, AthleteReg> = {};
+    if (c.athletes) {
+      c.athletes.forEach(a => {
+        reg[a.id] = {
+          selected: true,
+          events: a.events.reduce((acc: Record<string, boolean>, ev: string) => ({ ...acc, [ev]: true }), {}),
+        };
+      });
+    }
+    setAthleteReg(reg);
   }
 
-  function cancelEdit() { setEditId(null); setForm({ ...emptyForm }); setEvents({}); }
+  function cancelEdit() { setEditId(null); setForm({ ...emptyForm }); setEvents({}); setAthleteReg({}); }
+
+  function toggleAthlete(athleteId: string) {
+    setAthleteReg(prev => {
+      const existing = prev[athleteId];
+      if (existing?.selected) {
+        return { ...prev, [athleteId]: { ...existing, selected: false } };
+      }
+      const defaultEvents = Object.fromEntries(
+        Object.entries(events).filter(([, v]) => v).map(([k]) => [k, true])
+      );
+      return { ...prev, [athleteId]: { selected: true, events: defaultEvents } };
+    });
+  }
+
+  function toggleAthleteEvent(athleteId: string, eventId: string, checked: boolean) {
+    setAthleteReg(prev => ({
+      ...prev,
+      [athleteId]: {
+        ...prev[athleteId],
+        events: { ...(prev[athleteId]?.events || {}), [eventId]: checked },
+      },
+    }));
+  }
 
   async function submitComp() {
     if (!form.name) { showMsg('error', 'Competition name is required.'); return; }
+    const athletesData: CompetitionAthlete[] = Object.entries(athleteReg)
+      .filter(([, r]) => r.selected)
+      .map(([id, r]) => ({
+        id,
+        name: allAthletes.find(a => a.id === id)?.name || '',
+        events: Object.entries(r.events)
+          .filter(([evId, v]) => v && events[evId])
+          .map(([evId]) => evId),
+      }));
     try {
       if (editId) {
-        await updateCompetition(editId, { ...form, events });
+        await updateCompetition(editId, { ...form, events, athletes: athletesData });
         showMsg('success', 'Competition updated.');
       } else {
-        await addCompetition({ ...form, events });
+        await addCompetition({ ...form, events, athletes: athletesData });
         showMsg('success', 'Competition created.');
       }
       cancelEdit();
@@ -159,6 +207,99 @@ export default function CompetitionsTab() {
           </div>
         </div>
 
+        {/* Athletes Registration */}
+        {(() => {
+          const competitionEvents = WCA_EVENTS.filter(ev => events[ev.id]);
+          return (
+            <div className="form-group">
+              <label>Athletes</label>
+              <div style={{ fontSize: '0.73rem', color: 'var(--muted)', marginBottom: '0.5rem' }}>
+                Select athletes participating in this competition, then choose their events.
+              </div>
+              {allAthletes.length === 0 ? (
+                <div style={{ color: 'var(--muted)', fontSize: '0.85rem', fontStyle: 'italic' }}>No athletes in club yet.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                  {allAthletes.map(athlete => {
+                    const reg = athleteReg[athlete.id];
+                    const isSelected = reg?.selected || false;
+                    return (
+                      <div key={athlete.id} style={{
+                        borderRadius: '10px',
+                        border: `1px solid ${isSelected ? 'rgba(124,58,237,0.45)' : 'rgba(255,255,255,0.06)'}`,
+                        background: isSelected ? 'rgba(124,58,237,0.07)' : 'rgba(255,255,255,0.02)',
+                        transition: 'border-color 0.15s, background 0.15s',
+                      }}>
+                        <div
+                          onClick={() => toggleAthlete(athlete.id)}
+                          style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', padding: '0.5rem 0.75rem', cursor: 'pointer' }}
+                        >
+                          <div style={{
+                            width: 16, height: 16, borderRadius: '4px', flexShrink: 0,
+                            border: `2px solid ${isSelected ? '#7c3aed' : 'rgba(255,255,255,0.2)'}`,
+                            background: isSelected ? '#7c3aed' : 'transparent',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            transition: 'all 0.12s',
+                          }}>
+                            {isSelected && (
+                              <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+                                <path d="M1 4l3 3 5-6" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                            )}
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text)' }}>{athlete.name}</div>
+                            {athlete.wcaId && (
+                              <div style={{ fontSize: '0.72rem', color: 'var(--muted)', marginTop: '0.05rem' }}>{athlete.wcaId}</div>
+                            )}
+                          </div>
+                        </div>
+                        {isSelected && competitionEvents.length > 0 && (
+                          <div style={{
+                            display: 'flex', flexWrap: 'wrap', gap: '0.3rem',
+                            padding: '0.3rem 0.75rem 0.5rem 2.9rem',
+                            borderTop: '1px solid rgba(255,255,255,0.04)',
+                          }}>
+                            {competitionEvents.map(ev => {
+                              const evSelected = reg?.events?.[ev.id] ?? false;
+                              return (
+                                <button
+                                  key={ev.id}
+                                  type="button"
+                                  onClick={e => { e.stopPropagation(); toggleAthleteEvent(athlete.id, ev.id, !evSelected); }}
+                                  style={{
+                                    padding: '0.18rem 0.55rem', borderRadius: '999px',
+                                    cursor: 'pointer', fontSize: '0.73rem', fontFamily: 'inherit',
+                                    border: `1px solid ${evSelected ? 'rgba(124,58,237,0.6)' : 'rgba(255,255,255,0.1)'}`,
+                                    background: evSelected ? 'rgba(124,58,237,0.22)' : 'rgba(255,255,255,0.03)',
+                                    color: evSelected ? '#c4b5fd' : 'var(--muted)',
+                                    transition: 'all 0.12s',
+                                  }}
+                                >
+                                  {ev.short}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {isSelected && competitionEvents.length === 0 && (
+                          <div style={{
+                            padding: '0.3rem 0.75rem 0.4rem 2.9rem',
+                            borderTop: '1px solid rgba(255,255,255,0.04)',
+                            fontSize: '0.73rem', color: 'var(--muted)', fontStyle: 'italic',
+                          }}>
+                            No events selected for this competition yet.
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
           <button className="btn-sm-primary" onClick={submitComp}>{editId ? 'Save Changes' : 'Create Competition'}</button>
           {editId && <button className="btn-sm-secondary" onClick={cancelEdit}>Cancel Edit</button>}
@@ -184,6 +325,7 @@ export default function CompetitionsTab() {
                       <th>Club Date</th>
                       <th>Status</th>
                       <th>Events</th>
+                      <th>Athletes</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
@@ -210,6 +352,9 @@ export default function CompetitionsTab() {
                           </td>
                           <td className="td-muted" style={{ fontSize: '0.78rem' }}>
                             {Object.keys(c.events || {}).filter(k => (c.events as Record<string, boolean>)?.[k]).length} events
+                          </td>
+                          <td className="td-muted" style={{ fontSize: '0.78rem' }}>
+                            {(c.athletes || []).length} registered
                           </td>
                           <td>
                             <div style={{ display: 'flex', gap: '0.35rem' }}>

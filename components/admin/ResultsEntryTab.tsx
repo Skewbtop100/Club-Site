@@ -90,6 +90,7 @@ export default function ResultsEntryTab() {
   const selComp = comps.find(c => c.id === compId);
   const evList = selComp?.events ? WCA_EVENTS.filter(e => (selComp.events as Record<string,boolean>)?.[e.id]) : WCA_EVENTS;
   const liveComps = comps.filter(c => c.status === 'live' || c.status === 'upcoming');
+  const compAthletes = selComp?.athletes;
 
   return (
     <div className="card">
@@ -129,6 +130,14 @@ export default function ResultsEntryTab() {
         <div className="multi-entry-grid" style={{ gridTemplateColumns: `repeat(${numCols}, 1fr)` }}>
           {panels.map(panel => {
             const { single, average } = computeResult(panel);
+            const panelAthletes = compAthletes
+              ? athletes.filter(a => {
+                  const ca = compAthletes.find(x => x.id === a.id);
+                  if (!ca) return false;
+                  if (!panel.eventId) return true;
+                  return ca.events.includes(panel.eventId);
+                })
+              : athletes;
             return (
               <div className="compact-panel" key={panel.id}>
                 <div className="compact-panel-header">
@@ -142,7 +151,7 @@ export default function ResultsEntryTab() {
                 <select className="compact-select" value={panel.athleteId}
                   onChange={e => updatePanel(panel.id, { athleteId: e.target.value })}>
                   <option value="">— Athlete —</option>
-                  {[...athletes].sort((a,b) => a.name.localeCompare(b.name)).map(a => (
+                  {[...panelAthletes].sort((a,b) => a.name.localeCompare(b.name)).map(a => (
                     <option key={a.id} value={a.id}>{a.name}</option>
                   ))}
                 </select>

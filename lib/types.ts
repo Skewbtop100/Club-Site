@@ -8,6 +8,12 @@ export interface Athlete {
   imageUrl?: string;
 }
 
+export interface CompetitionAthlete {
+  id: string;
+  name: string;
+  events: string[];
+}
+
 export interface Competition {
   id: string;
   name: string;
@@ -16,6 +22,7 @@ export interface Competition {
   clubDate?: string | { toDate: () => Date };
   country?: string;
   events?: Record<string, boolean>;
+  athletes?: CompetitionAthlete[];
 }
 
 export interface Result {

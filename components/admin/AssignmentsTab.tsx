@@ -35,6 +35,10 @@ export default function AssignmentsTab() {
   const selComp = comps.find(c => c.id === compId);
   const evList = selComp?.events ? WCA_EVENTS.filter(e => (selComp.events as Record<string,boolean>)?.[e.id]) : [];
   const filteredAsg = evId ? assignments.filter(a => a.eventId === evId) : assignments;
+  const registeredAthletes = selComp?.athletes || [];
+  const eventRegisteredAthletes = evId
+    ? registeredAthletes.filter(a => a.events.includes(evId))
+    : registeredAthletes;
   const byEvent: Record<string, Assignment[]> = {};
   for (const asg of filteredAsg) {
     if (!byEvent[asg.eventId]) byEvent[asg.eventId] = [];
@@ -64,6 +68,26 @@ export default function AssignmentsTab() {
                 {ev.short}
               </button>
             ))}
+          </div>
+        )}
+
+        {compId && registeredAthletes.length > 0 && (
+          <div style={{ marginBottom: '1rem', padding: '0.65rem 0.9rem', borderRadius: '10px', background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.2)' }}>
+            <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#c4b5fd', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              {evId ? `Registered for ${WCA_EVENTS.find(e => e.id === evId)?.name || evId}` : 'Registered Athletes'}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+              {eventRegisteredAthletes.length === 0
+                ? <span style={{ fontSize: '0.78rem', color: 'var(--muted)', fontStyle: 'italic' }}>No athletes registered for this event.</span>
+                : eventRegisteredAthletes.map(a => (
+                  <span key={a.id} style={{
+                    padding: '0.18rem 0.6rem', borderRadius: '999px', fontSize: '0.75rem',
+                    background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.3)',
+                    color: '#c4b5fd',
+                  }}>{a.name}</span>
+                ))
+              }
+            </div>
           </div>
         )}
 
