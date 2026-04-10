@@ -61,6 +61,52 @@ const en = {
   'live.empty-heading': 'No live competition right now',
   'live.empty-sub': 'When a competition goes live, real-time results will appear here.',
 
+  // COMMON
+  'common.back': '← Back',
+
+  // RANKINGS TABLE
+  'rankings.single': 'Single',
+  'rankings.average': 'Average',
+  'rankings.athlete': 'Athlete',
+  'rankings.competition': 'Competition',
+  'rankings.date': 'Date',
+  'rankings.no-results': 'No results yet for this event.',
+
+  // RECORDS
+  'records.single-record': 'Single Record',
+  'records.average-record': 'Average Record',
+
+  // COMPETITIONS
+  'comp.upcoming': 'Upcoming',
+  'comp.live-tab': 'Live',
+  'comp.finished': 'Finished',
+  'comp.status.live': 'LIVE',
+  'comp.status.upcoming': '● UPCOMING',
+  'comp.status.finished': '✓ FINISHED',
+  'comp.no-upcoming': 'No upcoming competitions.',
+  'comp.no-live': 'No live competitions.',
+  'comp.no-finished': 'No finished competitions.',
+  'comp.view-results': 'View Results',
+  'comp.view-live': 'View Live Results',
+  'comp.assignments': 'Assignments',
+  'comp.no-assignments': 'No assignments published for this competition yet.',
+  'comp.no-results': 'No results yet.',
+
+  // ATHLETES SECTION
+  'athletes.no-athletes': 'No athletes registered yet.',
+  'athletes.best-333': 'Best 3x3: ',
+  'athletes.no-results': 'No results yet',
+  'athletes.profile': 'Athlete Profile',
+  'athletes.personal-bests': 'Personal Bests',
+  'athletes.comp-history': 'Competition History',
+  'athletes.no-comp-results': 'No results yet. Compete in your first event!',
+  'athletes.stat.comps': 'Comps',
+  'athletes.stat.events': 'Events',
+  'athletes.stat.solves': 'Solves',
+  'athletes.stat.gold': 'Gold',
+  'athletes.stat.silver': 'Silver',
+  'athletes.stat.bronze': 'Bronze',
+
   // THEME / LANG
   'theme.dark': '🌑 Dark',
   'theme.light': '☀ Light',

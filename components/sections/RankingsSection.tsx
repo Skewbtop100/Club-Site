@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import { useLang } from '@/lib/i18n';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { fmtTime, compareTime, formatDate } from '@/lib/time-utils';
 import { getResultRecordBadges, getVisibleBadge, BADGE_STYLES } from '@/lib/record-badges';
@@ -21,6 +22,7 @@ function isEventVisible(eventId: string, visibility: EventVisibility, results: R
 }
 
 export default function RankingsSection({ results, athletes, wcaRecords, eventVisibility }: Props) {
+  const { t } = useLang();
   const [activeEvent, setActiveEvent] = useState('333');
   const [rankType, setRankType] = useState<'single' | 'average'>('single');
 
@@ -74,16 +76,16 @@ export default function RankingsSection({ results, athletes, wcaRecords, eventVi
     <section id="rankings" style={{ padding: '6rem 2rem', background: 'var(--surface)' }}>
       <div style={{ maxWidth: 1400, margin: '0 auto', padding: '0 2rem' }}>
         <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
-          <div className="section-tag">LEADERBOARD</div>
-          <h2 className="section-title">Event Rankings</h2>
-          <p className="section-desc">Best single and average results across all WCA events. Ranked by single time, lowest first.</p>
+          <div className="section-tag">{t('section-tag.leaderboard')}</div>
+          <h2 className="section-title">{t('section-title.rankings')}</h2>
+          <p className="section-desc">{t('section-desc.rankings')}</p>
         </div>
 
         {/* Single / Average toggle */}
         <div style={{ display: 'flex', justifyContent: 'center', gap: '0.4rem', marginBottom: '1rem' }}>
-          {(['single', 'average'] as const).map((t) => (
-            <button key={t} onClick={() => setRankType(t)} className={`tab-btn${rankType === t ? ' active' : ''}`}>
-              {t === 'single' ? 'Single' : 'Average'}
+          {(['single', 'average'] as const).map((rt) => (
+            <button key={rt} onClick={() => setRankType(rt)} className={`tab-btn${rankType === rt ? ' active' : ''}`}>
+              {rt === 'single' ? t('rankings.single') : t('rankings.average')}
             </button>
           ))}
         </div>
@@ -106,7 +108,7 @@ export default function RankingsSection({ results, athletes, wcaRecords, eventVi
         {rows.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon">📊</div>
-            No results yet for this event.
+            {t('rankings.no-results')}
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
@@ -114,10 +116,10 @@ export default function RankingsSection({ results, athletes, wcaRecords, eventVi
               <thead>
                 <tr>
                   <th>#</th>
-                  <th>Athlete</th>
-                  <th>{rankType === 'single' ? 'Single' : 'Average'}</th>
-                  <th>Competition</th>
-                  <th>Date</th>
+                  <th>{t('rankings.athlete')}</th>
+                  <th>{rankType === 'single' ? t('rankings.single') : t('rankings.average')}</th>
+                  <th>{t('rankings.competition')}</th>
+                  <th>{t('rankings.date')}</th>
                   {rankType === 'average' && <><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th></>}
                 </tr>
               </thead>

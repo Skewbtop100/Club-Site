@@ -1,24 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import type { Lang } from '@/lib/i18n';
-
-const STORAGE_KEY = 'cubeLang';
+import { useLang, type Lang } from '@/lib/i18n';
 
 export default function LangToggle() {
-  const [lang, setLangState] = useState<Lang>('en');
-
-  useEffect(() => {
-    const saved = (localStorage.getItem(STORAGE_KEY) as Lang) || 'en';
-    setLangState(saved);
-  }, []);
-
-  function toggle(next: Lang) {
-    localStorage.setItem(STORAGE_KEY, next);
-    setLangState(next);
-    // Dispatch event so other components can react
-    window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY, newValue: next }));
-  }
+  const { lang, setLang } = useLang();
 
   return (
     <div
@@ -33,7 +18,7 @@ export default function LangToggle() {
       {(['en', 'mn'] as Lang[]).map((l) => (
         <button
           key={l}
-          onClick={() => toggle(l)}
+          onClick={() => setLang(l)}
           style={{
             padding: '0.22rem 0.52rem',
             borderRadius: '5px',

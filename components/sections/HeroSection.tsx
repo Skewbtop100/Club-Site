@@ -1,10 +1,12 @@
 'use client';
 
 import Link from 'next/link';
+import { useLang } from '@/lib/i18n';
 import { useAthletes } from '@/lib/hooks/useAthletes';
 import { useCompetitions } from '@/lib/hooks/useCompetitions';
 
 export default function HeroSection() {
+  const { t } = useLang();
   const { athletes, loading: athletesLoading } = useAthletes();
   const { competitions, loading: compsLoading } = useCompetitions();
 
@@ -42,7 +44,7 @@ export default function HeroSection() {
           padding: '0.35rem 0.9rem', borderRadius: 999, marginBottom: '1.5rem',
         }}>
           <span style={{ color: '#4ade80', fontSize: '0.7rem' }}>&#9679;</span>
-          WCA-Style Competition Platform
+          {t('hero.badge')}
         </div>
 
         <h1 style={{
@@ -60,15 +62,14 @@ export default function HeroSection() {
           color: 'var(--muted)', fontWeight: 400, letterSpacing: '0.15em',
           textTransform: 'uppercase', marginBottom: '1.4rem',
         }}>
-          COMPETITION PORTAL
+          {t('hero.subtitle')}
         </p>
 
         <p style={{
           fontSize: '1.05rem', color: 'var(--muted)', lineHeight: 1.7,
           maxWidth: 600, margin: '0 auto 2.2rem',
         }}>
-          Official results, live standings, athlete rankings, and competition management for
-          Mongolia&apos;s competitive speedcubing community.
+          {t('hero.desc')}
         </p>
 
         <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
@@ -78,7 +79,7 @@ export default function HeroSection() {
             color: '#fff', border: 'none', display: 'inline-block',
             transition: 'opacity 0.2s, transform 0.2s',
           }}>
-            View Rankings
+            {t('hero.btn-rankings')}
           </Link>
           <Link href="#competitions" style={{
             padding: '0.75rem 1.8rem', borderRadius: 10, fontSize: '0.95rem', fontWeight: 600,
@@ -86,7 +87,7 @@ export default function HeroSection() {
             border: '1px solid rgba(255,255,255,0.15)', display: 'inline-block',
             transition: 'border-color 0.2s, transform 0.2s',
           }}>
-            Competitions
+            {t('hero.btn-competitions')}
           </Link>
         </div>
 
@@ -97,9 +98,9 @@ export default function HeroSection() {
           background: 'var(--surface)', border: '1px solid rgba(255,255,255,0.06)',
           borderRadius: 14, backdropFilter: 'blur(12px)',
         }}>
-          <StatItem value={athletesLoading ? '...' : athletes.length} label="Athletes" />
-          <StatItem value={compsLoading ? '...' : competitions.length} label="Competitions" />
-          <StatItem value={17} label="Events Supported" />
+          <StatItem value={athletesLoading ? '...' : athletes.length} label={t('stats.athletes')} />
+          <StatItem value={compsLoading ? '...' : competitions.length} label={t('stats.competitions')} />
+          <StatItem value={17} label={t('stats.events-supported')} />
         </div>
       </div>
 
@@ -113,7 +114,7 @@ export default function HeroSection() {
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
           <path d="M12 5v14M5 12l7 7 7-7" />
         </svg>
-        Scroll
+        {t('hero.scroll')}
       </div>
 
       <style>{`

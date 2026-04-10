@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState, useEffect, useRef } from 'react';
+import { useLang } from '@/lib/i18n';
 import { fmtTime } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { compareTime } from '@/lib/time-utils';
@@ -13,6 +14,7 @@ interface Props {
 }
 
 export default function AthletesSection({ athletes, results, loading }: Props) {
+  const { t } = useLang();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const sorted = useMemo(() => {
@@ -54,9 +56,9 @@ export default function AthletesSection({ athletes, results, loading }: Props) {
     <section id="athletes" style={{ padding: '6rem 2rem', background: 'var(--surface)' }}>
       <div style={{ maxWidth: 1400, margin: '0 auto', padding: '0 2rem' }}>
         <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
-          <div className="section-tag">ATHLETES</div>
-          <h2 className="section-title">Club Athletes</h2>
-          <p className="section-desc">Our competitive speedcubers.</p>
+          <div className="section-tag">{t('section-tag.athletes')}</div>
+          <h2 className="section-title">{t('section-title.athletes')}</h2>
+          <p className="section-desc">{t('section-desc.athletes')}</p>
         </div>
 
         {loading ? (
@@ -66,7 +68,7 @@ export default function AthletesSection({ athletes, results, loading }: Props) {
         ) : athletes.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon">👤</div>
-            No athletes registered yet.
+            {t('athletes.no-athletes')}
           </div>
         ) : (
           <>
@@ -153,6 +155,7 @@ function AthleteCard({
   best333: number | undefined;
   onClick: () => void;
 }) {
+  const { t } = useLang();
   const initials = (athlete.name || '?').split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2);
 
   return (
@@ -166,8 +169,8 @@ function AthleteCard({
       {athlete.wcaId && <div className="athlete-wca">{athlete.wcaId}</div>}
       <div className="athlete-best">
         {best333
-          ? <><span style={{ color: 'var(--muted)', fontWeight: 400 }}>Best 3x3: </span><span>{fmtTime(best333)}</span></>
-          : 'No results yet'}
+          ? <><span style={{ color: 'var(--muted)', fontWeight: 400 }}>{t('athletes.best-333')}</span><span>{fmtTime(best333)}</span></>
+          : t('athletes.no-results')}
       </div>
     </div>
   );
@@ -186,6 +189,7 @@ function AthleteProfileModal({
   allResults: Result[];
   onClose: () => void;
 }) {
+  const { t } = useLang();
   const initials = (athlete.name || '?').split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2);
 
   // Personal bests per event
@@ -284,9 +288,9 @@ function AthleteProfileModal({
             display: 'flex', alignItems: 'center', gap: '0.4rem',
             background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer',
             fontSize: '0.85rem', fontWeight: 500, fontFamily: 'inherit',
-          }}>← Back</button>
+          }}>{t('common.back')}</button>
           <div style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-            Athlete Profile
+            {t('athletes.profile')}
           </div>
           <div style={{ width: '60px' }} />
         </div>
@@ -324,12 +328,12 @@ function AthleteProfileModal({
           {/* Quick stats */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '0.6rem', marginBottom: '2rem' }}>
             {[
-              { label: 'Comps', val: totalComps, style: {} },
-              { label: 'Events', val: totalEvents, style: {} },
-              { label: 'Solves', val: totalSolves, style: {} },
-              { label: 'Gold', val: medals.gold, style: medals.gold ? { color: '#fbbf24' } : { color: 'var(--muted)' } },
-              { label: 'Silver', val: medals.silver, style: medals.silver ? { color: '#94a3b8' } : { color: 'var(--muted)' } },
-              { label: 'Bronze', val: medals.bronze, style: medals.bronze ? { color: '#c97c4a' } : { color: 'var(--muted)' } },
+              { label: t('athletes.stat.comps'), val: totalComps, style: {} },
+              { label: t('athletes.stat.events'), val: totalEvents, style: {} },
+              { label: t('athletes.stat.solves'), val: totalSolves, style: {} },
+              { label: t('athletes.stat.gold'), val: medals.gold, style: medals.gold ? { color: '#fbbf24' } : { color: 'var(--muted)' } },
+              { label: t('athletes.stat.silver'), val: medals.silver, style: medals.silver ? { color: '#94a3b8' } : { color: 'var(--muted)' } },
+              { label: t('athletes.stat.bronze'), val: medals.bronze, style: medals.bronze ? { color: '#c97c4a' } : { color: 'var(--muted)' } },
             ].map((s) => (
               <div key={s.label} style={{
                 background: 'var(--card)', border: '1px solid rgba(255,255,255,0.06)',
@@ -347,7 +351,7 @@ function AthleteProfileModal({
           {Object.keys(pbs).length > 0 && (
             <div style={{ marginBottom: '2rem' }}>
               <div style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: '0.8rem' }}>
-                Personal Bests
+                {t('athletes.personal-bests')}
               </div>
               <div style={{ background: 'var(--card)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '12px', overflow: 'hidden' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -376,7 +380,7 @@ function AthleteProfileModal({
           {history.length > 0 && (
             <div>
               <div style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: '0.8rem' }}>
-                Competition History
+                {t('athletes.comp-history')}
               </div>
               {history.map((comp) => (
                 <div key={comp.compName} style={{ marginBottom: '1.2rem' }}>
@@ -415,7 +419,7 @@ function AthleteProfileModal({
           {results.length === 0 && (
             <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--muted)' }}>
               <div style={{ fontSize: '2rem', marginBottom: '0.6rem' }}>🏆</div>
-              No results yet. Compete in your first event!
+              {t('athletes.no-comp-results')}
             </div>
           )}
         </div>

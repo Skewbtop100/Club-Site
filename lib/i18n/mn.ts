@@ -61,6 +61,52 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'live.empty-heading': 'Одоогоор шууд тэмцээн байхгүй байна',
   'live.empty-sub': 'Тэмцээн шууд болох үед үр дүн энд харагдана.',
 
+  // COMMON
+  'common.back': '← Буцах',
+
+  // RANKINGS TABLE
+  'rankings.single': 'Нэг',
+  'rankings.average': 'Дундаж',
+  'rankings.athlete': 'Тамирчин',
+  'rankings.competition': 'Тэмцээн',
+  'rankings.date': 'Огноо',
+  'rankings.no-results': 'Энэ дэд тэмцээнд үр дүн байхгүй байна.',
+
+  // RECORDS
+  'records.single-record': 'Нэгийн рекорд',
+  'records.average-record': 'Дундажийн рекорд',
+
+  // COMPETITIONS
+  'comp.upcoming': 'Товлосон',
+  'comp.live-tab': 'Шууд',
+  'comp.finished': 'Дууссан',
+  'comp.status.live': 'ШУУД',
+  'comp.status.upcoming': '● ТОВЛОСОН',
+  'comp.status.finished': '✓ ДУУССАН',
+  'comp.no-upcoming': 'Товлосон тэмцээн байхгүй.',
+  'comp.no-live': 'Шууд тэмцээн байхгүй.',
+  'comp.no-finished': 'Дууссан тэмцээн байхгүй.',
+  'comp.view-results': 'Үр дүн үзэх',
+  'comp.view-live': 'Шууд үр дүн үзэх',
+  'comp.assignments': 'Томилгоо',
+  'comp.no-assignments': 'Энэ тэмцээний томилгоо одоогоор байхгүй байна.',
+  'comp.no-results': 'Үр дүн байхгүй байна.',
+
+  // ATHLETES SECTION
+  'athletes.no-athletes': 'Тамирчид бүртгэгдээгүй байна.',
+  'athletes.best-333': 'Хамгийн сайн 3x3: ',
+  'athletes.no-results': 'Үр дүн байхгүй',
+  'athletes.profile': 'Тамирчны профайл',
+  'athletes.personal-bests': 'Хувийн рекорд',
+  'athletes.comp-history': 'Тэмцээний түүх',
+  'athletes.no-comp-results': 'Үр дүн байхгүй байна. Анхны тэмцээндээ оролцоорой!',
+  'athletes.stat.comps': 'Тэмцээн',
+  'athletes.stat.events': 'Дэд тэмцээн',
+  'athletes.stat.solves': 'Оролдлого',
+  'athletes.stat.gold': 'Алт',
+  'athletes.stat.silver': 'Мөнгө',
+  'athletes.stat.bronze': 'Хүрэл',
+
   // THEME / LANG
   'theme.dark': '🌑 Харанхуй',
   'theme.light': '☀ Гэрэл',

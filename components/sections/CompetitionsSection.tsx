@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState, useEffect } from 'react';
+import { useLang } from '@/lib/i18n';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { fmtTime, compareTime } from '@/lib/time-utils';
 import { getResultsByComp } from '@/lib/firebase/services/results';
@@ -24,6 +25,7 @@ function formatCompDate(date: Competition['date']): string {
 }
 
 export default function CompetitionsSection({ competitions, loading }: Props) {
+  const { t } = useLang();
   const defaultTab = useMemo<Status>(() => {
     if (competitions.some((c) => c.status === 'live')) return 'live';
     if (competitions.some((c) => c.status === 'upcoming')) return 'upcoming';
@@ -40,14 +42,14 @@ export default function CompetitionsSection({ competitions, loading }: Props) {
     <section id="competitions" style={{ padding: '6rem 2rem', background: 'var(--surface)' }}>
       <div style={{ maxWidth: 1400, margin: '0 auto', padding: '0 2rem' }}>
         <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
-          <div className="section-tag">COMPETITIONS</div>
-          <h2 className="section-title">Competition Schedule</h2>
+          <div className="section-tag">{t('section-tag.competitions')}</div>
+          <h2 className="section-title">{t('section-title.competitions')}</h2>
         </div>
 
         <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.8rem' }}>
           {(['upcoming', 'live', 'finished'] as Status[]).map((s) => (
             <button key={s} onClick={() => setTab(s)} className={`tab-btn${activeTab === s ? ' active' : ''}`}>
-              {s.charAt(0).toUpperCase() + s.slice(1)}
+              {s === 'upcoming' ? t('comp.upcoming') : s === 'live' ? t('comp.live-tab') : t('comp.finished')}
             </button>
           ))}
         </div>
@@ -59,7 +61,7 @@ export default function CompetitionsSection({ competitions, loading }: Props) {
         ) : filtered.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon">📅</div>
-            No {activeTab} competitions.
+            {activeTab === 'upcoming' ? t('comp.no-upcoming') : activeTab === 'live' ? t('comp.no-live') : t('comp.no-finished')}
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1.1rem' }}>
@@ -147,6 +149,7 @@ function CompCard({
   onViewLive: () => void;
   onViewAssignments: () => void;
 }) {
+  const { t } = useLang();
   const statusClass = comp.status === 'live' ? 'status-live' : comp.status === 'upcoming' ? 'status-upcoming' : 'status-finished';
   const dateStr = formatCompDate(comp.date);
   const eventIds = comp.events ? Object.keys(comp.events) : [];
@@ -156,7 +159,7 @@ function CompCard({
     <div className="comp-card">
       <div className={`status-pill ${statusClass}`}>
         {comp.status === 'live' && <span className="live-dot" />}
-        {comp.status === 'live' ? 'LIVE' : comp.status === 'upcoming' ? '● UPCOMING' : '✓ FINISHED'}
+        {comp.status === 'live' ? t('comp.status.live') : comp.status === 'upcoming' ? t('comp.status.upcoming') : t('comp.status.finished')}
       </div>
 
       <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.4rem' }}>
@@ -179,12 +182,12 @@ function CompCard({
 
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'nowrap', marginTop: '0.5rem', alignItems: 'center' }}>
         {comp.status === 'live' && (
-          <button className="comp-action" onClick={onViewLive}>View Live Results</button>
+          <button className="comp-action" onClick={onViewLive}>{t('comp.view-live')}</button>
         )}
         {comp.status === 'finished' && (
-          <button className="comp-action" onClick={onViewResults}>View Results</button>
+          <button className="comp-action" onClick={onViewResults}>{t('comp.view-results')}</button>
         )}
-        <button className="comp-action-outline" onClick={onViewAssignments}>Assignments</button>
+        <button className="comp-action-outline" onClick={onViewAssignments}>{t('comp.assignments')}</button>
       </div>
     </div>
   );
@@ -205,6 +208,7 @@ function OverlayShell({
   children: React.ReactNode;
   liveIndicator?: boolean;
 }) {
+  const { t } = useLang();
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', handler);
@@ -239,7 +243,7 @@ function OverlayShell({
               {subtitle && <div style={{ fontSize: '0.78rem', color: 'var(--muted)', marginTop: '0.15rem' }}>{subtitle}</div>}
             </div>
             <button onClick={onClose} style={{ background: 'none', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: 'var(--muted)', cursor: 'pointer', padding: '0.35rem 0.8rem', fontSize: '0.82rem', fontFamily: 'inherit' }}>
-              ← Back
+              {t('common.back')}
             </button>
           </div>
           {/* Body */}
@@ -259,6 +263,7 @@ function OverlayShell({
 // ── Results table ─────────────────────────────────────────────────────────────
 
 function ResultsTable({ results }: { results: Result[] }) {
+  const { t } = useLang();
   const [activeEvent, setActiveEvent] = useState<string | null>(null);
   const [activeRound, setActiveRound] = useState<number>(1);
 
@@ -292,7 +297,7 @@ function ResultsTable({ results }: { results: Result[] }) {
   }, [results, selectedEvent, activeRound]);
 
   if (eventIds.length === 0) {
-    return <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--muted)' }}>No results yet.</div>;
+    return <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--muted)' }}>{t('comp.no-results')}</div>;
   }
 
   return (
@@ -429,6 +434,7 @@ function LiveResultsOverlay({ comp, onClose }: { comp: Competition; onClose: () 
 // ── AssignmentsOverlay ────────────────────────────────────────────────────────
 
 function AssignmentsOverlay({ comp, onClose }: { comp: Competition; onClose: () => void }) {
+  const { t } = useLang();
   const dateStr = formatCompDate(comp.date);
   const meta = [comp.country, dateStr !== '—' ? dateStr : ''].filter(Boolean).join(' · ');
 
@@ -436,7 +442,7 @@ function AssignmentsOverlay({ comp, onClose }: { comp: Competition; onClose: () 
     <OverlayShell title={comp.name} subtitle={meta} onClose={onClose}>
       <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--muted)' }}>
         <div style={{ fontSize: '2rem', marginBottom: '0.6rem' }}>📋</div>
-        No assignments published for this competition yet.
+        {t('comp.no-assignments')}
       </div>
     </OverlayShell>
   );

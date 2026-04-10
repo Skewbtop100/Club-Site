@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useLang } from '@/lib/i18n';
 import ThemeToggle from './ThemeToggle';
 import LangToggle from './LangToggle';
 
@@ -25,6 +26,7 @@ export default function Navbar() {
   const [open, setOpen] = useState(false);
   const [role, setRole] = useState<SessionRole>(null);
   const router = useRouter();
+  const { t } = useLang();
 
   useEffect(() => {
     setRole(getSessionRole());
@@ -61,11 +63,11 @@ export default function Navbar() {
 
       {/* Desktop nav links */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '1.6rem' }} className="nav-links">
-        <Link href="/#rankings" className="nav-link hide-mobile">Rankings</Link>
-        <Link href="/#records" className="nav-link hide-mobile">Records</Link>
-        <Link href="/#competitions" className="nav-link">Competitions</Link>
-        <Link href="/#live" className="nav-link">Live</Link>
-        <Link href="/#athletes" className="nav-link hide-mobile">Athletes</Link>
+        <Link href="/#rankings" className="nav-link hide-mobile">{t('nav.rankings')}</Link>
+        <Link href="/#records" className="nav-link hide-mobile">{t('nav.records')}</Link>
+        <Link href="/#competitions" className="nav-link">{t('nav.competitions')}</Link>
+        <Link href="/#live" className="nav-link">{t('nav.live')}</Link>
+        <Link href="/#athletes" className="nav-link hide-mobile">{t('nav.athletes')}</Link>
 
         {/* Auth dropdown */}
         <div style={{ position: 'relative' }}>
@@ -84,10 +86,10 @@ export default function Navbar() {
           >
             <span>
               {role === 'admin'
-                ? '⚡ Admin'
+                ? t('nav.admin')
                 : role === 'athlete' || role === 'results_entry'
-                ? '👤 My Profile'
-                : 'Sign In'}
+                ? t('nav.my-profile-short')
+                : t('nav.sign-in')}
             </span>
             <svg
               viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}
@@ -99,11 +101,7 @@ export default function Navbar() {
 
           {open && (
             <>
-              {/* Backdrop */}
-              <div
-                style={{ position: 'fixed', inset: 0, zIndex: -1 }}
-                onClick={() => setOpen(false)}
-              />
+              <div style={{ position: 'fixed', inset: 0, zIndex: -1 }} onClick={() => setOpen(false)} />
               <div style={{
                 position: 'absolute', top: 'calc(100% + 9px)', right: 0,
                 minWidth: '216px',
@@ -117,7 +115,6 @@ export default function Navbar() {
               }}>
 
                 {role === null && (
-                  /* Not logged in — show Sign In */
                   <button
                     onClick={() => { setOpen(false); router.push('/login'); }}
                     className="nd-link"
@@ -132,12 +129,11 @@ export default function Navbar() {
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
                       <path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3" />
                     </svg>
-                    Sign In
+                    {t('nav.sign-in')}
                   </button>
                 )}
 
                 {role === 'admin' && (
-                  /* Logged in as admin */
                   <>
                     <a
                       href="/admin/dashboard"
@@ -148,30 +144,19 @@ export default function Navbar() {
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
                         <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
                       </svg>
-                      Admin Dashboard
+                      {t('nav.admin-short')}
                     </a>
                     <div style={{ height: '1px', background: 'rgba(255,255,255,0.07)', margin: '3px 6px' }} />
-                    <button
-                      onClick={signOut}
-                      className="nd-link"
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: '0.5rem',
-                        padding: '0.58rem 0.65rem', borderRadius: '9px',
-                        fontSize: '0.86rem', fontWeight: 600, color: '#f87171',
-                        background: 'none', border: 'none', cursor: 'pointer',
-                        fontFamily: 'inherit', width: '100%', textAlign: 'left',
-                      }}
-                    >
+                    <button onClick={signOut} className="nd-link" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.58rem 0.65rem', borderRadius: '9px', fontSize: '0.86rem', fontWeight: 600, color: '#f87171', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', width: '100%', textAlign: 'left' }}>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                         <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>
                       </svg>
-                      Sign Out
+                      {t('nav.sign-out')}
                     </button>
                   </>
                 )}
 
                 {(role === 'athlete' || role === 'results_entry') && (
-                  /* Logged in as athlete / results entry */
                   <>
                     <a
                       href="/dashboard"
@@ -182,49 +167,27 @@ export default function Navbar() {
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
                         <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/>
                       </svg>
-                      My Profile
+                      {t('nav.my-profile-short')}
                     </a>
                     <div style={{ height: '1px', background: 'rgba(255,255,255,0.07)', margin: '3px 6px' }} />
-                    <button
-                      onClick={signOut}
-                      className="nd-link"
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: '0.5rem',
-                        padding: '0.58rem 0.65rem', borderRadius: '9px',
-                        fontSize: '0.86rem', fontWeight: 600, color: '#f87171',
-                        background: 'none', border: 'none', cursor: 'pointer',
-                        fontFamily: 'inherit', width: '100%', textAlign: 'left',
-                      }}
-                    >
+                    <button onClick={signOut} className="nd-link" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.58rem 0.65rem', borderRadius: '9px', fontSize: '0.86rem', fontWeight: 600, color: '#f87171', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', width: '100%', textAlign: 'left' }}>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                         <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>
                       </svg>
-                      Sign Out
+                      {t('nav.sign-out')}
                     </button>
                   </>
                 )}
 
                 <div style={{ height: '1px', background: 'rgba(255,255,255,0.07)', margin: '3px 6px' }} />
 
-                {/* Language row */}
-                <div style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '0.42rem 0.65rem', borderRadius: '9px', gap: '0.75rem',
-                }}>
-                  <span style={{ fontSize: '0.77rem', color: 'var(--muted)', fontWeight: 500, whiteSpace: 'nowrap' }}>
-                    Language
-                  </span>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.42rem 0.65rem', borderRadius: '9px', gap: '0.75rem' }}>
+                  <span style={{ fontSize: '0.77rem', color: 'var(--muted)', fontWeight: 500, whiteSpace: 'nowrap' }}>{t('lang.label')}</span>
                   <LangToggle />
                 </div>
 
-                {/* Theme row */}
-                <div style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '0.42rem 0.65rem', borderRadius: '9px', gap: '0.75rem',
-                }}>
-                  <span style={{ fontSize: '0.77rem', color: 'var(--muted)', fontWeight: 500, whiteSpace: 'nowrap' }}>
-                    Theme
-                  </span>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.42rem 0.65rem', borderRadius: '9px', gap: '0.75rem' }}>
+                  <span style={{ fontSize: '0.77rem', color: 'var(--muted)', fontWeight: 500, whiteSpace: 'nowrap' }}>{t('theme.label')}</span>
                   <ThemeToggle />
                 </div>
               </div>
@@ -235,11 +198,8 @@ export default function Navbar() {
 
       <style>{`
         .nav-link {
-          font-size: 0.875rem;
-          font-weight: 500;
-          color: var(--muted);
-          transition: color 0.2s;
-          text-decoration: none;
+          font-size: 0.875rem; font-weight: 500; color: var(--muted);
+          transition: color 0.2s; text-decoration: none;
         }
         .nav-link:hover { color: var(--text); }
         .nd-link:hover { background: rgba(124,58,237,0.1); }
@@ -247,9 +207,7 @@ export default function Navbar() {
           from { opacity: 0; transform: translateY(-6px); }
           to   { opacity: 1; transform: translateY(0); }
         }
-        @media (max-width: 700px) {
-          .hide-mobile { display: none !important; }
-        }
+        @media (max-width: 700px) { .hide-mobile { display: none !important; } }
       `}</style>
     </nav>
   );

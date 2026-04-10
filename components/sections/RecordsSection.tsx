@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
+import { useLang } from '@/lib/i18n';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { fmtTime, betterTime } from '@/lib/time-utils';
 import type { Result, Athlete, EventVisibility } from '@/lib/types';
@@ -21,6 +22,7 @@ function isEventVisible(eventId: string, visibility: EventVisibility, results: R
 interface RecordEntry { time: number; name: string; athleteId: string }
 
 export default function RecordsSection({ results, athletes, eventVisibility }: Props) {
+  const { t } = useLang();
   const nameMap = useMemo(() => {
     const m: Record<string, string> = {};
     athletes.forEach((a) => { m[a.id] = (a.name || '') + (a.lastName ? ' ' + a.lastName : ''); });
@@ -52,9 +54,9 @@ export default function RecordsSection({ results, athletes, eventVisibility }: P
     <section id="records" style={{ padding: '6rem 2rem', background: 'var(--bg)' }}>
       <div style={{ maxWidth: 1400, margin: '0 auto', padding: '0 2rem' }}>
         <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
-          <div className="section-tag">RECORDS</div>
-          <h2 className="section-title">Club Records</h2>
-          <p className="section-desc">The best single and average ever recorded in each WCA event within our club competitions.</p>
+          <div className="section-tag">{t('section-tag.records')}</div>
+          <h2 className="section-title">{t('section-title.records')}</h2>
+          <p className="section-desc">{t('section-desc.records')}</p>
         </div>
 
         <div style={{
@@ -71,8 +73,8 @@ export default function RecordsSection({ results, athletes, eventVisibility }: P
                   {ev.name}
                 </div>
 
-                <RecordRow label="Single Record" entry={s} />
-                <RecordRow label="Average Record" entry={a} isAvg />
+                <RecordRow label={t('records.single-record')} entry={s} />
+                <RecordRow label={t('records.average-record')} entry={a} isAvg />
               </div>
             );
           })}
