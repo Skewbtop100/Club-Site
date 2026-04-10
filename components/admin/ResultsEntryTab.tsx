@@ -27,8 +27,9 @@ interface PanelState {
   id: number; athleteId: string; eventId: string; round: number; group: number;
   solves: string[]; penalties: ('none' | '+2' | 'dnf')[];
   currentSolveIdx: number; rawInput: string;
-  selectedChip: number | null;   // which prior-solve chip is showing Edit button
+  selectedChip: number | null;   // which prior-solve chip is showing Edit button (during entry)
   editReturnIdx: number | null;  // where to return after editing a prior solve
+  postEditMode: boolean;         // in all-entered view: chips are directly tappable to edit
   msg: string; msgType: string;
 }
 function emptyPanel(id: number): PanelState {
@@ -36,7 +37,7 @@ function emptyPanel(id: number): PanelState {
     id, athleteId: '', eventId: '', round: 1, group: 1,
     solves: ['', '', '', '', ''], penalties: ['none', 'none', 'none', 'none', 'none'],
     currentSolveIdx: 0, rawInput: '',
-    selectedChip: null, editReturnIdx: null,
+    selectedChip: null, editReturnIdx: null, postEditMode: false,
     msg: '', msgType: '',
   };
 }
@@ -125,15 +126,16 @@ export default function ResultsEntryTab() {
     }));
   }
 
-  function startEditPriorSolve(panelId: number, solveIdx: number) {
+  function startEditPriorSolve(panelId: number, solveIdx: number, returnTo?: number) {
     setPanels(prev => prev.map(p => {
       if (p.id !== panelId) return p;
       return {
         ...p,
         currentSolveIdx: solveIdx,
         rawInput: p.penalties[solveIdx] === 'dnf' ? '' : timeToRawDigits(p.solves[solveIdx]),
-        editReturnIdx: p.currentSolveIdx,
+        editReturnIdx: returnTo !== undefined ? returnTo : p.currentSolveIdx,
         selectedChip: null,
+        postEditMode: false,
       };
     }));
   }
@@ -261,17 +263,6 @@ export default function ResultsEntryTab() {
             <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>Panels: <strong>{panels.length}</strong></span>
             <button className="btn-xs" onClick={() => setPanels(p => [...p, emptyPanel(p.length)])}>+ Add Panel</button>
             <button className="btn-xs" onClick={() => { if (panels.length <= 1) return; setPanels(p => p.slice(0, -1)); }}>− Remove</button>
-            <button
-              className="btn-xs"
-              onClick={() => { if (showTimer) { resetTimer(); setShowTimer(false); } else setShowTimer(true); }}
-              style={showTimer ? {
-                background: 'rgba(251,191,36,0.15)',
-                borderColor: 'rgba(251,191,36,0.45)',
-                color: '#fbbf24',
-              } : {}}
-            >
-              Inspection Timer
-            </button>
           </div>
         )}
       </div>
@@ -282,65 +273,6 @@ export default function ResultsEntryTab() {
         </div>
       )}
 
-      {/* ── Inspection Timer (tap to start/stop) ─────────────────────────────── */}
-      {showTimer && (() => {
-        const color = timerColor(timerMs);
-        const isDnf = timerMs / 1000 >= 17;
-        const isPlus2 = timerMs / 1000 >= 15 && !isDnf;
-        return (
-          <div
-            onClick={() => !timerStopped && tapTimer()}
-            style={{
-              marginBottom: '0.85rem', borderRadius: '12px', overflow: 'hidden',
-              border: `1px solid ${color === '#f8fafc' ? 'rgba(255,255,255,0.1)' : color + '55'}`,
-              cursor: timerStopped ? 'default' : 'pointer',
-              userSelect: 'none',
-              WebkitUserSelect: 'none',
-            }}
-          >
-            <div style={{
-              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-              padding: '1.75rem 1rem',
-              background: `${color}11`,
-              transition: 'background 0.25s',
-              minHeight: '110px',
-            }}>
-              <div style={{
-                fontSize: '3.5rem', fontWeight: 800, lineHeight: 1,
-                color, transition: 'color 0.25s',
-                fontVariantNumeric: 'tabular-nums',
-              }}>
-                {fmtInspection(timerMs)}
-              </div>
-              {isDnf && (
-                <div style={{ fontSize: '1.05rem', fontWeight: 700, color, marginTop: '0.5rem' }}>DNF!</div>
-              )}
-              {isPlus2 && (
-                <div style={{ fontSize: '1.05rem', fontWeight: 700, color, marginTop: '0.5rem' }}>+2 Penalty!</div>
-              )}
-              {!timerStopped && (
-                <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.35)', marginTop: '0.6rem' }}>
-                  {timerRunning ? 'TAP TO STOP' : 'TAP TO START'}
-                </div>
-              )}
-            </div>
-            {timerStopped && (
-              <div style={{ display: 'flex', justifyContent: 'center', padding: '0.55rem', background: 'rgba(0,0,0,0.25)' }}>
-                <button
-                  onClick={e => { e.stopPropagation(); resetTimer(); }}
-                  style={{
-                    padding: '0.35rem 1.4rem', borderRadius: '8px', fontSize: '0.82rem',
-                    background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)',
-                    color: 'var(--muted)', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600,
-                  }}
-                >
-                  Reset
-                </button>
-              </div>
-            )}
-          </div>
-        );
-      })()}
 
       {/* ── Entry Panels ─────────────────────────────────────────────────────── */}
       {compId && (
@@ -393,20 +325,85 @@ export default function ResultsEntryTab() {
                   {evList.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
                 </select>
 
-                {/* Round + Group */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.3rem', marginBottom: '0.3rem' }}>
-                  <select className="compact-select" value={panel.round} style={{ marginBottom: 0 }}
-                    onChange={e => updatePanel(panel.id, { round: Number(e.target.value) })}>
-                    {roundNames.map((name, idx) => (
-                      <option key={idx} value={idx + 1}>{name}</option>
-                    ))}
-                  </select>
-                  <select className="compact-select" value={panel.group} style={{ marginBottom: 0 }}
-                    onChange={e => updatePanel(panel.id, { group: Number(e.target.value) })}>
-                    {Array.from({ length: Math.max(1, groupCount) }, (_, i) => (
-                      <option key={i} value={i + 1}>Group {String.fromCharCode(65 + i)}</option>
-                    ))}
-                  </select>
+                {/* Round */}
+                <select className="compact-select" value={panel.round}
+                  onChange={e => updatePanel(panel.id, { round: Number(e.target.value) })}>
+                  {roundNames.map((name, idx) => (
+                    <option key={idx} value={idx + 1}>{name}</option>
+                  ))}
+                </select>
+
+                {/* Group */}
+                <select className="compact-select" value={panel.group}
+                  onChange={e => updatePanel(panel.id, { group: Number(e.target.value) })}>
+                  {Array.from({ length: Math.max(1, groupCount) }, (_, i) => (
+                    <option key={i} value={i + 1}>Group {String.fromCharCode(65 + i)}</option>
+                  ))}
+                </select>
+
+                {/* ── Inspection Timer ─────────────────────────────────────── */}
+                <div style={{ marginBottom: '0.4rem' }}>
+                  <button
+                    className="btn-xs"
+                    onClick={() => { if (showTimer) { resetTimer(); setShowTimer(false); } else setShowTimer(true); }}
+                    style={{
+                      width: '100%', marginBottom: showTimer ? '0.4rem' : 0,
+                      ...(showTimer ? {
+                        background: 'rgba(251,191,36,0.15)',
+                        borderColor: 'rgba(251,191,36,0.45)',
+                        color: '#fbbf24',
+                      } : {}),
+                    }}
+                  >
+                    Inspection Timer
+                  </button>
+                  {showTimer && (() => {
+                    const color  = timerColor(timerMs);
+                    const isDnf  = timerMs / 1000 >= 17;
+                    const isPlus2 = timerMs / 1000 >= 15 && !isDnf;
+                    return (
+                      <div
+                        onClick={() => !timerStopped && tapTimer()}
+                        style={{
+                          borderRadius: '10px', overflow: 'hidden',
+                          border: `1px solid ${color === '#f8fafc' ? 'rgba(255,255,255,0.1)' : color + '55'}`,
+                          cursor: timerStopped ? 'default' : 'pointer',
+                          userSelect: 'none', WebkitUserSelect: 'none',
+                        }}
+                      >
+                        <div style={{
+                          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                          padding: '1.25rem 1rem', background: `${color}11`, transition: 'background 0.25s', minHeight: '90px',
+                        }}>
+                          <div style={{
+                            fontSize: '3rem', fontWeight: 800, lineHeight: 1,
+                            color, transition: 'color 0.25s', fontVariantNumeric: 'tabular-nums',
+                          }}>
+                            {fmtInspection(timerMs)}
+                          </div>
+                          {isDnf && <div style={{ fontSize: '0.95rem', fontWeight: 700, color, marginTop: '0.4rem' }}>DNF!</div>}
+                          {isPlus2 && <div style={{ fontSize: '0.95rem', fontWeight: 700, color, marginTop: '0.4rem' }}>+2 Penalty!</div>}
+                          {!timerStopped && (
+                            <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.35)', marginTop: '0.5rem' }}>
+                              {timerRunning ? 'TAP TO STOP' : 'TAP TO START'}
+                            </div>
+                          )}
+                        </div>
+                        {timerStopped && (
+                          <div style={{ display: 'flex', justifyContent: 'center', padding: '0.45rem', background: 'rgba(0,0,0,0.25)' }}>
+                            <button
+                              onClick={e => { e.stopPropagation(); resetTimer(); }}
+                              style={{
+                                padding: '0.3rem 1.2rem', borderRadius: '7px', fontSize: '0.8rem',
+                                background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)',
+                                color: 'var(--muted)', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600,
+                              }}
+                            >Reset</button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* ── Solve Entry: one at a time ───────────────────────────── */}
@@ -612,22 +609,40 @@ export default function ResultsEntryTab() {
                 ) : (
                   /* ── All 5 entered — summary + save ─────────────────────── */
                   <div style={{ marginTop: '0.5rem' }}>
-                    {/* Solve summary */}
-                    <div style={{ display: 'flex', gap: '0.2rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
-                      {panel.solves.map((sv, i) => (
-                        <div key={i} style={{
-                          flex: 1, minWidth: '44px', textAlign: 'center',
-                          padding: '0.3rem 0.15rem', borderRadius: '6px',
-                          background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)',
-                          fontSize: '0.68rem',
+                    {/* Solve summary chips — tappable when in postEditMode */}
+                    <div style={{ marginBottom: panel.postEditMode ? '0.3rem' : '0.5rem' }}>
+                      {panel.postEditMode && (
+                        <div style={{
+                          fontSize: '0.7rem', fontWeight: 700, color: '#a78bfa',
+                          textTransform: 'uppercase', letterSpacing: '0.08em',
+                          textAlign: 'center', marginBottom: '0.35rem',
                         }}>
-                          <div style={{ color: 'var(--muted)', marginBottom: '2px' }}>S{i+1}</div>
-                          <div style={{ color: panel.penalties[i] === 'dnf' ? '#f87171' : 'var(--text)', fontWeight: 600 }}>
-                            {panel.penalties[i] === 'dnf' ? 'DNF' : (sv || '—')}
-                            {panel.penalties[i] === '+2' ? '+' : ''}
-                          </div>
+                          Tap a solve to edit
                         </div>
-                      ))}
+                      )}
+                      <div style={{ display: 'flex', gap: '0.2rem', flexWrap: 'wrap' }}>
+                        {panel.solves.map((sv, i) => (
+                          <div
+                            key={i}
+                            onClick={() => panel.postEditMode && startEditPriorSolve(panel.id, i, 5)}
+                            style={{
+                              flex: 1, minWidth: '44px', textAlign: 'center',
+                              padding: '0.3rem 0.15rem', borderRadius: '6px',
+                              fontSize: '0.68rem',
+                              cursor: panel.postEditMode ? 'pointer' : 'default',
+                              background: panel.postEditMode ? 'rgba(124,58,237,0.08)' : 'rgba(255,255,255,0.03)',
+                              border: `1px solid ${panel.postEditMode ? 'rgba(124,58,237,0.35)' : 'rgba(255,255,255,0.08)'}`,
+                              transition: 'background 0.12s, border-color 0.12s',
+                            }}
+                          >
+                            <div style={{ color: 'var(--muted)', marginBottom: '2px' }}>S{i+1}</div>
+                            <div style={{ color: panel.penalties[i] === 'dnf' ? '#f87171' : 'var(--text)', fontWeight: 600 }}>
+                              {panel.penalties[i] === 'dnf' ? 'DNF' : (sv || '—')}
+                              {panel.penalties[i] === '+2' ? '+' : ''}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
 
                     {/* Single / Ao5 */}
@@ -642,38 +657,51 @@ export default function ResultsEntryTab() {
                       </div>
                     </div>
 
-                    {/* Save Result button (green, full width) */}
-                    <button
-                      onClick={() => submit(panel.id)}
-                      style={{
-                        width: '100%', minHeight: '52px', borderRadius: '10px',
-                        fontSize: '1rem', fontWeight: 700, cursor: 'pointer',
-                        fontFamily: 'inherit', marginBottom: '0.35rem',
-                        background: 'rgba(34,197,94,0.2)',
-                        border: '1px solid rgba(34,197,94,0.5)',
-                        color: '#4ade80',
-                      }}
-                    >
-                      Save Result
-                    </button>
-
-                    {/* Re-enter link */}
-                    <button
-                      onClick={() => updatePanel(panel.id, {
-                        currentSolveIdx: 0,
-                        solves: ['', '', '', '', ''],
-                        penalties: ['none', 'none', 'none', 'none', 'none'],
-                        rawInput: '', msg: '', msgType: '',
-                        editReturnIdx: null, selectedChip: null,
-                      })}
-                      style={{
-                        width: '100%', padding: '0.4rem', borderRadius: '8px',
-                        background: 'transparent', border: '1px solid rgba(255,255,255,0.07)',
-                        color: 'var(--muted)', cursor: 'pointer', fontSize: '0.78rem', fontFamily: 'inherit',
-                      }}
-                    >
-                      Re-enter Solves
-                    </button>
+                    {/* Save + Edit buttons (or Cancel when in postEditMode) */}
+                    {panel.postEditMode ? (
+                      <button
+                        onClick={() => updatePanel(panel.id, { postEditMode: false })}
+                        style={{
+                          width: '100%', minHeight: '48px', borderRadius: '10px',
+                          fontSize: '0.9rem', fontWeight: 600, cursor: 'pointer',
+                          fontFamily: 'inherit',
+                          background: 'rgba(255,255,255,0.05)',
+                          border: '1px solid rgba(255,255,255,0.12)',
+                          color: 'var(--muted)',
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    ) : (
+                      <div style={{ display: 'flex', gap: '0.4rem' }}>
+                        <button
+                          onClick={() => submit(panel.id)}
+                          style={{
+                            flex: 2, minHeight: '52px', borderRadius: '10px',
+                            fontSize: '1rem', fontWeight: 700, cursor: 'pointer',
+                            fontFamily: 'inherit',
+                            background: 'rgba(34,197,94,0.2)',
+                            border: '1px solid rgba(34,197,94,0.5)',
+                            color: '#4ade80',
+                          }}
+                        >
+                          Save
+                        </button>
+                        <button
+                          onClick={() => updatePanel(panel.id, { postEditMode: true })}
+                          style={{
+                            flex: 1, minHeight: '52px', borderRadius: '10px',
+                            fontSize: '0.9rem', fontWeight: 600, cursor: 'pointer',
+                            fontFamily: 'inherit',
+                            background: 'rgba(255,255,255,0.05)',
+                            border: '1px solid rgba(255,255,255,0.12)',
+                            color: 'var(--muted)',
+                          }}
+                        >
+                          Edit
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
 
