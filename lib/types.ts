@@ -13,6 +13,7 @@ export interface Competition {
   name: string;
   status: 'upcoming' | 'live' | 'finished';
   date?: string | { toDate: () => Date };
+  clubDate?: string | { toDate: () => Date };
   country?: string;
   events?: Record<string, boolean>;
 }

@@ -152,6 +152,7 @@ function CompCard({
   const { t } = useLang();
   const statusClass = comp.status === 'live' ? 'status-live' : comp.status === 'upcoming' ? 'status-upcoming' : 'status-finished';
   const dateStr = formatCompDate(comp.date);
+  const clubDateStr = formatCompDate(comp.clubDate);
   const eventIds = comp.events ? Object.keys(comp.events) : [];
   const meta = [comp.country, dateStr !== '—' ? dateStr : ''].filter(Boolean).join(' · ');
 
@@ -165,7 +166,16 @@ function CompCard({
       <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.4rem' }}>
         {comp.name || '—'}
       </div>
-      <div style={{ fontSize: '0.82rem', color: 'var(--muted)', marginBottom: '0.8rem' }}>{meta}</div>
+      <div style={{ fontSize: '0.82rem', color: 'var(--muted)', marginBottom: clubDateStr !== '—' ? '0.4rem' : '0.8rem' }}>{meta}</div>
+      {clubDateStr !== '—' && (
+        <div style={{ fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} style={{ opacity: 0.6, flexShrink: 0 }}>
+            <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>
+          </svg>
+          <span style={{ opacity: 0.7 }}>Club event:</span>
+          <span style={{ color: '#a78bfa', fontWeight: 500 }}>{clubDateStr}</span>
+        </div>
+      )}
 
       {eventIds.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginBottom: '1rem' }}>
