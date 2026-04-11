@@ -923,49 +923,120 @@ export default function ResultsEntryTab() {
 
             {/* Part 4: Preview/Edit table */}
             {importRows.length > 0 && (
-              <div style={{ overflowX: 'auto', marginBottom: '1rem' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem', whiteSpace: 'nowrap' }}>
+              <div style={{ overflowX: 'auto', marginBottom: '1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
                   <thead>
-                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-                      {['#', 'Name', 'Country', 'S1', 'S2', 'S3', 'S4', 'S5', 'Avg', 'Best', 'Action'].map(h => (
-                        <th key={h} style={{ padding: '0.3rem 0.4rem', textAlign: 'left', color: 'var(--muted)', fontWeight: 600 }}>{h}</th>
+                    <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                      {[
+                        { label: '#',      align: 'center' as const },
+                        { label: 'Name',   align: 'left'   as const },
+                        { label: 'Country',align: 'left'   as const },
+                        { label: 'S1',     align: 'center' as const },
+                        { label: 'S2',     align: 'center' as const },
+                        { label: 'S3',     align: 'center' as const },
+                        { label: 'S4',     align: 'center' as const },
+                        { label: 'S5',     align: 'center' as const },
+                        { label: 'Avg',    align: 'center' as const },
+                        { label: 'Best',   align: 'center' as const },
+                        { label: '',       align: 'center' as const },
+                      ].map(({ label, align }) => (
+                        <th key={label} style={{
+                          padding: '0.4rem 0.5rem', textAlign: align,
+                          color: 'var(--muted)', fontWeight: 600,
+                          fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.06em',
+                        }}>{label}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {importRows.map((row, i) => (
-                      <tr key={row.idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', background: row.hasError ? 'rgba(239,68,68,0.07)' : 'transparent' }}>
-                        <td style={{ padding: '0.25rem 0.4rem', color: 'var(--muted)' }}>{i + 1}</td>
-                        {(['name', 'country', 's1', 's2', 's3', 's4', 's5', 'avg', 'best'] as const).map(field => (
-                          <td key={field} style={{ padding: '0.2rem 0.3rem' }}>
+                    {importRows.map((row, i) => {
+                      const isEven = i % 2 === 0;
+                      const rowBg = row.hasError
+                        ? 'rgba(239,68,68,0.07)'
+                        : isEven ? 'transparent' : 'rgba(255,255,255,0.018)';
+                      const solveFields = ['s1', 's2', 's3', 's4', 's5'] as const;
+                      const inputBase: React.CSSProperties = {
+                        padding: '0.18rem 0.3rem', borderRadius: '4px', fontSize: '0.78rem',
+                        fontFamily: 'inherit', background: 'rgba(255,255,255,0.05)',
+                        border: '1px solid rgba(255,255,255,0.09)',
+                        color: 'var(--text)', outline: 'none', textAlign: 'center',
+                      };
+                      return (
+                        <tr key={row.idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', background: rowBg }}>
+                          <td style={{ padding: '0.4rem 0.5rem', textAlign: 'center', color: 'var(--muted)', fontSize: '0.72rem' }}>{i + 1}</td>
+                          {/* Name */}
+                          <td style={{ padding: '0.3rem 0.4rem' }}>
                             <input
-                              value={row[field] || ''}
-                              onChange={e => updateImportRow(row.idx, field, e.target.value)}
+                              value={row.name}
+                              onChange={e => updateImportRow(row.idx, 'name', e.target.value)}
                               style={{
-                                width: field === 'name' ? '120px' : field === 'country' ? '68px' : '60px',
-                                padding: '0.2rem 0.35rem', borderRadius: '5px', fontSize: '0.78rem',
-                                fontFamily: 'inherit',
-                                background: 'rgba(255,255,255,0.05)',
-                                border: `1px solid ${row.hasError && field === 'name' ? 'rgba(239,68,68,0.5)' : 'rgba(255,255,255,0.1)'}`,
-                                color: 'var(--text)', outline: 'none',
+                                ...inputBase, textAlign: 'left', width: '160px',
+                                border: `1px solid ${row.hasError ? 'rgba(239,68,68,0.5)' : 'rgba(255,255,255,0.09)'}`,
                               }}
                             />
                           </td>
-                        ))}
-                        <td style={{ padding: '0.2rem 0.4rem' }}>
-                          <button
-                            onClick={() => setImportRows(r => r.filter(x => x.idx !== row.idx))}
-                            style={{
-                              padding: '0.18rem 0.5rem', borderRadius: '5px', cursor: 'pointer',
-                              fontFamily: 'inherit', fontSize: '0.72rem', fontWeight: 600,
-                              background: 'rgba(239,68,68,0.12)',
-                              border: '1px solid rgba(239,68,68,0.35)',
-                              color: '#f87171',
-                            }}
-                          >Remove</button>
-                        </td>
-                      </tr>
-                    ))}
+                          {/* Country */}
+                          <td style={{ padding: '0.3rem 0.4rem' }}>
+                            <input
+                              value={row.country}
+                              onChange={e => updateImportRow(row.idx, 'country', e.target.value)}
+                              style={{ ...inputBase, textAlign: 'left', width: '90px' }}
+                            />
+                          </td>
+                          {/* S1–S5 */}
+                          {solveFields.map(field => (
+                            <td key={field} style={{ padding: '0.3rem 0.2rem' }}>
+                              <input
+                                value={row[field]}
+                                onChange={e => updateImportRow(row.idx, field, e.target.value)}
+                                style={{ ...inputBase, width: '65px' }}
+                              />
+                            </td>
+                          ))}
+                          {/* Avg */}
+                          <td style={{ padding: '0.3rem 0.35rem' }}>
+                            <input
+                              value={row.avg}
+                              onChange={e => updateImportRow(row.idx, 'avg', e.target.value)}
+                              style={{
+                                ...inputBase, width: '68px',
+                                fontWeight: 700, fontSize: '0.82rem',
+                                color: '#2dd4bf',
+                                border: '1px solid rgba(45,212,191,0.2)',
+                                background: 'rgba(45,212,191,0.06)',
+                              }}
+                            />
+                          </td>
+                          {/* Best */}
+                          <td style={{ padding: '0.3rem 0.35rem' }}>
+                            <input
+                              value={row.best}
+                              onChange={e => updateImportRow(row.idx, 'best', e.target.value)}
+                              style={{
+                                ...inputBase, width: '68px',
+                                fontWeight: 700, fontSize: '0.82rem',
+                                color: '#fbbf24',
+                                border: '1px solid rgba(251,191,36,0.2)',
+                                background: 'rgba(251,191,36,0.06)',
+                              }}
+                            />
+                          </td>
+                          {/* Remove */}
+                          <td style={{ padding: '0.3rem 0.5rem' }}>
+                            <button
+                              onClick={() => setImportRows(r => r.filter(x => x.idx !== row.idx))}
+                              style={{
+                                padding: '0.18rem 0.5rem', borderRadius: '5px', cursor: 'pointer',
+                                fontFamily: 'inherit', fontSize: '0.72rem', fontWeight: 600,
+                                background: 'rgba(239,68,68,0.12)',
+                                border: '1px solid rgba(239,68,68,0.35)',
+                                color: '#f87171',
+                              }}
+                            >Remove</button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
