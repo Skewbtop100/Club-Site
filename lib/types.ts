@@ -14,9 +14,15 @@ export interface CompetitionAthlete {
   events: string[];
 }
 
+export interface AdvancementConfig {
+  type: 'fixed' | 'percent';
+  value: number;
+}
+
 export interface EventConfig {
   rounds: number;
   groups: number;
+  advancement?: Record<string, AdvancementConfig>;
 }
 
 export interface Competition {

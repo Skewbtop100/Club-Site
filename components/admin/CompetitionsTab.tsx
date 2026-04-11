@@ -8,7 +8,7 @@ import {
   deleteCompetition,
 } from '@/lib/firebase/services/competitions';
 import { getAthletes } from '@/lib/firebase/services/athletes';
-import type { Athlete, Competition, CompetitionAthlete, EventConfig } from '@/lib/types';
+import type { Athlete, Competition, CompetitionAthlete, EventConfig, AdvancementConfig } from '@/lib/types';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import COUNTRIES from '@/lib/countries';
 
@@ -268,6 +268,81 @@ export default function CompetitionsTab() {
                         }}
                       />
                     </label>
+                  </div>
+                )}
+                {events[ev.id] && (eventConfig[ev.id]?.rounds ?? 1) > 1 && (
+                  <div style={{
+                    padding: '0.3rem 0.7rem 0.5rem',
+                    borderTop: '1px solid rgba(255,255,255,0.05)',
+                    display: 'flex', flexDirection: 'column', gap: '0.3rem',
+                  }}>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.1rem', opacity: 0.7 }}>
+                      Advance to next round:
+                    </div>
+                    {Array.from({ length: (eventConfig[ev.id]?.rounds ?? 1) - 1 }, (_, idx) => idx + 1).map(r => {
+                      const adv: AdvancementConfig | undefined = eventConfig[ev.id]?.advancement?.[String(r)];
+                      const isPercent = adv?.type === 'percent';
+                      return (
+                        <div key={r} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.74rem', color: 'var(--muted)' }}>
+                          <span style={{ flexShrink: 0, minWidth: '1.6rem' }}>R{r}:</span>
+                          <span style={{ flexShrink: 0 }}>Top</span>
+                          <input
+                            type="number" min={1} max={isPercent ? 99 : 999}
+                            value={adv?.value ?? ''}
+                            placeholder={isPercent ? '25' : '8'}
+                            onChange={e => {
+                              const val = Math.max(1, Number(e.target.value));
+                              setEventConfig(prev => ({
+                                ...prev,
+                                [ev.id]: {
+                                  ...(prev[ev.id] || { rounds: 1, groups: 1 }),
+                                  advancement: {
+                                    ...(prev[ev.id]?.advancement || {}),
+                                    [String(r)]: { type: adv?.type || 'fixed', value: val },
+                                  },
+                                },
+                              }));
+                            }}
+                            style={{
+                              width: '3rem', padding: '0.2rem 0.3rem', fontSize: '0.78rem',
+                              borderRadius: '5px', textAlign: 'center', fontFamily: 'inherit',
+                              background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: 'var(--text)',
+                            }}
+                          />
+                          {/* Fixed / % toggle */}
+                          <div style={{ display: 'flex', borderRadius: '5px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.12)' }}>
+                            {(['fixed', 'percent'] as const).map(t => (
+                              <button
+                                key={t}
+                                type="button"
+                                onClick={() => setEventConfig(prev => ({
+                                  ...prev,
+                                  [ev.id]: {
+                                    ...(prev[ev.id] || { rounds: 1, groups: 1 }),
+                                    advancement: {
+                                      ...(prev[ev.id]?.advancement || {}),
+                                      [String(r)]: { type: t, value: adv?.value ?? (t === 'percent' ? 25 : 8) },
+                                    },
+                                  },
+                                }))}
+                                style={{
+                                  padding: '0.15rem 0.4rem', cursor: 'pointer',
+                                  fontSize: '0.7rem', fontFamily: 'inherit',
+                                  background: (adv?.type || 'fixed') === t ? 'rgba(124,58,237,0.4)' : 'rgba(255,255,255,0.04)',
+                                  color: (adv?.type || 'fixed') === t ? '#c4b5fd' : 'var(--muted)',
+                                  border: 'none',
+                                }}
+                              >
+                                {t === 'fixed' ? '#' : '%'}
+                              </button>
+                            ))}
+                          </div>
+                          <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: '0.7rem' }}>
+                            {isPercent ? 'advance' : 'advance'}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>

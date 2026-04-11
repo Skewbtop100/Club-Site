@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { subscribeCompetitions } from '@/lib/firebase/services/competitions';
 import { subscribeResultsByComp } from '@/lib/firebase/services/results';
-import type { Competition, Result } from '@/lib/types';
+import type { Competition, Result, AdvancementConfig } from '@/lib/types';
 import { fmtTime } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
 
@@ -33,13 +33,34 @@ export default function CompResultsTab() {
   const rounds = evId
     ? [...new Set(results.filter(r => r.eventId === evId).map(r => r.round || 1))].sort()
     : [];
+  // WCA ranking: valid average first, then single; DNF/negative = worst
+  function wcaSort(a: Result, b: Result) {
+    const scoreOf = (r: Result): [number, number] => {
+      const avg = r.average != null && r.average > 0 ? r.average : null;
+      const sng = r.single  != null && r.single  > 0 ? r.single  : null;
+      return [avg ?? Infinity, sng ?? Infinity];
+    };
+    const [pa, sa] = scoreOf(a);
+    const [pb, sb] = scoreOf(b);
+    return pa !== pb ? pa - pb : sa - sb;
+  }
+
   const tableRows = results
     .filter(r => r.eventId === evId && (r.round || 1) === round)
-    .sort((a, b) => {
-      const sa = a.single ?? Infinity, sb = b.single ?? Infinity;
-      if (sa < 0 && sb < 0) return 0; if (sa < 0) return 1; if (sb < 0) return -1;
-      return sa - sb;
-    });
+    .sort(wcaSort);
+
+  // Advancement cutoff for this round
+  const evConfig   = selComp?.eventConfig?.[evId];
+  const totalRounds = evConfig?.rounds ?? 1;
+  const isFinalRound = round >= totalRounds;
+  const advConfig: AdvancementConfig | undefined =
+    !isFinalRound ? (evConfig?.advancement?.[String(round)] as AdvancementConfig | undefined) : undefined;
+  const rawAdvCount = advConfig
+    ? advConfig.type === 'fixed'
+      ? advConfig.value
+      : Math.floor(tableRows.length * advConfig.value / 100)
+    : 0;
+  const advanceCount = Math.min(rawAdvCount, tableRows.length - 1); // must leave at least 1 below
 
   return (
     <div className="wca-live-layout">
@@ -106,11 +127,16 @@ export default function CompResultsTab() {
                     </tr>
                   </thead>
                   <tbody>
-                    {tableRows.map((r, i) => {
+                    {tableRows.flatMap((r, i) => {
+                      const isAdvancing = advanceCount > 0 && i < advanceCount;
+                      const isLastAdvancing = advanceCount > 0 && i === advanceCount - 1;
                       const rowCls = i === 0 ? 'row-gold' : i === 1 ? 'row-silver' : i === 2 ? 'row-bronze' : r.source === 'import' ? 'row-imported' : '';
-                      return (
-                        <tr key={r.id} className={rowCls}>
-                          <td className={`wca-td-rank${i < 3 ? ` wca-rank-${i+1}` : ''}`}>{i+1}</td>
+                      const advRow = (
+                        <tr key={r.id} className={rowCls} style={isAdvancing ? { borderLeft: '3px solid #22c55e' } : { borderLeft: '3px solid transparent' }}>
+                          <td className={`wca-td-rank${i < 3 ? ` wca-rank-${i+1}` : ''}`}
+                            style={isAdvancing ? { color: '#4ade80' } : undefined}>
+                            {i+1}
+                          </td>
                           <td className="wca-td-name">
                             <div className="wca-name">{r.athleteName || r.athleteId}</div>
                           </td>
@@ -125,6 +151,29 @@ export default function CompResultsTab() {
                           </td>
                         </tr>
                       );
+                      if (isLastAdvancing) {
+                        const cutoffLabel = advConfig?.type === 'fixed'
+                          ? `✓ Top ${advanceCount} advance to next round`
+                          : `✓ Top ${advConfig?.value}% advance (${advanceCount} athletes)`;
+                        return [
+                          advRow,
+                          <tr key="advance-cutoff">
+                            <td colSpan={10} style={{ padding: 0, borderBottom: 'none' }}>
+                              <div style={{
+                                borderTop: '2px dashed #22c55e',
+                                padding: '0.25rem 0.75rem',
+                                fontSize: '0.72rem',
+                                color: '#4ade80',
+                                background: 'rgba(34,197,94,0.05)',
+                                letterSpacing: '0.01em',
+                              }}>
+                                {cutoffLabel}
+                              </div>
+                            </td>
+                          </tr>,
+                        ];
+                      }
+                      return [advRow];
                     })}
                   </tbody>
                 </table>
