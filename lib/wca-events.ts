@@ -5,12 +5,12 @@ export interface WcaEvent {
 }
 
 export const WCA_EVENTS: WcaEvent[] = [
-  { id: '333',    name: '3x3x3',              short: '3x3'  },
-  { id: '222',    name: '2x2x2',              short: '2x2'  },
-  { id: '444',    name: '4x4x4',              short: '4x4'  },
-  { id: '555',    name: '5x5x5',              short: '5x5'  },
-  { id: '666',    name: '6x6x6',              short: '6x6'  },
-  { id: '777',    name: '7x7x7',              short: '7x7'  },
+  { id: '333',    name: '3x3x3 Cube',         short: '3x3'  },
+  { id: '222',    name: '2x2x2 Cube',         short: '2x2'  },
+  { id: '444',    name: '4x4x4 Cube',         short: '4x4'  },
+  { id: '555',    name: '5x5x5 Cube',         short: '5x5'  },
+  { id: '666',    name: '6x6x6 Cube',         short: '6x6'  },
+  { id: '777',    name: '7x7x7 Cube',         short: '7x7'  },
   { id: '333bf',  name: '3x3x3 Blindfolded',  short: '3BLD' },
   { id: '333fm',  name: '3x3x3 Fewest Moves', short: 'FMC'  },
   { id: '333oh',  name: '3x3x3 One-Handed',   short: '3OH'  },

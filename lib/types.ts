@@ -35,6 +35,7 @@ export interface Competition {
   events?: Record<string, boolean>;
   athletes?: CompetitionAthlete[];
   eventConfig?: Record<string, EventConfig>;
+  roundStatus?: Record<string, 'complete' | 'ongoing'>;
 }
 
 export interface Result {
