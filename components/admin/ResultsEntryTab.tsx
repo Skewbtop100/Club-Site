@@ -304,7 +304,7 @@ export default function ResultsEntryTab() {
       const s5  = cleanSolveCell(cols[7] || '');
       const avg  = cleanTimeBadge(cols[8] || '');
       const best = cleanTimeBadge(cols[9] || '');
-      return { idx: i, name, country, s1, s2, s3, s4, s5, avg, best, hasError: !name };
+      return { idx: i, name, country, s1, s2, s3, s4, s5, avg, best, hasError: !name, isDupe: false, checked: true };
     });
   }
 
