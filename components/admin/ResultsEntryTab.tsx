@@ -255,16 +255,29 @@ export default function ResultsEntryTab() {
     return s.trim().replace(/[A-Z]{1,3}$/, '').trim();
   }
 
+  // For solve cells: preserve DNF/DNS labels, convert blank to "DNF", strip badges from times.
+  function cleanSolveCell(raw: string): string {
+    const t = raw.trim();
+    if (!t) return 'DNF';
+    const u = t.toUpperCase();
+    if (u === 'DNF') return 'DNF';
+    if (u === 'DNS') return 'DNS';
+    return cleanTimeBadge(t);
+  }
+
   function parseImportTime(raw: string): number | null {
-    const s = cleanTimeBadge(raw);
-    if (!s || s === '-' || s === '--') return null;
-    const u = s.toUpperCase();
-    if (u === 'DNF' || u === 'DNS') return -1;
+    // Check DNF/DNS BEFORE cleanTimeBadge, which would strip all uppercase letters.
+    const t = raw.trim();
+    if (!t || t === '-' || t === '--') return -1; // blank → DNF
+    const u = t.toUpperCase();
+    if (u === 'DNF') return -1;
+    if (u === 'DNS') return -2;
+    const s = cleanTimeBadge(t);
     const m = s.match(/^(\d+):(\d{2})\.(\d{2})$/);
     if (m) return (parseInt(m[1]) * 60 + parseInt(m[2])) * 100 + parseInt(m[3]);
     const n = s.match(/^(\d+)\.(\d{2})$/);
     if (n) return parseInt(n[1]) * 100 + parseInt(n[2]);
-    return null;
+    return -1; // unparseable → DNF
   }
 
   function parseImportText(text: string): ImportRow[] {
@@ -281,11 +294,11 @@ export default function ResultsEntryTab() {
       const cols = splitLine(line);
       const name    = (cols[1] || '').trim();
       const country = (cols[2] || '').trim();
-      const s1  = cleanTimeBadge(cols[3] || '');
-      const s2  = cleanTimeBadge(cols[4] || '');
-      const s3  = cleanTimeBadge(cols[5] || '');
-      const s4  = cleanTimeBadge(cols[6] || '');
-      const s5  = cleanTimeBadge(cols[7] || '');
+      const s1  = cleanSolveCell(cols[3] || '');
+      const s2  = cleanSolveCell(cols[4] || '');
+      const s3  = cleanSolveCell(cols[5] || '');
+      const s4  = cleanSolveCell(cols[6] || '');
+      const s5  = cleanSolveCell(cols[7] || '');
       const avg  = cleanTimeBadge(cols[8] || '');
       const best = cleanTimeBadge(cols[9] || '');
       return { idx: i, name, country, s1, s2, s3, s4, s5, avg, best, hasError: !name };
