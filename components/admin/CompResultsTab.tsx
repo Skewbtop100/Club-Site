@@ -37,9 +37,14 @@ export default function CompResultsTab() {
   const [editSaving, setEditSaving] = useState(false);
   const [editError,  setEditError]  = useState('');
 
-  // Delete confirmation state
-  const [deleteRow,     setDeleteRow]     = useState<Result | null>(null);
+  // Bulk-delete state
+  const [deleteMode,    setDeleteMode]    = useState(false);
+  const [selected,      setSelected]      = useState<Set<string>>(new Set());
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleteWorking, setDeleteWorking] = useState(false);
+
+  // Select-all checkbox ref for indeterminate state
+  const selectAllRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const unsub = subscribeCompetitions((data) => setComps(data));
@@ -53,6 +58,13 @@ export default function CompResultsTab() {
     unsubRef.current = unsub;
     return () => unsub();
   }, [compId]);
+
+  // Exit delete mode when event or round changes
+  useEffect(() => {
+    setDeleteMode(false);
+    setSelected(new Set());
+    setDeleteConfirm(false);
+  }, [evId, round]);
 
   function openEdit(r: Result) {
     setEditRow(r);
@@ -80,12 +92,36 @@ export default function CompResultsTab() {
     }
   }
 
-  async function doDelete() {
-    if (!deleteRow) return;
+  function enterDeleteMode() {
+    setDeleteMode(true);
+    setSelected(new Set());
+    setDeleteConfirm(false);
+  }
+
+  function exitDeleteMode() {
+    setDeleteMode(false);
+    setSelected(new Set());
+    setDeleteConfirm(false);
+  }
+
+  function toggleRow(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll(ids: string[], checked: boolean) {
+    setSelected(checked ? new Set(ids) : new Set());
+  }
+
+  async function doDeleteSelected() {
+    if (selected.size === 0) return;
     setDeleteWorking(true);
     try {
-      await deleteResultFn(deleteRow.id);
-      setDeleteRow(null);
+      await Promise.all([...selected].map(id => deleteResultFn(id)));
+      exitDeleteMode();
     } catch { /* ignore */ } finally {
       setDeleteWorking(false);
     }
@@ -95,7 +131,7 @@ export default function CompResultsTab() {
   const visibleComps = comps.filter(c => c.status === 'live' || c.status === 'upcoming');
 
   const selComp = comps.find(c => c.id === compId);
-  const evList = selComp?.events
+  const evList  = selComp?.events
     ? WCA_EVENTS.filter(e => (selComp.events as Record<string, boolean>)?.[e.id])
     : [];
   const rounds = evId
@@ -118,6 +154,17 @@ export default function CompResultsTab() {
     .filter(r => r.eventId === evId && (r.round || 1) === round)
     .sort(wcaSort);
 
+  const rowIds = tableRows.map(r => r.id);
+  const allChecked   = rowIds.length > 0 && rowIds.every(id => selected.has(id));
+  const someChecked  = rowIds.some(id => selected.has(id));
+
+  // Keep select-all checkbox indeterminate when partially selected
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someChecked && !allChecked;
+    }
+  }, [someChecked, allChecked]);
+
   // Advancement cutoff for this round
   const evConfig    = selComp?.eventConfig?.[evId];
   const totalRounds = evConfig?.rounds ?? 1;
@@ -130,6 +177,9 @@ export default function CompResultsTab() {
       : Math.floor(tableRows.length * advConfig.value / 100)
     : 0;
   const advanceCount = Math.min(rawAdvCount, tableRows.length - 1);
+
+  // colSpan: 11 base + 1 checkbox column when in delete mode
+  const colSpan = deleteMode ? 12 : 11;
 
   const solveInputStyle: React.CSSProperties = {
     width: '4.5rem', padding: '0.28rem 0.3rem', fontSize: '0.82rem',
@@ -194,88 +244,161 @@ export default function CompResultsTab() {
             : tableRows.length === 0
               ? <div className="wca-empty">No results for this round yet.</div>
               : (
-                <table className="wca-results-table">
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>Name</th>
-                      <th className="th-r">Single</th>
-                      <th className="th-r">Average</th>
-                      <th className="th-r">S1</th><th className="th-r">S2</th>
-                      <th className="th-r">S3</th><th className="th-r">S4</th><th className="th-r">S5</th>
-                      <th>Source</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tableRows.flatMap((r, i) => {
-                      const isAdvancing    = advanceCount > 0 && i < advanceCount;
-                      const isLastAdvancing = advanceCount > 0 && i === advanceCount - 1;
-                      const rowCls = i === 0 ? 'row-gold' : i === 1 ? 'row-silver' : i === 2 ? 'row-bronze' : r.source === 'import' ? 'row-imported' : '';
-                      const dataRow = (
-                        <tr key={r.id} className={rowCls} style={isAdvancing ? { borderLeft: '3px solid #22c55e' } : { borderLeft: '3px solid transparent' }}>
-                          <td className={`wca-td-rank${i < 3 ? ` wca-rank-${i + 1}` : ''}`}
-                            style={isAdvancing ? { color: '#4ade80' } : undefined}>
-                            {i + 1}
-                          </td>
-                          <td className="wca-td-name">
-                            <div className="wca-name">{r.athleteName || r.athleteId}</div>
-                          </td>
-                          <td className={`wca-td-best${r.single != null && r.single < 0 ? ' dnf-solve' : ''}`}>{fmtTime(r.single)}</td>
-                          <td className={`wca-td-avg${r.average != null && r.average < 0 ? ' dnf-avg' : ''}`}>{fmtTime(r.average)}</td>
-                          {([0, 1, 2, 3, 4] as const).map(si => {
-                            const sv = r.solves?.[si] ?? null;
-                            return <td key={si} className={`wca-td-solve${sv !== null && sv < 0 ? ' dnf-solve' : ''}`}>{fmtTime(sv)}</td>;
-                          })}
-                          <td>
-                            {r.source === 'import' && <span className="badge-imported">Imported</span>}
-                          </td>
-                          <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}>
-                            <button
-                              onClick={() => openEdit(r)}
-                              title="Edit result"
-                              className="res-act-btn res-act-edit"
-                            >
-                              <span className="res-act-text">Edit</span>
-                              <span className="res-act-icon">✏️</span>
-                            </button>
-                            <button
-                              onClick={() => setDeleteRow(r)}
-                              title="Delete result"
-                              className="res-act-btn res-act-delete"
-                            >
-                              <span className="res-act-text">Delete</span>
-                              <span className="res-act-icon">🗑️</span>
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                      if (isLastAdvancing) {
-                        const cutoffLabel = advConfig?.type === 'fixed'
-                          ? `✓ Top ${advanceCount} advance to next round`
-                          : `✓ Top ${advConfig?.value}% advance (${advanceCount} athletes)`;
-                        return [
-                          dataRow,
-                          <tr key="advance-cutoff">
-                            <td colSpan={11} style={{ padding: 0, borderBottom: 'none' }}>
-                              <div style={{
-                                borderTop: '2px dashed #22c55e',
-                                padding: '0.25rem 0.75rem',
-                                fontSize: '0.72rem',
-                                color: '#4ade80',
-                                background: 'rgba(34,197,94,0.05)',
-                                letterSpacing: '0.01em',
-                              }}>
-                                {cutoffLabel}
-                              </div>
+                <>
+                  {/* ── Table toolbar ── */}
+                  <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+                    gap: '0.5rem', marginBottom: '0.5rem',
+                  }}>
+                    {deleteMode ? (
+                      <>
+                        <button
+                          onClick={exitDeleteMode}
+                          style={{
+                            padding: '0.28rem 0.75rem', fontSize: '0.76rem', borderRadius: '6px',
+                            cursor: 'pointer', fontFamily: 'inherit',
+                            background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)',
+                            color: 'var(--muted)',
+                          }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={() => selected.size > 0 && setDeleteConfirm(true)}
+                          disabled={selected.size === 0}
+                          style={{
+                            padding: '0.28rem 0.75rem', fontSize: '0.76rem', borderRadius: '6px',
+                            cursor: selected.size > 0 ? 'pointer' : 'not-allowed', fontFamily: 'inherit',
+                            fontWeight: 600,
+                            background: selected.size > 0 ? 'rgba(239,68,68,0.15)' : 'rgba(239,68,68,0.05)',
+                            border: `1px solid ${selected.size > 0 ? 'rgba(239,68,68,0.5)' : 'rgba(239,68,68,0.2)'}`,
+                            color: selected.size > 0 ? '#fca5a5' : 'rgba(252,165,165,0.35)',
+                            transition: 'all 0.15s',
+                          }}
+                        >
+                          Delete Selected ({selected.size})
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        onClick={enterDeleteMode}
+                        style={{
+                          padding: '0.28rem 0.75rem', fontSize: '0.76rem', borderRadius: '6px',
+                          cursor: 'pointer', fontFamily: 'inherit',
+                          background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)',
+                          color: '#fca5a5',
+                        }}
+                      >
+                        Delete Results
+                      </button>
+                    )}
+                  </div>
+
+                  {/* ── Results table ── */}
+                  <table className="wca-results-table">
+                    <thead>
+                      <tr>
+                        {deleteMode && (
+                          <th style={{ width: '2rem', textAlign: 'center', paddingRight: '0.2rem' }}>
+                            <input
+                              ref={selectAllRef}
+                              type="checkbox"
+                              checked={allChecked}
+                              onChange={e => toggleAll(rowIds, e.target.checked)}
+                              style={{ accentColor: '#ef4444', cursor: 'pointer' }}
+                            />
+                          </th>
+                        )}
+                        <th>#</th>
+                        <th>Name</th>
+                        <th className="th-r">Single</th>
+                        <th className="th-r">Average</th>
+                        <th className="th-r">S1</th><th className="th-r">S2</th>
+                        <th className="th-r">S3</th><th className="th-r">S4</th><th className="th-r">S5</th>
+                        <th>Source</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tableRows.flatMap((r, i) => {
+                        const isAdvancing     = advanceCount > 0 && i < advanceCount;
+                        const isLastAdvancing = advanceCount > 0 && i === advanceCount - 1;
+                        const isChecked       = selected.has(r.id);
+                        const rowCls = i === 0 ? 'row-gold' : i === 1 ? 'row-silver' : i === 2 ? 'row-bronze' : r.source === 'import' ? 'row-imported' : '';
+                        const dataRow = (
+                          <tr
+                            key={r.id}
+                            className={rowCls}
+                            style={{
+                              ...(isAdvancing ? { borderLeft: '3px solid #22c55e' } : { borderLeft: '3px solid transparent' }),
+                              ...(deleteMode && isChecked ? { background: 'rgba(239,68,68,0.07)' } : {}),
+                            }}
+                          >
+                            {deleteMode && (
+                              <td style={{ textAlign: 'center', paddingRight: '0.2rem' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => toggleRow(r.id)}
+                                  style={{ accentColor: '#ef4444', cursor: 'pointer' }}
+                                />
+                              </td>
+                            )}
+                            <td className={`wca-td-rank${i < 3 ? ` wca-rank-${i + 1}` : ''}`}
+                              style={isAdvancing ? { color: '#4ade80' } : undefined}>
+                              {i + 1}
                             </td>
-                          </tr>,
-                        ];
-                      }
-                      return [dataRow];
-                    })}
-                  </tbody>
-                </table>
+                            <td className="wca-td-name">
+                              <div className="wca-name">{r.athleteName || r.athleteId}</div>
+                            </td>
+                            <td className={`wca-td-best${r.single != null && r.single < 0 ? ' dnf-solve' : ''}`}>{fmtTime(r.single)}</td>
+                            <td className={`wca-td-avg${r.average != null && r.average < 0 ? ' dnf-avg' : ''}`}>{fmtTime(r.average)}</td>
+                            {([0, 1, 2, 3, 4] as const).map(si => {
+                              const sv = r.solves?.[si] ?? null;
+                              return <td key={si} className={`wca-td-solve${sv !== null && sv < 0 ? ' dnf-solve' : ''}`}>{fmtTime(sv)}</td>;
+                            })}
+                            <td>
+                              {r.source === 'import' && <span className="badge-imported">Imported</span>}
+                            </td>
+                            <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}>
+                              <button
+                                onClick={() => openEdit(r)}
+                                title="Edit result"
+                                className="res-act-btn res-act-edit"
+                              >
+                                <span className="res-act-text">Edit</span>
+                                <span className="res-act-icon">✏️</span>
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                        if (isLastAdvancing) {
+                          const cutoffLabel = advConfig?.type === 'fixed'
+                            ? `✓ Top ${advanceCount} advance to next round`
+                            : `✓ Top ${advConfig?.value}% advance (${advanceCount} athletes)`;
+                          return [
+                            dataRow,
+                            <tr key="advance-cutoff">
+                              <td colSpan={colSpan} style={{ padding: 0, borderBottom: 'none' }}>
+                                <div style={{
+                                  borderTop: '2px dashed #22c55e',
+                                  padding: '0.25rem 0.75rem',
+                                  fontSize: '0.72rem',
+                                  color: '#4ade80',
+                                  background: 'rgba(34,197,94,0.05)',
+                                  letterSpacing: '0.01em',
+                                }}>
+                                  {cutoffLabel}
+                                </div>
+                              </td>
+                            </tr>,
+                          ];
+                        }
+                        return [dataRow];
+                      })}
+                    </tbody>
+                  </table>
+                </>
               )
           }
         </div>
@@ -370,10 +493,10 @@ export default function CompResultsTab() {
         </div>
       )}
 
-      {/* ── Delete Confirmation Modal ─────────────────────────────────── */}
-      {deleteRow && (
+      {/* ── Bulk Delete Confirmation Modal ───────────────────────────── */}
+      {deleteConfirm && (
         <div
-          onClick={() => !deleteWorking && setDeleteRow(null)}
+          onClick={() => !deleteWorking && setDeleteConfirm(false)}
           style={{
             position: 'fixed', inset: 0, zIndex: 1000,
             background: 'rgba(0,0,0,0.72)',
@@ -393,18 +516,16 @@ export default function CompResultsTab() {
             }}
           >
             <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text)', marginBottom: '0.4rem' }}>
-              Delete result?
+              Delete {selected.size} {selected.size === 1 ? 'result' : 'results'}?
             </div>
             <div style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '1.25rem', lineHeight: 1.55 }}>
-              Delete result for{' '}
-              <strong style={{ color: 'var(--text)' }}>
-                {deleteRow.athleteName || deleteRow.athleteId}
-              </strong>?
-              {' '}This cannot be undone.
+              This will permanently delete{' '}
+              <strong style={{ color: 'var(--text)' }}>{selected.size} {selected.size === 1 ? 'result' : 'results'}</strong>.{' '}
+              This cannot be undone.
             </div>
             <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
               <button
-                onClick={() => setDeleteRow(null)}
+                onClick={() => setDeleteConfirm(false)}
                 disabled={deleteWorking}
                 style={{
                   padding: '0.45rem 1rem', borderRadius: '8px', fontSize: '0.85rem',
@@ -415,7 +536,7 @@ export default function CompResultsTab() {
                 Cancel
               </button>
               <button
-                onClick={doDelete}
+                onClick={doDeleteSelected}
                 disabled={deleteWorking}
                 style={{
                   padding: '0.45rem 1rem', borderRadius: '8px', fontSize: '0.85rem',
@@ -425,7 +546,7 @@ export default function CompResultsTab() {
                   fontFamily: 'inherit', fontWeight: 600,
                 }}
               >
-                {deleteWorking ? 'Deleting…' : 'Delete'}
+                {deleteWorking ? 'Deleting…' : `Delete ${selected.size}`}
               </button>
             </div>
           </div>
