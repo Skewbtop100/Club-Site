@@ -271,7 +271,6 @@ export default function CompResultsTab() {
                   }}
                 >
                   <div className="wca-ev-header-left">
-                    <span className="wca-ev-short">{ev.short}</span>
                     <span className="wca-ev-name">{ev.name}</span>
                   </div>
                   <span className={`wca-ev-chevron${isOpen ? ' open' : ''}`}>▶</span>
