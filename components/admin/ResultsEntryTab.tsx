@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { subscribeCompetitions } from '@/lib/firebase/services/competitions';
 import { getAthletes } from '@/lib/firebase/services/athletes';
-import { saveResult } from '@/lib/firebase/services/results';
+import { saveResult, getResultsByComp } from '@/lib/firebase/services/results';
 import { fmtTime, parseTime } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import type { Athlete, Competition } from '@/lib/types';
@@ -40,6 +40,8 @@ interface ImportRow {
   avg: string;
   best: string;
   hasError: boolean;
+  isDupe: boolean;
+  checked: boolean;
 }
 
 function emptyPanel(id: number): PanelState {
@@ -99,6 +101,7 @@ export default function ResultsEntryTab() {
   const [importMsg,     setImportMsg]     = useState('');
   const [importMsgType, setImportMsgType] = useState('');
   const [importLoading, setImportLoading] = useState(false);
+  const [checkLoading,  setCheckLoading]  = useState(false);
 
   // Inspection timer state
   const [showTimer, setShowTimer]       = useState(false);
@@ -305,19 +308,48 @@ export default function ResultsEntryTab() {
     });
   }
 
-  function updateImportRow(idx: number, field: keyof Omit<ImportRow, 'idx' | 'hasError'>, value: string) {
+  function updateImportRow(idx: number, field: keyof Omit<ImportRow, 'idx' | 'hasError' | 'isDupe' | 'checked'>, value: string) {
     setImportRows(prev => prev.map(r => r.idx === idx ? { ...r, [field]: value } : r));
   }
 
+  function toggleImportRow(idx: number) {
+    setImportRows(prev => prev.map(r => r.idx === idx && !r.isDupe ? { ...r, checked: !r.checked } : r));
+  }
+
+  async function checkAndSetRows() {
+    const parsed = parseImportText(importText);
+    if (!parsed.length) { setImportRows([]); return; }
+    setCheckLoading(true);
+    try {
+      let dupeNames = new Set<string>();
+      if (compId && importEventId) {
+        const existing = await getResultsByComp(compId);
+        const filtered = existing.filter(r =>
+          r.eventId === importEventId &&
+          r.round === importRound &&
+          r.source === 'imported',
+        );
+        dupeNames = new Set(filtered.map(r => (r.athleteName || '').trim().toLowerCase()));
+      }
+      setImportRows(parsed.map(row => {
+        const isDupe = dupeNames.has(row.name.trim().toLowerCase());
+        return { ...row, isDupe, checked: !isDupe };
+      }));
+    } finally {
+      setCheckLoading(false);
+    }
+  }
+
   async function doImport() {
-    if (!compId || !importEventId || importRows.length === 0) return;
+    const toImport = importRows.filter(r => r.checked && !r.isDupe);
+    if (!compId || !importEventId || toImport.length === 0) return;
     setImportLoading(true);
     setImportMsg('');
     try {
       const comp = comps.find(c => c.id === compId);
       const ts = Date.now();
-      for (let i = 0; i < importRows.length; i++) {
-        const row = importRows[i];
+      for (let i = 0; i < toImport.length; i++) {
+        const row = toImport[i];
         const solves: (number | null)[] = [
           parseImportTime(row.s1), parseImportTime(row.s2), parseImportTime(row.s3),
           parseImportTime(row.s4), parseImportTime(row.s5),
@@ -332,7 +364,8 @@ export default function ResultsEntryTab() {
           single, average, solves, status: 'published', source: 'imported',
         });
       }
-      setImportMsg(`✓ Imported ${importRows.length} result(s) successfully.`);
+      const dupeCount = importRows.length - toImport.length;
+      setImportMsg(`✓ Imported ${toImport.length} result${toImport.length !== 1 ? 's' : ''} successfully.${dupeCount > 0 ? ` (${dupeCount} already existed, skipped)` : ''}`);
       setImportMsgType('success');
       setImportRows([]);
       setImportText('');
@@ -908,16 +941,18 @@ export default function ResultsEntryTab() {
                 }}
               />
               <button
-                onClick={() => setImportRows(parseImportText(importText))}
+                onClick={checkAndSetRows}
+                disabled={checkLoading}
                 style={{
-                  padding: '0.5rem 1.2rem', borderRadius: '8px', cursor: 'pointer',
+                  padding: '0.5rem 1.2rem', borderRadius: '8px',
+                  cursor: checkLoading ? 'not-allowed' : 'pointer',
                   fontFamily: 'inherit', fontSize: '0.88rem', fontWeight: 600,
                   background: 'rgba(124,58,237,0.18)',
                   border: '1px solid rgba(124,58,237,0.45)',
-                  color: '#a78bfa',
+                  color: checkLoading ? 'rgba(167,139,250,0.4)' : '#a78bfa',
                 }}
               >
-                Parse Results
+                {checkLoading ? 'Checking…' : 'Parse Results'}
               </button>
             </div>
 
@@ -928,6 +963,7 @@ export default function ResultsEntryTab() {
                   <thead>
                     <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
                       {[
+                        { label: '✓',      align: 'center' as const },
                         { label: '#',      align: 'center' as const },
                         { label: 'Name',   align: 'left'   as const },
                         { label: 'Country',align: 'left'   as const },
@@ -939,8 +975,8 @@ export default function ResultsEntryTab() {
                         { label: 'Avg',    align: 'center' as const },
                         { label: 'Best',   align: 'center' as const },
                         { label: '',       align: 'center' as const },
-                      ].map(({ label, align }) => (
-                        <th key={label} style={{
+                      ].map(({ label, align }, hi) => (
+                        <th key={hi} style={{
                           padding: '0.4rem 0.5rem', textAlign: align,
                           color: 'var(--muted)', fontWeight: 600,
                           fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.06em',
@@ -953,27 +989,52 @@ export default function ResultsEntryTab() {
                       const isEven = i % 2 === 0;
                       const rowBg = row.hasError
                         ? 'rgba(239,68,68,0.07)'
-                        : isEven ? 'transparent' : 'rgba(255,255,255,0.018)';
+                        : row.isDupe
+                          ? 'rgba(251,191,36,0.04)'
+                          : isEven ? 'transparent' : 'rgba(255,255,255,0.018)';
+                      const dimmed = row.isDupe || !row.checked;
                       const solveFields = ['s1', 's2', 's3', 's4', 's5'] as const;
                       const inputBase: React.CSSProperties = {
                         padding: '0.18rem 0.3rem', borderRadius: '4px', fontSize: '0.78rem',
                         fontFamily: 'inherit', background: 'rgba(255,255,255,0.05)',
                         border: '1px solid rgba(255,255,255,0.09)',
                         color: 'var(--text)', outline: 'none', textAlign: 'center',
+                        opacity: dimmed ? 0.4 : 1,
                       };
                       return (
                         <tr key={row.idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', background: rowBg }}>
-                          <td style={{ padding: '0.4rem 0.5rem', textAlign: 'center', color: 'var(--muted)', fontSize: '0.72rem' }}>{i + 1}</td>
+                          {/* Checkbox */}
+                          <td style={{ padding: '0.4rem 0.5rem', textAlign: 'center' }}>
+                            <input
+                              type="checkbox"
+                              checked={row.checked}
+                              disabled={row.isDupe}
+                              onChange={() => toggleImportRow(row.idx)}
+                              style={{ cursor: row.isDupe ? 'not-allowed' : 'pointer', accentColor: '#a78bfa' }}
+                            />
+                          </td>
+                          <td style={{ padding: '0.4rem 0.5rem', textAlign: 'center', color: 'var(--muted)', fontSize: '0.72rem', opacity: dimmed ? 0.4 : 1 }}>{i + 1}</td>
                           {/* Name */}
                           <td style={{ padding: '0.3rem 0.4rem' }}>
-                            <input
-                              value={row.name}
-                              onChange={e => updateImportRow(row.idx, 'name', e.target.value)}
-                              style={{
-                                ...inputBase, textAlign: 'left', width: '160px',
-                                border: `1px solid ${row.hasError ? 'rgba(239,68,68,0.5)' : 'rgba(255,255,255,0.09)'}`,
-                              }}
-                            />
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                              <input
+                                value={row.name}
+                                onChange={e => updateImportRow(row.idx, 'name', e.target.value)}
+                                style={{
+                                  ...inputBase, textAlign: 'left', minWidth: '200px', width: '200px',
+                                  border: `1px solid ${row.hasError ? 'rgba(239,68,68,0.5)' : 'rgba(255,255,255,0.09)'}`,
+                                }}
+                              />
+                              {row.isDupe && (
+                                <span style={{
+                                  fontSize: '0.65rem', fontWeight: 700, padding: '0.1rem 0.4rem',
+                                  borderRadius: '4px', whiteSpace: 'nowrap',
+                                  background: 'rgba(251,191,36,0.15)',
+                                  border: '1px solid rgba(251,191,36,0.35)',
+                                  color: '#fbbf24',
+                                }}>Already imported</span>
+                              )}
+                            </div>
                           </td>
                           {/* Country */}
                           <td style={{ padding: '0.3rem 0.4rem' }}>
@@ -1001,9 +1062,9 @@ export default function ResultsEntryTab() {
                               style={{
                                 ...inputBase, width: '68px',
                                 fontWeight: 700, fontSize: '0.82rem',
-                                color: '#2dd4bf',
-                                border: '1px solid rgba(45,212,191,0.2)',
-                                background: 'rgba(45,212,191,0.06)',
+                                color: dimmed ? 'var(--muted)' : '#2dd4bf',
+                                border: dimmed ? '1px solid rgba(255,255,255,0.09)' : '1px solid rgba(45,212,191,0.2)',
+                                background: dimmed ? 'rgba(255,255,255,0.05)' : 'rgba(45,212,191,0.06)',
                               }}
                             />
                           </td>
@@ -1015,9 +1076,9 @@ export default function ResultsEntryTab() {
                               style={{
                                 ...inputBase, width: '68px',
                                 fontWeight: 700, fontSize: '0.82rem',
-                                color: '#fbbf24',
-                                border: '1px solid rgba(251,191,36,0.2)',
-                                background: 'rgba(251,191,36,0.06)',
+                                color: dimmed ? 'var(--muted)' : '#fbbf24',
+                                border: dimmed ? '1px solid rgba(255,255,255,0.09)' : '1px solid rgba(251,191,36,0.2)',
+                                background: dimmed ? 'rgba(255,255,255,0.05)' : 'rgba(251,191,36,0.06)',
                               }}
                             />
                           </td>
@@ -1044,7 +1105,14 @@ export default function ResultsEntryTab() {
 
             {/* Part 5: Import button */}
             {importRows.length > 0 && (() => {
-              const disabled = importLoading || !compId || !importEventId;
+              const toImport  = importRows.filter(r => r.checked && !r.isDupe);
+              const dupeCount = importRows.filter(r => r.isDupe).length;
+              const disabled  = importLoading || !compId || !importEventId || toImport.length === 0;
+              const label = importLoading
+                ? 'Importing…'
+                : dupeCount > 0
+                  ? `Import ${toImport.length} new result${toImport.length !== 1 ? 's' : ''} (${dupeCount} already exist)`
+                  : `Import ${toImport.length} Result${toImport.length !== 1 ? 's' : ''}`;
               return (
                 <button
                   disabled={disabled}
@@ -1060,7 +1128,7 @@ export default function ResultsEntryTab() {
                     marginBottom: '0.5rem',
                   }}
                 >
-                  {importLoading ? 'Importing…' : `Import ${importRows.length} Result${importRows.length !== 1 ? 's' : ''}`}
+                  {label}
                 </button>
               );
             })()}
