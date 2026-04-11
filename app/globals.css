@@ -401,11 +401,28 @@ html[data-theme="purple-light"] .wca-sidebar { background: var(--surface); borde
 .wca-fade-in { animation: wcaFadeIn 0.18s ease; }
 @keyframes wcaFadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
 
+/* Result row action buttons (Edit / Delete) */
+.res-act-btn {
+  padding: 0.18rem 0.5rem; font-size: 0.7rem; border-radius: 5px;
+  cursor: pointer; font-family: inherit; white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s;
+}
+.res-act-btn + .res-act-btn { margin-left: 0.25rem; }
+.res-act-edit  { background: rgba(99,102,241,0.1);  border: 1px solid rgba(99,102,241,0.35); color: #a5b4fc; }
+.res-act-edit:hover  { background: rgba(99,102,241,0.22); border-color: rgba(99,102,241,0.6); }
+.res-act-delete { background: rgba(239,68,68,0.1);  border: 1px solid rgba(239,68,68,0.35); color: #fca5a5; }
+.res-act-delete:hover { background: rgba(239,68,68,0.22); border-color: rgba(239,68,68,0.6); }
+.res-act-icon { display: none; }
+.res-act-text { display: inline; }
+
 @media (max-width: 760px) {
   .wca-live-layout { flex-direction: column; }
   .wca-sidebar { width: 100%; min-height: auto; border-right: none; border-bottom: 1px solid rgba(255,255,255,0.06); }
   .wca-sidebar-events { display: flex; flex-wrap: wrap; gap: 0.2rem; padding: 0.4rem 0.5rem; max-height: 110px; }
   .wca-event-item { border-left: none; border-radius: 8px; padding: 0.35rem 0.55rem; }
+  .res-act-text { display: none; }
+  .res-act-icon { display: inline; }
+  .res-act-btn  { padding: 0.18rem 0.35rem; }
 }
 
 /* Assignments tab */
