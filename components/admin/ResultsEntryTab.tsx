@@ -32,6 +32,16 @@ interface PanelState {
   postEditMode: boolean;         // in all-entered view: chips are directly tappable to edit
   msg: string; msgType: string;
 }
+interface ImportRow {
+  idx: number;
+  name: string;
+  country: string;
+  s1: string; s2: string; s3: string; s4: string; s5: string;
+  avg: string;
+  best: string;
+  hasError: boolean;
+}
+
 function emptyPanel(id: number): PanelState {
   return {
     id, athleteId: '', eventId: '', round: 1, group: 1,
@@ -78,6 +88,17 @@ export default function ResultsEntryTab() {
   const [comps, setComps]         = useState<Competition[]>([]);
   const [compId, setCompId]       = useState('');
   const [panels, setPanels]       = useState<PanelState[]>([emptyPanel(0)]);
+
+  // Import section state
+  const [importOpen,    setImportOpen]    = useState(false);
+  const [importEventId, setImportEventId] = useState('');
+  const [importRound,   setImportRound]   = useState(1);
+  const [importGroup,   setImportGroup]   = useState(1);
+  const [importText,    setImportText]    = useState('');
+  const [importRows,    setImportRows]    = useState<ImportRow[]>([]);
+  const [importMsg,     setImportMsg]     = useState('');
+  const [importMsgType, setImportMsgType] = useState('');
+  const [importLoading, setImportLoading] = useState(false);
 
   // Inspection timer state
   const [showTimer, setShowTimer]       = useState(false);
@@ -227,6 +248,90 @@ export default function ResultsEntryTab() {
   }
 
   function fmtInspection(ms: number) { return (ms / 1000).toFixed(1) + 's'; }
+
+  // ── Import helpers ────────────────────────────────────────────────────────
+
+  function cleanTimeBadge(s: string): string {
+    return s.trim().replace(/[A-Z]{1,3}$/, '').trim();
+  }
+
+  function parseImportTime(raw: string): number | null {
+    const s = cleanTimeBadge(raw);
+    if (!s || s === '-' || s === '--') return null;
+    const u = s.toUpperCase();
+    if (u === 'DNF' || u === 'DNS') return -1;
+    const m = s.match(/^(\d+):(\d{2})\.(\d{2})$/);
+    if (m) return (parseInt(m[1]) * 60 + parseInt(m[2])) * 100 + parseInt(m[3]);
+    const n = s.match(/^(\d+)\.(\d{2})$/);
+    if (n) return parseInt(n[1]) * 100 + parseInt(n[2]);
+    return null;
+  }
+
+  function parseImportText(text: string): ImportRow[] {
+    const lines = text.trim().split('\n').filter(l => l.trim());
+    if (!lines.length) return [];
+    const useTabs = lines[0].includes('\t');
+    const splitLine = useTabs
+      ? (l: string) => l.split('\t')
+      : (l: string) => l.trim().split(/\s{2,}/);
+    const firstCols = splitLine(lines[0]);
+    const firstCell = firstCols[0].replace(/^#/, '').trim();
+    const start = !firstCell || isNaN(Number(firstCell)) ? 1 : 0;
+    return lines.slice(start).map((line, i) => {
+      const cols = splitLine(line);
+      const name    = (cols[1] || '').trim();
+      const country = (cols[2] || '').trim();
+      const s1  = cleanTimeBadge(cols[3] || '');
+      const s2  = cleanTimeBadge(cols[4] || '');
+      const s3  = cleanTimeBadge(cols[5] || '');
+      const s4  = cleanTimeBadge(cols[6] || '');
+      const s5  = cleanTimeBadge(cols[7] || '');
+      const avg  = cleanTimeBadge(cols[8] || '');
+      const best = cleanTimeBadge(cols[9] || '');
+      return { idx: i, name, country, s1, s2, s3, s4, s5, avg, best, hasError: !name };
+    });
+  }
+
+  function updateImportRow(idx: number, field: keyof Omit<ImportRow, 'idx' | 'hasError'>, value: string) {
+    setImportRows(prev => prev.map(r => r.idx === idx ? { ...r, [field]: value } : r));
+  }
+
+  async function doImport() {
+    if (!compId || !importEventId || importRows.length === 0) return;
+    setImportLoading(true);
+    setImportMsg('');
+    try {
+      const comp = comps.find(c => c.id === compId);
+      const ts = Date.now();
+      for (let i = 0; i < importRows.length; i++) {
+        const row = importRows[i];
+        const solves: (number | null)[] = [
+          parseImportTime(row.s1), parseImportTime(row.s2), parseImportTime(row.s3),
+          parseImportTime(row.s4), parseImportTime(row.s5),
+        ];
+        const single  = bestOf(solves);
+        const average = calcAo5(solves);
+        const docId = `imp_${compId}_${importEventId}_r${importRound}_g${importGroup}_${ts}_${i}`;
+        await saveResult(docId, {
+          athleteId: '', athleteName: row.name, country: row.country,
+          competitionId: compId, competitionName: comp?.name || '',
+          eventId: importEventId, round: importRound, group: importGroup,
+          single, average, solves, status: 'published', source: 'imported',
+        });
+      }
+      setImportMsg(`✓ Imported ${importRows.length} result(s) successfully.`);
+      setImportMsgType('success');
+      setImportRows([]);
+      setImportText('');
+    } catch (e: unknown) {
+      setImportMsg('Error: ' + (e instanceof Error ? e.message : String(e)));
+      setImportMsgType('error');
+    } finally {
+      setImportLoading(false);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
 
   function timerColor(ms: number) {
     const s = ms / 1000;
@@ -720,6 +825,170 @@ export default function ResultsEntryTab() {
           })}
         </div>
       )}
+
+      {/* ── Import External Results ─────────────────────────────────────────── */}
+      <div style={{ marginTop: '1.5rem', borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: '1rem' }}>
+        <button
+          onClick={() => setImportOpen(v => !v)}
+          style={{
+            width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '0.6rem 0.8rem', borderRadius: '8px', cursor: 'pointer',
+            background: importOpen ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.02)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            color: 'var(--text)', fontFamily: 'inherit', fontSize: '0.92rem', fontWeight: 600,
+          }}
+        >
+          <span>Import External Results</span>
+          <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>{importOpen ? '▲' : '▼'}</span>
+        </button>
+
+        {importOpen && (
+          <div style={{ marginTop: '1rem' }}>
+            {/* Part 1: Selectors */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: '0.5rem', marginBottom: '1rem' }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label>Competition</label>
+                <select value={compId} onChange={e => { setCompId(e.target.value); setPanels([emptyPanel(0)]); resetTimer(); setShowTimer(false); }}>
+                  <option value="">— Select —</option>
+                  {liveComps.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label>Event</label>
+                <select value={importEventId} onChange={e => { setImportEventId(e.target.value); setImportRound(1); setImportGroup(1); }}>
+                  <option value="">— Select —</option>
+                  {evList.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                </select>
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label>Round</label>
+                <select value={importRound} onChange={e => setImportRound(Number(e.target.value))}>
+                  {getRoundNames((importEventId ? eventConfig[importEventId]?.rounds : 0) || 1).map((n, i) => (
+                    <option key={i} value={i + 1}>{n}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label>Group</label>
+                <select value={importGroup} onChange={e => setImportGroup(Number(e.target.value))}>
+                  {Array.from({ length: Math.max(1, (importEventId ? eventConfig[importEventId]?.groups : 0) || 1) }, (_, i) => (
+                    <option key={i} value={i + 1}>Group {String.fromCharCode(65 + i)}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Part 2: Paste area */}
+            <div style={{ marginBottom: '0.75rem' }}>
+              <textarea
+                value={importText}
+                onChange={e => setImportText(e.target.value)}
+                rows={6}
+                placeholder="Paste results table here (tab-separated from WCA Live or spreadsheet)..."
+                style={{
+                  width: '100%', boxSizing: 'border-box', resize: 'vertical',
+                  padding: '0.65rem 0.75rem', borderRadius: '8px',
+                  fontSize: '0.82rem', fontFamily: 'monospace', lineHeight: 1.5,
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.12)',
+                  color: 'var(--text)', outline: 'none', marginBottom: '0.5rem',
+                }}
+              />
+              <button
+                onClick={() => setImportRows(parseImportText(importText))}
+                style={{
+                  padding: '0.5rem 1.2rem', borderRadius: '8px', cursor: 'pointer',
+                  fontFamily: 'inherit', fontSize: '0.88rem', fontWeight: 600,
+                  background: 'rgba(124,58,237,0.18)',
+                  border: '1px solid rgba(124,58,237,0.45)',
+                  color: '#a78bfa',
+                }}
+              >
+                Parse Results
+              </button>
+            </div>
+
+            {/* Part 4: Preview/Edit table */}
+            {importRows.length > 0 && (
+              <div style={{ overflowX: 'auto', marginBottom: '1rem' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem', whiteSpace: 'nowrap' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                      {['#', 'Name', 'Country', 'S1', 'S2', 'S3', 'S4', 'S5', 'Avg', 'Best', 'Action'].map(h => (
+                        <th key={h} style={{ padding: '0.3rem 0.4rem', textAlign: 'left', color: 'var(--muted)', fontWeight: 600 }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {importRows.map((row, i) => (
+                      <tr key={row.idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', background: row.hasError ? 'rgba(239,68,68,0.07)' : 'transparent' }}>
+                        <td style={{ padding: '0.25rem 0.4rem', color: 'var(--muted)' }}>{i + 1}</td>
+                        {(['name', 'country', 's1', 's2', 's3', 's4', 's5', 'avg', 'best'] as const).map(field => (
+                          <td key={field} style={{ padding: '0.2rem 0.3rem' }}>
+                            <input
+                              value={row[field] || ''}
+                              onChange={e => updateImportRow(row.idx, field, e.target.value)}
+                              style={{
+                                width: field === 'name' ? '120px' : field === 'country' ? '68px' : '60px',
+                                padding: '0.2rem 0.35rem', borderRadius: '5px', fontSize: '0.78rem',
+                                fontFamily: 'inherit',
+                                background: 'rgba(255,255,255,0.05)',
+                                border: `1px solid ${row.hasError && field === 'name' ? 'rgba(239,68,68,0.5)' : 'rgba(255,255,255,0.1)'}`,
+                                color: 'var(--text)', outline: 'none',
+                              }}
+                            />
+                          </td>
+                        ))}
+                        <td style={{ padding: '0.2rem 0.4rem' }}>
+                          <button
+                            onClick={() => setImportRows(r => r.filter(x => x.idx !== row.idx))}
+                            style={{
+                              padding: '0.18rem 0.5rem', borderRadius: '5px', cursor: 'pointer',
+                              fontFamily: 'inherit', fontSize: '0.72rem', fontWeight: 600,
+                              background: 'rgba(239,68,68,0.12)',
+                              border: '1px solid rgba(239,68,68,0.35)',
+                              color: '#f87171',
+                            }}
+                          >Remove</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Part 5: Import button */}
+            {importRows.length > 0 && (() => {
+              const disabled = importLoading || !compId || !importEventId;
+              return (
+                <button
+                  disabled={disabled}
+                  onClick={doImport}
+                  style={{
+                    width: '100%', padding: '0.7rem', borderRadius: '10px',
+                    fontSize: '0.95rem', fontWeight: 700,
+                    cursor: disabled ? 'not-allowed' : 'pointer',
+                    fontFamily: 'inherit',
+                    background: disabled ? 'rgba(34,197,94,0.08)' : 'rgba(34,197,94,0.2)',
+                    border: `1px solid ${disabled ? 'rgba(34,197,94,0.2)' : 'rgba(34,197,94,0.5)'}`,
+                    color: disabled ? 'rgba(74,222,128,0.4)' : '#4ade80',
+                    marginBottom: '0.5rem',
+                  }}
+                >
+                  {importLoading ? 'Importing…' : `Import ${importRows.length} Result${importRows.length !== 1 ? 's' : ''}`}
+                </button>
+              );
+            })()}
+
+            {importMsg && (
+              <div className={`msg ${importMsgType}`} style={{ display: 'block', marginTop: '0.5rem' }}>
+                {importMsg}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

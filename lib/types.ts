@@ -44,6 +44,8 @@ export interface Result {
   average: number | null;
   solves?: (number | null)[];
   round?: number;
+  group?: number;
+  country?: string;
   submittedAt?: unknown;
 }
 
