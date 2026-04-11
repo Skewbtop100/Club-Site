@@ -3,10 +3,8 @@
 import { useMemo, useState, useEffect } from 'react';
 import { useLang } from '@/lib/i18n';
 import { WCA_EVENTS } from '@/lib/wca-events';
-import { fmtTime, compareTime } from '@/lib/time-utils';
-import { getResultsByComp } from '@/lib/firebase/services/results';
-import { subscribeResultsByComp } from '@/lib/firebase/services/results';
-import type { Competition, Result } from '@/lib/types';
+import type { Competition } from '@/lib/types';
+import CompetitionResultsViewer from '@/components/shared/CompetitionResultsViewer';
 
 interface Props {
   competitions: Competition[];
@@ -79,11 +77,13 @@ export default function CompetitionsSection({ competitions, loading }: Props) {
       </div>
 
       {overlay && (
-        overlay.type === 'live'
-          ? <LiveResultsOverlay comp={overlay.comp} onClose={() => setOverlay(null)} />
-          : overlay.type === 'assignments'
+        overlay.type === 'assignments'
           ? <AssignmentsOverlay comp={overlay.comp} onClose={() => setOverlay(null)} />
-          : <CompResultsOverlay comp={overlay.comp} onClose={() => setOverlay(null)} />
+          : <CompetitionResultsViewer
+              comp={overlay.comp}
+              onClose={() => setOverlay(null)}
+              isLive={overlay.type === 'live'}
+            />
       )}
 
       <style>{`
@@ -267,177 +267,6 @@ function OverlayShell({
         @keyframes pulseDot { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:.5; transform:scale(.7); } }
       `}</style>
     </div>
-  );
-}
-
-// ── Results table ─────────────────────────────────────────────────────────────
-
-function ResultsTable({ results }: { results: Result[] }) {
-  const { t } = useLang();
-  const [activeEvent, setActiveEvent] = useState<string | null>(null);
-  const [activeRound, setActiveRound] = useState<number>(1);
-
-  const eventIds = useMemo(() => {
-    const order = WCA_EVENTS.map((e) => e.id);
-    const ids = [...new Set(results.map((r) => r.eventId))];
-    return ids.sort((a, b) => order.indexOf(a) - order.indexOf(b));
-  }, [results]);
-
-  const selectedEvent = activeEvent ?? eventIds[0] ?? null;
-
-  const rounds = useMemo(() => {
-    if (!selectedEvent) return [];
-    const rSet = new Set(results.filter((r) => r.eventId === selectedEvent).map((r) => r.round || 1));
-    return [...rSet].sort((a, b) => a - b);
-  }, [results, selectedEvent]);
-
-  // Reset round when event changes
-  useEffect(() => {
-    setActiveRound(rounds[rounds.length - 1] ?? 1);
-  }, [selectedEvent, rounds.length]);
-
-  const tableRows = useMemo(() => {
-    if (!selectedEvent) return [];
-    return results
-      .filter((r) => r.eventId === selectedEvent && (r.round || 1) === activeRound)
-      .sort((a, b) => compareTime(
-        a.average !== null && a.average > 0 ? a.average : a.single,
-        b.average !== null && b.average > 0 ? b.average : b.single
-      ));
-  }, [results, selectedEvent, activeRound]);
-
-  if (eventIds.length === 0) {
-    return <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--muted)' }}>{t('comp.no-results')}</div>;
-  }
-
-  return (
-    <div>
-      {/* Event tabs */}
-      <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-        {eventIds.map((eid) => {
-          const ev = WCA_EVENTS.find((e) => e.id === eid);
-          return (
-            <button
-              key={eid}
-              onClick={() => setActiveEvent(eid)}
-              style={{
-                padding: '0.3rem 0.7rem', borderRadius: '999px', border: 'none',
-                fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-                background: selectedEvent === eid ? 'linear-gradient(135deg,var(--accent),var(--accent2))' : 'rgba(124,58,237,0.1)',
-                color: selectedEvent === eid ? '#fff' : '#a78bfa',
-              }}
-            >
-              {ev?.short || eid}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Round tabs */}
-      {rounds.length > 1 && (
-        <div style={{ display: 'flex', gap: '0.35rem', marginBottom: '1rem' }}>
-          {rounds.map((r) => (
-            <button
-              key={r}
-              onClick={() => setActiveRound(r)}
-              style={{
-                padding: '0.25rem 0.65rem', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.1)',
-                fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-                background: activeRound === r ? 'rgba(124,58,237,0.25)' : 'transparent',
-                color: activeRound === r ? '#c4b5fd' : 'var(--muted)',
-              }}
-            >
-              Round {r}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Table */}
-      <div style={{ background: 'var(--card)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '12px', overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-              {['#', 'Athlete', 'Single', 'Average', '1', '2', '3', '4', '5'].map((h) => (
-                <th key={h} style={{ padding: '0.6rem 0.8rem', textAlign: 'left', fontSize: '0.68rem', fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {tableRows.map((r, i) => (
-              <tr key={r.id || i} style={{ borderBottom: i < tableRows.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
-                <td style={{ padding: '0.55rem 0.8rem', fontSize: '0.8rem', color: 'var(--muted)', fontWeight: 600 }}>{i + 1}</td>
-                <td style={{ padding: '0.55rem 0.8rem', fontSize: '0.88rem', color: 'var(--text-primary)', fontWeight: 500 }}>{r.athleteName || r.athleteId}</td>
-                <td style={{ padding: '0.55rem 0.8rem', fontFamily: 'monospace', fontSize: '0.88rem', color: '#a78bfa', fontWeight: 600 }}>{fmtTime(r.single)}</td>
-                <td style={{ padding: '0.55rem 0.8rem', fontFamily: 'monospace', fontSize: '0.88rem', color: r.average !== null && r.average > 0 ? '#a78bfa' : 'var(--muted)', fontWeight: r.average !== null && r.average > 0 ? 600 : 400 }}>{r.average !== null ? fmtTime(r.average) : '—'}</td>
-                {[0, 1, 2, 3, 4].map((si) => (
-                  <td key={si} style={{ padding: '0.55rem 0.8rem', fontFamily: 'monospace', fontSize: '0.78rem', color: 'var(--muted)' }}>
-                    {r.solves?.[si] !== undefined ? fmtTime(r.solves[si]) : '—'}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ── CompResultsOverlay ────────────────────────────────────────────────────────
-
-function CompResultsOverlay({ comp, onClose }: { comp: Competition; onClose: () => void }) {
-  const [results, setResults] = useState<Result[] | null>(null);
-
-  useEffect(() => {
-    getResultsByComp(comp.id).then((r) => {
-      setResults(r.filter((x) => x.status === 'published'));
-    }).catch(() => setResults([]));
-  }, [comp.id]);
-
-  const dateStr = formatCompDate(comp.date);
-  const meta = [comp.country, dateStr !== '—' ? dateStr : ''].filter(Boolean).join(' · ');
-
-  return (
-    <OverlayShell title={comp.name} subtitle={meta} onClose={onClose}>
-      {results === null ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem' }}>
-          <div className="spinner" />
-        </div>
-      ) : (
-        <ResultsTable results={results} />
-      )}
-    </OverlayShell>
-  );
-}
-
-// ── LiveResultsOverlay ────────────────────────────────────────────────────────
-
-function LiveResultsOverlay({ comp, onClose }: { comp: Competition; onClose: () => void }) {
-  const [results, setResults] = useState<Result[]>([]);
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    const unsub = subscribeResultsByComp(comp.id, (r) => {
-      setResults(r.filter((x) => x.status === 'published'));
-      setReady(true);
-    });
-    return unsub;
-  }, [comp.id]);
-
-  const dateStr = formatCompDate(comp.date);
-  const meta = [comp.country, dateStr !== '—' ? dateStr : ''].filter(Boolean).join(' · ');
-
-  return (
-    <OverlayShell title={comp.name} subtitle={meta} onClose={onClose} liveIndicator>
-      {!ready ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem' }}>
-          <div className="spinner" />
-        </div>
-      ) : (
-        <ResultsTable results={results} />
-      )}
-    </OverlayShell>
   );
 }
 
