@@ -58,16 +58,16 @@ export default function Navbar() {
         WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
         backgroundClip: 'text',
       }}>
-        CUBEMN
+        MS
       </Link>
 
       {/* Desktop nav links */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '1.6rem' }} className="nav-links">
-        <Link href="/#rankings" className="nav-link hide-mobile">{t('nav.rankings')}</Link>
-        <Link href="/#records" className="nav-link hide-mobile">{t('nav.records')}</Link>
-        <Link href="/#competitions" className="nav-link">{t('nav.competitions')}</Link>
-        <Link href="/#live" className="nav-link">{t('nav.live')}</Link>
-        <Link href="/#athletes" className="nav-link hide-mobile">{t('nav.athletes')}</Link>
+        <Link href="/" className="nav-link hide-mobile">{t('nav.home')}</Link>
+        <Link href="/competition" className="nav-link">{t('nav.competition')}</Link>
+        <Link href="/timer" className="nav-link hide-mobile">{t('nav.timer')}</Link>
+        <Link href="/algorithms" className="nav-link hide-mobile">{t('nav.algorithms')}</Link>
+        <Link href="/gallery" className="nav-link hide-mobile">{t('nav.gallery')}</Link>
 
         {/* Auth dropdown */}
         <div style={{ position: 'relative' }}>

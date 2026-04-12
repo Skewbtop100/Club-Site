@@ -27,7 +27,7 @@ export default function Footer() {
         </div>
         <div style={{ display: 'flex', gap: '1.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
           {['#rankings', '#records', '#competitions', '#athletes'].map((href) => (
-            <Link key={href} href={href} style={{ fontSize: '0.85rem', color: 'var(--muted)', transition: 'color 0.2s' }}>
+            <Link key={href} href={`/competition${href}`} style={{ fontSize: '0.85rem', color: 'var(--muted)', transition: 'color 0.2s' }}>
               {href.slice(1).charAt(0).toUpperCase() + href.slice(2)}
             </Link>
           ))}

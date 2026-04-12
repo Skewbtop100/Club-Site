@@ -12,6 +12,11 @@ const en = {
   'nav.admin': '⚡ Admin',
   'nav.admin-short': 'Admin Dashboard',
   'nav.homepage': '⌂ Homepage',
+  'nav.home': 'Home',
+  'nav.competition': 'Competition',
+  'nav.timer': 'Timer',
+  'nav.algorithms': 'Algorithms',
+  'nav.gallery': 'Gallery',
 
   // HERO
   'hero.badge': 'WCA-Style Competition Platform',

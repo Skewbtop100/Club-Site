@@ -14,6 +14,11 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'nav.admin': '⚡ Админ',
   'nav.admin-short': 'Админ хянах самбар',
   'nav.homepage': '⌂ Нүүр хуудас',
+  'nav.home': 'Нүүр',
+  'nav.competition': 'Тэмцээн',
+  'nav.timer': 'Таймер',
+  'nav.algorithms': 'Алгоритм',
+  'nav.gallery': 'Галерей',
 
   // HERO
   'hero.badge': 'WCA Загварын Тэмцээний Платформ',

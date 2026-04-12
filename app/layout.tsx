@@ -5,9 +5,9 @@ import ConditionalNavbar from '@/components/layout/ConditionalNavbar';
 import ThemeProvider from '@/components/layout/ThemeProvider';
 
 export const metadata: Metadata = {
-  title: 'CUBE MN',
+  title: 'Mongolian Speedcubers',
   description:
-    "Official results, live standings, athlete rankings, and competition management for Mongolia's competitive speedcubing community.",
+    "Mongolia's competitive speedcubing community — competitions, live results, rankings, timer, algorithms, and more.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
