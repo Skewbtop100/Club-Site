@@ -5,11 +5,13 @@ import { useLang } from '@/lib/i18n';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { fmtTime, compareTime, formatDate } from '@/lib/time-utils';
 import { getResultRecordBadges, getVisibleBadge, BADGE_STYLES } from '@/lib/record-badges';
-import type { Result, Athlete, WcaRecords, EventVisibility } from '@/lib/types';
+import CompetitionResultsViewer from '@/components/shared/CompetitionResultsViewer';
+import type { Result, Athlete, Competition, WcaRecords, EventVisibility } from '@/lib/types';
 
 interface Props {
   results: Result[];
   athletes: Athlete[];
+  competitions: Competition[];
   wcaRecords: WcaRecords;
   eventVisibility: EventVisibility;
 }
@@ -21,10 +23,11 @@ function isEventVisible(eventId: string, visibility: EventVisibility, results: R
   return results.some((r) => r.eventId === eventId);
 }
 
-export default function RankingsSection({ results, athletes, wcaRecords, eventVisibility }: Props) {
+export default function RankingsSection({ results, athletes, competitions, wcaRecords, eventVisibility }: Props) {
   const { t } = useLang();
   const [activeEvent, setActiveEvent] = useState('333');
   const [rankType, setRankType] = useState<'single' | 'average'>('single');
+  const [overlayComp, setOverlayComp] = useState<Competition | null>(null);
 
   const visibleEvents = useMemo(
     () => WCA_EVENTS.filter((ev) => isEventVisible(ev.id, eventVisibility, results)),
@@ -143,8 +146,8 @@ export default function RankingsSection({ results, athletes, wcaRecords, eventVi
                   return (
                     <tr key={r.id}>
                       <td><span className={`rank-num ${rankCls}`}>{rank}</span></td>
-                      <td>
-                        <div style={{ fontWeight: 600 }}>{athleteNameMap[r.athleteId] || r.athleteName || r.athleteId}</div>
+                      <td className="athlete-cell">
+                        <div className="athlete-name-text">{athleteNameMap[r.athleteId] || r.athleteName || r.athleteId}</div>
                         {wcaId && <div className="wca-id">{wcaId}</div>}
                       </td>
                       <td>
@@ -159,7 +162,17 @@ export default function RankingsSection({ results, athletes, wcaRecords, eventVi
                           ) : fmtTime(value)}
                         </span>
                       </td>
-                      <td><span className="comp-name">{r.competitionName || r.competitionId || '—'}</span></td>
+                      <td>
+                        <span
+                          className="comp-name comp-name-link"
+                          onClick={() => {
+                            const comp = competitions.find((c) => c.id === r.competitionId);
+                            if (comp) setOverlayComp(comp);
+                          }}
+                        >
+                          {r.competitionName || r.competitionId || '—'}
+                        </span>
+                      </td>
                       <td><span className="comp-date">{formatDate(r.submittedAt)}</span></td>
                       {rankType === 'average' && solves.map((s, idx) => (
                         <td key={idx}>
@@ -176,6 +189,14 @@ export default function RankingsSection({ results, athletes, wcaRecords, eventVi
           </div>
         )}
       </div>
+
+      {overlayComp && (
+        <CompetitionResultsViewer
+          comp={overlayComp}
+          onClose={() => setOverlayComp(null)}
+          isLive={overlayComp.status === 'live'}
+        />
+      )}
 
       <style>{`
         .rankings-section { padding: 6rem 2rem; }
@@ -210,7 +231,10 @@ export default function RankingsSection({ results, athletes, wcaRecords, eventVi
         .wca-id { font-size: 0.75rem; color: var(--accent); font-family: monospace; margin-top: 0.1rem; }
         .time-val { font-family: monospace; font-weight: 600; }
         .time-dnf { color: #f87171; font-family: monospace; }
+        .athlete-name-text { font-weight: 600; }
         .comp-name { font-size: 0.82rem; color: var(--muted); }
+        .comp-name-link { cursor: pointer; transition: color 0.2s; }
+        .comp-name-link:hover { color: var(--text); text-decoration: underline; }
         .comp-date { font-size: 0.75rem; color: var(--muted); opacity: 0.6; }
         .rnk-solve { font-family: monospace; font-size: 0.82rem; color: var(--muted); }
         .rnk-solve.best-s { color: var(--text); font-weight: 700; }
@@ -222,8 +246,13 @@ export default function RankingsSection({ results, athletes, wcaRecords, eventVi
           .rankings-inner { max-width: none; padding: 0 0.75rem; }
           #rankings-tabs { justify-content: flex-start; flex-wrap: nowrap; padding: 0.5rem 0.75rem; margin-left: -0.75rem; margin-right: -0.75rem; scrollbar-width: none; }
           #rankings-tabs::-webkit-scrollbar { display: none; }
+          .leaderboard-table { min-width: 500px; }
           .leaderboard-table th { padding: 0.4rem 0.5rem; font-size: 0.68rem; }
           .leaderboard-table td { padding: 0.4rem 0.5rem; font-size: 0.85rem; }
+          .athlete-cell { max-width: 120px; }
+          .athlete-name-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
+          .wca-id { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
+          .comp-name { display: inline-block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100px; vertical-align: middle; }
         }
       `}</style>
     </section>

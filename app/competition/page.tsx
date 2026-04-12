@@ -26,6 +26,7 @@ export default function CompetitionPage() {
       <RankingsSection
         results={results}
         athletes={athletes}
+        competitions={competitions}
         wcaRecords={wcaRecords}
         eventVisibility={eventVisibility}
       />
