@@ -115,15 +115,15 @@ export default function RankingsSection({ results, athletes, competitions, wcaRe
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table className="leaderboard-table">
+            <table className={`leaderboard-table${rankType === 'average' ? ' avg-mode' : ' single-mode'}`}>
               <thead>
                 <tr>
                   <th>#</th>
                   <th>{t('rankings.athlete')}</th>
                   <th>{rankType === 'single' ? t('rankings.single') : t('rankings.average')}</th>
                   <th>{t('rankings.competition')}</th>
-                  <th>{t('rankings.date')}</th>
-                  {rankType === 'average' && <><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th></>}
+                  {rankType === 'single' && <th>{t('rankings.date')}</th>}
+                  {rankType === 'average' && <><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>{t('rankings.date')}</th></>}
                 </tr>
               </thead>
               <tbody>
@@ -173,14 +173,21 @@ export default function RankingsSection({ results, athletes, competitions, wcaRe
                           {r.competitionName || r.competitionId || '—'}
                         </span>
                       </td>
-                      <td><span className="comp-date">{formatDate(r.submittedAt)}</span></td>
-                      {rankType === 'average' && solves.map((s, idx) => (
-                        <td key={idx}>
-                          <span className={`rnk-solve${idx === bestIdx ? ' best-s' : ''}${s === -1 || s === -2 ? ' dnf-s' : ''}`}>
-                            {fmtTime(s)}
-                          </span>
-                        </td>
-                      ))}
+                      {rankType === 'single' && (
+                        <td><span className="comp-date">{formatDate(r.submittedAt)}</span></td>
+                      )}
+                      {rankType === 'average' && (
+                        <>
+                          {solves.map((s, idx) => (
+                            <td key={idx}>
+                              <span className={`rnk-solve${idx === bestIdx ? ' best-s' : ''}${s === -1 || s === -2 ? ' dnf-s' : ''}`}>
+                                {fmtTime(s)}
+                              </span>
+                            </td>
+                          ))}
+                          <td><span className="comp-date">{formatDate(r.submittedAt)}</span></td>
+                        </>
+                      )}
                     </tr>
                   );
                 })}
@@ -246,13 +253,13 @@ export default function RankingsSection({ results, athletes, competitions, wcaRe
           .rankings-inner { max-width: none; padding: 0 0.75rem; }
           #rankings-tabs { justify-content: flex-start; flex-wrap: nowrap; padding: 0.5rem 0.75rem; margin-left: -0.75rem; margin-right: -0.75rem; scrollbar-width: none; }
           #rankings-tabs::-webkit-scrollbar { display: none; }
-          .leaderboard-table { min-width: 500px; }
+          .leaderboard-table.single-mode { min-width: 700px; }
+          .leaderboard-table.avg-mode { min-width: 900px; }
           .leaderboard-table th { padding: 0.4rem 0.5rem; font-size: 0.68rem; }
           .leaderboard-table td { padding: 0.4rem 0.5rem; font-size: 0.85rem; }
-          .athlete-cell { max-width: 120px; }
-          .athlete-name-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
-          .wca-id { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
-          .comp-name { display: inline-block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100px; vertical-align: middle; }
+          .athlete-name-text { white-space: normal; word-break: keep-all; }
+          .comp-name { white-space: normal; word-break: keep-all; }
+          .comp-date { white-space: nowrap; }
         }
       `}</style>
     </section>
