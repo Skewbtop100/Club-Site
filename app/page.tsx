@@ -137,18 +137,21 @@ export default function HomePage() {
             icon={<span style={{ fontSize: '1.8rem' }}>&#9201;</span>}
             title="Speed Timer"
             desc="Practice with WCA-standard inspection timer"
+            comingSoon
           />
           <NavCard
             href="/algorithms"
             icon={<span style={{ fontSize: '1.8rem' }}>&#128218;</span>}
             title="Algorithms"
             desc="Learn OLL, PLL and other speedcubing algorithms"
+            comingSoon
           />
           <NavCard
             href="/gallery"
             icon={<span style={{ fontSize: '1.8rem' }}>&#128444;</span>}
             title="Gallery"
             desc="Photos and videos from our events"
+            comingSoon
           />
         </div>
       </section>
@@ -304,14 +307,25 @@ export default function HomePage() {
   );
 }
 
-function NavCard({ href, icon, title, desc }: { href: string; icon: React.ReactNode; title: string; desc: string }) {
+function NavCard({ href, icon, title, desc, comingSoon }: { href: string; icon: React.ReactNode; title: string; desc: string; comingSoon?: boolean }) {
   return (
     <Link href={href} style={{
-      display: 'block', padding: '1.8rem 1.5rem',
+      display: 'block', padding: '1.8rem 1.5rem', position: 'relative',
       background: 'var(--card)', border: '1px solid rgba(255,255,255,0.06)',
       borderRadius: 14, textDecoration: 'none',
       transition: 'border-color 0.2s, transform 0.2s',
     }}>
+      {comingSoon && (
+        <span style={{
+          position: 'absolute', top: '0.75rem', right: '0.75rem',
+          padding: '0.18rem 0.55rem', borderRadius: 6,
+          fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.03em',
+          background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.3)',
+          color: '#a78bfa',
+        }}>
+          Coming Soon
+        </span>
+      )}
       <div style={{ marginBottom: '0.75rem' }}>{icon}</div>
       <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text)', marginBottom: '0.4rem' }}>{title}</h3>
       <p style={{ fontSize: '0.88rem', color: 'var(--muted)', lineHeight: 1.5 }}>{desc}</p>

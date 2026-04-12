@@ -65,9 +65,18 @@ export default function Navbar() {
       <div style={{ display: 'flex', alignItems: 'center', gap: '1.6rem' }} className="nav-links">
         <Link href="/" className="nav-link hide-mobile">{t('nav.home')}</Link>
         <Link href="/competition" className="nav-link">{t('nav.competition')}</Link>
-        <Link href="/timer" className="nav-link hide-mobile">{t('nav.timer')}</Link>
-        <Link href="/algorithms" className="nav-link hide-mobile">{t('nav.algorithms')}</Link>
-        <Link href="/gallery" className="nav-link hide-mobile">{t('nav.gallery')}</Link>
+        <Link href="/timer" className="nav-link nav-soon hide-mobile" title="Тун удахгүй">
+          {t('nav.timer')}
+          <span className="soon-badge">soon</span>
+        </Link>
+        <Link href="/algorithms" className="nav-link nav-soon hide-mobile" title="Тун удахгүй">
+          {t('nav.algorithms')}
+          <span className="soon-badge">soon</span>
+        </Link>
+        <Link href="/gallery" className="nav-link nav-soon hide-mobile" title="Тун удахгүй">
+          {t('nav.gallery')}
+          <span className="soon-badge">soon</span>
+        </Link>
 
         {/* Auth dropdown */}
         <div style={{ position: 'relative' }}>
@@ -202,6 +211,13 @@ export default function Navbar() {
           transition: color 0.2s; text-decoration: none;
         }
         .nav-link:hover { color: var(--text); }
+        .nav-soon { position: relative; display: inline-flex; align-items: center; gap: 0.3rem; }
+        .soon-badge {
+          font-size: 0.55rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+          padding: 0.1rem 0.35rem; border-radius: 4px; line-height: 1;
+          background: rgba(124,58,237,0.18); color: #a78bfa;
+          vertical-align: middle;
+        }
         .nd-link:hover { background: rgba(124,58,237,0.1); }
         @keyframes ndFadeIn {
           from { opacity: 0; transform: translateY(-6px); }
