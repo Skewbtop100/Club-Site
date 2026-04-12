@@ -73,8 +73,8 @@ export default function RankingsSection({ results, athletes, wcaRecords, eventVi
   }, [results, safeEvent, rankType]);
 
   return (
-    <section id="rankings" style={{ padding: '6rem 2rem', background: 'var(--surface)' }}>
-      <div style={{ maxWidth: 1400, margin: '0 auto', padding: '0 2rem' }}>
+    <section id="rankings" className="rankings-section" style={{ background: 'var(--surface)' }}>
+      <div className="rankings-inner">
         <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
           <div className="section-tag">{t('section-tag.leaderboard')}</div>
           <h2 className="section-title">{t('section-title.rankings')}</h2>
@@ -178,6 +178,8 @@ export default function RankingsSection({ results, athletes, wcaRecords, eventVi
       </div>
 
       <style>{`
+        .rankings-section { padding: 6rem 2rem; }
+        .rankings-inner { max-width: 1400px; margin: 0 auto; padding: 0 2rem; }
         .section-tag {
           display: inline-block; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.18em;
           text-transform: uppercase; color: #a78bfa;
@@ -216,12 +218,10 @@ export default function RankingsSection({ results, athletes, wcaRecords, eventVi
         .empty-state { text-align: center; padding: 3rem 1rem; color: var(--muted); font-size: 0.95rem; }
         .empty-icon { font-size: 2.5rem; margin-bottom: 0.7rem; opacity: 0.4; }
         @media (max-width: 700px) {
-          #rankings { padding: 1rem 0.75rem; }
-          #rankings > div { max-width: none; padding: 0; }
-          #rankings-tabs { justify-content: flex-start; flex-wrap: nowrap; padding: 0.5rem 0; scrollbar-width: none; }
+          .rankings-section { padding: 1.5rem 0; }
+          .rankings-inner { max-width: none; padding: 0 0.75rem; }
+          #rankings-tabs { justify-content: flex-start; flex-wrap: nowrap; padding: 0.5rem 0.75rem; margin-left: -0.75rem; margin-right: -0.75rem; scrollbar-width: none; }
           #rankings-tabs::-webkit-scrollbar { display: none; }
-          .section-title { padding: 0; }
-          .section-desc { padding: 0; }
           .leaderboard-table th { padding: 0.4rem 0.5rem; font-size: 0.68rem; }
           .leaderboard-table td { padding: 0.4rem 0.5rem; font-size: 0.85rem; }
         }
