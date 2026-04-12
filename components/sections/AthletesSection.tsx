@@ -135,6 +135,8 @@ export default function AthletesSection({ athletes, results, loading }: Props) {
         .empty-icon { font-size:2.5rem;margin-bottom:.7rem;opacity:.4; }
         .mobile-carousel { display: none; }
         @media (max-width: 700px) {
+          #athletes { padding: 1rem 0.75rem; }
+          #athletes > div { max-width: none; padding: 0; }
           .athletes-grid-desktop { display: none; }
           .mobile-carousel { display: block; }
         }

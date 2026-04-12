@@ -99,7 +99,10 @@ export default function RecordsSection({ results, athletes, eventVisibility }: P
           transition: border-color 0.25s, box-shadow 0.25s; cursor: default;
         }
         .record-card:hover { border-color: rgba(124,58,237,0.4); box-shadow: 0 0 18px var(--glow); }
-        @media (max-width: 768px) { .records-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); } }
+        @media (max-width: 700px) {
+          #records { padding: 1rem 0.75rem; }
+          #records > div { max-width: none; padding: 0; }
+        }
       `}</style>
     </section>
   );

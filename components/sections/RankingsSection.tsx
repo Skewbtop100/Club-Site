@@ -215,7 +215,16 @@ export default function RankingsSection({ results, athletes, wcaRecords, eventVi
         .rnk-solve.dnf-s { color: #f87171; }
         .empty-state { text-align: center; padding: 3rem 1rem; color: var(--muted); font-size: 0.95rem; }
         .empty-icon { font-size: 2.5rem; margin-bottom: 0.7rem; opacity: 0.4; }
-        @media (max-width: 700px) { #rankings-tabs { justify-content: flex-start; flex-wrap: nowrap; } }
+        @media (max-width: 700px) {
+          #rankings { padding: 1rem 0.75rem; }
+          #rankings > div { max-width: none; padding: 0; }
+          #rankings-tabs { justify-content: flex-start; flex-wrap: nowrap; padding: 0.5rem 0; scrollbar-width: none; }
+          #rankings-tabs::-webkit-scrollbar { display: none; }
+          .section-title { padding: 0; }
+          .section-desc { padding: 0; }
+          .leaderboard-table th { padding: 0.4rem 0.5rem; font-size: 0.68rem; }
+          .leaderboard-table td { padding: 0.4rem 0.5rem; font-size: 0.85rem; }
+        }
       `}</style>
     </section>
   );

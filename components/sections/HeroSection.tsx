@@ -11,7 +11,7 @@ export default function HeroSection() {
   const { competitions, loading: compsLoading } = useCompetitions();
 
   return (
-    <section style={{
+    <section className="hero-section" style={{
       minHeight: '100vh', position: 'relative',
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
       textAlign: 'center', padding: '6rem 2rem 4rem', overflow: 'hidden',
@@ -121,6 +121,9 @@ export default function HeroSection() {
         @keyframes scrollBounce {
           0%, 100% { transform: translateX(-50%) translateY(0); }
           50%       { transform: translateX(-50%) translateY(6px); }
+        }
+        @media (max-width: 700px) {
+          .hero-section { padding: 4rem 0.75rem 3rem !important; }
         }
       `}</style>
     </section>

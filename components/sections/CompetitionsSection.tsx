@@ -131,6 +131,10 @@ export default function CompetitionsSection({ competitions, loading }: Props) {
         @keyframes spin { to { transform:rotate(360deg); } }
         .empty-state { text-align:center;padding:3rem 1rem;color:var(--muted);font-size:.95rem; }
         .empty-icon { font-size:2.5rem;margin-bottom:.7rem;opacity:.4; }
+        @media (max-width: 700px) {
+          #competitions { padding: 1rem 0.75rem; }
+          #competitions > div { max-width: none; padding: 0; }
+        }
       `}</style>
     </section>
   );
