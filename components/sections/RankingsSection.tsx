@@ -271,6 +271,15 @@ export default function RankingsSection({ results, athletes, competitions, wcaRe
         .rnk-solve { font-family: monospace; font-size: 0.82rem; color: var(--muted); }
         .rnk-solve.best-s { color: var(--text); font-weight: 700; }
         .rnk-solve.dnf-s { color: #f87171; }
+        .lb-hidden-row { display: none; }
+        .lb-toggle-btn {
+          padding: 0.4rem 1.2rem; border-radius: 999px;
+          font-size: 0.82rem; font-weight: 600; font-family: inherit;
+          background: transparent; color: var(--muted);
+          border: 1px solid rgba(255,255,255,0.1);
+          cursor: pointer; transition: all 0.2s;
+        }
+        .lb-toggle-btn:hover { color: var(--text); border-color: rgba(124,58,237,0.4); }
         .empty-state { text-align: center; padding: 3rem 1rem; color: var(--muted); font-size: 0.95rem; }
         .empty-icon { font-size: 2.5rem; margin-bottom: 0.7rem; opacity: 0.4; }
         @media (max-width: 700px) {
