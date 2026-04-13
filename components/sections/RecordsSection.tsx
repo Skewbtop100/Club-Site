@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useLang } from '@/lib/i18n';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { fmtTime, betterTime, formatDate } from '@/lib/time-utils';
 import type { Result, Athlete, EventVisibility } from '@/lib/types';
+import type { TranslationKey } from '@/lib/i18n';
 
 interface Props {
   results: Result[];
@@ -115,6 +116,21 @@ export default function RecordsSection({ results, athletes, eventVisibility }: P
 
   const visibleEvents = WCA_EVENTS.filter((ev) => isEventVisible(ev.id, eventVisibility, results));
 
+  // Mobile sort: cards with records first (preferred order), then empty
+  const PREFERRED_ORDER = ['333', '222', 'pyram', 'skewb'];
+  const mobileSorted = useMemo(() => {
+    return [...visibleEvents].sort((a, b) => {
+      const aHas = !!(bestSingle[a.id] || bestAverage[a.id]);
+      const bHas = !!(bestSingle[b.id] || bestAverage[b.id]);
+      if (aHas !== bHas) return aHas ? -1 : 1;
+      const aIdx = PREFERRED_ORDER.indexOf(a.id);
+      const bIdx = PREFERRED_ORDER.indexOf(b.id);
+      const aPrio = aIdx >= 0 ? aIdx : 100;
+      const bPrio = bIdx >= 0 ? bIdx : 100;
+      return aPrio - bPrio;
+    });
+  }, [visibleEvents, bestSingle, bestAverage]);
+
   const selectedEventName = selectedEvent
     ? WCA_EVENTS.find((e) => e.id === selectedEvent)?.name || selectedEvent
     : '';
@@ -148,30 +164,25 @@ export default function RecordsSection({ results, athletes, eventVisibility }: P
           <p className="section-desc">{t('section-desc.records')}</p>
         </div>
 
-        <div style={{
+        {/* Desktop grid */}
+        <div className="records-grid-desktop" style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))',
           gap: '1rem',
         }}>
-          {visibleEvents.map((ev) => {
-            const s = bestSingle[ev.id];
-            const a = bestAverage[ev.id];
-            return (
-              <div
-                key={ev.id}
-                className="record-card"
-                onClick={() => setSelectedEvent(ev.id)}
-              >
-                <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.9rem' }}>
-                  {ev.name}
-                </div>
-
-                <RecordRow label={t('records.single-record')} entry={s} />
-                <RecordRow label={t('records.average-record')} entry={a} isAvg />
-              </div>
-            );
-          })}
+          {visibleEvents.map((ev) => (
+            <RecordCard key={ev.id} ev={ev} s={bestSingle[ev.id]} a={bestAverage[ev.id]} t={t} onSelect={setSelectedEvent} />
+          ))}
         </div>
+
+        {/* Mobile carousel */}
+        <MobileRecordsCarousel
+          events={mobileSorted}
+          bestSingle={bestSingle}
+          bestAverage={bestAverage}
+          t={t}
+          onSelect={setSelectedEvent}
+        />
       </div>
 
       {/* Record History Modal */}
@@ -371,9 +382,12 @@ export default function RecordsSection({ results, athletes, eventVisibility }: P
         @keyframes rhFadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes rhSlideIn { from { transform: scale(0.95) translateY(10px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
 
+        .rec-mobile-carousel { display: none; }
         @media (max-width: 700px) {
           #records { padding: 1rem 0.75rem; }
           #records > div { max-width: none; padding: 0; }
+          .records-grid-desktop { display: none !important; }
+          .rec-mobile-carousel { display: block; }
           .rh-overlay { align-items: flex-end; padding: 0; }
           .rh-modal {
             max-width: 100%; max-height: 85vh;
@@ -409,6 +423,105 @@ function RecordRow({ label, entry, isAvg }: { label: string; entry: RecordEntry 
         </>
       ) : (
         <div style={{ color: 'var(--muted)', fontFamily: 'monospace', fontSize: '1.1rem' }}>—</div>
+      )}
+    </div>
+  );
+}
+
+interface WcaEvent { id: string; name: string; short: string }
+
+function RecordCard({ ev, s, a, t, onSelect }: {
+  ev: WcaEvent;
+  s: RecordEntry | undefined;
+  a: RecordEntry | undefined;
+  t: (k: TranslationKey) => string;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <div className="record-card" onClick={() => onSelect(ev.id)}>
+      <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.9rem' }}>
+        {ev.name}
+      </div>
+      <RecordRow label={t('records.single-record')} entry={s} />
+      <RecordRow label={t('records.average-record')} entry={a} isAvg />
+    </div>
+  );
+}
+
+// ── Mobile Records Carousel ─────────────────────────────────────────────────
+
+const CARDS_PER_SLIDE = 2;
+const AUTO_INTERVAL = 6000;
+
+function MobileRecordsCarousel({ events, bestSingle, bestAverage, t, onSelect }: {
+  events: WcaEvent[];
+  bestSingle: Record<string, RecordEntry>;
+  bestAverage: Record<string, RecordEntry>;
+  t: (k: TranslationKey) => string;
+  onSelect: (id: string) => void;
+}) {
+  const [page, setPage] = useState(0);
+  const startX = useRef(0);
+  const autoRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const totalPages = Math.ceil(events.length / CARDS_PER_SLIDE);
+
+  function resetAuto() {
+    if (autoRef.current) clearInterval(autoRef.current);
+    if (totalPages <= 1) return;
+    autoRef.current = setInterval(() => {
+      setPage((p) => (p + 1) % totalPages);
+    }, AUTO_INTERVAL);
+  }
+
+  useEffect(() => {
+    resetAuto();
+    return () => { if (autoRef.current) clearInterval(autoRef.current); };
+  }, [totalPages]);
+
+  function onTouchStart(e: React.TouchEvent) { startX.current = e.touches[0].clientX; }
+  function onTouchEnd(e: React.TouchEvent) {
+    const diff = startX.current - e.changedTouches[0].clientX;
+    if (Math.abs(diff) < 40) return;
+    if (diff > 0) setPage((p) => Math.min(p + 1, totalPages - 1));
+    else setPage((p) => Math.max(p - 1, 0));
+    resetAuto();
+  }
+
+  const slideCards = events.slice(page * CARDS_PER_SLIDE, (page + 1) * CARDS_PER_SLIDE);
+
+  return (
+    <div className="rec-mobile-carousel">
+      <div
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+        style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}
+      >
+        {slideCards.map((ev) => (
+          <RecordCard
+            key={ev.id}
+            ev={ev}
+            s={bestSingle[ev.id]}
+            a={bestAverage[ev.id]}
+            t={t}
+            onSelect={onSelect}
+          />
+        ))}
+      </div>
+
+      {totalPages > 1 && (
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '0.4rem', marginTop: '1.2rem' }}>
+          {Array.from({ length: totalPages }).map((_, i) => (
+            <button
+              key={i}
+              onClick={() => { setPage(i); resetAuto(); }}
+              style={{
+                width: i === page ? 20 : 8, height: 8, borderRadius: 999, border: 'none', padding: 0,
+                background: i === page ? 'var(--accent)' : 'rgba(255,255,255,0.2)',
+                cursor: 'pointer', transition: 'all 0.25s',
+              }}
+            />
+          ))}
+        </div>
       )}
     </div>
   );
