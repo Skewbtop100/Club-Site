@@ -1,9 +1,9 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useLang } from '@/lib/i18n';
 import { WCA_EVENTS } from '@/lib/wca-events';
-import { fmtTime, betterTime } from '@/lib/time-utils';
+import { fmtTime, betterTime, formatDate } from '@/lib/time-utils';
 import type { Result, Athlete, EventVisibility } from '@/lib/types';
 
 interface Props {
@@ -21,8 +21,73 @@ function isEventVisible(eventId: string, visibility: EventVisibility, results: R
 
 interface RecordEntry { time: number; name: string; athleteId: string }
 
+interface HistoryEntry {
+  time: number;
+  name: string;
+  athleteId: string;
+  competitionName: string;
+  date: string;
+  isCurrent: boolean;
+}
+
+function toSortableDate(ts: unknown): number {
+  if (!ts) return 0;
+  if (ts && typeof ts === 'object' && 'toDate' in ts && typeof (ts as { toDate: () => Date }).toDate === 'function') {
+    return (ts as { toDate: () => Date }).toDate().getTime();
+  }
+  if (typeof ts === 'string') return new Date(ts).getTime() || 0;
+  if (typeof ts === 'number') return ts;
+  return 0;
+}
+
+function buildRecordHistory(
+  results: Result[],
+  eventId: string,
+  type: 'single' | 'average',
+  nameMap: Record<string, string>,
+): HistoryEntry[] {
+  const eligible = results
+    .filter((r) => {
+      if (r.eventId !== eventId) return false;
+      if (r.source === 'imported' || r.source === 'import') return false;
+      if (r.status !== 'published') return false;
+      const val = type === 'single' ? r.single : r.average;
+      if (val === null || val === undefined || val === -1 || val === -2) return false;
+      if (val <= 0) return false;
+      return true;
+    })
+    .sort((a, b) => toSortableDate(a.submittedAt) - toSortableDate(b.submittedAt));
+
+  const history: HistoryEntry[] = [];
+  let currentBest: number | null = null;
+
+  for (const r of eligible) {
+    const val = (type === 'single' ? r.single : r.average)!;
+    if (currentBest === null || val < currentBest) {
+      currentBest = val;
+      history.push({
+        time: val,
+        name: nameMap[r.athleteId] || r.athleteName || r.athleteId,
+        athleteId: r.athleteId,
+        competitionName: r.competitionName || r.competitionId || '—',
+        date: formatDate(r.submittedAt),
+        isCurrent: false,
+      });
+    }
+  }
+
+  if (history.length > 0) {
+    history[history.length - 1].isCurrent = true;
+  }
+
+  return history;
+}
+
 export default function RecordsSection({ results, athletes, eventVisibility }: Props) {
   const { t } = useLang();
+  const [selectedEvent, setSelectedEvent] = useState<string | null>(null);
+  const [historyTab, setHistoryTab] = useState<'single' | 'average'>('single');
+
   const nameMap = useMemo(() => {
     const m: Record<string, string> = {};
     athletes.forEach((a) => { m[a.id] = (a.name || '') + (a.lastName ? ' ' + a.lastName : ''); });
@@ -50,6 +115,30 @@ export default function RecordsSection({ results, athletes, eventVisibility }: P
 
   const visibleEvents = WCA_EVENTS.filter((ev) => isEventVisible(ev.id, eventVisibility, results));
 
+  const selectedEventName = selectedEvent
+    ? WCA_EVENTS.find((e) => e.id === selectedEvent)?.name || selectedEvent
+    : '';
+
+  const history = useMemo(() => {
+    if (!selectedEvent) return [];
+    return buildRecordHistory(results, selectedEvent, historyTab, nameMap);
+  }, [results, selectedEvent, historyTab, nameMap]);
+
+  // Reset tab when opening a new event
+  useEffect(() => { setHistoryTab('single'); }, [selectedEvent]);
+
+  // Lock body scroll when modal open
+  useEffect(() => {
+    if (!selectedEvent) return;
+    document.body.style.overflow = 'hidden';
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelectedEvent(null); };
+    document.addEventListener('keydown', handler);
+    return () => {
+      document.body.style.overflow = '';
+      document.removeEventListener('keydown', handler);
+    };
+  }, [selectedEvent]);
+
   return (
     <section id="records" style={{ padding: '6rem 2rem', background: 'var(--bg)' }}>
       <div style={{ maxWidth: 1400, margin: '0 auto', padding: '0 2rem' }}>
@@ -68,7 +157,11 @@ export default function RecordsSection({ results, athletes, eventVisibility }: P
             const s = bestSingle[ev.id];
             const a = bestAverage[ev.id];
             return (
-              <div key={ev.id} className="record-card">
+              <div
+                key={ev.id}
+                className="record-card"
+                onClick={() => setSelectedEvent(ev.id)}
+              >
                 <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.9rem' }}>
                   {ev.name}
                 </div>
@@ -80,6 +173,83 @@ export default function RecordsSection({ results, athletes, eventVisibility }: P
           })}
         </div>
       </div>
+
+      {/* Record History Modal */}
+      {selectedEvent && (
+        <div
+          className="rh-overlay"
+          onClick={() => setSelectedEvent(null)}
+        >
+          <div className="rh-modal" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="rh-header">
+              <div>
+                <div className="rh-title">{selectedEventName}</div>
+                <div className="rh-subtitle">Record History</div>
+              </div>
+              <button className="rh-close" onClick={() => setSelectedEvent(null)}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2}>
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Tabs */}
+            <div className="rh-tabs">
+              {(['single', 'average'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  className={`rh-tab${historyTab === tab ? ' active' : ''}`}
+                  onClick={() => setHistoryTab(tab)}
+                >
+                  {tab === 'single' ? t('rankings.single') : t('rankings.average')}
+                </button>
+              ))}
+            </div>
+
+            {/* Timeline */}
+            <div className="rh-body">
+              {history.length === 0 ? (
+                <div className="rh-empty">
+                  <div style={{ fontSize: '2rem', marginBottom: '0.6rem', opacity: 0.4 }}>📊</div>
+                  No records yet for this event.
+                </div>
+              ) : history.length === 1 ? (
+                <div>
+                  <div className="rh-first-badge">First Record!</div>
+                  <div className="rh-row rh-current">
+                    <div className="rh-row-date">{history[0].date}</div>
+                    <div className="rh-row-main">
+                      <span className="rh-row-time">{fmtTime(history[0].time)}</span>
+                      <span className="rh-row-name">{history[0].name}</span>
+                    </div>
+                    <div className="rh-row-comp">{history[0].competitionName}</div>
+                    <span className="rh-current-badge">Current Record</span>
+                  </div>
+                  <div className="rh-empty" style={{ paddingTop: '1rem' }}>
+                    No previous records — this is the first record!
+                  </div>
+                </div>
+              ) : (
+                <div className="rh-timeline">
+                  {history.map((entry, i) => (
+                    <div key={i} className={`rh-row${entry.isCurrent ? ' rh-current' : ''}`}>
+                      <div className="rh-tl-dot" />
+                      <div className="rh-row-date">{entry.date}</div>
+                      <div className="rh-row-main">
+                        <span className="rh-row-time">{fmtTime(entry.time)}</span>
+                        <span className="rh-row-name">{entry.name}</span>
+                      </div>
+                      <div className="rh-row-comp">{entry.competitionName}</div>
+                      {entry.isCurrent && <span className="rh-current-badge">Current Record</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <style>{`
         .section-tag {
@@ -98,13 +268,124 @@ export default function RecordsSection({ results, athletes, eventVisibility }: P
         .record-card {
           background: var(--card); border: 1px solid rgba(255,255,255,0.06);
           border-radius: 14px; padding: 1.4rem;
-          transition: border-color 0.25s, box-shadow 0.25s; cursor: default;
+          transition: border-color 0.25s, box-shadow 0.25s; cursor: pointer;
         }
         .record-card:hover { border-color: rgba(124,58,237,0.4); box-shadow: 0 0 18px var(--glow); }
+
+        /* Record History Modal */
+        .rh-overlay {
+          position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 2000;
+          background: rgba(0,0,0,0.7); backdrop-filter: blur(4px);
+          display: flex; align-items: center; justify-content: center; padding: 1rem;
+          animation: rhFadeIn 0.18s ease;
+        }
+        .rh-modal {
+          width: 100%; max-width: 600px; max-height: 90vh;
+          background: var(--bg); border: 1px solid rgba(124,58,237,0.25);
+          border-radius: 16px; display: flex; flex-direction: column;
+          animation: rhSlideIn 0.22s cubic-bezier(.4,0,.2,1);
+        }
+        .rh-header {
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 1.2rem 1.5rem; border-bottom: 1px solid rgba(124,58,237,0.2); flex-shrink: 0;
+        }
+        .rh-title {
+          font-size: 1.1rem; font-weight: 700; color: var(--text);
+        }
+        .rh-subtitle {
+          font-size: 0.78rem; color: var(--muted); margin-top: 0.1rem;
+        }
+        .rh-close {
+          background: none; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;
+          color: var(--muted); cursor: pointer; padding: 0.35rem;
+          display: flex; align-items: center; justify-content: center;
+          transition: border-color 0.2s, color 0.2s;
+        }
+        .rh-close:hover { border-color: rgba(124,58,237,0.4); color: var(--text); }
+        .rh-tabs {
+          display: flex; gap: 0.4rem; padding: 0.8rem 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.06); flex-shrink: 0;
+        }
+        .rh-tab {
+          padding: 0.35rem 0.9rem; border-radius: 999px; font-size: 0.8rem; font-weight: 600;
+          border: 1px solid rgba(255,255,255,0.1); background: transparent; color: var(--muted);
+          cursor: pointer; transition: all 0.2s; font-family: inherit;
+        }
+        .rh-tab:hover { color: var(--text); border-color: rgba(124,58,237,0.4); }
+        .rh-tab.active { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; border-color: transparent; }
+        .rh-body {
+          overflow-y: auto; flex: 1; padding: 1.2rem 1.5rem;
+        }
+        .rh-empty {
+          text-align: center; padding: 2rem 1rem; color: var(--muted); font-size: 0.9rem;
+        }
+        .rh-first-badge {
+          text-align: center; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em;
+          text-transform: uppercase; color: #4ade80; margin-bottom: 1rem;
+        }
+        .rh-timeline { position: relative; padding-left: 1.2rem; }
+        .rh-timeline::before {
+          content: ''; position: absolute; left: 5px; top: 0.6rem; bottom: 0.6rem;
+          width: 2px; background: rgba(124,58,237,0.25); border-radius: 1px;
+        }
+        .rh-row {
+          position: relative; padding: 0.8rem 1rem; margin-bottom: 0.5rem;
+          background: var(--card); border: 1px solid rgba(255,255,255,0.06);
+          border-radius: 10px; transition: border-color 0.2s;
+        }
+        .rh-row:hover { border-color: rgba(124,58,237,0.3); }
+        .rh-current {
+          border-color: rgba(124,58,237,0.4);
+          background: rgba(124,58,237,0.08);
+        }
+        .rh-tl-dot {
+          position: absolute; left: -1.2rem; top: 1.1rem;
+          width: 10px; height: 10px; border-radius: 50%;
+          background: rgba(124,58,237,0.5); border: 2px solid var(--bg);
+        }
+        .rh-current .rh-tl-dot {
+          background: var(--accent); box-shadow: 0 0 8px rgba(124,58,237,0.5);
+        }
+        .rh-row-date {
+          font-size: 0.7rem; color: var(--muted); margin-bottom: 0.25rem; white-space: nowrap;
+        }
+        .rh-row-main {
+          display: flex; align-items: baseline; gap: 0.6rem; margin-bottom: 0.15rem;
+        }
+        .rh-row-time {
+          font-family: monospace; font-size: 1.15rem; font-weight: 700; color: #a78bfa;
+        }
+        .rh-row-name {
+          font-size: 0.88rem; font-weight: 600; color: var(--text);
+        }
+        .rh-row-comp {
+          font-size: 0.78rem; color: var(--muted);
+        }
+        .rh-current-badge {
+          display: inline-block; margin-top: 0.4rem;
+          font-size: 0.62rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+          background: rgba(124,58,237,0.2); color: #a78bfa;
+          border: 1px solid rgba(124,58,237,0.3);
+          padding: 0.15rem 0.5rem; border-radius: 999px;
+        }
+
+        @keyframes rhFadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes rhSlideIn { from { transform: scale(0.95) translateY(10px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
+
         @media (max-width: 700px) {
           #records { padding: 1rem 0.75rem; }
           #records > div { max-width: none; padding: 0; }
+          .rh-overlay { align-items: flex-end; padding: 0; }
+          .rh-modal {
+            max-width: 100%; max-height: 85vh;
+            border-radius: 16px 16px 0 0;
+            border-bottom: none;
+            animation: rhSlideUp 0.25s cubic-bezier(.4,0,.2,1);
+          }
+          .rh-header { padding: 1rem 1.2rem; }
+          .rh-tabs { padding: 0.6rem 1.2rem; }
+          .rh-body { padding: 1rem 1.2rem; }
         }
+        @keyframes rhSlideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
       `}</style>
     </section>
   );
