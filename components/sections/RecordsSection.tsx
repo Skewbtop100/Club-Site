@@ -6,12 +6,14 @@ import Autoplay from 'embla-carousel-autoplay';
 import { useLang } from '@/lib/i18n';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { fmtTime, betterTime, formatDate } from '@/lib/time-utils';
-import type { Result, Athlete, EventVisibility } from '@/lib/types';
+import CompetitionHistory from '@/components/shared/CompetitionHistory';
+import type { Result, Athlete, Competition, EventVisibility } from '@/lib/types';
 import type { TranslationKey } from '@/lib/i18n';
 
 interface Props {
   results: Result[];
   athletes: Athlete[];
+  competitions: Competition[];
   eventVisibility: EventVisibility;
 }
 
@@ -28,6 +30,7 @@ interface HistoryEntry {
   time: number;
   name: string;
   athleteId: string;
+  competitionId: string;
   competitionName: string;
   date: string;
   isCurrent: boolean;
@@ -72,6 +75,7 @@ function buildRecordHistory(
         time: val,
         name: nameMap[r.athleteId] || r.athleteName || r.athleteId,
         athleteId: r.athleteId,
+        competitionId: r.competitionId,
         competitionName: r.competitionName || r.competitionId || '—',
         date: formatDate(r.submittedAt),
         isCurrent: false,
@@ -86,10 +90,11 @@ function buildRecordHistory(
   return history;
 }
 
-export default function RecordsSection({ results, athletes, eventVisibility }: Props) {
+export default function RecordsSection({ results, athletes, competitions, eventVisibility }: Props) {
   const { t } = useLang();
   const [selectedEvent, setSelectedEvent] = useState<string | null>(null);
   const [historyTab, setHistoryTab] = useState<'single' | 'average'>('single');
+  const [historyComp, setHistoryComp] = useState<Competition | null>(null);
 
   const nameMap = useMemo(() => {
     const m: Record<string, string> = {};
@@ -236,7 +241,13 @@ export default function RecordsSection({ results, athletes, eventVisibility }: P
                       <span className="rh-row-time">{fmtTime(history[0].time)}</span>
                       <span className="rh-row-name">{history[0].name}</span>
                     </div>
-                    <div className="rh-row-comp">{history[0].competitionName}</div>
+                    <div
+                      className="rh-row-comp rh-row-comp-link"
+                      onClick={() => {
+                        const c = competitions.find(comp => comp.id === history[0].competitionId);
+                        if (c) setHistoryComp(c);
+                      }}
+                    >{history[0].competitionName}</div>
                     <span className="rh-current-badge">Current Record</span>
                   </div>
                   <div className="rh-empty" style={{ paddingTop: '1rem' }}>
@@ -253,7 +264,13 @@ export default function RecordsSection({ results, athletes, eventVisibility }: P
                         <span className="rh-row-time">{fmtTime(entry.time)}</span>
                         <span className="rh-row-name">{entry.name}</span>
                       </div>
-                      <div className="rh-row-comp">{entry.competitionName}</div>
+                      <div
+                        className="rh-row-comp rh-row-comp-link"
+                        onClick={() => {
+                          const c = competitions.find(comp => comp.id === entry.competitionId);
+                          if (c) setHistoryComp(c);
+                        }}
+                      >{entry.competitionName}</div>
                       {entry.isCurrent && <span className="rh-current-badge">Current Record</span>}
                     </div>
                   ))}
@@ -262,6 +279,14 @@ export default function RecordsSection({ results, athletes, eventVisibility }: P
             </div>
           </div>
         </div>
+      )}
+
+      {historyComp && (
+        <CompetitionHistory
+          comp={historyComp}
+          athletes={athletes}
+          onClose={() => setHistoryComp(null)}
+        />
       )}
 
       <style>{`
@@ -372,6 +397,12 @@ export default function RecordsSection({ results, athletes, eventVisibility }: P
         }
         .rh-row-comp {
           font-size: 0.78rem; color: var(--muted);
+        }
+        .rh-row-comp-link {
+          cursor: pointer; transition: color 0.2s;
+        }
+        .rh-row-comp-link:hover {
+          color: var(--text); text-decoration: underline;
         }
         .rh-current-badge {
           display: inline-block; margin-top: 0.4rem;

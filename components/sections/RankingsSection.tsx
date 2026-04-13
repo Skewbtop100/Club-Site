@@ -5,7 +5,7 @@ import { useLang } from '@/lib/i18n';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { fmtTime, compareTime, formatDate } from '@/lib/time-utils';
 import { getResultRecordBadges, getVisibleBadge, BADGE_STYLES } from '@/lib/record-badges';
-import CompetitionResultsViewer from '@/components/shared/CompetitionResultsViewer';
+import CompetitionHistory from '@/components/shared/CompetitionHistory';
 import type { Result, Athlete, Competition, WcaRecords, EventVisibility } from '@/lib/types';
 
 interface Props {
@@ -221,10 +221,10 @@ export default function RankingsSection({ results, athletes, competitions, wcaRe
       </div>
 
       {overlayComp && (
-        <CompetitionResultsViewer
+        <CompetitionHistory
           comp={overlayComp}
+          athletes={athletes}
           onClose={() => setOverlayComp(null)}
-          isLive={overlayComp.status === 'live'}
         />
       )}
 

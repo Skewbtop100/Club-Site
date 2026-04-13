@@ -3,11 +3,13 @@
 import { useMemo, useState, useEffect } from 'react';
 import { useLang } from '@/lib/i18n';
 import { WCA_EVENTS } from '@/lib/wca-events';
-import type { Competition } from '@/lib/types';
+import type { Competition, Athlete } from '@/lib/types';
 import CompetitionResultsViewer from '@/components/shared/CompetitionResultsViewer';
+import CompetitionHistory from '@/components/shared/CompetitionHistory';
 
 interface Props {
   competitions: Competition[];
+  athletes: Athlete[];
   loading: boolean;
 }
 
@@ -22,7 +24,7 @@ function formatCompDate(date: Competition['date']): string {
   return String(date);
 }
 
-export default function CompetitionsSection({ competitions, loading }: Props) {
+export default function CompetitionsSection({ competitions, athletes, loading }: Props) {
   const { t } = useLang();
   const defaultTab = useMemo<Status>(() => {
     if (competitions.some((c) => c.status === 'live')) return 'live';
@@ -79,11 +81,17 @@ export default function CompetitionsSection({ competitions, loading }: Props) {
       {overlay && (
         overlay.type === 'assignments'
           ? <AssignmentsOverlay comp={overlay.comp} onClose={() => setOverlay(null)} />
-          : <CompetitionResultsViewer
-              comp={overlay.comp}
-              onClose={() => setOverlay(null)}
-              isLive={overlay.type === 'live'}
-            />
+          : overlay.type === 'results'
+            ? <CompetitionHistory
+                comp={overlay.comp}
+                athletes={athletes}
+                onClose={() => setOverlay(null)}
+              />
+            : <CompetitionResultsViewer
+                comp={overlay.comp}
+                onClose={() => setOverlay(null)}
+                isLive
+              />
       )}
 
       <style>{`

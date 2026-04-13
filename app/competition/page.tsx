@@ -33,10 +33,12 @@ export default function CompetitionPage() {
       <RecordsSection
         results={results}
         athletes={athletes}
+        competitions={competitions}
         eventVisibility={eventVisibility}
       />
       <CompetitionsSection
         competitions={competitions}
+        athletes={athletes}
         loading={compsLoading}
       />
       <AthletesSection
