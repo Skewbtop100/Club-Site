@@ -465,6 +465,15 @@ function MobileRecordsCarousel({ events, bestSingle, bestAverage, t, onSelect }:
   const autoRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const totalPages = Math.ceil(events.length / CARDS_PER_SLIDE);
 
+  // Build slides: array of 2-card groups
+  const slides = useMemo(() => {
+    const s: WcaEvent[][] = [];
+    for (let i = 0; i < events.length; i += CARDS_PER_SLIDE) {
+      s.push(events.slice(i, i + CARDS_PER_SLIDE));
+    }
+    return s;
+  }, [events]);
+
   function resetAuto() {
     if (autoRef.current) clearInterval(autoRef.current);
     if (totalPages <= 1) return;
@@ -487,25 +496,44 @@ function MobileRecordsCarousel({ events, bestSingle, bestAverage, t, onSelect }:
     resetAuto();
   }
 
-  const slideCards = events.slice(page * CARDS_PER_SLIDE, (page + 1) * CARDS_PER_SLIDE);
-
   return (
     <div className="rec-mobile-carousel">
+      {/* Viewport — clips overflow */}
       <div
+        style={{ overflow: 'hidden' }}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
-        style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}
       >
-        {slideCards.map((ev) => (
-          <RecordCard
-            key={ev.id}
-            ev={ev}
-            s={bestSingle[ev.id]}
-            a={bestAverage[ev.id]}
-            t={t}
-            onSelect={onSelect}
-          />
-        ))}
+        {/* Track — all slides side by side, moved via translateX */}
+        <div
+          className="rec-carousel-track"
+          style={{
+            display: 'flex',
+            transform: `translateX(-${page * 100}%)`,
+          }}
+        >
+          {slides.map((group, si) => (
+            <div
+              key={si}
+              className={`rec-carousel-slide${si === page ? ' rec-slide-active' : ''}`}
+              style={{
+                minWidth: '100%', flex: '0 0 100%',
+                display: 'flex', flexDirection: 'column', gap: '0.75rem',
+              }}
+            >
+              {group.map((ev) => (
+                <RecordCard
+                  key={ev.id}
+                  ev={ev}
+                  s={bestSingle[ev.id]}
+                  a={bestAverage[ev.id]}
+                  t={t}
+                  onSelect={onSelect}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
 
       {totalPages > 1 && (
@@ -514,15 +542,32 @@ function MobileRecordsCarousel({ events, bestSingle, bestAverage, t, onSelect }:
             <button
               key={i}
               onClick={() => { setPage(i); resetAuto(); }}
-              style={{
-                width: i === page ? 20 : 8, height: 8, borderRadius: 999, border: 'none', padding: 0,
-                background: i === page ? 'var(--accent)' : 'rgba(255,255,255,0.2)',
-                cursor: 'pointer', transition: 'all 0.25s',
-              }}
+              className={`rec-dot${i === page ? ' rec-dot-active' : ''}`}
             />
           ))}
         </div>
       )}
+
+      <style>{`
+        .rec-carousel-track {
+          transition: transform 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+          will-change: transform;
+        }
+        .rec-carousel-slide { opacity: 0.4; transition: opacity 0.45s ease; }
+        .rec-slide-active { opacity: 1; animation: recSlideIn 0.45s ease; }
+        @keyframes recSlideIn {
+          from { opacity: 0.7; transform: scale(0.95); }
+          to   { opacity: 1;   transform: scale(1); }
+        }
+        .rec-dot {
+          height: 8px; border-radius: 999px; border: none; padding: 0; cursor: pointer;
+          background: rgba(255,255,255,0.2); width: 8px;
+          transition: width 0.3s ease, background 0.3s ease;
+        }
+        .rec-dot-active {
+          width: 20px; background: var(--accent);
+        }
+      `}</style>
     </div>
   );
 }
