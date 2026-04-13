@@ -159,8 +159,8 @@ export default function RankingsSection({ results, athletes, competitions, wcaRe
                       <td>
                         <span className={isDnf ? 'time-dnf' : 'time-val'}>
                           {badge ? (
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
-                              <span style={{ fontSize: '0.5rem', fontWeight: 900, letterSpacing: '0.04em', lineHeight: 1, padding: '1px 3px', borderRadius: 4, ...BADGE_STYLES[badge] }}>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
+                              <span style={{ fontSize: '0.58rem', fontWeight: 900, letterSpacing: '0.04em', lineHeight: 1, padding: '2px 4px', borderRadius: 4, ...BADGE_STYLES[badge] }}>
                                 {badge}
                               </span>
                               {fmtTime(value)}
@@ -256,19 +256,19 @@ export default function RankingsSection({ results, athletes, competitions, wcaRe
         .tab-btn.active { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; border-color: transparent; }
         .leaderboard-table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
         .leaderboard-table th { text-align: left; padding: 0.7rem 1rem; font-size: 0.73rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); border-bottom: 1px solid rgba(255,255,255,0.07); }
-        .leaderboard-table td { padding: 0.75rem 1rem; font-size: 0.9rem; border-bottom: 1px solid rgba(255,255,255,0.04); }
-        .leaderboard-table tr:hover td { background: rgba(124,58,237,0.06); }
-        .rank-num { font-weight: 700; font-size: 0.85rem; width: 2rem; text-align: center; display: inline-block; }
-        .rank-1 { color: #fbbf24; } .rank-2 { color: #94a3b8; } .rank-3 { color: #cd7c3e; } .rank-other { color: var(--muted); }
-        .wca-id { font-size: 0.75rem; color: var(--accent); font-family: monospace; margin-top: 0.1rem; }
-        .time-val { font-family: monospace; font-weight: 600; }
-        .time-dnf { color: #f87171; font-family: monospace; }
-        .athlete-name-text { font-weight: 600; }
+        .leaderboard-table td { padding: 0.9rem 1rem; font-size: 0.9rem; border-bottom: 1px solid rgba(255,255,255,0.06); vertical-align: middle; }
+        .leaderboard-table tr:hover td { background: rgba(124,58,237,0.08); }
+        .rank-num { font-weight: 800; font-size: 1rem; width: 2rem; text-align: center; display: inline-block; }
+        .rank-1 { color: #facc15; } .rank-2 { color: #a8b4c4; } .rank-3 { color: #e09050; } .rank-other { color: var(--muted); }
+        .wca-id { font-size: 0.72rem; color: var(--accent); font-family: monospace; margin-top: 0.15rem; }
+        .time-val { font-family: monospace; font-weight: 700; font-size: 1rem; }
+        .time-dnf { color: #f87171; font-family: monospace; font-weight: 700; font-size: 1rem; }
+        .athlete-name-text { font-weight: 700; font-size: 0.95rem; }
         .comp-name { font-size: 0.82rem; color: var(--muted); }
         .comp-name-link { cursor: pointer; transition: color 0.2s; }
         .comp-name-link:hover { color: var(--text); text-decoration: underline; }
-        .comp-date { font-size: 0.75rem; color: var(--muted); opacity: 0.6; }
-        .rnk-solve { font-family: monospace; font-size: 0.82rem; color: var(--muted); }
+        .comp-date { font-size: 0.75rem; color: var(--muted); opacity: 0.6; white-space: nowrap; }
+        .rnk-solve { font-family: monospace; font-size: 0.85rem; color: var(--muted); }
         .rnk-solve.best-s { color: var(--text); font-weight: 700; }
         .rnk-solve.dnf-s { color: #f87171; }
         .lb-hidden-row { display: none; }
@@ -289,11 +289,16 @@ export default function RankingsSection({ results, athletes, competitions, wcaRe
           #rankings-tabs::-webkit-scrollbar { display: none; }
           .leaderboard-table.single-mode { min-width: 700px; }
           .leaderboard-table.avg-mode { min-width: 900px; }
-          .leaderboard-table th { padding: 0.4rem 0.5rem; font-size: 0.68rem; }
-          .leaderboard-table td { padding: 0.4rem 0.5rem; font-size: 0.85rem; }
-          .athlete-name-text { white-space: normal; word-break: keep-all; }
-          .comp-name { white-space: normal; word-break: keep-all; }
-          .comp-date { white-space: nowrap; }
+          .leaderboard-table th { padding: 0.55rem 0.6rem; font-size: 0.7rem; }
+          .leaderboard-table td { padding: 0.75rem 0.6rem; font-size: 0.88rem; }
+          .leaderboard-table tbody tr { min-height: 56px; }
+          .athlete-name-text { font-size: 0.9rem; font-weight: 700; white-space: normal; word-break: keep-all; }
+          .wca-id { font-size: 0.68rem; }
+          .rank-num { font-size: 0.95rem; font-weight: 800; }
+          .time-val, .time-dnf { font-size: 0.95rem; }
+          .comp-name { white-space: normal; word-break: keep-all; font-size: 0.8rem; }
+          .comp-date { white-space: nowrap; font-size: 0.72rem; }
+          .rnk-solve { font-size: 0.8rem; }
         }
       `}</style>
     </section>
