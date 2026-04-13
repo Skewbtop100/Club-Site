@@ -32,6 +32,7 @@ export interface Competition {
   date?: string | { toDate: () => Date };
   clubDate?: string | { toDate: () => Date };
   country?: string;
+  imageUrl?: string;
   events?: Record<string, boolean>;
   athletes?: CompetitionAthlete[];
   eventConfig?: Record<string, EventConfig>;

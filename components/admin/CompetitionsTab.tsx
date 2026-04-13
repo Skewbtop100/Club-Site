@@ -19,10 +19,11 @@ interface FormShape {
   country: string;
   date: string;
   clubDate: string;
+  imageUrl: string;
   status: Status;
 }
 
-const emptyForm: FormShape = { name: '', country: '', date: '', clubDate: '', status: 'upcoming' };
+const emptyForm: FormShape = { name: '', country: '', date: '', clubDate: '', imageUrl: '', status: 'upcoming' };
 
 type AthleteReg = { selected: boolean; events: Record<string, boolean> };
 
@@ -58,6 +59,7 @@ export default function CompetitionsTab() {
       country: c.country || '',
       date: c.date as string || '',
       clubDate: c.clubDate as string || '',
+      imageUrl: c.imageUrl || '',
       status: c.status,
     });
     setEvents((c.events as Record<string, boolean>) || {});
@@ -177,6 +179,14 @@ export default function CompetitionsTab() {
               value={form.country}
               onChange={country => setForm(f => ({ ...f, country }))}
             />
+          </div>
+          <div className="form-group">
+            <label style={{ fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' as const, color: 'var(--muted)' }}>Competition Image URL</label>
+            <input type="text" value={form.imageUrl} placeholder="https://res.cloudinary.com/..."
+              onChange={e => setForm(f => ({ ...f, imageUrl: e.target.value }))} />
+            <div style={{ fontSize: '0.68rem', color: 'var(--muted)', marginTop: '0.25rem', opacity: 0.7 }}>
+              Upload image to cloudinary.com and paste the URL here
+            </div>
           </div>
           <div className="form-group">
             <label>Competition Date</label>

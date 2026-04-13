@@ -71,6 +71,7 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
   const [eventsExpanded, setEventsExpanded] = useState(false);
   const [medalOpen, setMedalOpen] = useState<'gold' | 'silver' | 'bronze' | null>(null);
   const [athleteProfile, setAthleteProfile] = useState<Athlete | null>(null);
+  const [solvesPopup, setSolvesPopup] = useState<{ solves: (number | null)[]; x: number; y: number } | null>(null);
   const wcaRecords = useWcaRecords();
 
   // Subscribe to results
@@ -83,16 +84,24 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
     return unsub;
   }, [comp.id]);
 
-  // Escape + scroll lock
+  // Escape + scroll lock + click-outside for solves popup
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', handler);
+    const keyHandler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (solvesPopup) setSolvesPopup(null);
+        else onClose();
+      }
+    };
+    const clickHandler = () => { if (solvesPopup) setSolvesPopup(null); };
+    document.addEventListener('keydown', keyHandler);
+    document.addEventListener('click', clickHandler);
     document.body.style.overflow = 'hidden';
     return () => {
-      document.removeEventListener('keydown', handler);
+      document.removeEventListener('keydown', keyHandler);
+      document.removeEventListener('click', clickHandler);
       document.body.style.overflow = '';
     };
-  }, [onClose]);
+  }, [onClose, solvesPopup]);
 
   // Derived data — club athletes = any athlete whose ID exists in allAthletes
   const clubAthleteIds = useMemo(() => new Set(athletes.map(a => a.id)), [athletes]);
@@ -255,8 +264,11 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
     return { athletesList, totalGold, totalSilver, totalBronze, bestSingle, bestAverage };
   }, [results, clubAthleteIds, athleteNameMap, athletes]);
 
-  // Detailed medal list: who won what in which event
-  interface MedalDetail { athleteId: string; name: string; eventId: string; eventName: string; time: number | null }
+  // Detailed medal list: who won what in which event + round + solves
+  interface MedalDetail {
+    athleteId: string; name: string; eventId: string; eventName: string;
+    roundLabel: string; time: number | null; solves: (number | null)[];
+  }
   const medalDetails = useMemo(() => {
     const gold: MedalDetail[] = [];
     const silver: MedalDetail[] = [];
@@ -266,17 +278,20 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
       const maxRound = results
         .filter(r => r.eventId === eventId)
         .reduce((max, r) => Math.max(max, r.round || 1), 1);
+      const totalR = totalRoundsFor(eventId);
       const finalResults = results
         .filter(r => r.eventId === eventId && (r.round || 1) === maxRound)
         .sort(wcaSort);
       const evName = WCA_EVENTS.find(e => e.id === eventId)?.name || eventId;
+      const rLabel = getRoundLabel(maxRound, totalR);
       finalResults.forEach((r, i) => {
         if (!clubAthleteIds.has(r.athleteId)) return;
         const detail: MedalDetail = {
           athleteId: r.athleteId,
           name: athleteNameMap[r.athleteId] || r.athleteName || r.athleteId,
-          eventId, eventName: evName,
+          eventId, eventName: evName, roundLabel: rLabel,
           time: r.average != null && r.average > 0 ? r.average : r.single,
+          solves: r.solves ? [...r.solves] : [],
         };
         if (i === 0) gold.push(detail);
         else if (i === 1) silver.push(detail);
@@ -286,12 +301,15 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
     return { gold, silver, bronze };
   }, [results, clubAthleteIds, athleteNameMap]);
 
-  // Detailed record list (TR/NR/CR/WR only, skip PR)
-  interface RecordDetail { badge: string; athleteId: string; name: string; eventName: string; type: string; time: number }
+  // Detailed record list (TR/NR/CR/WR only, skip PR) + solves for averages
+  interface RecordDetail {
+    badge: string; athleteId: string; name: string; eventName: string;
+    type: string; time: number; solves: (number | null)[];
+  }
   const recordDetails = useMemo(() => {
     const list: RecordDetail[] = [];
     const clubOnly = results.filter(r => clubAthleteIds.has(r.athleteId) && r.source !== 'imported' && r.source !== 'import');
-    const seen = new Set<string>(); // deduplicate
+    const seen = new Set<string>();
     clubOnly.forEach(r => {
       (['single', 'average'] as const).forEach(type => {
         const val = r[type];
@@ -299,7 +317,7 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
         const badges = getResultRecordBadges(r.eventId, type, val, r.athleteId, results, wcaRecords);
         const evName = WCA_EVENTS.find(e => e.id === r.eventId)?.name || r.eventId;
         badges.forEach(b => {
-          if (b === 'PR') return; // skip PR
+          if (b === 'PR') return;
           const key = `${b}-${r.eventId}-${type}-${r.athleteId}`;
           if (seen.has(key)) return;
           seen.add(key);
@@ -307,11 +325,11 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
             badge: b, athleteId: r.athleteId,
             name: athleteNameMap[r.athleteId] || r.athleteName || r.athleteId,
             eventName: evName, type, time: val,
+            solves: r.solves ? [...r.solves] : [],
           });
         });
       });
     });
-    // Sort by badge priority: WR > CR > NR > TR
     const order: Record<string, number> = { WR: 0, CR: 1, NR: 2, TR: 3 };
     list.sort((a, b) => (order[a.badge] ?? 9) - (order[b.badge] ?? 9));
     return list;
@@ -345,6 +363,14 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
     }
     return () => { if (stripIntervalRef.current) clearInterval(stripIntervalRef.current); };
   }, [section, participatingClubAthletes.length, startStripAutoScroll]);
+
+  // Helper: open solves popup relative to click position
+  const openSolves = (e: React.MouseEvent, solves: (number | null)[]) => {
+    if (!solves || solves.length === 0) return;
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setSolvesPopup({ solves, x: rect.left + rect.width / 2, y: rect.bottom + 4 });
+  };
 
   // ── render ──────────────────────────────────────────────────────────────────
 
@@ -391,6 +417,16 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
             {section === 'info' && (
               <div className="ch-info-section">
                 <div className="ch-info-card">
+                  {/* Competition image */}
+                  {comp.imageUrl ? (
+                    <div className="ch-comp-image-wrap">
+                      <img src={comp.imageUrl} alt={comp.name} className="ch-comp-image" />
+                    </div>
+                  ) : (
+                    <div className="ch-comp-image-placeholder">
+                      <span>{comp.name}</span>
+                    </div>
+                  )}
                   <h1 className="ch-info-title">{comp.name}</h1>
                   <div className="ch-info-meta">
                     {comp.country && (
@@ -507,9 +543,12 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
                                     )}
                                     <div className="ch-me-info">
                                       <div className="ch-me-name">{m.name}</div>
-                                      <div className="ch-me-event">{m.eventName}</div>
+                                      <div className="ch-me-event">{m.eventName} — {m.roundLabel}</div>
                                     </div>
-                                    <div className="ch-me-time">{fmtTime(m.time)}</div>
+                                    <div
+                                      className={`ch-me-time${m.solves.length > 0 ? ' ch-clickable-time' : ''}`}
+                                      onClick={m.solves.length > 0 ? (e) => openSolves(e, m.solves) : undefined}
+                                    >{fmtTime(m.time)}</div>
                                   </div>
                                 ))}
                               </div>
@@ -534,43 +573,60 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
                               <div className="ch-re-name">{rd.name}</div>
                               <div className="ch-re-event">{rd.eventName} · {rd.type}</div>
                             </div>
-                            <div className="ch-re-time">{fmtTime(rd.time)}</div>
+                            <div
+                              className={`ch-re-time${rd.type === 'average' && rd.solves.length > 0 ? ' ch-clickable-time' : ''}`}
+                              onClick={rd.type === 'average' && rd.solves.length > 0 ? (e) => openSolves(e, rd.solves) : undefined}
+                            >{fmtTime(rd.time)}</div>
                           </div>
                         ))}
                       </div>
                     )}
                   </div>
 
-                  {/* Club Athletes horizontal strip */}
+                  {/* Club Athletes horizontal strip with arrows */}
                   {participatingClubAthletes.length > 0 && (
                     <div className="ch-info-block" style={{ marginBottom: 0 }}>
                       <div className="ch-info-label">Our Athletes</div>
                       <div
-                        className="ch-athlete-strip"
-                        ref={stripRef}
+                        className="ch-strip-container"
                         onMouseEnter={() => { if (stripIntervalRef.current) clearInterval(stripIntervalRef.current); }}
                         onMouseLeave={() => startStripAutoScroll()}
-                        onTouchStart={() => { if (stripIntervalRef.current) clearInterval(stripIntervalRef.current); }}
-                        onTouchEnd={() => startStripAutoScroll()}
                       >
-                        {participatingClubAthletes.map(a => {
-                          const fullName = (a.name || '') + (a.lastName ? ' ' + a.lastName : '');
-                          const initials = fullName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
-                          return (
-                            <div
-                              key={a.id}
-                              className="ch-strip-card"
-                              onClick={() => setAthleteProfile(a)}
-                            >
-                              {a.imageUrl ? (
-                                <img src={a.imageUrl} alt={fullName} className="ch-strip-avatar" />
-                              ) : (
-                                <div className="ch-strip-avatar ch-strip-avatar-ph">{initials}</div>
-                              )}
-                              <div className="ch-strip-name">{fullName}</div>
-                            </div>
-                          );
-                        })}
+                        <button
+                          className="ch-strip-arrow ch-strip-arrow-left"
+                          onClick={() => { stripRef.current?.scrollBy({ left: -200, behavior: 'smooth' }); }}
+                          aria-label="Scroll left"
+                        >‹</button>
+                        <div
+                          className="ch-athlete-strip"
+                          ref={stripRef}
+                          onTouchStart={() => { if (stripIntervalRef.current) clearInterval(stripIntervalRef.current); }}
+                          onTouchEnd={() => startStripAutoScroll()}
+                        >
+                          {participatingClubAthletes.map(a => {
+                            const fullName = (a.name || '') + (a.lastName ? ' ' + a.lastName : '');
+                            const initials = fullName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+                            return (
+                              <div
+                                key={a.id}
+                                className="ch-strip-card"
+                                onClick={() => setAthleteProfile(a)}
+                              >
+                                {a.imageUrl ? (
+                                  <img src={a.imageUrl} alt={fullName} className="ch-strip-avatar" />
+                                ) : (
+                                  <div className="ch-strip-avatar ch-strip-avatar-ph">{initials}</div>
+                                )}
+                                <div className="ch-strip-name">{fullName}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <button
+                          className="ch-strip-arrow ch-strip-arrow-right"
+                          onClick={() => { stripRef.current?.scrollBy({ left: 200, behavior: 'smooth' }); }}
+                          aria-label="Scroll right"
+                        >›</button>
                       </div>
                     </div>
                   )}
@@ -906,6 +962,29 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
         )}
       </div>
 
+      {/* Solves popup */}
+      {solvesPopup && (
+        <div
+          className="ch-solves-popup"
+          style={{ left: solvesPopup.x, top: solvesPopup.y }}
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="ch-solves-row">
+            {(solvesPopup.solves.length >= 5 ? solvesPopup.solves.slice(0, 5) : solvesPopup.solves).map((s, i) => {
+              const valid = solvesPopup.solves.slice(0, 5).filter((v): v is number => v !== null && v > 0);
+              const best = valid.length > 0 ? Math.min(...valid) : null;
+              const isBest = s !== null && s > 0 && s === best;
+              return (
+                <span key={i} className={`ch-solve-cell${isBest ? ' best' : ''}${s !== null && s < 0 ? ' dnf' : ''}`}>
+                  <span className="ch-solve-label">S{i + 1}</span>
+                  <span className="ch-solve-val">{fmtTime(s)}</span>
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <style>{`
         /* ── Competition History Overlay ──────────────────────────── */
         .ch-overlay {
@@ -970,6 +1049,22 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
         .ch-info-card {
           background: var(--card); border: 1px solid rgba(255,255,255,0.06);
           border-radius: 14px; padding: 1.8rem;
+        }
+        .ch-comp-image-wrap { margin: -1.8rem -1.8rem 1.2rem; }
+        .ch-comp-image {
+          width: 100%; max-height: 280px; object-fit: cover;
+          border-radius: 14px 14px 0 0; display: block;
+        }
+        .ch-comp-image-placeholder {
+          margin: -1.8rem -1.8rem 1.2rem;
+          height: 140px; border-radius: 14px 14px 0 0;
+          background: linear-gradient(135deg, rgba(124,58,237,0.2), rgba(236,72,153,0.15));
+          display: flex; align-items: center; justify-content: center;
+          padding: 1.5rem;
+        }
+        .ch-comp-image-placeholder span {
+          font-size: 1.3rem; font-weight: 800; color: rgba(255,255,255,0.15);
+          text-align: center; line-height: 1.3;
         }
         .ch-info-title {
           font-size: 1.5rem; font-weight: 800; color: var(--text-primary);
@@ -1097,6 +1192,52 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
           font-family: monospace; font-size: 0.88rem; font-weight: 700;
           color: #a78bfa; flex-shrink: 0;
         }
+
+        /* Clickable time */
+        .ch-clickable-time {
+          cursor: pointer; position: relative;
+          border-bottom: 1px dashed rgba(167,139,250,0.4);
+          padding-bottom: 1px;
+        }
+        .ch-clickable-time:hover { color: #c4b5fd; }
+
+        /* Solves popup */
+        .ch-solves-popup {
+          position: fixed; z-index: 10001;
+          transform: translateX(-50%);
+          background: var(--bg); border: 1px solid rgba(124,58,237,0.35);
+          border-radius: 10px; padding: 0.5rem 0.6rem;
+          box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+          animation: chFadeIn 0.12s ease;
+        }
+        .ch-solves-row { display: flex; gap: 0.35rem; }
+        .ch-solve-cell {
+          display: flex; flex-direction: column; align-items: center; gap: 0.1rem;
+          min-width: 40px;
+        }
+        .ch-solve-label {
+          font-size: 0.55rem; font-weight: 700; color: var(--muted);
+          text-transform: uppercase; letter-spacing: 0.05em;
+        }
+        .ch-solve-val { font-family: monospace; font-size: 0.82rem; color: var(--muted); white-space: nowrap; }
+        .ch-solve-cell.best .ch-solve-val { color: var(--text); font-weight: 700; }
+        .ch-solve-cell.dnf .ch-solve-val { color: #f87171; }
+
+        /* Athlete strip container with arrows */
+        .ch-strip-container { position: relative; }
+        .ch-strip-arrow {
+          display: none; position: absolute; top: 50%; transform: translateY(-50%);
+          z-index: 2; width: 28px; height: 28px; border-radius: 50%;
+          background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.12);
+          color: #fff; font-size: 1.1rem; cursor: pointer;
+          align-items: center; justify-content: center;
+          transition: background 0.2s, border-color 0.2s;
+          font-family: inherit; line-height: 1; padding: 0;
+        }
+        .ch-strip-arrow:hover { background: rgba(124,58,237,0.5); border-color: rgba(124,58,237,0.5); }
+        .ch-strip-arrow-left { left: -4px; }
+        .ch-strip-arrow-right { right: -4px; }
+        .ch-strip-container:hover .ch-strip-arrow { display: flex; }
 
         /* Athlete horizontal strip */
         .ch-athlete-strip {
@@ -1246,6 +1387,9 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
           .ch-info-section { padding: 1rem; }
           .ch-info-card { padding: 1.2rem; }
           .ch-info-title { font-size: 1.2rem; }
+          .ch-comp-image-wrap { margin: -1.2rem -1.2rem 1rem; }
+          .ch-comp-image { border-radius: 14px 14px 0 0; }
+          .ch-comp-image-placeholder { margin: -1.2rem -1.2rem 1rem; height: 100px; }
           .ch-evd-item { flex-direction: column; gap: 0.3rem; }
           .ch-evd-name { min-width: auto; }
           .ch-athletes-section { padding: 1rem; }
@@ -1253,6 +1397,7 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
           .ch-overall-summary { grid-template-columns: 1fr; }
           .ch-results-section { overflow: hidden; }
           .ch-results-layout { min-height: 300px; }
+          .ch-strip-arrow { display: none !important; }
           .ch-ap-overlay { align-items: flex-end; padding: 0; }
           .ch-ap-modal { max-width: 100%; max-height: 85vh; border-radius: 16px 16px 0 0; border-bottom: none; }
         }
