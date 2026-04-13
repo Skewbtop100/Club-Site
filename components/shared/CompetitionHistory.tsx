@@ -68,7 +68,9 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
   const [loading, setLoading] = useState(true);
   const [evId, setEvId] = useState('');
   const [round, setRound] = useState(1);
-  const [eventDetailsOpen, setEventDetailsOpen] = useState(false);
+  const [eventsExpanded, setEventsExpanded] = useState(false);
+  const [medalOpen, setMedalOpen] = useState<'gold' | 'silver' | 'bronze' | null>(null);
+  const [athleteProfile, setAthleteProfile] = useState<Athlete | null>(null);
   const wcaRecords = useWcaRecords();
 
   // Subscribe to results
@@ -253,20 +255,67 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
     return { athletesList, totalGold, totalSilver, totalBronze, bestSingle, bestAverage };
   }, [results, clubAthleteIds, athleteNameMap, athletes]);
 
-  // Record badges set at this competition (club athletes only, source !== imported)
-  const recordCounts = useMemo(() => {
-    const counts = { WR: 0, CR: 0, NR: 0, TR: 0, PR: 0 };
+  // Detailed medal list: who won what in which event
+  interface MedalDetail { athleteId: string; name: string; eventId: string; eventName: string; time: number | null }
+  const medalDetails = useMemo(() => {
+    const gold: MedalDetail[] = [];
+    const silver: MedalDetail[] = [];
+    const bronze: MedalDetail[] = [];
+    const resultEventIds = new Set(results.map(r => r.eventId));
+    resultEventIds.forEach(eventId => {
+      const maxRound = results
+        .filter(r => r.eventId === eventId)
+        .reduce((max, r) => Math.max(max, r.round || 1), 1);
+      const finalResults = results
+        .filter(r => r.eventId === eventId && (r.round || 1) === maxRound)
+        .sort(wcaSort);
+      const evName = WCA_EVENTS.find(e => e.id === eventId)?.name || eventId;
+      finalResults.forEach((r, i) => {
+        if (!clubAthleteIds.has(r.athleteId)) return;
+        const detail: MedalDetail = {
+          athleteId: r.athleteId,
+          name: athleteNameMap[r.athleteId] || r.athleteName || r.athleteId,
+          eventId, eventName: evName,
+          time: r.average != null && r.average > 0 ? r.average : r.single,
+        };
+        if (i === 0) gold.push(detail);
+        else if (i === 1) silver.push(detail);
+        else if (i === 2) bronze.push(detail);
+      });
+    });
+    return { gold, silver, bronze };
+  }, [results, clubAthleteIds, athleteNameMap]);
+
+  // Detailed record list (TR/NR/CR/WR only, skip PR)
+  interface RecordDetail { badge: string; athleteId: string; name: string; eventName: string; type: string; time: number }
+  const recordDetails = useMemo(() => {
+    const list: RecordDetail[] = [];
     const clubOnly = results.filter(r => clubAthleteIds.has(r.athleteId) && r.source !== 'imported' && r.source !== 'import');
+    const seen = new Set<string>(); // deduplicate
     clubOnly.forEach(r => {
       (['single', 'average'] as const).forEach(type => {
         const val = r[type];
         if (val == null || val <= 0 || val === -1 || val === -2) return;
         const badges = getResultRecordBadges(r.eventId, type, val, r.athleteId, results, wcaRecords);
-        badges.forEach(b => { counts[b]++; });
+        const evName = WCA_EVENTS.find(e => e.id === r.eventId)?.name || r.eventId;
+        badges.forEach(b => {
+          if (b === 'PR') return; // skip PR
+          const key = `${b}-${r.eventId}-${type}-${r.athleteId}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+          list.push({
+            badge: b, athleteId: r.athleteId,
+            name: athleteNameMap[r.athleteId] || r.athleteName || r.athleteId,
+            eventName: evName, type, time: val,
+          });
+        });
       });
     });
-    return counts;
-  }, [results, clubAthleteIds, wcaRecords]);
+    // Sort by badge priority: WR > CR > NR > TR
+    const order: Record<string, number> = { WR: 0, CR: 1, NR: 2, TR: 3 };
+    list.sort((a, b) => (order[a.badge] ?? 9) - (order[b.badge] ?? 9));
+    return list;
+  }, [results, clubAthleteIds, athleteNameMap, wcaRecords]);
 
   // Club athletes who participated (for the horizontal strip)
   const participatingClubAthletes = useMemo(() => {
@@ -370,85 +419,126 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
                     )}
                   </div>
 
-                  {/* Events pills */}
+                  {/* Events panel (clickable to expand round details) */}
                   {eventIds.length > 0 && (
                     <div className="ch-info-block">
                       <div className="ch-info-label">Events</div>
-                      <div className="ch-pill-row">
-                        {eventIds.map(eid => {
-                          const ev = WCA_EVENTS.find(e => e.id === eid);
-                          if (!ev) return null;
-                          return (
-                            <span key={eid} className="ch-event-pill">{ev.name}</span>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Event Details (collapsible) */}
-                  {eventIds.length > 0 && (
-                    <div className="ch-info-block">
-                      <button
-                        className="ch-details-toggle"
-                        onClick={() => setEventDetailsOpen(v => !v)}
+                      <div
+                        className={`ch-events-panel${eventsExpanded ? ' expanded' : ''}`}
+                        onClick={() => setEventsExpanded(v => !v)}
                       >
-                        <span>Event Details</span>
-                        <span className={`ch-details-chevron${eventDetailsOpen ? ' open' : ''}`}>▶</span>
-                      </button>
-                      {eventDetailsOpen && (
-                        <div className="ch-event-details">
-                          {eventIds.map(eid => {
-                            const ev = WCA_EVENTS.find(e => e.id === eid);
-                            if (!ev) return null;
-                            const rounds = totalRoundsFor(eid);
-                            const cfg = comp.eventConfig?.[eid];
-                            return (
-                              <div key={eid} className="ch-ed-row">
-                                <div className="ch-ed-name">{ev.name}</div>
-                                <div className="ch-ed-info">
-                                  <span className="ch-ed-rounds">{rounds} {rounds === 1 ? 'round' : 'rounds'}</span>
-                                  {cfg?.advancement && Object.entries(cfg.advancement).map(([rn, adv]) => {
-                                    const a = adv as AdvancementConfig;
-                                    const label = a.type === 'fixed'
-                                      ? `Top ${a.value} advance`
-                                      : `Top ${a.value}% advance`;
-                                    return (
-                                      <span key={rn} className="ch-ed-adv">
-                                        R{rn}: {label}
-                                      </span>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            );
-                          })}
+                        <div className="ch-events-panel-header">
+                          <div className="ch-pill-row">
+                            {eventIds.map(eid => {
+                              const ev = WCA_EVENTS.find(e => e.id === eid);
+                              if (!ev) return null;
+                              return <span key={eid} className="ch-event-pill">{ev.name}</span>;
+                            })}
+                          </div>
+                          <span className={`ch-ep-chevron${eventsExpanded ? ' open' : ''}`}>▶</span>
                         </div>
-                      )}
+                        {eventsExpanded && (
+                          <div className="ch-events-detail-grid" onClick={e => e.stopPropagation()}>
+                            {eventIds.map(eid => {
+                              const ev = WCA_EVENTS.find(e => e.id === eid);
+                              if (!ev) return null;
+                              const rounds = totalRoundsFor(eid);
+                              const cfg = comp.eventConfig?.[eid];
+                              return (
+                                <div key={eid} className="ch-evd-item">
+                                  <div className="ch-evd-name">{ev.name}</div>
+                                  <div className="ch-evd-rounds">
+                                    {Array.from({ length: rounds }, (_, i) => i + 1).map(rn => {
+                                      const adv = cfg?.advancement?.[String(rn)] as AdvancementConfig | undefined;
+                                      const advLabel = adv
+                                        ? adv.type === 'fixed' ? `Top ${adv.value}` : `Top ${adv.value}%`
+                                        : null;
+                                      return (
+                                        <div key={rn} className="ch-evd-round">
+                                          <span className="ch-evd-round-name">{getRoundLabel(rn, rounds)}</span>
+                                          {advLabel && <span className="ch-evd-round-adv">→ {advLabel}</span>}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
 
-                  {/* Medals & Records */}
-                  <div className="ch-stats-row">
-                    <div className="ch-stat-card ch-stat-medals">
-                      <div className="ch-stat-label" style={{ marginTop: 0, marginBottom: '0.5rem' }}>Club Medals</div>
-                      <div className="ch-medal-stat-row">
-                        <span className="ch-medal-stat">🥇 <strong>{clubSummary.totalGold}</strong></span>
-                        <span className="ch-medal-stat">🥈 <strong>{clubSummary.totalSilver}</strong></span>
-                        <span className="ch-medal-stat">🥉 <strong>{clubSummary.totalBronze}</strong></span>
-                      </div>
-                    </div>
-                    <div className="ch-stat-card ch-stat-records">
-                      <div className="ch-stat-label" style={{ marginTop: 0, marginBottom: '0.5rem' }}>Club Records</div>
-                      <div className="ch-record-stat-row">
-                        {(['WR', 'CR', 'NR', 'TR', 'PR'] as const).map(badge => (
-                          <span key={badge} className={`ch-record-badge-stat${recordCounts[badge] > 0 ? ' has' : ''}`}>
-                            <span className={`ch-rb ch-rb-${badge.toLowerCase()}`}>{badge}</span>
-                            <strong>{recordCounts[badge]}</strong>
-                          </span>
+                  {/* Club Medals - detailed breakdown */}
+                  <div className="ch-info-block">
+                    <div className="ch-info-label">Club Medals</div>
+                    {medalDetails.gold.length + medalDetails.silver.length + medalDetails.bronze.length === 0 ? (
+                      <div className="ch-empty-note">No medals at this competition</div>
+                    ) : (
+                      <div className="ch-medal-sections">
+                        {([
+                          { key: 'gold' as const, icon: '🥇', label: 'Gold', items: medalDetails.gold },
+                          { key: 'silver' as const, icon: '🥈', label: 'Silver', items: medalDetails.silver },
+                          { key: 'bronze' as const, icon: '🥉', label: 'Bronze', items: medalDetails.bronze },
+                        ]).map(sec => sec.items.length > 0 && (
+                          <div key={sec.key} className="ch-medal-block">
+                            <button
+                              className={`ch-medal-header${medalOpen === sec.key ? ' open' : ''}`}
+                              onClick={() => setMedalOpen(v => v === sec.key ? null : sec.key)}
+                            >
+                              <span className="ch-medal-header-left">
+                                <span>{sec.icon}</span>
+                                <span className="ch-medal-header-label">{sec.label}</span>
+                                <span className="ch-medal-header-count">{sec.items.length}</span>
+                              </span>
+                              <span className={`ch-ep-chevron${medalOpen === sec.key ? ' open' : ''}`}>▶</span>
+                            </button>
+                            {medalOpen === sec.key && (
+                              <div className="ch-medal-list">
+                                {sec.items.map((m, i) => (
+                                  <div key={i} className="ch-medal-entry">
+                                    {athleteImageMap[m.athleteId] ? (
+                                      <img src={athleteImageMap[m.athleteId]} alt="" className="ch-me-avatar" />
+                                    ) : (
+                                      <div className="ch-me-avatar ch-me-avatar-ph">
+                                        {m.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
+                                      </div>
+                                    )}
+                                    <div className="ch-me-info">
+                                      <div className="ch-me-name">{m.name}</div>
+                                      <div className="ch-me-event">{m.eventName}</div>
+                                    </div>
+                                    <div className="ch-me-time">{fmtTime(m.time)}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         ))}
                       </div>
-                    </div>
+                    )}
+                  </div>
+
+                  {/* Club Records - detailed breakdown (TR/NR/CR/WR only) */}
+                  <div className="ch-info-block">
+                    <div className="ch-info-label">Club Records</div>
+                    {recordDetails.length === 0 ? (
+                      <div className="ch-empty-note">No national/world records set</div>
+                    ) : (
+                      <div className="ch-record-list">
+                        {recordDetails.map((rd, i) => (
+                          <div key={i} className="ch-record-entry">
+                            <span className={`ch-rb ch-rb-${rd.badge.toLowerCase()}`}>{rd.badge}</span>
+                            <div className="ch-re-info">
+                              <div className="ch-re-name">{rd.name}</div>
+                              <div className="ch-re-event">{rd.eventName} · {rd.type}</div>
+                            </div>
+                            <div className="ch-re-time">{fmtTime(rd.time)}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {/* Club Athletes horizontal strip */}
@@ -467,7 +557,11 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
                           const fullName = (a.name || '') + (a.lastName ? ' ' + a.lastName : '');
                           const initials = fullName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
                           return (
-                            <div key={a.id} className="ch-strip-card">
+                            <div
+                              key={a.id}
+                              className="ch-strip-card"
+                              onClick={() => setAthleteProfile(a)}
+                            >
                               {a.imageUrl ? (
                                 <img src={a.imageUrl} alt={fullName} className="ch-strip-avatar" />
                               ) : (
@@ -483,6 +577,62 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
                 </div>
               </div>
             )}
+
+            {/* Inline athlete profile modal */}
+            {athleteProfile && (() => {
+              const ap = athleteProfile;
+              const fullName = (ap.name || '') + (ap.lastName ? ' ' + ap.lastName : '');
+              const initials = fullName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+              const apResults = results.filter(r => r.athleteId === ap.id);
+              const pbs: Record<string, { single: number | null; average: number | null }> = {};
+              apResults.forEach(r => {
+                if (!pbs[r.eventId]) pbs[r.eventId] = { single: null, average: null };
+                const e = pbs[r.eventId];
+                if (r.single != null && r.single > 0 && (e.single === null || r.single < e.single)) e.single = r.single;
+                if (r.average != null && r.average > 0 && (e.average === null || r.average < e.average)) e.average = r.average;
+              });
+              return (
+                <div className="ch-ap-overlay" onClick={() => setAthleteProfile(null)}>
+                  <div className="ch-ap-modal" onClick={e => e.stopPropagation()}>
+                    <div className="ch-ap-header">
+                      <div className="ch-ap-header-left">
+                        {ap.imageUrl ? (
+                          <img src={ap.imageUrl} alt={fullName} className="ch-ap-avatar" />
+                        ) : (
+                          <div className="ch-ap-avatar ch-ap-avatar-ph">{initials}</div>
+                        )}
+                        <div>
+                          <div className="ch-ap-name">{fullName}</div>
+                          {ap.wcaId && <div className="ch-ap-wca">{ap.wcaId}</div>}
+                        </div>
+                      </div>
+                      <button className="ch-close-btn" onClick={() => setAthleteProfile(null)} style={{ minWidth: '2rem', minHeight: '2rem', fontSize: '0.9rem' }}>✕</button>
+                    </div>
+                    <div className="ch-ap-body">
+                      <div className="ch-info-label">Results at this competition</div>
+                      {Object.keys(pbs).length === 0 ? (
+                        <div className="ch-empty-note">No results</div>
+                      ) : (
+                        <div className="ch-ap-results">
+                          {Object.entries(pbs).map(([eid, pb]) => {
+                            const ev = WCA_EVENTS.find(e => e.id === eid);
+                            return (
+                              <div key={eid} className="ch-ap-result-row">
+                                <span className="ch-ap-ev">{ev?.name || eid}</span>
+                                <div className="ch-ap-times">
+                                  {pb.single != null && <span className="ch-ae-time"><span className="ch-ae-label">S</span>{fmtTime(pb.single)}</span>}
+                                  {pb.average != null && <span className="ch-ae-time"><span className="ch-ae-label">A</span>{fmtTime(pb.average)}</span>}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* SECTION B: Results */}
             {section === 'results' && (
@@ -848,71 +998,105 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
         .ch-rounds-indicator {
           font-size: 0.62rem; font-weight: 700; color: var(--muted); opacity: 0.7;
         }
-
-        /* Event Details collapsible */
-        .ch-details-toggle {
-          display: inline-flex; align-items: center; gap: 0.5rem;
-          background: none; border: none; color: var(--muted); cursor: pointer;
-          font-size: 0.78rem; font-weight: 600; font-family: inherit;
-          padding: 0; transition: color 0.2s;
-        }
-        .ch-details-toggle:hover { color: var(--text); }
-        .ch-details-chevron {
-          font-size: 0.5rem; transition: transform 0.2s;
-        }
-        .ch-details-chevron.open { transform: rotate(90deg); }
-        .ch-event-details {
-          margin-top: 0.6rem; display: flex; flex-direction: column; gap: 0.35rem;
-        }
-        .ch-ed-row {
-          display: flex; align-items: baseline; gap: 0.7rem;
-          padding: 0.45rem 0.7rem; border-radius: 8px;
-          background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.04);
-        }
-        .ch-ed-name { font-size: 0.82rem; font-weight: 600; color: var(--text); min-width: 120px; }
-        .ch-ed-info { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
-        .ch-ed-rounds {
-          font-size: 0.75rem; color: #a78bfa; font-weight: 600;
-          background: rgba(124,58,237,0.1); padding: 0.15rem 0.5rem;
-          border-radius: 999px; border: 1px solid rgba(124,58,237,0.2);
-        }
-        .ch-ed-adv {
-          font-size: 0.72rem; color: var(--muted);
-          background: rgba(255,255,255,0.04); padding: 0.12rem 0.4rem;
-          border-radius: 6px;
+        .ch-empty-note {
+          font-size: 0.82rem; color: var(--muted); padding: 0.6rem 0;
         }
 
-        /* Stats row: Medals + Records */
-        .ch-stats-row {
-          display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.8rem;
-          margin-bottom: 1.5rem;
+        /* Events panel */
+        .ch-events-panel {
+          background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06);
+          border-radius: 10px; padding: 0.8rem 1rem; cursor: pointer;
+          transition: border-color 0.2s, background 0.2s;
         }
-        .ch-stat-card {
-          background: rgba(124,58,237,0.06); border: 1px solid rgba(124,58,237,0.15);
-          border-radius: 10px; padding: 1rem;
+        .ch-events-panel:hover { border-color: rgba(124,58,237,0.25); background: rgba(124,58,237,0.03); }
+        .ch-events-panel.expanded { cursor: default; background: rgba(124,58,237,0.03); border-color: rgba(124,58,237,0.2); }
+        .ch-events-panel-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.6rem; }
+        .ch-ep-chevron {
+          font-size: 0.5rem; color: var(--muted); transition: transform 0.2s;
+          flex-shrink: 0; margin-top: 0.3rem;
         }
-        .ch-stat-label {
-          font-size: 0.7rem; font-weight: 600; color: var(--muted);
-          text-transform: uppercase; letter-spacing: 0.06em; margin-top: 0.2rem;
+        .ch-ep-chevron.open { transform: rotate(90deg); }
+        .ch-events-detail-grid {
+          display: flex; flex-direction: column; gap: 0.5rem;
+          margin-top: 0.8rem; padding-top: 0.8rem;
+          border-top: 1px solid rgba(255,255,255,0.06);
         }
-        .ch-medal-stat-row { display: flex; gap: 1rem; align-items: center; }
-        .ch-medal-stat { font-size: 1rem; display: inline-flex; align-items: center; gap: 0.25rem; }
-        .ch-medal-stat strong { font-size: 1.15rem; font-weight: 800; color: var(--text); font-family: monospace; }
-        .ch-record-stat-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
-        .ch-record-badge-stat {
-          display: inline-flex; align-items: center; gap: 0.25rem; opacity: 0.4;
+        .ch-evd-item {
+          display: flex; align-items: flex-start; gap: 0.8rem;
+          padding: 0.4rem 0;
         }
-        .ch-record-badge-stat.has { opacity: 1; }
-        .ch-record-badge-stat strong { font-size: 0.95rem; font-weight: 800; color: var(--text); font-family: monospace; }
+        .ch-evd-name {
+          font-size: 0.82rem; font-weight: 600; color: var(--text);
+          min-width: 130px; flex-shrink: 0;
+        }
+        .ch-evd-rounds { display: flex; flex-direction: column; gap: 0.2rem; }
+        .ch-evd-round { display: flex; align-items: center; gap: 0.4rem; font-size: 0.75rem; }
+        .ch-evd-round-name { color: var(--muted); }
+        .ch-evd-round-adv { color: #4ade80; font-weight: 600; font-size: 0.72rem; }
+
+        /* Medal sections */
+        .ch-medal-sections { display: flex; flex-direction: column; gap: 0.4rem; }
+        .ch-medal-block {
+          background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06);
+          border-radius: 10px; overflow: hidden;
+        }
+        .ch-medal-header {
+          display: flex; align-items: center; justify-content: space-between;
+          width: 100%; padding: 0.6rem 0.8rem; background: none; border: none;
+          cursor: pointer; font-family: inherit; transition: background 0.2s;
+        }
+        .ch-medal-header:hover { background: rgba(255,255,255,0.03); }
+        .ch-medal-header-left { display: flex; align-items: center; gap: 0.5rem; }
+        .ch-medal-header-label { font-size: 0.85rem; font-weight: 600; color: var(--text); }
+        .ch-medal-header-count {
+          font-size: 0.72rem; font-weight: 700; color: var(--muted);
+          background: rgba(255,255,255,0.06); padding: 0.1rem 0.4rem; border-radius: 999px;
+        }
+        .ch-medal-list { padding: 0 0.8rem 0.6rem; display: flex; flex-direction: column; gap: 0.3rem; }
+        .ch-medal-entry {
+          display: flex; align-items: center; gap: 0.6rem;
+          padding: 0.4rem 0.5rem; border-radius: 8px;
+          background: rgba(255,255,255,0.02);
+        }
+        .ch-me-avatar {
+          width: 28px; height: 28px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
+        }
+        .ch-me-avatar-ph {
+          background: linear-gradient(135deg, var(--accent), var(--accent2));
+          display: flex; align-items: center; justify-content: center;
+          font-size: 0.52rem; font-weight: 800; color: #fff;
+        }
+        .ch-me-info { flex: 1; min-width: 0; }
+        .ch-me-name { font-size: 0.82rem; font-weight: 600; color: var(--text); }
+        .ch-me-event { font-size: 0.72rem; color: var(--muted); }
+        .ch-me-time {
+          font-family: monospace; font-size: 0.88rem; font-weight: 700;
+          color: #a78bfa; flex-shrink: 0;
+        }
+
+        /* Record details */
         .ch-rb {
           font-size: 0.58rem; font-weight: 900; letter-spacing: 0.04em;
-          line-height: 1; padding: 2px 4px; border-radius: 4px;
+          line-height: 1; padding: 2px 5px; border-radius: 4px; flex-shrink: 0;
         }
         .ch-rb-wr { background: #b45309; color: #fef3c7; border: 1px solid #f59e0b; }
         .ch-rb-cr { background: #1d4ed8; color: #dbeafe; border: 1px solid #60a5fa; }
         .ch-rb-nr { background: #166534; color: #dcfce7; border: 1px solid #4ade80; }
         .ch-rb-tr { background: #4c1d95; color: #ede9fe; border: 1px solid #a78bfa; }
         .ch-rb-pr { background: #0e7490; color: #cffafe; border: 1px solid #22d3ee; }
+        .ch-record-list { display: flex; flex-direction: column; gap: 0.35rem; }
+        .ch-record-entry {
+          display: flex; align-items: center; gap: 0.6rem;
+          padding: 0.5rem 0.7rem; border-radius: 8px;
+          background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.04);
+        }
+        .ch-re-info { flex: 1; min-width: 0; }
+        .ch-re-name { font-size: 0.82rem; font-weight: 600; color: var(--text); }
+        .ch-re-event { font-size: 0.72rem; color: var(--muted); }
+        .ch-re-time {
+          font-family: monospace; font-size: 0.88rem; font-weight: 700;
+          color: #a78bfa; flex-shrink: 0;
+        }
 
         /* Athlete horizontal strip */
         .ch-athlete-strip {
@@ -923,7 +1107,7 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
         .ch-athlete-strip::-webkit-scrollbar { display: none; }
         .ch-strip-card {
           flex: 0 0 90px; display: flex; flex-direction: column;
-          align-items: center; gap: 0.35rem; cursor: default;
+          align-items: center; gap: 0.35rem; cursor: pointer;
         }
         .ch-strip-avatar {
           width: 48px; height: 48px; border-radius: 50%; object-fit: cover;
@@ -931,6 +1115,7 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
           transition: border-color 0.2s, transform 0.2s;
         }
         .ch-strip-card:hover .ch-strip-avatar { border-color: var(--accent); transform: scale(1.08); }
+        .ch-strip-card:hover .ch-strip-name { color: var(--text); }
         .ch-strip-avatar-ph {
           background: linear-gradient(135deg, var(--accent), var(--accent2));
           display: flex; align-items: center; justify-content: center;
@@ -941,7 +1126,48 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
           text-align: center; line-height: 1.2;
           max-width: 90px; overflow: hidden; text-overflow: ellipsis;
           display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+          transition: color 0.2s;
         }
+
+        /* Athlete profile modal */
+        .ch-ap-overlay {
+          position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 10000;
+          background: rgba(0,0,0,0.7); backdrop-filter: blur(4px);
+          display: flex; align-items: center; justify-content: center; padding: 1rem;
+          animation: chFadeIn 0.15s ease;
+        }
+        .ch-ap-modal {
+          width: 100%; max-width: 440px; max-height: 80vh;
+          background: var(--bg); border: 1px solid rgba(124,58,237,0.25);
+          border-radius: 16px; display: flex; flex-direction: column;
+          animation: chSlideIn 0.2s cubic-bezier(.4,0,.2,1);
+        }
+        @keyframes chSlideIn { from { transform: scale(0.95) translateY(10px); opacity:0; } to { transform: none; opacity:1; } }
+        .ch-ap-header {
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 1.1rem 1.3rem; border-bottom: 1px solid rgba(124,58,237,0.2); flex-shrink: 0;
+        }
+        .ch-ap-header-left { display: flex; align-items: center; gap: 0.7rem; }
+        .ch-ap-avatar {
+          width: 44px; height: 44px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
+          border: 2px solid rgba(124,58,237,0.3);
+        }
+        .ch-ap-avatar-ph {
+          background: linear-gradient(135deg, var(--accent), var(--accent2));
+          display: flex; align-items: center; justify-content: center;
+          font-size: 0.8rem; font-weight: 800; color: #fff;
+        }
+        .ch-ap-name { font-size: 1rem; font-weight: 700; color: var(--text); }
+        .ch-ap-wca { font-size: 0.72rem; color: var(--accent); font-family: monospace; margin-top: 0.1rem; }
+        .ch-ap-body { overflow-y: auto; flex: 1; padding: 1.1rem 1.3rem; }
+        .ch-ap-results { display: flex; flex-direction: column; gap: 0.4rem; }
+        .ch-ap-result-row {
+          display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
+          padding: 0.45rem 0.6rem; border-radius: 8px;
+          background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.04);
+        }
+        .ch-ap-ev { font-size: 0.82rem; font-weight: 600; color: var(--text); }
+        .ch-ap-times { display: flex; gap: 0.6rem; align-items: center; }
 
         /* ── Section B: Results ───────────────────────────────────── */
         .ch-results-section { flex: 1; display: flex; flex-direction: column; height: 100%; }
@@ -1020,14 +1246,15 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
           .ch-info-section { padding: 1rem; }
           .ch-info-card { padding: 1.2rem; }
           .ch-info-title { font-size: 1.2rem; }
-          .ch-stats-row { grid-template-columns: 1fr; }
-          .ch-ed-row { flex-direction: column; gap: 0.3rem; }
-          .ch-ed-name { min-width: auto; }
+          .ch-evd-item { flex-direction: column; gap: 0.3rem; }
+          .ch-evd-name { min-width: auto; }
           .ch-athletes-section { padding: 1rem; }
           .ch-athlete-grid { grid-template-columns: 1fr; }
           .ch-overall-summary { grid-template-columns: 1fr; }
           .ch-results-section { overflow: hidden; }
           .ch-results-layout { min-height: 300px; }
+          .ch-ap-overlay { align-items: flex-end; padding: 0; }
+          .ch-ap-modal { max-width: 100%; max-height: 85vh; border-radius: 16px 16px 0 0; border-bottom: none; }
         }
       `}</style>
     </div>
