@@ -1,6 +1,8 @@
 'use client';
 
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
+import useEmblaCarousel from 'embla-carousel-react';
+import Autoplay from 'embla-carousel-autoplay';
 import { useLang } from '@/lib/i18n';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { fmtTime, betterTime, formatDate } from '@/lib/time-utils';
@@ -460,10 +462,7 @@ function MobileRecordsCarousel({ events, bestSingle, bestAverage, t, onSelect }:
   t: (k: TranslationKey) => string;
   onSelect: (id: string) => void;
 }) {
-  const [page, setPage] = useState(0);
-  const startX = useRef(0);
-  const autoRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const totalPages = Math.ceil(events.length / CARDS_PER_SLIDE);
+  const [selectedSnap, setSelectedSnap] = useState(0);
 
   // Build slides: array of 2-card groups
   const slides = useMemo(() => {
@@ -474,53 +473,34 @@ function MobileRecordsCarousel({ events, bestSingle, bestAverage, t, onSelect }:
     return s;
   }, [events]);
 
-  function resetAuto() {
-    if (autoRef.current) clearInterval(autoRef.current);
-    if (totalPages <= 1) return;
-    autoRef.current = setInterval(() => {
-      setPage((p) => (p + 1) % totalPages);
-    }, AUTO_INTERVAL);
-  }
+  const [emblaRef, emblaApi] = useEmblaCarousel(
+    { loop: true, duration: 30 },
+    [Autoplay({ delay: AUTO_INTERVAL, stopOnInteraction: false, stopOnMouseEnter: true })],
+  );
+
+  const onEmblaSelect = useCallback(() => {
+    if (!emblaApi) return;
+    setSelectedSnap(emblaApi.selectedScrollSnap());
+  }, [emblaApi]);
 
   useEffect(() => {
-    resetAuto();
-    return () => { if (autoRef.current) clearInterval(autoRef.current); };
-  }, [totalPages]);
+    if (!emblaApi) return;
+    onEmblaSelect();
+    emblaApi.on('select', onEmblaSelect);
+    return () => { emblaApi.off('select', onEmblaSelect); };
+  }, [emblaApi, onEmblaSelect]);
 
-  function onTouchStart(e: React.TouchEvent) { startX.current = e.touches[0].clientX; }
-  function onTouchEnd(e: React.TouchEvent) {
-    const diff = startX.current - e.changedTouches[0].clientX;
-    if (Math.abs(diff) < 40) return;
-    if (diff > 0) setPage((p) => Math.min(p + 1, totalPages - 1));
-    else setPage((p) => Math.max(p - 1, 0));
-    resetAuto();
-  }
+  const scrollTo = useCallback((idx: number) => {
+    emblaApi?.scrollTo(idx);
+  }, [emblaApi]);
 
   return (
     <div className="rec-mobile-carousel">
-      {/* Viewport — clips overflow */}
-      <div
-        style={{ overflow: 'hidden' }}
-        onTouchStart={onTouchStart}
-        onTouchEnd={onTouchEnd}
-      >
-        {/* Track — all slides side by side, moved via translateX */}
-        <div
-          className="rec-carousel-track"
-          style={{
-            display: 'flex',
-            transform: `translateX(-${page * 100}%)`,
-          }}
-        >
+      {/* Embla viewport */}
+      <div className="embla" ref={emblaRef}>
+        <div className="embla__container">
           {slides.map((group, si) => (
-            <div
-              key={si}
-              className={`rec-carousel-slide${si === page ? ' rec-slide-active' : ''}`}
-              style={{
-                minWidth: '100%', flex: '0 0 100%',
-                display: 'flex', flexDirection: 'column', gap: '0.75rem',
-              }}
-            >
+            <div key={si} className="embla__slide">
               {group.map((ev) => (
                 <RecordCard
                   key={ev.id}
@@ -536,28 +516,24 @@ function MobileRecordsCarousel({ events, bestSingle, bestAverage, t, onSelect }:
         </div>
       </div>
 
-      {totalPages > 1 && (
+      {slides.length > 1 && (
         <div style={{ display: 'flex', justifyContent: 'center', gap: '0.4rem', marginTop: '1.2rem' }}>
-          {Array.from({ length: totalPages }).map((_, i) => (
+          {slides.map((_, i) => (
             <button
               key={i}
-              onClick={() => { setPage(i); resetAuto(); }}
-              className={`rec-dot${i === page ? ' rec-dot-active' : ''}`}
+              onClick={() => scrollTo(i)}
+              className={`rec-dot${i === selectedSnap ? ' rec-dot-active' : ''}`}
             />
           ))}
         </div>
       )}
 
       <style>{`
-        .rec-carousel-track {
-          transition: transform 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-          will-change: transform;
-        }
-        .rec-carousel-slide { opacity: 0.4; transition: opacity 0.45s ease; }
-        .rec-slide-active { opacity: 1; animation: recSlideIn 0.45s ease; }
-        @keyframes recSlideIn {
-          from { opacity: 0.7; transform: scale(0.95); }
-          to   { opacity: 1;   transform: scale(1); }
+        .embla { overflow: hidden; }
+        .embla__container { display: flex; }
+        .embla__slide {
+          flex: 0 0 100%; min-width: 0;
+          display: flex; flex-direction: column; gap: 0.75rem;
         }
         .rec-dot {
           height: 8px; border-radius: 999px; border: none; padding: 0; cursor: pointer;
