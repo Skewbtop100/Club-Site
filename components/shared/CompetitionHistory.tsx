@@ -88,8 +88,8 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
     };
   }, [onClose]);
 
-  // Derived data
-  const clubAthleteIds = useMemo(() => new Set((comp.athletes ?? []).map(a => a.id)), [comp.athletes]);
+  // Derived data — club athletes = any athlete whose ID exists in allAthletes
+  const clubAthleteIds = useMemo(() => new Set(athletes.map(a => a.id)), [athletes]);
 
   const athleteNameMap = useMemo(() => {
     const m: Record<string, string> = {};
@@ -108,7 +108,21 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
     [comp.events],
   );
 
-  const totalRoundsFor = (ev: string) => comp.eventConfig?.[ev]?.rounds ?? 1;
+  // Detect actual rounds from results data (fallback to eventConfig)
+  const actualRoundsMap = useMemo(() => {
+    const m: Record<string, number> = {};
+    results.forEach(r => {
+      const rd = r.round || 1;
+      if (!m[r.eventId] || rd > m[r.eventId]) m[r.eventId] = rd;
+    });
+    return m;
+  }, [results]);
+
+  const totalRoundsFor = (ev: string) => {
+    const fromConfig = comp.eventConfig?.[ev]?.rounds ?? 1;
+    const fromData = actualRoundsMap[ev] ?? 1;
+    return Math.max(fromConfig, fromData);
+  };
 
   // Auto-select first event when switching to results
   useEffect(() => {
@@ -126,7 +140,7 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
 
   // Advancement
   const evCfg = comp.eventConfig?.[evId];
-  const totalRounds = evCfg?.rounds ?? 1;
+  const totalRounds = totalRoundsFor(evId);
   const isFinal = round >= totalRounds;
   const advCfg: AdvancementConfig | undefined =
     !isFinal ? (evCfg?.advancement?.[String(round)] as AdvancementConfig | undefined) : undefined;
@@ -142,6 +156,10 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
   // Club athletes summary
   const clubSummary = useMemo(() => {
     const clubResults = results.filter(r => clubAthleteIds.has(r.athleteId));
+
+    // Find which club athletes actually have results in this competition
+    const participatingIds = new Set(clubResults.map(r => r.athleteId));
+
     const athleteMap = new Map<string, {
       id: string;
       name: string;
@@ -150,11 +168,12 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
       bestPerEvent: Record<string, { single: number | null; average: number | null }>;
     }>();
 
-    // Initialize club athletes from comp.athletes
-    (comp.athletes ?? []).forEach(ca => {
-      athleteMap.set(ca.id, {
-        id: ca.id,
-        name: athleteNameMap[ca.id] || ca.name,
+    // Initialize from allAthletes who have results in this competition
+    athletes.forEach(a => {
+      if (!participatingIds.has(a.id)) return;
+      athleteMap.set(a.id, {
+        id: a.id,
+        name: (a.name || '') + (a.lastName ? ' ' + a.lastName : ''),
         events: new Set(),
         medals: { gold: 0, silver: 0, bronze: 0 },
         bestPerEvent: {},
@@ -179,10 +198,15 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
     });
 
     // Calculate medals from final rounds among ALL athletes
-    compEvents.forEach(ev => {
-      const rounds = totalRoundsFor(ev.id);
+    // Get all event IDs that have results in this competition
+    const resultEventIds = new Set(results.map(r => r.eventId));
+    resultEventIds.forEach(eventId => {
+      // Find the maximum round for this event from actual data
+      const maxRound = results
+        .filter(r => r.eventId === eventId)
+        .reduce((max, r) => Math.max(max, r.round || 1), 1);
       const finalResults = results
-        .filter(r => r.eventId === ev.id && (r.round || 1) === rounds)
+        .filter(r => r.eventId === eventId && (r.round || 1) === maxRound)
         .sort(wcaSort);
       finalResults.forEach((r, i) => {
         const entry = athleteMap.get(r.athleteId);
@@ -227,7 +251,7 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
     }, null);
 
     return { athletesList, totalGold, totalSilver, totalBronze, bestSingle, bestAverage };
-  }, [results, clubAthleteIds, athleteNameMap, compEvents, comp.athletes]);
+  }, [results, clubAthleteIds, athleteNameMap, athletes]);
 
   // ── render ──────────────────────────────────────────────────────────────────
 
