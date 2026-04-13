@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useLang } from '@/lib/i18n';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { fmtTime, compareTime, formatDate } from '@/lib/time-utils';
@@ -28,6 +28,8 @@ export default function RankingsSection({ results, athletes, competitions, wcaRe
   const [activeEvent, setActiveEvent] = useState('333');
   const [rankType, setRankType] = useState<'single' | 'average'>('single');
   const [overlayComp, setOverlayComp] = useState<Competition | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const tableRef = useRef<HTMLDivElement>(null);
 
   const visibleEvents = useMemo(
     () => WCA_EVENTS.filter((ev) => isEventVisible(ev.id, eventVisibility, results)),
@@ -39,6 +41,9 @@ export default function RankingsSection({ results, athletes, competitions, wcaRe
     if (visibleEvents.some((e) => e.id === activeEvent)) return activeEvent;
     return visibleEvents[0]?.id ?? '333';
   }, [visibleEvents, activeEvent]);
+
+  // Reset to collapsed when event or rank type changes
+  useEffect(() => { setExpanded(false); }, [safeEvent, rankType]);
 
   const athleteNameMap = useMemo(() => {
     const m: Record<string, string> = {};
@@ -114,7 +119,8 @@ export default function RankingsSection({ results, athletes, competitions, wcaRe
             {t('rankings.no-results')}
           </div>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
+          <>
+          <div ref={tableRef} style={{ overflowX: 'auto' }}>
             <table className={`leaderboard-table${rankType === 'average' ? ' avg-mode' : ' single-mode'}`}>
               <thead>
                 <tr>
@@ -144,7 +150,7 @@ export default function RankingsSection({ results, athletes, competitions, wcaRe
                   }, -1);
 
                   return (
-                    <tr key={r.id}>
+                    <tr key={r.id} className={!expanded && i >= 5 ? 'lb-hidden-row' : undefined}>
                       <td><span className={`rank-num ${rankCls}`}>{rank}</span></td>
                       <td className="athlete-cell">
                         <div className="athlete-name-text">{athleteNameMap[r.athleteId] || r.athleteName || r.athleteId}</div>
@@ -194,6 +200,23 @@ export default function RankingsSection({ results, athletes, competitions, wcaRe
               </tbody>
             </table>
           </div>
+
+          {rows.length > 5 && (
+            <div style={{ textAlign: 'center', marginTop: '1rem' }}>
+              <button
+                className="lb-toggle-btn"
+                onClick={() => {
+                  if (expanded && tableRef.current) {
+                    tableRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }
+                  setExpanded((v) => !v);
+                }}
+              >
+                {expanded ? 'Show less \u2191' : `Show all ${rows.length} results \u2193`}
+              </button>
+            </div>
+          )}
+          </>
         )}
       </div>
 
