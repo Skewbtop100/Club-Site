@@ -30,7 +30,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'compResults',  label: '📋 Competition Results' },
   { id: 'history',      label: '📄 History' },
   { id: 'users',        label: '🔑 Users' },
-  { id: 'wcaImport',   label: '🌍 WCA Import' },
+  { id: 'wcaImport',   label: '🌍 WCA Records' },
   { id: 'events',       label: '⚙ Events' },
   { id: 'analytics',   label: '📊 Analytics' },
   { id: 'assignments',  label: '👥 Assignments' },
