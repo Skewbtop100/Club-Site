@@ -64,6 +64,7 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
   const [loading, setLoading] = useState(true);
   const [historyEvent, setHistoryEvent] = useState<string | null>(null);
   const [solvesPopup, setSolvesPopup] = useState<{ solves: (number | null)[]; x: number; y: number } | null>(null);
+  const [badgePopup, setBadgePopup] = useState<string | null>(null); // which badge is expanded
   const wcaRecords = useWcaRecords();
 
   const fullName = (athlete.name || '') + (athlete.lastName ? ' ' + athlete.lastName : '');
@@ -87,10 +88,14 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
     const keyHandler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (solvesPopup) setSolvesPopup(null);
+        else if (badgePopup) setBadgePopup(null);
         else onClose();
       }
     };
-    const clickHandler = () => { if (solvesPopup) setSolvesPopup(null); };
+    const clickHandler = () => {
+      if (solvesPopup) setSolvesPopup(null);
+      if (badgePopup) setBadgePopup(null);
+    };
     document.addEventListener('keydown', keyHandler);
     document.addEventListener('click', clickHandler);
     document.body.style.overflow = 'hidden';
@@ -99,7 +104,7 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
       document.removeEventListener('click', clickHandler);
       document.body.style.overflow = '';
     };
-  }, [onClose, solvesPopup]);
+  }, [onClose, solvesPopup, badgePopup]);
 
   // Derived data
   const compMap = useMemo(() => {
@@ -274,6 +279,40 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
     return items;
   }, [allResults, globalResults, wcaRecords, compMap]);
 
+  // All record badges for header display (includes PR)
+  interface BadgeDetail {
+    badge: RecordBadge; eventId: string; eventName: string;
+    type: 'single' | 'average'; time: number;
+    compName: string; roundLabel: string;
+  }
+  const allBadgeData = useMemo(() => {
+    const byBadge: Record<string, BadgeDetail[]> = { WR: [], CR: [], NR: [], TR: [], PR: [] };
+    if (!globalResults) return byBadge;
+    const seen = new Set<string>();
+    allResults.forEach(r => {
+      (['single', 'average'] as const).forEach(type => {
+        const val = r[type];
+        if (val == null || val <= 0 || val === -1 || val === -2) return;
+        const badges = getResultRecordBadges(r.eventId, type, val, r.athleteId, globalResults, wcaRecords);
+        const evName = WCA_EVENTS.find(e => e.id === r.eventId)?.name || r.eventId;
+        const comp = compMap[r.competitionId];
+        const maxRd = globalResults.filter(gr => gr.competitionId === r.competitionId && gr.eventId === r.eventId)
+          .reduce((m, gr) => Math.max(m, gr.round || 1), 1);
+        badges.forEach(b => {
+          const key = `${b}-${r.eventId}-${type}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+          byBadge[b]?.push({
+            badge: b, eventId: r.eventId, eventName: evName, type, time: val,
+            compName: comp?.name || r.competitionName || r.competitionId || '—',
+            roundLabel: getRoundLabel(r.round || 1, maxRd),
+          });
+        });
+      });
+    });
+    return byBadge;
+  }, [allResults, globalResults, wcaRecords, compMap]);
+
   // Competition history for selected event, grouped by competition
   interface HistoryRow extends Result {
     compName: string; compDate: unknown; roundLabel: string; roundNum: number; maxRound: number; sortDate: number;
@@ -349,9 +388,6 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
     return m;
   }, [globalResults, allResults, historyEvent]);
 
-  // Total record count for header
-  const totalRecords = useMemo(() => recordData.length, [recordData]);
-
   const openSolves = (e: React.MouseEvent, solves: (number | null)[]) => {
     if (!solves || solves.length === 0) return;
     e.stopPropagation();
@@ -411,11 +447,37 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
               <div className="apo-stat-num">🥉 {medalData.bronze}</div>
               <div className="apo-stat-label">Bronze</div>
             </div>
-            <div className="apo-stat">
-              <div className="apo-stat-num">{totalRecords}</div>
-              <div className="apo-stat-label">Records</div>
-            </div>
           </div>
+
+          {/* Record badges */}
+          {(() => {
+            const badgeOrder: RecordBadge[] = ['WR', 'CR', 'NR', 'TR', 'PR'];
+            const visible = badgeOrder.filter(b => (allBadgeData[b]?.length ?? 0) > 0);
+            if (visible.length === 0) return null;
+            return (
+              <div className="apo-badges-row">
+                {visible.map(b => (
+                  <div key={b} className="apo-badge-item" onClick={e => { e.stopPropagation(); setBadgePopup(bp => bp === b ? null : b); }}>
+                    <span className={`apo-badge-pill apo-bp-${b.toLowerCase()}`}>{b}</span>
+                    <span className="apo-badge-count">{allBadgeData[b].length}</span>
+                    {badgePopup === b && (
+                      <div className="apo-badge-popup" onClick={e => e.stopPropagation()}>
+                        {allBadgeData[b].map((d, i) => (
+                          <div key={i} className="apo-bp-row">
+                            <span className="apo-bp-ev">{d.eventName}</span>
+                            <span className="apo-bp-type">{d.type}</span>
+                            <span className="apo-bp-time">{fmtTime(d.time)}</span>
+                            <span className="apo-bp-comp">{d.compName}</span>
+                            <span className="apo-bp-round">{d.roundLabel}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
 
         {/* Tabs */}
@@ -695,6 +757,50 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
         .apo-stats-gold .apo-stat { border-right-color: rgba(250,204,21,0.1); }
         .apo-stat-num { font-size: 1rem; font-weight: 800; color: var(--text); font-family: monospace; }
         .apo-stat-label { font-size: 0.62rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 0.1rem; }
+
+        /* Record badges row */
+        .apo-badges-row {
+          display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap;
+          margin-top: 0.3rem;
+        }
+        .apo-badge-item {
+          display: flex; flex-direction: column; align-items: center; gap: 0.15rem;
+          cursor: pointer; position: relative; padding: 0.3rem 0.4rem;
+          border-radius: 8px; transition: background 0.15s;
+        }
+        .apo-badge-item:hover { background: rgba(255,255,255,0.04); }
+        .apo-badge-pill {
+          font-size: 0.6rem; font-weight: 900; letter-spacing: 0.04em;
+          padding: 2px 6px; border-radius: 4px; line-height: 1;
+        }
+        .apo-bp-wr { background: #b45309; color: #fef3c7; border: 1px solid #f59e0b; }
+        .apo-bp-cr { background: #1d4ed8; color: #dbeafe; border: 1px solid #60a5fa; }
+        .apo-bp-nr { background: #166534; color: #dcfce7; border: 1px solid #4ade80; }
+        .apo-bp-tr { background: #4c1d95; color: #ede9fe; border: 1px solid #a78bfa; }
+        .apo-bp-pr { background: #0e7490; color: #cffafe; border: 1px solid #22d3ee; }
+        .apo-badge-count {
+          font-size: 0.82rem; font-weight: 800; color: var(--text); font-family: monospace;
+        }
+        .apo-badge-popup {
+          position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+          z-index: 20; min-width: 280px; max-width: 360px;
+          background: var(--bg); border: 1px solid rgba(124,58,237,0.3);
+          border-radius: 10px; padding: 0.5rem;
+          box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+          animation: apoFadeIn 0.12s ease;
+          margin-top: 0.3rem;
+        }
+        .apo-bp-row {
+          display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;
+          padding: 0.35rem 0.5rem; border-radius: 6px;
+          transition: background 0.1s;
+        }
+        .apo-bp-row:hover { background: rgba(255,255,255,0.03); }
+        .apo-bp-ev { font-size: 0.78rem; font-weight: 600; color: var(--text); min-width: 80px; }
+        .apo-bp-type { font-size: 0.68rem; color: var(--muted); text-transform: capitalize; min-width: 42px; }
+        .apo-bp-time { font-family: monospace; font-size: 0.85rem; font-weight: 700; color: #a78bfa; min-width: 48px; }
+        .apo-bp-comp { font-size: 0.68rem; color: var(--muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .apo-bp-round { font-size: 0.65rem; color: var(--muted); opacity: 0.7; }
 
         /* Tabs */
         .apo-tabs {
