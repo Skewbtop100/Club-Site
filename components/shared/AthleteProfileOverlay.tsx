@@ -180,17 +180,15 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
     return { items: list, gold: 0, silver: 0, bronze: 0 };
   }, []);
 
-  // We need all published results to compute placement. Let's fetch them.
+  // Fetch all published results for placement/medal/record calculations
   const [globalResults, setGlobalResults] = useState<Result[] | null>(null);
   useEffect(() => {
-    if (tab === 'medals' && globalResults === null) {
-      import('@/lib/firebase/services/results').then(mod => {
-        mod.getAllResults().then(all => {
-          setGlobalResults(all.filter(r => r.status === 'published'));
-        });
+    import('@/lib/firebase/services/results').then(mod => {
+      mod.getAllResults().then(all => {
+        setGlobalResults(all.filter(r => r.status === 'published'));
       });
-    }
-  }, [tab, globalResults]);
+    });
+  }, []);
 
   // Compute medals from global results
   const medalData = useMemo(() => {
@@ -278,7 +276,7 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
 
   // Competition history for selected event, grouped by competition
   interface HistoryRow extends Result {
-    compName: string; compDate: unknown; roundLabel: string; roundNum: number; sortDate: number;
+    compName: string; compDate: unknown; roundLabel: string; roundNum: number; maxRound: number; sortDate: number;
   }
   interface HistoryGroup {
     compId: string; compName: string; compDate: unknown; sortDate: number;
@@ -310,6 +308,7 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
         compDate: comp?.date || r.submittedAt,
         roundLabel: getRoundLabel(roundNum, totalRounds),
         roundNum,
+        maxRound: totalRounds,
         sortDate: toSortableDate(comp?.date || r.submittedAt),
       };
     });
@@ -457,51 +456,51 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
                   {historyGroups.length === 0 ? (
                     <div className="apo-empty">No results for this event</div>
                   ) : (
-                    <div className="apo-history-groups">
-                      {historyGroups.map(g => (
-                        <div key={g.compId} className="apo-hg">
-                          {/* Competition header - shown once */}
-                          <div className="apo-hg-header">
-                            <span className="apo-hg-name">{g.compName}</span>
-                            <span className="apo-hg-date">{formatDate(g.compDate)}</span>
-                          </div>
-                          <div className="apo-table-wrap">
-                            <table className="apo-table">
-                              <thead>
-                                <tr>
-                                  <th>Round</th>
-                                  <th className="r">Place</th>
-                                  <th className="r">Single</th>
-                                  <th className="r">Average</th>
-                                  <th className="r">1</th><th className="r">2</th><th className="r">3</th><th className="r">4</th><th className="r">5</th>
+                    <div className="apo-table-wrap">
+                      <table className="apo-table apo-history-table">
+                        <thead>
+                          <tr>
+                            <th>Round</th>
+                            <th className="r">Place</th>
+                            <th className="r">Single</th>
+                            <th className="r">Average</th>
+                            <th className="r">1</th><th className="r">2</th><th className="r">3</th><th className="r">4</th><th className="r">5</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {historyGroups.flatMap(g =>
+                            g.rows.map((r, ri) => {
+                              const place = placementMap[r.id];
+                              const isFinalRound = r.roundNum === r.maxRound;
+                              const medalEmoji = isFinalRound && place != null && place <= 3
+                                ? (place === 1 ? '🥇' : place === 2 ? '🥈' : '🥉')
+                                : '';
+                              const isFirstRow = ri === 0; // highest round = first in group
+                              const solves = [...(r.solves ?? [])];
+                              while (solves.length < 5) solves.push(null);
+                              return (
+                                <tr key={r.id} className={isFirstRow ? 'apo-comp-first-row' : ''}>
+                                  <td className="apo-td-round">
+                                    {isFirstRow && (
+                                      <span className="apo-inline-comp">{g.compName}</span>
+                                    )}
+                                    <span>{r.roundLabel}</span>
+                                  </td>
+                                  <td className="apo-td-place r">
+                                    {medalEmoji && <span className="apo-medal-emoji">{medalEmoji}</span>}
+                                    {place || '—'}
+                                  </td>
+                                  <td className={`r mono${r.single != null && r.single < 0 ? ' dnf' : ''}`}>{fmtTime(r.single)}</td>
+                                  <td className={`r mono bold${r.average != null && r.average < 0 ? ' dnf' : ''}`}>{fmtTime(r.average)}</td>
+                                  {solves.slice(0, 5).map((s, i) => (
+                                    <td key={i} className={`r mono solve${s !== null && s < 0 ? ' dnf' : ''}`}>{fmtTime(s)}</td>
+                                  ))}
                                 </tr>
-                              </thead>
-                              <tbody>
-                                {g.rows.map(r => {
-                                  const place = placementMap[r.id];
-                                  const medalEmoji = place === 1 ? '🥇' : place === 2 ? '🥈' : place === 3 ? '🥉' : '';
-                                  const solves = [...(r.solves ?? [])];
-                                  while (solves.length < 5) solves.push(null);
-                                  return (
-                                    <tr key={r.id}>
-                                      <td className="apo-td-round">{r.roundLabel}</td>
-                                      <td className="apo-td-place r">
-                                        {medalEmoji && <span className="apo-medal-emoji">{medalEmoji}</span>}
-                                        {place || '—'}
-                                      </td>
-                                      <td className={`r mono${r.single != null && r.single < 0 ? ' dnf' : ''}`}>{fmtTime(r.single)}</td>
-                                      <td className={`r mono bold${r.average != null && r.average < 0 ? ' dnf' : ''}`}>{fmtTime(r.average)}</td>
-                                      {solves.slice(0, 5).map((s, i) => (
-                                        <td key={i} className={`r mono solve${s !== null && s < 0 ? ' dnf' : ''}`}>{fmtTime(s)}</td>
-                                      ))}
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      ))}
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
                     </div>
                   )}
                 </div>
@@ -736,32 +735,30 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
 
         /* Table */
         .apo-table-wrap { overflow-x: auto; }
-        .apo-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+        .apo-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
         .apo-table th {
-          text-align: left; padding: 0.5rem 0.5rem; font-size: 0.68rem; font-weight: 700;
+          text-align: left; padding: 0.7rem 0.8rem; font-size: 0.8rem; font-weight: 700;
           text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
           border-bottom: 2px solid rgba(255,255,255,0.07); white-space: nowrap;
           position: sticky; top: 0; background: var(--bg); z-index: 2;
         }
         .apo-table th.r, .apo-table td.r { text-align: right; }
-        .apo-table td { padding: 0.55rem 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.04); vertical-align: middle; }
+        .apo-table td { padding: 0.7rem 0.8rem; border-bottom: 1px solid rgba(255,255,255,0.04); vertical-align: middle; }
         .apo-table tr:hover td { background: rgba(124,58,237,0.05); }
-        .apo-table .mono { font-family: monospace; }
+        .apo-table .mono { font-family: monospace; font-size: 1rem; }
         .apo-table .bold { font-weight: 700; color: #a78bfa; }
         .apo-table .dnf { color: #f87171; }
-        .apo-table .solve { color: var(--muted); font-size: 0.78rem; }
-        /* History groups */
-        .apo-history-groups { display: flex; flex-direction: column; gap: 1.2rem; }
-        .apo-hg {}
-        .apo-hg-header {
-          display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap;
-          padding: 0.5rem 0; margin-bottom: 0.3rem;
-          border-bottom: 1px solid rgba(255,255,255,0.06);
+        .apo-table .solve { color: var(--muted); font-size: 0.88rem; }
+
+        /* History table specifics */
+        .apo-comp-first-row td { border-top: 1px solid rgba(124,58,237,0.15); }
+        .apo-inline-comp {
+          display: block; font-size: 0.95rem; font-weight: 700; color: #c4b5fd;
+          margin-bottom: 0.2rem; cursor: pointer; transition: color 0.2s;
         }
-        .apo-hg-name { font-size: 0.88rem; font-weight: 700; color: #c4b5fd; }
-        .apo-hg-date { font-size: 0.72rem; color: var(--muted); }
-        .apo-td-round { font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
-        .apo-td-place { font-weight: 700; }
+        .apo-inline-comp:hover { color: #e0d4ff; text-decoration: underline; }
+        .apo-td-round { color: var(--muted); white-space: nowrap; }
+        .apo-td-place { font-weight: 700; font-size: 1rem; }
         .apo-medal-emoji { margin-right: 0.15rem; }
 
         /* Records */
@@ -850,7 +847,13 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
           .apo-name { font-size: 1.3rem; }
           .apo-stats-row { max-width: 100%; }
           .apo-tab-content { padding: 1rem 0.75rem; }
-          .apo-table { min-width: 700px; }
+          .apo-table { min-width: 700px; font-size: 0.85rem; }
+          .apo-table th { padding: 0.5rem 0.5rem; font-size: 0.68rem; }
+          .apo-table td { padding: 0.55rem 0.5rem; }
+          .apo-table .mono { font-size: 0.88rem; }
+          .apo-table .solve { font-size: 0.78rem; }
+          .apo-td-place { font-size: 0.88rem; }
+          .apo-inline-comp { font-size: 0.82rem; }
           .apo-close { top: 0.5rem; right: 0.5rem; }
         }
       `}</style>
