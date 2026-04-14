@@ -369,7 +369,7 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
         roundLabel: getRoundLabel(roundNum, totalRounds),
         roundNum,
         maxRound: totalRounds,
-        sortDate: toSortableDate(comp?.date || r.submittedAt),
+        sortDate: toSortableDate(comp?.date),
       };
     });
 
@@ -387,6 +387,7 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
     const groups = Array.from(groupMap.values());
     // Sort groups by date descending
     groups.sort((a, b) => b.sortDate - a.sortDate);
+    console.log('Competition groups sorted:', groups.map(g => ({ name: g.compName, sortDate: g.sortDate, date: new Date(g.sortDate).toISOString() })));
     // Sort rows within each group: highest round first (Final at top)
     groups.forEach(g => {
       g.rows.sort((a, b) => b.roundNum - a.roundNum);
