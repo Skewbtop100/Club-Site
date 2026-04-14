@@ -16,20 +16,9 @@ export const BADGE_STYLES: Record<RecordBadge, React.CSSProperties> = {
   PR: { background: '#0e7490', color: '#cffafe', border: '1px solid #22d3ee', boxShadow: '0 0 3px rgba(34,211,238,0.3)' },
 };
 
-/**
- * Returns all applicable record badges for a given result value.
- *
- * Cascading rules:
- *   WR → includes CR + NR + TR + PR
- *   CR → includes NR + TR + PR
- *   NR → includes TR + PR
- *   TR → includes PR
- *
- * The returned array is sorted by priority (highest first).
- * For display, use getHighestBadge() to show only the most prominent.
- * For counting, use the full array.
- */
-export function getResultRecordBadges(
+// ── Internal helper ─────────────────────────────────────────────────────────
+
+function computeBadges(
   eventId: string,
   type: 'single' | 'average',
   value: number,
@@ -42,7 +31,6 @@ export function getResultRecordBadges(
   const valueSec = value / 100;
   const rec = wcaRecords[eventId];
 
-  // Check each level independently first
   let isWR = false, isCR = false, isNR = false, isTR = false, isPR = false;
 
   // WR / CR / NR — compared against wcaRecords thresholds (stored in seconds)
@@ -55,7 +43,7 @@ export function getResultRecordBadges(
     if (nr && nr.value !== null && nr.value !== undefined && valueSec <= nr.value) isNR = true;
   }
 
-  // TR — best result in allResults for this event+type (all athletes in the system)
+  // TR — best result in allResults for this event+type (all athletes)
   let trBest: number | null = null;
   allResults.forEach((r) => {
     const v = r[type];
@@ -78,7 +66,7 @@ export function getResultRecordBadges(
     if (prBest !== null && value <= prBest) isPR = true;
   }
 
-  // Apply cascading: higher records imply all lower ones
+  // Cascading: higher records imply all lower ones
   if (isWR) { isCR = true; isNR = true; isTR = true; isPR = true; }
   else if (isCR) { isNR = true; isTR = true; isPR = true; }
   else if (isNR) { isTR = true; isPR = true; }
@@ -94,6 +82,42 @@ export function getResultRecordBadges(
   return badges;
 }
 
+// ── Public API ──────────────────────────────────────────────────────────────
+
+/**
+ * Returns all applicable record badges for a single value (single OR average).
+ * Used by RankingsSection, CompetitionHistory where only one type is checked at a time.
+ */
+export function getResultRecordBadges(
+  eventId: string,
+  type: 'single' | 'average',
+  value: number,
+  athleteId: string | undefined,
+  allResults: Result[],
+  wcaRecords: WcaRecords,
+): RecordBadge[] {
+  return computeBadges(eventId, type, value, athleteId, allResults, wcaRecords);
+}
+
+/**
+ * Returns record badges for BOTH single and average of a Result, independently.
+ * Single and average badges are computed separately — a result can have PR on
+ * average but not single, or both, or neither.
+ */
+export function getResultBadgesPair(
+  result: Result,
+  allResults: Result[],
+  wcaRecords: WcaRecords,
+): { single: RecordBadge[]; average: RecordBadge[] } {
+  const single = (result.single != null && result.single > 0)
+    ? computeBadges(result.eventId, 'single', result.single, result.athleteId, allResults, wcaRecords)
+    : [];
+  const average = (result.average != null && result.average > 0)
+    ? computeBadges(result.eventId, 'average', result.average, result.athleteId, allResults, wcaRecords)
+    : [];
+  return { single, average };
+}
+
 /** Returns only the highest (most prominent) badge for display. */
 export function getHighestBadge(badges: RecordBadge[]): RecordBadge | null {
   if (badges.length === 0) return null;
@@ -103,7 +127,7 @@ export function getHighestBadge(badges: RecordBadge[]): RecordBadge | null {
   return null;
 }
 
-/** @deprecated Use getHighestBadge instead. Kept for backwards compat. */
+/** @deprecated Use getHighestBadge instead. */
 export function getVisibleBadge(badges: RecordBadge[]): RecordBadge | null {
   return getHighestBadge(badges);
 }

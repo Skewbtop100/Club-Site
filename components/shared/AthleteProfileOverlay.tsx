@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { getResultsByAthlete } from '@/lib/firebase/services/results';
 import { getCompetitions } from '@/lib/firebase/services/competitions';
-import { getResultRecordBadges, getHighestBadge } from '@/lib/record-badges';
+import { getResultRecordBadges, getResultBadgesPair, getHighestBadge } from '@/lib/record-badges';
 import { useWcaRecords } from '@/lib/hooks/useWcaRecords';
 import { fmtTime, formatDate } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
@@ -247,10 +247,12 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
     if (!globalResults) return items;
     const seen = new Set<string>();
     allResults.forEach(r => {
+      const pair = getResultBadgesPair(r, globalResults, wcaRecords);
+      const comp = compMap[r.competitionId];
       (['single', 'average'] as const).forEach(type => {
         const val = r[type];
         if (val == null || val <= 0 || val === -1 || val === -2) return;
-        const badges = getResultRecordBadges(r.eventId, type, val, r.athleteId, globalResults, wcaRecords);
+        const badges = pair[type];
         const significant = badges.filter(b => b !== 'PR') as RecordBadge[];
         if (significant.length === 0) return;
         const best = significant[0];
@@ -258,7 +260,6 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
         if (seen.has(key)) return;
         seen.add(key);
         const evName = WCA_EVENTS.find(e => e.id === r.eventId)?.name || r.eventId;
-        const comp = compMap[r.competitionId];
         const totalRounds = comp?.eventConfig?.[r.eventId]?.rounds ?? 1;
         items.push({
           eventId: r.eventId, eventName: evName, type, badge: best, time: val,
@@ -268,7 +269,6 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
         });
       });
     });
-    // Group by event order
     items.sort((a, b) => {
       const ai = EVENT_ORDER.indexOf(a.eventId);
       const bi = EVENT_ORDER.indexOf(b.eventId);
@@ -280,7 +280,7 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
     return items;
   }, [allResults, globalResults, wcaRecords, compMap]);
 
-  // All record badges for header display (includes PR)
+  // All record badges for header display (includes PR), computed independently for single/average
   interface BadgeDetail {
     badge: RecordBadge; eventId: string; eventName: string;
     type: 'single' | 'average'; time: number;
@@ -291,14 +291,16 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
     if (!globalResults) return byBadge;
     const seen = new Set<string>();
     allResults.forEach(r => {
+      const pair = getResultBadgesPair(r, globalResults, wcaRecords);
+      const comp = compMap[r.competitionId];
+      const maxRd = globalResults.filter(gr => gr.competitionId === r.competitionId && gr.eventId === r.eventId)
+        .reduce((m, gr) => Math.max(m, gr.round || 1), 1);
+      const evName = WCA_EVENTS.find(e => e.id === r.eventId)?.name || r.eventId;
+
       (['single', 'average'] as const).forEach(type => {
+        const badges = pair[type];
         const val = r[type];
-        if (val == null || val <= 0 || val === -1 || val === -2) return;
-        const badges = getResultRecordBadges(r.eventId, type, val, r.athleteId, globalResults, wcaRecords);
-        const evName = WCA_EVENTS.find(e => e.id === r.eventId)?.name || r.eventId;
-        const comp = compMap[r.competitionId];
-        const maxRd = globalResults.filter(gr => gr.competitionId === r.competitionId && gr.eventId === r.eventId)
-          .reduce((m, gr) => Math.max(m, gr.round || 1), 1);
+        if (!val || val <= 0 || val === -1 || val === -2) return;
         badges.forEach(b => {
           const key = `${b}-${r.eventId}-${type}`;
           if (seen.has(key)) return;
@@ -314,19 +316,15 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
     return byBadge;
   }, [allResults, globalResults, wcaRecords, compMap]);
 
-  // Per-result badge map: resultId → { single: best badge, average: best badge }
+  // Per-result badge map: resultId → { single: highest badge, average: highest badge }
   const resultBadgesMap = useMemo(() => {
     const m: Record<string, { single: RecordBadge | null; average: RecordBadge | null }> = {};
     if (!globalResults) return m;
     allResults.forEach(r => {
-      const entry = { single: null as RecordBadge | null, average: null as RecordBadge | null };
-      (['single', 'average'] as const).forEach(type => {
-        const val = r[type];
-        if (val == null || val <= 0 || val === -1 || val === -2) return;
-        const badges = getResultRecordBadges(r.eventId, type, val, r.athleteId, globalResults, wcaRecords);
-        if (badges.length > 0) entry[type] = getHighestBadge(badges);
-      });
-      if (entry.single || entry.average) m[r.id] = entry;
+      const pair = getResultBadgesPair(r, globalResults, wcaRecords);
+      const s = getHighestBadge(pair.single);
+      const a = getHighestBadge(pair.average);
+      if (s || a) m[r.id] = { single: s, average: a };
     });
     return m;
   }, [allResults, globalResults, wcaRecords]);
@@ -968,10 +966,10 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
         .apo-medal-emoji { margin-right: 0.15rem; }
 
         /* Time cell with record badge */
-        .apo-time-cell { position: relative; }
+        .apo-time-cell { position: relative; padding-right: 1.8rem !important; }
         .apo-time-badge {
-          position: absolute; top: -4px; right: -4px; z-index: 2;
-          font-size: 0.6rem; font-weight: 900; letter-spacing: 0.03em;
+          position: absolute; top: 50%; right: 0.4rem; transform: translateY(-50%);
+          z-index: 2; font-size: 0.55rem; font-weight: 900; letter-spacing: 0.03em;
           padding: 2px 4px; border-radius: 3px; line-height: 1;
         }
         .apo-tb-wr { background: #b45309; color: #fef3c7; border: 1px solid #f59e0b; }
@@ -1094,7 +1092,8 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
           .apo-bc-num { font-size: 1.15rem; }
           .apo-bc-sub { font-size: 0.55rem; }
           .apo-bc-events { max-width: 100%; }
-          .apo-time-badge { top: -6px; right: -6px; font-size: 0.55rem; }
+          .apo-time-cell { padding-right: 1.5rem !important; }
+          .apo-time-badge { font-size: 0.5rem; right: 0.2rem; }
         }
       `}</style>
     </div>
