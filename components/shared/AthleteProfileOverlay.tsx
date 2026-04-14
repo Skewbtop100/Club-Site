@@ -468,24 +468,26 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
                           </tr>
                         </thead>
                         <tbody>
-                          {historyGroups.flatMap(g =>
-                            g.rows.map((r, ri) => {
+                          {historyGroups.flatMap(g => {
+                            const compLabelRow = (
+                              <tr key={`comp-${g.compId}`} className="apo-comp-label-row">
+                                <td colSpan={9} className="apo-comp-label-cell">
+                                  <span className="apo-comp-label-text">Competition</span>
+                                  <span className="apo-comp-label-name">{g.compName}</span>
+                                </td>
+                              </tr>
+                            );
+                            const dataRows = g.rows.map(r => {
                               const place = placementMap[r.id];
                               const isFinalRound = r.roundNum === r.maxRound;
                               const medalEmoji = isFinalRound && place != null && place <= 3
                                 ? (place === 1 ? '🥇' : place === 2 ? '🥈' : '🥉')
                                 : '';
-                              const isFirstRow = ri === 0; // highest round = first in group
                               const solves = [...(r.solves ?? [])];
                               while (solves.length < 5) solves.push(null);
                               return (
-                                <tr key={r.id} className={isFirstRow ? 'apo-comp-first-row' : ''}>
-                                  <td className="apo-td-round">
-                                    {isFirstRow && (
-                                      <span className="apo-inline-comp">{g.compName}</span>
-                                    )}
-                                    <span>{r.roundLabel}</span>
-                                  </td>
+                                <tr key={r.id}>
+                                  <td className="apo-td-round">{r.roundLabel}</td>
                                   <td className="apo-td-place r">
                                     {medalEmoji && <span className="apo-medal-emoji">{medalEmoji}</span>}
                                     {place || '—'}
@@ -497,8 +499,9 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
                                   ))}
                                 </tr>
                               );
-                            })
-                          )}
+                            });
+                            return [compLabelRow, ...dataRows];
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -750,13 +753,22 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
         .apo-table .dnf { color: #f87171; }
         .apo-table .solve { color: var(--muted); font-size: 0.88rem; }
 
-        /* History table specifics */
-        .apo-comp-first-row td { border-top: 1px solid rgba(124,58,237,0.15); }
-        .apo-inline-comp {
-          display: block; font-size: 0.95rem; font-weight: 700; color: #c4b5fd;
-          margin-bottom: 0.2rem; cursor: pointer; transition: color 0.2s;
+        /* History table: competition label row */
+        .apo-comp-label-row td { border-bottom: none; }
+        .apo-comp-label-cell {
+          padding: 0.6rem 0.8rem 0.25rem !important;
+          background: rgba(124,58,237,0.04);
+          border-top: 1px solid rgba(124,58,237,0.12);
         }
-        .apo-inline-comp:hover { color: #e0d4ff; text-decoration: underline; }
+        .apo-comp-label-text {
+          font-size: 0.65rem; font-weight: 700; letter-spacing: 0.08em;
+          text-transform: uppercase; color: var(--muted); margin-right: 0.5rem;
+        }
+        .apo-comp-label-name {
+          font-size: 0.88rem; font-weight: 700; color: #c4b5fd;
+          cursor: pointer; transition: color 0.2s;
+        }
+        .apo-comp-label-name:hover { color: #e0d4ff; text-decoration: underline; }
         .apo-td-round { color: var(--muted); white-space: nowrap; }
         .apo-td-place { font-weight: 700; font-size: 1rem; }
         .apo-medal-emoji { margin-right: 0.15rem; }
@@ -853,7 +865,7 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
           .apo-table .mono { font-size: 0.88rem; }
           .apo-table .solve { font-size: 0.78rem; }
           .apo-td-place { font-size: 0.88rem; }
-          .apo-inline-comp { font-size: 0.82rem; }
+          .apo-comp-label-name { font-size: 0.8rem; }
           .apo-close { top: 0.5rem; right: 0.5rem; }
         }
       `}</style>
