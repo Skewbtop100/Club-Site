@@ -796,7 +796,7 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
           font-size: 2.2rem; font-weight: 800; color: #fff;
         }
         .apo-name {
-          font-size: 1.6rem; font-weight: 800; color: var(--text-primary);
+          font-size: 2rem; font-weight: 800; color: var(--text-primary);
           margin-bottom: 0.4rem;
         }
         .apo-meta { display: flex; gap: 0.6rem; flex-wrap: wrap; justify-content: center; margin-bottom: 1.2rem; }
@@ -805,11 +805,11 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
           background: rgba(255,255,255,0.04); padding: 0.2rem 0.6rem;
           border-radius: 999px; border: 1px solid rgba(255,255,255,0.06);
         }
-        .apo-wca { color: var(--accent); font-family: monospace; font-weight: 600; }
+        .apo-wca { color: var(--accent); font-family: monospace; font-weight: 600; font-size: 0.95rem; }
 
         /* Stats rows */
         .apo-stats-pair {
-          display: flex; gap: 0.6rem; width: 100%; max-width: 500px;
+          display: flex; gap: 0.6rem; width: 100%; max-width: 600px;
           align-items: stretch;
         }
         .apo-stats-row {
@@ -822,22 +822,22 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
           background: rgba(250,204,21,0.04);
         }
         .apo-stat {
-          flex: 1; padding: 0.6rem 0.3rem; text-align: center;
+          flex: 1; padding: 1.2rem 1.5rem; text-align: center;
           border-right: 1px solid rgba(255,255,255,0.06);
         }
         .apo-stat:last-child { border-right: none; }
         .apo-stats-gold .apo-stat { border-right-color: rgba(250,204,21,0.1); }
-        .apo-stat-num { font-size: 1rem; font-weight: 800; color: var(--text); font-family: monospace; }
-        .apo-stat-label { font-size: 0.62rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 0.1rem; }
+        .apo-stat-num { font-size: 1.8rem; font-weight: 800; color: var(--text); font-family: monospace; }
+        .apo-stat-label { font-size: 0.8rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 0.15rem; }
 
         /* Record badge cards */
         .apo-bc-grid {
           display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem;
-          width: 100%; max-width: 420px; margin-top: 1rem;
+          width: 100%; max-width: 560px; margin-top: 1rem;
         }
         .apo-bc {
-          display: flex; flex-direction: column; align-items: center; gap: 0.2rem;
-          padding: 0.55rem 0.3rem; border-radius: 10px;
+          display: flex; flex-direction: column; align-items: center; gap: 0.25rem;
+          padding: 1rem 0.5rem; border-radius: 10px; min-width: 100px;
           border: 1px solid rgba(255,255,255,0.06);
           background: var(--card); transition: all 0.2s;
         }
@@ -854,8 +854,8 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
         .apo-bc-active.apo-bc-pr { border-color: rgba(56,189,248,0.4); box-shadow: 0 0 12px rgba(56,189,248,0.15); }
 
         .apo-bc-label {
-          font-size: 0.6rem; font-weight: 900; letter-spacing: 0.04em;
-          padding: 2px 6px; border-radius: 4px; line-height: 1;
+          font-size: 0.85rem; font-weight: 800; letter-spacing: 0.04em;
+          padding: 3px 8px; border-radius: 4px; line-height: 1;
         }
         .apo-bp-wr { background: #b45309; color: #fef3c7; border: 1px solid #f59e0b; }
         .apo-bp-cr { background: #9a3412; color: #ffedd5; border: 1px solid #f97316; }
@@ -863,13 +863,13 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
         .apo-bp-tr { background: #4c1d95; color: #ede9fe; border: 1px solid #a78bfa; }
         .apo-bp-pr { background: #0e7490; color: #cffafe; border: 1px solid #22d3ee; }
 
-        .apo-bc-num { font-size: 1.15rem; font-weight: 800; color: var(--text); font-family: monospace; line-height: 1; }
-        .apo-bc-sub { font-size: 0.55rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+        .apo-bc-num { font-size: 2rem; font-weight: 800; color: var(--text); font-family: monospace; line-height: 1; }
+        .apo-bc-sub { font-size: 0.72rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
 
         /* Badge event pills */
         .apo-bc-events {
           display: flex; gap: 0.4rem; flex-wrap: wrap; justify-content: center;
-          width: 100%; max-width: 420px; margin-top: 0.6rem;
+          width: 100%; max-width: 560px; margin-top: 0.6rem;
           animation: apoBcFade 0.2s ease;
         }
         @keyframes apoBcFade { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
@@ -892,23 +892,23 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
 
         /* Tabs */
         .apo-tabs {
-          display: flex; border-bottom: 1px solid rgba(255,255,255,0.06);
+          display: grid; grid-template-columns: 1fr 1fr 1fr;
+          border-bottom: 1px solid rgba(255,255,255,0.06);
           position: sticky; top: 0; z-index: 5; background: var(--bg);
-          overflow-x: auto; scrollbar-width: none;
         }
-        .apo-tabs::-webkit-scrollbar { display: none; }
         .apo-tab {
-          flex-shrink: 0; padding: 0.7rem 1.2rem; background: none; border: none;
-          font-size: 0.82rem; font-weight: 600; color: var(--muted);
+          padding: 1rem 0.5rem; background: none; border: none;
+          font-size: 1rem; font-weight: 600; color: var(--muted);
           cursor: pointer; font-family: inherit; transition: all 0.2s;
-          border-bottom: 2px solid transparent; white-space: nowrap;
+          border-bottom: 3px solid transparent; white-space: nowrap;
+          text-align: center;
         }
-        .apo-tab:hover { color: var(--text); }
+        .apo-tab:hover { color: var(--text); background: rgba(255,255,255,0.02); }
         .apo-tab.active { color: #a78bfa; border-bottom-color: var(--accent); }
 
         /* Content */
         .apo-content { min-height: 300px; }
-        .apo-tab-content { padding: 1.2rem; max-width: 900px; margin: 0 auto; }
+        .apo-tab-content { padding: 1.5rem; max-width: 1000px; margin: 0 auto; }
         .apo-loading { display: flex; align-items: center; justify-content: center; padding: 3rem; }
         .apo-spinner {
           width: 28px; height: 28px; border-radius: 50%;
@@ -923,7 +923,7 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
           display: flex; gap: 0.35rem; flex-wrap: wrap; margin-bottom: 1rem;
         }
         .apo-ep {
-          padding: 0.35rem 0.8rem; border-radius: 999px; font-size: 0.78rem; font-weight: 600;
+          padding: 0.4rem 1rem; border-radius: 999px; font-size: 0.9rem; font-weight: 600;
           border: 1px solid rgba(255,255,255,0.1); background: transparent; color: var(--muted);
           cursor: pointer; font-family: inherit; transition: all 0.2s;
         }
@@ -932,20 +932,20 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
 
         /* Table */
         .apo-table-wrap { overflow-x: auto; }
-        .apo-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+        .apo-table { width: 100%; border-collapse: collapse; font-size: 1rem; }
         .apo-table th {
-          text-align: left; padding: 0.7rem 0.8rem; font-size: 0.8rem; font-weight: 700;
+          text-align: left; padding: 0.8rem 1rem; font-size: 0.8rem; font-weight: 700;
           text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
           border-bottom: 2px solid rgba(255,255,255,0.07); white-space: nowrap;
           position: sticky; top: 0; background: var(--bg); z-index: 2;
         }
         .apo-table th.r, .apo-table td.r { text-align: right; }
-        .apo-table td { padding: 0.7rem 0.8rem; border-bottom: 1px solid rgba(255,255,255,0.04); vertical-align: middle; }
+        .apo-table td { padding: 0.8rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.04); vertical-align: middle; }
         .apo-table tr:hover td { background: rgba(124,58,237,0.05); }
-        .apo-table .mono { font-family: monospace; font-size: 1rem; }
+        .apo-table .mono { font-family: monospace; font-size: 1.05rem; }
         .apo-table .bold { font-weight: 700; color: #a78bfa; }
         .apo-table .dnf { color: #f87171; }
-        .apo-table .solve { color: var(--muted); font-size: 0.88rem; }
+        .apo-table .solve { color: var(--muted); font-size: 0.92rem; }
 
         /* History table: competition label row */
         .apo-comp-label-row td { border-bottom: none; }
@@ -1071,9 +1071,15 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
           .apo-avatar { width: 90px; height: 90px; }
           .apo-avatar-ph { font-size: 1.6rem; }
           .apo-name { font-size: 1.3rem; }
+          .apo-wca { font-size: 0.78rem; }
           .apo-stats-pair { flex-direction: column; max-width: 100%; }
           .apo-stats-row { max-width: 100%; }
+          .apo-stat { padding: 0.6rem 0.3rem; }
+          .apo-stat-num { font-size: 1rem; }
+          .apo-stat-label { font-size: 0.62rem; }
+          .apo-tab { font-size: 0.9rem; padding: 0.7rem 0.3rem; }
           .apo-tab-content { padding: 1rem 0.75rem; }
+          .apo-ep { font-size: 0.78rem; padding: 0.35rem 0.8rem; }
           .apo-table { min-width: 700px; font-size: 0.85rem; }
           .apo-table th { padding: 0.5rem 0.5rem; font-size: 0.68rem; }
           .apo-table td { padding: 0.55rem 0.5rem; }
@@ -1083,6 +1089,10 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
           .apo-comp-label-name { font-size: 0.8rem; }
           .apo-close { top: 0.5rem; right: 0.5rem; }
           .apo-bc-grid { grid-template-columns: repeat(3, 1fr); max-width: 100%; }
+          .apo-bc { padding: 0.55rem 0.3rem; min-width: auto; }
+          .apo-bc-label { font-size: 0.6rem; padding: 2px 6px; }
+          .apo-bc-num { font-size: 1.15rem; }
+          .apo-bc-sub { font-size: 0.55rem; }
           .apo-bc-events { max-width: 100%; }
           .apo-time-badge { top: -6px; right: -6px; font-size: 0.55rem; }
         }
