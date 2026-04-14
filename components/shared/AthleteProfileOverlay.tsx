@@ -409,6 +409,86 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
     return m;
   }, [globalResults, allResults, historyEvent]);
 
+  // Historical record badges: what badge each result earned WHEN it was set (TR/NR/CR/WR only, no PR)
+  // Also tracks current personal bests for highlighting
+  const { historyBadgeMap, currentPBs } = useMemo(() => {
+    const map: Record<string, { single: RecordBadge | null; average: RecordBadge | null }> = {};
+    const pbs: { single: number | null; average: number | null } = { single: null, average: null };
+
+    if (!historyEvent) return { historyBadgeMap: map, currentPBs: pbs };
+
+    const refResults = globalResults ?? allResults;
+    const eventResults = allResults.filter(r => r.eventId === historyEvent);
+
+    // Sort by date ascending to process chronologically
+    const sorted = [...eventResults].sort((a, b) =>
+      toSortableDate(compMap[a.competitionId]?.date || a.submittedAt) -
+      toSortableDate(compMap[b.competitionId]?.date || b.submittedAt)
+    );
+
+    // WR/CR/NR thresholds from wcaRecords (in seconds)
+    const rec = wcaRecords[historyEvent];
+    const wrS = rec?.single?.WR?.value; const wrA = rec?.average?.WR?.value;
+    const crS = rec?.single?.CR?.value; const crA = rec?.average?.CR?.value;
+    const nrS = rec?.single?.NR?.value; const nrA = rec?.average?.NR?.value;
+
+    // TR = best across ALL athletes for this event
+    let trBestSingle: number | null = null;
+    let trBestAverage: number | null = null;
+    refResults.forEach(r => {
+      if (r.eventId !== historyEvent) return;
+      if (r.single != null && r.single > 0 && r.single !== -1 && r.single !== -2) {
+        if (trBestSingle === null || r.single < trBestSingle) trBestSingle = r.single;
+      }
+      if (r.average != null && r.average > 0 && r.average !== -1 && r.average !== -2) {
+        if (trBestAverage === null || r.average < trBestAverage) trBestAverage = r.average;
+      }
+    });
+
+    // Track running best to detect when records were set
+    let runBestSingle: number | null = null;
+    let runBestAverage: number | null = null;
+
+    sorted.forEach(r => {
+      const entry: { single: RecordBadge | null; average: RecordBadge | null } = { single: null, average: null };
+
+      // Check single
+      if (r.single != null && r.single > 0 && r.single !== -1 && r.single !== -2) {
+        const isNewPB = runBestSingle === null || r.single < runBestSingle;
+        if (isNewPB) {
+          runBestSingle = r.single;
+          const valSec = r.single / 100;
+          // Check from highest to lowest, assign only highest
+          if (wrS != null && valSec <= wrS) entry.single = 'WR';
+          else if (crS != null && valSec <= crS) entry.single = 'CR';
+          else if (nrS != null && valSec <= nrS) entry.single = 'NR';
+          else if (trBestSingle !== null && r.single <= trBestSingle) entry.single = 'TR';
+        }
+      }
+
+      // Check average
+      if (r.average != null && r.average > 0 && r.average !== -1 && r.average !== -2) {
+        const isNewPB = runBestAverage === null || r.average < runBestAverage;
+        if (isNewPB) {
+          runBestAverage = r.average;
+          const valSec = r.average / 100;
+          if (wrA != null && valSec <= wrA) entry.average = 'WR';
+          else if (crA != null && valSec <= crA) entry.average = 'CR';
+          else if (nrA != null && valSec <= nrA) entry.average = 'NR';
+          else if (trBestAverage !== null && r.average <= trBestAverage) entry.average = 'TR';
+        }
+      }
+
+      if (entry.single || entry.average) map[r.id] = entry;
+    });
+
+    // Current PBs = the running bests after processing all results
+    pbs.single = runBestSingle;
+    pbs.average = runBestAverage;
+
+    return { historyBadgeMap: map, currentPBs: pbs };
+  }, [allResults, historyEvent, compMap, globalResults, wcaRecords]);
+
   const openSolves = (e: React.MouseEvent, solves: (number | null)[]) => {
     if (!solves || solves.length === 0) return;
     e.stopPropagation();
@@ -610,8 +690,10 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
                                 : '';
                               const solves = [...(r.solves ?? [])];
                               while (solves.length < 5) solves.push(null);
-                              const rb = resultBadgesMap[r.id];
+                              const hb = historyBadgeMap[r.id];
                               const isHighlighted = highlightResultId === r.id;
+                              const isBestSingle = r.single != null && r.single > 0 && r.single === currentPBs.single;
+                              const isBestAvg = r.average != null && r.average > 0 && r.average === currentPBs.average;
                               return (
                                 <tr key={r.id} id={`apo-row-${r.id}`} className={isHighlighted ? 'apo-row-glow' : ''}>
                                   <td className="apo-td-round">{r.roundLabel}</td>
@@ -619,13 +701,13 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
                                     {medalEmoji && <span className="apo-medal-emoji">{medalEmoji}</span>}
                                     {place || '—'}
                                   </td>
-                                  <td className={`r mono apo-time-cell${r.single != null && r.single < 0 ? ' dnf' : ''}`}>
+                                  <td className={`r mono apo-time-cell${r.single != null && r.single < 0 ? ' dnf' : ''}${isBestSingle ? ' apo-pb' : ''}`}>
                                     {fmtTime(r.single)}
-                                    {rb?.single && <span className={`apo-time-badge apo-tb-${rb.single.toLowerCase()}`}>{rb.single}</span>}
+                                    {hb?.single && <span className={`apo-time-badge apo-tb-${hb.single.toLowerCase()}`}>{hb.single}</span>}
                                   </td>
-                                  <td className={`r mono bold apo-time-cell${r.average != null && r.average < 0 ? ' dnf' : ''}`}>
+                                  <td className={`r mono apo-time-cell${r.average != null && r.average < 0 ? ' dnf' : ''}${isBestAvg ? ' apo-pb' : ''}`}>
                                     {fmtTime(r.average)}
-                                    {rb?.average && <span className={`apo-time-badge apo-tb-${rb.average.toLowerCase()}`}>{rb.average}</span>}
+                                    {hb?.average && <span className={`apo-time-badge apo-tb-${hb.average.toLowerCase()}`}>{hb.average}</span>}
                                   </td>
                                   {solves.slice(0, 5).map((s, i) => (
                                     <td key={i} className={`r mono solve${s !== null && s < 0 ? ' dnf' : ''}`}>{fmtTime(s)}</td>
@@ -969,6 +1051,9 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
         .apo-td-round { color: var(--muted); white-space: nowrap; }
         .apo-td-place { font-weight: 700; font-size: 1rem; }
         .apo-medal-emoji { margin-right: 0.15rem; }
+
+        /* Personal best highlight */
+        .apo-pb { font-weight: 700 !important; color: #a78bfa !important; }
 
         /* Time cell with record badge */
         .apo-time-cell { position: relative; padding-right: 1.8rem !important; }
