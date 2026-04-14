@@ -276,31 +276,69 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
     return items;
   }, [allResults, globalResults, wcaRecords, compMap]);
 
-  // Competition history for selected event
-  const historyRows = useMemo(() => {
+  // Competition history for selected event, grouped by competition
+  interface HistoryRow extends Result {
+    compName: string; compDate: unknown; roundLabel: string; roundNum: number; sortDate: number;
+  }
+  interface HistoryGroup {
+    compId: string; compName: string; compDate: unknown; sortDate: number;
+    rows: HistoryRow[];
+  }
+  const historyGroups = useMemo((): HistoryGroup[] => {
     if (!historyEvent) return [];
-    const rows = allResults
-      .filter(r => r.eventId === historyEvent)
-      .map(r => {
-        const comp = compMap[r.competitionId];
-        const totalRounds = comp?.eventConfig?.[historyEvent]?.rounds ?? 1;
-        return {
-          ...r,
-          compName: comp?.name || r.competitionName || r.competitionId || '—',
-          compDate: comp?.date || r.submittedAt,
-          roundLabel: getRoundLabel(r.round || 1, totalRounds),
-          sortDate: toSortableDate(comp?.date || r.submittedAt),
-        };
-      })
-      .sort((a, b) => b.sortDate - a.sortDate);
-    return rows;
-  }, [allResults, historyEvent, compMap]);
+    const eventResults = allResults.filter(r => r.eventId === historyEvent);
 
-  // Placement for history rows (needs global results loaded for medals tab to work; fallback to '—')
+    // Find max round per competition for this event (from ALL results, not just this athlete)
+    const maxRoundPerComp: Record<string, number> = {};
+    // Use global results if available for accurate max round, else use athlete's own
+    const sourceForMax = globalResults ?? allResults;
+    sourceForMax.forEach(r => {
+      if (r.eventId !== historyEvent) return;
+      const rd = r.round || 1;
+      if (!maxRoundPerComp[r.competitionId] || rd > maxRoundPerComp[r.competitionId]) {
+        maxRoundPerComp[r.competitionId] = rd;
+      }
+    });
+
+    const rows: HistoryRow[] = eventResults.map(r => {
+      const comp = compMap[r.competitionId];
+      const totalRounds = maxRoundPerComp[r.competitionId] ?? 1;
+      const roundNum = r.round || 1;
+      return {
+        ...r,
+        compName: comp?.name || r.competitionName || r.competitionId || '—',
+        compDate: comp?.date || r.submittedAt,
+        roundLabel: getRoundLabel(roundNum, totalRounds),
+        roundNum,
+        sortDate: toSortableDate(comp?.date || r.submittedAt),
+      };
+    });
+
+    // Group by competition
+    const groupMap = new Map<string, HistoryGroup>();
+    rows.forEach(r => {
+      let g = groupMap.get(r.competitionId);
+      if (!g) {
+        g = { compId: r.competitionId, compName: r.compName, compDate: r.compDate, sortDate: r.sortDate, rows: [] };
+        groupMap.set(r.competitionId, g);
+      }
+      g.rows.push(r);
+    });
+
+    const groups = Array.from(groupMap.values());
+    // Sort groups by date descending
+    groups.sort((a, b) => b.sortDate - a.sortDate);
+    // Sort rows within each group: highest round first (Final at top)
+    groups.forEach(g => {
+      g.rows.sort((a, b) => b.roundNum - a.roundNum);
+    });
+    return groups;
+  }, [allResults, historyEvent, compMap, globalResults]);
+
+  // Placement for history rows
   const placementMap = useMemo(() => {
     const m: Record<string, number> = {};
     if (!globalResults) return m;
-    // For each result, find its placement in the round
     allResults.forEach(r => {
       if (r.eventId !== historyEvent) return;
       const roundResults = globalResults
@@ -405,8 +443,8 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
               {/* TAB 1: Competition History */}
               {tab === 'history' && (
                 <div className="apo-tab-content">
-                  {/* Event pills */}
-                  <div className="apo-event-pills">
+                  {/* Event pills - centered */}
+                  <div className="apo-event-pills" style={{ justifyContent: 'center' }}>
                     {athleteEvents.map(ev => (
                       <button
                         key={ev.id}
@@ -416,48 +454,54 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
                     ))}
                   </div>
 
-                  {historyRows.length === 0 ? (
+                  {historyGroups.length === 0 ? (
                     <div className="apo-empty">No results for this event</div>
                   ) : (
-                    <div className="apo-table-wrap">
-                      <table className="apo-table">
-                        <thead>
-                          <tr>
-                            <th>Competition</th>
-                            <th>Round</th>
-                            <th className="r">#</th>
-                            <th className="r">Single</th>
-                            <th className="r">Average</th>
-                            <th className="r">1</th><th className="r">2</th><th className="r">3</th><th className="r">4</th><th className="r">5</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {historyRows.map(r => {
-                            const place = placementMap[r.id];
-                            const medalEmoji = place === 1 ? '🥇' : place === 2 ? '🥈' : place === 3 ? '🥉' : '';
-                            const solves = r.solves ?? [];
-                            while (solves.length < 5) solves.push(null);
-                            return (
-                              <tr key={r.id}>
-                                <td className="apo-td-comp">
-                                  <div>{r.compName}</div>
-                                  <div className="apo-td-date">{formatDate(r.compDate)}</div>
-                                </td>
-                                <td className="apo-td-round">{r.roundLabel}</td>
-                                <td className="apo-td-place r">
-                                  {medalEmoji && <span className="apo-medal-emoji">{medalEmoji}</span>}
-                                  {place || '—'}
-                                </td>
-                                <td className={`r mono${r.single != null && r.single < 0 ? ' dnf' : ''}`}>{fmtTime(r.single)}</td>
-                                <td className={`r mono bold${r.average != null && r.average < 0 ? ' dnf' : ''}`}>{fmtTime(r.average)}</td>
-                                {solves.slice(0, 5).map((s, i) => (
-                                  <td key={i} className={`r mono solve${s !== null && s < 0 ? ' dnf' : ''}`}>{fmtTime(s)}</td>
-                                ))}
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                    <div className="apo-history-groups">
+                      {historyGroups.map(g => (
+                        <div key={g.compId} className="apo-hg">
+                          {/* Competition header - shown once */}
+                          <div className="apo-hg-header">
+                            <span className="apo-hg-name">{g.compName}</span>
+                            <span className="apo-hg-date">{formatDate(g.compDate)}</span>
+                          </div>
+                          <div className="apo-table-wrap">
+                            <table className="apo-table">
+                              <thead>
+                                <tr>
+                                  <th>Round</th>
+                                  <th className="r">Place</th>
+                                  <th className="r">Single</th>
+                                  <th className="r">Average</th>
+                                  <th className="r">1</th><th className="r">2</th><th className="r">3</th><th className="r">4</th><th className="r">5</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {g.rows.map(r => {
+                                  const place = placementMap[r.id];
+                                  const medalEmoji = place === 1 ? '🥇' : place === 2 ? '🥈' : place === 3 ? '🥉' : '';
+                                  const solves = [...(r.solves ?? [])];
+                                  while (solves.length < 5) solves.push(null);
+                                  return (
+                                    <tr key={r.id}>
+                                      <td className="apo-td-round">{r.roundLabel}</td>
+                                      <td className="apo-td-place r">
+                                        {medalEmoji && <span className="apo-medal-emoji">{medalEmoji}</span>}
+                                        {place || '—'}
+                                      </td>
+                                      <td className={`r mono${r.single != null && r.single < 0 ? ' dnf' : ''}`}>{fmtTime(r.single)}</td>
+                                      <td className={`r mono bold${r.average != null && r.average < 0 ? ' dnf' : ''}`}>{fmtTime(r.average)}</td>
+                                      {solves.slice(0, 5).map((s, i) => (
+                                        <td key={i} className={`r mono solve${s !== null && s < 0 ? ' dnf' : ''}`}>{fmtTime(s)}</td>
+                                      ))}
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -706,9 +750,16 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
         .apo-table .bold { font-weight: 700; color: #a78bfa; }
         .apo-table .dnf { color: #f87171; }
         .apo-table .solve { color: var(--muted); font-size: 0.78rem; }
-        .apo-td-comp { min-width: 140px; }
-        .apo-td-comp div:first-child { font-weight: 600; color: var(--text); font-size: 0.82rem; }
-        .apo-td-date { font-size: 0.68rem; color: var(--muted); margin-top: 0.1rem; }
+        /* History groups */
+        .apo-history-groups { display: flex; flex-direction: column; gap: 1.2rem; }
+        .apo-hg {}
+        .apo-hg-header {
+          display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap;
+          padding: 0.5rem 0; margin-bottom: 0.3rem;
+          border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .apo-hg-name { font-size: 0.88rem; font-weight: 700; color: #c4b5fd; }
+        .apo-hg-date { font-size: 0.72rem; color: var(--muted); }
         .apo-td-round { font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
         .apo-td-place { font-weight: 700; }
         .apo-medal-emoji { margin-right: 0.15rem; }
