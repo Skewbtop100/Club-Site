@@ -288,12 +288,13 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
   }
   const allBadgeData = useMemo(() => {
     const byBadge: Record<string, BadgeDetail[]> = { WR: [], CR: [], NR: [], TR: [], PR: [] };
-    if (!globalResults) return byBadge;
+    const refResults = globalResults ?? allResults;
+    if (refResults.length === 0) return byBadge;
     const seen = new Set<string>();
     allResults.forEach(r => {
-      const pair = getResultBadgesPair(r, globalResults, wcaRecords);
+      const pair = getResultBadgesPair(r, refResults, wcaRecords);
       const comp = compMap[r.competitionId];
-      const maxRd = globalResults.filter(gr => gr.competitionId === r.competitionId && gr.eventId === r.eventId)
+      const maxRd = refResults.filter(gr => gr.competitionId === r.competitionId && gr.eventId === r.eventId)
         .reduce((m, gr) => Math.max(m, gr.round || 1), 1);
       const evName = WCA_EVENTS.find(e => e.id === r.eventId)?.name || r.eventId;
 
@@ -317,11 +318,15 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
   }, [allResults, globalResults, wcaRecords, compMap]);
 
   // Per-result badge map: resultId → { single: highest badge, average: highest badge }
+  // Use allResults (athlete's own) as fallback for PR when globalResults hasn't loaded yet.
+  // TR/NR/CR/WR need globalResults, but PR only needs the athlete's own results.
   const resultBadgesMap = useMemo(() => {
     const m: Record<string, { single: RecordBadge | null; average: RecordBadge | null }> = {};
-    if (!globalResults) return m;
+    // Use globalResults if available (for TR accuracy), otherwise athlete's own results for PR
+    const refResults = globalResults ?? allResults;
+    if (refResults.length === 0) return m;
     allResults.forEach(r => {
-      const pair = getResultBadgesPair(r, globalResults, wcaRecords);
+      const pair = getResultBadgesPair(r, refResults, wcaRecords);
       const s = getHighestBadge(pair.single);
       const a = getHighestBadge(pair.average);
       if (s || a) m[r.id] = { single: s, average: a };
