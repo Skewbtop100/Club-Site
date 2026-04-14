@@ -18,6 +18,11 @@ export const BADGE_STYLES: Record<RecordBadge, React.CSSProperties> = {
 
 // ── Internal helper ─────────────────────────────────────────────────────────
 
+/** Check if a value is a valid positive time (not null, DNF, DNS, zero). */
+function isValidTime(v: unknown): v is number {
+  return typeof v === 'number' && v > 0 && v !== -1 && v !== -2;
+}
+
 function computeBadges(
   eventId: string,
   type: 'single' | 'average',
@@ -26,7 +31,7 @@ function computeBadges(
   allResults: Result[],
   wcaRecords: WcaRecords,
 ): RecordBadge[] {
-  if (!value || value <= 0 || value === -1 || value === -2) return [];
+  if (!isValidTime(value)) return [];
 
   const valueSec = value / 100;
   const rec = wcaRecords[eventId];
@@ -45,24 +50,23 @@ function computeBadges(
 
   // TR — best result in allResults for this event+type (all athletes)
   let trBest: number | null = null;
-  allResults.forEach((r) => {
+  for (const r of allResults) {
+    if (r.eventId !== eventId) continue;
     const v = r[type];
-    if (r.eventId === eventId && v && v > 0 && v !== -1 && v !== -2) {
-      if (trBest === null || v < trBest) trBest = v;
-    }
-  });
+    if (isValidTime(v) && (trBest === null || v < trBest)) trBest = v;
+  }
   if (trBest !== null && value <= trBest) isTR = true;
 
-  // PR — best result this athlete has achieved for this event+type
+  // PR — athlete's best-ever result for this event+type
+  // If this value equals their all-time best (or is their only result) → PR
   if (athleteId) {
     let prBest: number | null = null;
-    allResults.forEach((r) => {
-      if (r.athleteId !== athleteId || r.eventId !== eventId) return;
+    for (const r of allResults) {
+      if (r.athleteId !== athleteId || r.eventId !== eventId) continue;
       const v = r[type];
-      if (v && v > 0 && v !== -1 && v !== -2) {
-        if (prBest === null || v < prBest) prBest = v;
-      }
-    });
+      if (isValidTime(v) && (prBest === null || v < prBest)) prBest = v;
+    }
+    // PR if: this is the athlete's best ever, OR first ever (prBest === value)
     if (prBest !== null && value <= prBest) isPR = true;
   }
 
@@ -109,10 +113,10 @@ export function getResultBadgesPair(
   allResults: Result[],
   wcaRecords: WcaRecords,
 ): { single: RecordBadge[]; average: RecordBadge[] } {
-  const single = (result.single != null && result.single > 0)
+  const single = isValidTime(result.single)
     ? computeBadges(result.eventId, 'single', result.single, result.athleteId, allResults, wcaRecords)
     : [];
-  const average = (result.average != null && result.average > 0)
+  const average = isValidTime(result.average)
     ? computeBadges(result.eventId, 'average', result.average, result.athleteId, allResults, wcaRecords)
     : [];
   return { single, average };
