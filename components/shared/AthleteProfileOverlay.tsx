@@ -1,0 +1,808 @@
+'use client';
+
+import { useEffect, useState, useMemo } from 'react';
+import { getResultsByAthlete } from '@/lib/firebase/services/results';
+import { getCompetitions } from '@/lib/firebase/services/competitions';
+import { getResultRecordBadges } from '@/lib/record-badges';
+import { useWcaRecords } from '@/lib/hooks/useWcaRecords';
+import { fmtTime, formatDate } from '@/lib/time-utils';
+import { WCA_EVENTS } from '@/lib/wca-events';
+import type { Athlete, Result, Competition } from '@/lib/types';
+import type { RecordBadge } from '@/lib/record-badges';
+
+// ── helpers ─────────────────────────────────────────────────────────────────
+
+function getRoundLabel(roundNum: number, totalRounds: number): string {
+  if (totalRounds === 1) return 'Final';
+  if (roundNum === totalRounds) return 'Final';
+  if (totalRounds === 4 && roundNum === 3) return 'Semi Final';
+  const names: Record<number, string> = { 1: 'First Round', 2: 'Second Round', 3: 'Third Round' };
+  return names[roundNum] ?? `Round ${roundNum}`;
+}
+
+function wcaSort(a: Result, b: Result) {
+  const s = (r: Result): [number, number] => {
+    const avg = r.average != null && r.average > 0 ? r.average : null;
+    const sng = r.single != null && r.single > 0 ? r.single : null;
+    return [avg ?? Infinity, sng ?? Infinity];
+  };
+  const [pa, sa] = s(a), [pb, sb] = s(b);
+  return pa !== pb ? pa - pb : sa - sb;
+}
+
+function toSortableDate(ts: unknown): number {
+  if (!ts) return 0;
+  if (ts && typeof ts === 'object' && 'toDate' in ts && typeof (ts as { toDate: () => Date }).toDate === 'function')
+    return (ts as { toDate: () => Date }).toDate().getTime();
+  if (typeof ts === 'string') return new Date(ts).getTime() || 0;
+  if (typeof ts === 'number') return ts;
+  return 0;
+}
+
+const BADGE_STYLES: Record<string, React.CSSProperties> = {
+  WR: { background: '#b45309', color: '#fef3c7', border: '1px solid #f59e0b' },
+  CR: { background: '#1d4ed8', color: '#dbeafe', border: '1px solid #60a5fa' },
+  NR: { background: '#166534', color: '#dcfce7', border: '1px solid #4ade80' },
+  TR: { background: '#4c1d95', color: '#ede9fe', border: '1px solid #a78bfa' },
+};
+
+const EVENT_ORDER = ['333', '222', 'pyram', 'skewb'];
+
+// ── component ───────────────────────────────────────────────────────────────
+
+interface Props {
+  athlete: Athlete;
+  onClose: () => void;
+}
+
+type Tab = 'history' | 'records' | 'medals';
+
+export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
+  const [tab, setTab] = useState<Tab>('history');
+  const [allResults, setAllResults] = useState<Result[]>([]);
+  const [allComps, setAllComps] = useState<Competition[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [historyEvent, setHistoryEvent] = useState<string | null>(null);
+  const [solvesPopup, setSolvesPopup] = useState<{ solves: (number | null)[]; x: number; y: number } | null>(null);
+  const wcaRecords = useWcaRecords();
+
+  const fullName = (athlete.name || '') + (athlete.lastName ? ' ' + athlete.lastName : '');
+  const initials = fullName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+
+  // Fetch all results for this athlete + all competitions
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      getResultsByAthlete(athlete.id),
+      getCompetitions(),
+    ]).then(([res, comps]) => {
+      setAllResults(res.filter(r => r.status === 'published'));
+      setAllComps(comps);
+      setLoading(false);
+    });
+  }, [athlete.id]);
+
+  // Escape + scroll lock + click-outside for solves popup
+  useEffect(() => {
+    const keyHandler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (solvesPopup) setSolvesPopup(null);
+        else onClose();
+      }
+    };
+    const clickHandler = () => { if (solvesPopup) setSolvesPopup(null); };
+    document.addEventListener('keydown', keyHandler);
+    document.addEventListener('click', clickHandler);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', keyHandler);
+      document.removeEventListener('click', clickHandler);
+      document.body.style.overflow = '';
+    };
+  }, [onClose, solvesPopup]);
+
+  // Derived data
+  const compMap = useMemo(() => {
+    const m: Record<string, Competition> = {};
+    allComps.forEach(c => { m[c.id] = c; });
+    return m;
+  }, [allComps]);
+
+  const compNameMap = useMemo(() => {
+    const m: Record<string, string> = {};
+    allComps.forEach(c => { m[c.id] = c.name; });
+    return m;
+  }, [allComps]);
+
+  // Events this athlete has results for, sorted
+  const athleteEvents = useMemo(() => {
+    const ids = new Set(allResults.map(r => r.eventId));
+    const evts = WCA_EVENTS.filter(e => ids.has(e.id));
+    evts.sort((a, b) => {
+      const ai = EVENT_ORDER.indexOf(a.id);
+      const bi = EVENT_ORDER.indexOf(b.id);
+      return (ai >= 0 ? ai : 100) - (bi >= 0 ? bi : 100);
+    });
+    return evts;
+  }, [allResults]);
+
+  // Auto-select first event
+  useEffect(() => {
+    if (athleteEvents.length > 0 && !historyEvent) {
+      setHistoryEvent(athleteEvents[0].id);
+    }
+  }, [athleteEvents, historyEvent]);
+
+  // Stats
+  const stats = useMemo(() => {
+    const compIds = new Set(allResults.map(r => r.competitionId));
+    const eventIds = new Set(allResults.map(r => r.eventId));
+    let totalSolves = 0;
+    allResults.forEach(r => { totalSolves += (r.solves?.length || 0); });
+    return { comps: compIds.size, events: eventIds.size, solves: totalSolves };
+  }, [allResults]);
+
+  // Medals (across all competitions)
+  const medals = useMemo(() => {
+    interface MedalItem {
+      type: 'gold' | 'silver' | 'bronze';
+      eventId: string; eventName: string;
+      compId: string; compName: string; compDate: unknown;
+      roundLabel: string; time: number | null; solves: (number | null)[];
+    }
+    const list: MedalItem[] = [];
+    // Group all results by competition+event, find final rounds
+    const compEventMap = new Map<string, Result[]>();
+    // We need ALL results (not just this athlete) to determine placement.
+    // But we only have this athlete's results. We'll use comp.athletes or determine from results.
+    // Actually, for proper placement we need all results in the final round.
+    // Since we only fetched this athlete's results, we need to check placement differently.
+    // We'll look at the result's round and use the competition's eventConfig to identify final rounds.
+    // However the simplest approach: for each competition, find all events, determine final round results.
+    // We don't have other athletes' results here. Let's use a different approach:
+    // Group by compId+eventId, take the highest round, then we need to know placement.
+    // Since we can't determine placement from just this athlete's results, let's skip full placement logic
+    // and instead check if the athlete was in top 3 by fetching per-comp results.
+    // Actually that's too expensive. Let's fetch all results once (getAllResults is already in our results service).
+    // But that could be heavy. For now, let's approximate: we'll mark medals based on actual placement
+    // which requires competition results. Let's use a lazy approach - fetch per comp only when needed.
+    // SIMPLIFICATION: We'll compute medals only from results we have by checking placement info if available.
+    // The best approach: since we're inside a competition history overlay that already has results for ONE comp,
+    // and this overlay can be opened outside that context, let's just do a light calculation.
+    // We'll store medal info as "place unknown" and show events/times without placement.
+    // Actually - let me reconsider. We DO have getResultsByComp. Let's not over-engineer.
+    // We'll compute medals properly by grouping by comp and fetching all results per comp.
+    // But that's N queries. For now, let's just show the competition history and skip placement in medals.
+    // UPDATE: The user wants medals. Let's do it in a batch - we already have allComps.
+    // The cleanest: just show "results where this athlete participated" grouped by comp for the medals tab,
+    // and compute placement from allResults if we subscribe to all results.
+    // For now: return empty, we'll fill this using a subscription.
+    return { items: list, gold: 0, silver: 0, bronze: 0 };
+  }, []);
+
+  // We need all published results to compute placement. Let's fetch them.
+  const [globalResults, setGlobalResults] = useState<Result[] | null>(null);
+  useEffect(() => {
+    if (tab === 'medals' && globalResults === null) {
+      import('@/lib/firebase/services/results').then(mod => {
+        mod.getAllResults().then(all => {
+          setGlobalResults(all.filter(r => r.status === 'published'));
+        });
+      });
+    }
+  }, [tab, globalResults]);
+
+  // Compute medals from global results
+  const medalData = useMemo(() => {
+    if (!globalResults) return { items: [] as { type: 'gold' | 'silver' | 'bronze'; eventId: string; eventName: string; compId: string; compName: string; compDate: unknown; roundLabel: string; time: number | null; solves: (number | null)[] }[], gold: 0, silver: 0, bronze: 0 };
+    type MedalItem = { type: 'gold' | 'silver' | 'bronze'; eventId: string; eventName: string; compId: string; compName: string; compDate: unknown; roundLabel: string; time: number | null; solves: (number | null)[] };
+    const items: MedalItem[] = [];
+    // Get all competitions this athlete participated in
+    const myCompIds = new Set(allResults.map(r => r.competitionId));
+    myCompIds.forEach(compId => {
+      const comp = compMap[compId];
+      const compResults = globalResults.filter(r => r.competitionId === compId);
+      const eventIds = new Set(compResults.map(r => r.eventId));
+      eventIds.forEach(eventId => {
+        const evResults = compResults.filter(r => r.eventId === eventId);
+        const maxRound = evResults.reduce((m, r) => Math.max(m, r.round || 1), 1);
+        const finalResults = evResults.filter(r => (r.round || 1) === maxRound).sort(wcaSort);
+        const totalRounds = comp?.eventConfig?.[eventId]?.rounds ?? maxRound;
+        const rLabel = getRoundLabel(maxRound, totalRounds);
+        finalResults.forEach((r, i) => {
+          if (r.athleteId !== athlete.id) return;
+          if (i > 2) return;
+          const evName = WCA_EVENTS.find(e => e.id === eventId)?.name || eventId;
+          items.push({
+            type: i === 0 ? 'gold' : i === 1 ? 'silver' : 'bronze',
+            eventId, eventName: evName,
+            compId, compName: comp?.name || r.competitionName || compId,
+            compDate: comp?.date || r.submittedAt,
+            roundLabel: rLabel,
+            time: r.average != null && r.average > 0 ? r.average : r.single,
+            solves: r.solves ? [...r.solves] : [],
+          });
+        });
+      });
+    });
+    // Sort by date descending
+    items.sort((a, b) => toSortableDate(b.compDate) - toSortableDate(a.compDate));
+    let gold = 0, silver = 0, bronze = 0;
+    items.forEach(m => { if (m.type === 'gold') gold++; else if (m.type === 'silver') silver++; else bronze++; });
+    return { items, gold, silver, bronze };
+  }, [globalResults, allResults, compMap, athlete.id]);
+
+  // Records: TR/NR/CR/WR for this athlete
+  const recordData = useMemo(() => {
+    interface RecItem {
+      eventId: string; eventName: string; type: 'single' | 'average';
+      badge: RecordBadge; time: number; compName: string; roundLabel: string;
+      solves: (number | null)[];
+    }
+    const items: RecItem[] = [];
+    if (!globalResults) return items;
+    const seen = new Set<string>();
+    allResults.forEach(r => {
+      (['single', 'average'] as const).forEach(type => {
+        const val = r[type];
+        if (val == null || val <= 0 || val === -1 || val === -2) return;
+        const badges = getResultRecordBadges(r.eventId, type, val, r.athleteId, globalResults, wcaRecords);
+        const significant = badges.filter(b => b !== 'PR') as RecordBadge[];
+        if (significant.length === 0) return;
+        const best = significant[0]; // most prominent
+        const key = `${r.eventId}-${type}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        const evName = WCA_EVENTS.find(e => e.id === r.eventId)?.name || r.eventId;
+        const comp = compMap[r.competitionId];
+        const totalRounds = comp?.eventConfig?.[r.eventId]?.rounds ?? 1;
+        items.push({
+          eventId: r.eventId, eventName: evName, type, badge: best, time: val,
+          compName: comp?.name || r.competitionName || r.competitionId || '—',
+          roundLabel: getRoundLabel(r.round || 1, totalRounds),
+          solves: r.solves ? [...r.solves] : [],
+        });
+      });
+    });
+    // Group by event order
+    items.sort((a, b) => {
+      const ai = EVENT_ORDER.indexOf(a.eventId);
+      const bi = EVENT_ORDER.indexOf(b.eventId);
+      const ap = ai >= 0 ? ai : 100;
+      const bp = bi >= 0 ? bi : 100;
+      if (ap !== bp) return ap - bp;
+      return a.type === 'single' ? -1 : 1;
+    });
+    return items;
+  }, [allResults, globalResults, wcaRecords, compMap]);
+
+  // Competition history for selected event
+  const historyRows = useMemo(() => {
+    if (!historyEvent) return [];
+    const rows = allResults
+      .filter(r => r.eventId === historyEvent)
+      .map(r => {
+        const comp = compMap[r.competitionId];
+        const totalRounds = comp?.eventConfig?.[historyEvent]?.rounds ?? 1;
+        return {
+          ...r,
+          compName: comp?.name || r.competitionName || r.competitionId || '—',
+          compDate: comp?.date || r.submittedAt,
+          roundLabel: getRoundLabel(r.round || 1, totalRounds),
+          sortDate: toSortableDate(comp?.date || r.submittedAt),
+        };
+      })
+      .sort((a, b) => b.sortDate - a.sortDate);
+    return rows;
+  }, [allResults, historyEvent, compMap]);
+
+  // Placement for history rows (needs global results loaded for medals tab to work; fallback to '—')
+  const placementMap = useMemo(() => {
+    const m: Record<string, number> = {};
+    if (!globalResults) return m;
+    // For each result, find its placement in the round
+    allResults.forEach(r => {
+      if (r.eventId !== historyEvent) return;
+      const roundResults = globalResults
+        .filter(gr => gr.competitionId === r.competitionId && gr.eventId === r.eventId && (gr.round || 1) === (r.round || 1))
+        .sort(wcaSort);
+      const idx = roundResults.findIndex(gr => gr.athleteId === r.athleteId);
+      if (idx >= 0) m[r.id] = idx + 1;
+    });
+    return m;
+  }, [globalResults, allResults, historyEvent]);
+
+  // Total record count for header
+  const totalRecords = useMemo(() => recordData.length, [recordData]);
+
+  const openSolves = (e: React.MouseEvent, solves: (number | null)[]) => {
+    if (!solves || solves.length === 0) return;
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setSolvesPopup({ solves, x: rect.left + rect.width / 2, y: rect.bottom + 4 });
+  };
+
+  // ── render ────────────────────────────────────────────────────────────────
+
+  return (
+    <div className="apo-overlay">
+      {/* Close button */}
+      <button className="apo-close" onClick={onClose} aria-label="Close">✕</button>
+
+      <div className="apo-scroll">
+        {/* Header */}
+        <div className="apo-header">
+          {athlete.imageUrl ? (
+            <img src={athlete.imageUrl} alt={fullName} className="apo-avatar" />
+          ) : (
+            <div className="apo-avatar apo-avatar-ph">{initials}</div>
+          )}
+          <div className="apo-name">{fullName}</div>
+          <div className="apo-meta">
+            {athlete.wcaId && <span className="apo-meta-item apo-wca">{athlete.wcaId}</span>}
+            <span className="apo-meta-item">Mongolia</span>
+            {athlete.birthDate && <span className="apo-meta-item">{athlete.birthDate}</span>}
+          </div>
+
+          {/* Activity stats */}
+          <div className="apo-stats-row">
+            <div className="apo-stat">
+              <div className="apo-stat-num">{stats.comps}</div>
+              <div className="apo-stat-label">Comps</div>
+            </div>
+            <div className="apo-stat">
+              <div className="apo-stat-num">{stats.events}</div>
+              <div className="apo-stat-label">Events</div>
+            </div>
+            <div className="apo-stat">
+              <div className="apo-stat-num">{stats.solves}</div>
+              <div className="apo-stat-label">Solves</div>
+            </div>
+          </div>
+
+          {/* Achievement stats */}
+          <div className="apo-stats-row apo-stats-gold">
+            <div className="apo-stat">
+              <div className="apo-stat-num">🥇 {medalData.gold}</div>
+              <div className="apo-stat-label">Gold</div>
+            </div>
+            <div className="apo-stat">
+              <div className="apo-stat-num">🥈 {medalData.silver}</div>
+              <div className="apo-stat-label">Silver</div>
+            </div>
+            <div className="apo-stat">
+              <div className="apo-stat-num">🥉 {medalData.bronze}</div>
+              <div className="apo-stat-label">Bronze</div>
+            </div>
+            <div className="apo-stat">
+              <div className="apo-stat-num">{totalRecords}</div>
+              <div className="apo-stat-label">Records</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div className="apo-tabs">
+          {([
+            { key: 'history' as Tab, label: 'Competition History' },
+            { key: 'records' as Tab, label: 'Records' },
+            { key: 'medals' as Tab, label: 'Medals' },
+          ]).map(t => (
+            <button
+              key={t.key}
+              className={`apo-tab${tab === t.key ? ' active' : ''}`}
+              onClick={() => setTab(t.key)}
+            >{t.label}</button>
+          ))}
+        </div>
+
+        {/* Content */}
+        <div className="apo-content">
+          {loading ? (
+            <div className="apo-loading"><div className="apo-spinner" /></div>
+          ) : (
+            <>
+              {/* TAB 1: Competition History */}
+              {tab === 'history' && (
+                <div className="apo-tab-content">
+                  {/* Event pills */}
+                  <div className="apo-event-pills">
+                    {athleteEvents.map(ev => (
+                      <button
+                        key={ev.id}
+                        className={`apo-ep${historyEvent === ev.id ? ' active' : ''}`}
+                        onClick={() => setHistoryEvent(ev.id)}
+                      >{ev.name}</button>
+                    ))}
+                  </div>
+
+                  {historyRows.length === 0 ? (
+                    <div className="apo-empty">No results for this event</div>
+                  ) : (
+                    <div className="apo-table-wrap">
+                      <table className="apo-table">
+                        <thead>
+                          <tr>
+                            <th>Competition</th>
+                            <th>Round</th>
+                            <th className="r">#</th>
+                            <th className="r">Single</th>
+                            <th className="r">Average</th>
+                            <th className="r">1</th><th className="r">2</th><th className="r">3</th><th className="r">4</th><th className="r">5</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {historyRows.map(r => {
+                            const place = placementMap[r.id];
+                            const medalEmoji = place === 1 ? '🥇' : place === 2 ? '🥈' : place === 3 ? '🥉' : '';
+                            const solves = r.solves ?? [];
+                            while (solves.length < 5) solves.push(null);
+                            return (
+                              <tr key={r.id}>
+                                <td className="apo-td-comp">
+                                  <div>{r.compName}</div>
+                                  <div className="apo-td-date">{formatDate(r.compDate)}</div>
+                                </td>
+                                <td className="apo-td-round">{r.roundLabel}</td>
+                                <td className="apo-td-place r">
+                                  {medalEmoji && <span className="apo-medal-emoji">{medalEmoji}</span>}
+                                  {place || '—'}
+                                </td>
+                                <td className={`r mono${r.single != null && r.single < 0 ? ' dnf' : ''}`}>{fmtTime(r.single)}</td>
+                                <td className={`r mono bold${r.average != null && r.average < 0 ? ' dnf' : ''}`}>{fmtTime(r.average)}</td>
+                                {solves.slice(0, 5).map((s, i) => (
+                                  <td key={i} className={`r mono solve${s !== null && s < 0 ? ' dnf' : ''}`}>{fmtTime(s)}</td>
+                                ))}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAB 2: Records */}
+              {tab === 'records' && (
+                <div className="apo-tab-content">
+                  {(globalResults === null) ? (
+                    <div className="apo-loading"><div className="apo-spinner" /></div>
+                  ) : recordData.length === 0 ? (
+                    <div className="apo-empty">No national/world records yet</div>
+                  ) : (
+                    <div className="apo-records-list">
+                      {(() => {
+                        let lastEvent = '';
+                        return recordData.map((rd, i) => {
+                          const showHeader = rd.eventId !== lastEvent;
+                          lastEvent = rd.eventId;
+                          return (
+                            <div key={i}>
+                              {showHeader && <div className="apo-rec-event-header">{rd.eventName}</div>}
+                              <div className="apo-rec-row">
+                                <span className="apo-rec-badge" style={BADGE_STYLES[rd.badge] || {}}>{rd.badge}</span>
+                                <span className="apo-rec-type">{rd.type}</span>
+                                <span className="apo-rec-time mono bold">{fmtTime(rd.time)}</span>
+                                <span className="apo-rec-comp">{rd.compName}</span>
+                                <span className="apo-rec-round">{rd.roundLabel}</span>
+                                {rd.type === 'average' && rd.solves.length > 0 && (
+                                  <span
+                                    className="apo-rec-solves-btn"
+                                    onClick={e => openSolves(e, rd.solves)}
+                                  >solves</span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAB 3: Medals */}
+              {tab === 'medals' && (
+                <div className="apo-tab-content">
+                  {(globalResults === null) ? (
+                    <div className="apo-loading"><div className="apo-spinner" /></div>
+                  ) : medalData.items.length === 0 ? (
+                    <div className="apo-empty">No medals yet</div>
+                  ) : (
+                    <>
+                      {/* Summary */}
+                      <div className="apo-medal-summary">
+                        <span>🥇 {medalData.gold}</span>
+                        <span>🥈 {medalData.silver}</span>
+                        <span>🥉 {medalData.bronze}</span>
+                      </div>
+
+                      {/* Group by competition */}
+                      {(() => {
+                        const groups: { compId: string; compName: string; compDate: unknown; items: typeof medalData.items }[] = [];
+                        const gMap = new Map<string, typeof groups[0]>();
+                        medalData.items.forEach(m => {
+                          let g = gMap.get(m.compId);
+                          if (!g) {
+                            g = { compId: m.compId, compName: m.compName, compDate: m.compDate, items: [] };
+                            gMap.set(m.compId, g);
+                            groups.push(g);
+                          }
+                          g.items.push(m);
+                        });
+                        return groups.map(g => (
+                          <div key={g.compId} className="apo-medal-group">
+                            <div className="apo-medal-group-header">
+                              <span className="apo-mg-name">{g.compName}</span>
+                              <span className="apo-mg-date">{formatDate(g.compDate)}</span>
+                            </div>
+                            {g.items.map((m, i) => (
+                              <div key={i} className="apo-medal-row">
+                                <span className="apo-medal-icon">{m.type === 'gold' ? '🥇' : m.type === 'silver' ? '🥈' : '🥉'}</span>
+                                <span className="apo-medal-ev">{m.eventName}</span>
+                                <span className="apo-medal-round">{m.roundLabel}</span>
+                                <span
+                                  className={`apo-medal-time mono bold${m.solves.length > 0 ? ' apo-clickable' : ''}`}
+                                  onClick={m.solves.length > 0 ? e => openSolves(e, m.solves) : undefined}
+                                >{fmtTime(m.time)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ));
+                      })()}
+                    </>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Solves popup */}
+      {solvesPopup && (
+        <div
+          className="apo-solves-popup"
+          style={{ left: solvesPopup.x, top: solvesPopup.y }}
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="apo-solves-row">
+            {(solvesPopup.solves.length >= 5 ? solvesPopup.solves.slice(0, 5) : solvesPopup.solves).map((s, i) => {
+              const valid = solvesPopup.solves.slice(0, 5).filter((v): v is number => v !== null && v > 0);
+              const best = valid.length > 0 ? Math.min(...valid) : null;
+              const isBest = s !== null && s > 0 && s === best;
+              return (
+                <span key={i} className={`apo-solve-cell${isBest ? ' best' : ''}${s !== null && s < 0 ? ' dnf' : ''}`}>
+                  <span className="apo-solve-label">S{i + 1}</span>
+                  <span className="apo-solve-val">{fmtTime(s)}</span>
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        .apo-overlay {
+          position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+          z-index: 10000; background: var(--bg);
+          display: flex; flex-direction: column;
+          animation: apoFadeIn 0.22s ease;
+        }
+        @keyframes apoFadeIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+
+        .apo-close {
+          position: fixed; top: 0.8rem; right: 1rem; z-index: 10001;
+          background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.12);
+          border-radius: 8px; color: var(--muted); cursor: pointer;
+          font-family: inherit; min-width: 2.5rem; min-height: 2.5rem;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 1.1rem; transition: all 0.2s; backdrop-filter: blur(4px);
+        }
+        .apo-close:hover { border-color: rgba(124,58,237,0.4); color: var(--text); }
+
+        .apo-scroll { flex: 1; overflow-y: auto; }
+
+        /* Header */
+        .apo-header {
+          display: flex; flex-direction: column; align-items: center;
+          padding: 2.5rem 1.5rem 1.5rem; text-align: center;
+          background: linear-gradient(180deg, rgba(124,58,237,0.08) 0%, transparent 100%);
+        }
+        .apo-avatar {
+          width: 120px; height: 120px; border-radius: 50%; object-fit: cover;
+          border: 3px solid rgba(124,58,237,0.3); margin-bottom: 1rem;
+        }
+        .apo-avatar-ph {
+          background: linear-gradient(135deg, var(--accent), var(--accent2));
+          display: flex; align-items: center; justify-content: center;
+          font-size: 2.2rem; font-weight: 800; color: #fff;
+        }
+        .apo-name {
+          font-size: 1.6rem; font-weight: 800; color: var(--text-primary);
+          margin-bottom: 0.4rem;
+        }
+        .apo-meta { display: flex; gap: 0.6rem; flex-wrap: wrap; justify-content: center; margin-bottom: 1.2rem; }
+        .apo-meta-item {
+          font-size: 0.78rem; color: var(--muted);
+          background: rgba(255,255,255,0.04); padding: 0.2rem 0.6rem;
+          border-radius: 999px; border: 1px solid rgba(255,255,255,0.06);
+        }
+        .apo-wca { color: var(--accent); font-family: monospace; font-weight: 600; }
+
+        /* Stats rows */
+        .apo-stats-row {
+          display: flex; gap: 0; width: 100%; max-width: 400px;
+          background: var(--card); border: 1px solid rgba(255,255,255,0.06);
+          border-radius: 10px; overflow: hidden; margin-bottom: 0.6rem;
+        }
+        .apo-stats-gold {
+          border-color: rgba(250,204,21,0.15);
+          background: rgba(250,204,21,0.04);
+        }
+        .apo-stat {
+          flex: 1; padding: 0.6rem 0.3rem; text-align: center;
+          border-right: 1px solid rgba(255,255,255,0.06);
+        }
+        .apo-stat:last-child { border-right: none; }
+        .apo-stats-gold .apo-stat { border-right-color: rgba(250,204,21,0.1); }
+        .apo-stat-num { font-size: 1rem; font-weight: 800; color: var(--text); font-family: monospace; }
+        .apo-stat-label { font-size: 0.62rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 0.1rem; }
+
+        /* Tabs */
+        .apo-tabs {
+          display: flex; border-bottom: 1px solid rgba(255,255,255,0.06);
+          position: sticky; top: 0; z-index: 5; background: var(--bg);
+          overflow-x: auto; scrollbar-width: none;
+        }
+        .apo-tabs::-webkit-scrollbar { display: none; }
+        .apo-tab {
+          flex-shrink: 0; padding: 0.7rem 1.2rem; background: none; border: none;
+          font-size: 0.82rem; font-weight: 600; color: var(--muted);
+          cursor: pointer; font-family: inherit; transition: all 0.2s;
+          border-bottom: 2px solid transparent; white-space: nowrap;
+        }
+        .apo-tab:hover { color: var(--text); }
+        .apo-tab.active { color: #a78bfa; border-bottom-color: var(--accent); }
+
+        /* Content */
+        .apo-content { min-height: 300px; }
+        .apo-tab-content { padding: 1.2rem; max-width: 900px; margin: 0 auto; }
+        .apo-loading { display: flex; align-items: center; justify-content: center; padding: 3rem; }
+        .apo-spinner {
+          width: 28px; height: 28px; border-radius: 50%;
+          border: 3px solid rgba(124,58,237,0.2); border-top-color: var(--accent);
+          animation: apoSpin 0.8s linear infinite;
+        }
+        @keyframes apoSpin { to { transform: rotate(360deg); } }
+        .apo-empty { text-align: center; padding: 3rem 1rem; color: var(--muted); font-size: 0.88rem; }
+
+        /* Event pills */
+        .apo-event-pills {
+          display: flex; gap: 0.35rem; flex-wrap: wrap; margin-bottom: 1rem;
+        }
+        .apo-ep {
+          padding: 0.35rem 0.8rem; border-radius: 999px; font-size: 0.78rem; font-weight: 600;
+          border: 1px solid rgba(255,255,255,0.1); background: transparent; color: var(--muted);
+          cursor: pointer; font-family: inherit; transition: all 0.2s;
+        }
+        .apo-ep:hover { color: var(--text); border-color: rgba(124,58,237,0.4); }
+        .apo-ep.active { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; border-color: transparent; }
+
+        /* Table */
+        .apo-table-wrap { overflow-x: auto; }
+        .apo-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+        .apo-table th {
+          text-align: left; padding: 0.5rem 0.5rem; font-size: 0.68rem; font-weight: 700;
+          text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+          border-bottom: 2px solid rgba(255,255,255,0.07); white-space: nowrap;
+          position: sticky; top: 0; background: var(--bg); z-index: 2;
+        }
+        .apo-table th.r, .apo-table td.r { text-align: right; }
+        .apo-table td { padding: 0.55rem 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.04); vertical-align: middle; }
+        .apo-table tr:hover td { background: rgba(124,58,237,0.05); }
+        .apo-table .mono { font-family: monospace; }
+        .apo-table .bold { font-weight: 700; color: #a78bfa; }
+        .apo-table .dnf { color: #f87171; }
+        .apo-table .solve { color: var(--muted); font-size: 0.78rem; }
+        .apo-td-comp { min-width: 140px; }
+        .apo-td-comp div:first-child { font-weight: 600; color: var(--text); font-size: 0.82rem; }
+        .apo-td-date { font-size: 0.68rem; color: var(--muted); margin-top: 0.1rem; }
+        .apo-td-round { font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
+        .apo-td-place { font-weight: 700; }
+        .apo-medal-emoji { margin-right: 0.15rem; }
+
+        /* Records */
+        .apo-records-list { display: flex; flex-direction: column; gap: 0.2rem; }
+        .apo-rec-event-header {
+          font-size: 0.9rem; font-weight: 700; color: var(--text);
+          padding: 0.8rem 0 0.3rem; border-bottom: 1px solid rgba(255,255,255,0.06);
+          margin-bottom: 0.3rem;
+        }
+        .apo-rec-event-header:first-child { padding-top: 0; }
+        .apo-rec-row {
+          display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+          padding: 0.45rem 0.6rem; border-radius: 8px;
+          background: rgba(255,255,255,0.02);
+        }
+        .apo-rec-badge {
+          font-size: 0.58rem; font-weight: 900; letter-spacing: 0.04em;
+          padding: 2px 5px; border-radius: 4px; flex-shrink: 0;
+        }
+        .apo-rec-type {
+          font-size: 0.75rem; font-weight: 600; color: var(--muted);
+          min-width: 48px; text-transform: capitalize;
+        }
+        .apo-rec-time { font-size: 0.92rem; }
+        .apo-rec-comp { font-size: 0.75rem; color: var(--muted); }
+        .apo-rec-round { font-size: 0.72rem; color: var(--muted); opacity: 0.7; }
+        .apo-rec-solves-btn {
+          font-size: 0.68rem; color: var(--accent); cursor: pointer;
+          border-bottom: 1px dashed rgba(167,139,250,0.4); padding-bottom: 1px;
+        }
+        .apo-rec-solves-btn:hover { color: #c4b5fd; }
+
+        /* Medals */
+        .apo-medal-summary {
+          display: flex; gap: 1.5rem; justify-content: center;
+          font-size: 1.1rem; font-weight: 700; margin-bottom: 1.2rem;
+          padding: 0.8rem; background: rgba(250,204,21,0.04);
+          border: 1px solid rgba(250,204,21,0.12); border-radius: 10px;
+        }
+        .apo-medal-group { margin-bottom: 1rem; }
+        .apo-medal-group-header {
+          display: flex; align-items: baseline; gap: 0.6rem;
+          padding: 0.5rem 0; border-bottom: 1px solid rgba(255,255,255,0.06);
+          margin-bottom: 0.3rem;
+        }
+        .apo-mg-name { font-size: 0.88rem; font-weight: 700; color: var(--text); }
+        .apo-mg-date { font-size: 0.72rem; color: var(--muted); }
+        .apo-medal-row {
+          display: flex; align-items: center; gap: 0.5rem;
+          padding: 0.4rem 0.5rem; border-radius: 8px;
+          transition: background 0.15s;
+        }
+        .apo-medal-row:hover { background: rgba(255,255,255,0.03); }
+        .apo-medal-icon { font-size: 1rem; flex-shrink: 0; }
+        .apo-medal-ev { font-size: 0.82rem; font-weight: 600; color: var(--text); flex: 1; }
+        .apo-medal-round { font-size: 0.72rem; color: var(--muted); }
+        .apo-medal-time { font-size: 0.88rem; flex-shrink: 0; }
+        .apo-clickable {
+          cursor: pointer; border-bottom: 1px dashed rgba(167,139,250,0.4); padding-bottom: 1px;
+        }
+        .apo-clickable:hover { color: #c4b5fd; }
+
+        /* Solves popup */
+        .apo-solves-popup {
+          position: fixed; z-index: 10002;
+          transform: translateX(-50%);
+          background: var(--bg); border: 1px solid rgba(124,58,237,0.35);
+          border-radius: 10px; padding: 0.5rem 0.6rem;
+          box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+          animation: apoFadeIn 0.12s ease;
+        }
+        .apo-solves-row { display: flex; gap: 0.35rem; }
+        .apo-solve-cell {
+          display: flex; flex-direction: column; align-items: center; gap: 0.1rem; min-width: 40px;
+        }
+        .apo-solve-label { font-size: 0.55rem; font-weight: 700; color: var(--muted); text-transform: uppercase; }
+        .apo-solve-val { font-family: monospace; font-size: 0.82rem; color: var(--muted); white-space: nowrap; }
+        .apo-solve-cell.best .apo-solve-val { color: var(--text); font-weight: 700; }
+        .apo-solve-cell.dnf .apo-solve-val { color: #f87171; }
+
+        /* Mobile */
+        @media (max-width: 700px) {
+          .apo-header { padding: 2rem 1rem 1rem; }
+          .apo-avatar { width: 90px; height: 90px; }
+          .apo-avatar-ph { font-size: 1.6rem; }
+          .apo-name { font-size: 1.3rem; }
+          .apo-stats-row { max-width: 100%; }
+          .apo-tab-content { padding: 1rem 0.75rem; }
+          .apo-table { min-width: 700px; }
+          .apo-close { top: 0.5rem; right: 0.5rem; }
+        }
+      `}</style>
+    </div>
+  );
+}

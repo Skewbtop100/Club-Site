@@ -6,6 +6,7 @@ import { useWcaRecords } from '@/lib/hooks/useWcaRecords';
 import { getResultRecordBadges } from '@/lib/record-badges';
 import { fmtTime, formatDate } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
+import AthleteProfileOverlay from '@/components/shared/AthleteProfileOverlay';
 import type { Competition, Result, Athlete, AdvancementConfig } from '@/lib/types';
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -634,61 +635,13 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
               </div>
             )}
 
-            {/* Inline athlete profile modal */}
-            {athleteProfile && (() => {
-              const ap = athleteProfile;
-              const fullName = (ap.name || '') + (ap.lastName ? ' ' + ap.lastName : '');
-              const initials = fullName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
-              const apResults = results.filter(r => r.athleteId === ap.id);
-              const pbs: Record<string, { single: number | null; average: number | null }> = {};
-              apResults.forEach(r => {
-                if (!pbs[r.eventId]) pbs[r.eventId] = { single: null, average: null };
-                const e = pbs[r.eventId];
-                if (r.single != null && r.single > 0 && (e.single === null || r.single < e.single)) e.single = r.single;
-                if (r.average != null && r.average > 0 && (e.average === null || r.average < e.average)) e.average = r.average;
-              });
-              return (
-                <div className="ch-ap-overlay" onClick={() => setAthleteProfile(null)}>
-                  <div className="ch-ap-modal" onClick={e => e.stopPropagation()}>
-                    <div className="ch-ap-header">
-                      <div className="ch-ap-header-left">
-                        {ap.imageUrl ? (
-                          <img src={ap.imageUrl} alt={fullName} className="ch-ap-avatar" />
-                        ) : (
-                          <div className="ch-ap-avatar ch-ap-avatar-ph">{initials}</div>
-                        )}
-                        <div>
-                          <div className="ch-ap-name">{fullName}</div>
-                          {ap.wcaId && <div className="ch-ap-wca">{ap.wcaId}</div>}
-                        </div>
-                      </div>
-                      <button className="ch-close-btn" onClick={() => setAthleteProfile(null)} style={{ minWidth: '2rem', minHeight: '2rem', fontSize: '0.9rem' }}>✕</button>
-                    </div>
-                    <div className="ch-ap-body">
-                      <div className="ch-info-label">Results at this competition</div>
-                      {Object.keys(pbs).length === 0 ? (
-                        <div className="ch-empty-note">No results</div>
-                      ) : (
-                        <div className="ch-ap-results">
-                          {Object.entries(pbs).map(([eid, pb]) => {
-                            const ev = WCA_EVENTS.find(e => e.id === eid);
-                            return (
-                              <div key={eid} className="ch-ap-result-row">
-                                <span className="ch-ap-ev">{ev?.name || eid}</span>
-                                <div className="ch-ap-times">
-                                  {pb.single != null && <span className="ch-ae-time"><span className="ch-ae-label">S</span>{fmtTime(pb.single)}</span>}
-                                  {pb.average != null && <span className="ch-ae-time"><span className="ch-ae-label">A</span>{fmtTime(pb.average)}</span>}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
+            {/* Athlete profile overlay */}
+            {athleteProfile && (
+              <AthleteProfileOverlay
+                athlete={athleteProfile}
+                onClose={() => setAthleteProfile(null)}
+              />
+            )}
 
             {/* SECTION B: Results */}
             {section === 'results' && (
@@ -1270,46 +1223,6 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
           transition: color 0.2s;
         }
 
-        /* Athlete profile modal */
-        .ch-ap-overlay {
-          position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 10000;
-          background: rgba(0,0,0,0.7); backdrop-filter: blur(4px);
-          display: flex; align-items: center; justify-content: center; padding: 1rem;
-          animation: chFadeIn 0.15s ease;
-        }
-        .ch-ap-modal {
-          width: 100%; max-width: 440px; max-height: 80vh;
-          background: var(--bg); border: 1px solid rgba(124,58,237,0.25);
-          border-radius: 16px; display: flex; flex-direction: column;
-          animation: chSlideIn 0.2s cubic-bezier(.4,0,.2,1);
-        }
-        @keyframes chSlideIn { from { transform: scale(0.95) translateY(10px); opacity:0; } to { transform: none; opacity:1; } }
-        .ch-ap-header {
-          display: flex; align-items: center; justify-content: space-between;
-          padding: 1.1rem 1.3rem; border-bottom: 1px solid rgba(124,58,237,0.2); flex-shrink: 0;
-        }
-        .ch-ap-header-left { display: flex; align-items: center; gap: 0.7rem; }
-        .ch-ap-avatar {
-          width: 44px; height: 44px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
-          border: 2px solid rgba(124,58,237,0.3);
-        }
-        .ch-ap-avatar-ph {
-          background: linear-gradient(135deg, var(--accent), var(--accent2));
-          display: flex; align-items: center; justify-content: center;
-          font-size: 0.8rem; font-weight: 800; color: #fff;
-        }
-        .ch-ap-name { font-size: 1rem; font-weight: 700; color: var(--text); }
-        .ch-ap-wca { font-size: 0.72rem; color: var(--accent); font-family: monospace; margin-top: 0.1rem; }
-        .ch-ap-body { overflow-y: auto; flex: 1; padding: 1.1rem 1.3rem; }
-        .ch-ap-results { display: flex; flex-direction: column; gap: 0.4rem; }
-        .ch-ap-result-row {
-          display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
-          padding: 0.45rem 0.6rem; border-radius: 8px;
-          background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.04);
-        }
-        .ch-ap-ev { font-size: 0.82rem; font-weight: 600; color: var(--text); }
-        .ch-ap-times { display: flex; gap: 0.6rem; align-items: center; }
-
         /* ── Section B: Results ───────────────────────────────────── */
         .ch-results-section { flex: 1; display: flex; flex-direction: column; height: 100%; }
         .ch-results-layout { flex: 1; min-height: 400px; border: none; border-radius: 0; }
@@ -1398,8 +1311,6 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
           .ch-results-section { overflow: hidden; }
           .ch-results-layout { min-height: 300px; }
           .ch-strip-arrow { display: none !important; }
-          .ch-ap-overlay { align-items: flex-end; padding: 0; }
-          .ch-ap-modal { max-width: 100%; max-height: 85vh; border-radius: 16px 16px 0 0; border-bottom: none; }
         }
       `}</style>
     </div>
