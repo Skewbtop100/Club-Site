@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { getResultsByAthlete } from '@/lib/firebase/services/results';
 import { getCompetitions } from '@/lib/firebase/services/competitions';
-import { getResultRecordBadges } from '@/lib/record-badges';
+import { getResultRecordBadges, getHighestBadge } from '@/lib/record-badges';
 import { useWcaRecords } from '@/lib/hooks/useWcaRecords';
 import { fmtTime, formatDate } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
@@ -253,7 +253,7 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
         const badges = getResultRecordBadges(r.eventId, type, val, r.athleteId, globalResults, wcaRecords);
         const significant = badges.filter(b => b !== 'PR') as RecordBadge[];
         if (significant.length === 0) return;
-        const best = significant[0]; // most prominent
+        const best = significant[0];
         const key = `${r.eventId}-${type}`;
         if (seen.has(key)) return;
         seen.add(key);
@@ -324,7 +324,7 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
         const val = r[type];
         if (val == null || val <= 0 || val === -1 || val === -2) return;
         const badges = getResultRecordBadges(r.eventId, type, val, r.athleteId, globalResults, wcaRecords);
-        if (badges.length > 0) entry[type] = badges[0]; // most prominent
+        if (badges.length > 0) entry[type] = getHighestBadge(badges);
       });
       if (entry.single || entry.average) m[r.id] = entry;
     });

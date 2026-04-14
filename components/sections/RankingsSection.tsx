@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { useLang } from '@/lib/i18n';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { fmtTime, compareTime, formatDate } from '@/lib/time-utils';
-import { getResultRecordBadges, getVisibleBadge, BADGE_STYLES } from '@/lib/record-badges';
+import { getResultRecordBadges, getHighestBadge, BADGE_STYLES } from '@/lib/record-badges';
 import CompetitionHistory from '@/components/shared/CompetitionHistory';
 import type { Result, Athlete, Competition, WcaRecords, EventVisibility } from '@/lib/types';
 
@@ -138,7 +138,7 @@ export default function RankingsSection({ results, athletes, competitions, wcaRe
                   const rankCls = rank === 1 ? 'rank-1' : rank === 2 ? 'rank-2' : rank === 3 ? 'rank-3' : 'rank-other';
                   const value = rankType === 'single' ? r.single : r.average;
                   const badges = getResultRecordBadges(safeEvent, rankType, value!, r.athleteId, results, wcaRecords);
-                  const badge = getVisibleBadge(badges);
+                  const badge = getHighestBadge(badges);
                   const isDnf = value === -1 || value === -2;
                   const wcaId = wcaIdMap[r.athleteId];
                   const solves = rankType === 'average' ? [...(r.solves || []).slice(0, 5)] : [];
