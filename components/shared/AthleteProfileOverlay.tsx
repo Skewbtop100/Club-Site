@@ -449,33 +449,53 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
             </div>
           </div>
 
-          {/* Record badges */}
+          {/* Record badge cards */}
           {(() => {
-            const badgeOrder: RecordBadge[] = ['WR', 'CR', 'NR', 'TR', 'PR'];
-            const visible = badgeOrder.filter(b => (allBadgeData[b]?.length ?? 0) > 0);
-            if (visible.length === 0) return null;
+            const badges: { key: RecordBadge; label: string; sub: string }[] = [
+              { key: 'WR', label: 'WR', sub: 'World' },
+              { key: 'CR', label: 'CR', sub: 'Continental' },
+              { key: 'NR', label: 'NR', sub: 'National' },
+              { key: 'TR', label: 'TR', sub: 'Club' },
+              { key: 'PR', label: 'PR', sub: 'Personal' },
+            ];
             return (
-              <div className="apo-badges-row">
-                {visible.map(b => (
-                  <div key={b} className="apo-badge-item" onClick={e => { e.stopPropagation(); setBadgePopup(bp => bp === b ? null : b); }}>
-                    <span className={`apo-badge-pill apo-bp-${b.toLowerCase()}`}>{b}</span>
-                    <span className="apo-badge-count">{allBadgeData[b].length}</span>
-                    {badgePopup === b && (
-                      <div className="apo-badge-popup" onClick={e => e.stopPropagation()}>
-                        {allBadgeData[b].map((d, i) => (
-                          <div key={i} className="apo-bp-row">
-                            <span className="apo-bp-ev">{d.eventName}</span>
-                            <span className="apo-bp-type">{d.type}</span>
-                            <span className="apo-bp-time">{fmtTime(d.time)}</span>
-                            <span className="apo-bp-comp">{d.compName}</span>
-                            <span className="apo-bp-round">{d.roundLabel}</span>
-                          </div>
-                        ))}
+              <>
+                <div className="apo-bc-grid">
+                  {badges.map(b => {
+                    const count = allBadgeData[b.key]?.length ?? 0;
+                    const active = count > 0;
+                    const expanded = badgePopup === b.key;
+                    return (
+                      <div
+                        key={b.key}
+                        className={`apo-bc${active ? ' apo-bc-active' : ' apo-bc-dim'} apo-bc-${b.key.toLowerCase()}${expanded ? ' apo-bc-selected' : ''}`}
+                        onClick={active ? (e) => { e.stopPropagation(); setBadgePopup(bp => bp === b.key ? null : b.key); } : undefined}
+                      >
+                        <span className={`apo-bc-label apo-bp-${b.key.toLowerCase()}`}>{b.label}</span>
+                        <span className="apo-bc-num">{count}</span>
+                        <span className="apo-bc-sub">{b.sub}</span>
                       </div>
-                    )}
+                    );
+                  })}
+                </div>
+                {/* Expanded detail below cards */}
+                {badgePopup && (allBadgeData[badgePopup]?.length ?? 0) > 0 && (
+                  <div className="apo-bc-expand">
+                    {allBadgeData[badgePopup].map((d, i) => (
+                      <div key={i} className="apo-bce-row">
+                        <span className="apo-bce-ev">{d.eventName}</span>
+                        <span className="apo-bce-type">{d.type}</span>
+                        <span className="apo-bce-time">{fmtTime(d.time)}</span>
+                        <div className="apo-bce-meta">
+                          <span>{d.compName}</span>
+                          <span className="apo-bce-dot">·</span>
+                          <span>{d.roundLabel}</span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                )}
+              </>
             );
           })()}
         </div>
@@ -758,49 +778,62 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
         .apo-stat-num { font-size: 1rem; font-weight: 800; color: var(--text); font-family: monospace; }
         .apo-stat-label { font-size: 0.62rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 0.1rem; }
 
-        /* Record badges row */
-        .apo-badges-row {
-          display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap;
-          margin-top: 0.3rem;
+        /* Record badge cards */
+        .apo-bc-grid {
+          display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem;
+          width: 100%; max-width: 420px; margin-top: 1rem;
         }
-        .apo-badge-item {
-          display: flex; flex-direction: column; align-items: center; gap: 0.15rem;
-          cursor: pointer; position: relative; padding: 0.3rem 0.4rem;
-          border-radius: 8px; transition: background 0.15s;
+        .apo-bc {
+          display: flex; flex-direction: column; align-items: center; gap: 0.2rem;
+          padding: 0.55rem 0.3rem; border-radius: 10px;
+          border: 1px solid rgba(255,255,255,0.06);
+          background: var(--card); transition: all 0.2s;
         }
-        .apo-badge-item:hover { background: rgba(255,255,255,0.04); }
-        .apo-badge-pill {
+        .apo-bc-active { cursor: pointer; }
+        .apo-bc-active:hover { transform: translateY(-2px); }
+        .apo-bc-dim { opacity: 0.35; }
+        .apo-bc-selected { transform: translateY(-2px); }
+
+        /* Per-badge glow colors */
+        .apo-bc-active.apo-bc-wr { border-color: rgba(251,191,36,0.4); box-shadow: 0 0 12px rgba(251,191,36,0.15); }
+        .apo-bc-active.apo-bc-cr { border-color: rgba(249,115,22,0.4); box-shadow: 0 0 12px rgba(249,115,22,0.15); }
+        .apo-bc-active.apo-bc-nr { border-color: rgba(74,222,128,0.4); box-shadow: 0 0 12px rgba(74,222,128,0.15); }
+        .apo-bc-active.apo-bc-tr { border-color: rgba(167,139,250,0.4); box-shadow: 0 0 12px rgba(167,139,250,0.15); }
+        .apo-bc-active.apo-bc-pr { border-color: rgba(56,189,248,0.4); box-shadow: 0 0 12px rgba(56,189,248,0.15); }
+
+        .apo-bc-label {
           font-size: 0.6rem; font-weight: 900; letter-spacing: 0.04em;
           padding: 2px 6px; border-radius: 4px; line-height: 1;
         }
         .apo-bp-wr { background: #b45309; color: #fef3c7; border: 1px solid #f59e0b; }
-        .apo-bp-cr { background: #1d4ed8; color: #dbeafe; border: 1px solid #60a5fa; }
+        .apo-bp-cr { background: #9a3412; color: #ffedd5; border: 1px solid #f97316; }
         .apo-bp-nr { background: #166534; color: #dcfce7; border: 1px solid #4ade80; }
         .apo-bp-tr { background: #4c1d95; color: #ede9fe; border: 1px solid #a78bfa; }
         .apo-bp-pr { background: #0e7490; color: #cffafe; border: 1px solid #22d3ee; }
-        .apo-badge-count {
-          font-size: 0.82rem; font-weight: 800; color: var(--text); font-family: monospace;
+
+        .apo-bc-num { font-size: 1.15rem; font-weight: 800; color: var(--text); font-family: monospace; line-height: 1; }
+        .apo-bc-sub { font-size: 0.55rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+
+        /* Expanded detail section */
+        .apo-bc-expand {
+          width: 100%; max-width: 420px; margin-top: 0.6rem;
+          background: var(--card); border: 1px solid rgba(255,255,255,0.06);
+          border-radius: 10px; padding: 0.4rem;
+          animation: apoBcSlide 0.2s ease;
         }
-        .apo-badge-popup {
-          position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
-          z-index: 20; min-width: 280px; max-width: 360px;
-          background: var(--bg); border: 1px solid rgba(124,58,237,0.3);
-          border-radius: 10px; padding: 0.5rem;
-          box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-          animation: apoFadeIn 0.12s ease;
-          margin-top: 0.3rem;
+        @keyframes apoBcSlide { from { opacity: 0; max-height: 0; } to { opacity: 1; max-height: 500px; } }
+        .apo-bce-row {
+          display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+          padding: 0.45rem 0.6rem; border-radius: 6px; transition: background 0.1s;
+          border-bottom: 1px solid rgba(255,255,255,0.04);
         }
-        .apo-bp-row {
-          display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;
-          padding: 0.35rem 0.5rem; border-radius: 6px;
-          transition: background 0.1s;
-        }
-        .apo-bp-row:hover { background: rgba(255,255,255,0.03); }
-        .apo-bp-ev { font-size: 0.78rem; font-weight: 600; color: var(--text); min-width: 80px; }
-        .apo-bp-type { font-size: 0.68rem; color: var(--muted); text-transform: capitalize; min-width: 42px; }
-        .apo-bp-time { font-family: monospace; font-size: 0.85rem; font-weight: 700; color: #a78bfa; min-width: 48px; }
-        .apo-bp-comp { font-size: 0.68rem; color: var(--muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .apo-bp-round { font-size: 0.65rem; color: var(--muted); opacity: 0.7; }
+        .apo-bce-row:last-child { border-bottom: none; }
+        .apo-bce-row:hover { background: rgba(255,255,255,0.03); }
+        .apo-bce-ev { font-size: 0.82rem; font-weight: 600; color: var(--text); }
+        .apo-bce-type { font-size: 0.68rem; color: var(--muted); text-transform: capitalize; }
+        .apo-bce-time { font-family: monospace; font-size: 0.95rem; font-weight: 700; color: #a78bfa; margin-left: auto; }
+        .apo-bce-meta { width: 100%; display: flex; gap: 0.3rem; align-items: center; font-size: 0.68rem; color: var(--muted); }
+        .apo-bce-dot { opacity: 0.4; }
 
         /* Tabs */
         .apo-tabs {
@@ -973,6 +1006,8 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
           .apo-td-place { font-size: 0.88rem; }
           .apo-comp-label-name { font-size: 0.8rem; }
           .apo-close { top: 0.5rem; right: 0.5rem; }
+          .apo-bc-grid { grid-template-columns: repeat(3, 1fr); max-width: 100%; }
+          .apo-bc-expand { max-width: 100%; }
         }
       `}</style>
     </div>
