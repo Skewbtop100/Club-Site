@@ -64,7 +64,8 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
   const [loading, setLoading] = useState(true);
   const [historyEvent, setHistoryEvent] = useState<string | null>(null);
   const [solvesPopup, setSolvesPopup] = useState<{ solves: (number | null)[]; x: number; y: number } | null>(null);
-  const [badgePopup, setBadgePopup] = useState<string | null>(null); // which badge is expanded
+  const [badgePopup, setBadgePopup] = useState<string | null>(null);
+  const [highlightResultId, setHighlightResultId] = useState<string | null>(null);
   const wcaRecords = useWcaRecords();
 
   const fullName = (athlete.name || '') + (athlete.lastName ? ' ' + athlete.lastName : '');
@@ -313,6 +314,23 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
     return byBadge;
   }, [allResults, globalResults, wcaRecords, compMap]);
 
+  // Per-result badge map: resultId → { single: best badge, average: best badge }
+  const resultBadgesMap = useMemo(() => {
+    const m: Record<string, { single: RecordBadge | null; average: RecordBadge | null }> = {};
+    if (!globalResults) return m;
+    allResults.forEach(r => {
+      const entry = { single: null as RecordBadge | null, average: null as RecordBadge | null };
+      (['single', 'average'] as const).forEach(type => {
+        const val = r[type];
+        if (val == null || val <= 0 || val === -1 || val === -2) return;
+        const badges = getResultRecordBadges(r.eventId, type, val, r.athleteId, globalResults, wcaRecords);
+        if (badges.length > 0) entry[type] = badges[0]; // most prominent
+      });
+      if (entry.single || entry.average) m[r.id] = entry;
+    });
+    return m;
+  }, [allResults, globalResults, wcaRecords]);
+
   // Competition history for selected event, grouped by competition
   interface HistoryRow extends Result {
     compName: string; compDate: unknown; roundLabel: string; roundNum: number; maxRound: number; sortDate: number;
@@ -417,35 +435,35 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
             {athlete.birthDate && <span className="apo-meta-item">{athlete.birthDate}</span>}
           </div>
 
-          {/* Activity stats */}
-          <div className="apo-stats-row">
-            <div className="apo-stat">
-              <div className="apo-stat-num">{stats.comps}</div>
-              <div className="apo-stat-label">Comps</div>
+          {/* Stats: activity + medals side-by-side on desktop */}
+          <div className="apo-stats-pair">
+            <div className="apo-stats-row">
+              <div className="apo-stat">
+                <div className="apo-stat-num">{stats.comps}</div>
+                <div className="apo-stat-label">Comps</div>
+              </div>
+              <div className="apo-stat">
+                <div className="apo-stat-num">{stats.events}</div>
+                <div className="apo-stat-label">Events</div>
+              </div>
+              <div className="apo-stat">
+                <div className="apo-stat-num">{stats.solves}</div>
+                <div className="apo-stat-label">Solves</div>
+              </div>
             </div>
-            <div className="apo-stat">
-              <div className="apo-stat-num">{stats.events}</div>
-              <div className="apo-stat-label">Events</div>
-            </div>
-            <div className="apo-stat">
-              <div className="apo-stat-num">{stats.solves}</div>
-              <div className="apo-stat-label">Solves</div>
-            </div>
-          </div>
-
-          {/* Achievement stats */}
-          <div className="apo-stats-row apo-stats-gold">
-            <div className="apo-stat">
-              <div className="apo-stat-num">🥇 {medalData.gold}</div>
-              <div className="apo-stat-label">Gold</div>
-            </div>
-            <div className="apo-stat">
-              <div className="apo-stat-num">🥈 {medalData.silver}</div>
-              <div className="apo-stat-label">Silver</div>
-            </div>
-            <div className="apo-stat">
-              <div className="apo-stat-num">🥉 {medalData.bronze}</div>
-              <div className="apo-stat-label">Bronze</div>
+            <div className="apo-stats-row apo-stats-gold">
+              <div className="apo-stat">
+                <div className="apo-stat-num">🥇 {medalData.gold}</div>
+                <div className="apo-stat-label">Gold</div>
+              </div>
+              <div className="apo-stat">
+                <div className="apo-stat-num">🥈 {medalData.silver}</div>
+                <div className="apo-stat-label">Silver</div>
+              </div>
+              <div className="apo-stat">
+                <div className="apo-stat-num">🥉 {medalData.bronze}</div>
+                <div className="apo-stat-label">Bronze</div>
+              </div>
             </div>
           </div>
 
@@ -482,7 +500,27 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
                 {badgePopup && (allBadgeData[badgePopup]?.length ?? 0) > 0 && (
                   <div className="apo-bc-expand">
                     {allBadgeData[badgePopup].map((d, i) => (
-                      <div key={i} className="apo-bce-row">
+                      <div
+                        key={i}
+                        className="apo-bce-row apo-bce-clickable"
+                        onClick={() => {
+                          setHistoryEvent(d.eventId);
+                          setTab('history');
+                          setBadgePopup(null);
+                          // Find the result ID to highlight
+                          const match = allResults.find(r =>
+                            r.eventId === d.eventId &&
+                            ((d.type === 'single' && r.single === d.time) || (d.type === 'average' && r.average === d.time))
+                          );
+                          if (match) {
+                            setHighlightResultId(match.id);
+                            setTimeout(() => setHighlightResultId(null), 3000);
+                            setTimeout(() => {
+                              document.getElementById(`apo-row-${match.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }, 100);
+                          }
+                        }}
+                      >
                         <span className="apo-bce-ev">{d.eventName}</span>
                         <span className="apo-bce-type">{d.type}</span>
                         <span className="apo-bce-time">{fmtTime(d.time)}</span>
@@ -567,15 +605,23 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
                                 : '';
                               const solves = [...(r.solves ?? [])];
                               while (solves.length < 5) solves.push(null);
+                              const rb = resultBadgesMap[r.id];
+                              const isHighlighted = highlightResultId === r.id;
                               return (
-                                <tr key={r.id}>
+                                <tr key={r.id} id={`apo-row-${r.id}`} className={isHighlighted ? 'apo-row-glow' : ''}>
                                   <td className="apo-td-round">{r.roundLabel}</td>
                                   <td className="apo-td-place r">
                                     {medalEmoji && <span className="apo-medal-emoji">{medalEmoji}</span>}
                                     {place || '—'}
                                   </td>
-                                  <td className={`r mono${r.single != null && r.single < 0 ? ' dnf' : ''}`}>{fmtTime(r.single)}</td>
-                                  <td className={`r mono bold${r.average != null && r.average < 0 ? ' dnf' : ''}`}>{fmtTime(r.average)}</td>
+                                  <td className={`r mono apo-time-cell${r.single != null && r.single < 0 ? ' dnf' : ''}`}>
+                                    {fmtTime(r.single)}
+                                    {rb?.single && <span className={`apo-time-badge apo-tb-${rb.single.toLowerCase()}`}>{rb.single}</span>}
+                                  </td>
+                                  <td className={`r mono bold apo-time-cell${r.average != null && r.average < 0 ? ' dnf' : ''}`}>
+                                    {fmtTime(r.average)}
+                                    {rb?.average && <span className={`apo-time-badge apo-tb-${rb.average.toLowerCase()}`}>{rb.average}</span>}
+                                  </td>
                                   {solves.slice(0, 5).map((s, i) => (
                                     <td key={i} className={`r mono solve${s !== null && s < 0 ? ' dnf' : ''}`}>{fmtTime(s)}</td>
                                   ))}
@@ -760,10 +806,14 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
         .apo-wca { color: var(--accent); font-family: monospace; font-weight: 600; }
 
         /* Stats rows */
+        .apo-stats-pair {
+          display: flex; gap: 0.6rem; width: 100%; max-width: 500px;
+          align-items: stretch;
+        }
         .apo-stats-row {
-          display: flex; gap: 0; width: 100%; max-width: 400px;
+          display: flex; gap: 0; flex: 1;
           background: var(--card); border: 1px solid rgba(255,255,255,0.06);
-          border-radius: 10px; overflow: hidden; margin-bottom: 0.6rem;
+          border-radius: 10px; overflow: hidden;
         }
         .apo-stats-gold {
           border-color: rgba(250,204,21,0.15);
@@ -829,6 +879,7 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
         }
         .apo-bce-row:last-child { border-bottom: none; }
         .apo-bce-row:hover { background: rgba(255,255,255,0.03); }
+        .apo-bce-clickable { cursor: pointer; }
         .apo-bce-ev { font-size: 0.82rem; font-weight: 600; color: var(--text); }
         .apo-bce-type { font-size: 0.68rem; color: var(--muted); text-transform: capitalize; }
         .apo-bce-time { font-family: monospace; font-size: 0.95rem; font-weight: 700; color: #a78bfa; margin-left: auto; }
@@ -911,6 +962,26 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
         .apo-td-round { color: var(--muted); white-space: nowrap; }
         .apo-td-place { font-weight: 700; font-size: 1rem; }
         .apo-medal-emoji { margin-right: 0.15rem; }
+
+        /* Time cell with record badge */
+        .apo-time-cell { position: relative; }
+        .apo-time-badge {
+          position: absolute; top: 3px; right: 3px;
+          font-size: 0.45rem; font-weight: 900; letter-spacing: 0.03em;
+          padding: 1px 3px; border-radius: 3px; line-height: 1;
+        }
+        .apo-tb-wr { background: #b45309; color: #fef3c7; border: 1px solid #f59e0b; }
+        .apo-tb-cr { background: #9a3412; color: #ffedd5; border: 1px solid #f97316; }
+        .apo-tb-nr { background: #166534; color: #dcfce7; border: 1px solid #4ade80; }
+        .apo-tb-tr { background: #4c1d95; color: #ede9fe; border: 1px solid #a78bfa; }
+        .apo-tb-pr { background: #0e7490; color: #cffafe; border: 1px solid #22d3ee; }
+
+        /* Row glow highlight */
+        .apo-row-glow td { animation: apoRowGlow 0.8s ease 3; }
+        @keyframes apoRowGlow {
+          0%, 100% { background: transparent; }
+          50% { background: rgba(124,58,237,0.15); }
+        }
 
         /* Records */
         .apo-records-list { display: flex; flex-direction: column; gap: 0.2rem; }
@@ -996,6 +1067,7 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
           .apo-avatar { width: 90px; height: 90px; }
           .apo-avatar-ph { font-size: 1.6rem; }
           .apo-name { font-size: 1.3rem; }
+          .apo-stats-pair { flex-direction: column; max-width: 100%; }
           .apo-stats-row { max-width: 100%; }
           .apo-tab-content { padding: 1rem 0.75rem; }
           .apo-table { min-width: 700px; font-size: 0.85rem; }
