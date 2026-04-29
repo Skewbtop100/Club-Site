@@ -55,3 +55,13 @@ export async function updateCompetition(
 export async function deleteCompetition(id: string): Promise<void> {
   await deleteDoc(competitionDoc(id));
 }
+
+/** Officially finish a competition: set status='finished' and finishedAt=now. */
+export async function finishCompetition(id: string): Promise<void> {
+  const now = Timestamp.now();
+  await updateDoc(competitionDoc(id), {
+    status: 'finished',
+    finishedAt: now,
+    updatedAt: now,
+  });
+}

@@ -173,6 +173,7 @@ function CompCard({
     <div className="comp-card">
       <div className={`status-pill ${statusClass}`}>
         {comp.status === 'live' && <span className="live-dot" />}
+        {comp.status === 'finished' && <span style={{ marginRight: '0.15rem' }}>🔒</span>}
         {comp.status === 'live' ? t('comp.status.live') : comp.status === 'upcoming' ? t('comp.status.upcoming') : t('comp.status.finished')}
       </div>
 

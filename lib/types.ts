@@ -37,6 +37,7 @@ export interface Competition {
   athletes?: CompetitionAthlete[];
   eventConfig?: Record<string, EventConfig>;
   roundStatus?: Record<string, 'complete' | 'ongoing'>;
+  finishedAt?: { toDate: () => Date } | string | number;
 }
 
 export interface Result {

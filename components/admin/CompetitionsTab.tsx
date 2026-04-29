@@ -505,7 +505,12 @@ export default function CompetitionsTab() {
                               className="status-select"
                               value={c.status}
                               onChange={e => setStatus(c.id, e.target.value)}
-                              style={{ borderColor: statusColors[c.status] || 'rgba(255,255,255,0.08)' }}
+                              disabled={c.status === 'finished'}
+                              style={{
+                                borderColor: statusColors[c.status] || 'rgba(255,255,255,0.08)',
+                                opacity: c.status === 'finished' ? 0.55 : 1,
+                                cursor: c.status === 'finished' ? 'not-allowed' : 'pointer',
+                              }}
                             >
                               <option value="upcoming">{t('admin.comp.status.upcoming')}</option>
                               <option value="live">{t('admin.comp.status.live')}</option>
@@ -519,8 +524,18 @@ export default function CompetitionsTab() {
                             {(c.athletes || []).length} {t('admin.comp.athletes-suffix')}
                           </td>
                           <td>
-                            <div style={{ display: 'flex', gap: '0.35rem' }}>
-                              <button className="btn-edit" onClick={() => startEdit(c)}>{t('admin.btn.edit')}</button>
+                            <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+                              {c.status === 'finished' ? (
+                                <span title="🔒" style={{
+                                  fontSize: '0.78rem', color: 'var(--muted)',
+                                  padding: '0.2rem 0.5rem', borderRadius: '6px',
+                                  background: 'rgba(255,255,255,0.04)',
+                                  border: '1px solid rgba(255,255,255,0.08)',
+                                  whiteSpace: 'nowrap',
+                                }}>🔒</span>
+                              ) : (
+                                <button className="btn-edit" onClick={() => startEdit(c)}>{t('admin.btn.edit')}</button>
+                              )}
                               <button className="btn-delete" onClick={() => openDeleteModal(c)}>{t('admin.btn.delete')}</button>
                             </div>
                           </td>

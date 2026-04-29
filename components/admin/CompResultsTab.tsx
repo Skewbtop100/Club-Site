@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState, useRef } from 'react';
-import { subscribeCompetitions, updateCompetition } from '@/lib/firebase/services/competitions';
+import { subscribeCompetitions, updateCompetition, finishCompetition } from '@/lib/firebase/services/competitions';
 import { subscribeResultsByComp, saveResult, deleteResult as deleteResultFn } from '@/lib/firebase/services/results';
 import { getAthletes } from '@/lib/firebase/services/athletes';
 import type { Competition, Result, AdvancementConfig, Athlete } from '@/lib/types';
@@ -95,6 +95,11 @@ export default function CompResultsTab() {
   // Round status
   const [statusWorking, setStatusWorking] = useState(false);
 
+  // Finish competition
+  const [finishConfirm, setFinishConfirm] = useState(false);
+  const [finishWorking, setFinishWorking] = useState(false);
+  const [finishError, setFinishError] = useState('');
+
   // ── subscriptions ───────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -182,6 +187,22 @@ export default function CompResultsTab() {
     } catch { /* ignore */ } finally { setStatusWorking(false); }
   }
 
+  // ── finish competition handler ───────────────────────────────────────────────
+
+  async function doFinishCompetition() {
+    if (!compId || !selComp) return;
+    setFinishWorking(true);
+    setFinishError('');
+    try {
+      await finishCompetition(compId);
+      setFinishConfirm(false);
+    } catch (e) {
+      setFinishError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setFinishWorking(false);
+    }
+  }
+
   // ── derived data ─────────────────────────────────────────────────────────────
 
   const visibleComps = comps.filter(c => c.status === 'live' || c.status === 'upcoming');
@@ -195,6 +216,22 @@ export default function CompResultsTab() {
   function totalRoundsFor(ev: string) {
     return selComp?.eventConfig?.[ev]?.rounds ?? 1;
   }
+
+  /** True if every round of every selected event is marked 'complete'. */
+  const allRoundsComplete = useMemo(() => {
+    if (!selComp || compEvents.length === 0) return false;
+    const status = (selComp.roundStatus ?? {}) as Record<string, 'complete' | 'ongoing'>;
+    for (const ev of compEvents) {
+      const rounds = totalRoundsFor(ev.id);
+      for (let r = 1; r <= rounds; r++) {
+        if (status[rKey(ev.id, r)] !== 'complete') return false;
+      }
+    }
+    return true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selComp, compEvents.length]);
+
+  const isFinished = selComp?.status === 'finished';
 
   // WCA ranking: average first, then single; negatives = worst
   function wcaSort(a: Result, b: Result) {
@@ -323,7 +360,7 @@ export default function CompResultsTab() {
       <div className="wca-main">
 
         {/* Competition title */}
-        <div className="wca-main-header">
+        <div className="wca-main-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
           <div>
             <div className="wca-comp-title">{selComp?.name ?? t('admin.cr.select-comp-prompt')}</div>
             {selComp && (
@@ -333,6 +370,38 @@ export default function CompResultsTab() {
               </div>
             )}
           </div>
+          {selComp && (
+            isFinished ? (
+              <span style={{
+                fontSize: '0.78rem', fontWeight: 600, color: '#a78bfa',
+                padding: '0.4rem 0.8rem', borderRadius: '8px',
+                background: 'rgba(124,58,237,0.1)',
+                border: '1px solid rgba(124,58,237,0.35)',
+              }}>
+                {t('admin.cr.finish.locked')}
+              </span>
+            ) : (
+              <button
+                onClick={() => allRoundsComplete && setFinishConfirm(true)}
+                disabled={!allRoundsComplete}
+                title={allRoundsComplete ? '' : t('admin.cr.finish.btn-disabled-hint')}
+                style={{
+                  padding: '0.55rem 1.1rem', borderRadius: '10px',
+                  fontFamily: 'inherit', fontSize: '0.9rem', fontWeight: 700,
+                  cursor: allRoundsComplete ? 'pointer' : 'not-allowed',
+                  background: allRoundsComplete
+                    ? 'linear-gradient(135deg, rgba(34,197,94,0.85), rgba(16,185,129,0.85))'
+                    : 'rgba(34,197,94,0.1)',
+                  border: `1px solid ${allRoundsComplete ? 'rgba(34,197,94,0.7)' : 'rgba(34,197,94,0.25)'}`,
+                  color: allRoundsComplete ? '#fff' : 'rgba(74,222,128,0.4)',
+                  transition: 'all 0.15s',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {t('admin.cr.finish.btn')}
+              </button>
+            )
+          )}
         </div>
 
         {/* Round header */}
@@ -589,6 +658,38 @@ export default function CompResultsTab() {
               <button onClick={() => setEditRow(null)} disabled={editSaving} className="wca-modal-btn">{t('admin.btn.cancel')}</button>
               <button onClick={saveEdit} disabled={editSaving} className="wca-modal-btn primary" style={{ background: editSaving ? 'rgba(99,102,241,0.3)' : 'rgba(99,102,241,0.7)', borderColor: 'rgba(99,102,241,0.6)' }}>
                 {editSaving ? t('admin.cr.edit.saving') : t('admin.btn.save')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Finish Competition Confirmation Modal ──────────────────────────── */}
+      {finishConfirm && (
+        <div onClick={() => !finishWorking && setFinishConfirm(false)} className="wca-modal-backdrop">
+          <div onClick={e => e.stopPropagation()} className="wca-modal" style={{ borderColor: 'rgba(34,197,94,0.35)' }}>
+            <div className="wca-modal-title">{t('admin.cr.finish.title')}</div>
+            <div className="wca-modal-sub" style={{ marginBottom: '0.5rem' }}>
+              {t('admin.cr.finish.warning1')}
+            </div>
+            <div className="wca-modal-sub" style={{ marginBottom: '1.25rem' }}>
+              {t('admin.cr.finish.warning2')}
+            </div>
+            {finishError && (
+              <div style={{ fontSize: '0.78rem', color: '#f87171', marginBottom: '0.8rem' }}>{finishError}</div>
+            )}
+            <div className="wca-modal-actions">
+              <button onClick={() => setFinishConfirm(false)} disabled={finishWorking} className="wca-modal-btn">{t('admin.btn.cancel')}</button>
+              <button
+                onClick={doFinishCompetition}
+                disabled={finishWorking}
+                className="wca-modal-btn primary"
+                style={{
+                  background: finishWorking ? 'rgba(34,197,94,0.3)' : 'rgba(34,197,94,0.7)',
+                  borderColor: 'rgba(34,197,94,0.6)',
+                }}
+              >
+                {finishWorking ? t('admin.cr.finish.working') : t('admin.cr.finish.confirm')}
               </button>
             </div>
           </div>
