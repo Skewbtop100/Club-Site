@@ -375,7 +375,9 @@ export default function ResultsEntryTab() {
   }
 
   function toggleImportRow(idx: number) {
-    setImportRows(prev => prev.map(r => r.idx === idx && !r.isDupe ? { ...r, checked: !r.checked } : r));
+    setImportRows(prev => prev.map(r =>
+      r.idx === idx && !r.isDupe && !r.notAdvancing ? { ...r, checked: !r.checked } : r,
+    ));
   }
 
   async function checkAndSetRows() {
@@ -415,7 +417,7 @@ export default function ResultsEntryTab() {
         // notAdvancing is only meaningful when we have an advancing list AND the
         // row's name isn't in it. For round 1, advancingNames is empty → false.
         const notAdvancing = advancingNames.size > 0 && !advancingNames.has(lowerName);
-        return { ...row, isDupe, notAdvancing, checked: !isDupe };
+        return { ...row, isDupe, notAdvancing, checked: !isDupe && !notAdvancing };
       }));
     } finally {
       setCheckLoading(false);
@@ -423,8 +425,24 @@ export default function ResultsEntryTab() {
   }
 
   async function doImport() {
-    const toImport = importRows.filter(r => r.checked && !r.isDupe);
-    if (!compId || !importEventId || toImport.length === 0) return;
+    // Hard skip non-advancing rows for round 2+. Round 1 has notAdvancing=false
+    // for all rows (advancingNames was empty), so no-op there.
+    const skippedNonAdvancing = importRows.filter(r => r.notAdvancing);
+    const toImport = importRows.filter(r => r.checked && !r.isDupe && !r.notAdvancing);
+
+    if (!compId || !importEventId || toImport.length === 0) {
+      // Even if there's nothing to import, still surface the skip summary so
+      // the admin understands why nothing was imported.
+      if (skippedNonAdvancing.length > 0) {
+        const names = skippedNonAdvancing.map(r => r.name).join(', ');
+        setImportMsg(
+          `${t('admin.results.import.summary-skipped')} ${skippedNonAdvancing.length} ${t('admin.results.import.summary-skipped-reason')} ${names}`,
+        );
+        setImportMsgType('warn');
+      }
+      return;
+    }
+
     setImportLoading(true);
     setImportMsg('');
     try {
@@ -446,8 +464,13 @@ export default function ResultsEntryTab() {
           single, average, solves, status: 'published', source: 'imported',
         });
       }
-      const dupeCount = importRows.length - toImport.length;
-      setImportMsg(`✓ ${toImport.length} ${t('admin.history.results-suffix')} ${t('result.saved')}.${dupeCount > 0 ? ` (${dupeCount} ${t('admin.results.import.already-imported').toLowerCase()})` : ''}`);
+      // Build summary: imported count, then skipped (non-advancing) line listing names.
+      let summary = `✓ ${t('admin.results.import.summary-imported')} ${toImport.length} ${t('admin.results.import.summary-results-suffix')}`;
+      if (skippedNonAdvancing.length > 0) {
+        const names = skippedNonAdvancing.map(r => r.name).join(', ');
+        summary += `\n${t('admin.results.import.summary-skipped')} ${skippedNonAdvancing.length} ${t('admin.results.import.summary-skipped-reason')} ${names}`;
+      }
+      setImportMsg(summary);
       setImportMsgType('success');
       setImportRows([]);
       setImportText('');
@@ -1113,9 +1136,9 @@ export default function ResultsEntryTab() {
                             <input
                               type="checkbox"
                               checked={row.checked}
-                              disabled={row.isDupe}
+                              disabled={row.isDupe || row.notAdvancing}
                               onChange={() => toggleImportRow(row.idx)}
-                              style={{ cursor: row.isDupe ? 'not-allowed' : 'pointer', accentColor: '#a78bfa' }}
+                              style={{ cursor: (row.isDupe || row.notAdvancing) ? 'not-allowed' : 'pointer', accentColor: '#a78bfa' }}
                             />
                           </td>
                           <td style={{ padding: '0.4rem 0.5rem', textAlign: 'center', color: 'var(--muted)', fontSize: '0.72rem', opacity: dimmed ? 0.4 : 1 }}>{i + 1}</td>
@@ -1251,7 +1274,7 @@ export default function ResultsEntryTab() {
             })()}
 
             {importMsg && (
-              <div className={`msg ${importMsgType}`} style={{ display: 'block', marginTop: '0.5rem' }}>
+              <div className={`msg ${importMsgType}`} style={{ display: 'block', marginTop: '0.5rem', whiteSpace: 'pre-line' }}>
                 {importMsg}
               </div>
             )}
