@@ -6,6 +6,7 @@ import { getAthletes } from '@/lib/firebase/services/athletes';
 import { saveResult, getResultsByComp } from '@/lib/firebase/services/results';
 import { fmtTime, parseTime } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
+import { useLang, type TranslationKey } from '@/lib/i18n';
 import type { Athlete, Competition } from '@/lib/types';
 
 function calcAo5(solves: (number | null)[]): number | null {
@@ -61,11 +62,11 @@ function timeToRawDigits(timeStr: string): string {
   return timeStr.replace(/[^0-9]/g, '');
 }
 
-function getRoundNames(totalRounds: number): string[] {
-  if (totalRounds <= 1) return ['Final'];
-  if (totalRounds === 2) return ['First Round', 'Final'];
-  if (totalRounds === 3) return ['First Round', 'Second Round', 'Final'];
-  return ['First Round', 'Second Round', 'Semi Final', 'Final'];
+function getRoundNames(totalRounds: number, t: (k: TranslationKey) => string): string[] {
+  if (totalRounds <= 1) return [t('admin.round.final')];
+  if (totalRounds === 2) return [t('admin.round.first'), t('admin.round.final')];
+  if (totalRounds === 3) return [t('admin.round.first'), t('admin.round.second'), t('admin.round.final')];
+  return [t('admin.round.first'), t('admin.round.second'), t('admin.round.semi'), t('admin.round.final')];
 }
 
 /** Convert raw digit string to parseable time string.
@@ -86,6 +87,7 @@ function formatRawDigits(raw: string): string {
 }
 
 export default function ResultsEntryTab() {
+  const { t } = useLang();
   const [athletes, setAthletes]   = useState<Athlete[]>([]);
   const [comps, setComps]         = useState<Competition[]>([]);
   const [compId, setCompId]       = useState('');
@@ -176,7 +178,7 @@ export default function ResultsEntryTab() {
   async function submit(panelId: number) {
     const panel = panels.find(p => p.id === panelId)!;
     if (!panel.athleteId || !compId || !panel.eventId) {
-      updatePanel(panelId, { msg: 'Please fill athlete, event and round.', msgType: 'error' }); return;
+      updatePanel(panelId, { msg: t('admin.results.msg.fill'), msgType: 'error' }); return;
     }
     const { single, average, parsed } = computeResult(panel);
     const comp = comps.find(c => c.id === compId);
@@ -190,9 +192,9 @@ export default function ResultsEntryTab() {
         single: single < 0 ? single : single, average,
         solves: parsed, status: 'published', source: 'entry',
       });
-      updatePanel(panelId, { msg: `✓ Saved! Single: ${fmtTime(single)} Ao5: ${fmtTime(average)}`, msgType: 'success' });
+      updatePanel(panelId, { msg: `✓ ${t('result.saved')}! ${t('admin.results.single')}: ${fmtTime(single)} Ao5: ${fmtTime(average)}`, msgType: 'success' });
     } catch (e: unknown) {
-      updatePanel(panelId, { msg: 'Error: ' + (e instanceof Error ? e.message : String(e)), msgType: 'error' });
+      updatePanel(panelId, { msg: t('admin.msg.error-prefix') + (e instanceof Error ? e.message : String(e)), msgType: 'error' });
     }
   }
 
@@ -365,12 +367,12 @@ export default function ResultsEntryTab() {
         });
       }
       const dupeCount = importRows.length - toImport.length;
-      setImportMsg(`✓ Imported ${toImport.length} result${toImport.length !== 1 ? 's' : ''} successfully.${dupeCount > 0 ? ` (${dupeCount} already existed, skipped)` : ''}`);
+      setImportMsg(`✓ ${toImport.length} ${t('admin.history.results-suffix')} ${t('result.saved')}.${dupeCount > 0 ? ` (${dupeCount} ${t('admin.results.import.already-imported').toLowerCase()})` : ''}`);
       setImportMsgType('success');
       setImportRows([]);
       setImportText('');
     } catch (e: unknown) {
-      setImportMsg('Error: ' + (e instanceof Error ? e.message : String(e)));
+      setImportMsg(t('admin.msg.error-prefix') + (e instanceof Error ? e.message : String(e)));
       setImportMsgType('error');
     } finally {
       setImportLoading(false);
@@ -398,22 +400,22 @@ export default function ResultsEntryTab() {
 
   return (
     <div className="card">
-      <div className="card-title"><span className="title-accent" />Results Entry</div>
+      <div className="card-title"><span className="title-accent" />{t('admin.results.title')}</div>
 
       {/* Competition selector + controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.8rem', flexWrap: 'wrap' }}>
         <div className="form-group" style={{ maxWidth: '340px', marginBottom: 0, flex: 1, minWidth: '200px' }}>
-          <label>Competition</label>
+          <label>{t('admin.results.competition')}</label>
           <select value={compId} onChange={e => { setCompId(e.target.value); setPanels([emptyPanel(0)]); resetTimer(); setShowTimer(false); }}>
-            <option value="">— Select competition —</option>
+            <option value="">{t('admin.results.select-comp')}</option>
             {liveComps.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
         {compId && (
           <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', paddingTop: '1.5rem', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>Panels: <strong>{panels.length}</strong></span>
-            <button className="btn-xs" onClick={() => setPanels(p => [...p, emptyPanel(p.length)])}>+ Add Panel</button>
-            <button className="btn-xs" onClick={() => { if (panels.length <= 1) return; setPanels(p => p.slice(0, -1)); }}>− Remove</button>
+            <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>{t('admin.results.panels')} <strong>{panels.length}</strong></span>
+            <button className="btn-xs" onClick={() => setPanels(p => [...p, emptyPanel(p.length)])}>{t('admin.results.add-panel')}</button>
+            <button className="btn-xs" onClick={() => { if (panels.length <= 1) return; setPanels(p => p.slice(0, -1)); }}>{t('admin.results.remove-panel')}</button>
             <button
               className="btn-xs"
               onClick={() => { if (showTimer) { resetTimer(); setShowTimer(false); } else setShowTimer(true); }}
@@ -425,7 +427,7 @@ export default function ResultsEntryTab() {
                 color: showTimer ? '#5eead4' : '#2dd4bf',
               }}
             >
-              Inspection Timer
+              {t('admin.results.inspection-timer')}
             </button>
           </div>
         )}
@@ -433,7 +435,7 @@ export default function ResultsEntryTab() {
 
       {!compId && (
         <div style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--muted)', fontSize: '0.88rem' }}>
-          Select a competition to start entering results.
+          {t('admin.results.select-prompt')}
         </div>
       )}
 
@@ -443,7 +445,7 @@ export default function ResultsEntryTab() {
         <div className="multi-entry-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
           {panels.map(panel => {
             const cfg        = eventConfig[panel.eventId] || { rounds: 1, groups: 1 };
-            const roundNames = getRoundNames(cfg.rounds);
+            const roundNames = getRoundNames(cfg.rounds, t);
             const groupCount = cfg.groups;
             // In edit mode we're not "all entered" even if currentSolveIdx reached 5
             const allEntered = panel.currentSolveIdx >= 5 && panel.editReturnIdx === null;
@@ -467,16 +469,16 @@ export default function ResultsEntryTab() {
             return (
               <div className="compact-panel" key={panel.id}>
                 <div className="compact-panel-header">
-                  <span className="compact-panel-title">Panel {panel.id + 1}</span>
+                  <span className="compact-panel-title">{t('admin.results.panel')} {panel.id + 1}</span>
                   <div className="compact-panel-actions">
-                    <button className="btn-xs" onClick={() => updatePanel(panel.id, { ...emptyPanel(panel.id) })}>Clear</button>
+                    <button className="btn-xs" onClick={() => updatePanel(panel.id, { ...emptyPanel(panel.id) })}>{t('admin.results.clear')}</button>
                   </div>
                 </div>
 
                 {/* Athlete */}
                 <select className="compact-select" value={panel.athleteId}
                   onChange={e => updatePanel(panel.id, { athleteId: e.target.value })}>
-                  <option value="">— Athlete —</option>
+                  <option value="">{t('admin.results.select-athlete')}</option>
                   {[...panelAthletes].sort((a,b) => a.name.localeCompare(b.name)).map(a => (
                     <option key={a.id} value={a.id}>{a.name}</option>
                   ))}
@@ -485,14 +487,14 @@ export default function ResultsEntryTab() {
                 {/* Event */}
                 <select className="compact-select" value={panel.eventId}
                   onChange={e => updatePanel(panel.id, { eventId: e.target.value, round: 1, group: 1 })}>
-                  <option value="">— Event —</option>
+                  <option value="">{t('admin.results.select-event')}</option>
                   {evList.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
                 </select>
 
                 {/* Round + Group */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '0.3rem' }}>
                   <div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.2rem', paddingLeft: '0.1rem' }}>Round</div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.2rem', paddingLeft: '0.1rem' }}>{t('admin.results.round')}</div>
                     <select className="compact-select" value={panel.round} style={{ marginBottom: 0 }}
                       onChange={e => updatePanel(panel.id, { round: Number(e.target.value) })}>
                       {roundNames.map((name, idx) => (
@@ -501,11 +503,11 @@ export default function ResultsEntryTab() {
                     </select>
                   </div>
                   <div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.2rem', paddingLeft: '0.1rem' }}>Group</div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.2rem', paddingLeft: '0.1rem' }}>{t('admin.results.group')}</div>
                     <select className="compact-select" value={panel.group} style={{ marginBottom: 0 }}
                       onChange={e => updatePanel(panel.id, { group: Number(e.target.value) })}>
                       {Array.from({ length: Math.max(1, groupCount) }, (_, i) => (
-                        <option key={i} value={i + 1}>Group {String.fromCharCode(65 + i)}</option>
+                        <option key={i} value={i + 1}>{t('admin.results.group')} {String.fromCharCode(65 + i)}</option>
                       ))}
                     </select>
                   </div>
@@ -537,11 +539,11 @@ export default function ResultsEntryTab() {
                           }}>
                             {fmtInspection(timerMs)}
                           </div>
-                          {isDnf && <div style={{ fontSize: '0.95rem', fontWeight: 700, color, marginTop: '0.4rem' }}>DNF!</div>}
-                          {isPlus2 && <div style={{ fontSize: '0.95rem', fontWeight: 700, color, marginTop: '0.4rem' }}>+2 Penalty!</div>}
+                          {isDnf && <div style={{ fontSize: '0.95rem', fontWeight: 700, color, marginTop: '0.4rem' }}>{t('admin.results.dnf-label')}</div>}
+                          {isPlus2 && <div style={{ fontSize: '0.95rem', fontWeight: 700, color, marginTop: '0.4rem' }}>{t('admin.results.plus2-label')}</div>}
                           {!timerStopped && (
                             <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.35)', marginTop: '0.5rem' }}>
-                              {timerRunning ? 'TAP TO STOP' : 'TAP TO START'}
+                              {timerRunning ? t('admin.results.tap-to-stop') : t('admin.results.tap-to-start')}
                             </div>
                           )}
                         </div>
@@ -554,7 +556,7 @@ export default function ResultsEntryTab() {
                                 background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)',
                                 color: 'var(--muted)', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600,
                               }}
-                            >Reset</button>
+                            >{t('admin.results.reset')}</button>
                           </div>
                         )}
                       </div>
@@ -572,7 +574,7 @@ export default function ResultsEntryTab() {
                       textTransform: 'uppercase', letterSpacing: '0.08em',
                       textAlign: 'center', marginBottom: '0.4rem',
                     }}>
-                      {isEditMode ? `Editing Solve ${curIdx + 1}` : `Solve ${curIdx + 1} of 5`}
+                      {isEditMode ? `${t('admin.results.editing-solve')} ${curIdx + 1}` : `${t('admin.results.solve-prefix')} ${curIdx + 1} ${t('admin.results.solve-of')}`}
                     </div>
 
                     {/* Large input */}
@@ -646,7 +648,7 @@ export default function ResultsEntryTab() {
                           color: canAdvance ? '#a78bfa' : 'rgba(167,139,250,0.3)',
                         }}
                       >
-                        {isEditMode ? '✓ Update' : curIdx === 4 ? 'Done →' : '→ Next'}
+                        {isEditMode ? t('admin.results.update') : curIdx === 4 ? t('admin.results.done') : t('admin.results.next')}
                       </button>
                     </div>
 
@@ -751,9 +753,9 @@ export default function ResultsEntryTab() {
                               marginTop: '0.45rem', fontSize: '0.75rem', color: 'var(--muted)',
                               fontVariantNumeric: 'tabular-nums',
                             }}>
-                              <span>Best: <strong style={{ color: liveBest > 0 ? 'var(--text)' : 'var(--muted)' }}>{liveBest > 0 ? fmtTime(liveBest) : '—'}</strong></span>
+                              <span>{t('admin.results.live-best')} <strong style={{ color: liveBest > 0 ? 'var(--text)' : 'var(--muted)' }}>{liveBest > 0 ? fmtTime(liveBest) : '—'}</strong></span>
                               <span style={{ opacity: 0.35 }}>|</span>
-                              <span>Ao5: <strong style={{ color: liveAo5 !== null ? (liveAo5 < 0 ? '#f87171' : 'var(--text)') : 'var(--muted)' }}>
+                              <span>{t('admin.results.live-ao5')} <strong style={{ color: liveAo5 !== null ? (liveAo5 < 0 ? '#f87171' : 'var(--text)') : 'var(--muted)' }}>
                                 {liveAo5 !== null ? (liveAo5 < 0 ? 'DNF' : fmtTime(liveAo5)) : '—'}
                               </strong></span>
                             </div>
@@ -773,7 +775,7 @@ export default function ResultsEntryTab() {
                           textTransform: 'uppercase', letterSpacing: '0.08em',
                           textAlign: 'center', marginBottom: '0.35rem',
                         }}>
-                          Tap a solve to edit
+                          {t('admin.results.tap-edit')}
                         </div>
                       )}
                       <div style={{ display: 'flex', gap: '0.2rem', flexWrap: 'wrap' }}>
@@ -804,11 +806,11 @@ export default function ResultsEntryTab() {
                     {/* Single / Ao5 */}
                     <div className="compact-calc-row" style={{ marginBottom: '0.5rem' }}>
                       <div className="calc-item">
-                        <div className="calc-label">Single</div>
+                        <div className="calc-label">{t('admin.results.single')}</div>
                         <div className={`calc-value${single < 0 ? ' dnf' : ' accent'}`}>{fmtTime(single)}</div>
                       </div>
                       <div className="calc-item">
-                        <div className="calc-label">Ao5</div>
+                        <div className="calc-label">{t('admin.results.ao5')}</div>
                         <div className={`calc-value${average !== null && average < 0 ? ' dnf' : ' accent'}`}>{fmtTime(average)}</div>
                       </div>
                     </div>
@@ -826,7 +828,7 @@ export default function ResultsEntryTab() {
                           color: 'var(--muted)',
                         }}
                       >
-                        Cancel
+                        {t('admin.btn.cancel')}
                       </button>
                     ) : (
                       <div style={{ display: 'flex', gap: '0.4rem' }}>
@@ -841,7 +843,7 @@ export default function ResultsEntryTab() {
                             color: '#4ade80',
                           }}
                         >
-                          Save
+                          {t('admin.btn.save')}
                         </button>
                         <button
                           onClick={() => updatePanel(panel.id, { postEditMode: true })}
@@ -854,7 +856,7 @@ export default function ResultsEntryTab() {
                             color: 'var(--muted)',
                           }}
                         >
-                          Edit
+                          {t('admin.btn.edit')}
                         </button>
                       </div>
                     )}
@@ -884,7 +886,7 @@ export default function ResultsEntryTab() {
             color: 'var(--text)', fontFamily: 'inherit', fontSize: '0.92rem', fontWeight: 600,
           }}
         >
-          <span>Import External Results</span>
+          <span>{t('admin.results.import.title')}</span>
           <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>{importOpen ? '▲' : '▼'}</span>
         </button>
 
@@ -893,32 +895,32 @@ export default function ResultsEntryTab() {
             {/* Part 1: Selectors */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: '0.5rem', marginBottom: '1rem' }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label>Competition</label>
+                <label>{t('admin.results.competition')}</label>
                 <select value={compId} onChange={e => { setCompId(e.target.value); setPanels([emptyPanel(0)]); resetTimer(); setShowTimer(false); }}>
-                  <option value="">— Select —</option>
+                  <option value="">{t('admin.results.select-comp')}</option>
                   {liveComps.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label>Event</label>
+                <label>{t('admin.results.event')}</label>
                 <select value={importEventId} onChange={e => { setImportEventId(e.target.value); setImportRound(1); setImportGroup(1); }}>
-                  <option value="">— Select —</option>
+                  <option value="">{t('admin.results.select-event')}</option>
                   {evList.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
                 </select>
               </div>
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label>Round</label>
+                <label>{t('admin.results.round')}</label>
                 <select value={importRound} onChange={e => setImportRound(Number(e.target.value))}>
-                  {getRoundNames((importEventId ? eventConfig[importEventId]?.rounds : 0) || 1).map((n, i) => (
+                  {getRoundNames((importEventId ? eventConfig[importEventId]?.rounds : 0) || 1, t).map((n, i) => (
                     <option key={i} value={i + 1}>{n}</option>
                   ))}
                 </select>
               </div>
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label>Group</label>
+                <label>{t('admin.results.group')}</label>
                 <select value={importGroup} onChange={e => setImportGroup(Number(e.target.value))}>
                   {Array.from({ length: Math.max(1, (importEventId ? eventConfig[importEventId]?.groups : 0) || 1) }, (_, i) => (
-                    <option key={i} value={i + 1}>Group {String.fromCharCode(65 + i)}</option>
+                    <option key={i} value={i + 1}>{t('admin.results.group')} {String.fromCharCode(65 + i)}</option>
                   ))}
                 </select>
               </div>
@@ -930,7 +932,7 @@ export default function ResultsEntryTab() {
                 value={importText}
                 onChange={e => setImportText(e.target.value)}
                 rows={6}
-                placeholder="Paste results table here (tab-separated from WCA Live or spreadsheet)..."
+                placeholder={t('admin.results.import.paste-placeholder')}
                 style={{
                   width: '100%', boxSizing: 'border-box', resize: 'vertical',
                   padding: '0.65rem 0.75rem', borderRadius: '8px',
@@ -952,7 +954,7 @@ export default function ResultsEntryTab() {
                   color: checkLoading ? 'rgba(167,139,250,0.4)' : '#a78bfa',
                 }}
               >
-                {checkLoading ? 'Checking…' : 'Parse Results'}
+                {checkLoading ? t('admin.results.import.checking') : t('admin.results.import.parse')}
               </button>
             </div>
 
@@ -1032,7 +1034,7 @@ export default function ResultsEntryTab() {
                                   background: 'rgba(251,191,36,0.15)',
                                   border: '1px solid rgba(251,191,36,0.35)',
                                   color: '#fbbf24',
-                                }}>Already imported</span>
+                                }}>{t('admin.results.import.already-imported')}</span>
                               )}
                             </div>
                           </td>
@@ -1093,7 +1095,7 @@ export default function ResultsEntryTab() {
                                 border: '1px solid rgba(239,68,68,0.35)',
                                 color: '#f87171',
                               }}
-                            >Remove</button>
+                            >{t('admin.results.import.remove')}</button>
                           </td>
                         </tr>
                       );
@@ -1109,10 +1111,10 @@ export default function ResultsEntryTab() {
               const dupeCount = importRows.filter(r => r.isDupe).length;
               const disabled  = importLoading || !compId || !importEventId || toImport.length === 0;
               const label = importLoading
-                ? 'Importing…'
+                ? t('admin.results.import.importing')
                 : dupeCount > 0
-                  ? `Import ${toImport.length} new result${toImport.length !== 1 ? 's' : ''} (${dupeCount} already exist)`
-                  : `Import ${toImport.length} Result${toImport.length !== 1 ? 's' : ''}`;
+                  ? `${t('admin.results.import.title')}: ${toImport.length} (${dupeCount} ${t('admin.results.import.already-imported').toLowerCase()})`
+                  : `${t('admin.results.import.title')}: ${toImport.length}`;
               return (
                 <button
                   disabled={disabled}

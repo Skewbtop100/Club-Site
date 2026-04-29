@@ -10,6 +10,7 @@ import {
 import { getAthletes } from '@/lib/firebase/services/athletes';
 import type { Athlete, Competition, CompetitionAthlete, EventConfig, AdvancementConfig } from '@/lib/types';
 import { WCA_EVENTS } from '@/lib/wca-events';
+import { useLang } from '@/lib/i18n';
 import COUNTRIES from '@/lib/countries';
 
 type Status = 'upcoming' | 'live' | 'finished';
@@ -28,6 +29,7 @@ const emptyForm: FormShape = { name: '', country: '', date: '', clubDate: '', im
 type AthleteReg = { selected: boolean; events: Record<string, boolean> };
 
 export default function CompetitionsTab() {
+  const { t } = useLang();
   const [comps, setComps] = useState<Competition[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<FormShape>({ ...emptyForm });
@@ -102,7 +104,7 @@ export default function CompetitionsTab() {
   }
 
   async function submitComp() {
-    if (!form.name) { showMsg('error', 'Competition name is required.'); return; }
+    if (!form.name) { showMsg('error', t('admin.comp.msg.required')); return; }
     const athletesData: CompetitionAthlete[] = Object.entries(athleteReg)
       .filter(([, r]) => r.selected)
       .map(([id, r]) => ({
@@ -115,14 +117,14 @@ export default function CompetitionsTab() {
     try {
       if (editId) {
         await updateCompetition(editId, { ...form, events, athletes: athletesData, eventConfig });
-        showMsg('success', 'Competition updated.');
+        showMsg('success', t('admin.comp.msg.updated'));
       } else {
         await addCompetition({ ...form, events, athletes: athletesData, eventConfig });
-        showMsg('success', 'Competition created.');
+        showMsg('success', t('admin.comp.msg.created'));
       }
       cancelEdit();
     } catch (e: unknown) {
-      showMsg('error', 'Error: ' + (e instanceof Error ? e.message : String(e)));
+      showMsg('error', t('admin.msg.error-prefix') + (e instanceof Error ? e.message : String(e)));
     }
   }
 
@@ -165,62 +167,67 @@ export default function CompetitionsTab() {
       {/* Form */}
       <div className="card">
         <div className="card-title">
-          <span className="title-accent" />{editId ? 'Edit Competition' : 'New Competition'}
+          <span className="title-accent" />{editId ? t('admin.comp.edit-title') : t('admin.comp.new-title')}
         </div>
         <div className="form-grid-2">
           <div className="form-group">
-            <label>Competition Name *</label>
+            <label>{t('admin.comp.name')}</label>
             <input type="text" value={form.name} placeholder="e.g. Ulaanbaatar Open 2026"
               onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
           </div>
           <div className="form-group">
-            <label>Country *</label>
+            <label>{t('admin.comp.country')}</label>
             <CountryDropdown
               value={form.country}
               onChange={country => setForm(f => ({ ...f, country }))}
+              placeholder={t('admin.comp.country.search')}
             />
           </div>
           <div className="form-group">
-            <label style={{ fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' as const, color: 'var(--muted)' }}>Competition Image URL</label>
+            <label style={{ fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' as const, color: 'var(--muted)' }}>{t('admin.comp.image-url')}</label>
             <input type="text" value={form.imageUrl} placeholder="https://res.cloudinary.com/..."
               onChange={e => setForm(f => ({ ...f, imageUrl: e.target.value }))} />
             <div style={{ fontSize: '0.68rem', color: 'var(--muted)', marginTop: '0.25rem', opacity: 0.7 }}>
-              Upload image to cloudinary.com and paste the URL here
+              {t('admin.comp.image-help')}
             </div>
           </div>
           <div className="form-group">
-            <label>Competition Date</label>
+            <label>{t('admin.comp.date')}</label>
             <div style={{ fontSize: '0.73rem', color: 'var(--muted)', marginBottom: '0.35rem' }}>
-              The date the original competition was held
+              {t('admin.comp.date-help')}
             </div>
             <DatePicker
               value={form.date}
               onChange={date => setForm(f => ({ ...f, date }))}
+              placeholderLabel={t('admin.comp.date.placeholder')}
+              todayLabel={t('admin.comp.date.today')}
             />
           </div>
           <div className="form-group">
-            <label>Club Event Date</label>
+            <label>{t('admin.comp.club-date')}</label>
             <div style={{ fontSize: '0.73rem', color: 'var(--muted)', marginBottom: '0.35rem' }}>
-              The date your club is running this event
+              {t('admin.comp.club-date-help')}
             </div>
             <DatePicker
               value={form.clubDate}
               onChange={clubDate => setForm(f => ({ ...f, clubDate }))}
+              placeholderLabel={t('admin.comp.date.placeholder')}
+              todayLabel={t('admin.comp.date.today')}
             />
           </div>
           <div className="form-group">
-            <label>Status</label>
+            <label>{t('admin.comp.status-label')}</label>
             <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value as Status }))}>
-              <option value="upcoming">Upcoming</option>
-              <option value="live">Live</option>
-              <option value="finished">Finished</option>
+              <option value="upcoming">{t('admin.comp.status.upcoming')}</option>
+              <option value="live">{t('admin.comp.status.live')}</option>
+              <option value="finished">{t('admin.comp.status.finished')}</option>
             </select>
           </div>
         </div>
 
         {/* Events */}
         <div className="form-group">
-          <label>Events</label>
+          <label>{t('admin.comp.events-label')}</label>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '0.4rem', marginTop: '0.25rem' }}>
             {WCA_EVENTS.map(ev => (
               <div key={ev.id} style={{
@@ -247,7 +254,7 @@ export default function CompetitionsTab() {
                     borderTop: '1px solid rgba(255,255,255,0.05)', flexWrap: 'wrap',
                   }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: 'var(--muted)' }}>
-                      Rounds:
+                      {t('admin.comp.rounds')}
                       <input
                         type="number" min={1} max={4}
                         value={eventConfig[ev.id]?.rounds ?? 1}
@@ -263,7 +270,7 @@ export default function CompetitionsTab() {
                       />
                     </label>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: 'var(--muted)' }}>
-                      Groups/round:
+                      {t('admin.comp.groups')}
                       <input
                         type="number" min={1} max={10}
                         value={eventConfig[ev.id]?.groups ?? 1}
@@ -287,7 +294,7 @@ export default function CompetitionsTab() {
                     display: 'flex', flexDirection: 'column', gap: '0.3rem',
                   }}>
                     <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.1rem', opacity: 0.7 }}>
-                      Advance to next round:
+                      {t('admin.comp.advance-label')}
                     </div>
                     {Array.from({ length: (eventConfig[ev.id]?.rounds ?? 1) - 1 }, (_, idx) => idx + 1).map(r => {
                       const adv: AdvancementConfig | undefined = eventConfig[ev.id]?.advancement?.[String(r)];
@@ -295,7 +302,7 @@ export default function CompetitionsTab() {
                       return (
                         <div key={r} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.74rem', color: 'var(--muted)' }}>
                           <span style={{ flexShrink: 0, minWidth: '1.6rem' }}>R{r}:</span>
-                          <span style={{ flexShrink: 0 }}>Top</span>
+                          <span style={{ flexShrink: 0 }}>{t('admin.comp.advance-top')}</span>
                           <input
                             type="number" min={1} max={isPercent ? 99 : 999}
                             value={adv?.value ?? ''}
@@ -348,7 +355,7 @@ export default function CompetitionsTab() {
                             ))}
                           </div>
                           <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: '0.7rem' }}>
-                            {isPercent ? 'advance' : 'advance'}
+                            {t('admin.comp.advance-action')}
                           </span>
                         </div>
                       );
@@ -365,12 +372,12 @@ export default function CompetitionsTab() {
           const competitionEvents = WCA_EVENTS.filter(ev => events[ev.id]);
           return (
             <div className="form-group">
-              <label>Athletes</label>
+              <label>{t('admin.comp.athletes-label')}</label>
               <div style={{ fontSize: '0.73rem', color: 'var(--muted)', marginBottom: '0.5rem' }}>
-                Select athletes participating in this competition, then choose their events.
+                {t('admin.comp.athletes-help')}
               </div>
               {allAthletes.length === 0 ? (
-                <div style={{ color: 'var(--muted)', fontSize: '0.85rem', fontStyle: 'italic' }}>No athletes in club yet.</div>
+                <div style={{ color: 'var(--muted)', fontSize: '0.85rem', fontStyle: 'italic' }}>{t('admin.comp.no-athletes-club')}</div>
               ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '0.4rem' }}>
                   {allAthletes.map(athlete => {
@@ -443,7 +450,7 @@ export default function CompetitionsTab() {
                             borderTop: '1px solid rgba(255,255,255,0.04)',
                             fontSize: '0.7rem', color: 'var(--muted)', fontStyle: 'italic',
                           }}>
-                            No events selected yet.
+                            {t('admin.comp.no-events-selected')}
                           </div>
                         )}
                       </div>
@@ -456,32 +463,32 @@ export default function CompetitionsTab() {
         })()}
 
         <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
-          <button className="btn-sm-primary" onClick={submitComp}>{editId ? 'Save Changes' : 'Create Competition'}</button>
-          {editId && <button className="btn-sm-secondary" onClick={cancelEdit}>Cancel Edit</button>}
+          <button className="btn-sm-primary" onClick={submitComp}>{editId ? t('admin.btn.save-changes') : t('admin.comp.btn.create')}</button>
+          {editId && <button className="btn-sm-secondary" onClick={cancelEdit}>{t('admin.btn.cancel-edit')}</button>}
         </div>
         {msg && <div className={`msg ${msgType}`} style={{ display: 'block' }}>{msg}</div>}
       </div>
 
       {/* Competitions Table */}
       <div className="card">
-        <div className="card-title"><span className="title-accent" />All Competitions</div>
+        <div className="card-title"><span className="title-accent" />{t('admin.comp.list-title')}</div>
         {loading
-          ? <div className="spinner-row">Loading<span className="spinner-ring" /></div>
+          ? <div className="spinner-row">{t('admin.loading')}<span className="spinner-ring" /></div>
           : comps.length === 0
-            ? <div className="empty-state">No competitions yet.</div>
+            ? <div className="empty-state">{t('admin.comp.empty')}</div>
             : (
               <div className="table-wrap">
                 <table>
                   <thead>
                     <tr>
-                      <th>Name</th>
-                      <th>Country</th>
-                      <th>Comp Date</th>
-                      <th>Club Date</th>
-                      <th>Status</th>
-                      <th>Events</th>
-                      <th>Athletes</th>
-                      <th>Actions</th>
+                      <th>{t('admin.comp.col.name')}</th>
+                      <th>{t('admin.comp.col.country')}</th>
+                      <th>{t('admin.comp.col.comp-date')}</th>
+                      <th>{t('admin.comp.col.club-date')}</th>
+                      <th>{t('admin.comp.col.status')}</th>
+                      <th>{t('admin.comp.col.events')}</th>
+                      <th>{t('admin.comp.col.athletes')}</th>
+                      <th>{t('admin.label.actions')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -500,21 +507,21 @@ export default function CompetitionsTab() {
                               onChange={e => setStatus(c.id, e.target.value)}
                               style={{ borderColor: statusColors[c.status] || 'rgba(255,255,255,0.08)' }}
                             >
-                              <option value="upcoming">Upcoming</option>
-                              <option value="live">Live</option>
-                              <option value="finished">Finished</option>
+                              <option value="upcoming">{t('admin.comp.status.upcoming')}</option>
+                              <option value="live">{t('admin.comp.status.live')}</option>
+                              <option value="finished">{t('admin.comp.status.finished')}</option>
                             </select>
                           </td>
                           <td className="td-muted" style={{ fontSize: '0.78rem' }}>
-                            {Object.keys(c.events || {}).filter(k => (c.events as Record<string, boolean>)?.[k]).length} events
+                            {Object.keys(c.events || {}).filter(k => (c.events as Record<string, boolean>)?.[k]).length} {t('admin.comp.events-suffix')}
                           </td>
                           <td className="td-muted" style={{ fontSize: '0.78rem' }}>
-                            {(c.athletes || []).length} registered
+                            {(c.athletes || []).length} {t('admin.comp.athletes-suffix')}
                           </td>
                           <td>
                             <div style={{ display: 'flex', gap: '0.35rem' }}>
-                              <button className="btn-edit" onClick={() => startEdit(c)}>Edit</button>
-                              <button className="btn-delete" onClick={() => openDeleteModal(c)}>Delete</button>
+                              <button className="btn-edit" onClick={() => startEdit(c)}>{t('admin.btn.edit')}</button>
+                              <button className="btn-delete" onClick={() => openDeleteModal(c)}>{t('admin.btn.delete')}</button>
                             </div>
                           </td>
                         </tr>
@@ -552,7 +559,7 @@ export default function CompetitionsTab() {
             {deleteMsg === 'success' ? (
               <div style={{ textAlign: 'center', padding: '1rem 0' }}>
                 <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>✓</div>
-                <div style={{ color: '#4ade80', fontWeight: 600 }}>Competition deleted.</div>
+                <div style={{ color: '#4ade80', fontWeight: 600 }}>{t('admin.comp.delete.success')}</div>
               </div>
             ) : (
               <>
@@ -561,10 +568,10 @@ export default function CompetitionsTab() {
                   <span style={{ fontSize: '1.5rem', lineHeight: 1, flexShrink: 0 }}>⚠️</span>
                   <div>
                     <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text)', marginBottom: '0.4rem' }}>
-                      Delete Competition?
+                      {t('admin.comp.delete.title')}
                     </div>
                     <div style={{ fontSize: '0.85rem', color: 'var(--muted)', lineHeight: 1.55 }}>
-                      This will permanently delete <strong style={{ color: 'var(--text)' }}>{deleteModal.name}</strong> and ALL its results, assignments, and data. This cannot be undone.
+                      {t('admin.comp.delete.warning-prefix')} <strong style={{ color: 'var(--text)' }}>{deleteModal.name}</strong> {t('admin.comp.delete.warning-suffix')}
                     </div>
                   </div>
                 </div>
@@ -572,7 +579,7 @@ export default function CompetitionsTab() {
                 {/* Name confirmation input */}
                 <div style={{ marginBottom: '1.1rem' }}>
                   <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.4rem' }}>
-                    Type <strong style={{ color: 'var(--text)' }}>{deleteModal.name}</strong> to confirm:
+                    {t('admin.comp.delete.confirm-prefix')} <strong style={{ color: 'var(--text)' }}>{deleteModal.name}</strong> {t('admin.comp.delete.confirm-suffix')}
                   </label>
                   <input
                     type="text"
@@ -606,7 +613,7 @@ export default function CompetitionsTab() {
                       color: 'var(--text)', cursor: 'pointer', fontFamily: 'inherit',
                     }}
                   >
-                    Cancel
+                    {t('admin.btn.cancel')}
                   </button>
                   <button
                     onClick={confirmDelete}
@@ -620,7 +627,7 @@ export default function CompetitionsTab() {
                       transition: 'all 0.15s',
                     }}
                   >
-                    Delete Forever
+                    {t('admin.comp.delete.btn-forever')}
                   </button>
                 </div>
               </>
@@ -652,7 +659,7 @@ function toLocalIso(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-function DatePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function DatePicker({ value, onChange, placeholderLabel, todayLabel }: { value: string; onChange: (v: string) => void; placeholderLabel?: string; todayLabel?: string }) {
   const parsed = parseLocalDate(value);
   const today = new Date();
 
@@ -730,7 +737,7 @@ function DatePicker({ value, onChange }: { value: string; onChange: (v: string) 
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ opacity: 0.5, flexShrink: 0 }}>
           <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>
         </svg>
-        <span>{displayValue || 'Select date…'}</span>
+        <span>{displayValue || (placeholderLabel ?? 'Select date…')}</span>
         {value && (
           <button
             onPointerDown={e => { e.stopPropagation(); onChange(''); }}
@@ -809,7 +816,7 @@ function DatePicker({ value, onChange }: { value: string; onChange: (v: string) 
               onClick={() => { onChange(todayIso); setOpen(false); }}
               style={{ background: 'none', border: 'none', color: '#a78bfa', fontSize: '0.78rem', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600 }}
             >
-              Today
+              {todayLabel ?? 'Today'}
             </button>
           </div>
         </div>
@@ -832,7 +839,7 @@ const navBtnStyle: React.CSSProperties = {
 
 // ── CountryDropdown ────────────────────────────────────────────────────────────
 
-function CountryDropdown({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function CountryDropdown({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
   const [query, setQuery] = useState(value);
   const [open, setOpen] = useState(false);
   const [highlighted, setHighlighted] = useState(0);
@@ -899,7 +906,7 @@ function CountryDropdown({ value, onChange }: { value: string; onChange: (v: str
       <input
         type="text"
         value={query}
-        placeholder="Search country…"
+        placeholder={placeholder ?? 'Search country…'}
         autoComplete="off"
         onFocus={() => { setOpen(true); setHighlighted(0); }}
         onChange={e => {

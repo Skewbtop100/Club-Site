@@ -6,6 +6,7 @@ import { subscribeResultsByComp, saveResult, deleteResult as deleteResultFn } fr
 import type { Competition, Result, AdvancementConfig } from '@/lib/types';
 import { fmtTime, parseTime } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
+import { useLang, type TranslationKey } from '@/lib/i18n';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -26,12 +27,14 @@ function bestOf(solves: (number | null)[]): number {
 }
 
 /** Human-readable round name following WCA convention */
-function getRoundLabel(roundNum: number, totalRounds: number): string {
-  if (totalRounds === 1) return 'Final';
-  if (roundNum === totalRounds) return 'Final';
-  if (totalRounds === 4 && roundNum === 3) return 'Semi Final';
-  const names: Record<number, string> = { 1: 'First Round', 2: 'Second Round', 3: 'Third Round' };
-  return names[roundNum] ?? `Round ${roundNum}`;
+function getRoundLabel(roundNum: number, totalRounds: number, t: (k: TranslationKey) => string): string {
+  if (totalRounds === 1) return t('admin.round.final');
+  if (roundNum === totalRounds) return t('admin.round.final');
+  if (totalRounds === 4 && roundNum === 3) return t('admin.round.semi');
+  if (roundNum === 1) return t('admin.round.first');
+  if (roundNum === 2) return t('admin.round.second');
+  if (roundNum === 3) return t('admin.round.third');
+  return `${t('admin.round.generic')} ${roundNum}`;
 }
 
 /** Mark the best (dropped-best) and worst (dropped-worst) solve indices in an ao5 */
@@ -55,6 +58,7 @@ const rKey = (evId: string, r: number) => `${evId}_r${r}`;
 // ── component ─────────────────────────────────────────────────────────────────
 
 export default function CompResultsTab() {
+  const { t } = useLang();
   const [comps, setComps]     = useState<Competition[]>([]);
   const [compId, setCompId]   = useState('');
   const [evId, setEvId]       = useState('');
@@ -234,7 +238,7 @@ export default function CompResultsTab() {
         {/* Competition selector */}
         <div className="wca-sidebar-comp-sel">
           <select value={compId} onChange={e => setCompId(e.target.value)}>
-            <option value="">— Select competition —</option>
+            <option value="">{t('admin.cr.select-comp')}</option>
             {visibleComps
               .sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? '')))
               .map(c => (
@@ -249,7 +253,7 @@ export default function CompResultsTab() {
         <div className="wca-sidebar-events">
           {!compId && (
             <div style={{ padding: '0.9rem 0.85rem', color: 'var(--muted)', fontSize: '0.8rem' }}>
-              Select a competition
+              {t('admin.cr.select-comp-prompt')}
             </div>
           )}
           {compEvents.map(ev => {
@@ -278,7 +282,7 @@ export default function CompResultsTab() {
 
                 {/* Round sub-items */}
                 {isOpen && Array.from({ length: total }, (_, i) => i + 1).map(r => {
-                  const label   = getRoundLabel(r, total);
+                  const label   = getRoundLabel(r, total, t);
                   const st      = selComp?.roundStatus?.[rKey(ev.id, r)] ?? null;
                   const isActive = evId === ev.id && round === r;
                   return (
@@ -307,7 +311,7 @@ export default function CompResultsTab() {
         {/* Competition title */}
         <div className="wca-main-header">
           <div>
-            <div className="wca-comp-title">{selComp?.name ?? 'Select a competition'}</div>
+            <div className="wca-comp-title">{selComp?.name ?? t('admin.cr.select-comp-prompt')}</div>
             {selComp && (
               <div className="wca-comp-meta">
                 <span>{selComp.status}</span>
@@ -325,11 +329,11 @@ export default function CompResultsTab() {
                 {WCA_EVENTS.find(e => e.id === evId)?.name}
               </span>
               <span className="wca-round-label">
-                {getRoundLabel(round, totalRoundsFor(evId))}
+                {getRoundLabel(round, totalRoundsFor(evId), t)}
               </span>
               {/* Status badge */}
-              {curStatus === 'ongoing'  && <span className="wca-round-badge wca-round-badge-live">● Live</span>}
-              {curStatus === 'complete' && <span className="wca-round-badge wca-round-badge-done">✓ Round Complete</span>}
+              {curStatus === 'ongoing'  && <span className="wca-round-badge wca-round-badge-live">{t('admin.cr.round.live-badge')}</span>}
+              {curStatus === 'complete' && <span className="wca-round-badge wca-round-badge-done">{t('admin.cr.round.complete-badge')}</span>}
             </div>
             {/* Admin: round tabs + status buttons */}
             <div className="wca-round-header-right">
@@ -341,7 +345,7 @@ export default function CompResultsTab() {
                     className={`wca-round-tab${round === r ? ' active' : ''}`}
                     onClick={() => setRound(r)}
                   >
-                    {getRoundLabel(r, totalRoundsFor(evId))}
+                    {getRoundLabel(r, totalRoundsFor(evId), t)}
                   </button>
                 ))}
               </div>
@@ -352,14 +356,14 @@ export default function CompResultsTab() {
                   onClick={() => setRoundStatus(evId, round, curStatus === 'ongoing' ? null : 'ongoing')}
                   className={`wca-status-btn${curStatus === 'ongoing' ? ' active-live' : ''}`}
                 >
-                  ● Live
+                  {t('admin.cr.round.live-btn')}
                 </button>
                 <button
                   disabled={statusWorking}
                   onClick={() => setRoundStatus(evId, round, curStatus === 'complete' ? null : 'complete')}
                   className={`wca-status-btn${curStatus === 'complete' ? ' active-done' : ''}`}
                 >
-                  ✓ Done
+                  {t('admin.cr.round.done-btn')}
                 </button>
               </div>
             </div>
@@ -369,9 +373,9 @@ export default function CompResultsTab() {
         {/* Table area */}
         <div className="wca-table-wrap">
           {!evId
-            ? <div className="wca-empty">Select an event to view results.</div>
+            ? <div className="wca-empty">{t('admin.cr.empty-event')}</div>
             : tableRows.length === 0
-              ? <div className="wca-empty">No results for this round yet.</div>
+              ? <div className="wca-empty">{t('admin.cr.empty-results')}</div>
               : (
                 <>
                   {/* Toolbar */}
@@ -379,7 +383,7 @@ export default function CompResultsTab() {
                     {deleteMode ? (
                       <>
                         <button onClick={() => { setDeleteMode(false); setSelected(new Set()); setDeleteConfirm(false); }} className="wca-toolbar-btn">
-                          Cancel
+                          {t('admin.btn.cancel')}
                         </button>
                         <button
                           disabled={selected.size === 0}
@@ -387,12 +391,12 @@ export default function CompResultsTab() {
                           className="wca-toolbar-btn danger"
                           style={{ opacity: selected.size === 0 ? 0.4 : 1 }}
                         >
-                          Delete Selected ({selected.size})
+                          {t('admin.cr.btn.delete-selected')} ({selected.size})
                         </button>
                       </>
                     ) : (
                       <button onClick={() => { setDeleteMode(true); setSelected(new Set()); }} className="wca-toolbar-btn danger-outline">
-                        Delete Results
+                        {t('admin.cr.btn.delete-mode')}
                       </button>
                     )}
                   </div>
@@ -413,15 +417,15 @@ export default function CompResultsTab() {
                           </th>
                         )}
                         <th style={{ width: '2rem' }}>#</th>
-                        <th>Athlete</th>
-                        <th>Country</th>
+                        <th>{t('admin.cr.col.athlete')}</th>
+                        <th>{t('admin.cr.col.country')}</th>
                         <th className="th-r">1</th>
                         <th className="th-r">2</th>
                         <th className="th-r">3</th>
                         <th className="th-r">4</th>
                         <th className="th-r">5</th>
-                        <th className="th-r">Average</th>
-                        <th className="th-r">Best</th>
+                        <th className="th-r">{t('admin.cr.col.average')}</th>
+                        <th className="th-r">{t('admin.cr.col.best')}</th>
                         <th style={{ width: '2.5rem' }}></th>
                       </tr>
                     </thead>
@@ -497,8 +501,8 @@ export default function CompResultsTab() {
 
                             {/* Edit action */}
                             <td style={{ textAlign: 'right' }}>
-                              <button onClick={() => openEdit(r)} title="Edit result" className="res-act-btn res-act-edit">
-                                <span className="res-act-text">Edit</span>
+                              <button onClick={() => openEdit(r)} title={t('admin.btn.edit')} className="res-act-btn res-act-edit">
+                                <span className="res-act-text">{t('admin.btn.edit')}</span>
                                 <span className="res-act-icon">✏️</span>
                               </button>
                             </td>
@@ -508,8 +512,8 @@ export default function CompResultsTab() {
                         // Advancement cutoff separator
                         if (isLastAdvancing) {
                           const label = advCfg?.type === 'fixed'
-                            ? `✓ Top ${advanceCount} advance to next round`
-                            : `✓ Top ${advCfg?.value}% advance (${advanceCount} athletes)`;
+                            ? `${t('admin.cr.advance-prefix')} ${advanceCount} ${t('admin.cr.advance-fixed')}`
+                            : `${t('admin.cr.advance-prefix')} ${advCfg?.value}% (${advanceCount} ${t('admin.cr.advance-percent-suffix')})`;
                           return [
                             dataRow,
                             <tr key="adv-cutoff">
@@ -539,7 +543,7 @@ export default function CompResultsTab() {
       {editRow && (
         <div onClick={() => !editSaving && setEditRow(null)} className="wca-modal-backdrop">
           <div onClick={e => e.stopPropagation()} className="wca-modal" style={{ borderColor: 'rgba(99,102,241,0.35)' }}>
-            <div className="wca-modal-title">Edit Result</div>
+            <div className="wca-modal-title">{t('admin.cr.edit.title')}</div>
             <div className="wca-modal-sub">{editRow.athleteName || editRow.athleteId}</div>
 
             <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
@@ -559,18 +563,18 @@ export default function CompResultsTab() {
             </div>
 
             <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '1rem', opacity: 0.7 }}>
-              Enter times like <code style={{ fontFamily: 'monospace' }}>9.45</code>,{' '}
+              {t('admin.cr.edit.help-prefix')} <code style={{ fontFamily: 'monospace' }}>9.45</code>,{' '}
               <code style={{ fontFamily: 'monospace' }}>1:23.45</code>,{' '}
-              <code style={{ fontFamily: 'monospace' }}>DNF</code>, or{' '}
+              <code style={{ fontFamily: 'monospace' }}>DNF</code>, {t('admin.cr.edit.help-or')}{' '}
               <code style={{ fontFamily: 'monospace' }}>DNS</code>
             </div>
 
             {editError && <div style={{ fontSize: '0.78rem', color: '#f87171', marginBottom: '0.8rem' }}>{editError}</div>}
 
             <div className="wca-modal-actions">
-              <button onClick={() => setEditRow(null)} disabled={editSaving} className="wca-modal-btn">Cancel</button>
+              <button onClick={() => setEditRow(null)} disabled={editSaving} className="wca-modal-btn">{t('admin.btn.cancel')}</button>
               <button onClick={saveEdit} disabled={editSaving} className="wca-modal-btn primary" style={{ background: editSaving ? 'rgba(99,102,241,0.3)' : 'rgba(99,102,241,0.7)', borderColor: 'rgba(99,102,241,0.6)' }}>
-                {editSaving ? 'Saving…' : 'Save'}
+                {editSaving ? t('admin.cr.edit.saving') : t('admin.btn.save')}
               </button>
             </div>
           </div>
@@ -581,16 +585,15 @@ export default function CompResultsTab() {
       {deleteConfirm && (
         <div onClick={() => !deleteWorking && setDeleteConfirm(false)} className="wca-modal-backdrop">
           <div onClick={e => e.stopPropagation()} className="wca-modal" style={{ borderColor: 'rgba(239,68,68,0.35)' }}>
-            <div className="wca-modal-title">Delete {selected.size} {selected.size === 1 ? 'result' : 'results'}?</div>
+            <div className="wca-modal-title">{t('admin.cr.delete.title')}</div>
             <div className="wca-modal-sub" style={{ marginBottom: '1.25rem' }}>
-              This will permanently delete{' '}
-              <strong style={{ color: 'var(--text)' }}>{selected.size} {selected.size === 1 ? 'result' : 'results'}</strong>.
-              {' '}This cannot be undone.
+              <strong style={{ color: 'var(--text)' }}>{selected.size} {selected.size === 1 ? t('admin.cr.delete.result-1') : t('admin.cr.delete.result-n')}</strong>
+              {' '}— {t('admin.cr.delete.warning')}
             </div>
             <div className="wca-modal-actions">
-              <button onClick={() => setDeleteConfirm(false)} disabled={deleteWorking} className="wca-modal-btn">Cancel</button>
+              <button onClick={() => setDeleteConfirm(false)} disabled={deleteWorking} className="wca-modal-btn">{t('admin.btn.cancel')}</button>
               <button onClick={doDeleteSelected} disabled={deleteWorking} className="wca-modal-btn danger" style={{ background: deleteWorking ? 'rgba(239,68,68,0.2)' : 'rgba(239,68,68,0.75)', borderColor: 'rgba(239,68,68,0.6)' }}>
-                {deleteWorking ? 'Deleting…' : `Delete ${selected.size}`}
+                {deleteWorking ? t('admin.cr.delete.deleting') : `${t('admin.btn.delete')} ${selected.size}`}
               </button>
             </div>
           </div>

@@ -6,6 +6,7 @@ import { getResultsByComp } from '@/lib/firebase/services/results';
 import type { Competition, Result } from '@/lib/types';
 import { fmtTime } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
+import { useLang } from '@/lib/i18n';
 
 interface CompCard {
   comp: Competition;
@@ -16,6 +17,7 @@ interface CompCard {
 }
 
 export default function HistoryTab() {
+  const { t } = useLang();
   const [cards, setCards] = useState<CompCard[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -48,11 +50,11 @@ export default function HistoryTab() {
     setCards(prev => prev.map(c => c.comp.id === compId ? { ...c, evId } : c));
   }
 
-  if (loading) return <div className="spinner-row">Loading<span className="spinner-ring" /></div>;
+  if (loading) return <div className="spinner-row">{t('admin.loading')}<span className="spinner-ring" /></div>;
 
   return (
     <div className="hc-list">
-      {cards.length === 0 && <div className="empty-state">No competitions yet.</div>}
+      {cards.length === 0 && <div className="empty-state">{t('admin.history.empty')}</div>}
       {cards.map(card => {
         const evList = card.comp.events ? WCA_EVENTS.filter(e => (card.comp.events as Record<string,boolean>)?.[e.id]) : [];
         const filtResults = card.evId ? card.results.filter(r => r.eventId === card.evId) : card.results;
@@ -66,23 +68,23 @@ export default function HistoryTab() {
                 <div className="hc-chips">
                   {card.comp.date && <span className="hc-chip">{String(card.comp.date)}</span>}
                   <span className="hc-chip">{card.comp.status}</span>
-                  <span className="hc-chip">{card.results.length || '?'} results</span>
+                  <span className="hc-chip">{card.results.length || '?'} {t('admin.history.results-suffix')}</span>
                 </div>
               </div>
               <button className={`hc-toggle-btn${card.open ? ' open' : ''}`} onClick={() => toggleCard(card.comp.id)}>
-                {card.open ? 'Hide' : 'View Results'}
+                {card.open ? t('admin.history.btn.hide') : t('admin.history.btn.view')}
               </button>
             </div>
 
             {card.open && (
               <div className="hc-body open">
                 {card.loading
-                  ? <div style={{ padding: '1rem', color: 'var(--muted)', fontSize: '0.83rem' }}>Loading results…</div>
+                  ? <div style={{ padding: '1rem', color: 'var(--muted)', fontSize: '0.83rem' }}>{t('admin.history.loading-results')}</div>
                   : (
                     <>
                       {evList.length > 0 && (
                         <div className="hc-ev-tabs">
-                          <button className={`hc-ev-pill${!card.evId ? ' active' : ''}`} onClick={() => setEvId(card.comp.id, '')}>All</button>
+                          <button className={`hc-ev-pill${!card.evId ? ' active' : ''}`} onClick={() => setEvId(card.comp.id, '')}>{t('admin.history.all')}</button>
                           {evList.map(ev => (
                             <button key={ev.id} className={`hc-ev-pill${card.evId === ev.id ? ' active' : ''}`}
                               onClick={() => setEvId(card.comp.id, ev.id)}>
@@ -92,23 +94,23 @@ export default function HistoryTab() {
                         </div>
                       )}
                       {filtResults.length === 0
-                        ? <div style={{ padding: '1rem', color: 'var(--muted)', fontSize: '0.83rem' }}>No results found.</div>
+                        ? <div style={{ padding: '1rem', color: 'var(--muted)', fontSize: '0.83rem' }}>{t('admin.history.no-results')}</div>
                         : roundsInEv.length > 0
                           ? roundsInEv.map(r => {
                               const rRows = filtResults.filter(x => (x.round || 1) === r)
                                 .sort((a, b) => { const sa = a.single ?? Infinity, sb = b.single ?? Infinity; if (sa < 0 && sb < 0) return 0; if (sa < 0) return 1; if (sb < 0) return -1; return sa - sb; });
                               return (
                                 <div key={r}>
-                                  <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#c4b5fd', padding: '0.6rem 1.2rem 0.3rem' }}>Round {r}</div>
+                                  <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#c4b5fd', padding: '0.6rem 1.2rem 0.3rem' }}>{t('admin.history.round-prefix')} {r}</div>
                                   <div className="table-wrap" style={{ borderRadius: 0, border: 'none', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
                                     <table>
                                       <thead>
                                         <tr>
                                           <th>#</th>
-                                          <th>Name</th>
-                                          <th>Event</th>
-                                          <th className="th-r">Single</th>
-                                          <th className="th-r">Average</th>
+                                          <th>{t('admin.history.col.name')}</th>
+                                          <th>{t('admin.history.col.event')}</th>
+                                          <th className="th-r">{t('admin.history.col.single')}</th>
+                                          <th className="th-r">{t('admin.history.col.average')}</th>
                                         </tr>
                                       </thead>
                                       <tbody>
@@ -132,8 +134,8 @@ export default function HistoryTab() {
                               <table>
                                 <thead>
                                   <tr>
-                                    <th>#</th><th>Name</th><th>Event</th><th>R</th>
-                                    <th className="th-r">Single</th><th className="th-r">Avg</th>
+                                    <th>#</th><th>{t('admin.history.col.name')}</th><th>{t('admin.history.col.event')}</th><th>{t('admin.history.col.round')}</th>
+                                    <th className="th-r">{t('admin.history.col.single')}</th><th className="th-r">{t('admin.history.col.avg-short')}</th>
                                   </tr>
                                 </thead>
                                 <tbody>

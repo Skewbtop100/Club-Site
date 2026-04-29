@@ -6,11 +6,13 @@ import { getCompetitions } from '@/lib/firebase/services/competitions';
 import { getAllResults } from '@/lib/firebase/services/results';
 import { fmtTime } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
+import { useLang } from '@/lib/i18n';
 
 interface Stat { label: string; value: string | number; sub?: string; }
 interface EventStat { eventId: string; count: number; best: number | null; }
 
 export default function AnalyticsTab() {
+  const { t } = useLang();
   const [loading, setLoading] = useState(true);
   const [topStats, setTopStats] = useState<Stat[]>([]);
   const [eventStats, setEventStats] = useState<EventStat[]>([]);
@@ -25,12 +27,12 @@ export default function AnalyticsTab() {
       const validResults = results.filter(r => r.single !== null && Number(r.single) > 0);
 
       setTopStats([
-        { label: 'Total Athletes', value: athletes.length },
-        { label: 'Total Competitions', value: competitions.length },
-        { label: 'Total Results', value: results.length },
-        { label: 'Valid Results', value: validResults.length },
-        { label: 'Live Competitions', value: competitions.filter(c => c.status === 'live').length, sub: 'currently live' },
-        { label: 'Unique Athletes (results)', value: new Set(results.map(r => r.athleteId)).size },
+        { label: t('admin.an.total-athletes'), value: athletes.length },
+        { label: t('admin.an.total-comps'), value: competitions.length },
+        { label: t('admin.an.total-results'), value: results.length },
+        { label: t('admin.an.valid-results'), value: validResults.length },
+        { label: t('admin.an.live-comps'), value: competitions.filter(c => c.status === 'live').length, sub: t('admin.an.currently-live') },
+        { label: t('admin.an.unique-athletes'), value: new Set(results.map(r => r.athleteId)).size },
       ]);
 
       const evMap: Record<string, { count: number; best: number | null }> = {};
@@ -51,9 +53,9 @@ export default function AnalyticsTab() {
       setLoading(false);
     }
     load();
-  }, []);
+  }, [t]);
 
-  if (loading) return <div className="spinner-row">Loading analytics<span className="spinner-ring" /></div>;
+  if (loading) return <div className="spinner-row">{t('admin.an.loading')}<span className="spinner-ring" /></div>;
 
   return (
     <div>
@@ -78,14 +80,14 @@ export default function AnalyticsTab() {
       {/* Per-event stats */}
       {eventStats.length > 0 && (
         <div className="card">
-          <div className="card-title"><span className="title-accent" />Results by Event</div>
+          <div className="card-title"><span className="title-accent" />{t('admin.an.results-by-event')}</div>
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Event</th>
-                  <th>Results</th>
-                  <th>Best Single</th>
+                  <th>{t('admin.an.col.event')}</th>
+                  <th>{t('admin.an.col.results')}</th>
+                  <th>{t('admin.an.col.best-single')}</th>
                 </tr>
               </thead>
               <tbody>

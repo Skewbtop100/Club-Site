@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
+import { useLang, type TranslationKey } from '@/lib/i18n';
 import ThemeToggle from '@/components/layout/ThemeToggle';
 import LangToggle from '@/components/layout/LangToggle';
 
@@ -23,21 +24,22 @@ type Tab =
   | 'history'  | 'users'        | 'wcaImport' | 'events'
   | 'analytics' | 'assignments';
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'athletes',     label: '👤 Athletes' },
-  { id: 'competitions', label: '🏆 Competitions' },
-  { id: 'results',      label: '✎ Results Entry' },
-  { id: 'compResults',  label: '📋 Competition Results' },
-  { id: 'history',      label: '📄 History' },
-  { id: 'users',        label: '🔑 Users' },
-  { id: 'wcaImport',   label: '🌍 WCA Records' },
-  { id: 'events',       label: '⚙ Events' },
-  { id: 'analytics',   label: '📊 Analytics' },
-  { id: 'assignments',  label: '👥 Assignments' },
+const TABS: { id: Tab; labelKey: TranslationKey }[] = [
+  { id: 'athletes',     labelKey: 'admin.tab.athletes' },
+  { id: 'competitions', labelKey: 'admin.tab.competitions' },
+  { id: 'results',      labelKey: 'admin.tab.results' },
+  { id: 'compResults',  labelKey: 'admin.tab.comp-results' },
+  { id: 'history',      labelKey: 'admin.tab.history' },
+  { id: 'users',        labelKey: 'admin.tab.users' },
+  { id: 'wcaImport',    labelKey: 'admin.tab.wca-records' },
+  { id: 'events',       labelKey: 'admin.tab.events' },
+  { id: 'analytics',    labelKey: 'admin.tab.analytics' },
+  { id: 'assignments',  labelKey: 'admin.tab.assignments' },
 ];
 
 export default function AdminDashboardPage() {
   const router = useRouter();
+  const { t } = useLang();
   const [activeTab, setActiveTab] = useState<Tab>('athletes');
   const [menuOpen, setMenuOpen]   = useState(false);
 
@@ -95,8 +97,8 @@ export default function AdminDashboardPage() {
               fontSize: '1.32rem', fontWeight: 800,
               background: 'linear-gradient(135deg, var(--accent), var(--accent2))',
               WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
-            }}>Admin Dashboard</h1>
-            <p style={{ color: 'var(--muted)', fontSize: '0.78rem', marginTop: '0.1rem' }}>Cube MN Competition Management</p>
+            }}>{t('admin.title')}</h1>
+            <p style={{ color: 'var(--muted)', fontSize: '0.78rem', marginTop: '0.1rem' }}>{t('admin.subtitle')}</p>
           </div>
 
           {/* Admin menu */}
@@ -112,7 +114,7 @@ export default function AdminDashboardPage() {
                 cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
               }}
             >
-              <span>Admin</span>
+              <span>{t('admin.btn.admin')}</span>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}
                 style={{ width: 13, height: 13, opacity: 0.5, transform: menuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.22s' }}>
                 <path d="M6 9l6 6 6-6" />
@@ -133,15 +135,15 @@ export default function AdminDashboardPage() {
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
                       <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>
                     </svg>
-                    Homepage
+                    {t('admin.btn.homepage')}
                   </a>
                   <div style={{ height: '1px', background: 'rgba(255,255,255,0.07)', margin: '3px 6px' }} />
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.42rem 0.65rem', borderRadius: '9px', gap: '0.75rem' }}>
-                    <span style={{ fontSize: '0.77rem', color: 'var(--muted)', fontWeight: 500 }}>Language</span>
+                    <span style={{ fontSize: '0.77rem', color: 'var(--muted)', fontWeight: 500 }}>{t('lang.label')}</span>
                     <LangToggle />
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.42rem 0.65rem', borderRadius: '9px', gap: '0.75rem' }}>
-                    <span style={{ fontSize: '0.77rem', color: 'var(--muted)', fontWeight: 500 }}>Theme</span>
+                    <span style={{ fontSize: '0.77rem', color: 'var(--muted)', fontWeight: 500 }}>{t('theme.label')}</span>
                     <ThemeToggle />
                   </div>
                   <div style={{ height: '1px', background: 'rgba(255,255,255,0.07)', margin: '3px 6px' }} />
@@ -149,7 +151,7 @@ export default function AdminDashboardPage() {
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                       <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>
                     </svg>
-                    Sign Out
+                    {t('admin.btn.sign-out')}
                   </button>
                 </div>
               </>
@@ -159,13 +161,13 @@ export default function AdminDashboardPage() {
 
         {/* Tab Nav */}
         <div className="tab-nav" style={{ overflowX: 'auto', flexWrap: 'nowrap' }}>
-          {TABS.map(t => (
+          {TABS.map(tab => (
             <button
-              key={t.id}
-              className={`tab-btn${activeTab === t.id ? ' active' : ''}`}
-              onClick={() => setActiveTab(t.id)}
+              key={tab.id}
+              className={`tab-btn${activeTab === tab.id ? ' active' : ''}`}
+              onClick={() => setActiveTab(tab.id)}
             >
-              {t.label}
+              {t(tab.labelKey)}
             </button>
           ))}
         </div>

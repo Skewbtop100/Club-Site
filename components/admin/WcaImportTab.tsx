@@ -8,6 +8,7 @@ import { getAllResults } from '@/lib/firebase/services/results';
 import { getAthletes } from '@/lib/firebase/services/athletes';
 import { fmtTime } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
+import { useLang } from '@/lib/i18n';
 import type { Athlete, Result } from '@/lib/types';
 
 const ACTIVE_EVENTS = new Set([
@@ -37,6 +38,7 @@ interface ClubBest {
 }
 
 export default function WcaImportTab() {
+  const { t } = useLang();
   const [wcaData, setWcaData] = useState<Record<RecordLevel, RecordRow[]>>({ WR: [], CR: [], NR: [] });
   const [fetching, setFetching] = useState(false);
   const [lastFetched, setLastFetched] = useState<Date | null>(null);
@@ -180,7 +182,7 @@ export default function WcaImportTab() {
 
   function gapStr(recordCs: number | null, clubCs: number | null): string {
     if (recordCs === null || clubCs === null) return '—';
-    if (clubCs <= recordCs) return '🏆 Record holder!';
+    if (clubCs <= recordCs) return t('admin.wca.record-holder');
     const diff = (clubCs - recordCs) / 100;
     return `+${diff.toFixed(2)}s`;
   }
@@ -205,20 +207,20 @@ export default function WcaImportTab() {
 
   return (
     <div className="card">
-      <div className="card-title"><span className="title-accent" />WCA Records</div>
+      <div className="card-title"><span className="title-accent" />{t('admin.wca.title')}</div>
 
       {/* Controls */}
       <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '1rem' }}>
         <button className="btn-sm-primary" onClick={fetchRecords} disabled={fetching}>
-          {fetching ? 'Fetching…' : 'Refresh Records'}
+          {fetching ? t('admin.wca.btn.fetching') : t('admin.wca.btn.refresh')}
         </button>
         <button className="btn-sm-primary" onClick={saveToFirebase} disabled={saving || (wcaData.WR.length === 0 && trRows.length === 0)}
           style={{ background: 'rgba(74,222,128,0.15)', border: '1px solid rgba(74,222,128,0.4)', color: '#4ade80' }}>
-          {saving ? 'Saving…' : 'Save All to Firebase'}
+          {saving ? t('admin.wca.btn.saving') : t('admin.wca.btn.save-all')}
         </button>
         {lastFetched && (
           <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>
-            Last updated: {lastFetched.toLocaleTimeString()}
+            {t('admin.wca.last-updated')} {lastFetched.toLocaleTimeString()}
           </span>
         )}
       </div>
@@ -228,21 +230,21 @@ export default function WcaImportTab() {
       {/* Tabs */}
       <div style={{ display: 'flex', gap: '0.3rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
         {([
-          { key: 'WR' as TabKey, label: '🌍 World Records' },
-          { key: 'CR' as TabKey, label: '🌏 Asian Records' },
-          { key: 'NR' as TabKey, label: '🇲🇳 Mongolia Records' },
-          { key: 'TR' as TabKey, label: '🏠 Club Records (TR)' },
-        ]).map(t => (
+          { key: 'WR' as TabKey, label: t('admin.wca.tab.world') },
+          { key: 'CR' as TabKey, label: t('admin.wca.tab.asia') },
+          { key: 'NR' as TabKey, label: t('admin.wca.tab.mongolia') },
+          { key: 'TR' as TabKey, label: t('admin.wca.tab.club') },
+        ]).map(item => (
           <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            style={tab === t.key
+            key={item.key}
+            onClick={() => setTab(item.key)}
+            style={tab === item.key
               ? undefined
               : { background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: 'var(--muted)', cursor: 'pointer', fontFamily: 'inherit', padding: '0.3rem 0.8rem', borderRadius: '8px', fontSize: '0.78rem', fontWeight: 600 }
             }
-            className={tab === t.key ? 'btn-sm-primary' : undefined}
+            className={tab === item.key ? 'btn-sm-primary' : undefined}
           >
-            {t.label}
+            {item.label}
           </button>
         ))}
       </div>
@@ -251,18 +253,18 @@ export default function WcaImportTab() {
       {tab === 'TR' && (
         trRows.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--muted)', fontSize: '0.88rem' }}>
-            No club results yet.
+            {t('admin.wca.no-club')}
           </div>
         ) : (
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Event</th>
-                  <th style={{ textAlign: 'right' }}>TR Single</th>
-                  <th style={{ textAlign: 'right' }}>Holder</th>
-                  <th style={{ textAlign: 'right' }}>TR Average</th>
-                  <th style={{ textAlign: 'right' }}>Holder</th>
+                  <th>{t('admin.wca.col.event')}</th>
+                  <th style={{ textAlign: 'right' }}>{t('admin.wca.col.tr-single')}</th>
+                  <th style={{ textAlign: 'right' }}>{t('admin.wca.col.holder')}</th>
+                  <th style={{ textAlign: 'right' }}>{t('admin.wca.col.tr-average')}</th>
+                  <th style={{ textAlign: 'right' }}>{t('admin.wca.col.holder')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -293,20 +295,20 @@ export default function WcaImportTab() {
       {tab !== 'TR' && (
         activeWcaRows.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--muted)', fontSize: '0.88rem' }}>
-            {fetching ? 'Loading records…' : 'No records loaded. Click "Refresh Records" to fetch.'}
+            {fetching ? t('admin.wca.loading-records') : t('admin.wca.no-records')}
           </div>
         ) : (
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Event</th>
-                  <th style={{ textAlign: 'right' }}>Single {tab}</th>
-                  <th style={{ textAlign: 'right' }}>Average {tab}</th>
-                  <th style={{ textAlign: 'right' }}>Our Best Single</th>
-                  <th style={{ textAlign: 'right' }}>Our Best Avg</th>
-                  <th style={{ textAlign: 'right' }}>Single Gap</th>
-                  <th style={{ textAlign: 'right' }}>Avg Gap</th>
+                  <th>{t('admin.wca.col.event')}</th>
+                  <th style={{ textAlign: 'right' }}>{t('admin.wca.col.single-tab')} {tab}</th>
+                  <th style={{ textAlign: 'right' }}>{t('admin.wca.col.avg-tab')} {tab}</th>
+                  <th style={{ textAlign: 'right' }}>{t('admin.wca.col.our-best-single')}</th>
+                  <th style={{ textAlign: 'right' }}>{t('admin.wca.col.our-best-avg')}</th>
+                  <th style={{ textAlign: 'right' }}>{t('admin.wca.col.single-gap')}</th>
+                  <th style={{ textAlign: 'right' }}>{t('admin.wca.col.avg-gap')}</th>
                 </tr>
               </thead>
               <tbody>

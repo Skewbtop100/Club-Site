@@ -7,11 +7,13 @@ import {
   updateAthlete,
   deleteAthlete,
 } from '@/lib/firebase/services/athletes';
+import { useLang } from '@/lib/i18n';
 import type { Athlete } from '@/lib/types';
 
 const emptyForm = { wcaId: '', lastName: '', name: '', birthDate: '', imageUrl: '' };
 
 export default function AthletesTab() {
+  const { t } = useLang();
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ ...emptyForm });
@@ -38,28 +40,28 @@ export default function AthletesTab() {
   function cancelEdit() { setEditId(null); setForm({ ...emptyForm }); }
 
   async function submitAthlete() {
-    if (!form.name || !form.birthDate) { showMsg('error', 'Name and Birth Date are required.'); return; }
+    if (!form.name || !form.birthDate) { showMsg('error', t('admin.ath.msg.required')); return; }
     try {
       if (editId) {
         await updateAthlete(editId, form);
-        showMsg('success', 'Athlete updated.');
+        showMsg('success', t('admin.ath.msg.updated'));
       } else {
         await addAthlete(form);
-        showMsg('success', 'Athlete added.');
+        showMsg('success', t('admin.ath.msg.added'));
       }
       cancelEdit();
     } catch (e: unknown) {
-      showMsg('error', 'Error: ' + (e instanceof Error ? e.message : String(e)));
+      showMsg('error', t('admin.msg.error-prefix') + (e instanceof Error ? e.message : String(e)));
     }
   }
 
   async function handleDelete(id: string) {
-    if (!confirm('Delete this athlete? This cannot be undone.')) return;
+    if (!confirm(t('admin.ath.confirm-delete'))) return;
     try {
       await deleteAthlete(id);
-      showMsg('success', 'Athlete deleted.');
+      showMsg('success', t('admin.ath.msg.deleted'));
     } catch (e: unknown) {
-      showMsg('error', 'Error: ' + (e instanceof Error ? e.message : String(e)));
+      showMsg('error', t('admin.msg.error-prefix') + (e instanceof Error ? e.message : String(e)));
     }
   }
 
@@ -67,58 +69,58 @@ export default function AthletesTab() {
     <div>
       {/* Add / Edit Form */}
       <div className="card">
-        <div className="card-title"><span className="title-accent" />{editId ? 'Edit Athlete' : 'Add Athlete'}</div>
+        <div className="card-title"><span className="title-accent" />{editId ? t('admin.ath.edit-title') : t('admin.ath.add-title')}</div>
         <div className="form-grid">
           <div className="form-group">
-            <label>WCA ID</label>
+            <label>{t('admin.ath.wca-id')}</label>
             <input className="monospace" type="text" value={form.wcaId} placeholder="e.g. 2019GANT01"
               onChange={e => setForm(f => ({ ...f, wcaId: e.target.value }))} />
           </div>
           <div className="form-group">
-            <label>Last Name (Овог) *</label>
-            <input type="text" value={form.lastName} placeholder="Last name"
+            <label>{t('admin.ath.last-name')}</label>
+            <input type="text" value={form.lastName}
               onChange={e => setForm(f => ({ ...f, lastName: e.target.value }))} />
           </div>
           <div className="form-group">
-            <label>Full Name *</label>
-            <input type="text" value={form.name} placeholder="Full name"
+            <label>{t('admin.ath.full-name')}</label>
+            <input type="text" value={form.name}
               onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
           </div>
           <div className="form-group">
-            <label>Birth Date *</label>
+            <label>{t('admin.ath.birth-date')}</label>
             <input type="date" value={form.birthDate}
               onChange={e => setForm(f => ({ ...f, birthDate: e.target.value }))} />
           </div>
           <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-            <label>Profile Image URL</label>
+            <label>{t('admin.ath.image-url')}</label>
             <input type="url" value={form.imageUrl} placeholder="https://example.com/photo.jpg"
               onChange={e => setForm(f => ({ ...f, imageUrl: e.target.value }))} />
           </div>
         </div>
         <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <button className="btn-sm-primary" onClick={submitAthlete}>{editId ? 'Save Changes' : 'Add Athlete'}</button>
-          {editId && <button className="btn-sm-secondary" onClick={cancelEdit}>Cancel Edit</button>}
+          <button className="btn-sm-primary" onClick={submitAthlete}>{editId ? t('admin.btn.save-changes') : t('admin.ath.btn.add')}</button>
+          {editId && <button className="btn-sm-secondary" onClick={cancelEdit}>{t('admin.btn.cancel-edit')}</button>}
         </div>
         {msg && <div className={`msg ${msgType}`} style={{ display: 'block' }}>{msg}</div>}
       </div>
 
       {/* Athletes Table */}
       <div className="card">
-        <div className="card-title"><span className="title-accent" />All Athletes</div>
+        <div className="card-title"><span className="title-accent" />{t('admin.ath.list-title')}</div>
         {loading
-          ? <div className="spinner-row">Loading athletes<span className="spinner-ring" /></div>
+          ? <div className="spinner-row">{t('admin.ath.loading')}<span className="spinner-ring" /></div>
           : athletes.length === 0
-            ? <div className="empty-state">No athletes yet.</div>
+            ? <div className="empty-state">{t('admin.ath.empty')}</div>
             : (
               <div className="table-wrap">
                 <table>
                   <thead>
                     <tr>
-                      <th>Name</th>
-                      <th>Last Name</th>
-                      <th>WCA ID</th>
-                      <th>Birth Date</th>
-                      <th>Actions</th>
+                      <th>{t('admin.ath.col.name')}</th>
+                      <th>{t('admin.ath.col.last-name')}</th>
+                      <th>{t('admin.ath.col.wca-id')}</th>
+                      <th>{t('admin.ath.col.birth-date')}</th>
+                      <th>{t('admin.label.actions')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -132,8 +134,8 @@ export default function AthletesTab() {
                           <td className="td-muted">{a.birthDate || '—'}</td>
                           <td>
                             <div style={{ display: 'flex', gap: '0.35rem' }}>
-                              <button className="btn-edit" onClick={() => startEdit(a)}>Edit</button>
-                              <button className="btn-delete" onClick={() => handleDelete(a.id)}>Delete</button>
+                              <button className="btn-edit" onClick={() => startEdit(a)}>{t('admin.btn.edit')}</button>
+                              <button className="btn-delete" onClick={() => handleDelete(a.id)}>{t('admin.btn.delete')}</button>
                             </div>
                           </td>
                         </tr>

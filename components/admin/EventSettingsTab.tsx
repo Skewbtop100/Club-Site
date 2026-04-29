@@ -3,11 +3,13 @@
 import { useEffect, useState } from 'react';
 import { getEventVisibility, saveEventVisibility } from '@/lib/firebase/services/records';
 import { WCA_EVENTS } from '@/lib/wca-events';
+import { useLang } from '@/lib/i18n';
 import type { EventVisibility } from '@/lib/types';
 
 type Visibility = 'auto' | 'show' | 'hide';
 
 export default function EventSettingsTab() {
+  const { t } = useLang();
   const [settings, setSettings] = useState<EventVisibility>({});
   const [loading, setLoading]   = useState(true);
   const [msg, setMsg]           = useState(''); const [msgType, setMsgType] = useState('');
@@ -27,23 +29,23 @@ export default function EventSettingsTab() {
   async function save() {
     try {
       await saveEventVisibility(settings);
-      setMsgType('success'); setMsg('Event visibility saved.');
+      setMsgType('success'); setMsg(t('admin.ev.msg.saved'));
     } catch (e: unknown) {
-      setMsgType('error'); setMsg('Error: ' + (e instanceof Error ? e.message : String(e)));
+      setMsgType('error'); setMsg(t('admin.msg.error-prefix') + (e instanceof Error ? e.message : String(e)));
     }
     setTimeout(() => setMsg(''), 4000);
   }
 
-  if (loading) return <div className="spinner-row">Loading<span className="spinner-ring" /></div>;
+  if (loading) return <div className="spinner-row">{t('admin.loading')}<span className="spinner-ring" /></div>;
 
   const options: Visibility[] = ['auto', 'show', 'hide'];
-  const optionLabels: Record<Visibility, string> = { auto: 'Auto', show: 'Always Show', hide: 'Always Hide' };
+  const optionLabels: Record<Visibility, string> = { auto: t('admin.ev.auto'), show: t('admin.ev.show'), hide: t('admin.ev.hide') };
 
   return (
     <div className="card">
-      <div className="card-title"><span className="title-accent" />Event Visibility Settings</div>
+      <div className="card-title"><span className="title-accent" />{t('admin.ev.title')}</div>
       <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '1.2rem' }}>
-        Control which events appear in rankings and records. &ldquo;Auto&rdquo; shows events that have at least one result.
+        {t('admin.ev.help')}
       </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.2rem' }}>
@@ -85,7 +87,7 @@ export default function EventSettingsTab() {
         })}
       </div>
 
-      <button className="btn-sm-primary" onClick={save}>Save Settings</button>
+      <button className="btn-sm-primary" onClick={save}>{t('admin.ev.btn.save')}</button>
       {msg && <div className={`msg ${msgType}`} style={{ display: 'block', marginTop: '0.8rem' }}>{msg}</div>}
     </div>
   );
