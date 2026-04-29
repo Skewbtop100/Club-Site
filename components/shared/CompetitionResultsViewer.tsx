@@ -302,15 +302,18 @@ export default function CompetitionResultsViewer({ comp, onClose, isLive }: Prop
                           const isLastAdvancing = advanceCount > 0 && i === advanceCount - 1;
                           const isClub          = clubAthleteIds.has(r.athleteId);
                           const isMedal         = i < 3;
-                          const rowCls = i === 0 ? 'row-gold' : i === 1 ? 'row-silver' : i === 2 ? 'row-bronze' : isClub ? 'row-club' : '';
+                          const rowCls = [
+                            i === 0 ? 'row-gold' : i === 1 ? 'row-silver' : i === 2 ? 'row-bronze' : '',
+                            isClub && !isMedal ? 'club-athlete-row' : '',
+                          ].filter(Boolean).join(' ');
 
                           // Borders: advancing cutoff (green) takes priority over club highlight (purple).
                           const borderLeft = isAdvancing
                             ? '3px solid #22c55e'
                             : isClub && !isMedal
-                              ? '3px solid var(--accent)'
+                              ? '3px solid rgba(124,58,237,0.6)'
                               : '3px solid transparent';
-                          const rowBg = isClub && !isMedal ? 'rgba(124,58,237,0.06)' : undefined;
+                          const rowBg = isClub && !isMedal ? 'rgba(124,58,237,0.08)' : undefined;
 
                           const dataRow = (
                             <tr
@@ -328,11 +331,7 @@ export default function CompetitionResultsViewer({ comp, onClose, isLive }: Prop
 
                               {/* Athlete */}
                               <td className="wca-td-name">
-                                <div
-                                  className="wca-name"
-                                  style={isClub ? { fontWeight: 700, color: 'var(--text-primary)' } : undefined}
-                                >
-                                  {isClub && <span style={{ marginRight: '0.35rem' }}>🇲🇳</span>}
+                                <div className="wca-name">
                                   {athleteNameMap[r.athleteId] || r.athleteName || r.athleteId}
                                 </div>
                               </td>
