@@ -3,11 +3,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { subscribeCompetitions } from '@/lib/firebase/services/competitions';
 import { getAthletes } from '@/lib/firebase/services/athletes';
-import { saveResult, getResultsByComp } from '@/lib/firebase/services/results';
+import { saveResult, getResultsByComp, subscribeResultsByComp } from '@/lib/firebase/services/results';
 import { fmtTime, parseTime } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { useLang, type TranslationKey } from '@/lib/i18n';
-import type { Athlete, Competition } from '@/lib/types';
+import type { Athlete, Competition, Result } from '@/lib/types';
 
 function calcAo5(solves: (number | null)[]): number | null {
   const vals = solves.filter(v => v !== null) as number[];
@@ -92,6 +92,7 @@ export default function ResultsEntryTab() {
   const [comps, setComps]         = useState<Competition[]>([]);
   const [compId, setCompId]       = useState('');
   const [panels, setPanels]       = useState<PanelState[]>([emptyPanel(0)]);
+  const [compResults, setCompResults] = useState<Result[]>([]);
 
   // Import section state
   const [importOpen,    setImportOpen]    = useState(false);
@@ -120,6 +121,12 @@ export default function ResultsEntryTab() {
     const unsub = subscribeCompetitions((data) => setComps(data));
     return unsub;
   }, []);
+
+  useEffect(() => {
+    if (!compId) { setCompResults([]); return; }
+    const unsub = subscribeResultsByComp(compId, setCompResults);
+    return unsub;
+  }, [compId]);
   useEffect(() => {
     return () => { if (timerIntervalRef.current) clearInterval(timerIntervalRef.current); };
   }, []);
@@ -451,7 +458,8 @@ export default function ResultsEntryTab() {
             const allEntered = panel.currentSolveIdx >= 5 && panel.editReturnIdx === null;
             const { single, average } = computeResult(panel);
 
-            const panelAthletes = compAthletes
+            // Base set: registered athletes for this comp+event.
+            const baseAthletes = compAthletes
               ? athletes.filter(a => {
                   const ca = compAthletes.find(x => x.id === a.id);
                   if (!ca) return false;
@@ -459,6 +467,25 @@ export default function ResultsEntryTab() {
                   return ca.events.includes(panel.eventId);
                 })
               : athletes;
+
+            // For round >= 2, narrow to athletes that have a result row (placeholder
+            // or real, but not withdrawn) for this event+round. Falls back to base
+            // set when no such rows exist (advancement wasn't run yet).
+            const panelAthletes = (() => {
+              if (!panel.eventId || panel.round < 2) return baseAthletes;
+              const idsForRound = new Set(
+                compResults
+                  .filter(r =>
+                    r.eventId === panel.eventId &&
+                    (r.round || 1) === panel.round &&
+                    r.status !== 'withdrawn',
+                  )
+                  .map(r => r.athleteId)
+                  .filter(Boolean),
+              );
+              if (idsForRound.size === 0) return baseAthletes;
+              return baseAthletes.filter(a => idsForRound.has(a.id));
+            })();
 
             const curIdx     = panel.currentSolveIdx;
             const curPenalty = curIdx < 5 ? panel.penalties[curIdx] : 'none';

@@ -56,6 +56,8 @@ export interface Result {
   group?: number;
   country?: string;
   submittedAt?: unknown;
+  /** True when this is an auto-created next-round placeholder awaiting solves. */
+  isPlaceholder?: boolean;
 }
 
 export interface WcaRecordEntry {

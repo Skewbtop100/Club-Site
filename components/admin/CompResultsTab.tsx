@@ -100,6 +100,9 @@ export default function CompResultsTab() {
   const [finishWorking, setFinishWorking] = useState(false);
   const [finishError, setFinishError] = useState('');
 
+  // Advancement notification
+  const [advanceMsg, setAdvanceMsg] = useState('');
+
   // ── subscriptions ───────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -145,8 +148,30 @@ export default function CompResultsTab() {
     setEditSaving(true); setEditError('');
     try {
       const parsed = editSolves.map(s => parseTime(s.trim() || null));
-      await saveResult(editRow.id, { ...editRow, solves: parsed, single: bestOf(parsed), average: calcAo5(parsed) });
+      const newSingle = bestOf(parsed);
+      const newAverage = calcAo5(parsed);
+      // Strip placeholder flags when admin enters real solves.
+      const { isPlaceholder: _ip, ...editRest } = editRow;
+      const updated: Result = {
+        ...editRest,
+        solves: parsed,
+        single: newSingle,
+        average: newAverage,
+        status: 'published',
+      };
+      await saveResult(editRow.id, updated);
       setEditRow(null);
+
+      // If the edited result is in a round currently marked complete, recompute
+      // advancement using the freshly-edited results so the placeholder list stays
+      // in sync.
+      const editedRound = editRow.round || 1;
+      const roundKey = rKey(editRow.eventId, editedRound);
+      const isRoundComplete = (selComp?.roundStatus ?? {})[roundKey] === 'complete';
+      if (isRoundComplete) {
+        const merged = results.map(r => r.id === editRow.id ? { ...updated, id: editRow.id } : r);
+        await applyAdvancement(editRow.eventId, editedRound, merged);
+      }
     } catch (e) {
       setEditError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -184,7 +209,95 @@ export default function CompResultsTab() {
       const key = rKey(ev, r);
       if (newStatus === null) delete updated[key]; else updated[key] = newStatus;
       await updateCompetition(compId, { roundStatus: updated });
+
+      // On transition to 'complete', auto-create next-round placeholders.
+      if (newStatus === 'complete') {
+        await applyAdvancement(ev, r, results);
+      }
     } catch { /* ignore */ } finally { setStatusWorking(false); }
+  }
+
+  // ── advancement helpers ──────────────────────────────────────────────────────
+
+  /** Compute athleteIds advancing from a round, in WCA rank order. */
+  function computeAdvancingIds(roundResults: Result[], advCfg: AdvancementConfig): string[] {
+    const sorted = [...roundResults].filter(r => !r.isPlaceholder).sort(wcaSort);
+    const rawCount = advCfg.type === 'fixed'
+      ? advCfg.value
+      : Math.floor(sorted.length * advCfg.value / 100);
+    const count = Math.min(Math.max(0, rawCount), sorted.length);
+    return sorted.slice(0, count).map(r => r.athleteId);
+  }
+
+  /** Auto-create / withdraw next-round placeholders for a just-completed round.
+   *  Uses `currentResults` as the source of truth (caller passes the freshly-edited
+   *  array when calling from saveEdit, otherwise the live state). */
+  async function applyAdvancement(eventId: string, currentRound: number, currentResults: Result[]) {
+    if (!compId || !selComp) return;
+    const totalRounds = selComp.eventConfig?.[eventId]?.rounds ?? 1;
+    if (currentRound >= totalRounds) return; // no next round
+    const advCfg = selComp.eventConfig?.[eventId]?.advancement?.[String(currentRound)] as AdvancementConfig | undefined;
+    if (!advCfg) return;
+
+    const thisRoundResults = currentResults.filter(r =>
+      r.competitionId === compId && r.eventId === eventId && (r.round || 1) === currentRound
+    );
+    const advancingIds = computeAdvancingIds(thisRoundResults, advCfg);
+    const advancingSet = new Set(advancingIds);
+
+    const nextRound = currentRound + 1;
+    const nextRoundResults = currentResults.filter(r =>
+      r.competitionId === compId && r.eventId === eventId && (r.round || 1) === nextRound
+    );
+
+    // To create: in advancing set AND no next-round row of any status exists.
+    // (Reactivation of a withdrawn placeholder is handled in toReactivate, not here.)
+    const toCreate = advancingIds.filter(aid =>
+      !nextRoundResults.some(r => r.athleteId === aid)
+    );
+
+    // To withdraw: existing PLACEHOLDER (not real) but no longer advancing.
+    const toWithdraw = nextRoundResults.filter(r =>
+      r.isPlaceholder && r.status !== 'withdrawn' && !advancingSet.has(r.athleteId)
+    );
+
+    // To re-activate: PLACEHOLDER previously withdrawn but now advancing again.
+    const toReactivate = nextRoundResults.filter(r =>
+      r.isPlaceholder && r.status === 'withdrawn' && advancingSet.has(r.athleteId)
+    );
+
+    if (toCreate.length === 0 && toWithdraw.length === 0 && toReactivate.length === 0) return;
+
+    const writes: Promise<void>[] = [];
+    for (const aid of toCreate) {
+      const sourceResult = thisRoundResults.find(r => r.athleteId === aid);
+      const docId = `${compId}_${eventId}_r${nextRound}_${aid}`;
+      writes.push(saveResult(docId, {
+        competitionId: compId,
+        competitionName: selComp.name || '',
+        eventId,
+        round: nextRound,
+        athleteId: aid,
+        athleteName: sourceResult?.athleteName || '',
+        country: sourceResult?.country || '',
+        single: null,
+        average: null,
+        solves: [],
+        status: 'draft',
+        source: sourceResult?.source || 'entry',
+        isPlaceholder: true,
+      }));
+    }
+    for (const r of toWithdraw) {
+      writes.push(saveResult(r.id, { ...r, status: 'withdrawn' }));
+    }
+    for (const r of toReactivate) {
+      writes.push(saveResult(r.id, { ...r, status: 'draft' }));
+    }
+    await Promise.all(writes);
+
+    setAdvanceMsg(t('admin.cr.advancement-updated'));
+    setTimeout(() => setAdvanceMsg(''), 4000);
   }
 
   // ── finish competition handler ───────────────────────────────────────────────
@@ -246,7 +359,7 @@ export default function CompResultsTab() {
   }
 
   const tableRows = results
-    .filter(r => r.eventId === evId && (r.round || 1) === round)
+    .filter(r => r.eventId === evId && (r.round || 1) === round && r.status !== 'withdrawn')
     .sort(wcaSort);
 
   const rowIds      = tableRows.map(r => r.id);
@@ -405,6 +518,18 @@ export default function CompResultsTab() {
           )}
         </div>
 
+        {advanceMsg && (
+          <div style={{
+            margin: '0.5rem 0', padding: '0.5rem 0.85rem',
+            borderRadius: '8px', fontSize: '0.82rem', fontWeight: 600,
+            background: 'rgba(124,58,237,0.12)',
+            border: '1px solid rgba(124,58,237,0.35)',
+            color: '#c4b5fd',
+          }}>
+            ↻ {advanceMsg}
+          </div>
+        )}
+
         {/* Round header */}
         {evId && (
           <div className="wca-round-header">
@@ -520,6 +645,7 @@ export default function CompResultsTab() {
                         const isClub          = clubAthleteIds.has(r.athleteId);
                         const isChecked       = selected.has(r.id);
                         const isMedal         = i < 3;
+                        const isPlaceholder   = !!r.isPlaceholder;
 
                         // Row class: gold/silver/bronze take priority, then club highlight
                         const rowCls = [
@@ -544,7 +670,11 @@ export default function CompResultsTab() {
                           <tr
                             key={r.id}
                             className={rowCls}
-                            style={{ borderLeft, ...(rowBg ? { background: rowBg } : {}) }}
+                            style={{
+                              borderLeft,
+                              ...(rowBg ? { background: rowBg } : {}),
+                              ...(isPlaceholder ? { opacity: 0.6, fontStyle: 'italic' } : {}),
+                            }}
                           >
                             {deleteMode && (
                               <td style={{ textAlign: 'center' }}>
@@ -567,6 +697,17 @@ export default function CompResultsTab() {
                             <td className="wca-td-name">
                               <div className="wca-name">
                                 {athleteNameMap[r.athleteId] || r.athleteName || r.athleteId}
+                                {isPlaceholder && (
+                                  <span style={{
+                                    marginLeft: '0.5rem',
+                                    fontSize: '0.65rem', fontWeight: 700, fontStyle: 'normal',
+                                    letterSpacing: '0.05em', textTransform: 'uppercase',
+                                    padding: '0.1rem 0.4rem', borderRadius: '4px',
+                                    background: 'rgba(124,58,237,0.18)',
+                                    border: '1px solid rgba(124,58,237,0.35)',
+                                    color: '#c4b5fd', verticalAlign: 'middle',
+                                  }}>{t('admin.cr.qualified')}</span>
+                                )}
                               </div>
                             </td>
 
@@ -578,7 +719,7 @@ export default function CompResultsTab() {
                               const sv   = r.solves?.[si] ?? null;
                               const hint = getSolveHint(r.solves ?? [], si);
                               const isDnf = sv !== null && sv < 0;
-                              const text  = hint ? `(${fmtTime(sv)})` : fmtTime(sv);
+                              const text  = isPlaceholder ? '—' : (hint ? `(${fmtTime(sv)})` : fmtTime(sv));
                               return (
                                 <td
                                   key={si}
@@ -591,12 +732,12 @@ export default function CompResultsTab() {
 
                             {/* Average */}
                             <td className={`wca-td-avg${r.average != null && r.average < 0 ? ' dnf-avg' : ''}`}>
-                              {fmtTime(r.average)}
+                              {isPlaceholder ? '—' : fmtTime(r.average)}
                             </td>
 
                             {/* Best (single) */}
                             <td className={`wca-td-best${r.single != null && r.single < 0 ? ' dnf-solve' : ''}`}>
-                              {fmtTime(r.single)}
+                              {isPlaceholder ? '—' : fmtTime(r.single)}
                             </td>
 
                             {/* Edit action */}
