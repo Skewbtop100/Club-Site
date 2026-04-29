@@ -71,15 +71,21 @@ export default function CompetitionResultsViewer({ comp, onClose, isLive }: Prop
     getAthletes().then(setAllAthletes);
   }, []);
 
-  // Real-time subscription
+  // Real-time subscription. For live (and upcoming) comps, include placeholder
+  // rows so qualified athletes show in the next round before solves are entered.
+  // Finished comps only show real published results.
+  const isFinishedComp = comp.status === 'finished';
   useEffect(() => {
     setLoading(true);
     const unsub = subscribeResultsByComp(comp.id, (data) => {
-      setResults(data.filter(r => r.status === 'published'));
+      const filtered = isFinishedComp
+        ? data.filter(r => r.status === 'published')
+        : data.filter(r => r.status === 'published' || r.isPlaceholder === true);
+      setResults(filtered);
       setLoading(false);
     });
     return unsub;
-  }, [comp.id]);
+  }, [comp.id, isFinishedComp]);
 
   // Escape key + body scroll lock
   useEffect(() => {
@@ -114,10 +120,12 @@ export default function CompetitionResultsViewer({ comp, onClose, isLive }: Prop
   const isFinal     = round >= totalRounds;
   const advCfg: AdvancementConfig | undefined =
     !isFinal ? (evCfg?.advancement?.[String(round)] as AdvancementConfig | undefined) : undefined;
+  // Advancement math should count only real (non-placeholder) results.
+  const realCount = tableRows.filter(r => !r.isPlaceholder).length;
   const rawAdv = advCfg
-    ? advCfg.type === 'fixed' ? advCfg.value : Math.floor(tableRows.length * advCfg.value / 100)
+    ? advCfg.type === 'fixed' ? advCfg.value : Math.floor(realCount * advCfg.value / 100)
     : 0;
-  const advanceCount = Math.min(rawAdv, tableRows.length - 1);
+  const advanceCount = Math.min(rawAdv, Math.max(0, realCount - 1));
 
   const curStatus = comp.roundStatus?.[rKey(evId, round)] ?? null;
 
@@ -301,9 +309,10 @@ export default function CompetitionResultsViewer({ comp, onClose, isLive }: Prop
                           const isAdvancing     = advanceCount > 0 && i < advanceCount;
                           const isLastAdvancing = advanceCount > 0 && i === advanceCount - 1;
                           const isClub          = clubAthleteIds.has(r.athleteId);
-                          const isMedal         = i < 3;
+                          const isMedal         = i < 3 && !r.isPlaceholder;
+                          const isPlaceholder   = !!r.isPlaceholder;
                           const rowCls = [
-                            i === 0 ? 'row-gold' : i === 1 ? 'row-silver' : i === 2 ? 'row-bronze' : '',
+                            isMedal && i === 0 ? 'row-gold' : isMedal && i === 1 ? 'row-silver' : isMedal && i === 2 ? 'row-bronze' : '',
                             isClub && !isMedal ? 'club-athlete-row' : '',
                           ].filter(Boolean).join(' ');
 
@@ -323,10 +332,10 @@ export default function CompetitionResultsViewer({ comp, onClose, isLive }: Prop
                             >
                               {/* Rank */}
                               <td
-                                className={`wca-td-rank${i < 3 ? ` wca-rank-${i + 1}` : ''}`}
+                                className={`wca-td-rank${isMedal ? ` wca-rank-${i + 1}` : ''}`}
                                 style={isAdvancing ? { color: '#4ade80' } : undefined}
                               >
-                                {i + 1}
+                                {isPlaceholder ? '—' : i + 1}
                               </td>
 
                               {/* Athlete */}
@@ -344,7 +353,7 @@ export default function CompetitionResultsViewer({ comp, onClose, isLive }: Prop
                                 const sv   = r.solves?.[si] ?? null;
                                 const hint = getSolveHint(r.solves ?? [], si);
                                 const isDnf = sv !== null && sv < 0;
-                                const text  = hint ? `(${fmtTime(sv)})` : fmtTime(sv);
+                                const text  = isPlaceholder ? '—' : (hint ? `(${fmtTime(sv)})` : fmtTime(sv));
                                 return (
                                   <td
                                     key={si}
@@ -357,12 +366,12 @@ export default function CompetitionResultsViewer({ comp, onClose, isLive }: Prop
 
                               {/* Average */}
                               <td className={`wca-td-avg${r.average != null && r.average < 0 ? ' dnf-avg' : ''}`}>
-                                {fmtTime(r.average)}
+                                {isPlaceholder ? '—' : fmtTime(r.average)}
                               </td>
 
                               {/* Best (single) */}
                               <td className={`wca-td-best${r.single != null && r.single < 0 ? ' dnf-solve' : ''}`}>
-                                {fmtTime(r.single)}
+                                {isPlaceholder ? '—' : fmtTime(r.single)}
                               </td>
                             </tr>
                           );

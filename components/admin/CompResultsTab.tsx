@@ -384,10 +384,12 @@ export default function CompResultsTab() {
   const isFinal     = round >= totalRounds;
   const advCfg: AdvancementConfig | undefined =
     !isFinal ? (evCfg?.advancement?.[String(round)] as AdvancementConfig | undefined) : undefined;
+  // Advancement math should count only real (non-placeholder) results.
+  const realCount = tableRows.filter(r => !r.isPlaceholder).length;
   const rawAdv  = advCfg
-    ? advCfg.type === 'fixed' ? advCfg.value : Math.floor(tableRows.length * advCfg.value / 100)
+    ? advCfg.type === 'fixed' ? advCfg.value : Math.floor(realCount * advCfg.value / 100)
     : 0;
-  const advanceCount = Math.min(rawAdv, tableRows.length - 1);
+  const advanceCount = Math.min(rawAdv, Math.max(0, realCount - 1));
 
   const colSpan  = deleteMode ? 12 : 11;
   const curStatus = selComp?.roundStatus?.[rKey(evId, round)] ?? null;
