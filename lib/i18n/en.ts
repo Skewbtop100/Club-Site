@@ -280,6 +280,7 @@ const en = {
   'admin.results.import.not-advancing': 'Did not advance from previous round',
   'admin.results.import.remove': 'Remove',
   'admin.results.msg.fill': 'Please fill athlete, event and round.',
+  'admin.results.msg.updated-for': 'Result updated for',
 
   // ADMIN — COMPETITION RESULTS
   'admin.cr.select-comp': '— Select competition —',

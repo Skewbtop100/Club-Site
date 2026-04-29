@@ -280,6 +280,7 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'admin.results.import.not-advancing': 'Өмнөх үе шатнаас шалгараагүй',
   'admin.results.import.remove': 'Хасах',
   'admin.results.msg.fill': 'Тамирчин, төрөл, үе шатыг бөглөнө үү.',
+  'admin.results.msg.updated-for': 'Үр дүн шинэчлэгдлээ —',
 
   // ADMIN — COMPETITION RESULTS
   'admin.cr.select-comp': '— Тэмцээн сонгох —',

@@ -228,6 +228,18 @@ export default function ResultsEntryTab() {
     const comp = comps.find(c => c.id === compId);
     const ath  = athletes.find(a => a.id === panel.athleteId);
     const docId = `${compId}_${panel.eventId}_r${panel.round}_${panel.athleteId}`;
+
+    // Detect whether a non-placeholder result already exists for this
+    // (comp, event, round, athlete) — that means we're updating, not creating.
+    // Placeholder rows are auto-generated and don't count as a "real" prior result.
+    const existing = compResults.find(r =>
+      r.competitionId === compId &&
+      r.eventId === panel.eventId &&
+      (r.round || 1) === panel.round &&
+      r.athleteId === panel.athleteId &&
+      !r.isPlaceholder,
+    );
+
     try {
       await saveResult(docId, {
         athleteId: panel.athleteId, athleteName: ath?.name || '',
@@ -236,7 +248,11 @@ export default function ResultsEntryTab() {
         single: single < 0 ? single : single, average,
         solves: parsed, status: 'published', source: 'entry',
       });
-      updatePanel(panelId, { msg: `✓ ${t('result.saved')}! ${t('admin.results.single')}: ${fmtTime(single)} Ao5: ${fmtTime(average)}`, msgType: 'success' });
+      const fullName = `${ath?.name || ''}${ath?.lastName ? ' ' + ath.lastName : ''}`.trim() || panel.athleteId;
+      const msg = existing
+        ? `✓ ${t('admin.results.msg.updated-for')} ${fullName} — ${t('admin.results.single')}: ${fmtTime(single)} Ao5: ${fmtTime(average)}`
+        : `✓ ${t('result.saved')}! ${t('admin.results.single')}: ${fmtTime(single)} Ao5: ${fmtTime(average)}`;
+      updatePanel(panelId, { msg, msgType: 'success' });
     } catch (e: unknown) {
       updatePanel(panelId, { msg: t('admin.msg.error-prefix') + (e instanceof Error ? e.message : String(e)), msgType: 'error' });
     }
@@ -525,22 +541,20 @@ export default function ResultsEntryTab() {
                 })
               : athletes;
 
-            // For round >= 2, narrow to athletes that have a result row (placeholder
-            // or real, but not withdrawn) for this event+round. Falls back to base
-            // set when no such rows exist (advancement wasn't run yet).
+            // Round 1: show all registered athletes.
+            // Round >= 2: ONLY show athletes who have a row (placeholder or real)
+            // for this event+round. No fallback — empty until advancement runs.
             const panelAthletes = (() => {
               if (!panel.eventId || panel.round < 2) return baseAthletes;
               const idsForRound = new Set(
                 compResults
                   .filter(r =>
                     r.eventId === panel.eventId &&
-                    (r.round || 1) === panel.round &&
-                    r.status !== 'withdrawn',
+                    (r.round || 1) === panel.round,
                   )
                   .map(r => r.athleteId)
                   .filter(Boolean),
               );
-              if (idsForRound.size === 0) return baseAthletes;
               return baseAthletes.filter(a => idsForRound.has(a.id));
             })();
 

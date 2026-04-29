@@ -246,7 +246,7 @@ export default function CompResultsTab() {
     return sorted.slice(0, count);
   }
 
-  /** Auto-create / withdraw next-round placeholders for a just-completed round.
+  /** Auto-create / delete next-round placeholders for a just-completed round.
    *  Uses `currentResults` as the source of truth (caller passes the freshly-edited
    *  array when calling from saveEdit, otherwise the live state). */
   async function applyAdvancement(eventId: string, currentRound: number, currentResults: Result[]) {
@@ -269,20 +269,16 @@ export default function CompResultsTab() {
     const nextRoundByKey = new Map<string, Result>();
     for (const nr of nextRoundResults) nextRoundByKey.set(advancementKey(nr), nr);
 
-    // To create: advancing rows that have no next-round row of any status.
+    // To create: advancing rows that have no next-round row at all.
     const toCreate = advancing.filter(r => !nextRoundByKey.has(advancementKey(r)));
 
-    // To withdraw: existing PLACEHOLDER (not real) but no longer advancing.
-    const toWithdraw = nextRoundResults.filter(r =>
-      r.isPlaceholder && r.status !== 'withdrawn' && !advancingKeys.has(advancementKey(r))
+    // To delete: existing PLACEHOLDER (not real solves) but no longer advancing.
+    // Real round-N results (non-placeholder) are NEVER deleted here.
+    const toDelete = nextRoundResults.filter(r =>
+      r.isPlaceholder && !advancingKeys.has(advancementKey(r))
     );
 
-    // To re-activate: PLACEHOLDER previously withdrawn but now advancing again.
-    const toReactivate = nextRoundResults.filter(r =>
-      r.isPlaceholder && r.status === 'withdrawn' && advancingKeys.has(advancementKey(r))
-    );
-
-    if (toCreate.length === 0 && toWithdraw.length === 0 && toReactivate.length === 0) return;
+    if (toCreate.length === 0 && toDelete.length === 0) return;
 
     const writes: Promise<void>[] = [];
     for (const source of toCreate) {
@@ -303,11 +299,8 @@ export default function CompResultsTab() {
         isPlaceholder: true,
       }));
     }
-    for (const r of toWithdraw) {
-      writes.push(saveResult(r.id, { ...r, status: 'withdrawn' }));
-    }
-    for (const r of toReactivate) {
-      writes.push(saveResult(r.id, { ...r, status: 'draft' }));
+    for (const r of toDelete) {
+      writes.push(deleteResultFn(r.id));
     }
     await Promise.all(writes);
 
@@ -374,7 +367,7 @@ export default function CompResultsTab() {
   }
 
   const tableRows = results
-    .filter(r => r.eventId === evId && (r.round || 1) === round && r.status !== 'withdrawn')
+    .filter(r => r.eventId === evId && (r.round || 1) === round)
     .sort(wcaSort);
 
   const rowIds      = tableRows.map(r => r.id);
