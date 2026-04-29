@@ -185,7 +185,7 @@ function CompCard({
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} style={{ opacity: 0.6, flexShrink: 0 }}>
             <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>
           </svg>
-          <span style={{ opacity: 0.7 }}>Club event:</span>
+          <span style={{ opacity: 0.7 }}>{t('comp.club-event')}</span>
           <span style={{ color: '#a78bfa', fontWeight: 500 }}>{clubDateStr}</span>
         </div>
       )}
@@ -258,7 +258,7 @@ function OverlayShell({
                 {liveIndicator && (
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.7rem', fontWeight: 700, color: '#4ade80', background: 'rgba(74,222,128,0.1)', border: '1px solid rgba(74,222,128,0.25)', padding: '0.15rem 0.5rem', borderRadius: '999px' }}>
                     <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4ade80', animation: 'pulseDot 1.4s ease-in-out infinite', display: 'inline-block' }} />
-                    LIVE
+                    {t('comp.live-indicator')}
                   </span>
                 )}
                 <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>{title}</div>

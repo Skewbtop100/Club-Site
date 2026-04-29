@@ -203,7 +203,7 @@ export default function RecordsSection({ results, athletes, competitions, eventV
             <div className="rh-header">
               <div>
                 <div className="rh-title">{selectedEventName}</div>
-                <div className="rh-subtitle">Record History</div>
+                <div className="rh-subtitle">{t('records.history-title')}</div>
               </div>
               <button className="rh-close" onClick={() => setSelectedEvent(null)}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2}>
@@ -230,11 +230,11 @@ export default function RecordsSection({ results, athletes, competitions, eventV
               {history.length === 0 ? (
                 <div className="rh-empty">
                   <div style={{ fontSize: '2rem', marginBottom: '0.6rem', opacity: 0.4 }}>📊</div>
-                  No records yet for this event.
+                  {t('records.no-history')}
                 </div>
               ) : history.length === 1 ? (
                 <div>
-                  <div className="rh-first-badge">First Record!</div>
+                  <div className="rh-first-badge">{t('records.first-record')}</div>
                   <div className="rh-row rh-current">
                     <div className="rh-row-date">{history[0].date}</div>
                     <div className="rh-row-main">
@@ -248,10 +248,10 @@ export default function RecordsSection({ results, athletes, competitions, eventV
                         if (c) setHistoryComp(c);
                       }}
                     >{history[0].competitionName}</div>
-                    <span className="rh-current-badge">Current Record</span>
+                    <span className="rh-current-badge">{t('records.current-record')}</span>
                   </div>
                   <div className="rh-empty" style={{ paddingTop: '1rem' }}>
-                    No previous records — this is the first record!
+                    {t('records.no-previous')}
                   </div>
                 </div>
               ) : (
@@ -271,7 +271,7 @@ export default function RecordsSection({ results, athletes, competitions, eventV
                           if (c) setHistoryComp(c);
                         }}
                       >{entry.competitionName}</div>
-                      {entry.isCurrent && <span className="rh-current-badge">Current Record</span>}
+                      {entry.isCurrent && <span className="rh-current-badge">{t('records.current-record')}</span>}
                     </div>
                   ))}
                 </div>

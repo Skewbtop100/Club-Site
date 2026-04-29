@@ -212,7 +212,7 @@ export default function RankingsSection({ results, athletes, competitions, wcaRe
                   setExpanded((v) => !v);
                 }}
               >
-                {expanded ? 'Show less \u2191' : `Show all ${rows.length} results \u2193`}
+                {expanded ? t('rankings.show-less') : `${t('rankings.show-all')} (${rows.length})`}
               </button>
             </div>
           )}

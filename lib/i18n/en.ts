@@ -17,6 +17,7 @@ const en = {
   'nav.timer': 'Timer',
   'nav.algorithms': 'Algorithms',
   'nav.gallery': 'Gallery',
+  'nav.coming-soon': 'Coming soon',
 
   // HERO
   'hero.badge': 'WCA-Style Competition Platform',
@@ -68,6 +69,8 @@ const en = {
 
   // COMMON
   'common.back': '← Back',
+  'common.loading': 'Loading...',
+  'common.no-data': 'No data',
 
   // RANKINGS TABLE
   'rankings.single': 'Single',
@@ -76,10 +79,17 @@ const en = {
   'rankings.competition': 'Competition',
   'rankings.date': 'Date',
   'rankings.no-results': 'No results yet for this event.',
+  'rankings.show-less': 'Show less ↑',
+  'rankings.show-all': 'Show all results ↓',
 
   // RECORDS
   'records.single-record': 'Single Record',
   'records.average-record': 'Average Record',
+  'records.history-title': 'Record History',
+  'records.no-history': 'No records yet for this event.',
+  'records.first-record': 'First Record!',
+  'records.current-record': 'Current Record',
+  'records.no-previous': 'No previous records — this is the first record!',
 
   // COMPETITIONS
   'comp.upcoming': 'Upcoming',
@@ -96,6 +106,8 @@ const en = {
   'comp.assignments': 'Assignments',
   'comp.no-assignments': 'No assignments published for this competition yet.',
   'comp.no-results': 'No results yet.',
+  'comp.club-event': 'Club event:',
+  'comp.live-indicator': 'LIVE',
 
   // ATHLETES SECTION
   'athletes.no-athletes': 'No athletes registered yet.',

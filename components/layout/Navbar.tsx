@@ -65,15 +65,15 @@ export default function Navbar() {
       <div style={{ display: 'flex', alignItems: 'center', gap: '1.6rem' }} className="nav-links">
         <Link href="/" className="nav-link hide-mobile">{t('nav.home')}</Link>
         <Link href="/competition" className="nav-link">{t('nav.competition')}</Link>
-        <Link href="/timer" className="nav-link nav-soon hide-mobile" title="Тун удахгүй">
+        <Link href="/timer" className="nav-link nav-soon hide-mobile" title={t('nav.coming-soon')}>
           {t('nav.timer')}
           <span className="soon-badge">soon</span>
         </Link>
-        <Link href="/algorithms" className="nav-link nav-soon hide-mobile" title="Тун удахгүй">
+        <Link href="/algorithms" className="nav-link nav-soon hide-mobile" title={t('nav.coming-soon')}>
           {t('nav.algorithms')}
           <span className="soon-badge">soon</span>
         </Link>
-        <Link href="/gallery" className="nav-link nav-soon hide-mobile" title="Тун удахгүй">
+        <Link href="/gallery" className="nav-link nav-soon hide-mobile" title={t('nav.coming-soon')}>
           {t('nav.gallery')}
           <span className="soon-badge">soon</span>
         </Link>

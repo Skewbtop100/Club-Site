@@ -2,7 +2,7 @@ import type { TranslationKey } from './en';
 
 const mn: Partial<Record<TranslationKey, string>> = {
   // NAV
-  'nav.rankings': 'Рейтинг',
+  'nav.rankings': 'Эрэмбэ',
   'nav.records': 'Рекорд',
   'nav.competitions': 'Тэмцээн',
   'nav.live': 'Шууд',
@@ -19,13 +19,14 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'nav.timer': 'Таймер',
   'nav.algorithms': 'Алгоритм',
   'nav.gallery': 'Галерей',
+  'nav.coming-soon': 'Тун удахгүй',
 
   // HERO
   'hero.badge': 'WCA Загварын Тэмцээний Платформ',
-  'hero.subtitle': 'ТЭМЦЭЭНИЙ ПОРТАЛ',
+  'hero.subtitle': 'Үзүүлэлтийн Портал',
   'hero.desc':
-    'Монголын speedcubing нийгэмлэгийн албан ёсны үр дүн, шууд дамжуулалт, тамирчдын рейтинг болон тэмцээн удирдлага.',
-  'hero.btn-rankings': 'Рейтинг үзэх',
+    'Монголын speedcubing нийгэмлэгийн албан ёсны үр дүн, шууд дамжуулалт, тамирчдын эрэмбэ болон тэмцээн удирдлага.',
+  'hero.btn-rankings': 'Эрэмбэ харах',
   'hero.btn-competitions': 'Тэмцээнүүд',
   'hero.scroll': 'Доош',
 
@@ -35,11 +36,11 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'stats.events-supported': 'Дэд тэмцээн',
 
   // SECTIONS
-  'section-tag.leaderboard': 'РЕЙТИНГ',
-  'section-title.rankings': 'Дэд тэмцээний рейтинг',
+  'section-tag.leaderboard': 'ЭРЭМБЭ',
+  'section-title.rankings': 'Үйл явдлын эрэмбэ',
   'section-desc.rankings': 'Бүх WCA дэд тэмцээний хамгийн сайн нэг болон дундаж үр дүн.',
   'section-tag.records': 'РЕКОРД',
-  'section-title.records': 'Клубын рекорд',
+  'section-title.records': 'Клубын рекордууд',
   'section-desc.records': 'Клубын тэмцээнд тогтоосон хамгийн сайн нэг болон дундаж үр дүн.',
   'section-tag.competitions': 'ТЭМЦЭЭН',
   'section-title.competitions': 'Тэмцээний хуваарь',
@@ -68,6 +69,8 @@ const mn: Partial<Record<TranslationKey, string>> = {
 
   // COMMON
   'common.back': '← Буцах',
+  'common.loading': 'Ачааллаж байна...',
+  'common.no-data': 'Мэдээлэл алга',
 
   // RANKINGS TABLE
   'rankings.single': 'Нэг',
@@ -76,19 +79,26 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'rankings.competition': 'Тэмцээн',
   'rankings.date': 'Огноо',
   'rankings.no-results': 'Энэ дэд тэмцээнд үр дүн байхгүй байна.',
+  'rankings.show-less': 'Хураах ↑',
+  'rankings.show-all': 'Бүгдийг харах ↓',
 
   // RECORDS
   'records.single-record': 'Нэгийн рекорд',
   'records.average-record': 'Дундажийн рекорд',
+  'records.history-title': 'Рекордын түүх',
+  'records.no-history': 'Энэ дэд тэмцээнд рекорд байхгүй байна.',
+  'records.first-record': 'Анхны рекорд!',
+  'records.current-record': 'Одоогийн рекорд',
+  'records.no-previous': 'Өмнөх рекорд алга — энэ нь анхны рекорд!',
 
   // COMPETITIONS
-  'comp.upcoming': 'Товлосон',
+  'comp.upcoming': 'Болох',
   'comp.live-tab': 'Шууд',
   'comp.finished': 'Дууссан',
   'comp.status.live': 'ШУУД',
-  'comp.status.upcoming': '● ТОВЛОСОН',
+  'comp.status.upcoming': '● БОЛОХ',
   'comp.status.finished': '✓ ДУУССАН',
-  'comp.no-upcoming': 'Товлосон тэмцээн байхгүй.',
+  'comp.no-upcoming': 'Болох тэмцээн байхгүй.',
   'comp.no-live': 'Шууд тэмцээн байхгүй.',
   'comp.no-finished': 'Дууссан тэмцээн байхгүй.',
   'comp.view-results': 'Үр дүн үзэх',
@@ -96,6 +106,8 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'comp.assignments': 'Томилгоо',
   'comp.no-assignments': 'Энэ тэмцээний томилгоо одоогоор байхгүй байна.',
   'comp.no-results': 'Үр дүн байхгүй байна.',
+  'comp.club-event': 'Клубын тэмцээн:',
+  'comp.live-indicator': 'ШУУД',
 
   // ATHLETES SECTION
   'athletes.no-athletes': 'Тамирчид бүртгэгдээгүй байна.',
