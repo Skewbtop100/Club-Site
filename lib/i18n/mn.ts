@@ -277,6 +277,7 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'admin.results.import.checking': 'Шалгаж байна…',
   'admin.results.import.importing': 'Оруулж байна…',
   'admin.results.import.already-imported': 'Аль хэдийн орсон',
+  'admin.results.import.not-advancing': 'Өмнөх үе шатнаас шалгараагүй',
   'admin.results.import.remove': 'Хасах',
   'admin.results.msg.fill': 'Тамирчин, төрөл, үе шатыг бөглөнө үү.',
 

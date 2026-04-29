@@ -219,14 +219,31 @@ export default function CompResultsTab() {
 
   // ── advancement helpers ──────────────────────────────────────────────────────
 
-  /** Compute athleteIds advancing from a round, in WCA rank order. */
-  function computeAdvancingIds(roundResults: Result[], advCfg: AdvancementConfig): string[] {
-    const sorted = [...roundResults].filter(r => !r.isPlaceholder).sort(wcaSort);
+  /** Stable per-athlete key. Imported athletes have empty athleteId so we key
+   *  by their normalized name; collisions between two imported athletes with
+   *  the same name are accepted as a rare edge case. */
+  function advancementKey(r: Result): string {
+    if (r.athleteId) return `cl:${r.athleteId}`;
+    return `imp:${(r.athleteName || '').trim().toLowerCase()}`;
+  }
+
+  /** Deterministic placeholder doc ID, idempotent across re-runs. */
+  function placeholderDocId(eventId: string, nextRound: number, source: Result): string {
+    if (source.athleteId) return `${compId}_${eventId}_r${nextRound}_${source.athleteId}`;
+    return `phr_${source.id}_r${nextRound}`;
+  }
+
+  /** Compute advancing result rows in WCA rank order. Includes BOTH club and
+   *  imported results (athleteId may be empty for imported). */
+  function computeAdvancingResults(roundResults: Result[], advCfg: AdvancementConfig): Result[] {
+    const sorted = [...roundResults]
+      .filter(r => !r.isPlaceholder && r.status !== 'withdrawn')
+      .sort(wcaSort);
     const rawCount = advCfg.type === 'fixed'
       ? advCfg.value
       : Math.floor(sorted.length * advCfg.value / 100);
     const count = Math.min(Math.max(0, rawCount), sorted.length);
-    return sorted.slice(0, count).map(r => r.athleteId);
+    return sorted.slice(0, count);
   }
 
   /** Auto-create / withdraw next-round placeholders for a just-completed round.
@@ -242,49 +259,47 @@ export default function CompResultsTab() {
     const thisRoundResults = currentResults.filter(r =>
       r.competitionId === compId && r.eventId === eventId && (r.round || 1) === currentRound
     );
-    const advancingIds = computeAdvancingIds(thisRoundResults, advCfg);
-    const advancingSet = new Set(advancingIds);
+    const advancing = computeAdvancingResults(thisRoundResults, advCfg);
+    const advancingKeys = new Set(advancing.map(advancementKey));
 
     const nextRound = currentRound + 1;
     const nextRoundResults = currentResults.filter(r =>
       r.competitionId === compId && r.eventId === eventId && (r.round || 1) === nextRound
     );
+    const nextRoundByKey = new Map<string, Result>();
+    for (const nr of nextRoundResults) nextRoundByKey.set(advancementKey(nr), nr);
 
-    // To create: in advancing set AND no next-round row of any status exists.
-    // (Reactivation of a withdrawn placeholder is handled in toReactivate, not here.)
-    const toCreate = advancingIds.filter(aid =>
-      !nextRoundResults.some(r => r.athleteId === aid)
-    );
+    // To create: advancing rows that have no next-round row of any status.
+    const toCreate = advancing.filter(r => !nextRoundByKey.has(advancementKey(r)));
 
     // To withdraw: existing PLACEHOLDER (not real) but no longer advancing.
     const toWithdraw = nextRoundResults.filter(r =>
-      r.isPlaceholder && r.status !== 'withdrawn' && !advancingSet.has(r.athleteId)
+      r.isPlaceholder && r.status !== 'withdrawn' && !advancingKeys.has(advancementKey(r))
     );
 
     // To re-activate: PLACEHOLDER previously withdrawn but now advancing again.
     const toReactivate = nextRoundResults.filter(r =>
-      r.isPlaceholder && r.status === 'withdrawn' && advancingSet.has(r.athleteId)
+      r.isPlaceholder && r.status === 'withdrawn' && advancingKeys.has(advancementKey(r))
     );
 
     if (toCreate.length === 0 && toWithdraw.length === 0 && toReactivate.length === 0) return;
 
     const writes: Promise<void>[] = [];
-    for (const aid of toCreate) {
-      const sourceResult = thisRoundResults.find(r => r.athleteId === aid);
-      const docId = `${compId}_${eventId}_r${nextRound}_${aid}`;
+    for (const source of toCreate) {
+      const docId = placeholderDocId(eventId, nextRound, source);
       writes.push(saveResult(docId, {
         competitionId: compId,
         competitionName: selComp.name || '',
         eventId,
         round: nextRound,
-        athleteId: aid,
-        athleteName: sourceResult?.athleteName || '',
-        country: sourceResult?.country || '',
+        athleteId: source.athleteId || '',
+        athleteName: source.athleteName || '',
+        country: source.country || '',
         single: null,
         average: null,
         solves: [],
         status: 'draft',
-        source: sourceResult?.source || 'entry',
+        source: source.source || 'entry',
         isPlaceholder: true,
       }));
     }
@@ -673,7 +688,6 @@ export default function CompResultsTab() {
                             style={{
                               borderLeft,
                               ...(rowBg ? { background: rowBg } : {}),
-                              ...(isPlaceholder ? { opacity: 0.6, fontStyle: 'italic' } : {}),
                             }}
                           >
                             {deleteMode && (
@@ -697,17 +711,6 @@ export default function CompResultsTab() {
                             <td className="wca-td-name">
                               <div className="wca-name">
                                 {athleteNameMap[r.athleteId] || r.athleteName || r.athleteId}
-                                {isPlaceholder && (
-                                  <span style={{
-                                    marginLeft: '0.5rem',
-                                    fontSize: '0.65rem', fontWeight: 700, fontStyle: 'normal',
-                                    letterSpacing: '0.05em', textTransform: 'uppercase',
-                                    padding: '0.1rem 0.4rem', borderRadius: '4px',
-                                    background: 'rgba(124,58,237,0.18)',
-                                    border: '1px solid rgba(124,58,237,0.35)',
-                                    color: '#c4b5fd', verticalAlign: 'middle',
-                                  }}>{t('admin.cr.qualified')}</span>
-                                )}
                               </div>
                             </td>
 

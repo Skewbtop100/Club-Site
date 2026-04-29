@@ -277,6 +277,7 @@ const en = {
   'admin.results.import.checking': 'Checking…',
   'admin.results.import.importing': 'Importing…',
   'admin.results.import.already-imported': 'Already imported',
+  'admin.results.import.not-advancing': 'Did not advance from previous round',
   'admin.results.import.remove': 'Remove',
   'admin.results.msg.fill': 'Please fill athlete, event and round.',
 

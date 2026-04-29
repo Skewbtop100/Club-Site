@@ -42,7 +42,44 @@ interface ImportRow {
   best: string;
   hasError: boolean;
   isDupe: boolean;
+  /** True when importRound >= 2 and this athlete was not in the prior round's
+   *  advancing list. Import is still allowed; this is a soft warning. */
+  notAdvancing: boolean;
   checked: boolean;
+}
+
+// ── shared advancement helpers (kept local; mirror logic in CompResultsTab) ──
+
+function reWcaSort(a: { single: number | null; average: number | null }, b: typeof a): number {
+  const score = (r: typeof a): [number, number] => {
+    const avg = r.average != null && r.average > 0 ? r.average : null;
+    const sng = r.single  != null && r.single  > 0 ? r.single  : null;
+    return [avg ?? Infinity, sng ?? Infinity];
+  };
+  const [pa, sa] = score(a), [pb, sb] = score(b);
+  return pa !== pb ? pa - pb : sa - sb;
+}
+
+interface AdvLite { type: 'fixed' | 'percent'; value: number }
+
+function reComputeAdvancingNames(
+  priorRoundResults: { athleteId?: string; athleteName?: string; single: number | null; average: number | null; status?: string; isPlaceholder?: boolean }[],
+  advCfg: AdvLite | undefined,
+  athleteIdToFullName: Record<string, string>,
+): Set<string> {
+  if (!advCfg) return new Set();
+  const sorted = [...priorRoundResults]
+    .filter(r => !r.isPlaceholder && r.status !== 'withdrawn')
+    .sort(reWcaSort);
+  const rawCount = advCfg.type === 'fixed' ? advCfg.value : Math.floor(sorted.length * advCfg.value / 100);
+  const count = Math.min(Math.max(0, rawCount), sorted.length);
+  const advancing = sorted.slice(0, count);
+  const names = new Set<string>();
+  for (const r of advancing) {
+    const fullName = (r.athleteId && athleteIdToFullName[r.athleteId]) || r.athleteName || '';
+    if (fullName) names.add(fullName.trim().toLowerCase());
+  }
+  return names;
 }
 
 function emptyPanel(id: number): PanelState {
@@ -313,7 +350,7 @@ export default function ResultsEntryTab() {
       const s5  = cleanSolveCell(cols[7] || '');
       const avg  = cleanTimeBadge(cols[8] || '');
       const best = cleanTimeBadge(cols[9] || '');
-      return { idx: i, name, country, s1, s2, s3, s4, s5, avg, best, hasError: !name, isDupe: false, checked: true };
+      return { idx: i, name, country, s1, s2, s3, s4, s5, avg, best, hasError: !name, isDupe: false, notAdvancing: false, checked: true };
     });
   }
 
@@ -331,6 +368,8 @@ export default function ResultsEntryTab() {
     setCheckLoading(true);
     try {
       let dupeNames = new Set<string>();
+      let advancingNames = new Set<string>();
+
       if (compId && importEventId) {
         const existing = await getResultsByComp(compId);
         const filtered = existing.filter(r =>
@@ -339,10 +378,28 @@ export default function ResultsEntryTab() {
           r.source === 'imported',
         );
         dupeNames = new Set(filtered.map(r => (r.athleteName || '').trim().toLowerCase()));
+
+        // For round >= 2, build the advancing-names set from the prior round.
+        if (importRound >= 2) {
+          const advCfg = selComp?.eventConfig?.[importEventId]?.advancement?.[String(importRound - 1)] as AdvLite | undefined;
+          const priorRound = existing.filter(r =>
+            r.eventId === importEventId && (r.round || 1) === importRound - 1,
+          );
+          const idToFullName: Record<string, string> = {};
+          athletes.forEach(a => {
+            idToFullName[a.id] = `${a.name || ''}${a.lastName ? ' ' + a.lastName : ''}`.trim();
+          });
+          advancingNames = reComputeAdvancingNames(priorRound, advCfg, idToFullName);
+        }
       }
+
       setImportRows(parsed.map(row => {
-        const isDupe = dupeNames.has(row.name.trim().toLowerCase());
-        return { ...row, isDupe, checked: !isDupe };
+        const lowerName = row.name.trim().toLowerCase();
+        const isDupe = dupeNames.has(lowerName);
+        // notAdvancing is only meaningful when we have an advancing list AND the
+        // row's name isn't in it. For round 1, advancingNames is empty → false.
+        const notAdvancing = advancingNames.size > 0 && !advancingNames.has(lowerName);
+        return { ...row, isDupe, notAdvancing, checked: !isDupe };
       }));
     } finally {
       setCheckLoading(false);
@@ -1062,6 +1119,18 @@ export default function ResultsEntryTab() {
                                   border: '1px solid rgba(251,191,36,0.35)',
                                   color: '#fbbf24',
                                 }}>{t('admin.results.import.already-imported')}</span>
+                              )}
+                              {row.notAdvancing && !row.isDupe && (
+                                <span
+                                  title={t('admin.results.import.not-advancing')}
+                                  style={{
+                                    fontSize: '0.65rem', fontWeight: 700, padding: '0.1rem 0.4rem',
+                                    borderRadius: '4px', whiteSpace: 'nowrap',
+                                    background: 'rgba(251,191,36,0.15)',
+                                    border: '1px solid rgba(251,191,36,0.45)',
+                                    color: '#fbbf24',
+                                  }}
+                                >⚠ {t('admin.results.import.not-advancing')}</span>
                               )}
                             </div>
                           </td>
