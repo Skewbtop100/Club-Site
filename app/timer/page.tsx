@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { Scrambow } from 'scrambow';
 
 // ── Theme constants (lavender + mint, matches the screenshot) ───────────────
 const C = {
@@ -22,150 +23,59 @@ const C = {
 } as const;
 
 // ── Events ──────────────────────────────────────────────────────────────────
-interface EventDef { id: string; name: string; short: string; scrambleLen: number }
+interface EventDef { id: string; name: string; short: string }
 const EVENTS: EventDef[] = [
-  { id: '333',     name: '3x3x3 Cube',          short: '3x3',   scrambleLen: 20 },
-  { id: '222',     name: '2x2x2 Cube',          short: '2x2',   scrambleLen: 11 },
-  { id: '444',     name: '4x4x4 Cube',          short: '4x4',   scrambleLen: 40 },
-  { id: '555',     name: '5x5x5 Cube',          short: '5x5',   scrambleLen: 60 },
-  { id: '666',     name: '6x6x6 Cube',          short: '6x6',   scrambleLen: 80 },
-  { id: '777',     name: '7x7x7 Cube',          short: '7x7',   scrambleLen: 100 },
-  { id: '333oh',   name: '3x3 One-Handed',      short: '3OH',   scrambleLen: 20 },
-  { id: '333bld',  name: '3x3 Blindfolded',     short: '3BLD',  scrambleLen: 20 },
-  { id: '444bld',  name: '4x4 Blindfolded',     short: '4BLD',  scrambleLen: 40 },
-  { id: '555bld',  name: '5x5 Blindfolded',     short: '5BLD',  scrambleLen: 60 },
-  { id: '333mbf',  name: '3x3 Multi-Blind',     short: 'MBF',   scrambleLen: 20 },
-  { id: '333fm',   name: '3x3 Fewest Moves',    short: 'FMC',   scrambleLen: 25 },
-  { id: 'pyram',   name: 'Pyraminx',            short: 'Pyra',  scrambleLen: 11 },
-  { id: 'skewb',   name: 'Skewb',               short: 'Skewb', scrambleLen: 11 },
-  { id: 'sq1',     name: 'Square-1',            short: 'Sq-1',  scrambleLen: 12 },
-  { id: 'clock',   name: 'Clock',               short: 'Clock', scrambleLen: 14 },
-  { id: 'minx',    name: 'Megaminx',            short: 'Mega',  scrambleLen: 7 },
+  { id: '333',     name: '3x3x3 Cube',       short: '3x3'   },
+  { id: '222',     name: '2x2x2 Cube',       short: '2x2'   },
+  { id: '444',     name: '4x4x4 Cube',       short: '4x4'   },
+  { id: '555',     name: '5x5x5 Cube',       short: '5x5'   },
+  { id: '666',     name: '6x6x6 Cube',       short: '6x6'   },
+  { id: '777',     name: '7x7x7 Cube',       short: '7x7'   },
+  { id: '333oh',   name: '3x3 One-Handed',   short: '3OH'   },
+  { id: '333bld',  name: '3x3 Blindfolded',  short: '3BLD'  },
+  { id: '444bld',  name: '4x4 Blindfolded',  short: '4BLD'  },
+  { id: '555bld',  name: '5x5 Blindfolded',  short: '5BLD'  },
+  { id: '333mbf',  name: '3x3 Multi-Blind',  short: 'MBF'   },
+  { id: '333fm',   name: '3x3 Fewest Moves', short: 'FMC'   },
+  { id: 'pyram',   name: 'Pyraminx',         short: 'Pyra'  },
+  { id: 'skewb',   name: 'Skewb',            short: 'Skewb' },
+  { id: 'sq1',     name: 'Square-1',         short: 'Sq-1'  },
+  { id: 'clock',   name: 'Clock',            short: 'Clock' },
+  { id: 'minx',    name: 'Megaminx',         short: 'Mega'  },
 ];
 
-// ── Scramble generation ─────────────────────────────────────────────────────
-function pick<T>(arr: readonly T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
-
-const NXN_FACES = ['U', 'D', 'L', 'R', 'F', 'B'] as const;
-const MODS = ['', "'", '2'] as const;
-const axisOf = (f: string) => (f === 'U' || f === 'D') ? 0 : (f === 'L' || f === 'R') ? 1 : 2;
-
-function genNxN(n: number, length: number): string {
-  const allowsWide = n >= 4;
-  const moves: string[] = [];
-  let lastFace = '';
-  let lastAxis = -1;
-  let prevAxis = -1;
-  for (let i = 0; i < length; i++) {
-    let face: string;
-    let axis: number;
-    let attempts = 0;
-    do {
-      face = pick(NXN_FACES);
-      axis = axisOf(face);
-      attempts++;
-      if (attempts > 50) break;
-    } while (face === lastFace || (axis === lastAxis && axis === prevAxis));
-    const useWide = allowsWide && Math.random() < 0.45;
-    const layer = useWide ? face + 'w' : face;
-    moves.push(layer + pick(MODS));
-    prevAxis = lastAxis;
-    lastAxis = axis;
-    lastFace = face;
-  }
-  return moves.join(' ');
-}
-
-function genPyra(length: number): string {
-  const faces = ['U', 'L', 'R', 'B'] as const;
-  const tips  = ['u', 'l', 'r', 'b'] as const;
-  const out: string[] = [];
-  let last = '';
-  for (let i = 0; i < length; i++) {
-    let f: string; do { f = pick(faces); } while (f === last);
-    out.push(f + (Math.random() < 0.5 ? "'" : ''));
-    last = f;
-  }
-  // Append random tip rotations
-  for (const t of tips) {
-    if (Math.random() < 0.5) out.push(t + (Math.random() < 0.5 ? "'" : ''));
-  }
-  return out.join(' ');
-}
-
-function genSkewb(length: number): string {
-  const faces = ['U', 'R', 'L', 'B'] as const;
-  const out: string[] = [];
-  let last = '';
-  for (let i = 0; i < length; i++) {
-    let f: string; do { f = pick(faces); } while (f === last);
-    out.push(f + (Math.random() < 0.5 ? "'" : ''));
-    last = f;
-  }
-  return out.join(' ');
-}
-
-function genSq1(pairs: number): string {
-  const out: string[] = [];
-  for (let i = 0; i < pairs; i++) {
-    const top = Math.floor(Math.random() * 12) - 5;        // -5..6
-    const bot = Math.floor(Math.random() * 12) - 5;
-    const safeTop = top === 0 && bot === 0 ? 1 : top;
-    out.push(`(${safeTop},${bot})`);
-    if (i < pairs - 1) out.push('/');
-  }
-  return out.join(' ');
-}
-
-function genClock(): string {
-  const pins = ['UR', 'DR', 'DL', 'UL', 'U', 'R', 'D', 'L', 'ALL'] as const;
-  const out: string[] = [];
-  for (const p of pins) {
-    const n = Math.floor(Math.random() * 13) - 6;  // -6..+6
-    const sign = n >= 0 ? '+' : '-';
-    out.push(`${p}${Math.abs(n)}${sign}`);
-  }
-  out.push(Math.random() < 0.5 ? 'y2' : '');
-  return out.filter(Boolean).join(' ');
-}
-
-function genMinx(lines: number): string {
-  const out: string[] = [];
-  for (let i = 0; i < lines; i++) {
-    const seq: string[] = [];
-    for (let j = 0; j < 5; j++) {
-      seq.push(pick(['R++', 'R--']));
-      seq.push(pick(['D++', 'D--']));
-    }
-    seq.push(Math.random() < 0.5 ? "U" : "U'");
-    out.push(seq.join(' '));
-  }
-  return out.join('\n');
-}
+// ── Scramble generation (via scrambow) ───────────────────────────────────────
+// scrambow supports: 222, 333, 444, 555, 666, 777, 333fm, pyram, skewb, sq1,
+// clock, minx. OH/BLD/MBF use the same scramble as their base puzzle.
+const SCRAMBOW_TYPE: Record<string, string> = {
+  '333':    '333',
+  '222':    '222',
+  '444':    '444',
+  '555':    '555',
+  '666':    '666',
+  '777':    '777',
+  '333oh':  '333',
+  '333bld': '333',
+  '444bld': '444',
+  '555bld': '555',
+  '333mbf': '333',
+  '333fm':  '333fm',
+  'pyram':  'pyram',
+  'skewb':  'skewb',
+  'sq1':    'sq1',
+  'clock':  'clock',
+  'minx':   'minx',
+};
 
 function generateScramble(eventId: string): string {
-  const ev = EVENTS.find(e => e.id === eventId) ?? EVENTS[0];
-  switch (ev.id) {
-    case '333': case '333oh': case '333bld': case '333mbf':
-      return genNxN(3, ev.scrambleLen);
-    case '333fm':
-      return genNxN(3, ev.scrambleLen);
-    case '222':
-      return genNxN(2, ev.scrambleLen);
-    case '444': case '444bld':
-      return genNxN(4, ev.scrambleLen);
-    case '555': case '555bld':
-      return genNxN(5, ev.scrambleLen);
-    case '666':
-      return genNxN(6, ev.scrambleLen);
-    case '777':
-      return genNxN(7, ev.scrambleLen);
-    case 'pyram': return genPyra(ev.scrambleLen);
-    case 'skewb': return genSkewb(ev.scrambleLen);
-    case 'sq1':   return genSq1(ev.scrambleLen);
-    case 'clock': return genClock();
-    case 'minx':  return genMinx(ev.scrambleLen);
-    default:      return genNxN(3, 20);
+  const type = SCRAMBOW_TYPE[eventId] ?? '333';
+  try {
+    const result = new Scrambow().setType(type).get(1);
+    const s = result[0]?.scramble_string ?? '';
+    // Collapse runs of whitespace and trim — scrambow pads cells in NxN output.
+    return s.replace(/[ \t]+/g, ' ').trim();
+  } catch {
+    return '';
   }
 }
 
