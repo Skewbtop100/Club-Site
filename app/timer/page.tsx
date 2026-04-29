@@ -104,18 +104,6 @@ function fmtMs(ms: number | null | undefined, dnf = false): string {
   return `${m}:${s}`;
 }
 
-function ago(ts: number): string {
-  const diff = Math.max(0, Date.now() - ts);
-  const sec = Math.floor(diff / 1000);
-  if (sec < 60)  return `${sec}s ago`;
-  const min = Math.floor(sec / 60);
-  if (min < 60)  return `${min} min${min === 1 ? '' : 's'} ago`;
-  const h = Math.floor(min / 60);
-  if (h < 24)    return `${h}h ago`;
-  const d = Math.floor(h / 24);
-  return `${d}d ago`;
-}
-
 /** Mean of the middle of last n solves (drop best+worst). DNF in middle = DNF. */
 function avgOfN(solves: Solve[], n: number): number | null {
   if (solves.length < n) return null;
@@ -262,6 +250,8 @@ export default function TimerPage() {
   const [solves, setSolves] = useState<Solve[]>([]);
   const [hoveredSolveId, setHoveredSolveId] = useState<string | null>(null);
   const [, forceTick] = useState(0);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [detailSolveId, setDetailSolveId] = useState<string | null>(null);
 
   // Refresh "X mins ago" labels every 30s
   useEffect(() => {
@@ -444,8 +434,9 @@ export default function TimerPage() {
   // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div style={{
-      minHeight: '100vh', background: C.bg, color: C.text,
-      paddingTop: '60px',  // clear the site-wide navbar
+      height: 'calc(100vh - 60px)', overflow: 'hidden',
+      background: C.bg, color: C.text,
+      display: 'flex',
     }}>
       {/* Subtle grain background */}
       <div style={{
@@ -456,66 +447,152 @@ export default function TimerPage() {
 
       <div className="pv-grid" style={{
         position: 'relative', zIndex: 1,
-        display: 'grid',
-        gridTemplateColumns: '280px 1fr 320px',
-        gap: '1.25rem',
-        padding: '1.25rem',
+        display: 'flex',
+        gap: '1rem',
+        padding: '1rem',
+        width: '100%',
+        height: '100%',
         maxWidth: '1600px', margin: '0 auto',
-        minHeight: 'calc(100vh - 60px)',
       }}>
-        {/* ── LEFT SIDEBAR ─────────────────────────────────────────────── */}
+        {/* ── LEFT SIDEBAR (Settings + Session History) ─────────────────── */}
         <aside style={{
+          flex: '0 0 260px',
           background: C.card, border: `1px solid ${C.border}`,
-          borderRadius: 16, padding: '1.5rem 1rem',
-          display: 'flex', flexDirection: 'column', gap: '1rem',
-          height: 'fit-content', minHeight: '500px',
+          borderRadius: 16,
+          display: 'flex', flexDirection: 'column',
+          minHeight: 0,
+          overflow: 'hidden',
         }}>
-          <div>
-            <div style={{
-              fontSize: '1.25rem', fontWeight: 800, color: C.accent,
-              letterSpacing: '-0.01em', fontFamily: 'Inter, system-ui, sans-serif',
-            }}>
-              Precision Velocity
-            </div>
-            <div style={{ fontSize: '0.72rem', color: C.muted, marginTop: 2 }}>
-              The Kinetic Monolith
-            </div>
-          </div>
-
-          <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginTop: '0.5rem' }}>
-            <SidebarItem icon="⏱" label="Timer" active />
-            <SidebarItem icon="🏆" label="Competition" href="/competition" />
-            <SidebarItem icon="📊" label="Stats" />
-            <SidebarItem icon="👤" label="Profile" />
-            <SidebarItem icon="⚙" label="Settings" />
-          </nav>
-
-          <div style={{ flex: 1 }} />
-
+          {/* Top: Settings cog + History header */}
           <div style={{
-            background: C.cardAlt, border: `1px solid ${C.border}`,
-            borderRadius: 12, padding: '0.75rem',
-            display: 'flex', alignItems: 'center', gap: '0.7rem',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '0.85rem 1rem 0.6rem',
+            borderBottom: `1px solid ${C.border}`,
           }}>
-            <div style={{
-              width: 38, height: 38, borderRadius: 9,
-              background: `linear-gradient(135deg, ${C.accent}, ${C.accentDim})`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontWeight: 700, fontSize: '0.95rem', color: '#fff',
-            }}>
-              CB
-            </div>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: '0.86rem', fontWeight: 700 }}>Cuber</div>
-              <div style={{ fontSize: '0.66rem', color: C.muted, letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 1 }}>
-                Speedcuber
-              </div>
+            <button
+              onClick={() => setSettingsOpen(true)}
+              aria-label="Settings"
+              title="Settings"
+              style={{
+                width: 30, height: 30, borderRadius: 8,
+                background: 'transparent', border: `1px solid ${C.border}`,
+                color: C.muted, cursor: 'pointer', fontSize: '0.95rem',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.muted; }}
+            >⚙</button>
+            <div style={{ fontSize: '0.66rem', color: C.muted, letterSpacing: '0.05em' }}>
+              {solves.length === 0 ? '0 solves' : `${solves.length} solve${solves.length === 1 ? '' : 's'}`}
             </div>
           </div>
+
+          <div style={{ padding: '0.85rem 1rem 0.4rem', fontSize: '0.78rem', fontWeight: 700, letterSpacing: '0.05em', color: C.text }}>
+            Session History
+          </div>
+
+          {/* Scrollable solve list */}
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 0.5rem 0.5rem' }}>
+            {solves.length === 0 ? (
+              <div style={{ padding: '1.5rem 0.5rem', textAlign: 'center', color: C.mutedDim, fontSize: '0.78rem' }}>
+                Press SPACE to start your first solve.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                {[...solves].reverse().map((s, i) => {
+                  const idx = solves.length - i;
+                  const dnf = isDnf(s);
+                  const priorSet = solves.slice(0, solves.length - i).slice(0, -1).filter(x => !isDnf(x));
+                  const priorBest = priorSet.length ? Math.min(...priorSet.map(finalMs)) : Infinity;
+                  const isPB = !dnf && finalMs(s) < priorBest;
+                  return (
+                    <div
+                      key={s.id}
+                      onMouseEnter={() => setHoveredSolveId(s.id)}
+                      onMouseLeave={() => setHoveredSolveId(prev => prev === s.id ? null : prev)}
+                      onClick={() => setDetailSolveId(s.id)}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1.7rem 1fr auto auto',
+                        alignItems: 'center', gap: '0.5rem',
+                        padding: '0.5rem 0.6rem', borderRadius: 8,
+                        background: hoveredSolveId === s.id ? 'rgba(255,255,255,0.04)' : C.cardAlt,
+                        borderLeft: isPB ? `3px solid ${C.success}` : '3px solid transparent',
+                        cursor: 'pointer',
+                        transition: 'background 0.12s',
+                      }}
+                    >
+                      <div style={{ fontSize: '0.66rem', color: C.mutedDim, fontWeight: 600 }}>
+                        {String(idx).padStart(2, '0')}
+                      </div>
+                      <div style={{
+                        fontFamily: '"JetBrains Mono", monospace',
+                        fontSize: '0.92rem', fontWeight: 700,
+                        color: dnf ? C.danger : isPB ? C.success : C.text,
+                      }}>
+                        {fmtMs(finalMs(s), dnf)}
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.25rem' }}>
+                        {isPB && !dnf && (
+                          <span style={{
+                            fontSize: '0.55rem', fontWeight: 700, padding: '0.1rem 0.35rem', borderRadius: 4,
+                            background: 'rgba(52,211,153,0.15)', color: C.success, letterSpacing: '0.04em',
+                          }}>PB</span>
+                        )}
+                        {s.penalty === '+2' && (
+                          <span style={{
+                            fontSize: '0.55rem', fontWeight: 700, padding: '0.1rem 0.35rem', borderRadius: 4,
+                            background: 'rgba(251,191,36,0.15)', color: C.warn, letterSpacing: '0.04em',
+                          }}>+2</span>
+                        )}
+                      </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); deleteSolve(s.id); }}
+                        aria-label="Delete solve"
+                        style={{
+                          background: 'transparent', border: 'none', cursor: 'pointer',
+                          color: C.mutedDim, fontSize: '0.85rem', padding: '0.1rem 0.25rem',
+                          opacity: hoveredSolveId === s.id ? 1 : 0,
+                          transition: 'opacity 0.12s',
+                        }}
+                        title="Delete"
+                      >×</button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Footer: Clear All */}
+          {solves.length > 0 && (
+            <div style={{ padding: '0.6rem 0.85rem', borderTop: `1px solid ${C.border}` }}>
+              <button
+                onClick={resetSession}
+                style={{
+                  width: '100%', padding: '0.45rem 0.7rem', borderRadius: 8,
+                  fontSize: '0.74rem', fontWeight: 700, letterSpacing: '0.05em',
+                  background: 'rgba(239,68,68,0.08)', color: '#f87171',
+                  border: '1px solid rgba(239,68,68,0.25)',
+                  cursor: 'pointer', fontFamily: 'inherit',
+                  transition: 'background 0.15s',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.background = 'rgba(239,68,68,0.18)')}
+                onMouseLeave={e => (e.currentTarget.style.background = 'rgba(239,68,68,0.08)')}
+              >
+                Clear All
+              </button>
+            </div>
+          )}
         </aside>
 
         {/* ── CENTER PANEL ─────────────────────────────────────────────── */}
-        <main style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', minWidth: 0 }}>
+        <main style={{
+          flex: '1 1 auto', minWidth: 0,
+          display: 'flex', flexDirection: 'column', gap: '1rem',
+          height: '100%', overflow: 'hidden',
+        }}>
           {/* Scramble box */}
           <section style={{
             background: C.card, border: `1px solid ${C.border}`,
@@ -578,11 +655,11 @@ export default function TimerPage() {
             onTouchStart={onTimerTouchStart}
             onTouchEnd={onTimerTouchEnd}
             style={{
+              flex: '1 1 auto', minHeight: 0,
               background: C.card, border: `1px solid ${timer.state === 'armed' ? C.success : C.border}`,
-              borderRadius: 16, padding: '3rem 1.5rem 2.5rem',
+              borderRadius: 16, padding: '2rem 1.5rem',
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
               userSelect: 'none', cursor: 'pointer', textAlign: 'center',
-              minHeight: '320px',
               transition: 'border-color 0.15s',
             }}
           >
@@ -619,105 +696,15 @@ export default function TimerPage() {
             )}
           </section>
 
-          {/* Session history */}
-          <section style={{
-            background: C.card, border: `1px solid ${C.border}`,
-            borderRadius: 16, padding: '1.25rem 1.5rem',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-              <div style={{ fontSize: '1rem', fontWeight: 700 }}>Session History</div>
-              <div style={{ fontSize: '0.74rem', color: C.muted }}>
-                {solves.length === 0 ? 'No solves yet' : `${solves.length} solve${solves.length === 1 ? '' : 's'}`}
-              </div>
-            </div>
-            {solves.length === 0 ? (
-              <div style={{ padding: '1.5rem 0', textAlign: 'center', color: C.mutedDim, fontSize: '0.85rem' }}>
-                Press SPACE to start your first solve.
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                {[...solves].reverse().map((s, i) => {
-                  const idx = solves.length - i;
-                  const dnf = isDnf(s);
-                  // Was this a PB at the time?
-                  const priorBest = Math.min(
-                    ...solves.slice(0, solves.length - i).slice(0, -1).filter(x => !isDnf(x)).map(finalMs)
-                  );
-                  const isPB = !dnf && (
-                    solves.slice(0, solves.length - i).filter(x => !isDnf(x)).length === 1 ||
-                    finalMs(s) < priorBest
-                  );
-                  return (
-                    <div
-                      key={s.id}
-                      onMouseEnter={() => setHoveredSolveId(s.id)}
-                      onMouseLeave={() => setHoveredSolveId(prev => prev === s.id ? null : prev)}
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: '2.5rem 1fr auto auto',
-                        alignItems: 'center', gap: '0.75rem',
-                        padding: '0.6rem 0.85rem', borderRadius: 10,
-                        background: hoveredSolveId === s.id ? 'rgba(255,255,255,0.03)' : C.cardAlt,
-                        borderLeft: isPB ? `3px solid ${C.success}` : '3px solid transparent',
-                        transition: 'background 0.12s',
-                      }}
-                    >
-                      <div style={{ fontSize: '0.72rem', color: C.mutedDim, fontWeight: 600 }}>
-                        {String(idx).padStart(2, '0')}
-                      </div>
-                      <div style={{
-                        fontFamily: '"JetBrains Mono", monospace',
-                        fontSize: '1.05rem', fontWeight: 700,
-                        color: dnf ? C.danger : isPB ? C.success : C.text,
-                      }}>
-                        {fmtMs(finalMs(s), dnf)}
-                      </div>
-                      <div style={{ display: 'flex', gap: '0.35rem' }}>
-                        {s.event !== '333' && (
-                          <span style={{
-                            fontSize: '0.65rem', fontWeight: 700, padding: '0.15rem 0.45rem', borderRadius: 4,
-                            background: 'rgba(255,255,255,0.06)', color: C.muted, letterSpacing: '0.04em',
-                          }}>
-                            {EVENTS.find(e => e.id === s.event)?.short || s.event}
-                          </span>
-                        )}
-                        {isPB && !dnf && (
-                          <span style={{
-                            fontSize: '0.62rem', fontWeight: 700, padding: '0.15rem 0.45rem', borderRadius: 4,
-                            background: 'rgba(52,211,153,0.15)', color: C.success, letterSpacing: '0.05em',
-                          }}>NEW PB!</span>
-                        )}
-                        {s.penalty === '+2' && (
-                          <span style={{
-                            fontSize: '0.62rem', fontWeight: 700, padding: '0.15rem 0.45rem', borderRadius: 4,
-                            background: 'rgba(251,191,36,0.15)', color: C.warn, letterSpacing: '0.05em',
-                          }}>+2</span>
-                        )}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <span style={{ fontSize: '0.72rem', color: C.mutedDim }}>{ago(s.ts)}</span>
-                        <button
-                          onClick={() => deleteSolve(s.id)}
-                          aria-label="Delete solve"
-                          style={{
-                            background: 'transparent', border: 'none', cursor: 'pointer',
-                            color: C.mutedDim, fontSize: '0.85rem', padding: '0.15rem 0.3rem',
-                            opacity: hoveredSolveId === s.id ? 1 : 0,
-                            transition: 'opacity 0.12s',
-                          }}
-                          title="Delete"
-                        >×</button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
         </main>
 
         {/* ── RIGHT PANEL ───────────────────────────────────────────────── */}
-        <aside style={{ display: 'flex', flexDirection: 'column', gap: '1rem', minWidth: 0 }}>
+        <aside style={{
+          flex: '0 0 280px', minWidth: 0,
+          display: 'flex', flexDirection: 'column', gap: '0.75rem',
+          height: '100%', overflowY: 'auto', overflowX: 'hidden',
+          paddingRight: '0.25rem',
+        }}>
           <div style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: '-0.25rem' }}>Performance</div>
 
           {/* Personal Best card */}
@@ -826,9 +813,107 @@ export default function TimerPage() {
         </aside>
       </div>
 
+      {/* Settings modal */}
+      {settingsOpen && (
+        <ModalShell title="Settings" onClose={() => setSettingsOpen(false)}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+            <div>
+              <div style={{ fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, marginBottom: '0.5rem', fontWeight: 600 }}>
+                Keyboard Shortcuts
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', fontSize: '0.85rem' }}>
+                <Row label="Start / stop timer" kbd="SPACE" />
+                <Row label="Cancel inspection / reset" kbd="ESC" />
+                <Row label="Delete last solve" kbd="D" />
+                <Row label="New scramble" kbd="N" />
+              </div>
+            </div>
+            <div style={{ height: 1, background: C.border }} />
+            <div>
+              <div style={{ fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, marginBottom: '0.5rem', fontWeight: 600 }}>
+                Session
+              </div>
+              <div style={{ fontSize: '0.82rem', color: C.muted, lineHeight: 1.5 }}>
+                Solves are saved to local storage and restored on reload. Switching events generates a new scramble. Clearing the session is permanent.
+              </div>
+            </div>
+          </div>
+        </ModalShell>
+      )}
+
+      {/* Solve detail modal */}
+      {detailSolveId && (() => {
+        const s = solves.find(x => x.id === detailSolveId);
+        if (!s) return null;
+        const dnf = isDnf(s);
+        const ev = EVENTS.find(e => e.id === s.event);
+        return (
+          <ModalShell title="Solve Detail" onClose={() => setDetailSolveId(null)}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
+              <div>
+                <div style={{ fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, marginBottom: '0.4rem', fontWeight: 600 }}>
+                  Time {ev ? `· ${ev.short}` : ''}
+                </div>
+                <div style={{
+                  fontFamily: '"JetBrains Mono", monospace',
+                  fontSize: '2.5rem', fontWeight: 800,
+                  color: dnf ? C.danger : C.text,
+                  fontVariantNumeric: 'tabular-nums',
+                }}>
+                  {fmtMs(finalMs(s), dnf)}
+                </div>
+                {s.penalty === '+2' && (
+                  <div style={{ fontSize: '0.75rem', color: C.warn, marginTop: '0.2rem' }}>+2 penalty applied</div>
+                )}
+              </div>
+              <div>
+                <div style={{ fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, marginBottom: '0.4rem', fontWeight: 600 }}>
+                  Scramble
+                </div>
+                <div style={{
+                  fontFamily: '"JetBrains Mono", monospace',
+                  fontSize: '0.92rem', lineHeight: 1.6,
+                  color: C.text, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  background: C.cardAlt, border: `1px solid ${C.border}`,
+                  borderRadius: 8, padding: '0.75rem 0.85rem',
+                }}>
+                  {s.scramble}
+                </div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                <button
+                  onClick={() => { deleteSolve(s.id); setDetailSolveId(null); }}
+                  style={{
+                    padding: '0.5rem 0.9rem', borderRadius: 8,
+                    fontSize: '0.82rem', fontWeight: 600, fontFamily: 'inherit',
+                    background: 'rgba(239,68,68,0.1)', color: '#f87171',
+                    border: '1px solid rgba(239,68,68,0.3)', cursor: 'pointer',
+                  }}
+                >
+                  Delete
+                </button>
+                <button
+                  onClick={() => setDetailSolveId(null)}
+                  style={{
+                    padding: '0.5rem 0.9rem', borderRadius: 8,
+                    fontSize: '0.82rem', fontWeight: 600, fontFamily: 'inherit',
+                    background: C.accentDim, color: C.accent,
+                    border: `1px solid ${C.borderHi}`, cursor: 'pointer',
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </ModalShell>
+        );
+      })()}
+
       <style>{`
+        .pv-grid > main > section { box-sizing: border-box; }
         @media (max-width: 1100px) {
-          .pv-grid { grid-template-columns: 1fr !important; }
+          .pv-grid { flex-direction: column !important; height: auto !important; overflow: auto !important; }
+          .pv-grid > aside { flex: 0 0 auto !important; height: auto !important; max-height: 60vh; }
         }
         @media (max-width: 700px) {
           .pv-grid { padding: 0.75rem !important; gap: 0.75rem !important; }
@@ -839,28 +924,6 @@ export default function TimerPage() {
 }
 
 // ── Sub-components ──────────────────────────────────────────────────────────
-
-function SidebarItem({ icon, label, active, href }: { icon: string; label: string; active?: boolean; href?: string }) {
-  const inner = (
-    <div style={{
-      position: 'relative',
-      display: 'flex', alignItems: 'center', gap: '0.7rem',
-      padding: '0.6rem 0.7rem', borderRadius: 9,
-      background: active ? C.accentDim : 'transparent',
-      color: active ? C.accent : C.text,
-      fontSize: '0.86rem', fontWeight: active ? 700 : 500,
-      cursor: 'pointer', transition: 'background 0.15s',
-    }}>
-      <span style={{ width: 18, fontSize: '0.95rem', textAlign: 'center', opacity: active ? 1 : 0.7 }}>{icon}</span>
-      <span style={{ flex: 1 }}>{label}</span>
-      {active && (
-        <span style={{ position: 'absolute', right: -1, top: 8, bottom: 8, width: 3, borderRadius: 2, background: C.accent }} />
-      )}
-    </div>
-  );
-  if (href) return <Link href={href} style={{ textDecoration: 'none', color: 'inherit' }}>{inner}</Link>;
-  return inner;
-}
 
 function StatTile({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
@@ -899,5 +962,65 @@ function PenaltyButton({ label, active, onClick, color }: { label: string; activ
     >
       {label}
     </button>
+  );
+}
+
+function ModalShell({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  // Close on ESC
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 9000,
+        background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '1rem',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: 460,
+          background: C.card, border: `1px solid ${C.border}`,
+          borderRadius: 14, padding: '1.1rem 1.25rem',
+          boxShadow: '0 20px 60px rgba(0,0,0,0.6)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.85rem' }}>
+          <div style={{ fontSize: '1rem', fontWeight: 700, color: C.text }}>{title}</div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              width: 28, height: 28, borderRadius: 7,
+              background: 'transparent', border: `1px solid ${C.border}`,
+              color: C.muted, cursor: 'pointer', fontSize: '0.95rem',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >×</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Row({ label, kbd }: { label: string; kbd: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <span style={{ color: C.text }}>{label}</span>
+      <kbd style={{
+        fontFamily: '"JetBrains Mono", monospace',
+        fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.05em',
+        padding: '0.2rem 0.55rem', borderRadius: 6,
+        background: 'rgba(255,255,255,0.06)', border: `1px solid ${C.border}`,
+        color: C.text,
+      }}>{kbd}</kbd>
+    </div>
   );
 }
