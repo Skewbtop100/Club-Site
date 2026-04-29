@@ -531,8 +531,9 @@ export default function ResultsEntryTab() {
             const allEntered = panel.currentSolveIdx >= 5 && panel.editReturnIdx === null;
             const { single, average } = computeResult(panel);
 
-            // Base set: registered athletes for this comp+event.
-            const baseAthletes = compAthletes
+            // Show all registered athletes for this comp+event. Round-level
+            // gating happens on the round dropdown below.
+            const panelAthletes = compAthletes
               ? athletes.filter(a => {
                   const ca = compAthletes.find(x => x.id === a.id);
                   if (!ca) return false;
@@ -541,46 +542,20 @@ export default function ResultsEntryTab() {
                 })
               : athletes;
 
-            // Athlete dropdown filter rules:
-            // - Always exclude athletes who already have a real (non-placeholder)
-            //   result for this comp+event+round. They've already competed in this
-            //   round and can't compete again. To edit, use the Edit button in
-            //   the Competition Results tab.
-            // - Round 1: show all remaining registered athletes.
-            // - Round >= 2: additionally restrict to athletes with a row
-            //   (placeholder or real) for this round. No fallback — empty until
-            //   advancement runs.
-            const panelAthletes = (() => {
-              if (!panel.eventId) return baseAthletes;
-
-              // Athletes who already have a real (non-placeholder) result.
-              const completedIds = new Set(
-                compResults
-                  .filter(r =>
-                    r.eventId === panel.eventId &&
-                    (r.round || 1) === panel.round &&
-                    !r.isPlaceholder,
-                  )
-                  .map(r => r.athleteId)
-                  .filter(Boolean),
-              );
-
-              if (panel.round < 2) {
-                return baseAthletes.filter(a => !completedIds.has(a.id));
-              }
-
-              // Round >= 2: only athletes with a row for this round.
-              const idsForRound = new Set(
-                compResults
-                  .filter(r =>
-                    r.eventId === panel.eventId &&
-                    (r.round || 1) === panel.round,
-                  )
-                  .map(r => r.athleteId)
-                  .filter(Boolean),
-              );
-              return baseAthletes.filter(a => idsForRound.has(a.id) && !completedIds.has(a.id));
-            })();
+            // Rounds where this athlete already has a real (non-placeholder)
+            // result for this comp+event. Used to disable those round options.
+            const completedRounds = new Set<number>(
+              panel.athleteId && panel.eventId
+                ? compResults
+                    .filter(r =>
+                      r.competitionId === compId &&
+                      r.athleteId === panel.athleteId &&
+                      r.eventId === panel.eventId &&
+                      !r.isPlaceholder,
+                    )
+                    .map(r => r.round || 1)
+                : [],
+            );
 
             const curIdx     = panel.currentSolveIdx;
             const curPenalty = curIdx < 5 ? panel.penalties[curIdx] : 'none';
@@ -619,9 +594,15 @@ export default function ResultsEntryTab() {
                     <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.2rem', paddingLeft: '0.1rem' }}>{t('admin.results.round')}</div>
                     <select className="compact-select" value={panel.round} style={{ marginBottom: 0 }}
                       onChange={e => updatePanel(panel.id, { round: Number(e.target.value) })}>
-                      {roundNames.map((name, idx) => (
-                        <option key={idx} value={idx + 1}>{name}</option>
-                      ))}
+                      {roundNames.map((name, idx) => {
+                        const roundNum = idx + 1;
+                        const isLocked = completedRounds.has(roundNum);
+                        return (
+                          <option key={idx} value={roundNum} disabled={isLocked}>
+                            {name}{isLocked ? ' 🔒' : ''}
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
                   <div>
