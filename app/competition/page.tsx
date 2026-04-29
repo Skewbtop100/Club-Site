@@ -14,9 +14,13 @@ import AthletesSection from '@/components/sections/AthletesSection';
 import Footer from '@/components/layout/Footer';
 
 export default function CompetitionPage() {
+  console.log('Competition page rendering');
   const { competitions, loading: compsLoading } = useCompetitions();
+  console.log('competitions:', competitions);
   const { results, loading: resultsLoading } = useResults(competitions);
+  console.log('results:', results);
   const { athletes, loading: athletesLoading } = useAthletes();
+  console.log('athletes:', athletes);
   const eventVisibility = useEventVisibility();
   const wcaRecords = useWcaRecords();
 

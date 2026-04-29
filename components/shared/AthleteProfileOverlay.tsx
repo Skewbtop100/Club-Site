@@ -385,15 +385,17 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
     });
 
     const groups = Array.from(groupMap.values());
+    console.log('allComps:', allComps.map(c => ({ id: c.id, name: c.name, date: c.date })));
+    console.log('compMap:', Object.entries(compMap).map(([k, v]) => ({ id: k, date: v?.date })));
     // Sort groups by date descending
     groups.sort((a, b) => b.sortDate - a.sortDate);
-    console.log('Competition groups sorted:', groups.map(g => ({ name: g.compName, sortDate: g.sortDate, date: new Date(g.sortDate).toISOString() })));
+    console.log('sorted groups:', groups.map(g => ({ name: g.compName, sortDate: g.sortDate })));
     // Sort rows within each group: highest round first (Final at top)
     groups.forEach(g => {
       g.rows.sort((a, b) => b.roundNum - a.roundNum);
     });
     return groups;
-  }, [allResults, historyEvent, compMap, globalResults]);
+  }, [allResults, historyEvent, compMap, globalResults, allComps]);
 
   // Placement for history rows
   const placementMap = useMemo(() => {
