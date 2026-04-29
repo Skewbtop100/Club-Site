@@ -480,7 +480,7 @@ export default function ResultsEntryTab() {
                   onChange={e => updatePanel(panel.id, { athleteId: e.target.value })}>
                   <option value="">{t('admin.results.select-athlete')}</option>
                   {[...panelAthletes].sort((a,b) => a.name.localeCompare(b.name)).map(a => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
+                    <option key={a.id} value={a.id}>{`${a.name || ''}${a.lastName ? ' ' + a.lastName : ''}`}</option>
                   ))}
                 </select>
 

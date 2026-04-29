@@ -157,16 +157,17 @@ function AthleteCard({
   onClick: () => void;
 }) {
   const { t } = useLang();
-  const initials = (athlete.name || '?').split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2);
+  const fullName = `${athlete.name || ''}${athlete.lastName ? ' ' + athlete.lastName : ''}`;
+  const initials = (fullName || '?').split(' ').filter(Boolean).map((w) => w[0]).join('').toUpperCase().slice(0, 2);
 
   return (
     <div className="athlete-card" onClick={onClick}>
       {athlete.imageUrl ? (
-        <img className="athlete-avatar" src={athlete.imageUrl} alt={athlete.name} />
+        <img className="athlete-avatar" src={athlete.imageUrl} alt={fullName} />
       ) : (
         <div className="athlete-initials">{initials}</div>
       )}
-      <div className="athlete-name">{athlete.name || '—'}</div>
+      <div className="athlete-name">{fullName || '—'}</div>
       {athlete.wcaId && <div className="athlete-wca">{athlete.wcaId}</div>}
       <div className="athlete-best">
         {best333

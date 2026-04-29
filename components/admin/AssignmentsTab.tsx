@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { getCompetitions } from '@/lib/firebase/services/competitions';
+import { getAthletes } from '@/lib/firebase/services/athletes';
 import { subscribeAssignmentsByComp, type Assignment } from '@/lib/firebase/services/assignments';
-import type { Competition } from '@/lib/types';
+import type { Competition, Athlete } from '@/lib/types';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { useLang, type TranslationKey } from '@/lib/i18n';
 
@@ -25,10 +26,20 @@ export default function AssignmentsTab() {
   const [evId, setEvId]               = useState('');
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading]         = useState(false);
+  const [allAthletes, setAllAthletes] = useState<Athlete[]>([]);
 
   useEffect(() => {
     getCompetitions().then(setComps);
+    getAthletes().then(setAllAthletes);
   }, []);
+
+  const athleteNameMap = useMemo(() => {
+    const m: Record<string, string> = {};
+    allAthletes.forEach(a => {
+      m[a.id] = `${a.name || ''}${a.lastName ? ' ' + a.lastName : ''}`;
+    });
+    return m;
+  }, [allAthletes]);
 
   useEffect(() => {
     if (!compId) { setAssignments([]); return; }
@@ -92,7 +103,7 @@ export default function AssignmentsTab() {
                     padding: '0.18rem 0.6rem', borderRadius: '999px', fontSize: '0.75rem',
                     background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.3)',
                     color: '#c4b5fd',
-                  }}>{a.name}</span>
+                  }}>{athleteNameMap[a.id] || a.name}</span>
                 ))
               }
             </div>

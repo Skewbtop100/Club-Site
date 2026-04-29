@@ -128,7 +128,7 @@ export default function AthletesTab() {
                       .sort((a, b) => a.name.localeCompare(b.name))
                       .map(a => (
                         <tr key={a.id}>
-                          <td style={{ fontWeight: 600 }}>{a.name}</td>
+                          <td style={{ fontWeight: 600 }}>{`${a.name || ''}${a.lastName ? ' ' + a.lastName : ''}`}</td>
                           <td className="td-muted">{a.lastName || '—'}</td>
                           <td><code style={{ fontSize: '0.82rem', color: '#a78bfa' }}>{a.wcaId || '—'}</code></td>
                           <td className="td-muted">{a.birthDate || '—'}</td>

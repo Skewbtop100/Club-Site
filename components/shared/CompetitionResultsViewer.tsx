@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { subscribeResultsByComp } from '@/lib/firebase/services/results';
-import type { Competition, Result, AdvancementConfig } from '@/lib/types';
+import { getAthletes } from '@/lib/firebase/services/athletes';
+import type { Competition, Result, AdvancementConfig, Athlete } from '@/lib/types';
 import { fmtTime } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
 
@@ -56,6 +57,19 @@ export default function CompetitionResultsViewer({ comp, onClose, isLive }: Prop
   const [results, setResults] = useState<Result[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [allAthletes, setAllAthletes] = useState<Athlete[]>([]);
+
+  const athleteNameMap = useMemo(() => {
+    const m: Record<string, string> = {};
+    allAthletes.forEach(a => {
+      m[a.id] = `${a.name || ''}${a.lastName ? ' ' + a.lastName : ''}`;
+    });
+    return m;
+  }, [allAthletes]);
+
+  useEffect(() => {
+    getAthletes().then(setAllAthletes);
+  }, []);
 
   // Real-time subscription
   useEffect(() => {
@@ -304,7 +318,7 @@ export default function CompetitionResultsViewer({ comp, onClose, isLive }: Prop
 
                               {/* Athlete */}
                               <td className="wca-td-name">
-                                <div className="wca-name">{r.athleteName || r.athleteId}</div>
+                                <div className="wca-name">{athleteNameMap[r.athleteId] || r.athleteName || r.athleteId}</div>
                               </td>
 
                               {/* Country */}

@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { subscribeCompetitions, updateCompetition } from '@/lib/firebase/services/competitions';
 import { subscribeResultsByComp, saveResult, deleteResult as deleteResultFn } from '@/lib/firebase/services/results';
-import type { Competition, Result, AdvancementConfig } from '@/lib/types';
+import { getAthletes } from '@/lib/firebase/services/athletes';
+import type { Competition, Result, AdvancementConfig, Athlete } from '@/lib/types';
 import { fmtTime, parseTime } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { useLang, type TranslationKey } from '@/lib/i18n';
@@ -64,7 +65,16 @@ export default function CompResultsTab() {
   const [evId, setEvId]       = useState('');
   const [round, setRound]     = useState(1);
   const [results, setResults] = useState<Result[]>([]);
+  const [allAthletes, setAllAthletes] = useState<Athlete[]>([]);
   const unsubRef = useRef<(() => void) | null>(null);
+
+  const athleteNameMap = useMemo(() => {
+    const m: Record<string, string> = {};
+    allAthletes.forEach(a => {
+      m[a.id] = `${a.name || ''}${a.lastName ? ' ' + a.lastName : ''}`;
+    });
+    return m;
+  }, [allAthletes]);
 
   // Sidebar: which events are expanded
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -89,6 +99,10 @@ export default function CompResultsTab() {
 
   useEffect(() => {
     return subscribeCompetitions(data => setComps(data));
+  }, []);
+
+  useEffect(() => {
+    getAthletes().then(setAllAthletes);
   }, []);
 
   useEffect(() => {
@@ -467,7 +481,7 @@ export default function CompResultsTab() {
 
                             {/* Athlete */}
                             <td className="wca-td-name">
-                              <div className="wca-name">{r.athleteName || r.athleteId}</div>
+                              <div className="wca-name">{athleteNameMap[r.athleteId] || r.athleteName || r.athleteId}</div>
                             </td>
 
                             {/* Country */}
@@ -544,7 +558,7 @@ export default function CompResultsTab() {
         <div onClick={() => !editSaving && setEditRow(null)} className="wca-modal-backdrop">
           <div onClick={e => e.stopPropagation()} className="wca-modal" style={{ borderColor: 'rgba(99,102,241,0.35)' }}>
             <div className="wca-modal-title">{t('admin.cr.edit.title')}</div>
-            <div className="wca-modal-sub">{editRow.athleteName || editRow.athleteId}</div>
+            <div className="wca-modal-sub">{athleteNameMap[editRow.athleteId] || editRow.athleteName || editRow.athleteId}</div>
 
             <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
               {[0, 1, 2, 3, 4].map(i => (
