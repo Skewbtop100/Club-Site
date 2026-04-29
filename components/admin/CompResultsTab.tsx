@@ -552,7 +552,21 @@ export default function CompResultsTab() {
               </span>
               {/* Status badge */}
               {curStatus === 'ongoing'  && <span className="wca-round-badge wca-round-badge-live">{t('admin.cr.round.live-badge')}</span>}
-              {curStatus === 'complete' && <span className="wca-round-badge wca-round-badge-done">{t('admin.cr.round.complete-badge')}</span>}
+              {curStatus === 'complete' && (
+                <span
+                  className="wca-round-badge wca-round-badge-done"
+                  style={{
+                    background: 'rgba(74,222,128,0.15)',
+                    border: '1px solid rgba(74,222,128,0.5)',
+                    color: '#4ade80',
+                    fontWeight: 700,
+                    padding: '0.3rem 0.8rem',
+                    borderRadius: '999px',
+                  }}
+                >
+                  {t('admin.cr.round.complete-badge')}
+                </span>
+              )}
             </div>
             {/* Admin: round tabs + status buttons */}
             <div className="wca-round-header-right">
@@ -568,8 +582,8 @@ export default function CompResultsTab() {
                   </button>
                 ))}
               </div>
-              {/* Status buttons */}
-              <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
+              {/* Status buttons — Live and Done separated by a vertical divider */}
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
                 <button
                   disabled={statusWorking}
                   onClick={() => setRoundStatus(evId, round, curStatus === 'ongoing' ? null : 'ongoing')}
@@ -577,6 +591,16 @@ export default function CompResultsTab() {
                 >
                   {t('admin.cr.round.live-btn')}
                 </button>
+                <span
+                  aria-hidden
+                  style={{
+                    display: 'inline-block',
+                    width: '1px',
+                    height: '1.4rem',
+                    background: 'rgba(255,255,255,0.18)',
+                    margin: '0 0.4rem',
+                  }}
+                />
                 <button
                   disabled={statusWorking}
                   onClick={() => setRoundStatus(evId, round, curStatus === 'complete' ? null : 'complete')}
