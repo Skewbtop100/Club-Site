@@ -18,7 +18,10 @@ export default function LangToggle() {
       {(['en', 'mn'] as Lang[]).map((l) => (
         <button
           key={l}
-          onClick={() => setLang(l)}
+          onClick={() => {
+            console.log('Language changed to:', l);
+            setLang(l);
+          }}
           style={{
             padding: '0.22rem 0.52rem',
             borderRadius: '5px',

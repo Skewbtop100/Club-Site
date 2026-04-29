@@ -50,5 +50,7 @@ export function LangProvider({ children }: { children: ReactNode }) {
 }
 
 export function useLang() {
-  return useContext(LangContext);
+  const ctx = useContext(LangContext);
+  console.log('Current language:', ctx.lang);
+  return ctx;
 }
