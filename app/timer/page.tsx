@@ -269,6 +269,45 @@ export default function TimerPage() {
   const [, forceTick] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [detailSolveId, setDetailSolveId] = useState<string | null>(null);
+  // Default false to match SSR; updated after mount via matchMedia. Brief flash
+  // possible on mobile pageload but no hydration mismatch.
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 700px)');
+    setIsMobile(mq.matches);
+    const onChange = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  // Swipe-to-delete state for mobile session history
+  const swipeStartRef = useRef<{ id: string; x: number; y: number } | null>(null);
+  const [swipe, setSwipe] = useState<{ id: string; dx: number } | null>(null);
+
+  function onSwipeStart(e: React.TouchEvent, id: string) {
+    const t = e.touches[0];
+    swipeStartRef.current = { id, x: t.clientX, y: t.clientY };
+  }
+  function onSwipeMove(e: React.TouchEvent) {
+    const start = swipeStartRef.current;
+    if (!start) return;
+    const t = e.touches[0];
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    // Lock to horizontal swipe only; ignore vertical scroll gestures.
+    if (Math.abs(dx) > 6 && Math.abs(dx) > Math.abs(dy) && dx < 0) {
+      setSwipe({ id: start.id, dx: Math.max(dx, -110) });
+    }
+  }
+  function onSwipeEnd() {
+    const s = swipe;
+    swipeStartRef.current = null;
+    if (s && s.dx < -70) {
+      deleteSolve(s.id);
+    }
+    setSwipe(null);
+  }
 
   // Refresh "X mins ago" labels every 30s
   useEffect(() => {
@@ -460,6 +499,7 @@ export default function TimerPage() {
         backgroundSize: '3px 3px', opacity: 0.7,
       }} />
 
+      {!isMobile && (
       <div className="pv-grid" style={{
         position: 'relative', zIndex: 1,
         display: 'flex',
@@ -783,6 +823,218 @@ export default function TimerPage() {
           </div>
         </aside>
       </div>
+      )}
+
+      {isMobile && (() => {
+        const lastSolves = [...solves].slice(-5).reverse();
+        const lastSolve = solves.length > 0 ? solves[solves.length - 1] : null;
+        return (
+          <div style={{
+            position: 'relative', zIndex: 1,
+            height: '100%', width: '100%',
+            display: 'flex', flexDirection: 'column',
+            background: C.bg, color: C.text,
+            overflow: 'hidden',
+          }}>
+            {/* Header */}
+            <header style={{
+              flex: '0 0 50px',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '0 0.85rem',
+              borderBottom: `1px solid ${C.border}`,
+            }}>
+              <div style={{
+                fontSize: '0.95rem', fontWeight: 800, color: C.accent,
+                letterSpacing: '-0.01em', fontFamily: 'Inter, system-ui, sans-serif',
+              }}>
+                Precision Velocity
+              </div>
+              <button
+                onClick={() => setSettingsOpen(true)}
+                aria-label="Settings"
+                style={{
+                  width: 34, height: 34, borderRadius: 8,
+                  background: 'transparent', border: `1px solid ${C.border}`,
+                  color: C.muted, cursor: 'pointer', fontSize: '1rem',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >⚙</button>
+            </header>
+
+            {/* Top: scramble + event selector + new */}
+            <section style={{
+              flex: '0 0 auto',
+              padding: '0.7rem 0.85rem',
+              display: 'flex', flexDirection: 'column', gap: '0.5rem',
+              borderBottom: `1px solid ${C.border}`,
+            }}>
+              <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                <select
+                  value={eventId}
+                  onChange={e => setEventId(e.target.value)}
+                  style={{
+                    flex: 1,
+                    background: C.cardAlt, color: C.text,
+                    border: `1px solid ${C.border}`, borderRadius: 8,
+                    padding: '0.45rem 0.5rem', fontSize: '16px',  // 16px prevents iOS zoom
+                    fontFamily: 'inherit', outline: 'none',
+                  }}
+                >
+                  {EVENTS.map(ev => (
+                    <option key={ev.id} value={ev.id}>{ev.name}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={newScramble}
+                  style={{
+                    background: 'transparent', color: C.accent,
+                    border: `1px solid ${C.borderHi}`, borderRadius: 8,
+                    padding: '0.45rem 0.7rem', fontSize: '0.78rem',
+                    fontFamily: 'inherit', cursor: 'pointer', fontWeight: 600,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  New
+                </button>
+              </div>
+              <div style={{
+                fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
+                fontSize: '0.85rem', lineHeight: 1.5,
+                color: C.text, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                maxHeight: '4.2em', overflowY: 'auto',
+              }}>
+                {scramble}
+              </div>
+            </section>
+
+            {/* Center: timer (fills remaining space) */}
+            <section
+              onTouchStart={onTimerTouchStart}
+              onTouchEnd={onTimerTouchEnd}
+              style={{
+                flex: '1 1 auto', minHeight: 0,
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                userSelect: 'none', cursor: 'pointer', textAlign: 'center',
+                touchAction: 'manipulation',
+                padding: '0.5rem 1rem',
+                borderBottom: `1px solid ${C.border}`,
+                background: timer.state === 'armed' ? `${C.success}10` : 'transparent',
+                transition: 'background 0.12s',
+              }}
+            >
+              {timer.state === 'inspecting' && (
+                <div style={{ fontSize: '0.65rem', letterSpacing: '0.15em', textTransform: 'uppercase', color: C.warn, marginBottom: '0.6rem', fontWeight: 700 }}>
+                  Inspection
+                </div>
+              )}
+              <div style={{
+                fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
+                fontSize: 'clamp(3.5rem, 22vw, 6.5rem)',
+                fontWeight: 700, lineHeight: 0.95,
+                fontVariantNumeric: 'tabular-nums',
+                color: timerColor,
+                transition: 'color 0.12s',
+                textShadow: timer.state === 'armed' ? `0 0 30px ${C.success}55` : 'none',
+              }}>
+                {timerDisplay}
+              </div>
+              <div style={{ fontSize: '0.7rem', color: C.muted, marginTop: '0.9rem', letterSpacing: '0.06em' }}>
+                {timer.state === 'idle' && 'TAP TO START'}
+                {timer.state === 'inspecting' && 'Hold to arm, release to start'}
+                {timer.state === 'armed' && (<span style={{ color: C.success, fontWeight: 700 }}>RELEASE TO START</span>)}
+                {timer.state === 'running' && 'TAP TO STOP'}
+                {timer.state === 'stopped' && 'TAP TO START'}
+              </div>
+              {timer.state === 'stopped' && lastSolve && (
+                <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.8rem' }}>
+                  <PenaltyButton label="OK"  active={lastSolve.penalty === 'none'} onClick={() => setLastPenalty('none')} color={C.muted} />
+                  <PenaltyButton label="+2"  active={lastSolve.penalty === '+2'}   onClick={() => setLastPenalty('+2')}   color={C.warn} />
+                  <PenaltyButton label="DNF" active={lastSolve.penalty === 'dnf'}  onClick={() => setLastPenalty('dnf')}  color={C.danger} />
+                </div>
+              )}
+            </section>
+
+            {/* Bottom: quick stats + history + small cube */}
+            <section style={{
+              flex: '0 0 auto',
+              position: 'relative',
+              minHeight: '170px',
+            }}>
+              <div style={{
+                display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: '0.4rem', padding: '0.5rem 0.85rem 0.25rem',
+              }}>
+                <MiniStat label="Best" value={fmtMs(stats.best)} />
+                <MiniStat label="Ao5"  value={stats.ao5  == null ? '—' : fmtMs(stats.ao5)}  accent />
+                <MiniStat label="Ao12" value={stats.ao12 == null ? '—' : fmtMs(stats.ao12)} accent />
+              </div>
+              <div style={{
+                padding: '0 0.85rem 0.5rem',
+                paddingRight: '6.5rem',  // reserve right edge for floating cube
+                maxHeight: '110px', overflowY: 'auto',
+                display: 'flex', flexDirection: 'column', gap: '0.25rem',
+              }}>
+                {lastSolves.length === 0 ? (
+                  <div style={{ fontSize: '0.72rem', color: C.mutedDim, padding: '0.5rem 0' }}>
+                    Tap timer above to start your first solve.
+                  </div>
+                ) : (
+                  lastSolves.map((s) => {
+                    const idx = solves.indexOf(s) + 1;
+                    const dnf = isDnf(s);
+                    const swiped = swipe?.id === s.id ? swipe.dx : 0;
+                    return (
+                      <div
+                        key={s.id}
+                        onClick={() => { if (!swipe) setDetailSolveId(s.id); }}
+                        onTouchStart={(e) => onSwipeStart(e, s.id)}
+                        onTouchMove={onSwipeMove}
+                        onTouchEnd={onSwipeEnd}
+                        style={{
+                          display: 'grid', gridTemplateColumns: '1.7rem 1fr auto', alignItems: 'center', gap: '0.5rem',
+                          padding: '0.4rem 0.55rem', borderRadius: 7,
+                          background: C.cardAlt,
+                          touchAction: 'pan-y',
+                          transform: `translateX(${swiped}px)`,
+                          transition: swipe?.id === s.id ? 'none' : 'transform 0.18s',
+                        }}
+                      >
+                        <div style={{ fontSize: '0.65rem', color: C.mutedDim, fontWeight: 600 }}>
+                          {String(idx).padStart(2, '0')}
+                        </div>
+                        <div style={{
+                          fontFamily: '"JetBrains Mono", monospace',
+                          fontSize: '0.88rem', fontWeight: 700,
+                          color: dnf ? C.danger : C.text,
+                        }}>
+                          {fmtMs(finalMs(s), dnf)}
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.2rem' }}>
+                          {s.penalty === '+2' && (
+                            <span style={{
+                              fontSize: '0.55rem', fontWeight: 700, padding: '0.1rem 0.3rem', borderRadius: 4,
+                              background: 'rgba(251,191,36,0.15)', color: C.warn,
+                            }}>+2</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+              <div style={{
+                position: 'absolute', bottom: '0.5rem', right: '0.6rem',
+                width: 80, height: 80,
+                background: C.card, border: `1px solid ${C.border}`,
+                borderRadius: 10, padding: 4,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <CubeViewer eventId={eventId} scramble={scramble} />
+              </div>
+            </section>
+          </div>
+        );
+      })()}
 
       {/* Settings modal */}
       {settingsOpen && (
@@ -912,6 +1164,29 @@ function StatTile({ label, value, accent }: { label: string; value: string; acce
         fontSize: '1.35rem', fontWeight: 700,
         color: accent ? C.accent : C.text,
         marginTop: '0.3rem', fontVariantNumeric: 'tabular-nums',
+      }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function MiniStat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+  return (
+    <div style={{
+      background: accent ? 'linear-gradient(135deg, rgba(167,139,250,0.08), rgba(167,139,250,0.02))' : C.cardAlt,
+      border: `1px solid ${accent ? 'rgba(167,139,250,0.2)' : C.border}`,
+      borderRadius: 8, padding: '0.45rem 0.55rem',
+      display: 'flex', flexDirection: 'column', gap: '0.15rem',
+    }}>
+      <div style={{ fontSize: '0.55rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, fontWeight: 600 }}>
+        {label}
+      </div>
+      <div style={{
+        fontFamily: '"JetBrains Mono", monospace',
+        fontSize: '0.95rem', fontWeight: 700,
+        color: accent ? C.accent : C.text,
+        fontVariantNumeric: 'tabular-nums',
       }}>
         {value}
       </div>
