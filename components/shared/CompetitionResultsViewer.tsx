@@ -94,7 +94,8 @@ export default function CompetitionResultsViewer({ comp, onClose, isLive }: Prop
 
   // ── derived data ─────────────────────────────────────────────────────────────
 
-  const clubAthleteIds = new Set((comp.athletes ?? []).map(a => a.id));
+  // Club athletes = full club roster from the athletes collection.
+  const clubAthleteIds = useMemo(() => new Set(allAthletes.map(a => a.id)), [allAthletes]);
 
   const compEvents = comp.events
     ? WCA_EVENTS.filter(e => (comp.events as Record<string, boolean>)?.[e.id])
@@ -300,13 +301,22 @@ export default function CompetitionResultsViewer({ comp, onClose, isLive }: Prop
                           const isAdvancing     = advanceCount > 0 && i < advanceCount;
                           const isLastAdvancing = advanceCount > 0 && i === advanceCount - 1;
                           const isClub          = clubAthleteIds.has(r.athleteId);
+                          const isMedal         = i < 3;
                           const rowCls = i === 0 ? 'row-gold' : i === 1 ? 'row-silver' : i === 2 ? 'row-bronze' : isClub ? 'row-club' : '';
+
+                          // Borders: advancing cutoff (green) takes priority over club highlight (purple).
+                          const borderLeft = isAdvancing
+                            ? '3px solid #22c55e'
+                            : isClub && !isMedal
+                              ? '3px solid var(--accent)'
+                              : '3px solid transparent';
+                          const rowBg = isClub && !isMedal ? 'rgba(124,58,237,0.06)' : undefined;
 
                           const dataRow = (
                             <tr
                               key={r.id}
                               className={rowCls}
-                              style={isAdvancing ? { borderLeft: '3px solid #22c55e' } : { borderLeft: '3px solid transparent' }}
+                              style={{ borderLeft, ...(rowBg ? { background: rowBg } : {}) }}
                             >
                               {/* Rank */}
                               <td
@@ -318,11 +328,17 @@ export default function CompetitionResultsViewer({ comp, onClose, isLive }: Prop
 
                               {/* Athlete */}
                               <td className="wca-td-name">
-                                <div className="wca-name">{athleteNameMap[r.athleteId] || r.athleteName || r.athleteId}</div>
+                                <div
+                                  className="wca-name"
+                                  style={isClub ? { fontWeight: 700, color: 'var(--text-primary)' } : undefined}
+                                >
+                                  {isClub && <span style={{ marginRight: '0.35rem' }}>🇲🇳</span>}
+                                  {athleteNameMap[r.athleteId] || r.athleteName || r.athleteId}
+                                </div>
                               </td>
 
                               {/* Country */}
-                              <td className="wca-td-country">{r.country || '—'}</td>
+                              <td className="wca-td-country">{isClub ? 'Mongolia' : (r.country || '—')}</td>
 
                               {/* Solves 1–5 */}
                               {([0, 1, 2, 3, 4] as const).map(si => {
