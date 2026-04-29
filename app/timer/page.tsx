@@ -173,14 +173,6 @@ function calcStats(solves: Solve[]): Stats {
   return { best, worst, mean, ao5, ao12, ao100, pbMs, stdDev };
 }
 
-function consistencyLabel(stdDevMs: number | null, meanMs: number | null): { label: string; ratio: number } {
-  if (stdDevMs == null || meanMs == null || meanMs === 0) return { label: '—', ratio: 0 };
-  const cv = stdDevMs / meanMs;  // coefficient of variation
-  if (cv < 0.08) return { label: 'High', ratio: 0.92 };
-  if (cv < 0.18) return { label: 'Medium', ratio: 0.6 };
-  return { label: 'Low', ratio: 0.3 };
-}
-
 // ── Custom hook: timer state machine ────────────────────────────────────────
 type TimerState = 'idle' | 'inspecting' | 'armed' | 'running' | 'stopped';
 
@@ -454,8 +446,6 @@ export default function TimerPage() {
     return C.text;
   })();
 
-  const consistency = consistencyLabel(stats.stdDev, stats.mean);
-
   // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div style={{
@@ -727,8 +717,7 @@ export default function TimerPage() {
         <aside style={{
           flex: '0 0 280px', minWidth: 0,
           display: 'flex', flexDirection: 'column', gap: '0.75rem',
-          height: '100%', overflowY: 'auto', overflowX: 'hidden',
-          paddingRight: '0.25rem',
+          height: '100%', overflow: 'hidden',
         }}>
           <div style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: '-0.25rem' }}>Performance</div>
 
@@ -770,76 +759,17 @@ export default function TimerPage() {
             <StatTile label="Ao12"    value={stats.ao12 == null ? '—' : fmtMs(stats.ao12)} accent />
           </div>
 
-          {/* Current Session */}
-          <div style={{
-            background: C.card, border: `1px solid ${C.border}`,
-            borderRadius: 14, padding: '1rem 1.1rem',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ fontSize: '0.66rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: C.muted, fontWeight: 600 }}>
-                Current Session
-              </div>
-              <button
-                onClick={resetSession}
-                style={{
-                  fontSize: '0.66rem', fontWeight: 700, letterSpacing: '0.05em',
-                  background: 'rgba(255,255,255,0.06)', color: C.muted,
-                  border: 'none', borderRadius: 6, padding: '0.18rem 0.55rem',
-                  cursor: 'pointer', fontFamily: 'inherit',
-                }}
-              >
-                RESET
-              </button>
-            </div>
-            <div style={{ marginTop: '0.6rem', textAlign: 'center', padding: '0.5rem 0' }}>
-              <div style={{ fontSize: '0.7rem', color: C.muted }}>Total Solves</div>
-              <div style={{ fontSize: '2rem', fontWeight: 800, fontFamily: '"JetBrains Mono", monospace', marginTop: '0.1rem' }}>
-                {solves.length}
-              </div>
-              <div style={{ fontSize: '0.68rem', color: C.success, marginTop: '0.15rem' }}>
-                {stats.ao5 != null ? `Ao5 unlocked` : `${Math.max(0, 5 - solves.length)} until Ao5`}
-              </div>
-            </div>
-          </div>
-
-          {/* Consistency */}
-          <div style={{
-            background: C.card, border: `1px solid ${C.border}`,
-            borderRadius: 14, padding: '1rem 1.1rem',
-          }}>
-            <div style={{ fontSize: '0.66rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: C.muted, fontWeight: 600, marginBottom: '0.6rem' }}>
-              Consistency Meter
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.78rem', marginBottom: '0.35rem' }}>
-              <span style={{ color: C.text }}>Execution</span>
-              <span style={{ color: consistency.label === 'High' ? C.success : consistency.label === 'Medium' ? C.warn : C.muted, fontWeight: 700 }}>
-                {consistency.label}
-              </span>
-            </div>
-            <div style={{ height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.06)', overflow: 'hidden', marginBottom: '0.7rem' }}>
-              <div style={{
-                width: `${consistency.ratio * 100}%`, height: '100%',
-                background: C.accent, transition: 'width 0.4s',
-              }} />
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.78rem' }}>
-              <span style={{ color: C.text }}>Flow State</span>
-              <span style={{ color: consistency.label === 'High' ? C.success : C.muted, fontWeight: 600 }}>
-                {consistency.label === 'High' ? 'Optimal' : consistency.label === 'Medium' ? 'Steady' : 'Building'}
-              </span>
-            </div>
-          </div>
-
-          {/* 3D cube viewer (TwistyPlayer) */}
+          {/* 3D cube viewer (TwistyPlayer) — fills remaining vertical space */}
           <div className="cube-viewer-card" style={{
+            flex: '1 1 auto', minHeight: 0,
             background: C.card, border: `1px solid ${C.border}`,
             borderRadius: 14, padding: '0.5rem',
-            display: 'flex', flexDirection: 'column', alignItems: 'center',
+            display: 'flex', flexDirection: 'column', alignItems: 'stretch',
           }}>
             <div style={{
               fontSize: '0.62rem', letterSpacing: '0.12em',
               textTransform: 'uppercase', color: C.muted, fontWeight: 600,
-              alignSelf: 'flex-start', padding: '0.2rem 0.45rem 0.4rem',
+              padding: '0.2rem 0.45rem 0.4rem',
             }}>
               Cube Preview
             </div>
@@ -1138,7 +1068,7 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
   if (!puzzleId) {
     return (
       <div style={{
-        width: '100%', height: 200, fontSize: '0.72rem', color: C.mutedDim,
+        flex: '1 1 auto', minHeight: 0, width: '100%', fontSize: '0.72rem', color: C.mutedDim,
         display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '0 0.5rem',
       }}>
         Preview not available for this puzzle.
@@ -1149,7 +1079,7 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
     <div
       ref={containerRef}
       style={{
-        width: '100%', height: 210,
+        flex: '1 1 auto', minHeight: 0, width: '100%',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}
     />
