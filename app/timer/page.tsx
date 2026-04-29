@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Scrambow } from 'scrambow';
+// Type-only import; runtime is dynamic-imported below to avoid HTMLElement
+// access during Next.js server rendering.
+import type { TwistyPlayer as TwistyPlayerType } from 'cubing/twisty';
 
 // ── Theme constants (lavender + mint, matches the screenshot) ───────────────
 const C = {
@@ -65,6 +68,28 @@ const SCRAMBOW_TYPE: Record<string, string> = {
   'sq1':    'sq1',
   'clock':  'clock',
   'minx':   'minx',
+};
+
+// Map our event ids → TwistyPlayer puzzle ids. Events not in this map (e.g.
+// 333mbf, 333fm) fall back to their underlying puzzle.
+const PUZZLE_MAP: Record<string, string> = {
+  '333':    '3x3x3',
+  '333oh':  '3x3x3',
+  '333bld': '3x3x3',
+  '333mbf': '3x3x3',
+  '333fm':  '3x3x3',
+  '222':    '2x2x2',
+  '444':    '4x4x4',
+  '444bld': '4x4x4',
+  '555':    '5x5x5',
+  '555bld': '5x5x5',
+  '666':    '6x6x6',
+  '777':    '7x7x7',
+  'pyram':  'pyraminx',
+  'skewb':  'skewb',
+  'sq1':    'square1',
+  'clock':  'clock',
+  'minx':   'megaminx',
 };
 
 function generateScramble(eventId: string): string {
@@ -805,6 +830,22 @@ export default function TimerPage() {
             </div>
           </div>
 
+          {/* 3D cube viewer (TwistyPlayer) */}
+          <div className="cube-viewer-card" style={{
+            background: C.card, border: `1px solid ${C.border}`,
+            borderRadius: 14, padding: '0.5rem',
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
+          }}>
+            <div style={{
+              fontSize: '0.62rem', letterSpacing: '0.12em',
+              textTransform: 'uppercase', color: C.muted, fontWeight: 600,
+              alignSelf: 'flex-start', padding: '0.2rem 0.45rem 0.4rem',
+            }}>
+              Cube Preview
+            </div>
+            <CubeViewer eventId={eventId} scramble={scramble} />
+          </div>
+
           {/* Footer hint */}
           <div style={{ fontSize: '0.66rem', color: C.mutedDim, textAlign: 'center', lineHeight: 1.6, marginTop: '0.25rem' }}>
             <div>SPACE: timer · ESC: reset · D: delete last · N: new scramble</div>
@@ -917,6 +958,7 @@ export default function TimerPage() {
         }
         @media (max-width: 700px) {
           .pv-grid { padding: 0.75rem !important; gap: 0.75rem !important; }
+          .cube-viewer-card { display: none !important; }
         }
       `}</style>
     </div>
@@ -1022,5 +1064,94 @@ function Row({ label, kbd }: { label: string; kbd: string }) {
         color: C.text,
       }}>{kbd}</kbd>
     </div>
+  );
+}
+
+// 3D cube preview using @cubing/twisty's TwistyPlayer Web Component. Imported
+// dynamically so HTMLElement access doesn't break Next.js server rendering.
+function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const playerRef = useRef<TwistyPlayerType | null>(null);
+  const puzzleId = PUZZLE_MAP[eventId];
+
+  // Mount: load TwistyPlayer and create the player instance.
+  useEffect(() => {
+    if (!puzzleId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const mod = await import('cubing/twisty');
+        if (cancelled || !containerRef.current) return;
+        // Cast: PuzzleID is a strict literal union; we validated puzzleId via
+        // PUZZLE_MAP so the runtime value is a member of that union.
+        const config = {
+          puzzle: puzzleId,
+          experimentalSetupAlg: scramble,
+          alg: '',
+          background: 'none',
+          controlPanel: 'none',
+          viewerLink: 'none',
+          hintFacelets: 'none',
+          backView: 'none',
+          visualization: '3D',
+        } as unknown as ConstructorParameters<typeof mod.TwistyPlayer>[0];
+        const player = new mod.TwistyPlayer(config);
+        const el = player as unknown as HTMLElement;
+        el.style.width = '100%';
+        el.style.height = '100%';
+        el.style.background = 'transparent';
+        containerRef.current.appendChild(el);
+        playerRef.current = player;
+      } catch (err) {
+        // Silent fall-back: container stays empty if the module fails to load.
+        // eslint-disable-next-line no-console
+        console.warn('TwistyPlayer load failed', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      const player = playerRef.current as unknown as HTMLElement | null;
+      const c = containerRef.current;
+      if (player && c && c.contains(player)) c.removeChild(player);
+      playerRef.current = null;
+    };
+    // Mount only — subsequent puzzle/scramble changes are handled below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Update on scramble or puzzle change.
+  useEffect(() => {
+    const player = playerRef.current;
+    if (!player || !puzzleId) return;
+    try {
+      // Type assertion: PuzzleID is a string-literal union; we validated
+      // membership via PUZZLE_MAP, so the cast is safe at runtime.
+      (player as unknown as { puzzle: string }).puzzle = puzzleId;
+      (player as unknown as { experimentalSetupAlg: string }).experimentalSetupAlg = scramble;
+      (player as unknown as { alg: string }).alg = '';
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('TwistyPlayer update failed', err);
+    }
+  }, [scramble, puzzleId]);
+
+  if (!puzzleId) {
+    return (
+      <div style={{
+        width: '100%', height: 200, fontSize: '0.72rem', color: C.mutedDim,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '0 0.5rem',
+      }}>
+        Preview not available for this puzzle.
+      </div>
+    );
+  }
+  return (
+    <div
+      ref={containerRef}
+      style={{
+        width: '100%', height: 210,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+    />
   );
 }
