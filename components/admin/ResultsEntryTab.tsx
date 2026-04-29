@@ -541,11 +541,35 @@ export default function ResultsEntryTab() {
                 })
               : athletes;
 
-            // Round 1: show all registered athletes.
-            // Round >= 2: ONLY show athletes who have a row (placeholder or real)
-            // for this event+round. No fallback — empty until advancement runs.
+            // Athlete dropdown filter rules:
+            // - Always exclude athletes who already have a real (non-placeholder)
+            //   result for this comp+event+round. They've already competed in this
+            //   round and can't compete again. To edit, use the Edit button in
+            //   the Competition Results tab.
+            // - Round 1: show all remaining registered athletes.
+            // - Round >= 2: additionally restrict to athletes with a row
+            //   (placeholder or real) for this round. No fallback — empty until
+            //   advancement runs.
             const panelAthletes = (() => {
-              if (!panel.eventId || panel.round < 2) return baseAthletes;
+              if (!panel.eventId) return baseAthletes;
+
+              // Athletes who already have a real (non-placeholder) result.
+              const completedIds = new Set(
+                compResults
+                  .filter(r =>
+                    r.eventId === panel.eventId &&
+                    (r.round || 1) === panel.round &&
+                    !r.isPlaceholder,
+                  )
+                  .map(r => r.athleteId)
+                  .filter(Boolean),
+              );
+
+              if (panel.round < 2) {
+                return baseAthletes.filter(a => !completedIds.has(a.id));
+              }
+
+              // Round >= 2: only athletes with a row for this round.
               const idsForRound = new Set(
                 compResults
                   .filter(r =>
@@ -555,7 +579,7 @@ export default function ResultsEntryTab() {
                   .map(r => r.athleteId)
                   .filter(Boolean),
               );
-              return baseAthletes.filter(a => idsForRound.has(a.id));
+              return baseAthletes.filter(a => idsForRound.has(a.id) && !completedIds.has(a.id));
             })();
 
             const curIdx     = panel.currentSolveIdx;
