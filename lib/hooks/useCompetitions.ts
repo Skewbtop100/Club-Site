@@ -10,9 +10,18 @@ export function useCompetitions() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    console.log('useCompetitions: subscribing to Firebase');
     const unsub = subscribeCompetitions(
-      (data) => { setCompetitions(data); setLoading(false); },
-      () => { setError('Failed to load competitions.'); setLoading(false); },
+      (data) => {
+        console.log('useCompetitions: snapshot received, count:', data.length);
+        setCompetitions(data);
+        setLoading(false);
+      },
+      (err) => {
+        console.log('useCompetitions: error:', err);
+        setError('Failed to load competitions.');
+        setLoading(false);
+      },
     );
     return unsub;
   }, []);
