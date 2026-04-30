@@ -6,6 +6,7 @@ import { Scrambow } from 'scrambow';
 // Type-only import; runtime is dynamic-imported below to avoid HTMLElement
 // access during Next.js server rendering.
 import type { TwistyPlayer as TwistyPlayerType } from 'cubing/twisty';
+import { useGanTimer } from './useGanTimer';
 
 // ── Theme constants (lavender + mint, matches the screenshot) ───────────────
 const C = {
@@ -267,9 +268,21 @@ function useTimer(onSolveCommit: (ms: number, dnf: boolean) => void) {
     inspStartRef.current = 0;
   }, []);
 
+  // Drive the timer to "stopped" with an externally-measured time
+  // (e.g. authoritative time from a GAN bluetooth timer). Bypasses the
+  // local Date.now() math so we record the device's exact ms value.
+  const finishExternal = useCallback((finalMs: number) => {
+    cancelAnimationFrame(rafRef.current);
+    setDisplayMs(finalMs);
+    setState('stopped');
+    inspStartRef.current = 0;
+    setInspectionMs(15000);
+    onSolveCommit(finalMs, false);
+  }, [onSolveCommit]);
+
   return {
     state, displayMs, inspectionMs,
-    beginInspection, startArming, startRunning, fireRunning, stop, reset,
+    beginInspection, startArming, startRunning, fireRunning, stop, reset, finishExternal,
   };
 }
 
@@ -524,6 +537,27 @@ export default function TimerPage() {
 
   const timer = useTimer(onSolveCommit);
 
+  // ── GAN bluetooth timer ─────────────────────────────────────────────────
+  // When connected, the physical timer drives our state machine and SPACE /
+  // tap input is locked out so the device is the single source of truth.
+  const ganTimerRef = useRef(timer);
+  ganTimerRef.current = timer;
+  const gan = useGanTimer({
+    onSolveStart: () => {
+      // HANDS_OFF — physical timer started counting. Drive our display.
+      ganTimerRef.current.startRunning();
+    },
+    onSolveStop: (finalMs: number) => {
+      // STOPPED — record the device's authoritative time.
+      ganTimerRef.current.finishExternal(finalMs);
+    },
+    onIdle: () => {
+      // Optional: ensure our state returns to idle if it lingered as 'stopped'.
+      // No-op for now; the next solve cycle will reset display naturally.
+    },
+  });
+  const ganConnected = gan.state === 'connected';
+
   const newScramble = useCallback(() => {
     setScramble(generateScramble(eventId));
   }, [eventId]);
@@ -545,6 +579,8 @@ export default function TimerPage() {
         e.preventDefault();
         if (spaceHeldRef.current) return;
         spaceHeldRef.current = true;
+        // GAN timer takes over the timer state machine when connected.
+        if (ganConnected) return;
         if (timer.state === 'running') {
           timer.stop();
           return;
@@ -614,7 +650,7 @@ export default function TimerPage() {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [timer, inspectionEnabled, holdToStart, clearPending, setSolves]);
+  }, [timer, inspectionEnabled, holdToStart, clearPending, setSolves, ganConnected]);
 
   // Clear any pending Alt+D timeout on unmount.
   useEffect(() => {
@@ -626,8 +662,9 @@ export default function TimerPage() {
     };
   }, []);
 
-  // Mobile: tap timer area
+  // Mobile: tap timer area. Disabled while a GAN timer is connected.
   const onTimerTouchStart = useCallback(() => {
+    if (ganConnected) return;
     if (timer.state === 'running') { timer.stop(); return; }
     if (timer.state === 'idle' || timer.state === 'stopped') {
       if (inspectionEnabled) {
@@ -643,7 +680,7 @@ export default function TimerPage() {
       if (holdToStart) timer.startArming();
       else timer.startRunning();
     }
-  }, [timer, inspectionEnabled, holdToStart]);
+  }, [timer, inspectionEnabled, holdToStart, ganConnected]);
 
   const onTimerTouchEnd = useCallback(() => {
     if (timer.state === 'armed') timer.fireRunning();
@@ -1155,10 +1192,16 @@ export default function TimerPage() {
                   }}
                   onMouseEnter={e => (e.currentTarget.style.background = C.accentDim)}
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                  title="Press N for new scramble"
                 >
                   New Scramble
                 </button>
+                <GanButton
+                  state={gan.state}
+                  onConnect={gan.connect}
+                  onDisconnect={gan.disconnect}
+                  size={32}
+                  iconSize={16}
+                />
               </div>
             </div>
 
@@ -1187,6 +1230,15 @@ export default function TimerPage() {
               transition: 'border-color 0.15s',
             }}
           >
+            {ganConnected && (
+              <div style={{
+                display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
+                fontSize: '0.66rem', letterSpacing: '0.15em', textTransform: 'uppercase',
+                color: C.success, marginBottom: '0.85rem', fontWeight: 700,
+              }}>
+                <IconBluetooth size={12} /> Using GAN Timer
+              </div>
+            )}
             {timer.state === 'inspecting' && (
               <div style={{ fontSize: '0.72rem', letterSpacing: '0.15em', textTransform: 'uppercase', color: C.warn, marginBottom: '1rem', fontWeight: 700 }}>
                 Inspection
@@ -1204,9 +1256,10 @@ export default function TimerPage() {
               {timerDisplay}
             </div>
             <div style={{ fontSize: '0.78rem', color: C.muted, marginTop: '1.5rem', letterSpacing: '0.06em', minHeight: '1.2rem' }}>
+              {ganConnected && timer.state !== 'running' && timer.state !== 'inspecting' && timer.state !== 'armed' && 'Use the GAN timer pads'}
               {timer.state === 'inspecting' && 'Hold SPACE to arm, release to start'}
               {timer.state === 'armed' && (<span style={{ color: C.success, fontWeight: 700 }}>RELEASE TO START</span>)}
-              {timer.state === 'running' && 'Press SPACE / tap to stop'}
+              {!ganConnected && timer.state === 'running' && 'Press SPACE / tap to stop'}
             </div>
 
           </section>
@@ -1382,16 +1435,25 @@ export default function TimerPage() {
                   borderRadius: 999, padding: '0.35rem 0.45rem',
                   display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: '0.4rem',
                 }}>
-                  <button
-                    onClick={() => setSettingsOpen(true)}
-                    aria-label="Settings"
-                    style={{
-                      width: 34, height: 34, borderRadius: 999,
-                      background: 'transparent', border: 'none',
-                      color: C.muted, cursor: 'pointer',
-                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    }}
-                  ><IconSettings size={18} /></button>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <button
+                      onClick={() => setSettingsOpen(true)}
+                      aria-label="Settings"
+                      style={{
+                        width: 34, height: 34, borderRadius: 999,
+                        background: 'transparent', border: 'none',
+                        color: C.muted, cursor: 'pointer',
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      }}
+                    ><IconSettings size={18} /></button>
+                    <GanButton
+                      state={gan.state}
+                      onConnect={gan.connect}
+                      onDisconnect={gan.disconnect}
+                      size={34}
+                      iconSize={16}
+                    />
+                  </div>
                   <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                     <select
                       value={eventId}
@@ -1504,6 +1566,15 @@ export default function TimerPage() {
                     transition: 'background 0.12s',
                   }}
                 >
+                  {ganConnected && (
+                    <div style={{
+                      display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
+                      fontSize: '0.6rem', letterSpacing: '0.15em', textTransform: 'uppercase',
+                      color: C.success, marginBottom: '0.5rem', fontWeight: 700,
+                    }}>
+                      <IconBluetooth size={11} /> Using GAN Timer
+                    </div>
+                  )}
                   {timer.state === 'inspecting' && (
                     <div style={{ fontSize: '0.65rem', letterSpacing: '0.15em', textTransform: 'uppercase', color: C.warn, marginBottom: '0.6rem', fontWeight: 700 }}>
                       Inspection
@@ -1521,9 +1592,10 @@ export default function TimerPage() {
                     {timerDisplay}
                   </div>
                   <div style={{ fontSize: '0.7rem', color: C.muted, marginTop: '0.7rem', letterSpacing: '0.06em', minHeight: '1rem' }}>
+                    {ganConnected && timer.state !== 'running' && timer.state !== 'inspecting' && timer.state !== 'armed' && 'Use the GAN timer pads'}
                     {timer.state === 'inspecting' && 'Hold to arm, release to start'}
                     {timer.state === 'armed' && (<span style={{ color: C.success, fontWeight: 700 }}>RELEASE TO START</span>)}
-                    {timer.state === 'running' && 'TAP TO STOP'}
+                    {!ganConnected && timer.state === 'running' && 'TAP TO STOP'}
                   </div>
                 </section>
               </div>
@@ -2316,6 +2388,10 @@ export default function TimerPage() {
         @media (max-width: 700px) {
           .pv-grid { padding: 0.75rem !important; gap: 0.75rem !important; }
         }
+        @keyframes pv-ble-pulse {
+          0%, 100% { opacity: 1; }
+          50%      { opacity: 0.45; }
+        }
       `}</style>
     </div>
   );
@@ -2346,6 +2422,61 @@ function StatTile({ label, value, accent }: { label: string; value: string; acce
 }
 
 // ── Mobile-only sub-components ──────────────────────────────────────────────
+
+// Compact Bluetooth toggle. State drives both color and tooltip; click flips
+// between connect (idle/error) and disconnect (connected). When the browser
+// doesn't expose Web Bluetooth, the button still renders but explains why.
+function GanButton({
+  state, onConnect, onDisconnect, size = 30, iconSize = 16,
+}: {
+  state: 'unsupported' | 'idle' | 'connecting' | 'connected' | 'error';
+  onConnect: () => void;
+  onDisconnect: () => void;
+  size?: number;
+  iconSize?: number;
+}) {
+  const isConnected = state === 'connected';
+  const isConnecting = state === 'connecting';
+  const isUnsupported = state === 'unsupported';
+  const color = isConnected ? C.success
+    : isConnecting ? C.accent
+    : isUnsupported ? C.mutedDim
+    : C.muted;
+  const title = isUnsupported ? 'Web Bluetooth not supported in this browser'
+    : isConnecting ? 'Connecting…'
+    : isConnected ? 'GAN Timer connected — tap to disconnect'
+    : 'Connect GAN Timer';
+  return (
+    <button
+      onClick={() => {
+        if (isUnsupported) {
+          // eslint-disable-next-line no-alert
+          alert('Web Bluetooth is required for GAN timer support. Use Chrome or Edge over HTTPS / localhost.');
+          return;
+        }
+        if (isConnected) onDisconnect(); else if (!isConnecting) onConnect();
+      }}
+      aria-label={title}
+      title={title}
+      style={{
+        width: size, height: size, borderRadius: 8,
+        background: isConnected ? 'rgba(52,211,153,0.12)'
+          : isConnecting ? C.accentDim
+          : 'transparent',
+        border: `1px solid ${
+          isConnected ? 'rgba(52,211,153,0.4)'
+          : isConnecting ? C.borderHi
+          : C.border
+        }`,
+        color, cursor: isUnsupported ? 'help' : 'pointer',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        animation: isConnecting ? 'pv-ble-pulse 1.1s ease-in-out infinite' : undefined,
+        transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+        fontFamily: 'inherit',
+      }}
+    ><IconBluetooth size={iconSize} /></button>
+  );
+}
 
 function MobileActionIcon({ label, icon, onClick }: { label: string; icon: React.ReactNode; onClick: () => void }) {
   return (
@@ -2778,3 +2909,4 @@ function IconSettings(p: IconProps)   { return <IconBase {...p}><circle cx={12} 
 function IconCheck(p: IconProps)      { return <IconBase {...p}><path d="M5 12l5 5L20 7"/></IconBase>; }
 function IconTrash(p: IconProps)      { return <IconBase {...p}><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6"/><path d="M14 11v6"/></IconBase>; }
 function IconCube(p: IconProps)       { return <IconBase {...p}><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5"/><path d="M12 12L4 7.5"/><path d="M12 12v9"/></IconBase>; }
+function IconBluetooth(p: IconProps)  { return <IconBase {...p}><path d="M7 7l10 10-5 5V2l5 5L7 17"/></IconBase>; }
