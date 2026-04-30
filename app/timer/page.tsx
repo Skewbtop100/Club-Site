@@ -1354,12 +1354,15 @@ export default function TimerPage() {
             // Root is exactly the viewport, with a flex-column children
             // arrangement so the footer (stats + nav) sits in normal flow
             // below a scrollable main content area — no fixed positioning,
-            // no padding hacks, no z-index stacking.
+            // no padding hacks, no z-index stacking. The top safe-area
+            // inset keeps content clear of the iOS notch when running
+            // standalone with viewport-fit: cover.
             height: '100vh',
             width: '100%',
             display: 'flex', flexDirection: 'column',
             background: C.bg, color: C.text,
             overflow: 'hidden',
+            paddingTop: 'env(safe-area-inset-top)',
           }}>
             {/* ── MAIN: scrollable content area (one tab at a time) ─────── */}
             <main style={{
@@ -1838,7 +1841,12 @@ export default function TimerPage() {
               )}
 
               <nav style={{
-                height: 56,
+                // 56px of tab content + the iOS bottom safe-area inset
+                // (home indicator) below it, so the buttons sit above
+                // the indicator and the bg color extends to the edge.
+                height: 'calc(56px + env(safe-area-inset-bottom))',
+                paddingBottom: 'env(safe-area-inset-bottom)',
+                boxSizing: 'border-box',
                 display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
                 background: C.card, borderTop: `1px solid ${C.border}`,
               }}>
