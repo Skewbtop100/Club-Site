@@ -1296,11 +1296,16 @@ export default function TimerPage() {
         return (
           <div style={{
             position: 'relative', zIndex: 1,
-            height: '100%', width: '100%',
+            // Pin the wrapper to "viewport minus nav" so content is bounded
+            // by what's actually visible. overflow-y: auto lets the user
+            // scroll if a tall scramble or small viewport pushes content
+            // past the fold, instead of clipping silently.
+            height: 'calc(100vh - 56px)',
+            width: '100%',
             display: 'flex', flexDirection: 'column',
             background: C.bg, color: C.text,
-            overflow: 'hidden',
-            paddingBottom: 72,  // reserve clearance above the fixed bottom nav
+            overflowY: 'auto',
+            paddingBottom: 0,
           }}>
             {/* ── TIMER TAB ─────────────────────────────────────────────── */}
             {mobileTab === 'timer' && (
@@ -1459,12 +1464,14 @@ export default function TimerPage() {
                   </div>
                 </section>
 
-                {/* Bottom stats bar: 2 columns + center cube */}
+                {/* Bottom stats bar: 2 columns + center cube — fixed height,
+                    pinned to the end of the timer-tab column. */}
                 <div style={{
                   display: 'grid', gridTemplateColumns: '1fr auto 1fr',
                   gap: '0.5rem', padding: '0.4rem 0.7rem 0.6rem',
                   alignItems: 'center',
                   borderTop: `1px solid ${C.border}`,
+                  flexShrink: 0,
                 }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
                     <MobileMicroStat label="Dev"   value={stats.stdDev == null ? '—' : (stats.stdDev / 1000).toFixed(2)} />
