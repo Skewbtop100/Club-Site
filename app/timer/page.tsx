@@ -120,13 +120,20 @@ const PENALTY_ADD: Record<Penalty, number> = { none: 0, '+2': 2000, dnf: 0 };
 const isDnf = (s: Solve) => s.penalty === 'dnf';
 const finalMs = (s: Solve) => s.ms + PENALTY_ADD[s.penalty];
 
-function fmtMs(ms: number | null | undefined, dnf = false): string {
+function fmtMs(ms: number | null | undefined, dnf = false, showMs = true): string {
   if (dnf) return 'DNF';
   if (ms == null) return '—';
   const totalSec = ms / 1000;
-  if (totalSec < 60) return totalSec.toFixed(2);
-  const m = Math.floor(totalSec / 60);
-  const s = (totalSec - m * 60).toFixed(2).padStart(5, '0');
+  if (showMs) {
+    if (totalSec < 60) return totalSec.toFixed(2);
+    const m = Math.floor(totalSec / 60);
+    const s = (totalSec - m * 60).toFixed(2).padStart(5, '0');
+    return `${m}:${s}`;
+  }
+  const sec = Math.floor(totalSec);
+  if (sec < 60) return sec.toString();
+  const m = Math.floor(sec / 60);
+  const s = (sec - m * 60).toString().padStart(2, '0');
   return `${m}:${s}`;
 }
 
@@ -191,11 +198,12 @@ function useTimer(onSolveCommit: (ms: number, dnf: boolean) => void) {
     if (state === 'running') {
       const final = Date.now() - runStartRef.current;
       cancelAnimationFrame(rafRef.current);
-      setDisplayMs(final);
-      setState('stopped');
-      // DNF if inspection >= 17s
+      // Auto-return to idle: no confirmation, no penalty UI.
+      setDisplayMs(0);
+      setState('idle');
       const dnf = inspectionMs <= -2000;
-      // +2 handled separately by penalty UI
+      inspStartRef.current = 0;
+      setInspectionMs(15000);
       onSolveCommit(final, dnf);
     }
   }, [state, inspectionMs, onSolveCommit]);
@@ -231,6 +239,13 @@ function useTimer(onSolveCommit: (ms: number, dnf: boolean) => void) {
     setState('armed');
   }, []);
 
+  // Skip arming entirely (used when "hold to start" preference is off)
+  const startRunning = useCallback(() => {
+    runStartRef.current = Date.now();
+    setDisplayMs(0);
+    setState('running');
+  }, []);
+
   const fireRunning = useCallback(() => {
     // Only commits if held long enough
     const heldFor = Date.now() - armStartRef.current;
@@ -254,13 +269,14 @@ function useTimer(onSolveCommit: (ms: number, dnf: boolean) => void) {
 
   return {
     state, displayMs, inspectionMs,
-    beginInspection, startArming, fireRunning, stop, reset,
+    beginInspection, startArming, startRunning, fireRunning, stop, reset,
   };
 }
 
 // ── Main page ───────────────────────────────────────────────────────────────
 
 const STORAGE_KEY = 'pv.timer.session.v1';
+const PREFS_KEY = 'pv.timer.prefs.v1';
 
 export default function TimerPage() {
   const router = useRouter();
@@ -340,6 +356,29 @@ export default function TimerPage() {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ solves, eventId })); } catch { /* ignore */ }
   }, [solves, eventId]);
 
+  // Load preferences on mount
+  const prefsLoadedRef = useRef(false);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(PREFS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { inspectionEnabled?: boolean; showMs?: boolean; holdToStart?: boolean };
+        if (typeof parsed.inspectionEnabled === 'boolean') setInspectionEnabled(parsed.inspectionEnabled);
+        if (typeof parsed.showMs === 'boolean')            setShowMs(parsed.showMs);
+        if (typeof parsed.holdToStart === 'boolean')       setHoldToStart(parsed.holdToStart);
+      }
+    } catch { /* ignore */ }
+    prefsLoadedRef.current = true;
+  }, []);
+
+  // Persist preferences (skip the very first render before load completes)
+  useEffect(() => {
+    if (!prefsLoadedRef.current) return;
+    try {
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ inspectionEnabled, showMs, holdToStart }));
+    } catch { /* ignore */ }
+  }, [inspectionEnabled, showMs, holdToStart]);
+
   // Stats — recomputed on every solves change
   const stats = useMemo(() => calcStats(solves), [solves]);
   const sessionEvent = useMemo(() => EVENTS.find(e => e.id === eventId) ?? EVENTS[0], [eventId]);
@@ -358,14 +397,15 @@ export default function TimerPage() {
 
   const timer = useTimer(onSolveCommit);
 
-  // After a solve commits, generate next scramble (delay so user sees the time)
+  // After a solve commits, immediately generate next scramble so the
+  // timer drops back to a fresh idle state without any confirmation step.
   const lastCommittedCountRef = useRef(0);
   useEffect(() => {
     if (solves.length > lastCommittedCountRef.current) {
       lastCommittedCountRef.current = solves.length;
-      // Don't auto-rescramble — wait for user space-press to start next
+      setScramble(generateScramble(eventId));
     }
-  }, [solves.length]);
+  }, [solves.length, eventId]);
 
   const newScramble = useCallback(() => {
     setScramble(generateScramble(eventId));
@@ -392,13 +432,19 @@ export default function TimerPage() {
           timer.stop();
           return;
         }
-        if (timer.state === 'idle' || timer.state === 'stopped') {
-          if (timer.state === 'stopped') newScramble();
-          timer.beginInspection();
+        if (timer.state === 'idle') {
+          if (inspectionEnabled) {
+            timer.beginInspection();
+          } else if (holdToStart) {
+            timer.startArming();
+          } else {
+            timer.startRunning();
+          }
           return;
         }
         if (timer.state === 'inspecting') {
-          timer.startArming();
+          if (holdToStart) timer.startArming();
+          else timer.startRunning();
           return;
         }
       }
@@ -430,27 +476,32 @@ export default function TimerPage() {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [timer, newScramble]);
+  }, [timer, newScramble, inspectionEnabled, holdToStart]);
 
   // Mobile: tap timer area
   const onTimerTouchStart = useCallback(() => {
     if (timer.state === 'running') { timer.stop(); return; }
-    if (timer.state === 'idle' || timer.state === 'stopped') {
-      if (timer.state === 'stopped') newScramble();
-      timer.beginInspection();
+    if (timer.state === 'idle') {
+      if (inspectionEnabled) {
+        timer.beginInspection();
+      } else if (holdToStart) {
+        timer.startArming();
+      } else {
+        timer.startRunning();
+      }
       return;
     }
-    if (timer.state === 'inspecting') timer.startArming();
-  }, [timer, newScramble]);
+    if (timer.state === 'inspecting') {
+      if (holdToStart) timer.startArming();
+      else timer.startRunning();
+    }
+  }, [timer, inspectionEnabled, holdToStart]);
 
   const onTimerTouchEnd = useCallback(() => {
     if (timer.state === 'armed') timer.fireRunning();
   }, [timer]);
 
   // ── Solve action handlers ────────────────────────────────────────────────
-  const setLastPenalty = (p: Penalty) => {
-    setSolves(prev => prev.length === 0 ? prev : prev.map((s, i) => i === prev.length - 1 ? { ...s, penalty: p } : s));
-  };
   const deleteSolve = (id: string) => setSolves(prev => prev.filter(s => s.id !== id));
   const resetSession = () => {
     if (confirm('Reset current session? All solves will be cleared.')) setSolves([]);
@@ -472,8 +523,8 @@ export default function TimerPage() {
       if (sec >= 0) return Math.ceil(sec).toString();
       return sec <= -2 ? 'DNF' : '+2';
     }
-    if (timer.state === 'armed') return '0.00';
-    return fmtMs(timer.displayMs);
+    if (timer.state === 'armed') return showMs ? '0.00' : '0';
+    return fmtMs(timer.displayMs, false, showMs);
   })();
 
   // Color of the big timer
@@ -608,7 +659,7 @@ export default function TimerPage() {
                         fontSize: '0.92rem', fontWeight: 700,
                         color: dnf ? C.danger : isPB ? C.success : C.text,
                       }}>
-                        {fmtMs(finalMs(s), dnf)}
+                        {fmtMs(finalMs(s), dnf, showMs)}
                       </div>
                       <div style={{ display: 'flex', gap: '0.25rem' }}>
                         {isPB && !dnf && (
@@ -764,13 +815,6 @@ export default function TimerPage() {
               {timer.state === 'stopped' && (<>PRESS <span style={{ color: C.accent, fontWeight: 700 }}>SPACE</span> TO START / TAP TO START</>)}
             </div>
 
-            {timer.state === 'stopped' && solves.length > 0 && (
-              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
-                <PenaltyButton label="OK"  active={solves[solves.length - 1].penalty === 'none'} onClick={() => setLastPenalty('none')} color={C.muted} />
-                <PenaltyButton label="+2"  active={solves[solves.length - 1].penalty === '+2'}   onClick={() => setLastPenalty('+2')}   color={C.warn} />
-                <PenaltyButton label="DNF" active={solves[solves.length - 1].penalty === 'dnf'}  onClick={() => setLastPenalty('dnf')}  color={C.danger} />
-              </div>
-            )}
           </section>
 
         </main>
@@ -849,7 +893,6 @@ export default function TimerPage() {
 
       {isMobile && (() => {
         const lastSolves = [...solves].slice(-5).reverse();
-        const lastSolve = solves.length > 0 ? solves[solves.length - 1] : null;
         return (
           <div style={{
             position: 'relative', zIndex: 1,
@@ -979,13 +1022,6 @@ export default function TimerPage() {
                 {timer.state === 'running' && 'TAP TO STOP'}
                 {timer.state === 'stopped' && 'TAP TO START'}
               </div>
-              {timer.state === 'stopped' && lastSolve && (
-                <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.8rem' }}>
-                  <PenaltyButton label="OK"  active={lastSolve.penalty === 'none'} onClick={() => setLastPenalty('none')} color={C.muted} />
-                  <PenaltyButton label="+2"  active={lastSolve.penalty === '+2'}   onClick={() => setLastPenalty('+2')}   color={C.warn} />
-                  <PenaltyButton label="DNF" active={lastSolve.penalty === 'dnf'}  onClick={() => setLastPenalty('dnf')}  color={C.danger} />
-                </div>
-              )}
             </section>
 
             {/* Bottom: quick stats + history + small cube */}
@@ -1041,7 +1077,7 @@ export default function TimerPage() {
                           fontSize: '0.88rem', fontWeight: 700,
                           color: dnf ? C.danger : C.text,
                         }}>
-                          {fmtMs(finalMs(s), dnf)}
+                          {fmtMs(finalMs(s), dnf, showMs)}
                         </div>
                         <div style={{ display: 'flex', gap: '0.2rem' }}>
                           {s.penalty === '+2' && (
@@ -1152,7 +1188,7 @@ export default function TimerPage() {
                   color: dnf ? C.danger : C.text,
                   fontVariantNumeric: 'tabular-nums',
                 }}>
-                  {fmtMs(finalMs(s), dnf)}
+                  {fmtMs(finalMs(s), dnf, showMs)}
                 </div>
                 {s.penalty === '+2' && (
                   <div style={{ fontSize: '0.75rem', color: C.warn, marginTop: '0.2rem' }}>+2 penalty applied</div>
@@ -1260,24 +1296,6 @@ function MiniStat({ label, value, accent }: { label: string; value: string; acce
         {value}
       </div>
     </div>
-  );
-}
-
-function PenaltyButton({ label, active, onClick, color }: { label: string; active: boolean; onClick: () => void; color: string }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        padding: '0.42rem 0.95rem', borderRadius: 8,
-        fontSize: '0.78rem', fontWeight: 700, fontFamily: 'inherit',
-        background: active ? `${color}26` : 'rgba(255,255,255,0.04)',
-        border: `1px solid ${active ? color : 'rgba(255,255,255,0.08)'}`,
-        color: active ? color : C.muted,
-        cursor: 'pointer', transition: 'all 0.15s',
-      }}
-    >
-      {label}
-    </button>
   );
 }
 
