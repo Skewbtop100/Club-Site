@@ -328,6 +328,7 @@ export default function TimerPage() {
   const [sessionPanelOpen, setSessionPanelOpen] = useState(false);
   const [newSessionName, setNewSessionName] = useState('');
   const [cubeFullscreenOpen, setCubeFullscreenOpen] = useState(false);
+  const [sessionDropdownOpen, setSessionDropdownOpen] = useState(false);
 
   // ── Derived solves + setSolves wrapper ──
   // Source of truth is `sessions`. `solves` is the active session's array.
@@ -742,8 +743,174 @@ export default function TimerPage() {
             </div>
           </div>
 
-          <div style={{ padding: '0.85rem 1rem 0.4rem', fontSize: '0.78rem', fontWeight: 700, letterSpacing: '0.05em', color: C.text }}>
-            Session History
+          {/* Session selector — clickable name with dropdown panel */}
+          <div style={{ position: 'relative', padding: '0.7rem 0.7rem 0.4rem' }}>
+            <button
+              onClick={() => setSessionDropdownOpen(o => !o)}
+              aria-expanded={sessionDropdownOpen}
+              aria-haspopup="listbox"
+              style={{
+                width: '100%',
+                background: sessionDropdownOpen ? C.accentDim : C.cardAlt,
+                border: `1px solid ${sessionDropdownOpen ? C.borderHi : C.border}`,
+                borderRadius: 8,
+                padding: '0.45rem 0.6rem',
+                display: 'grid', gridTemplateColumns: '1fr auto',
+                alignItems: 'center', gap: '0.35rem',
+                cursor: 'pointer', fontFamily: 'inherit',
+                color: C.text, textAlign: 'left',
+                transition: 'background 0.12s, border-color 0.12s',
+              }}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem', minWidth: 0 }}>
+                <span style={{ fontSize: '0.55rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, fontWeight: 600 }}>
+                  Session
+                </span>
+                <span style={{
+                  fontSize: '0.85rem', fontWeight: 700,
+                  color: sessionDropdownOpen ? C.accent : C.text,
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                }}>
+                  {currentSession?.name ?? 'Default'}
+                </span>
+              </div>
+              <span style={{
+                color: sessionDropdownOpen ? C.accent : C.muted,
+                fontSize: '0.7rem',
+                transform: sessionDropdownOpen ? 'rotate(180deg)' : 'none',
+                transition: 'transform 0.15s',
+              }}>▾</span>
+            </button>
+
+            {sessionDropdownOpen && (() => {
+              const ev = sessions[eventId];
+              const list = ev?.sessions ?? [];
+              const currentId = ev?.currentId;
+              return (
+                <>
+                  {/* Click-outside catcher */}
+                  <div
+                    onClick={() => setSessionDropdownOpen(false)}
+                    style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'transparent' }}
+                  />
+                  <div
+                    role="listbox"
+                    style={{
+                      position: 'absolute', top: '100%', left: '0.7rem', right: '0.7rem',
+                      marginTop: '0.3rem', zIndex: 51,
+                      background: C.card, border: `1px solid ${C.border}`,
+                      borderRadius: 10, padding: '0.4rem',
+                      boxShadow: '0 12px 30px rgba(0,0,0,0.55)',
+                      display: 'flex', flexDirection: 'column', gap: '0.25rem',
+                      maxHeight: '60vh', overflowY: 'auto',
+                    }}
+                  >
+                    {list.length === 0 && (
+                      <div style={{ fontSize: '0.78rem', color: C.mutedDim, padding: '0.4rem' }}>
+                        No sessions yet.
+                      </div>
+                    )}
+                    {list.map(s => {
+                      const valid = s.solves.filter(x => !isDnf(x));
+                      const sessBest = valid.length ? Math.min(...valid.map(finalMs)) : null;
+                      const isCurrent = s.id === currentId;
+                      return (
+                        <div
+                          key={s.id}
+                          style={{
+                            display: 'grid', gridTemplateColumns: '1fr auto auto',
+                            alignItems: 'center', gap: '0.35rem',
+                            padding: '0.45rem 0.55rem', borderRadius: 7,
+                            background: isCurrent ? C.accentDim : 'transparent',
+                            border: `1px solid ${isCurrent ? C.borderHi : 'transparent'}`,
+                          }}
+                        >
+                          <button
+                            onClick={() => { switchSession(s.id); setSessionDropdownOpen(false); }}
+                            style={{
+                              background: 'transparent', border: 'none', cursor: 'pointer',
+                              fontFamily: 'inherit', color: 'inherit', padding: 0, textAlign: 'left',
+                              display: 'flex', flexDirection: 'column', gap: '0.1rem',
+                              minWidth: 0,
+                            }}
+                          >
+                            <span style={{
+                              fontSize: '0.82rem', fontWeight: 700,
+                              color: isCurrent ? C.accent : C.text,
+                              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                            }}>
+                              {s.name}
+                            </span>
+                            <span style={{ fontSize: '0.62rem', color: C.muted }}>
+                              {s.solves.length} solve{s.solves.length === 1 ? '' : 's'}
+                              {sessBest != null && (
+                                <> · best <span style={{ fontFamily: '"JetBrains Mono", monospace', color: C.success }}>{fmtMs(sessBest, false, showMs)}</span></>
+                              )}
+                            </span>
+                          </button>
+                          {isCurrent
+                            ? <span style={{ color: C.accent, display: 'inline-flex' }}><IconCheck size={14} /></span>
+                            : <span aria-hidden style={{ width: 14, height: 14 }} />}
+                          <button
+                            onClick={() => deleteSession(s.id)}
+                            aria-label="Delete session"
+                            disabled={list.length <= 1}
+                            title={list.length > 1 ? 'Delete session' : 'At least one session is required'}
+                            style={{
+                              background: 'transparent', border: 'none',
+                              cursor: list.length > 1 ? 'pointer' : 'not-allowed',
+                              color: list.length > 1 ? C.mutedDim : 'rgba(255,255,255,0.1)',
+                              padding: '0.15rem',
+                              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            }}
+                          ><IconTrash size={13} /></button>
+                        </div>
+                      );
+                    })}
+
+                    {/* Divider + new session row */}
+                    <div style={{ height: 1, background: C.border, margin: '0.25rem 0' }} />
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.3rem' }}>
+                      <input
+                        value={newSessionName}
+                        onChange={e => setNewSessionName(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            createSession(newSessionName);
+                            setNewSessionName('');
+                            setSessionDropdownOpen(false);
+                          }
+                        }}
+                        placeholder="New session name"
+                        style={{
+                          background: C.cardAlt, color: C.text,
+                          border: `1px solid ${C.border}`, borderRadius: 7,
+                          padding: '0.4rem 0.55rem', fontSize: '0.78rem',
+                          fontFamily: 'inherit', outline: 'none', minWidth: 0,
+                        }}
+                      />
+                      <button
+                        onClick={() => {
+                          createSession(newSessionName);
+                          setNewSessionName('');
+                          setSessionDropdownOpen(false);
+                        }}
+                        style={{
+                          padding: '0.4rem 0.55rem', borderRadius: 7,
+                          fontSize: '0.72rem', fontWeight: 700, fontFamily: 'inherit',
+                          background: C.accentDim, color: C.accent,
+                          border: `1px solid ${C.borderHi}`, cursor: 'pointer',
+                          display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
+                        }}
+                      >
+                        <IconPlus size={12} />New
+                      </button>
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
           </div>
 
           {/* Scrollable solve list */}
@@ -989,12 +1156,17 @@ export default function TimerPage() {
             <StatTile label="Ao12"    value={stats.ao12 == null ? '—' : fmtMs(stats.ao12)} accent />
           </div>
 
-          {/* Scramble preview — square card at the bottom of the right panel.
-              Width = 100% of panel; aspect-ratio keeps it square. */}
+          {/* Scramble preview — pinned to the bottom of the right panel.
+              marginTop: auto pushes it past the stat cards; aspect-ratio
+              keeps it square between the 180–280px size bounds. */}
           <div style={{
+            marginTop: 'auto',
             width: '100%',
+            maxWidth: 280,
             aspectRatio: '1 / 1',
-            minHeight: 220,
+            minHeight: 180,
+            maxHeight: 280,
+            alignSelf: 'center',
             background: C.card, border: `1px solid ${C.border}`,
             borderRadius: 14, padding: '0.5rem',
             display: 'flex', flexDirection: 'column',
