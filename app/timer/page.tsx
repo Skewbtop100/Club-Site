@@ -347,6 +347,12 @@ export default function TimerPage() {
   // Two-step Alt+D confirmation for clearing the session.
   const [clearPending, setClearPending] = useState(false);
   const clearTimeoutRef = useRef<number | null>(null);
+  // Mobile Solves tab — long-press to enter multi-select.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedSolveIds, setSelectedSolveIds] = useState<Set<string>>(() => new Set());
+  const longPressTimerRef = useRef<number | null>(null);
+  const longPressFiredRef = useRef(false);
+  const longPressOriginRef = useRef<{ x: number; y: number } | null>(null);
 
   // ── Derived solves + setSolves wrapper ──
   // Source of truth is `sessions`. `solves` is the active session's array.
@@ -647,9 +653,90 @@ export default function TimerPage() {
   const deleteSolve = (id: string) => setSolves(prev => prev.filter(s => s.id !== id));
   const setSolvePenalty = (id: string, p: Penalty) =>
     setSolves(prev => prev.map(s => s.id === id ? { ...s, penalty: p } : s));
-  const resetSession = () => {
-    if (confirm('Reset current session? All solves will be cleared.')) setSolves([]);
+
+  // ── Mobile multi-select (Solves tab) ─────────────────────────────────────
+  const exitSelectMode = useCallback(() => {
+    setSelectMode(false);
+    setSelectedSolveIds(new Set());
+    if (longPressTimerRef.current != null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    longPressFiredRef.current = false;
+  }, []);
+
+  const startSolveLongPress = (id: string, e: React.TouchEvent) => {
+    const t = e.touches[0];
+    longPressOriginRef.current = { x: t.clientX, y: t.clientY };
+    longPressFiredRef.current = false;
+    if (longPressTimerRef.current != null) window.clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = window.setTimeout(() => {
+      longPressFiredRef.current = true;
+      setSelectMode(true);
+      setSelectedSolveIds(prev => {
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
+      longPressTimerRef.current = null;
+    }, 500);
   };
+
+  const moveSolveLongPress = (e: React.TouchEvent) => {
+    const origin = longPressOriginRef.current;
+    if (!origin || longPressTimerRef.current == null) return;
+    const t = e.touches[0];
+    if (Math.abs(t.clientX - origin.x) > 8 || Math.abs(t.clientY - origin.y) > 8) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const endSolveLongPress = () => {
+    if (longPressTimerRef.current != null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    longPressOriginRef.current = null;
+  };
+
+  const handleSolveCardClick = (id: string) => {
+    if (longPressFiredRef.current) {
+      // Long-press already added this card to selection — swallow the click.
+      longPressFiredRef.current = false;
+      return;
+    }
+    if (selectMode) {
+      setSelectedSolveIds(prev => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id); else next.add(id);
+        return next;
+      });
+      return;
+    }
+    setDetailSolveId(id);
+  };
+
+  const selectAllVisible = (ids: string[]) => {
+    setSelectedSolveIds(new Set(ids));
+  };
+
+  const confirmDeleteSelected = () => {
+    const count = selectedSolveIds.size;
+    if (count === 0) return;
+    if (!confirm(`Delete ${count} solve${count === 1 ? '' : 's'}? This cannot be undone.`)) return;
+    setSolves(prev => prev.filter(s => !selectedSolveIds.has(s.id)));
+    exitSelectMode();
+  };
+
+  // Leave select-mode when navigating away from the Solves tab.
+  useEffect(() => {
+    if (mobileTab !== 'solves' && (selectMode || selectedSolveIds.size > 0)) {
+      exitSelectMode();
+    }
+    // exitSelectMode is stable; selectedSolveIds + selectMode read in body
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mobileTab]);
 
   // Smart digit-only parser: last 2 digits = centiseconds, next 2 = seconds,
   // remaining = minutes. Examples:
@@ -756,45 +843,27 @@ export default function TimerPage() {
           minHeight: 0,
           overflow: 'hidden',
         }}>
-          {/* Top: Settings cog + Exit + History header */}
+          {/* Top: Settings cog only — exit lives in the Settings panel,
+              solve count moved to the Performance panel on the right. */}
           <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            display: 'flex', alignItems: 'center',
             padding: '0.85rem 1rem 0.6rem',
             borderBottom: `1px solid ${C.border}`,
           }}>
-            <div style={{ display: 'flex', gap: '0.4rem' }}>
-              <button
-                onClick={() => setSettingsOpen(true)}
-                aria-label="Settings"
-                title="Settings"
-                style={{
-                  width: 30, height: 30, borderRadius: 8,
-                  background: 'transparent', border: `1px solid ${C.border}`,
-                  color: C.muted, cursor: 'pointer', fontSize: '0.95rem',
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  transition: 'background 0.15s, color 0.15s, border-color 0.15s',
-                }}
-                onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.muted; }}
-              >⚙</button>
-              <button
-                onClick={() => router.push('/')}
-                aria-label="Exit timer"
-                title="Exit to main site"
-                style={{
-                  width: 30, height: 30, borderRadius: 8,
-                  background: 'transparent', border: `1px solid ${C.border}`,
-                  color: C.mutedDim, cursor: 'pointer', fontSize: '0.95rem',
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  transition: 'background 0.15s, color 0.15s, border-color 0.15s',
-                }}
-                onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.mutedDim; }}
-              >×</button>
-            </div>
-            <div style={{ fontSize: '0.66rem', color: C.muted, letterSpacing: '0.05em' }}>
-              {solves.length === 0 ? '0 solves' : `${solves.length} solve${solves.length === 1 ? '' : 's'}`}
-            </div>
+            <button
+              onClick={() => setSettingsOpen(true)}
+              aria-label="Settings"
+              title="Settings"
+              style={{
+                width: 30, height: 30, borderRadius: 8,
+                background: 'transparent', border: `1px solid ${C.border}`,
+                color: C.muted, cursor: 'pointer', fontSize: '0.95rem',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.muted; }}
+            >⚙</button>
           </div>
 
           {/* Session selector — clickable name with dropdown panel */}
@@ -1040,26 +1109,6 @@ export default function TimerPage() {
             )}
           </div>
 
-          {/* Footer: Clear All */}
-          {solves.length > 0 && (
-            <div style={{ padding: '0.6rem 0.85rem', borderTop: `1px solid ${C.border}` }}>
-              <button
-                onClick={resetSession}
-                style={{
-                  width: '100%', padding: '0.45rem 0.7rem', borderRadius: 8,
-                  fontSize: '0.74rem', fontWeight: 700, letterSpacing: '0.05em',
-                  background: 'rgba(239,68,68,0.08)', color: '#f87171',
-                  border: '1px solid rgba(239,68,68,0.25)',
-                  cursor: 'pointer', fontFamily: 'inherit',
-                  transition: 'background 0.15s',
-                }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'rgba(239,68,68,0.18)')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'rgba(239,68,68,0.08)')}
-              >
-                Clear All
-              </button>
-            </div>
-          )}
         </aside>
 
         {/* ── CENTER PANEL ─────────────────────────────────────────────── */}
@@ -1202,12 +1251,18 @@ export default function TimerPage() {
             </div>
           </div>
 
-          {/* Stats grid 2x2 */}
+          {/* Stats grid 2x2 + total solves spanning both columns */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.7rem' }}>
             <StatTile label="Average" value={fmtMs(stats.mean)} />
             <StatTile label="Worst"   value={fmtMs(stats.worst)} />
             <StatTile label="Ao5"     value={stats.ao5  == null ? '—' : fmtMs(stats.ao5)}  accent />
             <StatTile label="Ao12"    value={stats.ao12 == null ? '—' : fmtMs(stats.ao12)} accent />
+            <div style={{ gridColumn: 'span 2' }}>
+              <StatTile
+                label="Total Solves"
+                value={String(solves.filter(s => !isDnf(s)).length)}
+              />
+            </div>
           </div>
 
           {/* Scramble preview — pinned to the bottom of the right panel.
@@ -1477,45 +1532,96 @@ export default function TimerPage() {
                 flex: '1 1 auto', minHeight: 0,
                 display: 'flex', flexDirection: 'column',
               }}>
-                {/* Header with exit */}
-                <div style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '0.7rem 0.85rem 0.4rem',
-                }}>
-                  <div style={{ fontSize: '1rem', fontWeight: 700 }}>Solves</div>
-                  <button
-                    onClick={() => router.push('/')}
-                    aria-label="Exit timer"
-                    style={{
-                      width: 34, height: 34, borderRadius: 8,
-                      background: 'transparent', border: `1px solid ${C.border}`,
-                      color: C.mutedDim, cursor: 'pointer',
-                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    }}
-                  ><IconClose size={16} /></button>
-                </div>
-
-                {/* Search bar */}
-                <div style={{ padding: '0 0.85rem 0.6rem' }}>
+                {/* Header — switches to a select-mode action bar when active */}
+                {selectMode ? (
                   <div style={{
-                    display: 'grid', gridTemplateColumns: 'auto 1fr',
-                    gap: '0.4rem', alignItems: 'center',
-                    background: C.card, border: `1px solid ${C.border}`,
-                    borderRadius: 999, padding: '0.4rem 0.85rem',
+                    display: 'grid', gridTemplateColumns: 'auto 1fr auto auto',
+                    alignItems: 'center', gap: '0.4rem',
+                    padding: '0.5rem 0.7rem 0.4rem',
+                    background: C.accentDim,
+                    borderBottom: `1px solid ${C.borderHi}`,
                   }}>
-                    <span style={{ color: C.muted, display: 'inline-flex' }}><IconSearch size={16} /></span>
-                    <input
-                      value={mobileSearch}
-                      onChange={e => setMobileSearch(e.target.value)}
-                      placeholder="Search solves..."
+                    <button
+                      onClick={exitSelectMode}
+                      aria-label="Cancel select"
                       style={{
-                        background: 'transparent', border: 'none', outline: 'none',
-                        color: C.text, fontFamily: 'inherit', fontSize: '16px',
-                        width: '100%',
+                        width: 34, height: 34, borderRadius: 8,
+                        background: 'transparent', border: `1px solid ${C.border}`,
+                        color: C.text, cursor: 'pointer',
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                       }}
-                    />
+                    ><IconClose size={16} /></button>
+                    <div style={{ fontSize: '0.92rem', fontWeight: 700, color: C.accent }}>
+                      {selectedSolveIds.size} selected
+                    </div>
+                    <button
+                      onClick={() => selectAllVisible(solvesFiltered.map(x => x.id))}
+                      style={{
+                        padding: '0.4rem 0.7rem', borderRadius: 8,
+                        fontSize: '0.74rem', fontWeight: 700, fontFamily: 'inherit',
+                        letterSpacing: '0.04em',
+                        background: 'transparent', color: C.accent,
+                        border: `1px solid ${C.borderHi}`, cursor: 'pointer',
+                      }}
+                    >Select all</button>
+                    <button
+                      onClick={confirmDeleteSelected}
+                      disabled={selectedSolveIds.size === 0}
+                      aria-label="Delete selected"
+                      style={{
+                        padding: '0.4rem 0.6rem', borderRadius: 8,
+                        fontSize: '0.74rem', fontWeight: 700, fontFamily: 'inherit',
+                        letterSpacing: '0.04em',
+                        background: 'rgba(239,68,68,0.12)',
+                        color: selectedSolveIds.size === 0 ? 'rgba(248,113,113,0.4)' : '#f87171',
+                        border: '1px solid rgba(239,68,68,0.3)',
+                        cursor: selectedSolveIds.size === 0 ? 'not-allowed' : 'pointer',
+                        display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+                      }}
+                    ><IconTrash size={14} />Delete</button>
                   </div>
-                </div>
+                ) : (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '0.7rem 0.85rem 0.4rem',
+                  }}>
+                    <div style={{ fontSize: '1rem', fontWeight: 700 }}>Solves</div>
+                    <button
+                      onClick={() => router.push('/')}
+                      aria-label="Exit timer"
+                      style={{
+                        width: 34, height: 34, borderRadius: 8,
+                        background: 'transparent', border: `1px solid ${C.border}`,
+                        color: C.mutedDim, cursor: 'pointer',
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      }}
+                    ><IconClose size={16} /></button>
+                  </div>
+                )}
+
+                {/* Search bar — hidden in select mode */}
+                {!selectMode && (
+                  <div style={{ padding: '0 0.85rem 0.6rem' }}>
+                    <div style={{
+                      display: 'grid', gridTemplateColumns: 'auto 1fr',
+                      gap: '0.4rem', alignItems: 'center',
+                      background: C.card, border: `1px solid ${C.border}`,
+                      borderRadius: 999, padding: '0.4rem 0.85rem',
+                    }}>
+                      <span style={{ color: C.muted, display: 'inline-flex' }}><IconSearch size={16} /></span>
+                      <input
+                        value={mobileSearch}
+                        onChange={e => setMobileSearch(e.target.value)}
+                        placeholder="Search solves..."
+                        style={{
+                          background: 'transparent', border: 'none', outline: 'none',
+                          color: C.text, fontFamily: 'inherit', fontSize: '16px',
+                          width: '100%',
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
 
                 {/* Solves grid (3 columns) */}
                 <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 0.85rem 1rem' }}>
@@ -1536,20 +1642,48 @@ export default function TimerPage() {
                         const isBest  = !dnf && s.id === bestId  && validSolves.length > 1;
                         const isWorst = !dnf && s.id === worstId && validSolves.length > 1;
                         const dateStr = new Date(s.ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                        const selected = selectedSolveIds.has(s.id);
                         return (
                           <button
                             key={s.id}
-                            onClick={() => setDetailSolveId(s.id)}
+                            onClick={() => handleSolveCardClick(s.id)}
+                            onTouchStart={(e) => startSolveLongPress(s.id, e)}
+                            onTouchMove={moveSolveLongPress}
+                            onTouchEnd={endSolveLongPress}
+                            onTouchCancel={endSolveLongPress}
                             style={{
+                              position: 'relative',
                               textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit',
-                              background: isWorst ? 'rgba(239,68,68,0.08)' : C.card,
-                              border: `1px solid ${isWorst ? 'rgba(239,68,68,0.25)' : C.border}`,
-                              borderLeft: isBest ? `3px solid ${C.success}` : `1px solid ${isWorst ? 'rgba(239,68,68,0.25)' : C.border}`,
+                              background: selected
+                                ? C.accentDim
+                                : isWorst ? 'rgba(239,68,68,0.08)' : C.card,
+                              border: `1px solid ${
+                                selected ? C.borderHi
+                                : isWorst ? 'rgba(239,68,68,0.25)'
+                                : C.border
+                              }`,
+                              borderLeft: selected
+                                ? `3px solid ${C.accent}`
+                                : isBest ? `3px solid ${C.success}`
+                                : `1px solid ${isWorst ? 'rgba(239,68,68,0.25)' : C.border}`,
                               borderRadius: 10, padding: '0.5rem 0.55rem',
                               display: 'flex', flexDirection: 'column', gap: '0.3rem',
                               minHeight: 64,
+                              transition: 'background 0.12s, border-color 0.12s',
                             }}
                           >
+                            {selectMode && (
+                              <span style={{
+                                position: 'absolute', top: 4, right: 4,
+                                width: 18, height: 18, borderRadius: 999,
+                                background: selected ? C.accent : 'rgba(255,255,255,0.06)',
+                                border: `1px solid ${selected ? C.accent : C.border}`,
+                                color: selected ? '#0a0a0a' : 'transparent',
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                              }}>
+                                {selected && <IconCheck size={12} />}
+                              </span>
+                            )}
                             <div style={{
                               fontSize: '0.6rem', color: C.mutedDim, fontWeight: 600,
                               letterSpacing: '0.04em',
