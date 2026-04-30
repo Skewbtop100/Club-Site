@@ -1296,17 +1296,22 @@ export default function TimerPage() {
         return (
           <div style={{
             position: 'relative', zIndex: 1,
-            // Pin the wrapper to "viewport minus nav" so content is bounded
-            // by what's actually visible. overflow-y: auto lets the user
-            // scroll if a tall scramble or small viewport pushes content
-            // past the fold, instead of clipping silently.
-            height: 'calc(100vh - 56px)',
+            // Root is exactly the viewport, with a flex-column children
+            // arrangement so the footer (stats + nav) sits in normal flow
+            // below a scrollable main content area — no fixed positioning,
+            // no padding hacks, no z-index stacking.
+            height: '100vh',
             width: '100%',
             display: 'flex', flexDirection: 'column',
             background: C.bg, color: C.text,
-            overflowY: 'auto',
-            paddingBottom: 0,
+            overflow: 'hidden',
           }}>
+            {/* ── MAIN: scrollable content area (one tab at a time) ─────── */}
+            <main style={{
+              flex: 1, minHeight: 0,
+              overflowY: 'auto',
+              display: 'flex', flexDirection: 'column',
+            }}>
             {/* ── TIMER TAB ─────────────────────────────────────────────── */}
             {mobileTab === 'timer' && (
               <div style={{
@@ -1463,42 +1468,6 @@ export default function TimerPage() {
                     {timer.state === 'running' && 'TAP TO STOP'}
                   </div>
                 </section>
-
-                {/* Bottom stats bar: 2 columns + center cube — fixed height,
-                    pinned to the end of the timer-tab column. */}
-                <div style={{
-                  display: 'grid', gridTemplateColumns: '1fr auto 1fr',
-                  gap: '0.5rem', padding: '0.4rem 0.7rem 0.6rem',
-                  alignItems: 'center',
-                  borderTop: `1px solid ${C.border}`,
-                  flexShrink: 0,
-                }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                    <MobileMicroStat label="Dev"   value={stats.stdDev == null ? '—' : (stats.stdDev / 1000).toFixed(2)} />
-                    <MobileMicroStat label="Mean"  value={fmtMs(stats.mean, false, showMs)} />
-                    <MobileMicroStat label="Best"  value={fmtMs(stats.best, false, showMs)} accent />
-                    <MobileMicroStat label="Count" value={String(validCount)} />
-                  </div>
-                  <button
-                    onClick={() => setCubeFullscreenOpen(true)}
-                    aria-label="Enlarge cube"
-                    style={{
-                      width: 92, height: 92,
-                      background: C.card, border: `1px solid ${C.border}`,
-                      borderRadius: 10, padding: 4,
-                      display: 'flex', cursor: 'pointer',
-                      fontFamily: 'inherit',
-                    }}
-                  >
-                    <CubeViewer eventId={eventId} scramble={scramble} />
-                  </button>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                    <MobileMicroStat label="Ao5"   value={fmtMs(stats.ao5,  false, showMs)} accent={stats.ao5 != null} />
-                    <MobileMicroStat label="Ao12"  value={fmtMs(stats.ao12, false, showMs)} accent={stats.ao12 != null} />
-                    <MobileMicroStat label="Ao50"  value={fmtMs(ao50,       false, showMs)} accent={ao50 != null} />
-                    <MobileMicroStat label="Ao100" value={fmtMs(ao100,      false, showMs)} accent={ao100 != null} />
-                  </div>
-                </div>
               </div>
             )}
 
@@ -1692,17 +1661,58 @@ export default function TimerPage() {
               </div>
             )}
 
-            {/* ── BOTTOM NAV (fixed, always visible regardless of viewport) ── */}
-            <nav style={{
-              position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 100,
-              height: 56,
-              display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
-              background: C.card, borderTop: `1px solid ${C.border}`,
-            }}>
-              <BottomTab label="Timer"  icon={<IconStopwatch size={20} />} active={mobileTab === 'timer'}  onClick={() => setMobileTab('timer')} C={C} />
-              <BottomTab label="Solves" icon={<IconList size={20} />}      active={mobileTab === 'solves'} onClick={() => setMobileTab('solves')} C={C} />
-              <BottomTab label="Stats"  icon={<IconChart size={20} />}     active={mobileTab === 'stats'}  onClick={() => setMobileTab('stats')} C={C} />
-            </nav>
+            </main>
+
+            {/* ── FOOTER: stats bar (timer tab only) + bottom nav.
+                Both live in normal flow at the column tail with flex-shrink: 0
+                so they never get clipped or covered. */}
+            <div style={{ flexShrink: 0 }}>
+              {mobileTab === 'timer' && (
+                <div style={{
+                  display: 'grid', gridTemplateColumns: '1fr auto 1fr',
+                  gap: '0.5rem', padding: '0.4rem 0.7rem 0.6rem',
+                  alignItems: 'center',
+                  background: C.card,
+                  borderTop: `1px solid ${C.border}`,
+                }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                    <MobileMicroStat label="Dev"   value={stats.stdDev == null ? '—' : (stats.stdDev / 1000).toFixed(2)} />
+                    <MobileMicroStat label="Mean"  value={fmtMs(stats.mean, false, showMs)} />
+                    <MobileMicroStat label="Best"  value={fmtMs(stats.best, false, showMs)} accent />
+                    <MobileMicroStat label="Count" value={String(validCount)} />
+                  </div>
+                  <button
+                    onClick={() => setCubeFullscreenOpen(true)}
+                    aria-label="Enlarge cube"
+                    style={{
+                      width: 92, height: 92,
+                      background: C.cardAlt, border: `1px solid ${C.border}`,
+                      borderRadius: 10, padding: 4,
+                      display: 'flex', cursor: 'pointer',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    <CubeViewer eventId={eventId} scramble={scramble} />
+                  </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                    <MobileMicroStat label="Ao5"   value={fmtMs(stats.ao5,  false, showMs)} accent={stats.ao5 != null} />
+                    <MobileMicroStat label="Ao12"  value={fmtMs(stats.ao12, false, showMs)} accent={stats.ao12 != null} />
+                    <MobileMicroStat label="Ao50"  value={fmtMs(ao50,       false, showMs)} accent={ao50 != null} />
+                    <MobileMicroStat label="Ao100" value={fmtMs(ao100,      false, showMs)} accent={ao100 != null} />
+                  </div>
+                </div>
+              )}
+
+              <nav style={{
+                height: 56,
+                display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
+                background: C.card, borderTop: `1px solid ${C.border}`,
+              }}>
+                <BottomTab label="Timer"  icon={<IconStopwatch size={20} />} active={mobileTab === 'timer'}  onClick={() => setMobileTab('timer')} C={C} />
+                <BottomTab label="Solves" icon={<IconList size={20} />}      active={mobileTab === 'solves'} onClick={() => setMobileTab('solves')} C={C} />
+                <BottomTab label="Stats"  icon={<IconChart size={20} />}     active={mobileTab === 'stats'}  onClick={() => setMobileTab('stats')} C={C} />
+              </nav>
+            </div>
           </div>
         );
       })()}
