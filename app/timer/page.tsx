@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Scrambow } from 'scrambow';
 // Type-only import; runtime is dynamic-imported below to avoid HTMLElement
@@ -286,7 +285,7 @@ export default function TimerPage() {
   const [hoveredSolveId, setHoveredSolveId] = useState<string | null>(null);
   const [, forceTick] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [detailSolveId, setDetailSolveId] = useState<string | null>(null);
+  const [expandedSolveId, setExpandedSolveId] = useState<string | null>(null);
   // Timer preferences
   const [inspectionEnabled, setInspectionEnabled] = useState(true);
   const [showMs, setShowMs] = useState(true);          // ms vs seconds-only
@@ -503,6 +502,10 @@ export default function TimerPage() {
 
   // ── Solve action handlers ────────────────────────────────────────────────
   const deleteSolve = (id: string) => setSolves(prev => prev.filter(s => s.id !== id));
+  const setSolvePenalty = (id: string, p: Penalty) =>
+    setSolves(prev => prev.map(s => s.id === id ? { ...s, penalty: p } : s));
+  const toggleExpand = (id: string) =>
+    setExpandedSolveId(prev => prev === id ? null : id);
   const resetSession = () => {
     if (confirm('Reset current session? All solves will be cleared.')) setSolves([]);
   };
@@ -634,58 +637,66 @@ export default function TimerPage() {
                   const priorSet = solves.slice(0, solves.length - i).slice(0, -1).filter(x => !isDnf(x));
                   const priorBest = priorSet.length ? Math.min(...priorSet.map(finalMs)) : Infinity;
                   const isPB = !dnf && finalMs(s) < priorBest;
+                  const expanded = expandedSolveId === s.id;
                   return (
-                    <div
-                      key={s.id}
-                      onMouseEnter={() => setHoveredSolveId(s.id)}
-                      onMouseLeave={() => setHoveredSolveId(prev => prev === s.id ? null : prev)}
-                      onClick={() => setDetailSolveId(s.id)}
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: '1.7rem 1fr auto auto',
-                        alignItems: 'center', gap: '0.5rem',
-                        padding: '0.5rem 0.6rem', borderRadius: 8,
-                        background: hoveredSolveId === s.id ? 'rgba(255,255,255,0.04)' : C.cardAlt,
-                        borderLeft: isPB ? `3px solid ${C.success}` : '3px solid transparent',
-                        cursor: 'pointer',
-                        transition: 'background 0.12s',
-                      }}
-                    >
-                      <div style={{ fontSize: '0.66rem', color: C.mutedDim, fontWeight: 600 }}>
-                        {String(idx).padStart(2, '0')}
-                      </div>
-                      <div style={{
-                        fontFamily: '"JetBrains Mono", monospace',
-                        fontSize: '0.92rem', fontWeight: 700,
-                        color: dnf ? C.danger : isPB ? C.success : C.text,
-                      }}>
-                        {fmtMs(finalMs(s), dnf, showMs)}
-                      </div>
-                      <div style={{ display: 'flex', gap: '0.25rem' }}>
-                        {isPB && !dnf && (
-                          <span style={{
-                            fontSize: '0.55rem', fontWeight: 700, padding: '0.1rem 0.35rem', borderRadius: 4,
-                            background: 'rgba(52,211,153,0.15)', color: C.success, letterSpacing: '0.04em',
-                          }}>PB</span>
-                        )}
-                        {s.penalty === '+2' && (
-                          <span style={{
-                            fontSize: '0.55rem', fontWeight: 700, padding: '0.1rem 0.35rem', borderRadius: 4,
-                            background: 'rgba(251,191,36,0.15)', color: C.warn, letterSpacing: '0.04em',
-                          }}>+2</span>
-                        )}
-                      </div>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); deleteSolve(s.id); }}
-                        aria-label="Delete solve"
+                    <div key={s.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                      <div
+                        onMouseEnter={() => setHoveredSolveId(s.id)}
+                        onMouseLeave={() => setHoveredSolveId(prev => prev === s.id ? null : prev)}
+                        onClick={() => toggleExpand(s.id)}
                         style={{
-                          background: 'transparent', border: 'none', cursor: 'pointer',
-                          color: C.mutedDim, fontSize: '0.85rem', padding: '0.1rem 0.25rem',
-                          opacity: hoveredSolveId === s.id ? 1 : 0,
-                          transition: 'opacity 0.12s',
+                          display: 'grid',
+                          gridTemplateColumns: '1.7rem 1fr auto auto',
+                          alignItems: 'center', gap: '0.5rem',
+                          padding: '0.5rem 0.6rem', borderRadius: 8,
+                          background: expanded || hoveredSolveId === s.id ? 'rgba(255,255,255,0.04)' : C.cardAlt,
+                          borderLeft: isPB ? `3px solid ${C.success}` : '3px solid transparent',
+                          cursor: 'pointer',
+                          transition: 'background 0.12s',
                         }}
-                        title="Delete"
-                      >×</button>
+                      >
+                        <div style={{ fontSize: '0.66rem', color: C.mutedDim, fontWeight: 600 }}>
+                          {String(idx).padStart(2, '0')}
+                        </div>
+                        <div style={{
+                          fontFamily: '"JetBrains Mono", monospace',
+                          fontSize: '0.92rem', fontWeight: 700,
+                          color: dnf ? C.danger : isPB ? C.success : C.text,
+                        }}>
+                          {fmtMs(finalMs(s), dnf, showMs)}
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.25rem' }}>
+                          {isPB && !dnf && (
+                            <span style={{
+                              fontSize: '0.55rem', fontWeight: 700, padding: '0.1rem 0.35rem', borderRadius: 4,
+                              background: 'rgba(52,211,153,0.15)', color: C.success, letterSpacing: '0.04em',
+                            }}>PB</span>
+                          )}
+                          {s.penalty === '+2' && (
+                            <span style={{
+                              fontSize: '0.55rem', fontWeight: 700, padding: '0.1rem 0.35rem', borderRadius: 4,
+                              background: 'rgba(251,191,36,0.15)', color: C.warn, letterSpacing: '0.04em',
+                            }}>+2</span>
+                          )}
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); deleteSolve(s.id); }}
+                          aria-label="Delete solve"
+                          style={{
+                            background: 'transparent', border: 'none', cursor: 'pointer',
+                            color: C.mutedDim, fontSize: '0.85rem', padding: '0.1rem 0.25rem',
+                            opacity: hoveredSolveId === s.id || expanded ? 1 : 0,
+                            transition: 'opacity 0.12s',
+                          }}
+                          title="Delete"
+                        >×</button>
+                      </div>
+                      {expanded && (
+                        <PenaltyRow
+                          penalty={s.penalty}
+                          onSet={(p) => setSolvePenalty(s.id, p)}
+                        />
+                      )}
                     </div>
                   );
                 })}
@@ -783,7 +794,7 @@ export default function TimerPage() {
             onTouchStart={onTimerTouchStart}
             onTouchEnd={onTimerTouchEnd}
             style={{
-              flex: '1 1 auto', minHeight: 0,
+              flex: '1 1 auto', minHeight: 0, position: 'relative',
               background: C.card, border: `1px solid ${timer.state === 'armed' ? C.success : C.border}`,
               borderRadius: 16, padding: '2rem 1.5rem',
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
@@ -807,14 +818,21 @@ export default function TimerPage() {
             }}>
               {timerDisplay}
             </div>
-            <div style={{ fontSize: '0.78rem', color: C.muted, marginTop: '1.5rem', letterSpacing: '0.06em' }}>
-              {timer.state === 'idle' && (<>PRESS <span style={{ color: C.accent, fontWeight: 700 }}>SPACE</span> TO START / TAP TO START</>)}
+            <div style={{ fontSize: '0.78rem', color: C.muted, marginTop: '1.5rem', letterSpacing: '0.06em', minHeight: '1.2rem' }}>
               {timer.state === 'inspecting' && 'Hold SPACE to arm, release to start'}
               {timer.state === 'armed' && (<span style={{ color: C.success, fontWeight: 700 }}>RELEASE TO START</span>)}
               {timer.state === 'running' && 'Press SPACE / tap to stop'}
-              {timer.state === 'stopped' && (<>PRESS <span style={{ color: C.accent, fontWeight: 700 }}>SPACE</span> TO START / TAP TO START</>)}
             </div>
 
+            {/* Cube preview — fixed-square, bottom-right; visual only (no pointer) */}
+            <div style={{
+              position: 'absolute', bottom: '1rem', right: '1rem',
+              width: 180, height: 180,
+              pointerEvents: 'none',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <CubeViewer eventId={eventId} scramble={scramble} />
+            </div>
           </section>
 
         </main>
@@ -865,28 +883,6 @@ export default function TimerPage() {
             <StatTile label="Ao12"    value={stats.ao12 == null ? '—' : fmtMs(stats.ao12)} accent />
           </div>
 
-          {/* 3D cube viewer (TwistyPlayer) — fills remaining vertical space */}
-          <div className="cube-viewer-card" style={{
-            flex: '1 1 auto', minHeight: 0,
-            background: C.card, border: `1px solid ${C.border}`,
-            borderRadius: 14, padding: '0.5rem',
-            display: 'flex', flexDirection: 'column', alignItems: 'stretch',
-          }}>
-            <div style={{
-              fontSize: '0.62rem', letterSpacing: '0.12em',
-              textTransform: 'uppercase', color: C.muted, fontWeight: 600,
-              padding: '0.2rem 0.45rem 0.4rem',
-            }}>
-              Cube Preview
-            </div>
-            <CubeViewer eventId={eventId} scramble={scramble} />
-          </div>
-
-          {/* Footer hint */}
-          <div style={{ fontSize: '0.66rem', color: C.mutedDim, textAlign: 'center', lineHeight: 1.6, marginTop: '0.25rem' }}>
-            <div>SPACE: timer · ESC: reset · D: delete last · N: new scramble</div>
-            <Link href="/" style={{ color: C.muted, textDecoration: 'none', display: 'inline-block', marginTop: '0.5rem' }}>← Back to home</Link>
-          </div>
         </aside>
       </div>
       )}
@@ -1015,12 +1011,10 @@ export default function TimerPage() {
               }}>
                 {timerDisplay}
               </div>
-              <div style={{ fontSize: '0.7rem', color: C.muted, marginTop: '0.9rem', letterSpacing: '0.06em' }}>
-                {timer.state === 'idle' && 'TAP TO START'}
+              <div style={{ fontSize: '0.7rem', color: C.muted, marginTop: '0.9rem', letterSpacing: '0.06em', minHeight: '1rem' }}>
                 {timer.state === 'inspecting' && 'Hold to arm, release to start'}
                 {timer.state === 'armed' && (<span style={{ color: C.success, fontWeight: 700 }}>RELEASE TO START</span>)}
                 {timer.state === 'running' && 'TAP TO STOP'}
-                {timer.state === 'stopped' && 'TAP TO START'}
               </div>
             </section>
 
@@ -1053,40 +1047,48 @@ export default function TimerPage() {
                     const idx = solves.indexOf(s) + 1;
                     const dnf = isDnf(s);
                     const swiped = swipe?.id === s.id ? swipe.dx : 0;
+                    const expanded = expandedSolveId === s.id;
                     return (
-                      <div
-                        key={s.id}
-                        onClick={() => { if (!swipe) setDetailSolveId(s.id); }}
-                        onTouchStart={(e) => onSwipeStart(e, s.id)}
-                        onTouchMove={onSwipeMove}
-                        onTouchEnd={onSwipeEnd}
-                        style={{
-                          display: 'grid', gridTemplateColumns: '1.7rem 1fr auto', alignItems: 'center', gap: '0.5rem',
-                          padding: '0.4rem 0.55rem', borderRadius: 7,
-                          background: C.cardAlt,
-                          touchAction: 'pan-y',
-                          transform: `translateX(${swiped}px)`,
-                          transition: swipe?.id === s.id ? 'none' : 'transform 0.18s',
-                        }}
-                      >
-                        <div style={{ fontSize: '0.65rem', color: C.mutedDim, fontWeight: 600 }}>
-                          {String(idx).padStart(2, '0')}
+                      <div key={s.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                        <div
+                          onClick={() => { if (!swipe) toggleExpand(s.id); }}
+                          onTouchStart={(e) => onSwipeStart(e, s.id)}
+                          onTouchMove={onSwipeMove}
+                          onTouchEnd={onSwipeEnd}
+                          style={{
+                            display: 'grid', gridTemplateColumns: '1.7rem 1fr auto', alignItems: 'center', gap: '0.5rem',
+                            padding: '0.4rem 0.55rem', borderRadius: 7,
+                            background: expanded ? 'rgba(255,255,255,0.05)' : C.cardAlt,
+                            touchAction: 'pan-y',
+                            transform: `translateX(${swiped}px)`,
+                            transition: swipe?.id === s.id ? 'none' : 'transform 0.18s, background 0.12s',
+                          }}
+                        >
+                          <div style={{ fontSize: '0.65rem', color: C.mutedDim, fontWeight: 600 }}>
+                            {String(idx).padStart(2, '0')}
+                          </div>
+                          <div style={{
+                            fontFamily: '"JetBrains Mono", monospace',
+                            fontSize: '0.88rem', fontWeight: 700,
+                            color: dnf ? C.danger : C.text,
+                          }}>
+                            {fmtMs(finalMs(s), dnf, showMs)}
+                          </div>
+                          <div style={{ display: 'flex', gap: '0.2rem' }}>
+                            {s.penalty === '+2' && (
+                              <span style={{
+                                fontSize: '0.55rem', fontWeight: 700, padding: '0.1rem 0.3rem', borderRadius: 4,
+                                background: 'rgba(251,191,36,0.15)', color: C.warn,
+                              }}>+2</span>
+                            )}
+                          </div>
                         </div>
-                        <div style={{
-                          fontFamily: '"JetBrains Mono", monospace',
-                          fontSize: '0.88rem', fontWeight: 700,
-                          color: dnf ? C.danger : C.text,
-                        }}>
-                          {fmtMs(finalMs(s), dnf, showMs)}
-                        </div>
-                        <div style={{ display: 'flex', gap: '0.2rem' }}>
-                          {s.penalty === '+2' && (
-                            <span style={{
-                              fontSize: '0.55rem', fontWeight: 700, padding: '0.1rem 0.3rem', borderRadius: 4,
-                              background: 'rgba(251,191,36,0.15)', color: C.warn,
-                            }}>+2</span>
-                          )}
-                        </div>
+                        {expanded && (
+                          <PenaltyRow
+                            penalty={s.penalty}
+                            onSet={(p) => setSolvePenalty(s.id, p)}
+                          />
+                        )}
                       </div>
                     );
                   })
@@ -1108,7 +1110,25 @@ export default function TimerPage() {
 
       {/* Settings modal */}
       {settingsOpen && (
-        <ModalShell title="Settings" onClose={() => setSettingsOpen(false)}>
+        <ModalShell
+          title="Settings"
+          onClose={() => setSettingsOpen(false)}
+          headerAction={(
+            <button
+              onClick={() => router.push('/')}
+              style={{
+                background: 'transparent', border: 'none', cursor: 'pointer',
+                color: C.mutedDim, fontSize: '0.72rem', fontFamily: 'inherit',
+                letterSpacing: '0.04em', padding: '0.1rem 0.25rem',
+                transition: 'color 0.15s',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.color = C.muted)}
+              onMouseLeave={e => (e.currentTarget.style.color = C.mutedDim)}
+            >
+              ← Exit
+            </button>
+          )}
+        >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
             <div>
               <div style={{ fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, marginBottom: '0.5rem', fontWeight: 600 }}>
@@ -1150,92 +1170,9 @@ export default function TimerPage() {
                 Solves are saved to local storage and restored on reload. Switching events generates a new scramble. Clearing the session is permanent.
               </div>
             </div>
-            <button
-              onClick={() => router.push('/')}
-              style={{
-                marginTop: '0.5rem', padding: '0.7rem 0.9rem', borderRadius: 10,
-                fontSize: '0.85rem', fontWeight: 700, fontFamily: 'inherit',
-                letterSpacing: '0.04em',
-                background: C.accentDim, color: C.accent,
-                border: `1px solid ${C.borderHi}`, cursor: 'pointer',
-                transition: 'background 0.15s',
-              }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(167,139,250,0.25)')}
-              onMouseLeave={e => (e.currentTarget.style.background = C.accentDim)}
-            >
-              ← Exit to Main Site
-            </button>
           </div>
         </ModalShell>
       )}
-
-      {/* Solve detail modal */}
-      {detailSolveId && (() => {
-        const s = solves.find(x => x.id === detailSolveId);
-        if (!s) return null;
-        const dnf = isDnf(s);
-        const ev = EVENTS.find(e => e.id === s.event);
-        return (
-          <ModalShell title="Solve Detail" onClose={() => setDetailSolveId(null)}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
-              <div>
-                <div style={{ fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, marginBottom: '0.4rem', fontWeight: 600 }}>
-                  Time {ev ? `· ${ev.short}` : ''}
-                </div>
-                <div style={{
-                  fontFamily: '"JetBrains Mono", monospace',
-                  fontSize: '2.5rem', fontWeight: 800,
-                  color: dnf ? C.danger : C.text,
-                  fontVariantNumeric: 'tabular-nums',
-                }}>
-                  {fmtMs(finalMs(s), dnf, showMs)}
-                </div>
-                {s.penalty === '+2' && (
-                  <div style={{ fontSize: '0.75rem', color: C.warn, marginTop: '0.2rem' }}>+2 penalty applied</div>
-                )}
-              </div>
-              <div>
-                <div style={{ fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, marginBottom: '0.4rem', fontWeight: 600 }}>
-                  Scramble
-                </div>
-                <div style={{
-                  fontFamily: '"JetBrains Mono", monospace',
-                  fontSize: '0.92rem', lineHeight: 1.6,
-                  color: C.text, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                  background: C.cardAlt, border: `1px solid ${C.border}`,
-                  borderRadius: 8, padding: '0.75rem 0.85rem',
-                }}>
-                  {s.scramble}
-                </div>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-                <button
-                  onClick={() => { deleteSolve(s.id); setDetailSolveId(null); }}
-                  style={{
-                    padding: '0.5rem 0.9rem', borderRadius: 8,
-                    fontSize: '0.82rem', fontWeight: 600, fontFamily: 'inherit',
-                    background: 'rgba(239,68,68,0.1)', color: '#f87171',
-                    border: '1px solid rgba(239,68,68,0.3)', cursor: 'pointer',
-                  }}
-                >
-                  Delete
-                </button>
-                <button
-                  onClick={() => setDetailSolveId(null)}
-                  style={{
-                    padding: '0.5rem 0.9rem', borderRadius: 8,
-                    fontSize: '0.82rem', fontWeight: 600, fontFamily: 'inherit',
-                    background: C.accentDim, color: C.accent,
-                    border: `1px solid ${C.borderHi}`, cursor: 'pointer',
-                  }}
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </ModalShell>
-        );
-      })()}
 
       <style>{`
         .pv-grid > main > section { box-sizing: border-box; }
@@ -1245,7 +1182,6 @@ export default function TimerPage() {
         }
         @media (max-width: 700px) {
           .pv-grid { padding: 0.75rem !important; gap: 0.75rem !important; }
-          .cube-viewer-card { display: none !important; }
         }
       `}</style>
     </div>
@@ -1299,7 +1235,7 @@ function MiniStat({ label, value, accent }: { label: string; value: string; acce
   );
 }
 
-function ModalShell({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+function ModalShell({ title, onClose, headerAction, children }: { title: string; onClose: () => void; headerAction?: React.ReactNode; children: React.ReactNode }) {
   // Close on ESC
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }
@@ -1325,18 +1261,21 @@ function ModalShell({ title, onClose, children }: { title: string; onClose: () =
           boxShadow: '0 20px 60px rgba(0,0,0,0.6)',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.85rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.85rem', gap: '0.5rem' }}>
           <div style={{ fontSize: '1rem', fontWeight: 700, color: C.text }}>{title}</div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            style={{
-              width: 28, height: 28, borderRadius: 7,
-              background: 'transparent', border: `1px solid ${C.border}`,
-              color: C.muted, cursor: 'pointer', fontSize: '0.95rem',
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            }}
-          >×</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            {headerAction}
+            <button
+              onClick={onClose}
+              aria-label="Close"
+              style={{
+                width: 28, height: 28, borderRadius: 7,
+                background: 'transparent', border: `1px solid ${C.border}`,
+                color: C.muted, cursor: 'pointer', fontSize: '0.95rem',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              }}
+            >×</button>
+          </div>
         </div>
         {children}
       </div>
@@ -1368,6 +1307,41 @@ function ToggleRow({ label, value, onChange }: { label: string; value: boolean; 
           transition: 'left 0.18s, background 0.18s',
         }} />
       </button>
+    </div>
+  );
+}
+
+function PenaltyRow({ penalty, onSet }: { penalty: Penalty; onSet: (p: Penalty) => void }) {
+  const opts: { label: string; value: Penalty; color: string }[] = [
+    { label: 'OK',  value: 'none', color: C.muted   },
+    { label: '+2',  value: '+2',   color: C.warn    },
+    { label: 'DNF', value: 'dnf',  color: C.danger  },
+  ];
+  return (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{ display: 'flex', gap: '0.3rem', padding: '0.1rem 0.6rem 0.3rem 2.7rem' }}
+    >
+      {opts.map(o => {
+        const active = penalty === o.value;
+        return (
+          <button
+            key={o.value}
+            onClick={() => onSet(o.value)}
+            style={{
+              padding: '0.25rem 0.55rem', borderRadius: 6,
+              fontSize: '0.68rem', fontWeight: 700, fontFamily: 'inherit',
+              letterSpacing: '0.04em',
+              background: active ? `${o.color}26` : 'rgba(255,255,255,0.04)',
+              border: `1px solid ${active ? o.color : 'rgba(255,255,255,0.08)'}`,
+              color: active ? o.color : C.muted,
+              cursor: 'pointer', transition: 'all 0.12s',
+            }}
+          >
+            {o.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
