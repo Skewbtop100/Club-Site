@@ -120,21 +120,29 @@ const PENALTY_ADD: Record<Penalty, number> = { none: 0, '+2': 2000, dnf: 0 };
 const isDnf = (s: Solve) => s.penalty === 'dnf';
 const finalMs = (s: Solve) => s.ms + PENALTY_ADD[s.penalty];
 
-function fmtMs(ms: number | null | undefined, dnf = false, showMs = true): string {
+// Format a millisecond duration. ALWAYS truncates (Math.floor) so we never
+// show a time that's faster than what was actually achieved — never round.
+//   precision='cs' → "0.54"  (centiseconds, 547ms → 0.54)
+//   precision='ms' → "0.547" (milliseconds, 547ms → 0.547)
+type Precision = 'cs' | 'ms';
+function fmtMs(ms: number | null | undefined, dnf = false, precision: Precision = 'cs'): string {
   if (dnf) return 'DNF';
   if (ms == null) return '—';
-  const totalSec = ms / 1000;
-  if (showMs) {
-    if (totalSec < 60) return totalSec.toFixed(2);
-    const m = Math.floor(totalSec / 60);
-    const s = (totalSec - m * 60).toFixed(2).padStart(5, '0');
-    return `${m}:${s}`;
+  const safe = Math.max(0, Math.floor(ms));
+  const totalSec = Math.floor(safe / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  if (precision === 'ms') {
+    const sub = safe % 1000;                       // 0..999
+    const subStr = String(sub).padStart(3, '0');
+    if (m === 0) return `${s}.${subStr}`;
+    return `${m}:${String(s).padStart(2, '0')}.${subStr}`;
   }
-  const sec = Math.floor(totalSec);
-  if (sec < 60) return sec.toString();
-  const m = Math.floor(sec / 60);
-  const s = (sec - m * 60).toString().padStart(2, '0');
-  return `${m}:${s}`;
+  // centiseconds (truncate, never round)
+  const cs = Math.floor((safe % 1000) / 10);       // 0..99
+  const csStr = String(cs).padStart(2, '0');
+  if (m === 0) return `${s}.${csStr}`;
+  return `${m}:${String(s).padStart(2, '0')}.${csStr}`;
 }
 
 /** Mean of the middle of last n solves (drop best+worst). DNF in middle = DNF. */
@@ -333,7 +341,7 @@ export default function TimerPage() {
   const [detailSolveId, setDetailSolveId] = useState<string | null>(null);
   // Timer preferences
   const [inspectionEnabled, setInspectionEnabled] = useState(true);
-  const [showMs, setShowMs] = useState(true);          // ms vs seconds-only
+  const [precision, setPrecision] = useState<Precision>('cs');
   const [holdToStart, setHoldToStart] = useState(true); // long-press arming
   const [scrambleFontSize, setScrambleFontSize] = useState<'sm' | 'md' | 'lg'>('md');
   // Default false to match SSR; updated after mount via matchMedia. Brief flash
@@ -491,12 +499,18 @@ export default function TimerPage() {
       if (raw) {
         const parsed = JSON.parse(raw) as {
           inspectionEnabled?: boolean;
-          showMs?: boolean;
+          showMs?: boolean;          // legacy (boolean) — migrated to `precision`
+          precision?: Precision;
           holdToStart?: boolean;
           scrambleFontSize?: 'sm' | 'md' | 'lg';
         };
         if (typeof parsed.inspectionEnabled === 'boolean') setInspectionEnabled(parsed.inspectionEnabled);
-        if (typeof parsed.showMs === 'boolean')            setShowMs(parsed.showMs);
+        if (parsed.precision === 'cs' || parsed.precision === 'ms') {
+          setPrecision(parsed.precision);
+        } else if (typeof parsed.showMs === 'boolean') {
+          // legacy: showMs=true meant "show .00", which maps to centiseconds.
+          setPrecision('cs');
+        }
         if (typeof parsed.holdToStart === 'boolean')       setHoldToStart(parsed.holdToStart);
         if (parsed.scrambleFontSize === 'sm' || parsed.scrambleFontSize === 'md' || parsed.scrambleFontSize === 'lg') {
           setScrambleFontSize(parsed.scrambleFontSize);
@@ -510,9 +524,9 @@ export default function TimerPage() {
   useEffect(() => {
     if (!prefsLoadedRef.current) return;
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify({ inspectionEnabled, showMs, holdToStart, scrambleFontSize }));
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ inspectionEnabled, precision, holdToStart, scrambleFontSize }));
     } catch { /* ignore */ }
-  }, [inspectionEnabled, showMs, holdToStart, scrambleFontSize]);
+  }, [inspectionEnabled, precision, holdToStart, scrambleFontSize]);
 
   // Stats — recomputed on every solves change
   const stats = useMemo(() => calcStats(solves), [solves]);
@@ -552,8 +566,9 @@ export default function TimerPage() {
       ganTimerRef.current.finishExternal(finalMs);
     },
     onIdle: () => {
-      // Optional: ensure our state returns to idle if it lingered as 'stopped'.
-      // No-op for now; the next solve cycle will reset display naturally.
+      // GAN reset (or initial idle) — sync our state machine to idle so the
+      // display drops to 0.00 and the next solve cycle starts cleanly.
+      ganTimerRef.current.reset();
     },
   });
   const ganConnected = gan.state === 'connected';
@@ -828,8 +843,8 @@ export default function TimerPage() {
       if (sec >= 0) return Math.ceil(sec).toString();
       return sec <= -2 ? 'DNF' : '+2';
     }
-    if (timer.state === 'armed') return showMs ? '0.00' : '0';
-    return fmtMs(timer.displayMs, false, showMs);
+    if (timer.state === 'armed') return precision === 'ms' ? '0.000' : '0.00';
+    return fmtMs(timer.displayMs, false, precision);
   })();
 
   // Color of the big timer
@@ -843,6 +858,12 @@ export default function TimerPage() {
       return C.text;
     }
     if (timer.state === 'armed')   return C.success;
+    // GAN cue: pads pressed / armed / running on the device → green.
+    // 'stopped' falls through so the final time renders in the normal
+    // text color (still green if it's a personal best).
+    if (ganConnected && (gan.liveState === 'handsOn' || gan.liveState === 'getSet' || gan.liveState === 'running')) {
+      return C.success;
+    }
     if (timer.state === 'stopped' && lastSolveIsPB) return C.success;
     return C.text;
   })();
@@ -1004,7 +1025,7 @@ export default function TimerPage() {
                             <span style={{ fontSize: '0.62rem', color: C.muted }}>
                               {s.solves.length} solve{s.solves.length === 1 ? '' : 's'}
                               {sessBest != null && (
-                                <> · best <span style={{ fontFamily: '"JetBrains Mono", monospace', color: C.success }}>{fmtMs(sessBest, false, showMs)}</span></>
+                                <> · best <span style={{ fontFamily: '"JetBrains Mono", monospace', color: C.success }}>{fmtMs(sessBest, false, precision)}</span></>
                               )}
                             </span>
                           </button>
@@ -1112,7 +1133,7 @@ export default function TimerPage() {
                         fontSize: '0.92rem', fontWeight: 700,
                         color: dnf ? C.danger : isPB ? C.success : C.text,
                       }}>
-                        {fmtMs(finalMs(s), dnf, showMs)}
+                        {fmtMs(finalMs(s), dnf, precision)}
                       </div>
                       <div style={{ display: 'flex', gap: '0.25rem' }}>
                         {isPB && !dnf && (
@@ -1357,7 +1378,7 @@ export default function TimerPage() {
         // Filter for the Solves tab search box
         const q = mobileSearch.trim().toLowerCase();
         const solvesFiltered = !q ? solvesNewest : solvesNewest.filter(s => {
-          const time = fmtMs(finalMs(s), isDnf(s), showMs).toLowerCase();
+          const time = fmtMs(finalMs(s), isDnf(s), precision).toLowerCase();
           const date = new Date(s.ts).toLocaleString().toLowerCase();
           return time.includes(q) || date.includes(q) || s.scramble.toLowerCase().includes(q);
         });
@@ -1771,7 +1792,7 @@ export default function TimerPage() {
                               color: dnf ? C.danger : isBest ? C.success : C.text,
                               fontVariantNumeric: 'tabular-nums',
                             }}>
-                              {fmtMs(finalMs(s), dnf, showMs)}
+                              {fmtMs(finalMs(s), dnf, precision)}
                             </div>
                             {s.penalty === '+2' && !dnf && (
                               <div style={{
@@ -1859,11 +1880,11 @@ export default function TimerPage() {
                     }}>
                       <div>Stat</div><div>Global</div><div>Session</div>
                     </div>
-                    <StatTableRow zebra={false} label="Best"      global={fmtMs(stats.best, false, showMs)}  session={fmtMs(stats.best, false, showMs)} highlight />
+                    <StatTableRow zebra={false} label="Best"      global={fmtMs(stats.best, false, precision)}  session={fmtMs(stats.best, false, precision)} highlight />
                     <StatTableRow zebra={true}  label="Deviation" global={stats.stdDev == null ? '—' : (stats.stdDev / 1000).toFixed(2)} session={stats.stdDev == null ? '—' : (stats.stdDev / 1000).toFixed(2)} />
-                    <StatTableRow zebra={false} label="Ao12"      global={fmtMs(stats.ao12, false, showMs)}  session={fmtMs(stats.ao12, false, showMs)} />
-                    <StatTableRow zebra={true}  label="Ao50"      global={fmtMs(ao50,       false, showMs)}  session={fmtMs(ao50,       false, showMs)} />
-                    <StatTableRow zebra={false} label="Ao100"     global={fmtMs(ao100,      false, showMs)}  session={fmtMs(ao100,      false, showMs)} />
+                    <StatTableRow zebra={false} label="Ao12"      global={fmtMs(stats.ao12, false, precision)}  session={fmtMs(stats.ao12, false, precision)} />
+                    <StatTableRow zebra={true}  label="Ao50"      global={fmtMs(ao50,       false, precision)}  session={fmtMs(ao50,       false, precision)} />
+                    <StatTableRow zebra={false} label="Ao100"     global={fmtMs(ao100,      false, precision)}  session={fmtMs(ao100,      false, precision)} />
                     <StatTableRow zebra={true}  label="Count"     global={String(validCount)}                session={String(validCount)} />
                   </div>
                 </div>
@@ -1886,8 +1907,8 @@ export default function TimerPage() {
                 }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
                     <MobileMicroStat label="Dev"   value={stats.stdDev == null ? '—' : (stats.stdDev / 1000).toFixed(2)} />
-                    <MobileMicroStat label="Mean"  value={fmtMs(stats.mean, false, showMs)} />
-                    <MobileMicroStat label="Best"  value={fmtMs(stats.best, false, showMs)} accent />
+                    <MobileMicroStat label="Mean"  value={fmtMs(stats.mean, false, precision)} />
+                    <MobileMicroStat label="Best"  value={fmtMs(stats.best, false, precision)} accent />
                     <MobileMicroStat label="Count" value={String(validCount)} />
                   </div>
                   <button
@@ -1904,10 +1925,10 @@ export default function TimerPage() {
                     <CubeViewer eventId={eventId} scramble={scramble} />
                   </button>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                    <MobileMicroStat label="Ao5"   value={fmtMs(stats.ao5,  false, showMs)} accent={stats.ao5 != null} />
-                    <MobileMicroStat label="Ao12"  value={fmtMs(stats.ao12, false, showMs)} accent={stats.ao12 != null} />
-                    <MobileMicroStat label="Ao50"  value={fmtMs(ao50,       false, showMs)} accent={ao50 != null} />
-                    <MobileMicroStat label="Ao100" value={fmtMs(ao100,      false, showMs)} accent={ao100 != null} />
+                    <MobileMicroStat label="Ao5"   value={fmtMs(stats.ao5,  false, precision)} accent={stats.ao5 != null} />
+                    <MobileMicroStat label="Ao12"  value={fmtMs(stats.ao12, false, precision)} accent={stats.ao12 != null} />
+                    <MobileMicroStat label="Ao50"  value={fmtMs(ao50,       false, precision)} accent={ao50 != null} />
+                    <MobileMicroStat label="Ao100" value={fmtMs(ao100,      false, precision)} accent={ao100 != null} />
                   </div>
                 </div>
               )}
@@ -2041,7 +2062,7 @@ export default function TimerPage() {
                         <span style={{ fontSize: '0.66rem', color: C.muted }}>
                           {s.solves.length} solve{s.solves.length === 1 ? '' : 's'}
                           {sessBest != null && (
-                            <> · best <span style={{ fontFamily: '"JetBrains Mono", monospace', color: C.success }}>{fmtMs(sessBest, false, showMs)}</span></>
+                            <> · best <span style={{ fontFamily: '"JetBrains Mono", monospace', color: C.success }}>{fmtMs(sessBest, false, precision)}</span></>
                           )}
                         </span>
                       </button>
@@ -2223,8 +2244,36 @@ export default function TimerPage() {
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <ToggleRow label="Inspection time"  value={inspectionEnabled} onChange={setInspectionEnabled} />
-                <ToggleRow label="Show milliseconds" value={showMs}            onChange={setShowMs} />
                 <ToggleRow label="Hold to start"    value={holdToStart}        onChange={setHoldToStart} />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                  <span style={{ color: C.text }}>Timer precision</span>
+                  <div style={{
+                    display: 'inline-flex',
+                    background: 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 8, padding: 2, gap: 2,
+                  }}>
+                    {(['cs','ms'] as const).map(p => {
+                      const label = p === 'cs' ? 'Centiseconds (0.00)' : 'Milliseconds (0.000)';
+                      const active = precision === p;
+                      return (
+                        <button
+                          key={p}
+                          onClick={() => setPrecision(p)}
+                          title={p === 'cs' ? 'Truncated to 1/100s' : 'Truncated to 1/1000s'}
+                          style={{
+                            padding: '0.3rem 0.65rem', borderRadius: 6,
+                            fontFamily: 'inherit', fontSize: '0.74rem', fontWeight: 600,
+                            background: active ? C.accentDim : 'transparent',
+                            color: active ? C.accent : C.muted,
+                            border: `1px solid ${active ? C.borderHi : 'transparent'}`,
+                            cursor: 'pointer', transition: 'all 0.12s',
+                          }}
+                        >{label}</button>
+                      );
+                    })}
+                  </div>
+                </div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.85rem' }}>
                   <span style={{ color: C.text }}>Scramble size</span>
                   <div style={{
@@ -2252,6 +2301,70 @@ export default function TimerPage() {
                       );
                     })}
                   </div>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ height: 1, background: C.border }} />
+
+            {/* Bluetooth Timer section */}
+            <div>
+              <div style={{ fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, marginBottom: '0.5rem', fontWeight: 600 }}>
+                Bluetooth Timer
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', minWidth: 0 }}>
+                    <span style={{
+                      display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
+                      fontSize: '0.85rem', color: C.text,
+                    }}>
+                      <span style={{
+                        width: 8, height: 8, borderRadius: 999,
+                        background: gan.state === 'connected' ? C.success : C.mutedDim,
+                        display: 'inline-block', flexShrink: 0,
+                      }} />
+                      {gan.state === 'connected' ? 'Connected' :
+                       gan.state === 'connecting' ? 'Connecting…' :
+                       gan.state === 'unsupported' ? 'Not supported' :
+                       'Disconnected'}
+                    </span>
+                    {gan.state === 'connected' && gan.deviceName && (
+                      <span style={{ fontSize: '0.7rem', color: C.muted, fontFamily: '"JetBrains Mono", monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {gan.deviceName}
+                      </span>
+                    )}
+                    {gan.state === 'unsupported' && (
+                      <span style={{ fontSize: '0.7rem', color: C.mutedDim, lineHeight: 1.4 }}>
+                        Web Bluetooth requires Chrome / Edge over HTTPS or localhost.
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (gan.state === 'unsupported') return;
+                      if (gan.state === 'connected') gan.disconnect();
+                      else if (gan.state !== 'connecting') gan.connect();
+                    }}
+                    disabled={gan.state === 'unsupported' || gan.state === 'connecting'}
+                    style={{
+                      padding: '0.4rem 0.85rem', borderRadius: 8,
+                      fontSize: '0.78rem', fontWeight: 700, fontFamily: 'inherit',
+                      letterSpacing: '0.04em',
+                      background: gan.state === 'connected'
+                        ? 'rgba(239,68,68,0.1)'
+                        : C.accentDim,
+                      color: gan.state === 'connected' ? '#f87171' : C.accent,
+                      border: `1px solid ${gan.state === 'connected' ? 'rgba(239,68,68,0.3)' : C.borderHi}`,
+                      cursor: gan.state === 'unsupported' || gan.state === 'connecting' ? 'not-allowed' : 'pointer',
+                      opacity: gan.state === 'unsupported' || gan.state === 'connecting' ? 0.5 : 1,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {gan.state === 'connected' ? 'Disconnect' :
+                     gan.state === 'connecting' ? 'Connecting…' :
+                     'Connect'}
+                  </button>
                 </div>
               </div>
             </div>
@@ -2318,7 +2431,7 @@ export default function TimerPage() {
                   fontVariantNumeric: 'tabular-nums',
                   lineHeight: 1.1,
                 }}>
-                  {fmtMs(finalMs(s), dnf, showMs)}
+                  {fmtMs(finalMs(s), dnf, precision)}
                 </div>
                 {s.penalty === '+2' && !dnf && (
                   <div style={{ fontSize: '0.75rem', color: C.warn, marginTop: '0.25rem' }}>+2 penalty applied</div>
