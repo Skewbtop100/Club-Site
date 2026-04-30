@@ -784,7 +784,7 @@ export default function TimerPage() {
             onTouchStart={onTimerTouchStart}
             onTouchEnd={onTimerTouchEnd}
             style={{
-              flex: '1 1 auto', minHeight: 0, position: 'relative',
+              flex: '1 1 auto', minHeight: 0,
               background: C.card, border: `1px solid ${timer.state === 'armed' ? C.success : C.border}`,
               borderRadius: 16, padding: '2rem 1.5rem',
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
@@ -814,19 +814,6 @@ export default function TimerPage() {
               {timer.state === 'running' && 'Press SPACE / tap to stop'}
             </div>
 
-            {/* Cube preview — fixed 180x180 square, bottom-right.
-                pointer-events: none so taps still reach the timer area.
-                display:flex with default stretch lets CubeViewer fill the box. */}
-            <div style={{
-              position: 'absolute', bottom: '1rem', right: '1rem',
-              width: 180, height: 180,
-              background: C.cardAlt, border: `1px solid ${C.border}`,
-              borderRadius: 10, padding: 4,
-              pointerEvents: 'none',
-              display: 'flex',
-            }}>
-              <CubeViewer eventId={eventId} scramble={scramble} />
-            </div>
           </section>
 
         </main>
@@ -875,6 +862,29 @@ export default function TimerPage() {
             <StatTile label="Worst"   value={fmtMs(stats.worst)} />
             <StatTile label="Ao5"     value={stats.ao5  == null ? '—' : fmtMs(stats.ao5)}  accent />
             <StatTile label="Ao12"    value={stats.ao12 == null ? '—' : fmtMs(stats.ao12)} accent />
+          </div>
+
+          {/* Scramble preview — square card at the bottom of the right panel.
+              Width = 100% of panel; aspect-ratio keeps it square. */}
+          <div style={{
+            width: '100%',
+            aspectRatio: '1 / 1',
+            minHeight: 220,
+            background: C.card, border: `1px solid ${C.border}`,
+            borderRadius: 14, padding: '0.5rem',
+            display: 'flex', flexDirection: 'column',
+            flexShrink: 0,
+          }}>
+            <div style={{
+              fontSize: '0.62rem', letterSpacing: '0.12em',
+              textTransform: 'uppercase', color: C.muted, fontWeight: 600,
+              padding: '0.2rem 0.45rem 0.4rem',
+            }}>
+              Scramble Preview
+            </div>
+            <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+              <CubeViewer eventId={eventId} scramble={scramble} />
+            </div>
           </div>
 
         </aside>
