@@ -197,9 +197,10 @@ function useTimer(onSolveCommit: (ms: number, dnf: boolean) => void) {
     if (state === 'running') {
       const final = Date.now() - runStartRef.current;
       cancelAnimationFrame(rafRef.current);
-      // Auto-return to idle: no confirmation, no penalty UI.
-      setDisplayMs(0);
-      setState('idle');
+      // Keep the final time on display so the user sees their result.
+      // The next start press resets to 0 and begins inspection.
+      setDisplayMs(final);
+      setState('stopped');
       const dnf = inspectionMs <= -2000;
       inspStartRef.current = 0;
       setInspectionMs(15000);
@@ -498,7 +499,11 @@ export default function TimerPage() {
   const stats = useMemo(() => calcStats(solves), [solves]);
   const sessionEvent = useMemo(() => EVENTS.find(e => e.id === eventId) ?? EVENTS[0], [eventId]);
 
-  // Timer
+  // Commit a solve to the active session and immediately roll a new scramble
+  // so the timer is ready for the next attempt. Inline scramble generation
+  // here is more reliable than a length-comparison effect, which got out of
+  // sync when switching events/sessions changed `solves.length` without a
+  // new solve actually being added.
   const onSolveCommit = useCallback((ms: number, dnf: boolean) => {
     setSolves(prev => [
       ...prev,
@@ -508,25 +513,16 @@ export default function TimerPage() {
         scramble, event: eventId, ts: Date.now(),
       },
     ]);
+    setScramble(generateScramble(eventId));
   }, [scramble, eventId]);
 
   const timer = useTimer(onSolveCommit);
-
-  // After a solve commits, immediately generate next scramble so the
-  // timer drops back to a fresh idle state without any confirmation step.
-  const lastCommittedCountRef = useRef(0);
-  useEffect(() => {
-    if (solves.length > lastCommittedCountRef.current) {
-      lastCommittedCountRef.current = solves.length;
-      setScramble(generateScramble(eventId));
-    }
-  }, [solves.length, eventId]);
 
   const newScramble = useCallback(() => {
     setScramble(generateScramble(eventId));
   }, [eventId]);
 
-  // When event changes, regenerate scramble
+  // When event changes (dropdown, Alt+key, etc.), regenerate scramble.
   useEffect(() => {
     setScramble(generateScramble(eventId));
   }, [eventId]);
@@ -547,7 +543,7 @@ export default function TimerPage() {
           timer.stop();
           return;
         }
-        if (timer.state === 'idle') {
+        if (timer.state === 'idle' || timer.state === 'stopped') {
           if (inspectionEnabled) {
             timer.beginInspection();
           } else if (holdToStart) {
@@ -564,8 +560,8 @@ export default function TimerPage() {
         }
       }
       // Alt+key combinations: event switching + session clear.
-      // Only handle when timer is idle so an active solve is never disrupted.
-      if (e.altKey && !e.metaKey && !e.ctrlKey && timer.state === 'idle') {
+      // Only handle when timer isn't running to avoid disrupting an active solve.
+      if (e.altKey && !e.metaKey && !e.ctrlKey && (timer.state === 'idle' || timer.state === 'stopped')) {
         // Alt+D — two-step clear current session
         if (e.code === 'KeyD') {
           e.preventDefault();
@@ -627,7 +623,7 @@ export default function TimerPage() {
   // Mobile: tap timer area
   const onTimerTouchStart = useCallback(() => {
     if (timer.state === 'running') { timer.stop(); return; }
-    if (timer.state === 'idle') {
+    if (timer.state === 'idle' || timer.state === 'stopped') {
       if (inspectionEnabled) {
         timer.beginInspection();
       } else if (holdToStart) {
@@ -1304,7 +1300,7 @@ export default function TimerPage() {
             display: 'flex', flexDirection: 'column',
             background: C.bg, color: C.text,
             overflow: 'hidden',
-            paddingBottom: 56,  // reserve space for the fixed bottom nav
+            paddingBottom: 72,  // reserve clearance above the fixed bottom nav
           }}>
             {/* ── TIMER TAB ─────────────────────────────────────────────── */}
             {mobileTab === 'timer' && (
