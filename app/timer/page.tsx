@@ -276,12 +276,28 @@ function useTimer(onSolveCommit: (ms: number, dnf: boolean) => void) {
 
 const STORAGE_KEY = 'pv.timer.session.v1';
 const PREFS_KEY = 'pv.timer.prefs.v1';
+const SESSIONS_KEY = 'pv.timer.sessions.v2';
+
+interface Session {
+  id: string;
+  name: string;
+  createdAt: number;
+  solves: Solve[];
+}
+type SessionStore = Record<string /* eventId */, { sessions: Session[]; currentId: string }>;
+
+const newSessionId = () => `sess_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+function makeDefaultSession(solves: Solve[] = []): Session {
+  return { id: newSessionId(), name: 'Default', createdAt: Date.now(), solves };
+}
 
 export default function TimerPage() {
   const router = useRouter();
   const [eventId, setEventId] = useState<string>('333');
   const [scramble, setScramble] = useState<string>(() => generateScramble('333'));
-  const [solves, setSolves] = useState<Solve[]>([]);
+  // Sessions store: per-event list of sessions, plus the active session id.
+  // `solves` derives from the active session.
+  const [sessions, setSessions] = useState<SessionStore>({});
   const [hoveredSolveId, setHoveredSolveId] = useState<string | null>(null);
   const [, forceTick] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -309,6 +325,77 @@ export default function TimerPage() {
   const [manualEntryValue, setManualEntryValue] = useState('');
   const [editScrambleOpen, setEditScrambleOpen] = useState(false);
   const [editScrambleValue, setEditScrambleValue] = useState('');
+  const [sessionPanelOpen, setSessionPanelOpen] = useState(false);
+  const [newSessionName, setNewSessionName] = useState('');
+  const [cubeFullscreenOpen, setCubeFullscreenOpen] = useState(false);
+
+  // ── Derived solves + setSolves wrapper ──
+  // Source of truth is `sessions`. `solves` is the active session's array.
+  const currentSession = useMemo<Session | null>(() => {
+    const ev = sessions[eventId];
+    if (!ev) return null;
+    return ev.sessions.find(s => s.id === ev.currentId) ?? ev.sessions[0] ?? null;
+  }, [sessions, eventId]);
+  const solves: Solve[] = currentSession?.solves ?? [];
+
+  const setSolves = useCallback(
+    (updater: Solve[] | ((prev: Solve[]) => Solve[])) => {
+      setSessions(prev => {
+        const ev = prev[eventId];
+        if (!ev) return prev;
+        const cur = ev.sessions.find(s => s.id === ev.currentId) ?? ev.sessions[0];
+        if (!cur) return prev;
+        const next = typeof updater === 'function'
+          ? (updater as (p: Solve[]) => Solve[])(cur.solves)
+          : updater;
+        const list = ev.sessions.map(s => s.id === cur.id ? { ...s, solves: next } : s);
+        return { ...prev, [eventId]: { sessions: list, currentId: cur.id } };
+      });
+    },
+    [eventId],
+  );
+
+  // Ensure the active event always has at least one session.
+  useEffect(() => {
+    setSessions(prev => {
+      const ev = prev[eventId];
+      if (ev && ev.sessions.length > 0) return prev;
+      const ds = makeDefaultSession();
+      return { ...prev, [eventId]: { sessions: [ds], currentId: ds.id } };
+    });
+  }, [eventId]);
+
+  const switchSession = useCallback((sessionId: string) => {
+    setSessions(prev => {
+      const ev = prev[eventId];
+      if (!ev) return prev;
+      if (!ev.sessions.some(s => s.id === sessionId)) return prev;
+      return { ...prev, [eventId]: { ...ev, currentId: sessionId } };
+    });
+  }, [eventId]);
+
+  const createSession = useCallback((rawName: string) => {
+    const name = rawName.trim() || `Session ${Date.now().toString(36).slice(-4)}`;
+    const ds = makeDefaultSession();
+    ds.name = name;
+    setSessions(prev => {
+      const ev = prev[eventId];
+      const list = ev ? [...ev.sessions, ds] : [ds];
+      return { ...prev, [eventId]: { sessions: list, currentId: ds.id } };
+    });
+  }, [eventId]);
+
+  const deleteSession = useCallback((sessionId: string) => {
+    setSessions(prev => {
+      const ev = prev[eventId];
+      if (!ev) return prev;
+      // Refuse to delete the last remaining session.
+      if (ev.sessions.length <= 1) return prev;
+      const list = ev.sessions.filter(s => s.id !== sessionId);
+      const currentId = ev.currentId === sessionId ? list[0].id : ev.currentId;
+      return { ...prev, [eventId]: { sessions: list, currentId } };
+    });
+  }, [eventId]);
 
   // Refresh "X mins ago" labels every 30s
   useEffect(() => {
@@ -317,23 +404,46 @@ export default function TimerPage() {
   }, []);
 
   // Load session from localStorage on mount
+  // Load sessions store on mount, with one-time migration from v1 storage.
+  const sessionsLoadedRef = useRef(false);
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as { solves?: Solve[]; eventId?: string };
-      if (Array.isArray(parsed.solves)) setSolves(parsed.solves);
-      if (parsed.eventId && EVENTS.some(e => e.id === parsed.eventId)) {
-        setEventId(parsed.eventId);
-        setScramble(generateScramble(parsed.eventId));
+      const raw = localStorage.getItem(SESSIONS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { store?: SessionStore; currentEventId?: string };
+        if (parsed?.store && typeof parsed.store === 'object') setSessions(parsed.store);
+        if (parsed?.currentEventId && EVENTS.some(e => e.id === parsed.currentEventId)) {
+          setEventId(parsed.currentEventId);
+          setScramble(generateScramble(parsed.currentEventId));
+        }
+      } else {
+        // Migrate from the old single-session format.
+        const old = localStorage.getItem(STORAGE_KEY);
+        if (old) {
+          const parsedOld = JSON.parse(old) as { solves?: Solve[]; eventId?: string };
+          const oldEvent = parsedOld.eventId && EVENTS.some(e => e.id === parsedOld.eventId)
+            ? parsedOld.eventId : '333';
+          const oldSolves = Array.isArray(parsedOld.solves) ? parsedOld.solves : [];
+          const ds = makeDefaultSession(oldSolves);
+          setSessions({ [oldEvent]: { sessions: [ds], currentId: ds.id } });
+          setEventId(oldEvent);
+          setScramble(generateScramble(oldEvent));
+        }
       }
     } catch { /* ignore */ }
+    sessionsLoadedRef.current = true;
   }, []);
 
-  // Persist session whenever it changes
+  // Persist sessions store + active event whenever they change.
   useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ solves, eventId })); } catch { /* ignore */ }
-  }, [solves, eventId]);
+    if (!sessionsLoadedRef.current) return;
+    try {
+      localStorage.setItem(
+        SESSIONS_KEY,
+        JSON.stringify({ store: sessions, currentEventId: eventId }),
+      );
+    } catch { /* ignore */ }
+  }, [sessions, eventId]);
 
   // Load preferences on mount
   const prefsLoadedRef = useRef(false);
@@ -983,11 +1093,11 @@ export default function TimerPage() {
                     style={{
                       width: 34, height: 34, borderRadius: 999,
                       background: 'transparent', border: 'none',
-                      color: C.muted, cursor: 'pointer', fontSize: '1.05rem',
+                      color: C.muted, cursor: 'pointer',
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                     }}
-                  >⚙</button>
-                  <div style={{ position: 'relative' }}>
+                  ><IconSettings size={18} /></button>
+                  <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                     <select
                       value={eventId}
                       onChange={e => setEventId(e.target.value)}
@@ -996,7 +1106,7 @@ export default function TimerPage() {
                         width: '100%', appearance: 'none', WebkitAppearance: 'none',
                         background: 'transparent', color: C.text,
                         border: 'none', borderRadius: 999,
-                        padding: '0.4rem 1.5rem 0.4rem 0.7rem',
+                        padding: '0.15rem 1.2rem 0 0.7rem',
                         fontSize: '0.92rem', fontWeight: 600, fontFamily: 'inherit',
                         outline: 'none', textAlign: 'center', textAlignLast: 'center',
                       }}
@@ -1006,20 +1116,29 @@ export default function TimerPage() {
                       ))}
                     </select>
                     <span style={{
-                      position: 'absolute', right: '0.55rem', top: '50%',
-                      transform: 'translateY(-50%)', color: C.muted,
-                      fontSize: '0.75rem', pointerEvents: 'none',
+                      position: 'absolute', right: '0.4rem', top: '0.45rem',
+                      color: C.muted,
+                      fontSize: '0.7rem', pointerEvents: 'none',
                     }}>▾</span>
+                    <div style={{
+                      fontSize: '0.6rem', color: C.mutedDim,
+                      letterSpacing: '0.05em', fontWeight: 600,
+                      lineHeight: 1, paddingBottom: '0.2rem',
+                    }}>
+                      {currentSession?.name ?? 'Default'}
+                    </div>
                   </div>
-                  <div style={{
-                    width: 34, height: 34, borderRadius: 999,
-                    background: C.cardAlt, border: `1px solid ${C.border}`,
-                    color: C.accent, fontSize: '0.62rem', fontWeight: 700,
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    letterSpacing: '0.04em',
-                  }}>
-                    {sessionEvent.short.toUpperCase()}
-                  </div>
+                  <button
+                    onClick={() => { setNewSessionName(''); setSessionPanelOpen(true); }}
+                    aria-label="Sessions"
+                    title="Sessions"
+                    style={{
+                      width: 34, height: 34, borderRadius: 999,
+                      background: 'transparent', border: `1px solid ${C.border}`,
+                      color: C.muted, cursor: 'pointer',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    }}
+                  ><IconPlus size={16} /></button>
                 </div>
 
                 {/* Scramble row + refresh */}
@@ -1042,10 +1161,10 @@ export default function TimerPage() {
                     style={{
                       width: 38, height: 38, borderRadius: 10,
                       background: C.card, border: `1px solid ${C.border}`,
-                      color: C.accent, cursor: 'pointer', fontSize: '1.1rem',
+                      color: C.accent, cursor: 'pointer',
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                     }}
-                  >🔄</button>
+                  ><IconRefresh size={18} /></button>
                 </div>
 
                 {/* Action icons row */}
@@ -1053,9 +1172,9 @@ export default function TimerPage() {
                   margin: '0 0.7rem 0.4rem',
                   display: 'flex', gap: '0.4rem',
                 }}>
-                  <MobileActionIcon label="New scramble" onClick={newScramble} icon="🔄" />
-                  <MobileActionIcon label="Edit scramble" onClick={() => { setEditScrambleValue(scramble); setEditScrambleOpen(true); }} icon="✏" />
-                  <MobileActionIcon label="Add manual time" onClick={() => { setManualEntryValue(''); setManualEntryOpen(true); }} icon="+" />
+                  <MobileActionIcon label="New scramble"   onClick={newScramble}                                                                  icon={<IconRefresh size={16} />} />
+                  <MobileActionIcon label="Edit scramble"  onClick={() => { setEditScrambleValue(scramble); setEditScrambleOpen(true); }}         icon={<IconPencil size={16} />} />
+                  <MobileActionIcon label="Add manual time" onClick={() => { setManualEntryValue(''); setManualEntryOpen(true); }}                icon={<IconPlus size={16} />} />
                 </div>
 
                 {/* Big timer area */}
@@ -1109,14 +1228,19 @@ export default function TimerPage() {
                     <MobileMicroStat label="Best"  value={fmtMs(stats.best, false, showMs)} accent />
                     <MobileMicroStat label="Count" value={String(validCount)} />
                   </div>
-                  <div style={{
-                    width: 92, height: 92,
-                    background: C.card, border: `1px solid ${C.border}`,
-                    borderRadius: 10, padding: 4,
-                    display: 'flex',
-                  }}>
+                  <button
+                    onClick={() => setCubeFullscreenOpen(true)}
+                    aria-label="Enlarge cube"
+                    style={{
+                      width: 92, height: 92,
+                      background: C.card, border: `1px solid ${C.border}`,
+                      borderRadius: 10, padding: 4,
+                      display: 'flex', cursor: 'pointer',
+                      fontFamily: 'inherit',
+                    }}
+                  >
                     <CubeViewer eventId={eventId} scramble={scramble} />
-                  </div>
+                  </button>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
                     <MobileMicroStat label="Ao5"   value={fmtMs(stats.ao5,  false, showMs)} accent={stats.ao5 != null} />
                     <MobileMicroStat label="Ao12"  value={fmtMs(stats.ao12, false, showMs)} accent={stats.ao12 != null} />
@@ -1145,10 +1269,10 @@ export default function TimerPage() {
                     style={{
                       width: 34, height: 34, borderRadius: 8,
                       background: 'transparent', border: `1px solid ${C.border}`,
-                      color: C.mutedDim, cursor: 'pointer', fontSize: '1rem',
+                      color: C.mutedDim, cursor: 'pointer',
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                     }}
-                  >×</button>
+                  ><IconClose size={16} /></button>
                 </div>
 
                 {/* Search bar */}
@@ -1159,7 +1283,7 @@ export default function TimerPage() {
                     background: C.card, border: `1px solid ${C.border}`,
                     borderRadius: 999, padding: '0.4rem 0.85rem',
                   }}>
-                    <span style={{ color: C.muted, fontSize: '0.9rem' }}>🔍</span>
+                    <span style={{ color: C.muted, display: 'inline-flex' }}><IconSearch size={16} /></span>
                     <input
                       value={mobileSearch}
                       onChange={e => setMobileSearch(e.target.value)}
@@ -1253,10 +1377,10 @@ export default function TimerPage() {
                     style={{
                       width: 34, height: 34, borderRadius: 8,
                       background: 'transparent', border: `1px solid ${C.border}`,
-                      color: C.mutedDim, cursor: 'pointer', fontSize: '1rem',
+                      color: C.mutedDim, cursor: 'pointer',
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                     }}
-                  >×</button>
+                  ><IconClose size={16} /></button>
                 </div>
 
                 {/* Chart card */}
@@ -1323,11 +1447,165 @@ export default function TimerPage() {
               display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
               background: C.card, borderTop: `1px solid ${C.border}`,
             }}>
-              <BottomTab label="Timer"  icon="⏱" active={mobileTab === 'timer'}  onClick={() => setMobileTab('timer')} C={C} />
-              <BottomTab label="Solves" icon="▤" active={mobileTab === 'solves'} onClick={() => setMobileTab('solves')} C={C} />
-              <BottomTab label="Stats"  icon="〰" active={mobileTab === 'stats'}  onClick={() => setMobileTab('stats')} C={C} />
+              <BottomTab label="Timer"  icon={<IconStopwatch size={20} />} active={mobileTab === 'timer'}  onClick={() => setMobileTab('timer')} C={C} />
+              <BottomTab label="Solves" icon={<IconList size={20} />}      active={mobileTab === 'solves'} onClick={() => setMobileTab('solves')} C={C} />
+              <BottomTab label="Stats"  icon={<IconChart size={20} />}     active={mobileTab === 'stats'}  onClick={() => setMobileTab('stats')} C={C} />
             </nav>
           </div>
+        );
+      })()}
+
+      {/* Cube fullscreen modal (mobile — tap on the cube preview) */}
+      {cubeFullscreenOpen && (
+        <div
+          onClick={() => setCubeFullscreenOpen(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9500,
+            background: 'rgba(0,0,0,0.92)', backdropFilter: 'blur(6px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '1.5rem',
+          }}
+        >
+          <button
+            onClick={(e) => { e.stopPropagation(); setCubeFullscreenOpen(false); }}
+            aria-label="Close"
+            style={{
+              position: 'absolute', top: '1rem', right: '1rem',
+              width: 38, height: 38, borderRadius: 999,
+              background: 'rgba(255,255,255,0.06)', border: `1px solid ${C.border}`,
+              color: C.text, cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          ><IconClose size={18} /></button>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(86vw, 86vh, 480px)',
+              height: 'min(86vw, 86vh, 480px)',
+              background: C.card, border: `1px solid ${C.border}`,
+              borderRadius: 16, padding: '0.75rem',
+              display: 'flex',
+            }}
+          >
+            <CubeViewer eventId={eventId} scramble={scramble} />
+          </div>
+        </div>
+      )}
+
+      {/* Sessions panel modal (mobile + button in header) */}
+      {sessionPanelOpen && (() => {
+        const ev = sessions[eventId];
+        const list = ev?.sessions ?? [];
+        const currentId = ev?.currentId;
+        return (
+          <ModalShell title={`${sessionEvent.short.toUpperCase()} Sessions`} onClose={() => setSessionPanelOpen(false)}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+              {/* Session list */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: '50vh', overflowY: 'auto' }}>
+                {list.length === 0 ? (
+                  <div style={{ fontSize: '0.8rem', color: C.mutedDim, padding: '0.5rem' }}>
+                    No sessions yet.
+                  </div>
+                ) : list.map(s => {
+                  const valid = s.solves.filter(x => !isDnf(x));
+                  const sessBest = valid.length ? Math.min(...valid.map(finalMs)) : null;
+                  const isCurrent = s.id === currentId;
+                  return (
+                    <div
+                      key={s.id}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1fr auto auto',
+                        gap: '0.5rem', alignItems: 'center',
+                        padding: '0.5rem 0.6rem', borderRadius: 8,
+                        background: isCurrent ? C.accentDim : C.cardAlt,
+                        border: `1px solid ${isCurrent ? C.borderHi : C.border}`,
+                      }}
+                    >
+                      <button
+                        onClick={() => { switchSession(s.id); setSessionPanelOpen(false); }}
+                        style={{
+                          background: 'transparent', border: 'none', cursor: 'pointer',
+                          fontFamily: 'inherit', color: 'inherit', padding: 0, textAlign: 'left',
+                          display: 'flex', flexDirection: 'column', gap: '0.15rem',
+                        }}
+                      >
+                        <span style={{ fontSize: '0.88rem', fontWeight: 700, color: isCurrent ? C.accent : C.text }}>
+                          {s.name}
+                        </span>
+                        <span style={{ fontSize: '0.66rem', color: C.muted }}>
+                          {s.solves.length} solve{s.solves.length === 1 ? '' : 's'}
+                          {sessBest != null && (
+                            <> · best <span style={{ fontFamily: '"JetBrains Mono", monospace', color: C.success }}>{fmtMs(sessBest, false, showMs)}</span></>
+                          )}
+                        </span>
+                      </button>
+                      {isCurrent && (
+                        <span style={{ color: C.accent, display: 'inline-flex' }}><IconCheck size={16} /></span>
+                      )}
+                      {!isCurrent && (
+                        <span aria-hidden style={{ width: 16, height: 16 }} />
+                      )}
+                      <button
+                        onClick={() => deleteSession(s.id)}
+                        aria-label="Delete session"
+                        title={list.length > 1 ? 'Delete session' : 'At least one session is required'}
+                        disabled={list.length <= 1}
+                        style={{
+                          background: 'transparent', border: 'none', cursor: list.length > 1 ? 'pointer' : 'not-allowed',
+                          color: list.length > 1 ? C.mutedDim : 'rgba(255,255,255,0.1)',
+                          padding: '0.25rem',
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        }}
+                      ><IconTrash size={15} /></button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* New session input */}
+              <div style={{
+                display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.4rem',
+                paddingTop: '0.6rem', borderTop: `1px solid ${C.border}`,
+              }}>
+                <input
+                  value={newSessionName}
+                  onChange={e => setNewSessionName(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      createSession(newSessionName);
+                      setNewSessionName('');
+                      setSessionPanelOpen(false);
+                    }
+                  }}
+                  placeholder="New session name"
+                  style={{
+                    background: C.cardAlt, color: C.text,
+                    border: `1px solid ${C.border}`, borderRadius: 8,
+                    padding: '0.5rem 0.7rem', fontSize: '16px',
+                    fontFamily: 'inherit', outline: 'none',
+                  }}
+                />
+                <button
+                  onClick={() => {
+                    createSession(newSessionName);
+                    setNewSessionName('');
+                    setSessionPanelOpen(false);
+                  }}
+                  style={{
+                    padding: '0.5rem 0.85rem', borderRadius: 8,
+                    fontSize: '0.8rem', fontWeight: 700, fontFamily: 'inherit',
+                    background: C.accentDim, color: C.accent,
+                    border: `1px solid ${C.borderHi}`, cursor: 'pointer',
+                    display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+                  }}
+                >
+                  <IconPlus size={14} />New Session
+                </button>
+              </div>
+            </div>
+          </ModalShell>
         );
       })()}
 
@@ -1620,7 +1898,7 @@ function StatTile({ label, value, accent }: { label: string; value: string; acce
 
 // ── Mobile-only sub-components ──────────────────────────────────────────────
 
-function MobileActionIcon({ label, icon, onClick }: { label: string; icon: string; onClick: () => void }) {
+function MobileActionIcon({ label, icon, onClick }: { label: string; icon: React.ReactNode; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
@@ -1629,7 +1907,7 @@ function MobileActionIcon({ label, icon, onClick }: { label: string; icon: strin
       style={{
         flex: 1, height: 38, borderRadius: 10,
         background: C.card, border: `1px solid ${C.border}`,
-        color: C.muted, cursor: 'pointer', fontSize: '1rem',
+        color: C.muted, cursor: 'pointer',
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       }}
     >{icon}</button>
@@ -1661,7 +1939,7 @@ function MobileMicroStat({ label, value, accent }: { label: string; value: strin
   );
 }
 
-function BottomTab({ label, icon, active, onClick, C: c }: { label: string; icon: string; active: boolean; onClick: () => void; C: typeof C }) {
+function BottomTab({ label, icon, active, onClick, C: c }: { label: string; icon: React.ReactNode; active: boolean; onClick: () => void; C: typeof C }) {
   return (
     <button
       onClick={onClick}
@@ -1669,14 +1947,14 @@ function BottomTab({ label, icon, active, onClick, C: c }: { label: string; icon
         background: 'transparent', border: 'none', cursor: 'pointer',
         fontFamily: 'inherit',
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-        gap: '0.15rem',
+        gap: '0.2rem',
         padding: '0.4rem 0',
         position: 'relative',
         color: active ? c.accent : c.muted,
         transition: 'color 0.12s',
       }}
     >
-      <span style={{ fontSize: '1.1rem', lineHeight: 1 }}>{icon}</span>
+      <span style={{ display: 'inline-flex', lineHeight: 1 }}>{icon}</span>
       <span style={{ fontSize: '0.62rem', fontWeight: 600, letterSpacing: '0.04em' }}>{label}</span>
       {active && (
         <span style={{
@@ -1848,10 +2126,10 @@ function ModalShell({ title, onClose, headerAction, children }: { title: string;
               style={{
                 width: 28, height: 28, borderRadius: 7,
                 background: 'transparent', border: `1px solid ${C.border}`,
-                color: C.muted, cursor: 'pointer', fontSize: '0.95rem',
+                color: C.muted, cursor: 'pointer',
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
               }}
-            >×</button>
+            ><IconClose size={14} /></button>
           </div>
         </div>
         {children}
@@ -2026,3 +2304,28 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
     />
   );
 }
+
+// ── SVG icons (mobile UI) ───────────────────────────────────────────────────
+type IconProps = { size?: number; strokeWidth?: number };
+function IconBase({ size = 18, strokeWidth = 1.8, children }: IconProps & { children: React.ReactNode }) {
+  return (
+    <svg
+      width={size} height={size} viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth={strokeWidth}
+      strokeLinecap="round" strokeLinejoin="round"
+      style={{ display: 'block' }}
+    >{children}</svg>
+  );
+}
+function IconStopwatch(p: IconProps)  { return <IconBase {...p}><circle cx={12} cy={14} r={7}/><path d="M12 14v-3"/><path d="M9 2h6"/><path d="M12 4v3"/><path d="M19 6l-1.5 1.5"/></IconBase>; }
+function IconList(p: IconProps)       { return <IconBase {...p}><path d="M8 6h12"/><path d="M8 12h12"/><path d="M8 18h12"/><circle cx={4} cy={6}  r={1}/><circle cx={4} cy={12} r={1}/><circle cx={4} cy={18} r={1}/></IconBase>; }
+function IconChart(p: IconProps)      { return <IconBase {...p}><path d="M4 20V4"/><path d="M4 20h16"/><path d="M7 14l3-3 3 3 4-6"/></IconBase>; }
+function IconRefresh(p: IconProps)    { return <IconBase {...p}><path d="M21 12a9 9 0 0 0-15.5-6.3L3 8"/><path d="M3 4v4h4"/><path d="M3 12a9 9 0 0 0 15.5 6.3L21 16"/><path d="M21 20v-4h-4"/></IconBase>; }
+function IconPencil(p: IconProps)     { return <IconBase {...p}><path d="M14.5 4.5l4 4-9.5 9.5H5v-4z"/><path d="M13 6l5 5"/></IconBase>; }
+function IconPlus(p: IconProps)       { return <IconBase {...p}><path d="M12 5v14"/><path d="M5 12h14"/></IconBase>; }
+function IconClose(p: IconProps)      { return <IconBase {...p}><path d="M6 6l12 12"/><path d="M18 6l-12 12"/></IconBase>; }
+function IconSearch(p: IconProps)     { return <IconBase {...p}><circle cx={11} cy={11} r={6}/><path d="M20 20l-4.3-4.3"/></IconBase>; }
+function IconSettings(p: IconProps)   { return <IconBase {...p}><circle cx={12} cy={12} r={3}/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></IconBase>; }
+function IconCheck(p: IconProps)      { return <IconBase {...p}><path d="M5 12l5 5L20 7"/></IconBase>; }
+function IconTrash(p: IconProps)      { return <IconBase {...p}><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6"/><path d="M14 11v6"/></IconBase>; }
+function IconCube(p: IconProps)       { return <IconBase {...p}><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5"/><path d="M12 12L4 7.5"/><path d="M12 12v9"/></IconBase>; }
