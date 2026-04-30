@@ -321,6 +321,7 @@ export default function TimerPage() {
   const [inspectionEnabled, setInspectionEnabled] = useState(true);
   const [showMs, setShowMs] = useState(true);          // ms vs seconds-only
   const [holdToStart, setHoldToStart] = useState(true); // long-press arming
+  const [scrambleFontSize, setScrambleFontSize] = useState<'sm' | 'md' | 'lg'>('md');
   // Default false to match SSR; updated after mount via matchMedia. Brief flash
   // possible on mobile pageload but no hydration mismatch.
   const [isMobile, setIsMobile] = useState(false);
@@ -338,8 +339,6 @@ export default function TimerPage() {
   const [mobileSearch, setMobileSearch] = useState('');
   const [manualEntryOpen, setManualEntryOpen] = useState(false);
   const [manualEntryValue, setManualEntryValue] = useState('');
-  const [editScrambleOpen, setEditScrambleOpen] = useState(false);
-  const [editScrambleValue, setEditScrambleValue] = useState('');
   const [sessionPanelOpen, setSessionPanelOpen] = useState(false);
   const [newSessionName, setNewSessionName] = useState('');
   const [cubeFullscreenOpen, setCubeFullscreenOpen] = useState(false);
@@ -470,10 +469,18 @@ export default function TimerPage() {
     try {
       const raw = localStorage.getItem(PREFS_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw) as { inspectionEnabled?: boolean; showMs?: boolean; holdToStart?: boolean };
+        const parsed = JSON.parse(raw) as {
+          inspectionEnabled?: boolean;
+          showMs?: boolean;
+          holdToStart?: boolean;
+          scrambleFontSize?: 'sm' | 'md' | 'lg';
+        };
         if (typeof parsed.inspectionEnabled === 'boolean') setInspectionEnabled(parsed.inspectionEnabled);
         if (typeof parsed.showMs === 'boolean')            setShowMs(parsed.showMs);
         if (typeof parsed.holdToStart === 'boolean')       setHoldToStart(parsed.holdToStart);
+        if (parsed.scrambleFontSize === 'sm' || parsed.scrambleFontSize === 'md' || parsed.scrambleFontSize === 'lg') {
+          setScrambleFontSize(parsed.scrambleFontSize);
+        }
       }
     } catch { /* ignore */ }
     prefsLoadedRef.current = true;
@@ -483,9 +490,9 @@ export default function TimerPage() {
   useEffect(() => {
     if (!prefsLoadedRef.current) return;
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify({ inspectionEnabled, showMs, holdToStart }));
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ inspectionEnabled, showMs, holdToStart, scrambleFontSize }));
     } catch { /* ignore */ }
-  }, [inspectionEnabled, showMs, holdToStart]);
+  }, [inspectionEnabled, showMs, holdToStart, scrambleFontSize]);
 
   // Stats — recomputed on every solves change
   const stats = useMemo(() => calcStats(solves), [solves]);
@@ -648,18 +655,25 @@ export default function TimerPage() {
     if (confirm('Reset current session? All solves will be cleared.')) setSolves([]);
   };
 
-  // Parse a manual time entry. Accepts "12.34", "1:23.45", "1:23", "12".
-  // Returns ms, or null if invalid.
+  // Smart digit-only parser: last 2 digits = centiseconds, next 2 = seconds,
+  // remaining = minutes. Examples:
+  //   "1221"   → 12.21s   (12s 21cs)
+  //   "122"    → 1.22s    (1s 22cs)
+  //   "12211"  → 1:22.11
+  //   "122111" → 12:21.11
   function parseManualTime(raw: string): number | null {
-    const s = raw.trim();
-    if (!s) return null;
-    const m = s.match(/^(?:(\d+):)?(\d+)(?:\.(\d{1,3}))?$/);
-    if (!m) return null;
-    const mins = m[1] ? parseInt(m[1], 10) : 0;
-    const secs = parseInt(m[2], 10);
-    const fracStr = m[3] ?? '';
-    const fracMs = fracStr ? parseInt(fracStr.padEnd(3, '0').slice(0, 3), 10) : 0;
-    return (mins * 60 + secs) * 1000 + fracMs;
+    const d = (raw || '').replace(/\D/g, '');
+    if (!d) return null;
+    let s = d;
+    const csStr  = s.length >= 2 ? s.slice(-2) : s.padStart(2, '0');
+    s = s.length >= 2 ? s.slice(0, -2) : '';
+    const secStr = s.length >= 2 ? s.slice(-2) : s;
+    s = s.length >= 2 ? s.slice(0, -2) : '';
+    const minStr = s;
+    const cs  = parseInt(csStr, 10) || 0;
+    const sec = parseInt(secStr || '0', 10) || 0;
+    const min = parseInt(minStr || '0', 10) || 0;
+    return (min * 60 + sec) * 1000 + cs * 10;
   }
 
   function commitManualEntry() {
@@ -677,11 +691,6 @@ export default function TimerPage() {
     setManualEntryValue('');
   }
 
-  function commitEditScramble() {
-    const next = editScrambleValue.replace(/\s+/g, ' ').trim();
-    if (next) setScramble(next);
-    setEditScrambleOpen(false);
-  }
 
   // ── PB detection (for the most recent solve) ─────────────────────────────
   const lastSolveIsPB = useMemo(() => {
@@ -1295,6 +1304,7 @@ export default function TimerPage() {
             display: 'flex', flexDirection: 'column',
             background: C.bg, color: C.text,
             overflow: 'hidden',
+            paddingBottom: 56,  // reserve space for the fixed bottom nav
           }}>
             {/* ── TIMER TAB ─────────────────────────────────────────────── */}
             {mobileTab === 'timer' && (
@@ -1365,37 +1375,54 @@ export default function TimerPage() {
                 {/* Scramble row + refresh */}
                 <div style={{
                   margin: '0 0.7rem 0.5rem',
-                  display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.5rem',
-                  alignItems: 'center',
+                  display: 'flex', justifyContent: 'center',
                 }}>
                   <div style={{
                     fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
-                    fontSize: '0.95rem', lineHeight: 1.4,
-                    color: C.text, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                    maxHeight: '2.8em', overflow: 'hidden',
+                    fontSize: scrambleFontSize === 'sm' ? 14 : scrambleFontSize === 'lg' ? 22 : 18,
+                    lineHeight: 1.45,
+                    color: C.text,
+                    whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                    textAlign: 'center',
+                    maxWidth: '100%',
                   }}>
                     {scramble}
                   </div>
+                </div>
+
+                {/* Action row: refresh (purple) + add time */}
+                <div style={{
+                  margin: '0 0.7rem 0.4rem',
+                  display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem',
+                }}>
                   <button
                     onClick={newScramble}
                     aria-label="New scramble"
                     style={{
-                      width: 38, height: 38, borderRadius: 10,
-                      background: C.card, border: `1px solid ${C.border}`,
-                      color: C.accent, cursor: 'pointer',
-                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      height: 40, borderRadius: 10,
+                      background: C.accentDim, color: C.accent,
+                      border: `1px solid ${C.borderHi}`, cursor: 'pointer',
+                      fontFamily: 'inherit', fontWeight: 600,
+                      letterSpacing: '0.04em', fontSize: '0.78rem',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem',
                     }}
-                  ><IconRefresh size={18} /></button>
-                </div>
-
-                {/* Action icons row */}
-                <div style={{
-                  margin: '0 0.7rem 0.4rem',
-                  display: 'flex', gap: '0.4rem',
-                }}>
-                  <MobileActionIcon label="New scramble"   onClick={newScramble}                                                                  icon={<IconRefresh size={16} />} />
-                  <MobileActionIcon label="Edit scramble"  onClick={() => { setEditScrambleValue(scramble); setEditScrambleOpen(true); }}         icon={<IconPencil size={16} />} />
-                  <MobileActionIcon label="Add manual time" onClick={() => { setManualEntryValue(''); setManualEntryOpen(true); }}                icon={<IconPlus size={16} />} />
+                  >
+                    <IconRefresh size={16} /> New scramble
+                  </button>
+                  <button
+                    onClick={() => { setManualEntryValue(''); setManualEntryOpen(true); }}
+                    aria-label="Add time"
+                    style={{
+                      height: 40, borderRadius: 10,
+                      background: C.card, color: C.text,
+                      border: `1px solid ${C.border}`, cursor: 'pointer',
+                      fontFamily: 'inherit', fontWeight: 600,
+                      letterSpacing: '0.04em', fontSize: '0.78rem',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem',
+                    }}
+                  >
+                    <IconPlus size={16} /> Add time
+                  </button>
                 </div>
 
                 {/* Big timer area */}
@@ -1662,9 +1689,10 @@ export default function TimerPage() {
               </div>
             )}
 
-            {/* ── BOTTOM NAV (always visible) ───────────────────────────── */}
+            {/* ── BOTTOM NAV (fixed, always visible regardless of viewport) ── */}
             <nav style={{
-              flex: '0 0 56px',
+              position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 100,
+              height: 56,
               display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
               background: C.card, borderTop: `1px solid ${C.border}`,
             }}>
@@ -1859,36 +1887,58 @@ export default function TimerPage() {
         );
       })()}
 
-      {/* Manual time entry modal (mobile + icon) */}
-      {manualEntryOpen && (
+      {/* Manual time entry modal (mobile Add Time button) */}
+      {manualEntryOpen && (() => {
+        const parsedMs = parseManualTime(manualEntryValue);
+        const previewStr = parsedMs == null ? '0.00' : fmtMs(parsedMs);
+        return (
         <ModalShell title="Add Time" onClose={() => setManualEntryOpen(false)}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
             <div style={{ fontSize: '0.78rem', color: C.muted, lineHeight: 1.5 }}>
-              Enter time as <span style={{ fontFamily: '"JetBrains Mono", monospace', color: C.text }}>12.34</span> or <span style={{ fontFamily: '"JetBrains Mono", monospace', color: C.text }}>1:23.45</span>.
+              Type digits — last 2 are centiseconds.
+              <br />
+              <span style={{ fontFamily: '"JetBrains Mono", monospace', color: C.text }}>1221</span>
+              <span> → 12.21s · </span>
+              <span style={{ fontFamily: '"JetBrains Mono", monospace', color: C.text }}>12211</span>
+              <span> → 1:22.11</span>
             </div>
             <input
               autoFocus
               value={manualEntryValue}
-              onChange={e => setManualEntryValue(e.target.value)}
+              onChange={e => setManualEntryValue(e.target.value.replace(/\D/g, ''))}
               onKeyDown={e => {
                 if (e.key === 'Enter') { e.preventDefault(); commitManualEntry(); }
               }}
-              placeholder="0.00"
-              inputMode="decimal"
+              placeholder="1221"
+              inputMode="numeric"
+              pattern="[0-9]*"
               style={{
                 background: C.cardAlt, color: C.text,
                 border: `1px solid ${C.border}`, borderRadius: 8,
                 padding: '0.6rem 0.75rem',
                 fontSize: '1.2rem', fontFamily: '"JetBrains Mono", monospace',
                 fontVariantNumeric: 'tabular-nums', outline: 'none',
-                letterSpacing: '0.04em',
+                letterSpacing: '0.05em',
               }}
             />
-            {manualEntryValue && parseManualTime(manualEntryValue) == null && (
-              <div style={{ fontSize: '0.72rem', color: C.danger }}>
-                Couldn&apos;t parse that — try a format like 12.34 or 1:23.45.
-              </div>
-            )}
+            {/* Live preview */}
+            <div style={{
+              display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+              padding: '0.6rem 0.85rem',
+              background: C.cardAlt, border: `1px solid ${C.border}`, borderRadius: 8,
+            }}>
+              <span style={{ fontSize: '0.65rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, fontWeight: 600 }}>
+                Preview
+              </span>
+              <span style={{
+                fontFamily: '"JetBrains Mono", monospace',
+                fontSize: '1.4rem', fontWeight: 700,
+                color: parsedMs == null ? C.mutedDim : C.success,
+                fontVariantNumeric: 'tabular-nums',
+              }}>
+                {previewStr}
+              </span>
+            </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
               <button
                 onClick={() => setManualEntryOpen(false)}
@@ -1915,51 +1965,8 @@ export default function TimerPage() {
             </div>
           </div>
         </ModalShell>
-      )}
-
-      {/* Edit scramble modal (mobile ✏ icon) */}
-      {editScrambleOpen && (
-        <ModalShell title="Edit Scramble" onClose={() => setEditScrambleOpen(false)}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-            <textarea
-              autoFocus
-              value={editScrambleValue}
-              onChange={e => setEditScrambleValue(e.target.value)}
-              rows={4}
-              style={{
-                background: C.cardAlt, color: C.text,
-                border: `1px solid ${C.border}`, borderRadius: 8,
-                padding: '0.6rem 0.75rem',
-                fontSize: '0.92rem', fontFamily: '"JetBrains Mono", monospace',
-                lineHeight: 1.5, outline: 'none', resize: 'vertical',
-              }}
-            />
-            <div style={{ fontSize: '0.72rem', color: C.muted }}>
-              Replaces the current scramble. Doesn&apos;t affect the scramble generator.
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-              <button
-                onClick={() => setEditScrambleOpen(false)}
-                style={{
-                  padding: '0.5rem 0.9rem', borderRadius: 8,
-                  fontSize: '0.82rem', fontWeight: 600, fontFamily: 'inherit',
-                  background: 'transparent', color: C.muted,
-                  border: `1px solid ${C.border}`, cursor: 'pointer',
-                }}
-              >Cancel</button>
-              <button
-                onClick={commitEditScramble}
-                style={{
-                  padding: '0.5rem 0.9rem', borderRadius: 8,
-                  fontSize: '0.82rem', fontWeight: 700, fontFamily: 'inherit',
-                  background: C.accentDim, color: C.accent,
-                  border: `1px solid ${C.borderHi}`, cursor: 'pointer',
-                }}
-              >Save</button>
-            </div>
-          </div>
-        </ModalShell>
-      )}
+        );
+      })()}
 
       {/* Settings modal */}
       {settingsOpen && (
@@ -1991,6 +1998,34 @@ export default function TimerPage() {
                 <ToggleRow label="Inspection time"  value={inspectionEnabled} onChange={setInspectionEnabled} />
                 <ToggleRow label="Show milliseconds" value={showMs}            onChange={setShowMs} />
                 <ToggleRow label="Hold to start"    value={holdToStart}        onChange={setHoldToStart} />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                  <span style={{ color: C.text }}>Scramble size</span>
+                  <div style={{
+                    display: 'inline-flex',
+                    background: 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 8, padding: 2, gap: 2,
+                  }}>
+                    {(['sm','md','lg'] as const).map(sz => {
+                      const label = sz === 'sm' ? 'Small' : sz === 'md' ? 'Medium' : 'Large';
+                      const active = scrambleFontSize === sz;
+                      return (
+                        <button
+                          key={sz}
+                          onClick={() => setScrambleFontSize(sz)}
+                          style={{
+                            padding: '0.3rem 0.65rem', borderRadius: 6,
+                            fontFamily: 'inherit', fontSize: '0.74rem', fontWeight: 600,
+                            background: active ? C.accentDim : 'transparent',
+                            color: active ? C.accent : C.muted,
+                            border: `1px solid ${active ? C.borderHi : 'transparent'}`,
+                            cursor: 'pointer', transition: 'all 0.12s',
+                          }}
+                        >{label}</button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             </div>
             <div style={{ height: 1, background: C.border }} />
