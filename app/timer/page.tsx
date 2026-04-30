@@ -365,6 +365,16 @@ export default function TimerPage() {
   const [newSessionName, setNewSessionName] = useState('');
   const [cubeFullscreenOpen, setCubeFullscreenOpen] = useState(false);
   const [sessionDropdownOpen, setSessionDropdownOpen] = useState(false);
+  type SettingsSection = 'timer' | 'bluetooth' | 'shortcuts' | 'display';
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('timer');
+  // Mobile accordion: which section bodies are open. Defaults to Timer.
+  const [mobileExpanded, setMobileExpanded] = useState<Set<SettingsSection>>(() => new Set(['timer']));
+  const toggleMobileSection = (s: SettingsSection) =>
+    setMobileExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(s)) next.delete(s); else next.add(s);
+      return next;
+    });
   // Two-step Alt+D confirmation for clearing the session.
   const [clearPending, setClearPending] = useState(false);
   const clearTimeoutRef = useRef<number | null>(null);
@@ -2253,199 +2263,26 @@ export default function TimerPage() {
         );
       })()}
 
-      {/* Settings modal */}
+      {/* Settings: desktop sidebar modal + mobile bottom-sheet accordion */}
       {settingsOpen && (
-        <ModalShell
-          title="Settings"
+        <SettingsPanel
+          isMobile={isMobile}
+          C={C}
           onClose={() => setSettingsOpen(false)}
-          headerAction={(
-            <button
-              onClick={() => router.push('/')}
-              style={{
-                background: 'transparent', border: 'none', cursor: 'pointer',
-                color: C.mutedDim, fontSize: '0.72rem', fontFamily: 'inherit',
-                letterSpacing: '0.04em', padding: '0.1rem 0.25rem',
-                transition: 'color 0.15s',
-              }}
-              onMouseEnter={e => (e.currentTarget.style.color = C.muted)}
-              onMouseLeave={e => (e.currentTarget.style.color = C.mutedDim)}
-            >
-              ← Exit
-            </button>
-          )}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-            <div>
-              <div style={{ fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, marginBottom: '0.5rem', fontWeight: 600 }}>
-                Preferences
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <ToggleRow label="Inspection time"  value={inspectionEnabled} onChange={setInspectionEnabled} />
-                <ToggleRow label="Hold to start"    value={holdToStart}        onChange={setHoldToStart} />
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.85rem' }}>
-                  <span style={{ color: C.text }}>Timer precision</span>
-                  <div style={{
-                    display: 'inline-flex',
-                    background: 'rgba(255,255,255,0.04)',
-                    border: `1px solid ${C.border}`,
-                    borderRadius: 8, padding: 2, gap: 2,
-                  }}>
-                    {(['cs','ms'] as const).map(p => {
-                      const label = p === 'cs' ? 'Centiseconds (0.00)' : 'Milliseconds (0.000)';
-                      const active = precision === p;
-                      return (
-                        <button
-                          key={p}
-                          onClick={() => setPrecision(p)}
-                          title={p === 'cs' ? 'Truncated to 1/100s' : 'Truncated to 1/1000s'}
-                          style={{
-                            padding: '0.3rem 0.65rem', borderRadius: 6,
-                            fontFamily: 'inherit', fontSize: '0.74rem', fontWeight: 600,
-                            background: active ? C.accentDim : 'transparent',
-                            color: active ? C.accent : C.muted,
-                            border: `1px solid ${active ? C.borderHi : 'transparent'}`,
-                            cursor: 'pointer', transition: 'all 0.12s',
-                          }}
-                        >{label}</button>
-                      );
-                    })}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.85rem' }}>
-                  <span style={{ color: C.text }}>Scramble size</span>
-                  <div style={{
-                    display: 'inline-flex',
-                    background: 'rgba(255,255,255,0.04)',
-                    border: `1px solid ${C.border}`,
-                    borderRadius: 8, padding: 2, gap: 2,
-                  }}>
-                    {(['sm','md','lg'] as const).map(sz => {
-                      const label = sz === 'sm' ? 'Small' : sz === 'md' ? 'Medium' : 'Large';
-                      const active = scrambleFontSize === sz;
-                      return (
-                        <button
-                          key={sz}
-                          onClick={() => setScrambleFontSize(sz)}
-                          style={{
-                            padding: '0.3rem 0.65rem', borderRadius: 6,
-                            fontFamily: 'inherit', fontSize: '0.74rem', fontWeight: 600,
-                            background: active ? C.accentDim : 'transparent',
-                            color: active ? C.accent : C.muted,
-                            border: `1px solid ${active ? C.borderHi : 'transparent'}`,
-                            cursor: 'pointer', transition: 'all 0.12s',
-                          }}
-                        >{label}</button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div style={{ height: 1, background: C.border }} />
-
-            {/* Bluetooth Timer section */}
-            <div>
-              <div style={{ fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, marginBottom: '0.5rem', fontWeight: 600 }}>
-                Bluetooth Timer
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', minWidth: 0 }}>
-                    <span style={{
-                      display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
-                      fontSize: '0.85rem', color: C.text,
-                    }}>
-                      <span style={{
-                        width: 8, height: 8, borderRadius: 999,
-                        background: gan.state === 'connected' ? C.success : C.mutedDim,
-                        display: 'inline-block', flexShrink: 0,
-                      }} />
-                      {gan.state === 'connected' ? 'Connected' :
-                       gan.state === 'connecting' ? 'Connecting…' :
-                       gan.state === 'unsupported' ? 'Not supported' :
-                       'Disconnected'}
-                    </span>
-                    {gan.state === 'connected' && gan.deviceName && (
-                      <span style={{ fontSize: '0.7rem', color: C.muted, fontFamily: '"JetBrains Mono", monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {gan.deviceName}
-                      </span>
-                    )}
-                    {gan.state === 'unsupported' && (
-                      <span style={{ fontSize: '0.7rem', color: C.mutedDim, lineHeight: 1.4 }}>
-                        Web Bluetooth requires Chrome / Edge over HTTPS or localhost.
-                      </span>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => {
-                      if (gan.state === 'unsupported') return;
-                      if (gan.state === 'connected') gan.disconnect();
-                      else if (gan.state !== 'connecting') gan.connect();
-                    }}
-                    disabled={gan.state === 'unsupported' || gan.state === 'connecting'}
-                    style={{
-                      padding: '0.4rem 0.85rem', borderRadius: 8,
-                      fontSize: '0.78rem', fontWeight: 700, fontFamily: 'inherit',
-                      letterSpacing: '0.04em',
-                      background: gan.state === 'connected'
-                        ? 'rgba(239,68,68,0.1)'
-                        : C.accentDim,
-                      color: gan.state === 'connected' ? '#f87171' : C.accent,
-                      border: `1px solid ${gan.state === 'connected' ? 'rgba(239,68,68,0.3)' : C.borderHi}`,
-                      cursor: gan.state === 'unsupported' || gan.state === 'connecting' ? 'not-allowed' : 'pointer',
-                      opacity: gan.state === 'unsupported' || gan.state === 'connecting' ? 0.5 : 1,
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {gan.state === 'connected' ? 'Disconnect' :
-                     gan.state === 'connecting' ? 'Connecting…' :
-                     'Connect'}
-                  </button>
-                </div>
-              </div>
-            </div>
-            <div style={{ height: 1, background: C.border }} />
-            <div>
-              <div style={{ fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, marginBottom: '0.5rem', fontWeight: 600 }}>
-                Theme
-              </div>
-              <div style={{ fontSize: '0.82rem', color: C.muted, lineHeight: 1.5 }}>
-                Lavender on midnight. Additional themes coming soon.
-              </div>
-            </div>
-            <div style={{ height: 1, background: C.border }} />
-            <div>
-              <div style={{ fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, marginBottom: '0.5rem', fontWeight: 600 }}>
-                Keyboard Shortcuts
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', fontSize: '0.85rem' }}>
-                <Row label="Start / stop timer"  kbd="SPACE" />
-                <Row label="Clear session (press twice)" kbd="Alt+D" />
-                <Row label="Square-1"            kbd="Alt+1" />
-                <Row label="2x2x2 Cube"          kbd="Alt+2" />
-                <Row label="3x3x3 Cube"          kbd="Alt+3" />
-                <Row label="4x4x4 Cube"          kbd="Alt+4" />
-                <Row label="5x5x5 Cube"          kbd="Alt+5" />
-                <Row label="6x6x6 Cube"          kbd="Alt+6" />
-                <Row label="7x7x7 Cube"          kbd="Alt+7" />
-                <Row label="Skewb"               kbd="Alt+S" />
-                <Row label="Megaminx"            kbd="Alt+M" />
-                <Row label="Clock"               kbd="Alt+C" />
-                <Row label="Pyraminx"            kbd="Alt+P" />
-              </div>
-            </div>
-            <div style={{ height: 1, background: C.border }} />
-            <div>
-              <div style={{ fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, marginBottom: '0.5rem', fontWeight: 600 }}>
-                Session
-              </div>
-              <div style={{ fontSize: '0.82rem', color: C.muted, lineHeight: 1.5 }}>
-                Solves are saved to local storage and restored on reload. Switching events generates a new scramble. Clearing the session is permanent.
-              </div>
-            </div>
-          </div>
-        </ModalShell>
+          onExit={() => router.push('/')}
+          section={settingsSection}
+          setSection={setSettingsSection}
+          mobileExpanded={mobileExpanded}
+          toggleMobileSection={toggleMobileSection}
+          // Timer
+          inspectionEnabled={inspectionEnabled} setInspectionEnabled={setInspectionEnabled}
+          holdToStart={holdToStart} setHoldToStart={setHoldToStart}
+          precision={precision} setPrecision={setPrecision}
+          // Bluetooth
+          gan={gan}
+          // Display
+          scrambleFontSize={scrambleFontSize} setScrambleFontSize={setScrambleFontSize}
+        />
       )}
 
       {/* Solve detail modal — shows time, full scramble, and penalty editor */}
@@ -2820,6 +2657,438 @@ function MobileLineChart({
   );
 }
 
+// ── SettingsPanel: large multi-section modal (desktop) / bottom sheet (mobile)
+type SettingsSectionId = 'timer' | 'bluetooth' | 'shortcuts' | 'display';
+interface SettingsPanelProps {
+  isMobile: boolean;
+  C: typeof C;
+  onClose: () => void;
+  onExit: () => void;
+  section: SettingsSectionId;
+  setSection: (s: SettingsSectionId) => void;
+  mobileExpanded: Set<SettingsSectionId>;
+  toggleMobileSection: (s: SettingsSectionId) => void;
+  inspectionEnabled: boolean;
+  setInspectionEnabled: (v: boolean) => void;
+  holdToStart: boolean;
+  setHoldToStart: (v: boolean) => void;
+  precision: Precision;
+  setPrecision: (p: Precision) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  gan: any;
+  scrambleFontSize: 'sm' | 'md' | 'lg';
+  setScrambleFontSize: (s: 'sm' | 'md' | 'lg') => void;
+}
+
+const SETTINGS_SECTIONS: { id: SettingsSectionId; label: string; icon: React.ReactNode }[] = [
+  { id: 'timer',     label: 'Timer',     icon: <IconStopwatch size={16} /> },
+  { id: 'bluetooth', label: 'Bluetooth', icon: <IconBluetooth size={16} /> },
+  { id: 'shortcuts', label: 'Shortcuts', icon: <IconKeyboard  size={16} /> },
+  { id: 'display',   label: 'Display',   icon: <IconPalette   size={16} /> },
+];
+
+function SettingsPanel(props: SettingsPanelProps) {
+  const { isMobile, C: c, onClose, onExit } = props;
+
+  // ESC closes — captured to win over any other listeners.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') { e.stopPropagation(); onClose(); }
+    }
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
+
+  // ── Section bodies (shared between desktop + mobile) ──────────────────────
+  const renderTimer = () => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+      <ToggleRow label="Inspection time" value={props.inspectionEnabled} onChange={props.setInspectionEnabled} />
+      <ToggleRow label="Hold to start"   value={props.holdToStart}        onChange={props.setHoldToStart} />
+      <SegmentedRow
+        label="Timer precision"
+        value={props.precision}
+        onChange={props.setPrecision}
+        options={[
+          { value: 'cs', label: 'Centiseconds (0.00)',  title: 'Truncated to 1/100s' },
+          { value: 'ms', label: 'Milliseconds (0.000)', title: 'Truncated to 1/1000s' },
+        ]}
+        c={c}
+      />
+    </div>
+  );
+
+  const renderBluetooth = () => {
+    const { gan } = props;
+    const connected = gan.state === 'connected';
+    const connecting = gan.state === 'connecting';
+    const unsupported = gan.state === 'unsupported';
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: '0.75rem', padding: '0.75rem', borderRadius: 10,
+          background: c.cardAlt, border: `1px solid ${c.border}`,
+        }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', minWidth: 0 }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.88rem', fontWeight: 600, color: c.text }}>
+              <span style={{
+                width: 9, height: 9, borderRadius: 999,
+                background: connected ? c.success : c.mutedDim,
+                flexShrink: 0,
+              }} />
+              {connected ? 'Connected' : connecting ? 'Connecting…' : unsupported ? 'Not supported' : 'Disconnected'}
+            </span>
+            {connected && gan.deviceName && (
+              <span style={{ fontSize: '0.74rem', color: c.muted, fontFamily: '"JetBrains Mono", monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {gan.deviceName}
+              </span>
+            )}
+            {!connected && !connecting && !unsupported && (
+              <span style={{ fontSize: '0.74rem', color: c.muted }}>
+                Pair your GAN Halo Smart Timer to record solves automatically.
+              </span>
+            )}
+          </div>
+          <button
+            onClick={() => {
+              if (unsupported) return;
+              if (connected) gan.disconnect();
+              else if (!connecting) gan.connect();
+            }}
+            disabled={unsupported || connecting}
+            style={{
+              padding: '0.5rem 0.95rem', borderRadius: 8,
+              fontSize: '0.78rem', fontWeight: 700, fontFamily: 'inherit',
+              letterSpacing: '0.04em',
+              background: connected ? 'rgba(239,68,68,0.1)' : c.accentDim,
+              color: connected ? '#f87171' : c.accent,
+              border: `1px solid ${connected ? 'rgba(239,68,68,0.3)' : c.borderHi}`,
+              cursor: unsupported || connecting ? 'not-allowed' : 'pointer',
+              opacity: unsupported || connecting ? 0.5 : 1,
+              whiteSpace: 'nowrap', flexShrink: 0,
+            }}
+          >
+            {connected ? 'Disconnect' : connecting ? 'Connecting…' : 'Connect'}
+          </button>
+        </div>
+        {unsupported ? (
+          <div style={{ fontSize: '0.78rem', color: c.mutedDim, lineHeight: 1.55 }}>
+            Web Bluetooth is required. Use Chrome or Edge over HTTPS or localhost.
+          </div>
+        ) : (
+          <div style={{ fontSize: '0.78rem', color: c.muted, lineHeight: 1.55 }}>
+            Compatible with the GAN Halo Smart Timer over Bluetooth. While
+            connected, the physical pads control inspection and the timer —
+            keyboard / tap input is paused so the device is the source of truth.
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderShortcuts = () => (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: '0.5rem 1.25rem',
+      fontSize: '0.84rem',
+    }}>
+      <ShortcutCell label="Start / stop timer"            kbd="SPACE" c={c} />
+      <ShortcutCell label="Clear session (press twice)"   kbd="Alt+D" c={c} />
+      <ShortcutCell label="Square-1"                      kbd="Alt+1" c={c} />
+      <ShortcutCell label="2×2 Cube"                      kbd="Alt+2" c={c} />
+      <ShortcutCell label="3×3 Cube"                      kbd="Alt+3" c={c} />
+      <ShortcutCell label="4×4 Cube"                      kbd="Alt+4" c={c} />
+      <ShortcutCell label="5×5 Cube"                      kbd="Alt+5" c={c} />
+      <ShortcutCell label="6×6 Cube"                      kbd="Alt+6" c={c} />
+      <ShortcutCell label="7×7 Cube"                      kbd="Alt+7" c={c} />
+      <ShortcutCell label="Skewb"                         kbd="Alt+S" c={c} />
+      <ShortcutCell label="Megaminx"                      kbd="Alt+M" c={c} />
+      <ShortcutCell label="Clock"                         kbd="Alt+C" c={c} />
+      <ShortcutCell label="Pyraminx"                      kbd="Alt+P" c={c} />
+    </div>
+  );
+
+  const renderDisplay = () => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+      <SegmentedRow
+        label="Scramble font size"
+        value={props.scrambleFontSize}
+        onChange={props.setScrambleFontSize}
+        options={[
+          { value: 'sm', label: 'Small'  },
+          { value: 'md', label: 'Medium' },
+          { value: 'lg', label: 'Large'  },
+        ]}
+        c={c}
+      />
+      <div style={{
+        background: c.cardAlt, border: `1px solid ${c.border}`,
+        borderRadius: 10, padding: '0.7rem 0.85rem',
+        fontSize: '0.78rem', color: c.muted, lineHeight: 1.55,
+      }}>
+        <div style={{ color: c.text, fontWeight: 700, marginBottom: '0.2rem' }}>Theme</div>
+        Lavender on midnight. Additional themes coming soon.
+      </div>
+    </div>
+  );
+
+  const renderSection = (id: SettingsSectionId) => {
+    if (id === 'timer')     return renderTimer();
+    if (id === 'bluetooth') return renderBluetooth();
+    if (id === 'shortcuts') return renderShortcuts();
+    return renderDisplay();
+  };
+
+  // Header content shared between layouts (Settings title + Exit + Close).
+  const headerActions = (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.6rem' }}>
+      <button
+        onClick={onExit}
+        style={{
+          background: 'transparent', border: 'none', cursor: 'pointer',
+          color: c.mutedDim, fontSize: '0.74rem', fontFamily: 'inherit',
+          letterSpacing: '0.04em', padding: '0.2rem 0.45rem',
+          transition: 'color 0.15s',
+        }}
+        onMouseEnter={e => (e.currentTarget.style.color = c.muted)}
+        onMouseLeave={e => (e.currentTarget.style.color = c.mutedDim)}
+      >← Exit</button>
+      <button
+        onClick={onClose}
+        aria-label="Close"
+        style={{
+          width: 30, height: 30, borderRadius: 8,
+          background: 'transparent', border: `1px solid ${c.border}`,
+          color: c.muted, cursor: 'pointer',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        }}
+      ><IconClose size={14} /></button>
+    </div>
+  );
+
+  // ── Mobile bottom sheet with accordion ──
+  if (isMobile) {
+    return (
+      <div
+        onClick={onClose}
+        style={{
+          position: 'fixed', inset: 0, zIndex: 9000,
+          background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)',
+          display: 'flex', alignItems: 'flex-end', justifyContent: 'stretch',
+        }}
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            width: '100%', maxHeight: '85vh',
+            background: c.card, borderTop: `1px solid ${c.border}`,
+            borderTopLeftRadius: 16, borderTopRightRadius: 16,
+            paddingBottom: 'env(safe-area-inset-bottom)',
+            display: 'flex', flexDirection: 'column',
+            boxShadow: '0 -16px 40px rgba(0,0,0,0.55)',
+          }}
+        >
+          {/* Sticky header */}
+          <div style={{
+            flexShrink: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '0.85rem 0.95rem',
+            borderBottom: `1px solid ${c.border}`,
+          }}>
+            <div style={{ fontSize: '1.05rem', fontWeight: 700, color: c.text }}>Settings</div>
+            {headerActions}
+          </div>
+          {/* Scroll area with accordion */}
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0.5rem 0.85rem 1rem' }}>
+            {SETTINGS_SECTIONS.map(s => {
+              const open = props.mobileExpanded.has(s.id);
+              return (
+                <div
+                  key={s.id}
+                  style={{
+                    background: c.cardAlt, border: `1px solid ${c.border}`,
+                    borderRadius: 10, marginBottom: '0.5rem', overflow: 'hidden',
+                  }}
+                >
+                  <button
+                    onClick={() => props.toggleMobileSection(s.id)}
+                    aria-expanded={open}
+                    style={{
+                      width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      padding: '0.75rem 0.85rem',
+                      background: 'transparent', border: 'none', cursor: 'pointer',
+                      color: c.text, fontFamily: 'inherit',
+                    }}
+                  >
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.55rem' }}>
+                      <span style={{ color: open ? c.accent : c.muted, display: 'inline-flex' }}>{s.icon}</span>
+                      <span style={{ fontSize: '0.92rem', fontWeight: 700 }}>{s.label}</span>
+                    </span>
+                    <span style={{
+                      color: c.muted, fontSize: '0.72rem',
+                      transform: open ? 'rotate(180deg)' : 'none',
+                      transition: 'transform 0.15s',
+                    }}>▾</span>
+                  </button>
+                  {open && (
+                    <div style={{
+                      padding: '0.5rem 0.85rem 0.95rem',
+                      borderTop: `1px solid ${c.border}`,
+                    }}>
+                      {renderSection(s.id)}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Desktop: 800×560 modal with left sidebar nav ──
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 9000,
+        background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '1rem',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: 'min(800px, 100%)', height: 'min(560px, 100%)',
+          background: c.card, border: `1px solid ${c.border}`,
+          borderRadius: 14, boxShadow: '0 24px 60px rgba(0,0,0,0.65)',
+          display: 'flex', flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          flexShrink: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0.85rem 1rem',
+          borderBottom: `1px solid ${c.border}`,
+        }}>
+          <div style={{ fontSize: '1.05rem', fontWeight: 700, color: c.text }}>Settings</div>
+          {headerActions}
+        </div>
+        {/* Body: sidebar + content */}
+        <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+          <nav style={{
+            flex: '0 0 220px', minWidth: 0,
+            background: c.cardAlt, borderRight: `1px solid ${c.border}`,
+            padding: '0.7rem 0.5rem',
+            display: 'flex', flexDirection: 'column', gap: '0.2rem',
+          }}>
+            {SETTINGS_SECTIONS.map(s => {
+              const active = props.section === s.id;
+              return (
+                <button
+                  key={s.id}
+                  onClick={() => props.setSection(s.id)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '0.6rem',
+                    padding: '0.55rem 0.7rem', borderRadius: 8,
+                    background: active ? c.accentDim : 'transparent',
+                    border: `1px solid ${active ? c.borderHi : 'transparent'}`,
+                    color: active ? c.accent : c.muted,
+                    fontFamily: 'inherit', fontSize: '0.88rem', fontWeight: 600,
+                    cursor: 'pointer', textAlign: 'left',
+                    transition: 'background 0.12s, color 0.12s, border-color 0.12s',
+                  }}
+                  onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                  onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <span style={{ display: 'inline-flex' }}>{s.icon}</span>
+                  {s.label}
+                </button>
+              );
+            })}
+          </nav>
+          <div style={{
+            flex: 1, minWidth: 0,
+            padding: '1.1rem 1.25rem',
+            overflowY: 'auto',
+          }}>
+            <div style={{
+              fontSize: '0.66rem', letterSpacing: '0.12em',
+              textTransform: 'uppercase', color: c.muted, fontWeight: 700,
+              marginBottom: '0.85rem',
+            }}>
+              {SETTINGS_SECTIONS.find(s => s.id === props.section)?.label}
+            </div>
+            {renderSection(props.section)}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Reusable label + segmented options row used across Settings sections.
+function SegmentedRow<T extends string>({
+  label, value, onChange, options, c,
+}: {
+  label: string;
+  value: T;
+  onChange: (v: T) => void;
+  options: { value: T; label: string; title?: string }[];
+  c: typeof C;
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.85rem', gap: '0.6rem', flexWrap: 'wrap' }}>
+      <span style={{ color: c.text }}>{label}</span>
+      <div style={{
+        display: 'inline-flex',
+        background: 'rgba(255,255,255,0.04)',
+        border: `1px solid ${c.border}`,
+        borderRadius: 8, padding: 2, gap: 2,
+      }}>
+        {options.map(o => {
+          const active = value === o.value;
+          return (
+            <button
+              key={o.value}
+              onClick={() => onChange(o.value)}
+              title={o.title}
+              style={{
+                padding: '0.3rem 0.7rem', borderRadius: 6,
+                fontFamily: 'inherit', fontSize: '0.74rem', fontWeight: 600,
+                background: active ? c.accentDim : 'transparent',
+                color: active ? c.accent : c.muted,
+                border: `1px solid ${active ? c.borderHi : 'transparent'}`,
+                cursor: 'pointer', transition: 'all 0.12s',
+              }}
+            >{o.label}</button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ShortcutCell({ label, kbd, c }: { label: string; kbd: string; c: typeof C }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', minWidth: 0 }}>
+      <span style={{ color: c.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+      <kbd style={{
+        fontFamily: '"JetBrains Mono", monospace',
+        fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.04em',
+        padding: '0.2rem 0.5rem', borderRadius: 6,
+        background: 'rgba(255,255,255,0.06)', border: `1px solid ${c.border}`,
+        color: c.text, whiteSpace: 'nowrap',
+      }}>{kbd}</kbd>
+    </div>
+  );
+}
+
 function ModalShell({ title, onClose, headerAction, children }: { title: string; onClose: () => void; headerAction?: React.ReactNode; children: React.ReactNode }) {
   // Close on ESC
   useEffect(() => {
@@ -3060,3 +3329,5 @@ function IconCheck(p: IconProps)      { return <IconBase {...p}><path d="M5 12l5
 function IconTrash(p: IconProps)      { return <IconBase {...p}><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6"/><path d="M14 11v6"/></IconBase>; }
 function IconCube(p: IconProps)       { return <IconBase {...p}><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5"/><path d="M12 12L4 7.5"/><path d="M12 12v9"/></IconBase>; }
 function IconBluetooth(p: IconProps)  { return <IconBase {...p}><path d="M7 7l10 10-5 5V2l5 5L7 17"/></IconBase>; }
+function IconKeyboard(p: IconProps)   { return <IconBase {...p}><rect x={2}  y={6}  width={20} height={12} rx={2}/><path d="M6 10h0M10 10h0M14 10h0M18 10h0M6 14h0M10 14h4M18 14h0"/></IconBase>; }
+function IconPalette(p: IconProps)    { return <IconBase {...p}><path d="M12 3a9 9 0 1 0 0 18c1.1 0 2-.9 2-2 0-.5-.2-1-.5-1.4-.3-.4-.5-.9-.5-1.4 0-1.1.9-2 2-2H17a4 4 0 0 0 4-4 8 8 0 0 0-9-7.2"/><circle cx={7.5}  cy={11} r={1}/><circle cx={9.5}  cy={7}  r={1}/><circle cx={14.5} cy={7}  r={1}/><circle cx={17.5} cy={11} r={1}/></IconBase>; }
