@@ -302,33 +302,13 @@ export default function TimerPage() {
     return () => mq.removeEventListener('change', onChange);
   }, []);
 
-  // Swipe-to-delete state for mobile session history
-  const swipeStartRef = useRef<{ id: string; x: number; y: number } | null>(null);
-  const [swipe, setSwipe] = useState<{ id: string; dx: number } | null>(null);
-
-  function onSwipeStart(e: React.TouchEvent, id: string) {
-    const t = e.touches[0];
-    swipeStartRef.current = { id, x: t.clientX, y: t.clientY };
-  }
-  function onSwipeMove(e: React.TouchEvent) {
-    const start = swipeStartRef.current;
-    if (!start) return;
-    const t = e.touches[0];
-    const dx = t.clientX - start.x;
-    const dy = t.clientY - start.y;
-    // Lock to horizontal swipe only; ignore vertical scroll gestures.
-    if (Math.abs(dx) > 6 && Math.abs(dx) > Math.abs(dy) && dx < 0) {
-      setSwipe({ id: start.id, dx: Math.max(dx, -110) });
-    }
-  }
-  function onSwipeEnd() {
-    const s = swipe;
-    swipeStartRef.current = null;
-    if (s && s.dx < -70) {
-      deleteSolve(s.id);
-    }
-    setSwipe(null);
-  }
+  // Mobile tab navigation + entry modals
+  const [mobileTab, setMobileTab] = useState<'timer' | 'solves' | 'stats'>('timer');
+  const [mobileSearch, setMobileSearch] = useState('');
+  const [manualEntryOpen, setManualEntryOpen] = useState(false);
+  const [manualEntryValue, setManualEntryValue] = useState('');
+  const [editScrambleOpen, setEditScrambleOpen] = useState(false);
+  const [editScrambleValue, setEditScrambleValue] = useState('');
 
   // Refresh "X mins ago" labels every 30s
   useEffect(() => {
@@ -507,6 +487,41 @@ export default function TimerPage() {
   const resetSession = () => {
     if (confirm('Reset current session? All solves will be cleared.')) setSolves([]);
   };
+
+  // Parse a manual time entry. Accepts "12.34", "1:23.45", "1:23", "12".
+  // Returns ms, or null if invalid.
+  function parseManualTime(raw: string): number | null {
+    const s = raw.trim();
+    if (!s) return null;
+    const m = s.match(/^(?:(\d+):)?(\d+)(?:\.(\d{1,3}))?$/);
+    if (!m) return null;
+    const mins = m[1] ? parseInt(m[1], 10) : 0;
+    const secs = parseInt(m[2], 10);
+    const fracStr = m[3] ?? '';
+    const fracMs = fracStr ? parseInt(fracStr.padEnd(3, '0').slice(0, 3), 10) : 0;
+    return (mins * 60 + secs) * 1000 + fracMs;
+  }
+
+  function commitManualEntry() {
+    const ms = parseManualTime(manualEntryValue);
+    if (ms == null) return;
+    setSolves(prev => [
+      ...prev,
+      {
+        id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        ms, penalty: 'none',
+        scramble, event: eventId, ts: Date.now(),
+      },
+    ]);
+    setManualEntryOpen(false);
+    setManualEntryValue('');
+  }
+
+  function commitEditScramble() {
+    const next = editScrambleValue.replace(/\s+/g, ' ').trim();
+    if (next) setScramble(next);
+    setEditScrambleOpen(false);
+  }
 
   // ── PB detection (for the most recent solve) ─────────────────────────────
   const lastSolveIsPB = useMemo(() => {
@@ -892,7 +907,56 @@ export default function TimerPage() {
       )}
 
       {isMobile && (() => {
-        const lastSolves = [...solves].slice(-5).reverse();
+        // Solves sorted newest-first (used by Solves and Stats tabs)
+        const solvesNewest = [...solves].slice().reverse();
+
+        // Filter for the Solves tab search box
+        const q = mobileSearch.trim().toLowerCase();
+        const solvesFiltered = !q ? solvesNewest : solvesNewest.filter(s => {
+          const time = fmtMs(finalMs(s), isDnf(s), showMs).toLowerCase();
+          const date = new Date(s.ts).toLocaleString().toLowerCase();
+          return time.includes(q) || date.includes(q) || s.scramble.toLowerCase().includes(q);
+        });
+
+        // Identify best/worst solve ids for grid styling
+        const validSolves = solves.filter(s => !isDnf(s));
+        const bestId = validSolves.length
+          ? validSolves.reduce((a, b) => finalMs(a) <= finalMs(b) ? a : b).id : null;
+        const worstId = validSolves.length
+          ? validSolves.reduce((a, b) => finalMs(a) >= finalMs(b) ? a : b).id : null;
+
+        // Extra averages for the Stats tab
+        const ao50 = avgOfN(solves, 50);
+        const ao100 = avgOfN(solves, 100);
+        const validCount = validSolves.length;
+
+        // Chart series for Stats tab
+        const chartSolves = solves;
+        const chartSeries = (() => {
+          const all: (number | null)[] = [];
+          const best: (number | null)[] = [];
+          const ao5s: (number | null)[] = [];
+          const ao12s: (number | null)[] = [];
+          const pbIndices: number[] = [];
+          let runningBest: number | null = null;
+          chartSolves.forEach((s, i) => {
+            if (isDnf(s)) {
+              all.push(null);
+            } else {
+              const v = finalMs(s);
+              all.push(v);
+              if (runningBest == null || v < runningBest) {
+                runningBest = v;
+                pbIndices.push(i);
+              }
+            }
+            best.push(runningBest);
+            ao5s.push(avgOfN(chartSolves.slice(0, i + 1), 5));
+            ao12s.push(avgOfN(chartSolves.slice(0, i + 1), 12));
+          });
+          return { all, best, ao5s, ao12s, pbIndices };
+        })();
+
         return (
           <div style={{
             position: 'relative', zIndex: 1,
@@ -901,208 +965,473 @@ export default function TimerPage() {
             background: C.bg, color: C.text,
             overflow: 'hidden',
           }}>
-            {/* Header */}
-            <header style={{
-              flex: '0 0 50px',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '0 0.85rem',
-              borderBottom: `1px solid ${C.border}`,
-            }}>
+            {/* ── TIMER TAB ─────────────────────────────────────────────── */}
+            {mobileTab === 'timer' && (
               <div style={{
-                fontSize: '0.95rem', fontWeight: 800, color: C.accent,
-                letterSpacing: '-0.01em', fontFamily: 'Inter, system-ui, sans-serif',
+                flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column',
               }}>
-                Precision Velocity
-              </div>
-              <div style={{ display: 'flex', gap: '0.4rem' }}>
-                <button
-                  onClick={() => setSettingsOpen(true)}
-                  aria-label="Settings"
-                  style={{
-                    width: 34, height: 34, borderRadius: 8,
-                    background: 'transparent', border: `1px solid ${C.border}`,
-                    color: C.muted, cursor: 'pointer', fontSize: '1rem',
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  }}
-                >⚙</button>
-                <button
-                  onClick={() => router.push('/')}
-                  aria-label="Exit timer"
-                  style={{
-                    width: 34, height: 34, borderRadius: 8,
-                    background: 'transparent', border: `1px solid ${C.border}`,
-                    color: C.mutedDim, cursor: 'pointer', fontSize: '1.05rem',
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  }}
-                >×</button>
-              </div>
-            </header>
-
-            {/* Top: scramble + event selector + new */}
-            <section style={{
-              flex: '0 0 auto',
-              padding: '0.7rem 0.85rem',
-              display: 'flex', flexDirection: 'column', gap: '0.5rem',
-              borderBottom: `1px solid ${C.border}`,
-            }}>
-              <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-                <select
-                  value={eventId}
-                  onChange={e => setEventId(e.target.value)}
-                  style={{
-                    flex: 1,
-                    background: C.cardAlt, color: C.text,
-                    border: `1px solid ${C.border}`, borderRadius: 8,
-                    padding: '0.45rem 0.5rem', fontSize: '16px',  // 16px prevents iOS zoom
-                    fontFamily: 'inherit', outline: 'none',
-                  }}
-                >
-                  {EVENTS.map(ev => (
-                    <option key={ev.id} value={ev.id}>{ev.name}</option>
-                  ))}
-                </select>
-                <button
-                  onClick={newScramble}
-                  style={{
-                    background: 'transparent', color: C.accent,
-                    border: `1px solid ${C.borderHi}`, borderRadius: 8,
-                    padding: '0.45rem 0.7rem', fontSize: '0.78rem',
-                    fontFamily: 'inherit', cursor: 'pointer', fontWeight: 600,
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  New
-                </button>
-              </div>
-              <div style={{
-                fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
-                fontSize: '0.85rem', lineHeight: 1.5,
-                color: C.text, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                maxHeight: '4.2em', overflowY: 'auto',
-              }}>
-                {scramble}
-              </div>
-            </section>
-
-            {/* Center: timer (fills remaining space) */}
-            <section
-              onTouchStart={onTimerTouchStart}
-              onTouchEnd={onTimerTouchEnd}
-              style={{
-                flex: '1 1 auto', minHeight: 0,
-                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                userSelect: 'none', cursor: 'pointer', textAlign: 'center',
-                touchAction: 'manipulation',
-                padding: '0.5rem 1rem',
-                borderBottom: `1px solid ${C.border}`,
-                background: timer.state === 'armed' ? `${C.success}10` : 'transparent',
-                transition: 'background 0.12s',
-              }}
-            >
-              {timer.state === 'inspecting' && (
-                <div style={{ fontSize: '0.65rem', letterSpacing: '0.15em', textTransform: 'uppercase', color: C.warn, marginBottom: '0.6rem', fontWeight: 700 }}>
-                  Inspection
-                </div>
-              )}
-              <div style={{
-                fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
-                fontSize: 'clamp(3.5rem, 22vw, 6.5rem)',
-                fontWeight: 700, lineHeight: 0.95,
-                fontVariantNumeric: 'tabular-nums',
-                color: timerColor,
-                transition: 'color 0.12s',
-                textShadow: timer.state === 'armed' ? `0 0 30px ${C.success}55` : 'none',
-              }}>
-                {timerDisplay}
-              </div>
-              <div style={{ fontSize: '0.7rem', color: C.muted, marginTop: '0.9rem', letterSpacing: '0.06em', minHeight: '1rem' }}>
-                {timer.state === 'inspecting' && 'Hold to arm, release to start'}
-                {timer.state === 'armed' && (<span style={{ color: C.success, fontWeight: 700 }}>RELEASE TO START</span>)}
-                {timer.state === 'running' && 'TAP TO STOP'}
-              </div>
-            </section>
-
-            {/* Bottom: quick stats + history + small cube */}
-            <section style={{
-              flex: '0 0 auto',
-              position: 'relative',
-              minHeight: '170px',
-            }}>
-              <div style={{
-                display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
-                gap: '0.4rem', padding: '0.5rem 0.85rem 0.25rem',
-              }}>
-                <MiniStat label="Best" value={fmtMs(stats.best)} />
-                <MiniStat label="Ao5"  value={stats.ao5  == null ? '—' : fmtMs(stats.ao5)}  accent />
-                <MiniStat label="Ao12" value={stats.ao12 == null ? '—' : fmtMs(stats.ao12)} accent />
-              </div>
-              <div style={{
-                padding: '0 0.85rem 0.5rem',
-                paddingRight: '6.5rem',  // reserve right edge for floating cube
-                maxHeight: '110px', overflowY: 'auto',
-                display: 'flex', flexDirection: 'column', gap: '0.25rem',
-              }}>
-                {lastSolves.length === 0 ? (
-                  <div style={{ fontSize: '0.72rem', color: C.mutedDim, padding: '0.5rem 0' }}>
-                    Tap timer above to start your first solve.
+                {/* Header capsule */}
+                <div style={{
+                  margin: '0.7rem 0.7rem 0.5rem',
+                  background: C.card, border: `1px solid ${C.border}`,
+                  borderRadius: 999, padding: '0.35rem 0.45rem',
+                  display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: '0.4rem',
+                }}>
+                  <button
+                    onClick={() => setSettingsOpen(true)}
+                    aria-label="Settings"
+                    style={{
+                      width: 34, height: 34, borderRadius: 999,
+                      background: 'transparent', border: 'none',
+                      color: C.muted, cursor: 'pointer', fontSize: '1.05rem',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    }}
+                  >⚙</button>
+                  <div style={{ position: 'relative' }}>
+                    <select
+                      value={eventId}
+                      onChange={e => setEventId(e.target.value)}
+                      aria-label="Puzzle event"
+                      style={{
+                        width: '100%', appearance: 'none', WebkitAppearance: 'none',
+                        background: 'transparent', color: C.text,
+                        border: 'none', borderRadius: 999,
+                        padding: '0.4rem 1.5rem 0.4rem 0.7rem',
+                        fontSize: '0.92rem', fontWeight: 600, fontFamily: 'inherit',
+                        outline: 'none', textAlign: 'center', textAlignLast: 'center',
+                      }}
+                    >
+                      {EVENTS.map(ev => (
+                        <option key={ev.id} value={ev.id}>{ev.name}</option>
+                      ))}
+                    </select>
+                    <span style={{
+                      position: 'absolute', right: '0.55rem', top: '50%',
+                      transform: 'translateY(-50%)', color: C.muted,
+                      fontSize: '0.75rem', pointerEvents: 'none',
+                    }}>▾</span>
                   </div>
-                ) : (
-                  lastSolves.map((s) => {
-                    const idx = solves.indexOf(s) + 1;
-                    const dnf = isDnf(s);
-                    const swiped = swipe?.id === s.id ? swipe.dx : 0;
-                    return (
-                      <div
-                        key={s.id}
-                        onClick={() => { if (!swipe) setDetailSolveId(s.id); }}
-                        onTouchStart={(e) => onSwipeStart(e, s.id)}
-                        onTouchMove={onSwipeMove}
-                        onTouchEnd={onSwipeEnd}
-                        style={{
-                          display: 'grid', gridTemplateColumns: '1.7rem 1fr auto', alignItems: 'center', gap: '0.5rem',
-                          padding: '0.4rem 0.55rem', borderRadius: 7,
-                          background: C.cardAlt,
-                          touchAction: 'pan-y',
-                          transform: `translateX(${swiped}px)`,
-                          transition: swipe?.id === s.id ? 'none' : 'transform 0.18s',
-                        }}
-                      >
-                        <div style={{ fontSize: '0.65rem', color: C.mutedDim, fontWeight: 600 }}>
-                          {String(idx).padStart(2, '0')}
-                        </div>
-                        <div style={{
-                          fontFamily: '"JetBrains Mono", monospace',
-                          fontSize: '0.88rem', fontWeight: 700,
-                          color: dnf ? C.danger : C.text,
-                        }}>
-                          {fmtMs(finalMs(s), dnf, showMs)}
-                        </div>
-                        <div style={{ display: 'flex', gap: '0.2rem' }}>
-                          {s.penalty === '+2' && (
-                            <span style={{
-                              fontSize: '0.55rem', fontWeight: 700, padding: '0.1rem 0.3rem', borderRadius: 4,
-                              background: 'rgba(251,191,36,0.15)', color: C.warn,
-                            }}>+2</span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
+                  <div style={{
+                    width: 34, height: 34, borderRadius: 999,
+                    background: C.cardAlt, border: `1px solid ${C.border}`,
+                    color: C.accent, fontSize: '0.62rem', fontWeight: 700,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    letterSpacing: '0.04em',
+                  }}>
+                    {sessionEvent.short.toUpperCase()}
+                  </div>
+                </div>
+
+                {/* Scramble row + refresh */}
+                <div style={{
+                  margin: '0 0.7rem 0.5rem',
+                  display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.5rem',
+                  alignItems: 'center',
+                }}>
+                  <div style={{
+                    fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
+                    fontSize: '0.95rem', lineHeight: 1.4,
+                    color: C.text, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                    maxHeight: '2.8em', overflow: 'hidden',
+                  }}>
+                    {scramble}
+                  </div>
+                  <button
+                    onClick={newScramble}
+                    aria-label="New scramble"
+                    style={{
+                      width: 38, height: 38, borderRadius: 10,
+                      background: C.card, border: `1px solid ${C.border}`,
+                      color: C.accent, cursor: 'pointer', fontSize: '1.1rem',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    }}
+                  >🔄</button>
+                </div>
+
+                {/* Action icons row */}
+                <div style={{
+                  margin: '0 0.7rem 0.4rem',
+                  display: 'flex', gap: '0.4rem',
+                }}>
+                  <MobileActionIcon label="New scramble" onClick={newScramble} icon="🔄" />
+                  <MobileActionIcon label="Edit scramble" onClick={() => { setEditScrambleValue(scramble); setEditScrambleOpen(true); }} icon="✏" />
+                  <MobileActionIcon label="Add manual time" onClick={() => { setManualEntryValue(''); setManualEntryOpen(true); }} icon="+" />
+                </div>
+
+                {/* Big timer area */}
+                <section
+                  onTouchStart={onTimerTouchStart}
+                  onTouchEnd={onTimerTouchEnd}
+                  style={{
+                    flex: '1 1 auto', minHeight: 0,
+                    display: 'flex', flexDirection: 'column',
+                    alignItems: 'center', justifyContent: 'center',
+                    userSelect: 'none', cursor: 'pointer', textAlign: 'center',
+                    touchAction: 'manipulation',
+                    margin: '0 0.7rem',
+                    background: timer.state === 'armed' ? `${C.success}10` : 'transparent',
+                    transition: 'background 0.12s',
+                  }}
+                >
+                  {timer.state === 'inspecting' && (
+                    <div style={{ fontSize: '0.65rem', letterSpacing: '0.15em', textTransform: 'uppercase', color: C.warn, marginBottom: '0.6rem', fontWeight: 700 }}>
+                      Inspection
+                    </div>
+                  )}
+                  <div style={{
+                    fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
+                    fontSize: 'clamp(3.5rem, 22vw, 7rem)',
+                    fontWeight: 700, lineHeight: 0.95,
+                    fontVariantNumeric: 'tabular-nums',
+                    color: timerColor,
+                    transition: 'color 0.12s',
+                    textShadow: timer.state === 'armed' ? `0 0 30px ${C.success}55` : 'none',
+                  }}>
+                    {timerDisplay}
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: C.muted, marginTop: '0.7rem', letterSpacing: '0.06em', minHeight: '1rem' }}>
+                    {timer.state === 'inspecting' && 'Hold to arm, release to start'}
+                    {timer.state === 'armed' && (<span style={{ color: C.success, fontWeight: 700 }}>RELEASE TO START</span>)}
+                    {timer.state === 'running' && 'TAP TO STOP'}
+                  </div>
+                </section>
+
+                {/* Bottom stats bar: 2 columns + center cube */}
+                <div style={{
+                  display: 'grid', gridTemplateColumns: '1fr auto 1fr',
+                  gap: '0.5rem', padding: '0.4rem 0.7rem 0.6rem',
+                  alignItems: 'center',
+                  borderTop: `1px solid ${C.border}`,
+                }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                    <MobileMicroStat label="Dev"   value={stats.stdDev == null ? '—' : (stats.stdDev / 1000).toFixed(2)} />
+                    <MobileMicroStat label="Mean"  value={fmtMs(stats.mean, false, showMs)} />
+                    <MobileMicroStat label="Best"  value={fmtMs(stats.best, false, showMs)} accent />
+                    <MobileMicroStat label="Count" value={String(validCount)} />
+                  </div>
+                  <div style={{
+                    width: 92, height: 92,
+                    background: C.card, border: `1px solid ${C.border}`,
+                    borderRadius: 10, padding: 4,
+                    display: 'flex',
+                  }}>
+                    <CubeViewer eventId={eventId} scramble={scramble} />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                    <MobileMicroStat label="Ao5"   value={fmtMs(stats.ao5,  false, showMs)} accent={stats.ao5 != null} />
+                    <MobileMicroStat label="Ao12"  value={fmtMs(stats.ao12, false, showMs)} accent={stats.ao12 != null} />
+                    <MobileMicroStat label="Ao50"  value={fmtMs(ao50,       false, showMs)} accent={ao50 != null} />
+                    <MobileMicroStat label="Ao100" value={fmtMs(ao100,      false, showMs)} accent={ao100 != null} />
+                  </div>
+                </div>
               </div>
+            )}
+
+            {/* ── SOLVES TAB ────────────────────────────────────────────── */}
+            {mobileTab === 'solves' && (
               <div style={{
-                position: 'absolute', bottom: '0.5rem', right: '0.6rem',
-                width: 80, height: 80,
-                background: C.card, border: `1px solid ${C.border}`,
-                borderRadius: 10, padding: 4,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flex: '1 1 auto', minHeight: 0,
+                display: 'flex', flexDirection: 'column',
               }}>
-                <CubeViewer eventId={eventId} scramble={scramble} />
+                {/* Header with exit */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '0.7rem 0.85rem 0.4rem',
+                }}>
+                  <div style={{ fontSize: '1rem', fontWeight: 700 }}>Solves</div>
+                  <button
+                    onClick={() => router.push('/')}
+                    aria-label="Exit timer"
+                    style={{
+                      width: 34, height: 34, borderRadius: 8,
+                      background: 'transparent', border: `1px solid ${C.border}`,
+                      color: C.mutedDim, cursor: 'pointer', fontSize: '1rem',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    }}
+                  >×</button>
+                </div>
+
+                {/* Search bar */}
+                <div style={{ padding: '0 0.85rem 0.6rem' }}>
+                  <div style={{
+                    display: 'grid', gridTemplateColumns: 'auto 1fr',
+                    gap: '0.4rem', alignItems: 'center',
+                    background: C.card, border: `1px solid ${C.border}`,
+                    borderRadius: 999, padding: '0.4rem 0.85rem',
+                  }}>
+                    <span style={{ color: C.muted, fontSize: '0.9rem' }}>🔍</span>
+                    <input
+                      value={mobileSearch}
+                      onChange={e => setMobileSearch(e.target.value)}
+                      placeholder="Search solves..."
+                      style={{
+                        background: 'transparent', border: 'none', outline: 'none',
+                        color: C.text, fontFamily: 'inherit', fontSize: '16px',
+                        width: '100%',
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Solves grid (3 columns) */}
+                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 0.85rem 1rem' }}>
+                  {solvesFiltered.length === 0 ? (
+                    <div style={{
+                      fontSize: '0.85rem', color: C.mutedDim, textAlign: 'center',
+                      padding: '2rem 0',
+                    }}>
+                      {q ? 'No solves match your search.' : 'Tap the Timer tab to start your first solve.'}
+                    </div>
+                  ) : (
+                    <div style={{
+                      display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
+                      gap: '0.5rem',
+                    }}>
+                      {solvesFiltered.map(s => {
+                        const dnf = isDnf(s);
+                        const isBest  = !dnf && s.id === bestId  && validSolves.length > 1;
+                        const isWorst = !dnf && s.id === worstId && validSolves.length > 1;
+                        const dateStr = new Date(s.ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                        return (
+                          <button
+                            key={s.id}
+                            onClick={() => setDetailSolveId(s.id)}
+                            style={{
+                              textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit',
+                              background: isWorst ? 'rgba(239,68,68,0.08)' : C.card,
+                              border: `1px solid ${isWorst ? 'rgba(239,68,68,0.25)' : C.border}`,
+                              borderLeft: isBest ? `3px solid ${C.success}` : `1px solid ${isWorst ? 'rgba(239,68,68,0.25)' : C.border}`,
+                              borderRadius: 10, padding: '0.5rem 0.55rem',
+                              display: 'flex', flexDirection: 'column', gap: '0.3rem',
+                              minHeight: 64,
+                            }}
+                          >
+                            <div style={{
+                              fontSize: '0.6rem', color: C.mutedDim, fontWeight: 600,
+                              letterSpacing: '0.04em',
+                            }}>
+                              {dateStr}
+                            </div>
+                            <div style={{
+                              fontFamily: '"JetBrains Mono", monospace',
+                              fontSize: '0.95rem', fontWeight: 700,
+                              color: dnf ? C.danger : isBest ? C.success : C.text,
+                              fontVariantNumeric: 'tabular-nums',
+                            }}>
+                              {fmtMs(finalMs(s), dnf, showMs)}
+                            </div>
+                            {s.penalty === '+2' && !dnf && (
+                              <div style={{
+                                fontSize: '0.5rem', fontWeight: 700, color: C.warn,
+                                letterSpacing: '0.05em',
+                              }}>+2</div>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
-            </section>
+            )}
+
+            {/* ── STATS TAB ─────────────────────────────────────────────── */}
+            {mobileTab === 'stats' && (
+              <div style={{
+                flex: '1 1 auto', minHeight: 0,
+                display: 'flex', flexDirection: 'column',
+              }}>
+                {/* Header with exit */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '0.7rem 0.85rem 0.4rem',
+                }}>
+                  <div style={{ fontSize: '1rem', fontWeight: 700 }}>Stats</div>
+                  <button
+                    onClick={() => router.push('/')}
+                    aria-label="Exit timer"
+                    style={{
+                      width: 34, height: 34, borderRadius: 8,
+                      background: 'transparent', border: `1px solid ${C.border}`,
+                      color: C.mutedDim, cursor: 'pointer', fontSize: '1rem',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    }}
+                  >×</button>
+                </div>
+
+                {/* Chart card */}
+                <div style={{ padding: '0 0.7rem 0.5rem', flex: '1 1 50%', minHeight: 0, display: 'flex' }}>
+                  <div style={{
+                    flex: 1,
+                    background: C.card, border: `1px solid ${C.border}`,
+                    borderRadius: 12, padding: '0.6rem',
+                    display: 'flex', flexDirection: 'column', gap: '0.4rem',
+                    minHeight: 0,
+                  }}>
+                    <div style={{ flex: 1, minHeight: 0 }}>
+                      <MobileLineChart
+                        all={chartSeries.all}
+                        best={chartSeries.best}
+                        ao5={chartSeries.ao5s}
+                        ao12={chartSeries.ao12s}
+                        pbIndices={chartSeries.pbIndices}
+                        C={C}
+                      />
+                    </div>
+                    <div style={{
+                      display: 'flex', flexWrap: 'wrap', gap: '0.6rem',
+                      fontSize: '0.62rem', color: C.muted, letterSpacing: '0.04em',
+                      paddingTop: '0.2rem', borderTop: `1px solid ${C.border}`,
+                    }}>
+                      <ChartLegendDot color="#9ca3af" label="Everything" />
+                      <ChartLegendDot color="#fbbf24" label="Best" />
+                      <ChartLegendDot color={C.accent}  label="Ao5" />
+                      <ChartLegendDot color={C.success} label="Ao12" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Stats table */}
+                <div style={{ padding: '0 0.7rem 0.6rem', flex: '0 0 auto' }}>
+                  <div style={{
+                    background: C.card, border: `1px solid ${C.border}`,
+                    borderRadius: 12, overflow: 'hidden',
+                  }}>
+                    <div style={{
+                      display: 'grid', gridTemplateColumns: '1fr 1fr 1fr',
+                      padding: '0.5rem 0.7rem',
+                      fontSize: '0.6rem', letterSpacing: '0.1em',
+                      textTransform: 'uppercase', color: C.muted, fontWeight: 600,
+                      borderBottom: `1px solid ${C.border}`,
+                    }}>
+                      <div>Stat</div><div>Global</div><div>Session</div>
+                    </div>
+                    <StatTableRow zebra={false} label="Best"      global={fmtMs(stats.best, false, showMs)}  session={fmtMs(stats.best, false, showMs)} highlight />
+                    <StatTableRow zebra={true}  label="Deviation" global={stats.stdDev == null ? '—' : (stats.stdDev / 1000).toFixed(2)} session={stats.stdDev == null ? '—' : (stats.stdDev / 1000).toFixed(2)} />
+                    <StatTableRow zebra={false} label="Ao12"      global={fmtMs(stats.ao12, false, showMs)}  session={fmtMs(stats.ao12, false, showMs)} />
+                    <StatTableRow zebra={true}  label="Ao50"      global={fmtMs(ao50,       false, showMs)}  session={fmtMs(ao50,       false, showMs)} />
+                    <StatTableRow zebra={false} label="Ao100"     global={fmtMs(ao100,      false, showMs)}  session={fmtMs(ao100,      false, showMs)} />
+                    <StatTableRow zebra={true}  label="Count"     global={String(validCount)}                session={String(validCount)} />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── BOTTOM NAV (always visible) ───────────────────────────── */}
+            <nav style={{
+              flex: '0 0 56px',
+              display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
+              background: C.card, borderTop: `1px solid ${C.border}`,
+            }}>
+              <BottomTab label="Timer"  icon="⏱" active={mobileTab === 'timer'}  onClick={() => setMobileTab('timer')} C={C} />
+              <BottomTab label="Solves" icon="▤" active={mobileTab === 'solves'} onClick={() => setMobileTab('solves')} C={C} />
+              <BottomTab label="Stats"  icon="〰" active={mobileTab === 'stats'}  onClick={() => setMobileTab('stats')} C={C} />
+            </nav>
           </div>
         );
       })()}
+
+      {/* Manual time entry modal (mobile + icon) */}
+      {manualEntryOpen && (
+        <ModalShell title="Add Time" onClose={() => setManualEntryOpen(false)}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+            <div style={{ fontSize: '0.78rem', color: C.muted, lineHeight: 1.5 }}>
+              Enter time as <span style={{ fontFamily: '"JetBrains Mono", monospace', color: C.text }}>12.34</span> or <span style={{ fontFamily: '"JetBrains Mono", monospace', color: C.text }}>1:23.45</span>.
+            </div>
+            <input
+              autoFocus
+              value={manualEntryValue}
+              onChange={e => setManualEntryValue(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') { e.preventDefault(); commitManualEntry(); }
+              }}
+              placeholder="0.00"
+              inputMode="decimal"
+              style={{
+                background: C.cardAlt, color: C.text,
+                border: `1px solid ${C.border}`, borderRadius: 8,
+                padding: '0.6rem 0.75rem',
+                fontSize: '1.2rem', fontFamily: '"JetBrains Mono", monospace',
+                fontVariantNumeric: 'tabular-nums', outline: 'none',
+                letterSpacing: '0.04em',
+              }}
+            />
+            {manualEntryValue && parseManualTime(manualEntryValue) == null && (
+              <div style={{ fontSize: '0.72rem', color: C.danger }}>
+                Couldn&apos;t parse that — try a format like 12.34 or 1:23.45.
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+              <button
+                onClick={() => setManualEntryOpen(false)}
+                style={{
+                  padding: '0.5rem 0.9rem', borderRadius: 8,
+                  fontSize: '0.82rem', fontWeight: 600, fontFamily: 'inherit',
+                  background: 'transparent', color: C.muted,
+                  border: `1px solid ${C.border}`, cursor: 'pointer',
+                }}
+              >Cancel</button>
+              <button
+                onClick={commitManualEntry}
+                disabled={parseManualTime(manualEntryValue) == null}
+                style={{
+                  padding: '0.5rem 0.9rem', borderRadius: 8,
+                  fontSize: '0.82rem', fontWeight: 700, fontFamily: 'inherit',
+                  background: parseManualTime(manualEntryValue) == null ? 'rgba(167,139,250,0.08)' : C.accentDim,
+                  color: C.accent,
+                  border: `1px solid ${C.borderHi}`,
+                  cursor: parseManualTime(manualEntryValue) == null ? 'not-allowed' : 'pointer',
+                  opacity: parseManualTime(manualEntryValue) == null ? 0.5 : 1,
+                }}
+              >Add</button>
+            </div>
+          </div>
+        </ModalShell>
+      )}
+
+      {/* Edit scramble modal (mobile ✏ icon) */}
+      {editScrambleOpen && (
+        <ModalShell title="Edit Scramble" onClose={() => setEditScrambleOpen(false)}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+            <textarea
+              autoFocus
+              value={editScrambleValue}
+              onChange={e => setEditScrambleValue(e.target.value)}
+              rows={4}
+              style={{
+                background: C.cardAlt, color: C.text,
+                border: `1px solid ${C.border}`, borderRadius: 8,
+                padding: '0.6rem 0.75rem',
+                fontSize: '0.92rem', fontFamily: '"JetBrains Mono", monospace',
+                lineHeight: 1.5, outline: 'none', resize: 'vertical',
+              }}
+            />
+            <div style={{ fontSize: '0.72rem', color: C.muted }}>
+              Replaces the current scramble. Doesn&apos;t affect the scramble generator.
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+              <button
+                onClick={() => setEditScrambleOpen(false)}
+                style={{
+                  padding: '0.5rem 0.9rem', borderRadius: 8,
+                  fontSize: '0.82rem', fontWeight: 600, fontFamily: 'inherit',
+                  background: 'transparent', color: C.muted,
+                  border: `1px solid ${C.border}`, cursor: 'pointer',
+                }}
+              >Cancel</button>
+              <button
+                onClick={commitEditScramble}
+                style={{
+                  padding: '0.5rem 0.9rem', borderRadius: 8,
+                  fontSize: '0.82rem', fontWeight: 700, fontFamily: 'inherit',
+                  background: C.accentDim, color: C.accent,
+                  border: `1px solid ${C.borderHi}`, cursor: 'pointer',
+                }}
+              >Save</button>
+            </div>
+          </div>
+        </ModalShell>
+      )}
 
       {/* Settings modal */}
       {settingsOpen && (
@@ -1289,26 +1618,197 @@ function StatTile({ label, value, accent }: { label: string; value: string; acce
   );
 }
 
-function MiniStat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+// ── Mobile-only sub-components ──────────────────────────────────────────────
+
+function MobileActionIcon({ label, icon, onClick }: { label: string; icon: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      style={{
+        flex: 1, height: 38, borderRadius: 10,
+        background: C.card, border: `1px solid ${C.border}`,
+        color: C.muted, cursor: 'pointer', fontSize: '1rem',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      }}
+    >{icon}</button>
+  );
+}
+
+function MobileMicroStat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
     <div style={{
-      background: accent ? 'linear-gradient(135deg, rgba(167,139,250,0.08), rgba(167,139,250,0.02))' : C.cardAlt,
-      border: `1px solid ${accent ? 'rgba(167,139,250,0.2)' : C.border}`,
-      borderRadius: 8, padding: '0.45rem 0.55rem',
-      display: 'flex', flexDirection: 'column', gap: '0.15rem',
+      display: 'grid', gridTemplateColumns: '2.6rem 1fr',
+      alignItems: 'baseline', gap: '0.4rem',
     }}>
-      <div style={{ fontSize: '0.55rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, fontWeight: 600 }}>
+      <div style={{
+        fontSize: '0.55rem', letterSpacing: '0.1em',
+        textTransform: 'uppercase', color: C.muted, fontWeight: 600,
+      }}>
         {label}
       </div>
       <div style={{
         fontFamily: '"JetBrains Mono", monospace',
-        fontSize: '0.95rem', fontWeight: 700,
+        fontSize: '0.85rem', fontWeight: 700,
         color: accent ? C.accent : C.text,
         fontVariantNumeric: 'tabular-nums',
+        textAlign: 'right',
       }}>
         {value}
       </div>
     </div>
+  );
+}
+
+function BottomTab({ label, icon, active, onClick, C: c }: { label: string; icon: string; active: boolean; onClick: () => void; C: typeof C }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        background: 'transparent', border: 'none', cursor: 'pointer',
+        fontFamily: 'inherit',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        gap: '0.15rem',
+        padding: '0.4rem 0',
+        position: 'relative',
+        color: active ? c.accent : c.muted,
+        transition: 'color 0.12s',
+      }}
+    >
+      <span style={{ fontSize: '1.1rem', lineHeight: 1 }}>{icon}</span>
+      <span style={{ fontSize: '0.62rem', fontWeight: 600, letterSpacing: '0.04em' }}>{label}</span>
+      {active && (
+        <span style={{
+          position: 'absolute', bottom: 0, left: '30%', right: '30%',
+          height: 2, background: c.accent, borderRadius: 2,
+        }} />
+      )}
+    </button>
+  );
+}
+
+function ChartLegendDot({ color, label }: { color: string; label: string }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+      <span style={{ width: 8, height: 8, borderRadius: 999, background: color, display: 'inline-block' }} />
+      <span style={{ color: C.muted }}>{label}</span>
+    </span>
+  );
+}
+
+function StatTableRow({ label, global, session, zebra, highlight }: { label: string; global: string; session: string; zebra: boolean; highlight?: boolean }) {
+  return (
+    <div style={{
+      display: 'grid', gridTemplateColumns: '1fr 1fr 1fr',
+      padding: '0.5rem 0.7rem',
+      fontSize: '0.78rem',
+      background: zebra ? 'rgba(255,255,255,0.02)' : 'transparent',
+      color: highlight ? C.success : C.text,
+      fontWeight: highlight ? 700 : 500,
+    }}>
+      <div style={{ color: highlight ? C.success : C.muted, fontSize: '0.72rem', letterSpacing: '0.05em', alignSelf: 'center' }}>
+        {label}
+      </div>
+      <div style={{ fontFamily: '"JetBrains Mono", monospace', fontVariantNumeric: 'tabular-nums' }}>
+        {global}
+      </div>
+      <div style={{ fontFamily: '"JetBrains Mono", monospace', fontVariantNumeric: 'tabular-nums' }}>
+        {session}
+      </div>
+    </div>
+  );
+}
+
+function MobileLineChart({
+  all, best, ao5, ao12, pbIndices, C: c,
+}: {
+  all: (number | null)[];
+  best: (number | null)[];
+  ao5:  (number | null)[];
+  ao12: (number | null)[];
+  pbIndices: number[];
+  C: typeof C;
+}) {
+  const n = all.length;
+  if (n < 2) {
+    return (
+      <div style={{
+        height: '100%', minHeight: 160,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: c.mutedDim, fontSize: '0.78rem', textAlign: 'center',
+      }}>
+        Need at least 2 solves to chart progress.
+      </div>
+    );
+  }
+
+  // Find global y range (ms, lower = faster).
+  const allValues: number[] = [];
+  [all, ao5, ao12, best].forEach(arr => arr.forEach(v => { if (v != null) allValues.push(v); }));
+  const minMs = Math.min(...allValues);
+  const maxMs = Math.max(...allValues);
+  const pad = (maxMs - minMs) * 0.08 || 100;
+  const yMin = Math.max(0, minMs - pad);
+  const yMax = maxMs + pad;
+
+  // viewBox scaled units; React renders responsive via SVG preserveAspectRatio.
+  const W = 320, H = 160, padL = 26, padR = 6, padT = 6, padB = 16;
+  const innerW = W - padL - padR;
+  const innerH = H - padT - padB;
+  const xAt = (i: number) => padL + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
+  const yAt = (ms: number) => padT + (yMax === yMin ? innerH / 2 : (1 - (ms - yMin) / (yMax - yMin)) * innerH);
+
+  const pathFor = (arr: (number | null)[]) => {
+    let d = '';
+    let started = false;
+    arr.forEach((v, i) => {
+      if (v == null) { started = false; return; }
+      const x = xAt(i).toFixed(1);
+      const y = yAt(v).toFixed(1);
+      d += (started ? ' L ' : 'M ') + x + ' ' + y;
+      started = true;
+    });
+    return d;
+  };
+
+  // Y-axis ticks (3 levels)
+  const ticks = [yMin, (yMin + yMax) / 2, yMax];
+  const fmtTick = (ms: number) => (ms / 1000).toFixed(1) + 's';
+
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="none"
+      style={{ width: '100%', height: '100%', display: 'block' }}
+    >
+      {/* horizontal gridlines + tick labels */}
+      {ticks.map((t, i) => (
+        <g key={i}>
+          <line
+            x1={padL} x2={W - padR}
+            y1={yAt(t)} y2={yAt(t)}
+            stroke={c.border} strokeWidth={1}
+          />
+          <text x={4} y={yAt(t) + 3} fontSize={9} fill={c.mutedDim} fontFamily="monospace">
+            {fmtTick(t)}
+          </text>
+        </g>
+      ))}
+
+      {/* Series — order: everything (back), ao12, ao5, best (front) */}
+      <path d={pathFor(all)}  fill="none" stroke="#9ca3af" strokeWidth={1}   strokeLinejoin="round" strokeLinecap="round" opacity={0.55} />
+      <path d={pathFor(ao12)} fill="none" stroke={c.success} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+      <path d={pathFor(ao5)}  fill="none" stroke={c.accent}  strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+      <path d={pathFor(best)} fill="none" stroke="#fbbf24"  strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+
+      {/* PB markers — gold dots */}
+      {pbIndices.map(i => {
+        const v = all[i];
+        if (v == null) return null;
+        return <circle key={i} cx={xAt(i)} cy={yAt(v)} r={2.4} fill="#fbbf24" />;
+      })}
+    </svg>
   );
 }
 
