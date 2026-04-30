@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Scrambow } from 'scrambow';
 // Type-only import; runtime is dynamic-imported below to avoid HTMLElement
 // access during Next.js server rendering.
@@ -262,6 +263,7 @@ function useTimer(onSolveCommit: (ms: number, dnf: boolean) => void) {
 const STORAGE_KEY = 'pv.timer.session.v1';
 
 export default function TimerPage() {
+  const router = useRouter();
   const [eventId, setEventId] = useState<string>('333');
   const [scramble, setScramble] = useState<string>(() => generateScramble('333'));
   const [solves, setSolves] = useState<Solve[]>([]);
@@ -269,6 +271,10 @@ export default function TimerPage() {
   const [, forceTick] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [detailSolveId, setDetailSolveId] = useState<string | null>(null);
+  // Timer preferences
+  const [inspectionEnabled, setInspectionEnabled] = useState(true);
+  const [showMs, setShowMs] = useState(true);          // ms vs seconds-only
+  const [holdToStart, setHoldToStart] = useState(true); // long-press arming
   // Default false to match SSR; updated after mount via matchMedia. Brief flash
   // possible on mobile pageload but no hydration mismatch.
   const [isMobile, setIsMobile] = useState(false);
@@ -488,7 +494,7 @@ export default function TimerPage() {
   // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div style={{
-      height: 'calc(100vh - 60px)', overflow: 'hidden',
+      height: '100vh', overflow: 'hidden',
       background: C.bg, color: C.text,
       display: 'flex',
     }}>
@@ -518,26 +524,42 @@ export default function TimerPage() {
           minHeight: 0,
           overflow: 'hidden',
         }}>
-          {/* Top: Settings cog + History header */}
+          {/* Top: Settings cog + Exit + History header */}
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             padding: '0.85rem 1rem 0.6rem',
             borderBottom: `1px solid ${C.border}`,
           }}>
-            <button
-              onClick={() => setSettingsOpen(true)}
-              aria-label="Settings"
-              title="Settings"
-              style={{
-                width: 30, height: 30, borderRadius: 8,
-                background: 'transparent', border: `1px solid ${C.border}`,
-                color: C.muted, cursor: 'pointer', fontSize: '0.95rem',
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                transition: 'background 0.15s, color 0.15s, border-color 0.15s',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.muted; }}
-            >⚙</button>
+            <div style={{ display: 'flex', gap: '0.4rem' }}>
+              <button
+                onClick={() => setSettingsOpen(true)}
+                aria-label="Settings"
+                title="Settings"
+                style={{
+                  width: 30, height: 30, borderRadius: 8,
+                  background: 'transparent', border: `1px solid ${C.border}`,
+                  color: C.muted, cursor: 'pointer', fontSize: '0.95rem',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.muted; }}
+              >⚙</button>
+              <button
+                onClick={() => router.push('/')}
+                aria-label="Exit timer"
+                title="Exit to main site"
+                style={{
+                  width: 30, height: 30, borderRadius: 8,
+                  background: 'transparent', border: `1px solid ${C.border}`,
+                  color: C.mutedDim, cursor: 'pointer', fontSize: '0.95rem',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.mutedDim; }}
+              >×</button>
+            </div>
             <div style={{ fontSize: '0.66rem', color: C.muted, letterSpacing: '0.05em' }}>
               {solves.length === 0 ? '0 solves' : `${solves.length} solve${solves.length === 1 ? '' : 's'}`}
             </div>
@@ -849,16 +871,28 @@ export default function TimerPage() {
               }}>
                 Precision Velocity
               </div>
-              <button
-                onClick={() => setSettingsOpen(true)}
-                aria-label="Settings"
-                style={{
-                  width: 34, height: 34, borderRadius: 8,
-                  background: 'transparent', border: `1px solid ${C.border}`,
-                  color: C.muted, cursor: 'pointer', fontSize: '1rem',
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                }}
-              >⚙</button>
+              <div style={{ display: 'flex', gap: '0.4rem' }}>
+                <button
+                  onClick={() => setSettingsOpen(true)}
+                  aria-label="Settings"
+                  style={{
+                    width: 34, height: 34, borderRadius: 8,
+                    background: 'transparent', border: `1px solid ${C.border}`,
+                    color: C.muted, cursor: 'pointer', fontSize: '1rem',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  }}
+                >⚙</button>
+                <button
+                  onClick={() => router.push('/')}
+                  aria-label="Exit timer"
+                  style={{
+                    width: 34, height: 34, borderRadius: 8,
+                    background: 'transparent', border: `1px solid ${C.border}`,
+                    color: C.mutedDim, cursor: 'pointer', fontSize: '1.05rem',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  }}
+                >×</button>
+              </div>
             </header>
 
             {/* Top: scramble + event selector + new */}
@@ -1042,6 +1076,26 @@ export default function TimerPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
             <div>
               <div style={{ fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, marginBottom: '0.5rem', fontWeight: 600 }}>
+                Preferences
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <ToggleRow label="Inspection time"  value={inspectionEnabled} onChange={setInspectionEnabled} />
+                <ToggleRow label="Show milliseconds" value={showMs}            onChange={setShowMs} />
+                <ToggleRow label="Hold to start"    value={holdToStart}        onChange={setHoldToStart} />
+              </div>
+            </div>
+            <div style={{ height: 1, background: C.border }} />
+            <div>
+              <div style={{ fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, marginBottom: '0.5rem', fontWeight: 600 }}>
+                Theme
+              </div>
+              <div style={{ fontSize: '0.82rem', color: C.muted, lineHeight: 1.5 }}>
+                Lavender on midnight. Additional themes coming soon.
+              </div>
+            </div>
+            <div style={{ height: 1, background: C.border }} />
+            <div>
+              <div style={{ fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, marginBottom: '0.5rem', fontWeight: 600 }}>
                 Keyboard Shortcuts
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', fontSize: '0.85rem' }}>
@@ -1060,6 +1114,21 @@ export default function TimerPage() {
                 Solves are saved to local storage and restored on reload. Switching events generates a new scramble. Clearing the session is permanent.
               </div>
             </div>
+            <button
+              onClick={() => router.push('/')}
+              style={{
+                marginTop: '0.5rem', padding: '0.7rem 0.9rem', borderRadius: 10,
+                fontSize: '0.85rem', fontWeight: 700, fontFamily: 'inherit',
+                letterSpacing: '0.04em',
+                background: C.accentDim, color: C.accent,
+                border: `1px solid ${C.borderHi}`, cursor: 'pointer',
+                transition: 'background 0.15s',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(167,139,250,0.25)')}
+              onMouseLeave={e => (e.currentTarget.style.background = C.accentDim)}
+            >
+              ← Exit to Main Site
+            </button>
           </div>
         </ModalShell>
       )}
@@ -1253,6 +1322,34 @@ function ModalShell({ title, onClose, children }: { title: string; onClose: () =
         </div>
         {children}
       </div>
+    </div>
+  );
+}
+
+function ToggleRow({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+      <span style={{ color: C.text }}>{label}</span>
+      <button
+        onClick={() => onChange(!value)}
+        role="switch"
+        aria-checked={value}
+        style={{
+          position: 'relative',
+          width: 40, height: 22, borderRadius: 999,
+          background: value ? C.accent : 'rgba(255,255,255,0.1)',
+          border: `1px solid ${value ? C.borderHi : C.border}`,
+          cursor: 'pointer', padding: 0,
+          transition: 'background 0.18s, border-color 0.18s',
+        }}
+      >
+        <span style={{
+          position: 'absolute', top: 2, left: value ? 20 : 2,
+          width: 16, height: 16, borderRadius: '50%',
+          background: value ? '#fff' : C.muted,
+          transition: 'left 0.18s, background 0.18s',
+        }} />
+      </button>
     </div>
   );
 }
