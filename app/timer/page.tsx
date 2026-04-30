@@ -278,6 +278,21 @@ const STORAGE_KEY = 'pv.timer.session.v1';
 const PREFS_KEY = 'pv.timer.prefs.v1';
 const SESSIONS_KEY = 'pv.timer.sessions.v2';
 
+// Alt+key → event id. Uses KeyboardEvent.code so the mapping is layout-stable.
+const ALT_EVENT_KEYS: Record<string, string> = {
+  Digit1: 'sq1',
+  Digit2: '222',
+  Digit3: '333',
+  Digit4: '444',
+  Digit5: '555',
+  Digit6: '666',
+  Digit7: '777',
+  KeyS:   'skewb',
+  KeyM:   'minx',
+  KeyC:   'clock',
+  KeyP:   'pyram',
+};
+
 interface Session {
   id: string;
   name: string;
@@ -329,6 +344,9 @@ export default function TimerPage() {
   const [newSessionName, setNewSessionName] = useState('');
   const [cubeFullscreenOpen, setCubeFullscreenOpen] = useState(false);
   const [sessionDropdownOpen, setSessionDropdownOpen] = useState(false);
+  // Two-step Alt+D confirmation for clearing the session.
+  const [clearPending, setClearPending] = useState(false);
+  const clearTimeoutRef = useRef<number | null>(null);
 
   // ── Derived solves + setSolves wrapper ──
   // Source of truth is `sessions`. `solves` is the active session's array.
@@ -538,17 +556,38 @@ export default function TimerPage() {
           return;
         }
       }
-      if (e.code === 'Escape') {
-        e.preventDefault();
-        timer.reset();
-      }
-      if (e.code === 'KeyD' && timer.state === 'idle' && !e.metaKey && !e.ctrlKey) {
-        e.preventDefault();
-        setSolves(prev => prev.slice(0, -1));
-      }
-      if (e.code === 'KeyN' && timer.state === 'idle' && !e.metaKey && !e.ctrlKey) {
-        e.preventDefault();
-        newScramble();
+      // Alt+key combinations: event switching + session clear.
+      // Only handle when timer is idle so an active solve is never disrupted.
+      if (e.altKey && !e.metaKey && !e.ctrlKey && timer.state === 'idle') {
+        // Alt+D — two-step clear current session
+        if (e.code === 'KeyD') {
+          e.preventDefault();
+          if (clearPending) {
+            setSolves([]);
+            setClearPending(false);
+            if (clearTimeoutRef.current != null) {
+              window.clearTimeout(clearTimeoutRef.current);
+              clearTimeoutRef.current = null;
+            }
+          } else {
+            setClearPending(true);
+            if (clearTimeoutRef.current != null) {
+              window.clearTimeout(clearTimeoutRef.current);
+            }
+            clearTimeoutRef.current = window.setTimeout(() => {
+              setClearPending(false);
+              clearTimeoutRef.current = null;
+            }, 3000);
+          }
+          return;
+        }
+        // Alt+1..7 / S / M / C / P — switch event
+        const target = ALT_EVENT_KEYS[e.code];
+        if (target) {
+          e.preventDefault();
+          setEventId(target);
+          return;
+        }
       }
     }
     function onKeyUp(e: KeyboardEvent) {
@@ -566,7 +605,17 @@ export default function TimerPage() {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [timer, newScramble, inspectionEnabled, holdToStart]);
+  }, [timer, inspectionEnabled, holdToStart, clearPending, setSolves]);
+
+  // Clear any pending Alt+D timeout on unmount.
+  useEffect(() => {
+    return () => {
+      if (clearTimeoutRef.current != null) {
+        window.clearTimeout(clearTimeoutRef.current);
+        clearTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   // Mobile: tap timer area
   const onTimerTouchStart = useCallback(() => {
@@ -1627,6 +1676,35 @@ export default function TimerPage() {
         );
       })()}
 
+      {/* Alt+D confirmation toast — shown for ~3s after the first press. */}
+      {clearPending && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: 'fixed', top: '1rem', left: '50%', transform: 'translateX(-50%)',
+            zIndex: 9700,
+            background: C.card, border: `1px solid ${C.borderHi}`,
+            color: C.text,
+            borderRadius: 999,
+            padding: '0.55rem 1rem',
+            fontSize: '0.82rem', fontWeight: 600,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
+            display: 'flex', alignItems: 'center', gap: '0.4rem',
+          }}
+        >
+          Clear session?
+          <kbd style={{
+            fontFamily: '"JetBrains Mono", monospace',
+            fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.04em',
+            padding: '0.15rem 0.45rem', borderRadius: 5,
+            background: C.accentDim, color: C.accent,
+            border: `1px solid ${C.borderHi}`,
+          }}>Alt+D</kbd>
+          <span style={{ color: C.muted }}>again to confirm</span>
+        </div>
+      )}
+
       {/* Cube fullscreen modal (mobile — tap on the cube preview) */}
       {cubeFullscreenOpen && (
         <div
@@ -1930,10 +2008,19 @@ export default function TimerPage() {
                 Keyboard Shortcuts
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', fontSize: '0.85rem' }}>
-                <Row label="Start / stop timer" kbd="SPACE" />
-                <Row label="Cancel inspection / reset" kbd="ESC" />
-                <Row label="Delete last solve" kbd="D" />
-                <Row label="New scramble" kbd="N" />
+                <Row label="Start / stop timer"  kbd="SPACE" />
+                <Row label="Clear session (press twice)" kbd="Alt+D" />
+                <Row label="Square-1"            kbd="Alt+1" />
+                <Row label="2x2x2 Cube"          kbd="Alt+2" />
+                <Row label="3x3x3 Cube"          kbd="Alt+3" />
+                <Row label="4x4x4 Cube"          kbd="Alt+4" />
+                <Row label="5x5x5 Cube"          kbd="Alt+5" />
+                <Row label="6x6x6 Cube"          kbd="Alt+6" />
+                <Row label="7x7x7 Cube"          kbd="Alt+7" />
+                <Row label="Skewb"               kbd="Alt+S" />
+                <Row label="Megaminx"            kbd="Alt+M" />
+                <Row label="Clock"               kbd="Alt+C" />
+                <Row label="Pyraminx"            kbd="Alt+P" />
               </div>
             </div>
             <div style={{ height: 1, background: C.border }} />
