@@ -554,24 +554,58 @@ export default function TimerPage() {
   // ── GAN bluetooth timer ─────────────────────────────────────────────────
   // When connected, the physical timer drives our state machine and SPACE /
   // tap input is locked out so the device is the single source of truth.
+  // The display while running is driven by an explicit 10ms interval keyed
+  // off the HANDS_OFF timestamp — bypassing the timer hook's rAF loop so
+  // the on-screen counter is guaranteed to tick.
   const ganTimerRef = useRef(timer);
   ganTimerRef.current = timer;
+  const [ganDisplayMs, setGanDisplayMs] = useState(0);
+  const ganStartTimeRef = useRef<number | null>(null);
+  const ganIntervalRef = useRef<number | null>(null);
+
+  const stopGanInterval = useCallback(() => {
+    if (ganIntervalRef.current != null) {
+      window.clearInterval(ganIntervalRef.current);
+      ganIntervalRef.current = null;
+    }
+    ganStartTimeRef.current = null;
+  }, []);
+
   const gan = useGanTimer({
     onSolveStart: () => {
-      // HANDS_OFF — physical timer started counting. Drive our display.
+      // HANDS_OFF — physical timer started counting. Drive our display
+      // via a 10ms interval so the web counter ticks live with the device.
+      ganStartTimeRef.current = Date.now();
+      setGanDisplayMs(0);
+      if (ganIntervalRef.current != null) {
+        window.clearInterval(ganIntervalRef.current);
+      }
+      ganIntervalRef.current = window.setInterval(() => {
+        const start = ganStartTimeRef.current;
+        if (start != null) setGanDisplayMs(Date.now() - start);
+      }, 10);
       ganTimerRef.current.startRunning();
     },
     onSolveStop: (finalMs: number) => {
-      // STOPPED — record the device's authoritative time.
+      // STOPPED — clear the interval and snap to the device's authoritative time.
+      stopGanInterval();
+      setGanDisplayMs(finalMs);
       ganTimerRef.current.finishExternal(finalMs);
     },
     onIdle: () => {
-      // GAN reset (or initial idle) — sync our state machine to idle so the
-      // display drops to 0.00 and the next solve cycle starts cleanly.
+      // RESET — drop display to zero and return to idle.
+      stopGanInterval();
+      setGanDisplayMs(0);
       ganTimerRef.current.reset();
     },
   });
   const ganConnected = gan.state === 'connected';
+
+  // Safety net: clear the interval on unmount or if the connection drops.
+  useEffect(() => {
+    if (!ganConnected) stopGanInterval();
+    return () => stopGanInterval();
+  }, [ganConnected, stopGanInterval]);
 
   const newScramble = useCallback(() => {
     setScramble(generateScramble(eventId));
@@ -844,6 +878,9 @@ export default function TimerPage() {
       return sec <= -2 ? 'DNF' : '+2';
     }
     if (timer.state === 'armed') return precision === 'ms' ? '0.000' : '0.00';
+    // When the GAN timer is the source of truth, show its independent
+    // counter so the display keeps ticking even if the rAF loop didn't.
+    if (ganConnected) return fmtMs(ganDisplayMs, false, precision);
     return fmtMs(timer.displayMs, false, precision);
   })();
 
