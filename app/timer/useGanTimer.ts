@@ -36,6 +36,10 @@ export function useGanTimer(callbacks: GanCallbacks) {
   const [deviceName, setDeviceName] = useState<string | null>(null);
   // Most recent live phase from the device — used for UI cues (color etc).
   const [liveState, setLiveState] = useState<GanLiveState>('idle');
+  // Ref mirror of liveState so the BLE subscription callback can read the
+  // CURRENT phase without React's closure capturing a stale value.
+  const liveStateRef = useRef<GanLiveState>('idle');
+  useEffect(() => { liveStateRef.current = liveState; }, [liveState]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const connRef = useRef<any>(null);
@@ -109,13 +113,21 @@ export function useGanTimer(callbacks: GanCallbacks) {
             setLiveState('getSet');
             cb.onGetSet?.();
             break;
-          case S.HANDS_OFF:
+          case S.HANDS_OFF: {
+            const wasRunning = liveStateRef.current === 'running';
+            liveStateRef.current = 'running';
             setLiveState('running');
-            cb.onSolveStart?.();
+            if (!wasRunning) cb.onSolveStart?.();
             break;
-          case S.RUNNING:
+          }
+          case S.RUNNING: {
+            // Fallback: some devices skip HANDS_OFF and go straight to RUNNING.
+            const wasRunning = liveStateRef.current === 'running';
+            liveStateRef.current = 'running';
             setLiveState('running');
+            if (!wasRunning) cb.onSolveStart?.();
             break;
+          }
           case S.STOPPED:
             setLiveState('stopped');
             if (evt.recordedTime) cb.onSolveStop?.(evt.recordedTime.asTimestamp);
