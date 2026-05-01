@@ -1462,10 +1462,12 @@ function RacingScreen({
   const isRoundDone = myCurrent >= SOLVES_PER_ROUND;
   const currentScramble = !isRoundDone ? (room.scrambles?.[String(myCurrent)] ?? '') : '';
 
-  // Pending = awaiting OK / +2 / DNF confirmation. While pending, all
-  // touch/space input on the timer surface is ignored AND we drop the
-  // touchstart preventDefault so the confirm buttons receive their clicks.
+  // Pending = awaiting OK / +2 / DNF confirmation.
   const [pending, setPending] = useState<{ ms: number; defaultDnf: boolean } | null>(null);
+
+  // Scramble reveal — hidden until the user taps "Tap to reveal scramble".
+  // Re-hides on every solve boundary so each solve starts fresh.
+  const [scrambleShown, setScrambleShown] = useState(false);
 
   const onSolveCommit = useCallback((ms: number, dnf: boolean) => {
     setPending({ ms, defaultDnf: dnf });
@@ -1473,11 +1475,13 @@ function RacingScreen({
 
   const timer = useMpTimer(MP_INSPECTION_ENABLED, onSolveCommit);
 
-  const interactionLocked = isWaitingForOpponents || isRoundDone || !!pending;
+  // Timer can't fire until the player has revealed the scramble.
+  const interactionLocked = isWaitingForOpponents || isRoundDone || !!pending || !scrambleShown;
 
   // Reset local + timer state at solve / round boundary.
   useEffect(() => {
     setPending(null);
+    setScrambleShown(false);
     timer.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myCurrent, room.round]);
@@ -1579,6 +1583,8 @@ function RacingScreen({
         isRoundDone={isRoundDone}
         isWaitingForOpponents={isWaitingForOpponents}
         currentScramble={currentScramble}
+        scrambleShown={scrambleShown}
+        onRevealScramble={() => setScrambleShown(true)}
         timer={timer}
         pending={pending}
         displayValue={displayValue}
@@ -1633,16 +1639,13 @@ function RacingScreen({
         }}>You finished the round! Waiting for everyone else to finish…</div>
       )}
 
-      {!isRoundDone && !isWaitingForOpponents && (
-        <div style={{
-          background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
-          padding: '0.7rem 0.9rem',
-          fontFamily: 'JetBrains Mono, monospace',
-          fontSize: 'clamp(0.95rem, 2.4vw, 1.35rem)',
-          color: C.text, lineHeight: 1.5, letterSpacing: '0.04em',
-          whiteSpace: 'pre-wrap', wordBreak: 'break-word', textAlign: 'center',
-        }}>{currentScramble}</div>
-      )}
+      <ScrambleArea
+        isMobile={false}
+        scramble={currentScramble}
+        shown={scrambleShown}
+        onReveal={() => setScrambleShown(true)}
+        hidden={isRoundDone || isWaitingForOpponents}
+      />
 
       <div className="mp-race-grid" style={{
         display: 'grid', gridTemplateColumns: '2fr 1fr',
@@ -1688,57 +1691,42 @@ function RacingScreen({
             {pending && 'Confirm your time'}
             {!pending && isRoundDone && 'Round complete'}
             {!pending && !isRoundDone && isWaitingForOpponents && 'Waiting for opponents…'}
-            {!pending && !isRoundDone && !isWaitingForOpponents && timer.state === 'idle' && 'Hold SPACE / press to arm'}
+            {!pending && !isRoundDone && !isWaitingForOpponents && !scrambleShown && 'Reveal the scramble first'}
+            {!pending && !isRoundDone && !isWaitingForOpponents && scrambleShown && timer.state === 'idle' && 'Hold SPACE / press to arm'}
             {!pending && timer.state === 'inspecting' && 'Hold to arm, release to start'}
             {!pending && timer.state === 'armed' && (<span style={{ color: C.success, fontWeight: 700 }}>RELEASE TO START</span>)}
             {!pending && timer.state === 'running' && 'Tap or press SPACE to stop'}
           </div>
 
           {pending && (
-            <div style={{
-              marginTop: '1.2rem',
-              display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem',
-              width: '100%', maxWidth: 360,
-            }}>
+            <div
+              onTouchStart={(e) => e.stopPropagation()}
+              onTouchEnd={(e) => e.stopPropagation()}
+              style={{
+                marginTop: '1.2rem',
+                display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem',
+                width: '100%', maxWidth: 360,
+              }}
+            >
               <ConfirmButton color={C.success} onClick={(e) => { e.stopPropagation(); confirmSolve('ok'); }}>OK</ConfirmButton>
               <ConfirmButton color={C.warn}    onClick={(e) => { e.stopPropagation(); confirmSolve('+2'); }}>+2</ConfirmButton>
               <ConfirmButton color={C.danger}  onClick={(e) => { e.stopPropagation(); confirmSolve('dnf'); }}>DNF</ConfirmButton>
             </div>
           )}
-
-          <div style={{
-            marginTop: '1.5rem', display: 'flex', gap: '0.4rem',
-            flexWrap: 'wrap', justifyContent: 'center',
-          }}>
-            {Array.from({ length: SOLVES_PER_ROUND }, (_, i) => {
-              const s = mySolves[i];
-              const isCurrent = i === myCurrent && !isRoundDone;
-              return (
-                <div key={i} style={{
-                  minWidth: 56, padding: '0.3rem 0.5rem',
-                  background: s ? C.cardAlt : 'transparent',
-                  border: `1px solid ${isCurrent ? C.accent : C.border}`,
-                  borderRadius: 8,
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.1rem',
-                }}>
-                  <div style={{ fontSize: '0.55rem', letterSpacing: '0.12em', color: C.mutedDim, fontWeight: 700 }}>
-                    S{i + 1}
-                  </div>
-                  <div style={{
-                    fontFamily: 'JetBrains Mono, monospace', fontSize: '0.78rem', fontWeight: 700,
-                    fontVariantNumeric: 'tabular-nums',
-                    color: !s ? C.mutedDim : s.penalty === 'dnf' ? C.danger : C.text,
-                  }}>
-                    {!s ? '—' : s.penalty === 'dnf' ? 'DNF' : fmtMs(effectiveSolveMs(s), false, 2)}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
         </div>
 
         <OpponentsPanel room={room} userId={userId} />
       </div>
+
+      <SolveAndCubeRow
+        isMobile={false}
+        mySolves={mySolves}
+        current={myCurrent}
+        isRoundDone={isRoundDone}
+        eventId={room.event}
+        scramble={currentScramble}
+        scrambleShown={scrambleShown}
+      />
     </div>
   );
 }
@@ -1746,7 +1734,8 @@ function RacingScreen({
 // ── Mobile racing layout (header + tabs + bottom nav) ────────────────────
 function MobileRacingLayout({
   room, userId, myCurrent, mySolves, isRoundDone, isWaitingForOpponents,
-  currentScramble, timer, pending, displayValue, timerColor, borderColor,
+  currentScramble, scrambleShown, onRevealScramble,
+  timer, pending, displayValue, timerColor, borderColor,
   interactionLocked, confirmSolve, onTimerTouchStart, onTimerTouchEnd, onLeave,
 }: {
   room: RoomData;
@@ -1756,6 +1745,8 @@ function MobileRacingLayout({
   isRoundDone: boolean;
   isWaitingForOpponents: boolean;
   currentScramble: string;
+  scrambleShown: boolean;
+  onRevealScramble: () => void;
   timer: ReturnType<typeof useMpTimer>;
   pending: { ms: number; defaultDnf: boolean } | null;
   displayValue: string;
@@ -1776,30 +1767,19 @@ function MobileRacingLayout({
       display: 'flex', flexDirection: 'column',
       background: C.bg,
     }}>
-      {/* Header: scramble centered + X leave (top-right) */}
+      {/* Header: just the X leave button — no title or scramble. */}
       <header style={{
         position: 'relative',
-        padding: '0.55rem 2.4rem 0.55rem 0.7rem',
+        padding: '0.4rem 0.55rem',
         borderBottom: `1px solid ${C.border}`,
         background: C.card,
-        minHeight: 44,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
       }}>
-        <div style={{
-          fontFamily: 'JetBrains Mono, monospace',
-          fontSize: 'clamp(0.74rem, 3vw, 0.95rem)',
-          color: C.text, lineHeight: 1.35, letterSpacing: '0.03em',
-          textAlign: 'center', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-          maxWidth: '100%',
-        }}>
-          {isRoundDone ? '' : currentScramble}
-        </div>
         <button
           onClick={onLeave}
           aria-label="Leave race"
           title="Leave"
           style={{
-            position: 'absolute', top: 6, right: 6,
             width: 32, height: 32, borderRadius: 8,
             background: 'transparent', color: C.muted,
             border: `1px solid ${C.border}`,
@@ -1830,6 +1810,15 @@ function MobileRacingLayout({
                 color: C.success, fontWeight: 700, fontSize: '0.92rem',
               }}>Round complete — waiting for the others…</div>
             )}
+
+            {/* Scramble (hide / show) */}
+            <ScrambleArea
+              isMobile={true}
+              scramble={currentScramble}
+              shown={scrambleShown}
+              onReveal={onRevealScramble}
+              hidden={isRoundDone || isWaitingForOpponents}
+            />
 
             {/* Big timer */}
             <div
@@ -1872,7 +1861,8 @@ function MobileRacingLayout({
                 {pending && 'Confirm your time'}
                 {!pending && isRoundDone && 'Round complete'}
                 {!pending && !isRoundDone && isWaitingForOpponents && 'Waiting for opponents…'}
-                {!pending && !isRoundDone && !isWaitingForOpponents && timer.state === 'idle' && 'Hold to arm, release to start'}
+                {!pending && !isRoundDone && !isWaitingForOpponents && !scrambleShown && 'Reveal the scramble first'}
+                {!pending && !isRoundDone && !isWaitingForOpponents && scrambleShown && timer.state === 'idle' && 'Hold to arm, release to start'}
                 {!pending && timer.state === 'inspecting' && 'Hold to arm, release to start'}
                 {!pending && timer.state === 'armed' && (<span style={{ color: C.success, fontWeight: 700 }}>RELEASE TO START</span>)}
                 {!pending && timer.state === 'running' && 'Tap to stop'}
@@ -1895,18 +1885,6 @@ function MobileRacingLayout({
                 </div>
               )}
             </div>
-
-            {/* Cube viz */}
-            {!isRoundDone && (
-              <div style={{
-                background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
-                padding: '0.4rem',
-                height: 130,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>
-                <CubeViewer eventId={room.event} scramble={currentScramble} />
-              </div>
-            )}
           </div>
         ) : (
           <div style={{ padding: '0.7rem' }}>
@@ -1915,47 +1893,19 @@ function MobileRacingLayout({
         )}
       </div>
 
-      {/* Solve strip + tiny round label, fixed above tabs */}
-      <div style={{
-        background: C.card, borderTop: `1px solid ${C.border}`,
-        padding: '0.45rem 0.7rem',
-        display: 'flex', flexDirection: 'column', gap: '0.15rem',
-        flexShrink: 0,
-      }}>
-        <div style={{
-          display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.25rem',
-        }}>
-          {Array.from({ length: SOLVES_PER_ROUND }, (_, i) => {
-            const s = mySolves[i];
-            const isCurrent = i === myCurrent && !isRoundDone;
-            const dnf = s?.penalty === 'dnf';
-            return (
-              <div
-                key={i}
-                className={isCurrent ? 'mp-solve-current' : undefined}
-                style={{
-                  fontFamily: 'JetBrains Mono, monospace',
-                  fontSize: '0.86rem', fontWeight: 700,
-                  fontVariantNumeric: 'tabular-nums',
-                  textAlign: 'center',
-                  padding: '0.2rem 0.1rem',
-                  color: isCurrent ? C.accent
-                    : !s ? C.mutedDim
-                    : dnf ? C.danger : C.text,
-                  letterSpacing: dnf ? '0.04em' : '0',
-                }}
-              >
-                {isCurrent && !s ? '●' : !s ? '—' : dnf ? 'DNF' : fmtMs(effectiveSolveMs(s), false, 2)}
-              </div>
-            );
-          })}
-        </div>
-        <div style={{
-          fontSize: '0.58rem', letterSpacing: '0.12em', textTransform: 'uppercase',
-          color: C.mutedDim, fontWeight: 700, textAlign: 'center',
-        }}>
-          {roundLabel} · Ao5
-        </div>
+      {/* S1..S5 + cube viz row, persistent above the tab bar. Same component
+          rendered on desktop, just with isMobile=true here for sizing. */}
+      <div style={{ padding: '0.55rem 0.7rem', flexShrink: 0 }}>
+        <SolveAndCubeRow
+          isMobile={true}
+          mySolves={mySolves}
+          current={myCurrent}
+          isRoundDone={isRoundDone}
+          eventId={room.event}
+          scramble={currentScramble}
+          scrambleShown={scrambleShown}
+          roundLabel={roundLabel}
+        />
       </div>
 
       {/* Bottom 2-tab nav */}
@@ -2035,6 +1985,147 @@ function RaceTabButton({
       {icon}
       {label}
     </button>
+  );
+}
+
+// ── Shared scramble + solve+cube row (used on desktop AND mobile) ────────
+// Behaviour is identical at every breakpoint; only sizes differ.
+
+function ScrambleArea({
+  isMobile, scramble, shown, onReveal, hidden,
+}: {
+  isMobile: boolean;
+  scramble: string;
+  shown: boolean;
+  onReveal: () => void;
+  // Optionally suppress the whole component (e.g. round done / waiting banners).
+  hidden?: boolean;
+}) {
+  if (hidden) return null;
+  return (
+    <div style={{
+      background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
+      padding: isMobile ? '0.6rem 0.7rem' : '0.7rem 0.9rem',
+      minHeight: isMobile ? 56 : 72,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      {shown ? (
+        <div style={{
+          fontFamily: 'JetBrains Mono, monospace',
+          fontSize: isMobile ? 'clamp(0.78rem, 3vw, 1rem)' : 'clamp(0.95rem, 2vw, 1.3rem)',
+          color: C.text, lineHeight: 1.5, letterSpacing: '0.04em',
+          whiteSpace: 'pre-wrap', wordBreak: 'break-word', textAlign: 'center',
+          width: '100%',
+        }}>{scramble}</div>
+      ) : (
+        <button
+          onClick={onReveal}
+          type="button"
+          style={{
+            background: C.accentDim, color: C.accent,
+            border: `1px solid ${C.borderHi}`, borderRadius: 10,
+            padding: isMobile ? '0.55rem 0.95rem' : '0.65rem 1.2rem',
+            fontSize: isMobile ? '0.86rem' : '0.95rem',
+            fontWeight: 700, fontFamily: 'inherit',
+            cursor: 'pointer', letterSpacing: '0.02em',
+          }}
+        >Tap to reveal scramble</button>
+      )}
+    </div>
+  );
+}
+
+// Single horizontal row: 5 solve chips on the left, cube viz cell on the
+// right. The cube viz also respects scrambleShown so the visualisation
+// doesn't leak the scramble before reveal.
+function SolveAndCubeRow({
+  isMobile, mySolves, current, isRoundDone, eventId, scramble, scrambleShown, roundLabel,
+}: {
+  isMobile: boolean;
+  mySolves: SolveData[];
+  current: number;
+  isRoundDone: boolean;
+  eventId: string;
+  scramble: string;
+  scrambleShown: boolean;
+  roundLabel?: string;
+}) {
+  const cubeSize = isMobile ? 120 : 160;
+  return (
+    <div style={{
+      background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
+      padding: isMobile ? '0.55rem 0.65rem' : '0.75rem 0.9rem',
+      display: 'flex', flexDirection: 'column', gap: '0.4rem',
+    }}>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: `minmax(0, 1fr) ${cubeSize}px`,
+        gap: isMobile ? '0.5rem' : '0.85rem',
+        alignItems: 'center',
+      }}>
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
+          gap: isMobile ? '0.25rem' : '0.4rem',
+          minWidth: 0,
+        }}>
+          {Array.from({ length: SOLVES_PER_ROUND }, (_, i) => {
+            const s = mySolves[i];
+            const isCurrent = i === current && !isRoundDone;
+            const dnf = s?.penalty === 'dnf';
+            return (
+              <div
+                key={i}
+                className={isCurrent && !s ? 'mp-solve-current' : undefined}
+                style={{
+                  fontFamily: 'JetBrains Mono, monospace',
+                  fontSize: isMobile ? '0.78rem' : '0.92rem', fontWeight: 700,
+                  fontVariantNumeric: 'tabular-nums',
+                  textAlign: 'center',
+                  padding: isMobile ? '0.4rem 0.1rem' : '0.55rem 0.2rem',
+                  background: s ? C.cardAlt : 'transparent',
+                  border: `1px solid ${isCurrent ? C.accent : C.border}`,
+                  borderRadius: 8,
+                  color: isCurrent && !s ? C.accent
+                    : !s ? C.mutedDim
+                    : dnf ? C.danger : C.text,
+                  letterSpacing: dnf ? '0.04em' : '0',
+                  minHeight: isMobile ? 36 : 44,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  overflow: 'hidden',
+                }}
+              >
+                {isCurrent && !s ? '●' : !s ? '—' : dnf ? 'DNF' : fmtMs(effectiveSolveMs(s), false, 2)}
+              </div>
+            );
+          })}
+        </div>
+        <div style={{
+          width: cubeSize, height: cubeSize,
+          background: C.cardAlt, border: `1px solid ${C.border}`, borderRadius: 10,
+          padding: 4,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0,
+          overflow: 'hidden',
+        }}>
+          {scrambleShown && !isRoundDone ? (
+            <CubeViewer eventId={eventId} scramble={scramble} />
+          ) : (
+            <div style={{
+              fontSize: '0.6rem', letterSpacing: '0.12em', textTransform: 'uppercase',
+              color: C.mutedDim, fontWeight: 700, textAlign: 'center',
+            }}>{isRoundDone ? '—' : 'Hidden'}</div>
+          )}
+        </div>
+      </div>
+      {roundLabel && (
+        <div style={{
+          fontSize: '0.58rem', letterSpacing: '0.12em', textTransform: 'uppercase',
+          color: C.mutedDim, fontWeight: 700, textAlign: 'center',
+        }}>
+          {roundLabel} · Ao5
+        </div>
+      )}
+    </div>
   );
 }
 
