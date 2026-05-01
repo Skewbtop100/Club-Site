@@ -1379,49 +1379,71 @@ export default function TimerPage() {
         }}>
           <div style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: '-0.25rem' }}>Performance</div>
 
-          {/* Personal Best card */}
-          <div style={{
-            background: `linear-gradient(135deg, ${C.cardAlt}, ${C.card})`,
-            border: `1px solid ${C.border}`, borderRadius: 14, padding: '1rem 1.1rem',
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div style={{ fontSize: '0.66rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: C.muted, fontWeight: 600 }}>
-                Personal Best
-              </div>
-              <span style={{ fontSize: '1.1rem', opacity: 0.6 }}>🏆</span>
-            </div>
-            <div style={{
-              fontFamily: '"JetBrains Mono", monospace',
-              fontSize: '2.4rem', fontWeight: 800, color: C.success,
-              marginTop: '0.4rem', fontVariantNumeric: 'tabular-nums',
-            }}>
-              {fmtMs(stats.pbMs)}
-            </div>
-            <div style={{ marginTop: '0.6rem', height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
-              <div style={{
-                width: stats.pbMs ? '70%' : '0%', height: '100%',
-                background: `linear-gradient(90deg, ${C.success}, ${C.accent})`,
-                transition: 'width 0.5s',
-              }} />
-            </div>
-            <div style={{ fontSize: '0.66rem', color: C.muted, marginTop: '0.4rem', textAlign: 'right' }}>
-              {stats.pbMs ? 'Personal record' : 'No solves yet'}
-            </div>
-          </div>
+          {(() => {
+            // Trend comparison: each rolling average vs. its value one window
+            // ago. Lower = faster = "improving" (down-arrow, green).
+            const prevAo5  = avgOfN(solves.slice(0, -5), 5);
+            const prevAo12 = avgOfN(solves.slice(0, -12), 12);
+            const validNow = solves.filter(s => !isDnf(s));
+            const validCnt = validNow.length;
+            const worstMs  = validCnt ? Math.max(...validNow.map(finalMs)) : null;
+            const gapFromMean = stats.pbMs != null && stats.mean != null
+              ? (stats.mean - stats.pbMs) / 1000
+              : null;
+            return (
+              <>
+                {/* PB card — gradient-border (mint→lavender), large green time */}
+                <DesktopPbCard
+                  pbMs={stats.pbMs}
+                  gapFromMean={gapFromMean}
+                  precision={precision}
+                />
 
-          {/* Stats grid 2x2 + total solves spanning both columns */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.7rem' }}>
-            <StatTile label="Average" value={fmtMs(stats.mean)} />
-            <StatTile label="Worst"   value={fmtMs(stats.worst)} />
-            <StatTile label="Ao5"     value={stats.ao5  == null ? '—' : fmtMs(stats.ao5)}  accent />
-            <StatTile label="Ao12"    value={stats.ao12 == null ? '—' : fmtMs(stats.ao12)} accent />
-            <div style={{ gridColumn: 'span 2' }}>
-              <StatTile
-                label="Total Solves"
-                value={String(solves.filter(s => !isDnf(s)).length)}
-              />
-            </div>
-          </div>
+                {/* 2x2 stats grid: Ao5 | Ao12 / Mean | σ */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                  <DesktopStatCard
+                    label="Ao5"
+                    value={stats.ao5  == null ? '—' : fmtMs(stats.ao5,  false, precision)}
+                    accent={stats.ao5 != null}
+                    trend={trendDir(stats.ao5,  prevAo5)}
+                  />
+                  <DesktopStatCard
+                    label="Ao12"
+                    value={stats.ao12 == null ? '—' : fmtMs(stats.ao12, false, precision)}
+                    accent={stats.ao12 != null}
+                    trend={trendDir(stats.ao12, prevAo12)}
+                  />
+                  <DesktopStatCard
+                    label="Mean"
+                    value={fmtMs(stats.mean, false, precision)}
+                  />
+                  <DesktopStatCard
+                    label="σ"
+                    value={stats.stdDev == null ? '—' : (stats.stdDev / 1000).toFixed(2)}
+                  />
+                </div>
+
+                {/* Sparkline — last 20 valid solves, no axes */}
+                <Sparkline solves={solves} count={20} c={C} />
+
+                {/* Session info: count + best/worst on a compact row */}
+                <div style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+                  fontSize: '0.7rem', color: C.muted,
+                  padding: '0 0.1rem',
+                }}>
+                  <span>
+                    <span style={{ color: C.text, fontWeight: 700 }}>{validCnt}</span>
+                    {' '}solve{validCnt === 1 ? '' : 's'} this session
+                  </span>
+                  <span style={{ display: 'inline-flex', gap: '0.6rem', fontFamily: '"JetBrains Mono", monospace', fontVariantNumeric: 'tabular-nums' }}>
+                    <span><span style={{ color: C.mutedDim }}>best</span>{' '}<span style={{ color: C.success }}>{fmtMs(stats.pbMs, false, precision)}</span></span>
+                    <span><span style={{ color: C.mutedDim }}>worst</span>{' '}<span style={{ color: C.text }}>{worstMs == null ? '—' : fmtMs(worstMs, false, precision)}</span></span>
+                  </span>
+                </div>
+              </>
+            );
+          })()}
 
           {/* Scramble preview — pinned to the bottom of the right panel.
               marginTop: auto pushes it past the stat cards; aspect-ratio
@@ -1917,22 +1939,26 @@ export default function TimerPage() {
                   ><IconClose size={16} /></button>
                 </div>
 
-                {/* Chart card */}
-                <div style={{ padding: '0 0.7rem 0.5rem', flex: '1 1 50%', minHeight: 0, display: 'flex' }}>
+                {/* Chart card — fixed 200px height, last 50 solves only */}
+                <div style={{ padding: '0 0.7rem 0.5rem', flex: '0 0 auto' }}>
                   <div style={{
-                    flex: 1,
                     background: C.card, border: `1px solid ${C.border}`,
                     borderRadius: 12, padding: '0.6rem',
                     display: 'flex', flexDirection: 'column', gap: '0.4rem',
-                    minHeight: 0,
                   }}>
-                    <div style={{ flex: 1, minHeight: 0 }}>
+                    <div style={{ height: 200, width: '100%' }}>
                       <MobileLineChart
-                        all={chartSeries.all}
-                        best={chartSeries.best}
-                        ao5={chartSeries.ao5s}
-                        ao12={chartSeries.ao12s}
-                        pbIndices={chartSeries.pbIndices}
+                        all={chartSeries.all.slice(-50)}
+                        best={chartSeries.best.slice(-50)}
+                        ao5={chartSeries.ao5s.slice(-50)}
+                        ao12={chartSeries.ao12s.slice(-50)}
+                        pbIndices={(() => {
+                          // Re-index PB markers relative to the trailing 50 window.
+                          const offset = Math.max(0, chartSeries.all.length - 50);
+                          return chartSeries.pbIndices
+                            .filter(i => i >= offset)
+                            .map(i => i - offset);
+                        })()}
                         C={C}
                       />
                     </div>
@@ -1941,36 +1967,34 @@ export default function TimerPage() {
                       fontSize: '0.62rem', color: C.muted, letterSpacing: '0.04em',
                       paddingTop: '0.2rem', borderTop: `1px solid ${C.border}`,
                     }}>
-                      <ChartLegendDot color="#9ca3af" label="Everything" />
-                      <ChartLegendDot color="#fbbf24" label="Best" />
+                      <ChartLegendDot color="#9ca3af" label="Solves" />
+                      <ChartLegendDot color="#fbbf24" label="PB" />
                       <ChartLegendDot color={C.accent}  label="Ao5" />
                       <ChartLegendDot color={C.success} label="Ao12" />
                     </div>
                   </div>
                 </div>
 
-                {/* Stats table */}
-                <div style={{ padding: '0 0.7rem 0.6rem', flex: '0 0 auto' }}>
-                  <div style={{
-                    background: C.card, border: `1px solid ${C.border}`,
-                    borderRadius: 12, overflow: 'hidden',
-                  }}>
-                    <div style={{
-                      display: 'grid', gridTemplateColumns: '1fr 1fr 1fr',
-                      padding: '0.5rem 0.7rem',
-                      fontSize: '0.6rem', letterSpacing: '0.1em',
-                      textTransform: 'uppercase', color: C.muted, fontWeight: 600,
-                      borderBottom: `1px solid ${C.border}`,
-                    }}>
-                      <div>Stat</div><div>Global</div><div>Session</div>
-                    </div>
-                    <StatTableRow zebra={false} label="Best"      global={fmtMs(stats.best, false, precision)}  session={fmtMs(stats.best, false, precision)} highlight />
-                    <StatTableRow zebra={true}  label="Deviation" global={stats.stdDev == null ? '—' : (stats.stdDev / 1000).toFixed(2)} session={stats.stdDev == null ? '—' : (stats.stdDev / 1000).toFixed(2)} />
-                    <StatTableRow zebra={false} label="Ao12"      global={fmtMs(stats.ao12, false, precision)}  session={fmtMs(stats.ao12, false, precision)} />
-                    <StatTableRow zebra={true}  label="Ao50"      global={fmtMs(ao50,       false, precision)}  session={fmtMs(ao50,       false, precision)} />
-                    <StatTableRow zebra={false} label="Ao100"     global={fmtMs(ao100,      false, precision)}  session={fmtMs(ao100,      false, precision)} />
-                    <StatTableRow zebra={true}  label="Count"     global={String(validCount)}                session={String(validCount)} />
-                  </div>
+                {/* 2x2 main stats grid */}
+                <div style={{
+                  padding: '0 0.7rem 0.5rem',
+                  display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem',
+                }}>
+                  <MobileStatCard label="Best" value={fmtMs(stats.best, false, precision)} accent={C.success} />
+                  <MobileStatCard label="Mean" value={fmtMs(stats.mean, false, precision)} />
+                  <MobileStatCard label="Ao5"  value={stats.ao5  == null ? '—' : fmtMs(stats.ao5,  false, precision)} accent={stats.ao5  == null ? undefined : C.accent} />
+                  <MobileStatCard label="Ao12" value={stats.ao12 == null ? '—' : fmtMs(stats.ao12, false, precision)} accent={stats.ao12 == null ? undefined : C.accent} />
+                </div>
+
+                {/* Compact secondary row: Ao50 | Ao100 | Count | σ */}
+                <div style={{
+                  padding: '0 0.7rem 0.6rem',
+                  display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.4rem',
+                }}>
+                  <MobileStatMini label="Ao50"  value={ao50  == null ? '—' : fmtMs(ao50,  false, precision)} />
+                  <MobileStatMini label="Ao100" value={ao100 == null ? '—' : fmtMs(ao100, false, precision)} />
+                  <MobileStatMini label="Count" value={String(validCount)} />
+                  <MobileStatMini label="σ"     value={stats.stdDev == null ? '—' : (stats.stdDev / 1000).toFixed(2)} />
                 </div>
               </div>
             )}
@@ -2425,24 +2449,149 @@ export default function TimerPage() {
 
 // ── Sub-components ──────────────────────────────────────────────────────────
 
-function StatTile({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+// ── Desktop right-panel components (redesigned Performance section) ────────
+
+// Returns 'down' (current is lower = faster = improving) or 'up' (slower).
+function trendDir(curr: number | null, prev: number | null): 'up' | 'down' | null {
+  if (curr == null || prev == null) return null;
+  if (curr < prev) return 'down';
+  if (curr > prev) return 'up';
+  return null;
+}
+
+function DesktopPbCard({ pbMs, gapFromMean, precision }: {
+  pbMs: number | null;
+  gapFromMean: number | null;  // seconds, positive = PB faster than mean
+  precision: Precision;
+}) {
+  // Gradient border via the "two background-images" trick: padding-box gets
+  // the card fill, border-box gets the gradient.
+  const borderGrad = `linear-gradient(135deg, ${C.success}, ${C.accent})`;
   return (
     <div style={{
-      background: accent ? 'linear-gradient(135deg, rgba(167,139,250,0.08), rgba(167,139,250,0.02))' : C.card,
-      border: `1px solid ${accent ? 'rgba(167,139,250,0.2)' : C.border}`,
-      borderRadius: 12, padding: '0.85rem 0.9rem',
+      borderRadius: 14, padding: '1rem 1.1rem',
+      background: `linear-gradient(${C.cardAlt}, ${C.card}) padding-box, ${borderGrad} border-box`,
+      border: '1px solid transparent',
     }}>
-      <div style={{ fontSize: '0.62rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: C.muted, fontWeight: 600 }}>
-        {label}
+      <div style={{
+        fontSize: '0.66rem', letterSpacing: '0.12em',
+        textTransform: 'uppercase', color: C.muted, fontWeight: 700,
+      }}>
+        Personal Best
       </div>
       <div style={{
         fontFamily: '"JetBrains Mono", monospace',
-        fontSize: '1.35rem', fontWeight: 700,
+        fontSize: '2.4rem', fontWeight: 800, color: C.success,
+        marginTop: '0.35rem', fontVariantNumeric: 'tabular-nums',
+        lineHeight: 1.0,
+      }}>
+        {fmtMs(pbMs, false, precision)}
+      </div>
+      <div style={{
+        marginTop: '0.5rem', fontSize: '0.7rem', color: C.muted,
+      }}>
+        {gapFromMean != null && gapFromMean > 0 ? (
+          <>
+            <span style={{ color: C.success, fontWeight: 700 }}>↓ {gapFromMean.toFixed(2)}s</span>
+            {' '}from mean
+          </>
+        ) : pbMs == null ? 'No solves yet' : 'Personal record'}
+      </div>
+    </div>
+  );
+}
+
+function DesktopStatCard({ label, value, accent, trend }: {
+  label: string;
+  value: string;
+  accent?: boolean;
+  trend?: 'up' | 'down' | null;
+}) {
+  const trendColor = trend === 'down' ? C.success : trend === 'up' ? '#f87171' : C.mutedDim;
+  const trendChar  = trend === 'down' ? '↓' : trend === 'up' ? '↑' : '';
+  return (
+    <div
+      style={{
+        background: accent ? 'linear-gradient(135deg, rgba(167,139,250,0.10), rgba(167,139,250,0.02))' : C.card,
+        border: `1px solid ${accent ? 'rgba(167,139,250,0.25)' : C.border}`,
+        borderRadius: 12, padding: '0.7rem 0.85rem',
+        display: 'flex', flexDirection: 'column', gap: '0.25rem',
+        transition: 'background 0.15s, border-color 0.15s',
+      }}
+      onMouseEnter={e => {
+        e.currentTarget.style.borderColor = accent ? 'rgba(167,139,250,0.45)' : 'rgba(255,255,255,0.16)';
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.borderColor = accent ? 'rgba(167,139,250,0.25)' : C.border;
+      }}
+    >
+      <div style={{
+        display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+      }}>
+        <span style={{
+          fontSize: '0.6rem', letterSpacing: '0.12em',
+          textTransform: 'uppercase', color: C.muted, fontWeight: 600,
+        }}>
+          {label}
+        </span>
+        {trendChar && (
+          <span style={{ color: trendColor, fontSize: '0.78rem', fontWeight: 700, lineHeight: 1 }}>
+            {trendChar}
+          </span>
+        )}
+      </div>
+      <div style={{
+        fontFamily: '"JetBrains Mono", monospace',
+        fontSize: '1.55rem', fontWeight: 700,
         color: accent ? C.accent : C.text,
-        marginTop: '0.3rem', fontVariantNumeric: 'tabular-nums',
+        fontVariantNumeric: 'tabular-nums',
+        lineHeight: 1.05,
       }}>
         {value}
       </div>
+    </div>
+  );
+}
+
+// Tiny line chart, last N valid solves. No axes/labels — pure spark.
+function Sparkline({ solves, count, c }: { solves: Solve[]; count: number; c: typeof C }) {
+  const valid = solves.filter(s => !isDnf(s)).slice(-count).map(finalMs);
+  if (valid.length < 2) {
+    return (
+      <div style={{
+        height: 80, borderRadius: 10,
+        background: c.card, border: `1px solid ${c.border}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: c.mutedDim, fontSize: '0.7rem',
+      }}>
+        Last {count} solves will appear here.
+      </div>
+    );
+  }
+  const W = 280, H = 80, pad = 6;
+  const innerW = W - pad * 2;
+  const innerH = H - pad * 2;
+  const minV = Math.min(...valid);
+  const maxV = Math.max(...valid);
+  const span = maxV - minV || 1;
+  const xAt = (i: number) => pad + (i / (valid.length - 1)) * innerW;
+  const yAt = (v: number) => pad + (1 - (v - minV) / span) * innerH;
+  let d = '';
+  valid.forEach((v, i) => {
+    d += (i === 0 ? 'M ' : ' L ') + xAt(i).toFixed(1) + ' ' + yAt(v).toFixed(1);
+  });
+  // Improving if last < first.
+  const improving = valid[valid.length - 1] < valid[0];
+  const stroke = improving ? c.success : c.text;
+  return (
+    <div style={{
+      height: 80, borderRadius: 10,
+      background: c.card, border: `1px solid ${c.border}`,
+      padding: 0, overflow: 'hidden',
+    }}>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%', display: 'block' }}>
+        <path d={d} fill="none" stroke={stroke} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+      </svg>
     </div>
   );
 }
@@ -2520,6 +2669,62 @@ function MobileActionIcon({ label, icon, onClick }: { label: string; icon: React
   );
 }
 
+// Tiles for the mobile Stats tab — bigger card style for the 2x2 main grid.
+function MobileStatCard({ label, value, accent }: { label: string; value: string; accent?: string }) {
+  return (
+    <div style={{
+      background: accent ? `linear-gradient(135deg, ${accent}1A, ${accent}05)` : C.card,
+      border: `1px solid ${accent ? `${accent}33` : C.border}`,
+      borderRadius: 10, padding: '0.6rem 0.75rem',
+      display: 'flex', flexDirection: 'column', gap: '0.25rem',
+    }}>
+      <div style={{
+        fontSize: '0.58rem', letterSpacing: '0.12em',
+        textTransform: 'uppercase', color: C.muted, fontWeight: 600,
+      }}>
+        {label}
+      </div>
+      <div style={{
+        fontFamily: '"JetBrains Mono", monospace',
+        fontSize: '1.35rem', fontWeight: 700,
+        color: accent ?? C.text,
+        fontVariantNumeric: 'tabular-nums',
+        lineHeight: 1.05,
+      }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+// Compact 4-up secondary row: tiny label + value, no card chrome.
+function MobileStatMini({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{
+      background: C.cardAlt, border: `1px solid ${C.border}`,
+      borderRadius: 8, padding: '0.4rem 0.5rem',
+      display: 'flex', flexDirection: 'column', gap: '0.1rem',
+      alignItems: 'center', textAlign: 'center', minWidth: 0,
+    }}>
+      <div style={{
+        fontSize: '0.55rem', letterSpacing: '0.1em',
+        textTransform: 'uppercase', color: C.muted, fontWeight: 600,
+      }}>
+        {label}
+      </div>
+      <div style={{
+        fontFamily: '"JetBrains Mono", monospace',
+        fontSize: '0.82rem', fontWeight: 700,
+        color: C.text, fontVariantNumeric: 'tabular-nums',
+        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        maxWidth: '100%',
+      }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
 function MobileMicroStat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
     <div style={{
@@ -2581,29 +2786,6 @@ function ChartLegendDot({ color, label }: { color: string; label: string }) {
   );
 }
 
-function StatTableRow({ label, global, session, zebra, highlight }: { label: string; global: string; session: string; zebra: boolean; highlight?: boolean }) {
-  return (
-    <div style={{
-      display: 'grid', gridTemplateColumns: '1fr 1fr 1fr',
-      padding: '0.5rem 0.7rem',
-      fontSize: '0.78rem',
-      background: zebra ? 'rgba(255,255,255,0.02)' : 'transparent',
-      color: highlight ? C.success : C.text,
-      fontWeight: highlight ? 700 : 500,
-    }}>
-      <div style={{ color: highlight ? C.success : C.muted, fontSize: '0.72rem', letterSpacing: '0.05em', alignSelf: 'center' }}>
-        {label}
-      </div>
-      <div style={{ fontFamily: '"JetBrains Mono", monospace', fontVariantNumeric: 'tabular-nums' }}>
-        {global}
-      </div>
-      <div style={{ fontFamily: '"JetBrains Mono", monospace', fontVariantNumeric: 'tabular-nums' }}>
-        {session}
-      </div>
-    </div>
-  );
-}
-
 function MobileLineChart({
   all, best, ao5, ao12, pbIndices, C: c,
 }: {
@@ -2636,8 +2818,11 @@ function MobileLineChart({
   const yMin = Math.max(0, minMs - pad);
   const yMax = maxMs + pad;
 
-  // viewBox scaled units; React renders responsive via SVG preserveAspectRatio.
-  const W = 320, H = 160, padL = 26, padR = 6, padT = 6, padB = 16;
+  // viewBox scaled units. Aspect roughly matches a 200px-tall mobile chart.
+  // preserveAspectRatio="none" stretches X/Y independently to fill the parent
+  // box exactly; for line charts the "distortion" only changes line angles,
+  // not data correctness.
+  const W = 400, H = 200, padL = 28, padR = 8, padT = 8, padB = 18;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
   const xAt = (i: number) => padL + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
