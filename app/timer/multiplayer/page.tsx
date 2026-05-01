@@ -191,6 +191,52 @@ function fmtMs(ms: number | null, dnf?: boolean, precision: 2 | 3 = 2): string {
   return s.toFixed(precision);
 }
 
+// ── Multiplayer prefs (persisted to localStorage) ───────────────────────────
+const MP_PREFS_KEY = 'pv.timer.mp.prefs.v1';
+
+interface MpPrefs {
+  inspectionEnabled: boolean;
+  holdToStart: boolean;
+  precision: 2 | 3;                 // 2 = centiseconds, 3 = milliseconds
+  scrambleFontSize: 'sm' | 'md' | 'lg';
+}
+
+const DEFAULT_MP_PREFS: MpPrefs = {
+  inspectionEnabled: false,
+  holdToStart: true,
+  precision: 2,
+  scrambleFontSize: 'md',
+};
+
+function useMpPrefs(): [MpPrefs, (patch: Partial<MpPrefs>) => void] {
+  const [prefs, setPrefs] = useState<MpPrefs>(DEFAULT_MP_PREFS);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(MP_PREFS_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<MpPrefs>;
+      setPrefs(prev => ({ ...prev, ...parsed }));
+    } catch {}
+  }, []);
+
+  const update = useCallback((patch: Partial<MpPrefs>) => {
+    setPrefs(prev => {
+      const next = { ...prev, ...patch };
+      try { localStorage.setItem(MP_PREFS_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, []);
+
+  return [prefs, update];
+}
+
+const SCRAMBLE_FONT_PX: Record<MpPrefs['scrambleFontSize'], { mobile: string; desktop: string }> = {
+  sm: { mobile: '0.78rem', desktop: '0.95rem' },
+  md: { mobile: '0.92rem', desktop: '1.15rem' },
+  lg: { mobile: '1.05rem', desktop: '1.35rem' },
+};
+
 // ── Timer state machine ─────────────────────────────────────────────────────
 // Ported verbatim from app/timer/page.tsx so multiplayer feels identical:
 // hold-to-arm (≥350ms), green-when-armed, inspection countdown if enabled,
@@ -398,11 +444,22 @@ function MultiplayerPageInner() {
   // "Rejoin {code}" lobby card). Empty string = nothing to rejoin.
   const [pendingRejoin, setPendingRejoin] = useState<string>('');
 
-  // Responsive: JS-based mobile detection (≤900px). Initial render is desktop;
-  // the effect runs on mount and on resize.
+  // Prefs (inspection / hold-to-start / precision / scramble font size).
+  // Persisted to localStorage; mutated only via the Settings modal.
+  const [prefs, updatePrefs] = useMpPrefs();
+
+  // Settings + Pause modal state.
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [pauseOpen, setPauseOpen] = useState(false);
+  const [exitConfirmOpen, setExitConfirmOpen] = useState(false);
+
+  // Responsive: ≤1024px gets the mobile/tablet single-column layout (so iPads
+  // and other tablets share the bottom-tab racing UI). Desktop above 1024px
+  // uses the side-by-side layout. Initial render is desktop; the effect runs
+  // on mount and on resize.
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth <= 900);
+    const check = () => setIsMobile(window.innerWidth <= 1024);
     check();
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
@@ -639,6 +696,44 @@ function MultiplayerPageInner() {
     setPendingRejoin('');
   }, [roomCode, userId]);
 
+  // Leave temporarily — keep our room slot + LAST_ROOM_KEY so we can rejoin.
+  // Navigate back to /timer; the rejoin probe on next visit will offer to come
+  // back. Cancel the onDisconnect-remove handler so our member entry stays.
+  const leaveTemporarily = useCallback(async () => {
+    if (!roomCode || !userId) return;
+    try {
+      const memberRef = ref(rtdb, `rooms/${roomCode}/members/${userId}`);
+      await onDisconnect(memberRef).cancel();
+    } catch (err) {
+      console.error('[mp] leaveTemporarily cancel onDisconnect', err);
+    }
+    // LAST_ROOM_KEY stays set; member entry stays in Firebase.
+    router.push('/timer');
+  }, [roomCode, userId, router]);
+
+  // Exit permanently — remove our slot. Host exit deletes the entire room so
+  // the other clients see "Room no longer exists" via the subscription effect.
+  const exitPermanently = useCallback(async () => {
+    if (!roomCode || !userId) return;
+    const isHost = room?.host === userId;
+    try {
+      if (isHost) {
+        await remove(ref(rtdb, `rooms/${roomCode}`));
+      } else {
+        await remove(ref(rtdb, `rooms/${roomCode}/members/${userId}`));
+      }
+    } catch (err) {
+      console.error('[mp] exitPermanently error', err);
+    }
+    try { localStorage.removeItem(LAST_ROOM_KEY); } catch {}
+    setRoom(null);
+    setRoomCode('');
+    setView('lobby');
+    setPendingRejoin('');
+    setPauseOpen(false);
+    setExitConfirmOpen(false);
+  }, [roomCode, userId, room?.host]);
+
   // Rejoin a previously-active room. Re-adds our member entry (which was
   // removed by onDisconnect when we last left) and switches to the room view.
   const rejoinRoom = useCallback(async () => {
@@ -847,15 +942,23 @@ function MultiplayerPageInner() {
   }, [room?.status, room?.members, room?.host, roomCode, userId]);
 
   // ── Render ──────────────────────────────────────────────────────────────
+  // Use 100dvh while racing so the layout fits exactly between mobile chrome
+  // (URL bar / safe-area / nav) without scrolling. Other views fall back to
+  // 100vh so a long lobby/results table can scroll naturally.
+  const isRacing = view === 'room' && room?.status === 'racing';
   return (
     <div style={{
-      minHeight: '100vh', background: C.bg, color: C.text,
+      ...(isRacing
+        ? { height: '100dvh' }
+        : { minHeight: '100vh' }),
+      background: C.bg, color: C.text,
       fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
       display: 'flex', flexDirection: 'column',
+      overflow: isRacing ? 'hidden' : undefined,
     }}>
-      {/* The mobile racing screen renders its own header (scramble + X
-          leave icon), so we suppress the global TopBar in that single case. */}
-      {!(isMobile && view === 'room' && room?.status === 'racing') && (
+      {/* The racing screen renders its own header (settings + pause icons)
+          on every breakpoint, so we suppress the global TopBar there. */}
+      {!(view === 'room' && room?.status === 'racing') && (
         <TopBar
           roomCode={view === 'room' ? roomCode : ''}
           onBack={() => {
@@ -868,7 +971,7 @@ function MultiplayerPageInner() {
 
       <main style={{
         flex: '1 1 auto', minWidth: 0,
-        padding: (isMobile && view === 'room' && room?.status === 'racing') ? 0 : '1rem',
+        padding: (view === 'room' && room?.status === 'racing') ? 0 : '1rem',
         display: 'flex', flexDirection: 'column',
       }}>
         {errorMsg && view !== 'room' && (
@@ -923,6 +1026,9 @@ function MultiplayerPageInner() {
             roomCode={roomCode}
             room={room}
             userId={userId}
+            prefs={prefs}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onPause={() => setPauseOpen(true)}
             onToggleReady={toggleReady}
             onSetEvent={setEvent}
             onSetMaxRounds={setMaxRounds}
@@ -935,6 +1041,31 @@ function MultiplayerPageInner() {
           />
         )}
       </main>
+
+      {/* Settings + Pause modals — overlay on top of everything. */}
+      {settingsOpen && (
+        <MpSettingsModal
+          isMobile={isMobile}
+          prefs={prefs}
+          onChange={updatePrefs}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
+      {pauseOpen && (
+        <MpPauseModal
+          isMobile={isMobile}
+          onResume={() => setPauseOpen(false)}
+          onLeaveTemporarily={() => { setPauseOpen(false); leaveTemporarily(); }}
+          onExit={() => { setExitConfirmOpen(true); }}
+        />
+      )}
+      {exitConfirmOpen && (
+        <MpExitConfirmModal
+          isMobile={isMobile}
+          onCancel={() => setExitConfirmOpen(false)}
+          onConfirm={() => { setExitConfirmOpen(false); exitPermanently(); }}
+        />
+      )}
     </div>
   );
 }
@@ -1301,6 +1432,9 @@ interface RoomViewProps {
   roomCode: string;
   room: RoomData;
   userId: string;
+  prefs: MpPrefs;
+  onOpenSettings: () => void;
+  onPause: () => void;
   onToggleReady: () => void;
   onSetEvent: (id: string) => void;
   onSetMaxRounds: (n: number) => void;
@@ -1431,15 +1565,13 @@ function WaitingRoom({
 }
 
 // ── Racing screen ─────────────────────────────────────────────────────────
-// Multiplayer behaviour parity with main timer:
-//   - Hold-to-start always on (≥350ms hold to arm; release to begin)
-//   - Inspection off (multiplayer is a quick race; can be exposed later)
-const MP_HOLD_TO_START = true;
-const MP_INSPECTION_ENABLED = false;
-
 function RacingScreen({
-  isMobile, room, userId, onSubmitSolve, onLeave,
+  isMobile, room, userId, prefs, onSubmitSolve, onOpenSettings, onPause,
 }: RoomViewProps & { isHost: boolean }) {
+  // Behaviour now driven by user prefs (Settings modal). The hook signature
+  // unchanged: useMpTimer takes inspectionEnabled and the commit callback.
+  const holdToStart = prefs.holdToStart;
+  const inspectionEnabled = prefs.inspectionEnabled;
   const me = room.members?.[userId];
   const myCurrent = me?.currentSolve ?? 0;
   const mySolves = useMemo(() => {
@@ -1473,7 +1605,7 @@ function RacingScreen({
     setPending({ ms, defaultDnf: dnf });
   }, []);
 
-  const timer = useMpTimer(MP_INSPECTION_ENABLED, onSolveCommit);
+  const timer = useMpTimer(inspectionEnabled, onSolveCommit);
 
   // Timer can't fire until the player has revealed the scramble.
   const interactionLocked = isWaitingForOpponents || isRoundDone || !!pending || !scrambleShown;
@@ -1501,16 +1633,16 @@ function RacingScreen({
     if (interactionLocked) return;
     if (timer.state === 'running') { timer.stop(); return; }
     if (timer.state === 'idle' || timer.state === 'stopped') {
-      if (MP_INSPECTION_ENABLED) timer.beginInspection();
-      else if (MP_HOLD_TO_START) timer.startArming();
+      if (inspectionEnabled) timer.beginInspection();
+      else if (holdToStart) timer.startArming();
       else timer.startRunning();
       return;
     }
     if (timer.state === 'inspecting') {
-      if (MP_HOLD_TO_START) timer.startArming();
+      if (holdToStart) timer.startArming();
       else timer.startRunning();
     }
-  }, [interactionLocked, timer]);
+  }, [interactionLocked, timer, inspectionEnabled, holdToStart]);
 
   const onTimerTouchEnd = useCallback(() => {
     if (timer.state === 'armed') timer.fireRunning();
@@ -1529,13 +1661,13 @@ function RacingScreen({
       if (interactionLocked && timer.state !== 'running') return;
       if (timer.state === 'running') { timer.stop(); return; }
       if (timer.state === 'idle' || timer.state === 'stopped') {
-        if (MP_INSPECTION_ENABLED) timer.beginInspection();
-        else if (MP_HOLD_TO_START) timer.startArming();
+        if (inspectionEnabled) timer.beginInspection();
+        else if (holdToStart) timer.startArming();
         else timer.startRunning();
         return;
       }
       if (timer.state === 'inspecting') {
-        if (MP_HOLD_TO_START) timer.startArming();
+        if (holdToStart) timer.startArming();
         else timer.startRunning();
       }
     };
@@ -1551,13 +1683,15 @@ function RacingScreen({
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [interactionLocked, timer]);
+  }, [interactionLocked, timer, inspectionEnabled, holdToStart]);
 
-  // Display values
-  const displayValue = pending ? fmtMs(pending.ms, false, 2)
+  // Display values — precision pulled from prefs (2=cs, 3=ms).
+  const p = prefs.precision;
+  const armedZero = p === 3 ? '0.000' : '0.00';
+  const displayValue = pending ? fmtMs(pending.ms, false, p)
     : timer.state === 'inspecting' ? Math.max(0, Math.ceil(timer.inspectionMs / 1000)).toString()
-    : timer.state === 'armed' ? '0.00'
-    : fmtMs(timer.displayMs, false, 2);
+    : timer.state === 'armed' ? armedZero
+    : fmtMs(timer.displayMs, false, p);
 
   const timerColor =
     pending ? C.warn
@@ -1572,12 +1706,13 @@ function RacingScreen({
     : timer.state === 'running' ? C.accent
     : C.border;
 
-  // ── Mobile layout: header + tabs + S1..S5 strip + bottom nav ─────────
+  // ── Mobile / tablet layout: header + tabs + S1..S5 strip + bottom nav ─
   if (isMobile) {
     return (
       <MobileRacingLayout
         room={room}
         userId={userId}
+        prefs={prefs}
         myCurrent={myCurrent}
         mySolves={mySolves}
         isRoundDone={isRoundDone}
@@ -1594,26 +1729,34 @@ function RacingScreen({
         confirmSolve={confirmSolve}
         onTimerTouchStart={onTimerTouchStart}
         onTimerTouchEnd={onTimerTouchEnd}
-        onLeave={onLeave}
+        onOpenSettings={onOpenSettings}
+        onPause={onPause}
       />
     );
   }
 
-  // ── Desktop layout (unchanged) ───────────────────────────────────────
+  // ── Desktop layout ───────────────────────────────────────────────────
   return (
     <div className="mp-race-container" style={{
       flex: '1 1 auto', minHeight: 0, width: '100%',
       maxWidth: '1100px', margin: '0 auto',
       display: 'flex', flexDirection: 'column', gap: '0.85rem',
-      padding: '0.5rem 0',
+      padding: '0.5rem 1rem 1rem',
     }}>
+      {/* Unified header: ⚙ left, round info center, ⏸ right. Same icons as mobile. */}
       <div style={{
         background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
-        padding: '0.6rem 0.85rem',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.6rem',
-        flexWrap: 'wrap',
+        padding: '0.55rem 0.7rem',
+        display: 'grid', gridTemplateColumns: 'auto 1fr auto',
+        alignItems: 'center', gap: '0.7rem',
       }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+        <IconButton aria-label="Settings" title="Settings" onClick={onOpenSettings}>
+          <SettingsIcon />
+        </IconButton>
+        <div style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.15rem',
+          minWidth: 0,
+        }}>
           <div style={{ fontSize: '0.62rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: C.muted, fontWeight: 700 }}>
             {room.roundName || getRoundName(room.round, room.maxRounds)}
           </div>
@@ -1621,7 +1764,9 @@ function RacingScreen({
             Solve {Math.min(myCurrent + 1, SOLVES_PER_ROUND)} of {SOLVES_PER_ROUND}
           </div>
         </div>
-        <SolveProgressDots count={SOLVES_PER_ROUND} done={myCurrent} />
+        <IconButton aria-label="Pause race" title="Pause" onClick={onPause}>
+          <PauseIcon />
+        </IconButton>
       </div>
 
       {isWaitingForOpponents && (
@@ -1645,6 +1790,7 @@ function RacingScreen({
         shown={scrambleShown}
         onReveal={() => setScrambleShown(true)}
         hidden={isRoundDone || isWaitingForOpponents}
+        fontSizeDesktop={SCRAMBLE_FONT_PX[prefs.scrambleFontSize].desktop}
       />
 
       <div className="mp-race-grid" style={{
@@ -1665,12 +1811,11 @@ function RacingScreen({
           style={{
             background: timer.state === 'armed' ? `${C.success}10` : C.card,
             border: `1px solid ${borderColor}`,
-            borderRadius: 16, padding: '1.5rem 1rem',
+            borderRadius: 16, padding: '1rem',
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             userSelect: 'none', cursor: interactionLocked ? 'default' : 'pointer',
             textAlign: 'center', touchAction: 'manipulation',
             transition: 'border-color 0.12s, background 0.12s',
-            minHeight: 220,
           }}
         >
           {timer.state === 'inspecting' && (
@@ -1680,7 +1825,7 @@ function RacingScreen({
           )}
           <div style={{
             fontFamily: 'JetBrains Mono, monospace',
-            fontSize: 'clamp(3.5rem, 14vw, 7rem)',
+            fontSize: 'clamp(5rem, 12vw, 11rem)',
             fontWeight: 800, lineHeight: 0.95,
             fontVariantNumeric: 'tabular-nums',
             color: timerColor,
@@ -1731,15 +1876,17 @@ function RacingScreen({
   );
 }
 
-// ── Mobile racing layout (header + tabs + bottom nav) ────────────────────
+// ── Mobile racing layout (header + flex-1 timer + S1..S5/cube row + tabs) ─
 function MobileRacingLayout({
-  room, userId, myCurrent, mySolves, isRoundDone, isWaitingForOpponents,
+  room, userId, prefs, myCurrent, mySolves, isRoundDone, isWaitingForOpponents,
   currentScramble, scrambleShown, onRevealScramble,
   timer, pending, displayValue, timerColor, borderColor,
-  interactionLocked, confirmSolve, onTimerTouchStart, onTimerTouchEnd, onLeave,
+  interactionLocked, confirmSolve, onTimerTouchStart, onTimerTouchEnd,
+  onOpenSettings, onPause,
 }: {
   room: RoomData;
   userId: string;
+  prefs: MpPrefs;
   myCurrent: number;
   mySolves: SolveData[];
   isRoundDone: boolean;
@@ -1756,10 +1903,12 @@ function MobileRacingLayout({
   confirmSolve: (p: Penalty) => void;
   onTimerTouchStart: () => void;
   onTimerTouchEnd: () => void;
-  onLeave: () => void;
+  onOpenSettings: () => void;
+  onPause: () => void;
 }) {
   const [tab, setTab] = useState<'timer' | 'opponents'>('timer');
   const roundLabel = room.roundName || getRoundName(room.round, room.maxRounds);
+  void prefs;
 
   return (
     <div style={{
@@ -1767,60 +1916,51 @@ function MobileRacingLayout({
       display: 'flex', flexDirection: 'column',
       background: C.bg,
     }}>
-      {/* Header: just the X leave button — no title or scramble. */}
+      {/* Header: ⚙ left, ⏸ right. Subtle, low-contrast — doesn't distract. */}
       <header style={{
-        position: 'relative',
-        padding: '0.4rem 0.55rem',
-        borderBottom: `1px solid ${C.border}`,
+        flexShrink: 0,
+        padding: '0.45rem 0.6rem',
         background: C.card,
-        display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+        borderBottom: `1px solid ${C.border}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       }}>
-        <button
-          onClick={onLeave}
-          aria-label="Leave race"
-          title="Leave"
-          style={{
-            width: 32, height: 32, borderRadius: 8,
-            background: 'transparent', color: C.muted,
-            border: `1px solid ${C.border}`,
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer', fontFamily: 'inherit',
-          }}
-        ><CloseIcon /></button>
+        <IconButton aria-label="Settings" title="Settings" onClick={onOpenSettings}>
+          <SettingsIcon />
+        </IconButton>
+        <IconButton aria-label="Pause race" title="Pause" onClick={onPause}>
+          <PauseIcon />
+        </IconButton>
       </header>
 
-      {/* Tab content (Timer | Opponents) */}
-      <div style={{ flex: '1 1 auto', minHeight: 0, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+      {/* Tab content area — flex: 1 so the timer fills all available space. */}
+      <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {tab === 'timer' ? (
           <div style={{
-            flex: '1 1 auto', display: 'flex', flexDirection: 'column',
-            gap: '0.7rem', padding: '0.7rem',
+            flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column',
           }}>
-            {isWaitingForOpponents && (
-              <div style={{
-                background: C.accentDim, border: `1px solid ${C.borderHi}`,
-                borderRadius: 12, padding: '0.7rem 0.9rem', textAlign: 'center',
-                color: C.accent, fontWeight: 700, fontSize: '0.88rem',
-              }}>Waiting for opponents to catch up…</div>
-            )}
-            {isRoundDone && (
-              <div style={{
-                background: C.successDim, border: `1px solid ${C.success}`,
-                borderRadius: 12, padding: '0.7rem 0.9rem', textAlign: 'center',
-                color: C.success, fontWeight: 700, fontSize: '0.92rem',
-              }}>Round complete — waiting for the others…</div>
-            )}
+            {/* Scramble (compact, top, muted via ScrambleArea styling) */}
+            <div style={{ flexShrink: 0, padding: '0.55rem 0.7rem 0' }}>
+              {(isRoundDone || isWaitingForOpponents) ? (
+                <div style={{
+                  background: isRoundDone ? C.successDim : C.accentDim,
+                  border: `1px solid ${isRoundDone ? C.success : C.borderHi}`,
+                  borderRadius: 12, padding: '0.6rem 0.85rem', textAlign: 'center',
+                  color: isRoundDone ? C.success : C.accent, fontWeight: 700, fontSize: '0.82rem',
+                }}>
+                  {isRoundDone ? 'Round complete — waiting for the others…' : 'Waiting for opponents…'}
+                </div>
+              ) : (
+                <ScrambleArea
+                  isMobile={true}
+                  scramble={currentScramble}
+                  shown={scrambleShown}
+                  onReveal={onRevealScramble}
+                  fontSizeMobile={SCRAMBLE_FONT_PX[prefs.scrambleFontSize].mobile}
+                />
+              )}
+            </div>
 
-            {/* Scramble (hide / show) */}
-            <ScrambleArea
-              isMobile={true}
-              scramble={currentScramble}
-              shown={scrambleShown}
-              onReveal={onRevealScramble}
-              hidden={isRoundDone || isWaitingForOpponents}
-            />
-
-            {/* Big timer */}
+            {/* Big timer — flex: 1 fills ALL remaining space. Tap area = whole div. */}
             <div
               onTouchStart={(e) => {
                 if (interactionLocked) return;
@@ -1833,31 +1973,36 @@ function MobileRacingLayout({
                 onTimerTouchEnd();
               }}
               style={{
-                background: timer.state === 'armed' ? `${C.success}10` : C.card,
+                flex: '1 1 auto', minHeight: 0,
+                margin: '0.55rem 0.7rem',
+                background: timer.state === 'armed' ? `${C.success}10` : 'transparent',
                 border: `1px solid ${borderColor}`,
-                borderRadius: 16, padding: '1.2rem 0.9rem',
+                borderRadius: 16, padding: '0.5rem',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                 userSelect: 'none', cursor: interactionLocked ? 'default' : 'pointer',
                 textAlign: 'center', touchAction: 'manipulation',
                 transition: 'border-color 0.12s, background 0.12s',
-                minHeight: 200,
               }}
             >
               {timer.state === 'inspecting' && (
-                <div style={{ fontSize: '0.62rem', letterSpacing: '0.15em', textTransform: 'uppercase', color: C.warn, marginBottom: '0.4rem', fontWeight: 700 }}>
-                  Inspection
-                </div>
+                <div style={{
+                  fontSize: '0.65rem', letterSpacing: '0.15em', textTransform: 'uppercase',
+                  color: C.warn, marginBottom: '0.4rem', fontWeight: 700,
+                }}>Inspection</div>
               )}
               <div style={{
                 fontFamily: 'JetBrains Mono, monospace',
-                fontSize: 'clamp(3.4rem, 18vw, 6rem)',
+                fontSize: 'clamp(5rem, 20vw, 12rem)',
                 fontWeight: 800, lineHeight: 0.95,
                 fontVariantNumeric: 'tabular-nums',
                 color: timerColor,
                 textShadow: timer.state === 'armed' ? `0 0 30px ${C.success}55` : 'none',
                 transition: 'color 0.12s',
               }}>{displayValue}</div>
-              <div style={{ fontSize: '0.72rem', color: C.muted, marginTop: '0.7rem', letterSpacing: '0.04em', minHeight: '1.1rem' }}>
+              <div style={{
+                fontSize: '0.74rem', color: C.muted,
+                marginTop: '0.7rem', letterSpacing: '0.04em', minHeight: '1.1rem',
+              }}>
                 {pending && 'Confirm your time'}
                 {!pending && isRoundDone && 'Round complete'}
                 {!pending && !isRoundDone && isWaitingForOpponents && 'Waiting for opponents…'}
@@ -1875,7 +2020,7 @@ function MobileRacingLayout({
                   style={{
                     marginTop: '1rem',
                     display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem',
-                    width: '100%', maxWidth: 320,
+                    width: '100%', maxWidth: 360,
                     position: 'relative', zIndex: 2,
                   }}
                 >
@@ -1887,15 +2032,14 @@ function MobileRacingLayout({
             </div>
           </div>
         ) : (
-          <div style={{ padding: '0.7rem' }}>
+          <div style={{ flex: '1 1 auto', minHeight: 0, overflow: 'auto', padding: '0.7rem' }}>
             <OpponentsPanel room={room} userId={userId} />
           </div>
         )}
       </div>
 
-      {/* S1..S5 + cube viz row, persistent above the tab bar. Same component
-          rendered on desktop, just with isMobile=true here for sizing. */}
-      <div style={{ padding: '0.55rem 0.7rem', flexShrink: 0 }}>
+      {/* S1..S5 + cube viz row, persistent above the tab bar. */}
+      <div style={{ padding: '0.45rem 0.7rem 0.5rem', flexShrink: 0 }}>
         <SolveAndCubeRow
           isMobile={true}
           mySolves={mySolves}
@@ -1908,10 +2052,13 @@ function MobileRacingLayout({
         />
       </div>
 
-      {/* Bottom 2-tab nav */}
+      {/* Bottom 2-tab nav — frosted glass. */}
       <nav style={{
         display: 'grid', gridTemplateColumns: '1fr 1fr',
-        background: C.card, borderTop: `1px solid ${C.border}`,
+        background: 'rgba(20, 20, 20, 0.78)',
+        backdropFilter: 'blur(12px) saturate(150%)',
+        WebkitBackdropFilter: 'blur(12px) saturate(150%)',
+        borderTop: `1px solid ${C.border}`,
         paddingBottom: 'env(safe-area-inset-bottom)',
         flexShrink: 0,
       }}>
@@ -1921,10 +2068,10 @@ function MobileRacingLayout({
 
       <style>{`
         @keyframes mp-pulse {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50%      { opacity: 0.55; transform: scale(0.9); }
+          0%, 100%   { opacity: 1; box-shadow: 0 0 0 0 rgba(167, 139, 250, 0); }
+          50%        { opacity: 0.7; box-shadow: 0 0 14px 0 rgba(167, 139, 250, 0.55); }
         }
-        .mp-solve-current { animation: mp-pulse 1.1s ease-in-out infinite; }
+        .mp-solve-current { animation: mp-pulse 1.2s ease-in-out infinite; }
       `}</style>
     </div>
   );
@@ -1948,6 +2095,54 @@ function StopwatchIcon({ size = 20 }: { size?: number }) {
       <line x1="12" y1="10" x2="12" y2="14" />
       <line x1="12" y1="14" x2="15" y2="16" />
     </svg>
+  );
+}
+
+function SettingsIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
+function PauseIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <rect x="6" y="5" width="4" height="14" rx="1" />
+      <rect x="14" y="5" width="4" height="14" rx="1" />
+    </svg>
+  );
+}
+
+function IconButton({
+  onClick, children, ...rest
+}: {
+  onClick: () => void;
+  children: React.ReactNode;
+} & Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'onClick' | 'style' | 'children'>) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        width: 34, height: 34, borderRadius: 8,
+        background: 'transparent', color: C.muted,
+        border: `1px solid ${C.border}`,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        cursor: 'pointer', fontFamily: 'inherit',
+        transition: 'background 0.12s, color 0.12s, border-color 0.12s',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.color = C.text;
+        e.currentTarget.style.borderColor = C.borderHi;
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.color = C.muted;
+        e.currentTarget.style.borderColor = C.border;
+      }}
+      {...rest}
+    >{children}</button>
   );
 }
 
@@ -1993,6 +2188,7 @@ function RaceTabButton({
 
 function ScrambleArea({
   isMobile, scramble, shown, onReveal, hidden,
+  fontSizeMobile, fontSizeDesktop,
 }: {
   isMobile: boolean;
   scramble: string;
@@ -2000,20 +2196,26 @@ function ScrambleArea({
   onReveal: () => void;
   // Optionally suppress the whole component (e.g. round done / waiting banners).
   hidden?: boolean;
+  // Pref-driven size overrides; default to medium.
+  fontSizeMobile?: string;
+  fontSizeDesktop?: string;
 }) {
   if (hidden) return null;
+  const fontSize = isMobile
+    ? (fontSizeMobile ?? '0.92rem')
+    : (fontSizeDesktop ?? '1.15rem');
   return (
     <div style={{
       background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
-      padding: isMobile ? '0.6rem 0.7rem' : '0.7rem 0.9rem',
-      minHeight: isMobile ? 56 : 72,
+      padding: isMobile ? '0.55rem 0.7rem' : '0.7rem 0.9rem',
+      minHeight: isMobile ? 50 : 64,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
     }}>
       {shown ? (
         <div style={{
           fontFamily: 'JetBrains Mono, monospace',
-          fontSize: isMobile ? 'clamp(0.78rem, 3vw, 1rem)' : 'clamp(0.95rem, 2vw, 1.3rem)',
-          color: C.text, lineHeight: 1.5, letterSpacing: '0.04em',
+          fontSize,
+          color: C.muted, lineHeight: 1.5, letterSpacing: '0.04em',
           whiteSpace: 'pre-wrap', wordBreak: 'break-word', textAlign: 'center',
           width: '100%',
         }}>{scramble}</div>
@@ -2024,8 +2226,8 @@ function ScrambleArea({
           style={{
             background: C.accentDim, color: C.accent,
             border: `1px solid ${C.borderHi}`, borderRadius: 10,
-            padding: isMobile ? '0.55rem 0.95rem' : '0.65rem 1.2rem',
-            fontSize: isMobile ? '0.86rem' : '0.95rem',
+            padding: isMobile ? '0.5rem 0.95rem' : '0.6rem 1.2rem',
+            fontSize: isMobile ? '0.84rem' : '0.92rem',
             fontWeight: 700, fontFamily: 'inherit',
             cursor: 'pointer', letterSpacing: '0.02em',
           }}
@@ -2065,7 +2267,7 @@ function SolveAndCubeRow({
       }}>
         <div style={{
           display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
-          gap: isMobile ? '0.25rem' : '0.4rem',
+          gap: isMobile ? '0.3rem' : '0.45rem',
           minWidth: 0,
         }}>
           {Array.from({ length: SOLVES_PER_ROUND }, (_, i) => {
@@ -2075,16 +2277,16 @@ function SolveAndCubeRow({
             return (
               <div
                 key={i}
-                className={isCurrent && !s ? 'mp-solve-current' : undefined}
+                className={isCurrent ? 'mp-solve-current' : undefined}
                 style={{
                   fontFamily: 'JetBrains Mono, monospace',
                   fontSize: isMobile ? '0.78rem' : '0.92rem', fontWeight: 700,
                   fontVariantNumeric: 'tabular-nums',
                   textAlign: 'center',
-                  padding: isMobile ? '0.4rem 0.1rem' : '0.55rem 0.2rem',
+                  padding: isMobile ? '0.4rem 0.2rem' : '0.55rem 0.3rem',
                   background: s ? C.cardAlt : 'transparent',
                   border: `1px solid ${isCurrent ? C.accent : C.border}`,
-                  borderRadius: 8,
+                  borderRadius: 999,
                   color: isCurrent && !s ? C.accent
                     : !s ? C.mutedDim
                     : dnf ? C.danger : C.text,
@@ -2125,6 +2327,15 @@ function SolveAndCubeRow({
           {roundLabel} · Ao5
         </div>
       )}
+      {/* Inline keyframes — pill-shape current chip pulses with a purple glow.
+          Same animation also referenced from MobileRacingLayout's <style>. */}
+      <style>{`
+        @keyframes mp-pulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(167, 139, 250, 0); }
+          50%      { box-shadow: 0 0 14px 0 rgba(167, 139, 250, 0.55); }
+        }
+        .mp-solve-current { animation: mp-pulse 1.2s ease-in-out infinite; }
+      `}</style>
     </div>
   );
 }
@@ -2292,6 +2503,335 @@ function OpponentsPanel({
         );
       })}
     </div>
+  );
+}
+
+// ── Modals: Settings / Pause / Exit-confirm ───────────────────────────────
+
+function ModalShell({
+  isMobile, title, onClose, children, maxWidth = 480,
+}: {
+  isMobile: boolean;
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+  maxWidth?: number;
+}) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 9000,
+        background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: isMobile ? 'flex-end' : 'center', justifyContent: 'center',
+        padding: isMobile ? 0 : '1rem',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: isMobile ? '100%' : `min(${maxWidth}px, 100%)`,
+          background: C.card, border: `1px solid ${C.border}`,
+          borderTopLeftRadius: 16, borderTopRightRadius: 16,
+          borderBottomLeftRadius: isMobile ? 0 : 16, borderBottomRightRadius: isMobile ? 0 : 16,
+          boxShadow: '0 24px 60px rgba(0,0,0,0.65)',
+          display: 'flex', flexDirection: 'column',
+          maxHeight: isMobile ? '90dvh' : '85dvh',
+          paddingBottom: 'env(safe-area-inset-bottom)',
+          overflow: 'hidden',
+        }}
+      >
+        <header style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0.85rem 1rem',
+          borderBottom: `1px solid ${C.border}`,
+          flexShrink: 0,
+        }}>
+          <div style={{ fontSize: '1.05rem', fontWeight: 700, color: C.text }}>{title}</div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              width: 30, height: 30, borderRadius: 8,
+              background: 'transparent', border: `1px solid ${C.border}`,
+              color: C.muted, cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          ><CloseIcon size={14} /></button>
+        </header>
+        <div style={{ flex: '1 1 auto', minHeight: 0, overflow: 'auto', padding: '0.95rem 1rem' }}>
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MpSettingsRow({
+  label, hint, control,
+}: {
+  label: string;
+  hint?: string;
+  control: React.ReactNode;
+}) {
+  return (
+    <div style={{
+      display: 'grid', gridTemplateColumns: '1fr auto',
+      alignItems: 'center', gap: '0.85rem',
+      padding: '0.6rem 0',
+      borderBottom: `1px solid ${C.border}`,
+    }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: '0.88rem', fontWeight: 600, color: C.text }}>{label}</div>
+        {hint && <div style={{ fontSize: '0.72rem', color: C.muted, marginTop: '0.15rem', lineHeight: 1.4 }}>{hint}</div>}
+      </div>
+      <div>{control}</div>
+    </div>
+  );
+}
+
+function MpToggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      onClick={() => onChange(!checked)}
+      role="switch"
+      aria-checked={checked}
+      style={{
+        width: 44, height: 26, borderRadius: 999,
+        background: checked ? C.accent : C.cardAlt,
+        border: `1px solid ${checked ? C.accent : C.border}`,
+        position: 'relative', cursor: 'pointer',
+        transition: 'background 0.15s, border-color 0.15s',
+      }}
+    >
+      <span style={{
+        position: 'absolute',
+        top: 2, left: checked ? 20 : 2,
+        width: 20, height: 20, borderRadius: 999,
+        background: checked ? '#0a0a0a' : C.muted,
+        transition: 'left 0.15s, background 0.15s',
+      }} />
+    </button>
+  );
+}
+
+function MpSelect<T extends string | number>({
+  value, options, onChange,
+}: {
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (v: T) => void;
+}) {
+  return (
+    <select
+      value={String(value)}
+      onChange={(e) => {
+        const raw = e.target.value;
+        const opt = options.find(o => String(o.value) === raw);
+        if (opt) onChange(opt.value);
+      }}
+      style={{
+        background: C.cardAlt, color: C.text,
+        border: `1px solid ${C.border}`, borderRadius: 8,
+        padding: '0.4rem 0.6rem', fontSize: '0.85rem',
+        fontFamily: 'inherit', outline: 'none', cursor: 'pointer',
+      }}
+    >
+      {options.map(o => <option key={String(o.value)} value={String(o.value)}>{o.label}</option>)}
+    </select>
+  );
+}
+
+function MpSettingsModal({
+  isMobile, prefs, onChange, onClose,
+}: {
+  isMobile: boolean;
+  prefs: MpPrefs;
+  onChange: (patch: Partial<MpPrefs>) => void;
+  onClose: () => void;
+}) {
+  return (
+    <ModalShell isMobile={isMobile} title="Settings" onClose={onClose}>
+      <div style={{
+        fontSize: '0.66rem', letterSpacing: '0.12em',
+        textTransform: 'uppercase', color: C.muted, fontWeight: 700,
+        marginBottom: '0.5rem',
+      }}>Timer</div>
+
+      <MpSettingsRow
+        label="Inspection time"
+        hint="WCA-style 15s inspection countdown before each solve."
+        control={<MpToggle checked={prefs.inspectionEnabled} onChange={(v) => onChange({ inspectionEnabled: v })} />}
+      />
+      <MpSettingsRow
+        label="Hold to start"
+        hint="Hold space / press for 0.35s to arm the timer (green) before release."
+        control={<MpToggle checked={prefs.holdToStart} onChange={(v) => onChange({ holdToStart: v })} />}
+      />
+      <MpSettingsRow
+        label="Precision"
+        control={
+          <MpSelect<2 | 3>
+            value={prefs.precision}
+            options={[
+              { value: 2, label: 'Centiseconds (0.00)' },
+              { value: 3, label: 'Milliseconds (0.000)' },
+            ]}
+            onChange={(v) => onChange({ precision: v })}
+          />
+        }
+      />
+      <MpSettingsRow
+        label="Scramble font size"
+        control={
+          <MpSelect<MpPrefs['scrambleFontSize']>
+            value={prefs.scrambleFontSize}
+            options={[
+              { value: 'sm', label: 'Small' },
+              { value: 'md', label: 'Medium' },
+              { value: 'lg', label: 'Large' },
+            ]}
+            onChange={(v) => onChange({ scrambleFontSize: v })}
+          />
+        }
+      />
+
+      <div style={{
+        fontSize: '0.66rem', letterSpacing: '0.12em',
+        textTransform: 'uppercase', color: C.muted, fontWeight: 700,
+        margin: '1.1rem 0 0.5rem',
+      }}>Bluetooth</div>
+      <div style={{
+        background: C.cardAlt, border: `1px solid ${C.border}`,
+        borderRadius: 10, padding: '0.7rem 0.85rem',
+        display: 'flex', flexDirection: 'column', gap: '0.5rem',
+      }}>
+        <div style={{ fontSize: '0.78rem', color: C.muted, lineHeight: 1.5 }}>
+          GAN and QiYi smart-cube support is coming to multiplayer races. For now, race solves are timed via touch / space on the on-screen timer.
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.45rem' }}>
+          <button disabled style={{
+            background: 'transparent', color: C.mutedDim,
+            border: `1px solid ${C.border}`, borderRadius: 8,
+            padding: '0.5rem 0.6rem', fontSize: '0.8rem', fontFamily: 'inherit',
+            cursor: 'not-allowed', fontWeight: 700,
+          }}>Connect GAN</button>
+          <button disabled style={{
+            background: 'transparent', color: C.mutedDim,
+            border: `1px solid ${C.border}`, borderRadius: 8,
+            padding: '0.5rem 0.6rem', fontSize: '0.8rem', fontFamily: 'inherit',
+            cursor: 'not-allowed', fontWeight: 700,
+          }}>Connect QiYi</button>
+        </div>
+      </div>
+    </ModalShell>
+  );
+}
+
+function MpPauseModal({
+  isMobile, onResume, onLeaveTemporarily, onExit,
+}: {
+  isMobile: boolean;
+  onResume: () => void;
+  onLeaveTemporarily: () => void;
+  onExit: () => void;
+}) {
+  return (
+    <ModalShell isMobile={isMobile} title="Race Paused" onClose={onResume} maxWidth={420}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+        <button
+          onClick={onResume}
+          style={{
+            background: C.success, color: '#0a0a0a',
+            border: `1px solid ${C.success}`, borderRadius: 12,
+            padding: '0.95rem 1rem', fontSize: '1rem', fontWeight: 800,
+            fontFamily: 'inherit', cursor: 'pointer', letterSpacing: '0.02em',
+          }}
+        >Resume Race</button>
+        <button
+          onClick={onLeaveTemporarily}
+          style={{
+            background: 'transparent', color: C.warn,
+            border: `1px solid ${C.warn}`, borderRadius: 12,
+            padding: '0.95rem 1rem', fontSize: '1rem', fontWeight: 700,
+            fontFamily: 'inherit', cursor: 'pointer', letterSpacing: '0.02em',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.15rem',
+          }}
+        >
+          <span>Leave Temporarily</span>
+          <span style={{ fontSize: '0.7rem', color: C.muted, fontWeight: 500 }}>You can rejoin from /timer</span>
+        </button>
+        <button
+          onClick={onExit}
+          style={{
+            background: 'transparent', color: C.danger,
+            border: `1px solid ${C.danger}`, borderRadius: 12,
+            padding: '0.95rem 1rem', fontSize: '1rem', fontWeight: 700,
+            fontFamily: 'inherit', cursor: 'pointer', letterSpacing: '0.02em',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.15rem',
+          }}
+        >
+          <span>Exit Race</span>
+          <span style={{ fontSize: '0.7rem', color: C.muted, fontWeight: 500 }}>Permanent — your slot is removed</span>
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function MpExitConfirmModal({
+  isMobile, onCancel, onConfirm,
+}: {
+  isMobile: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const [text, setText] = useState('');
+  const ok = text.trim().toUpperCase() === 'LEAVE';
+  return (
+    <ModalShell isMobile={isMobile} title="Exit Race" onClose={onCancel} maxWidth={420}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+        <div style={{ fontSize: '0.92rem', color: C.text, lineHeight: 1.5 }}>
+          This permanently removes you from the race. To confirm, type <strong style={{ color: C.danger }}>LEAVE</strong> below.
+        </div>
+        <input
+          autoFocus
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Type LEAVE"
+          onKeyDown={(e) => { if (e.key === 'Enter' && ok) onConfirm(); }}
+          style={{
+            background: C.cardAlt, color: C.text,
+            border: `1px solid ${ok ? C.danger : C.border}`, borderRadius: 10,
+            padding: '0.7rem 0.85rem', fontSize: '1rem',
+            fontFamily: 'JetBrains Mono, monospace', outline: 'none',
+            letterSpacing: '0.15em', textAlign: 'center', textTransform: 'uppercase',
+          }}
+        />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+          <button
+            onClick={onCancel}
+            style={{
+              background: 'transparent', color: C.text,
+              border: `1px solid ${C.border}`, borderRadius: 10,
+              padding: '0.7rem 0.85rem', fontSize: '0.92rem',
+              fontFamily: 'inherit', cursor: 'pointer', fontWeight: 700,
+            }}
+          >Cancel</button>
+          <button
+            onClick={onConfirm}
+            disabled={!ok}
+            style={{
+              background: ok ? C.danger : C.cardAlt,
+              color: ok ? '#fff' : C.mutedDim,
+              border: `1px solid ${ok ? C.danger : C.border}`, borderRadius: 10,
+              padding: '0.7rem 0.85rem', fontSize: '0.92rem',
+              fontFamily: 'inherit', cursor: ok ? 'pointer' : 'not-allowed', fontWeight: 800,
+            }}
+          >Exit Race</button>
+        </div>
+      </div>
+    </ModalShell>
   );
 }
 
