@@ -13,6 +13,7 @@ import {
   remove,
   onDisconnect,
   get,
+  runTransaction,
 } from 'firebase/database';
 import { rtdb } from '@/lib/firebase';
 
@@ -356,6 +357,7 @@ interface MemberData {
   roundAverage: number | null;   // ms, set after solve 5 confirmed; null if pending or DNF
   totalPoints: number;
   connected: boolean;
+  joinedAt: number;              // server timestamp; used to pick next host on migration
 }
 
 interface RoomData {
@@ -408,6 +410,37 @@ function generateScrambles(eventId: string, n = SOLVES_PER_ROUND): Record<string
   const out: Record<string, string> = {};
   for (let i = 0; i < n; i++) out[String(i)] = generateScramble(eventId);
   return out;
+}
+
+// ── Host migration ───────────────────────────────────────────────────────
+// Runs as a Firebase transaction so concurrent attempts from multiple
+// remaining clients can't double-promote. The transaction is a no-op when
+// the current host is still in `members`. When the host is gone we pick the
+// member with the earliest joinedAt; when no members remain, we delete the
+// room. Every remaining client may safely call this — only one will commit.
+async function migrateHostIfOrphaned(roomCode: string): Promise<void> {
+  try {
+    await runTransaction(ref(rtdb, `rooms/${roomCode}`), (room: RoomData | null) => {
+      if (!room) return room;
+      const members = room.members || {};
+      // Host still present — abort (returning undefined leaves data unchanged).
+      if (room.host && members[room.host]) return;
+      const memberUids = Object.keys(members);
+      // No one left — delete the room.
+      if (memberUids.length === 0) return null;
+      // Pick the member who joined earliest. Members without joinedAt (legacy
+      // rows from before this field existed) sort last.
+      const sorted = memberUids.slice().sort((a, b) => {
+        const aJ = members[a].joinedAt ?? Number.MAX_SAFE_INTEGER;
+        const bJ = members[b].joinedAt ?? Number.MAX_SAFE_INTEGER;
+        return aJ - bJ;
+      });
+      room.host = sorted[0];
+      return room;
+    });
+  } catch (err) {
+    console.error('[mp] migrateHostIfOrphaned failed', err);
+  }
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────
@@ -580,6 +613,41 @@ function MultiplayerPageInner() {
     };
   }, [roomCode, userId, room?.host]);
 
+  // Host migration: when the snapshot shows room.host pointing at a uid that
+  // is no longer in members (host disconnected, was kicked, or left), every
+  // remaining client kicks off the migration transaction. The transaction is
+  // a no-op when it sees the host already replaced, so concurrent attempts
+  // don't double-promote.
+  useEffect(() => {
+    if (!roomCode || !room) return;
+    if (!room.host) return;
+    if (room.members?.[room.host]) return;
+    migrateHostIfOrphaned(roomCode);
+  }, [roomCode, room?.host, room?.members]);
+
+  // Toast: "Host transferred to {Name}" when room.host changes between
+  // snapshots. We seed prevHostUidRef on the first non-empty snapshot so the
+  // initial render doesn't fire a phantom transfer.
+  const [hostTransferName, setHostTransferName] = useState<string>('');
+  const prevHostUidRef = useRef<string>('');
+  useEffect(() => {
+    if (!room?.host) return;
+    if (!prevHostUidRef.current) {
+      prevHostUidRef.current = room.host;
+      return;
+    }
+    if (room.host !== prevHostUidRef.current) {
+      prevHostUidRef.current = room.host;
+      const name = room.members?.[room.host]?.name ?? 'New host';
+      setHostTransferName(name);
+    }
+  }, [room?.host, room?.members]);
+  useEffect(() => {
+    if (!hostTransferName) return;
+    const t = window.setTimeout(() => setHostTransferName(''), 3000);
+    return () => window.clearTimeout(t);
+  }, [hostTransferName]);
+
   // ── Actions ──────────────────────────────────────────────────────────────
   const persistName = useCallback((n: string) => {
     setDisplayName(n);
@@ -625,6 +693,7 @@ function MultiplayerPageInner() {
               roundAverage: null,
               totalPoints: 0,
               connected: true,
+              joinedAt: now,
             },
           },
         };
@@ -681,6 +750,7 @@ function MultiplayerPageInner() {
         roundAverage: existingMember?.roundAverage ?? null,
         totalPoints: existingMember?.totalPoints ?? 0,
         connected: true,
+        joinedAt: existingMember?.joinedAt ?? Date.now(),
       };
       await set(memberRef, memberData);
       console.log('[mp] joined', code);
@@ -726,13 +796,15 @@ function MultiplayerPageInner() {
     router.push('/timer');
   }, [roomCode, userId, router]);
 
-  // Exit permanently — remove our slot. Host exit deletes the entire room so
-  // the other clients see "Room no longer exists" via the subscription effect.
+  // Exit permanently — remove our slot. If the host exits and they're the
+  // last person, the room is deleted; otherwise we just remove the member
+  // entry and let remaining clients run the migration transaction.
   const exitPermanently = useCallback(async () => {
     if (!roomCode || !userId) return;
     const isHost = room?.host === userId;
+    const memberCount = Object.keys(room?.members || {}).length;
     try {
-      if (isHost) {
+      if (isHost && memberCount <= 1) {
         await remove(ref(rtdb, `rooms/${roomCode}`));
       } else {
         await remove(ref(rtdb, `rooms/${roomCode}/members/${userId}`));
@@ -786,7 +858,9 @@ function MultiplayerPageInner() {
       }
       const memberRef = ref(rtdb, `rooms/${pendingRejoin}/members/${uid}`);
       const existing = data.members?.[uid];
-      // Preserve cumulative points / round progress on return.
+      // Preserve cumulative points / round progress on return. joinedAt is
+      // preserved when present so a returning host (after migration) keeps
+      // their original join order, but they remain a regular member.
       const memberData: MemberData = {
         name,
         ready: existing?.ready ?? false,
@@ -794,6 +868,7 @@ function MultiplayerPageInner() {
         roundAverage: existing?.roundAverage ?? null,
         totalPoints: existing?.totalPoints ?? 0,
         connected: true,
+        joinedAt: existing?.joinedAt ?? Date.now(),
       };
       await set(memberRef, memberData);
       setRoomCode(pendingRejoin);
@@ -1067,6 +1142,11 @@ function MultiplayerPageInner() {
           />
         )}
       </main>
+
+      {/* Host-transfer toast — auto-dismisses after 3s (set in effect). */}
+      {hostTransferName && view === 'room' && (
+        <HostTransferToast name={hostTransferName} />
+      )}
 
       {/* Settings + Pause modals — overlay on top of everything. */}
       {settingsOpen && (
@@ -3549,9 +3629,17 @@ function MemberRow({
       borderRadius: 10,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', minWidth: 0 }}>
+        {isHost && (
+          <span
+            title="Host"
+            aria-label="Host"
+            style={{ color: C.warn, display: 'inline-flex', alignItems: 'center', flex: '0 0 auto' }}
+          >
+            <CrownIcon />
+          </span>
+        )}
         <span style={{ fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</span>
-        {isHost && <Pill color={C.accent}>Host</Pill>}
-        {isYou && !isHost && <Pill color={C.muted}>You</Pill>}
+        {isYou && <Pill color={isHost ? C.warn : C.muted}>You</Pill>}
       </div>
       <div>{right}</div>
     </div>
@@ -3609,6 +3697,64 @@ function CheckIcon() {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="20 6 9 17 4 12" />
     </svg>
+  );
+}
+
+function CrownIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <path d="M3 7l4 3 5-6 5 6 4-3-2 12H5L3 7zm2.7 10h12.6l.4-2H5.3l.4 2z" />
+    </svg>
+  );
+}
+
+function HostTransferToast({ name }: { name: string }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        position: 'fixed',
+        top: 'calc(env(safe-area-inset-top) + 0.75rem)',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        zIndex: 1000,
+        background: C.card,
+        border: `1px solid ${C.warn}`,
+        color: C.text,
+        borderRadius: 999,
+        padding: '0.55rem 1rem',
+        fontSize: '0.85rem',
+        fontWeight: 700,
+        letterSpacing: '0.01em',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '0.45rem',
+        animation: 'mp-host-toast-in 0.22s ease-out',
+        maxWidth: 'calc(100vw - 2rem)',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+      }}
+    >
+      <span style={{ color: C.warn, display: 'inline-flex', alignItems: 'center' }}>
+        <CrownIcon />
+      </span>
+      <span>Host transferred to {name}</span>
+      <style>{`
+        @keyframes mp-host-toast-in {
+          from { opacity: 0; transform: translate(-50%, -8px); }
+          to   { opacity: 1; transform: translate(-50%, 0); }
+        }
+      `}</style>
+    </div>
   );
 }
 
