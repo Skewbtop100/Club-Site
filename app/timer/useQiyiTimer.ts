@@ -324,18 +324,32 @@ export function useQiyiTimer(callbacks: QiyiCallbacks) {
     setState('connecting');
 
     try {
+      // DEBUG MODE: show ALL nearby BLE devices so the user can identify what
+      // their QiYi timer actually advertises. After we confirm the real name
+      // pattern, this can be tightened back to namePrefix filters.
+      //
+      // The csTimer reference assumes "QY-Timer-XXXX-NNNN" / "QY-Adapter-…"
+      // but firmware revisions vary, and some devices advertise plain "QiYi"
+      // or generic Bluetooth-LE-Module names. Approach C surfaces them all.
+      const requestOpts: RequestDeviceOptions = {
+        acceptAllDevices: true,
+        optionalServices: [QIYI_SERVICE],
+      };
       // eslint-disable-next-line no-console
       console.log('[QiYi] scanning for devices…');
-      const bt = (navigator as Navigator & { bluetooth: { requestDevice: (o: unknown) => Promise<BluetoothDevice> } }).bluetooth;
-      const device = await bt.requestDevice({
-        filters: [
-          { namePrefix: 'QY-Timer' },
-          { namePrefix: 'QY-Adapter' },
-        ],
-        optionalServices: [QIYI_SERVICE],
-      });
       // eslint-disable-next-line no-console
-      console.log('[QiYi] device found:', device.name, '(id=', device.id, ')');
+      console.log('[QiYi] Requesting BLE device with options:', JSON.stringify(requestOpts));
+      // eslint-disable-next-line no-console
+      console.log('[QiYi] Tip: if the picker is empty, your browser may not see the timer. ' +
+        'Tighter filters previously tried: namePrefix=[QY-Timer, QY-Adapter, QiYi, Qiyi] / services=[' + QIYI_SERVICE + ']');
+
+      const bt = (navigator as Navigator & { bluetooth: { requestDevice: (o: RequestDeviceOptions) => Promise<BluetoothDevice> } }).bluetooth;
+      const device = await bt.requestDevice(requestOpts);
+
+      // eslint-disable-next-line no-console
+      console.log('[QiYi] Selected device:', { name: device.name, id: device.id });
+      // eslint-disable-next-line no-console
+      console.log('[QiYi] (If the name doesn\'t match QY-Timer/QY-Adapter, the MAC fallback will use placeholder zeros — let us know what the device advertises.)');
       setDeviceName(device.name ?? 'QiYi Timer');
       deviceRef.current = device;
 
@@ -352,11 +366,28 @@ export function useQiyiTimer(callbacks: QiyiCallbacks) {
       // eslint-disable-next-line no-console
       console.log('[QiYi] connecting GATT…');
       const server = await device.gatt.connect();
+      // Enumerate primary services to help diagnose "wrong device picked" cases.
+      try {
+        const services = await server.getPrimaryServices();
+        // eslint-disable-next-line no-console
+        console.log('[QiYi] device exposes services:', services.map(s => s.uuid));
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[QiYi] could not enumerate services (may need optionalServices)', err);
+      }
       // eslint-disable-next-line no-console
       console.log('[QiYi] getting primary service', QIYI_SERVICE);
       const service = await server.getPrimaryService(QIYI_SERVICE);
       // eslint-disable-next-line no-console
       console.log('[QiYi] getting characteristics');
+      try {
+        const allChars = await service.getCharacteristics();
+        // eslint-disable-next-line no-console
+        console.log('[QiYi] service exposes characteristics:', allChars.map(c => ({ uuid: c.uuid, props: c.properties })));
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[QiYi] could not list characteristics', err);
+      }
       const writeChar  = await service.getCharacteristic(QIYI_CHRCT_WRITE);
       const notifyChar = await service.getCharacteristic(QIYI_CHRCT_READ);
       writeCharRef.current = writeChar;
