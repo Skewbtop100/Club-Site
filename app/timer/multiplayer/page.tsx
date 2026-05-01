@@ -199,42 +199,58 @@ export default function MultiplayerPage() {
     setErrorMsg('');
     const name = createName.trim();
     if (!name) { setErrorMsg('Enter a display name.'); return; }
-    if (!userId) return;
-    persistName(name);
-    // Try a few times in case of code collision
-    for (let i = 0; i < 5; i++) {
-      const code = genRoomCode();
-      const roomRef = ref(rtdb, `rooms/${code}`);
-      const snap = await get(roomRef);
-      if (snap.exists()) continue;
-      const initial: RoomData = {
-        host: userId,
-        event: '333',
-        scramble: generateScramble('333'),
-        status: 'waiting',
-        round: 1,
-        maxRounds: 5,
-        createdAt: Date.now(),
-        countdownStart: null,
-        raceStart: null,
-        members: {
-          [userId]: {
-            name,
-            ready: false,
-            time: null,
-            penalty: null,
-            finishedAt: null,
-            startedAt: null,
-            totalPoints: 0,
-          },
-        },
-      };
-      await set(roomRef, initial);
-      setRoomCode(code);
-      setView('room');
-      return;
+    // Self-heal: if the mount-effect hasn't populated userId yet, generate now.
+    let uid = userId;
+    if (!uid) {
+      uid = getUserId();
+      setUserId(uid);
     }
-    setErrorMsg('Could not allocate a room code. Try again.');
+    if (!uid) { setErrorMsg('Could not establish a user id (localStorage unavailable?).'); return; }
+    persistName(name);
+    console.log('[mp] createRoom start', { uid, name, rtdb });
+    try {
+      // Try a few times in case of code collision
+      for (let i = 0; i < 5; i++) {
+        const code = genRoomCode();
+        console.log('[mp] trying code', code);
+        const roomRef = ref(rtdb, `rooms/${code}`);
+        const snap = await get(roomRef);
+        if (snap.exists()) { console.log('[mp] code collision, retrying'); continue; }
+        const initial: RoomData = {
+          host: uid,
+          event: '333',
+          scramble: generateScramble('333'),
+          status: 'waiting',
+          round: 1,
+          maxRounds: 5,
+          createdAt: Date.now(),
+          countdownStart: null,
+          raceStart: null,
+          members: {
+            [uid]: {
+              name,
+              ready: false,
+              time: null,
+              penalty: null,
+              finishedAt: null,
+              startedAt: null,
+              totalPoints: 0,
+            },
+          },
+        };
+        await set(roomRef, initial);
+        console.log('[mp] room created', code);
+        setRoomCode(code);
+        setView('room');
+        return;
+      }
+      setErrorMsg('Could not allocate a room code. Try again.');
+    } catch (err) {
+      console.error('[mp] createRoom error', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      // Most common cause: RTDB rules deny writes, RTDB not enabled, or wrong databaseURL.
+      setErrorMsg(`Couldn't create room: ${msg}. Check Firebase RTDB is enabled and rules allow writes.`);
+    }
   }, [createName, userId, persistName]);
 
   const joinRoom = useCallback(async () => {
@@ -243,27 +259,40 @@ export default function MultiplayerPage() {
     const name = joinName.trim();
     if (!code) { setErrorMsg('Enter a room code.'); return; }
     if (!name) { setErrorMsg('Enter a display name.'); return; }
-    if (!userId) return;
-    persistName(name);
-    const roomRef = ref(rtdb, `rooms/${code}`);
-    const snap = await get(roomRef);
-    if (!snap.exists()) {
-      setErrorMsg(`Room ${code} not found.`);
-      return;
+    let uid = userId;
+    if (!uid) {
+      uid = getUserId();
+      setUserId(uid);
     }
-    const memberRef = ref(rtdb, `rooms/${code}/members/${userId}`);
-    const memberData: MemberData = {
-      name,
-      ready: false,
-      time: null,
-      penalty: null,
-      finishedAt: null,
-      startedAt: null,
-      totalPoints: 0,
-    };
-    await set(memberRef, memberData);
-    setRoomCode(code);
-    setView('room');
+    if (!uid) { setErrorMsg('Could not establish a user id (localStorage unavailable?).'); return; }
+    persistName(name);
+    console.log('[mp] joinRoom', { code, uid, name });
+    try {
+      const roomRef = ref(rtdb, `rooms/${code}`);
+      const snap = await get(roomRef);
+      if (!snap.exists()) {
+        setErrorMsg(`Room ${code} not found.`);
+        return;
+      }
+      const memberRef = ref(rtdb, `rooms/${code}/members/${uid}`);
+      const memberData: MemberData = {
+        name,
+        ready: false,
+        time: null,
+        penalty: null,
+        finishedAt: null,
+        startedAt: null,
+        totalPoints: 0,
+      };
+      await set(memberRef, memberData);
+      console.log('[mp] joined', code);
+      setRoomCode(code);
+      setView('room');
+    } catch (err) {
+      console.error('[mp] joinRoom error', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setErrorMsg(`Couldn't join: ${msg}. Check Firebase RTDB is enabled and rules allow reads/writes.`);
+    }
   }, [joinCode, joinName, userId, persistName]);
 
   const leaveRoom = useCallback(async () => {
