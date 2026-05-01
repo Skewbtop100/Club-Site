@@ -324,32 +324,30 @@ export function useQiyiTimer(callbacks: QiyiCallbacks) {
     setState('connecting');
 
     try {
-      // DEBUG MODE: show ALL nearby BLE devices so the user can identify what
-      // their QiYi timer actually advertises. After we confirm the real name
-      // pattern, this can be tightened back to namePrefix filters.
-      //
-      // The csTimer reference assumes "QY-Timer-XXXX-NNNN" / "QY-Adapter-…"
-      // but firmware revisions vary, and some devices advertise plain "QiYi"
-      // or generic Bluetooth-LE-Module names. Approach C surfaces them all.
+      // QiYi timers advertise as "QY-Timer-V2-XXXX" or similar. Accept the
+      // four prefixes seen in the wild — case-sensitive in Web Bluetooth, so
+      // include both `QY-Timer` and `QY-TIMER`.
       const requestOpts: RequestDeviceOptions = {
-        acceptAllDevices: true,
+        filters: [
+          { namePrefix: 'QY-Timer'   },  // QY-Timer-V2-XXXX, QY-Timer-V3-XXXX, …
+          { namePrefix: 'QY-Adapter' },  // QY-Adapter-XXXX-NNNN
+          { namePrefix: 'QY-TIMER'   },  // uppercase variant
+          { namePrefix: 'QiYi-Timer' },  // alternative naming
+        ],
         optionalServices: [QIYI_SERVICE],
       };
       // eslint-disable-next-line no-console
       console.log('[QiYi] scanning for devices…');
       // eslint-disable-next-line no-console
       console.log('[QiYi] Requesting BLE device with options:', JSON.stringify(requestOpts));
-      // eslint-disable-next-line no-console
-      console.log('[QiYi] Tip: if the picker is empty, your browser may not see the timer. ' +
-        'Tighter filters previously tried: namePrefix=[QY-Timer, QY-Adapter, QiYi, Qiyi] / services=[' + QIYI_SERVICE + ']');
 
       const bt = (navigator as Navigator & { bluetooth: { requestDevice: (o: RequestDeviceOptions) => Promise<BluetoothDevice> } }).bluetooth;
       const device = await bt.requestDevice(requestOpts);
 
       // eslint-disable-next-line no-console
-      console.log('[QiYi] Selected device:', { name: device.name, id: device.id });
+      console.log('QiYi device found:', device.name);
       // eslint-disable-next-line no-console
-      console.log('[QiYi] (If the name doesn\'t match QY-Timer/QY-Adapter, the MAC fallback will use placeholder zeros — let us know what the device advertises.)');
+      console.log('[QiYi] Selected device:', { name: device.name, id: device.id });
       setDeviceName(device.name ?? 'QiYi Timer');
       deviceRef.current = device;
 

@@ -334,7 +334,12 @@ function makeDefaultSession(solves: Solve[] = []): Session {
 export default function TimerPage() {
   const router = useRouter();
   const [eventId, setEventId] = useState<string>('333');
-  const [scramble, setScramble] = useState<string>(() => generateScramble('333'));
+  // Empty initial value so server and client first-render match. The
+  // existing eventId-change effect runs on mount and fills in the real
+  // scramble — generating one in the useState initializer would call
+  // Math.random() and produce different markup on the server vs the
+  // client (React hydration error #418).
+  const [scramble, setScramble] = useState<string>('');
   // Sessions store: per-event list of sessions, plus the active session id.
   // `solves` derives from the active session.
   const [sessions, setSessions] = useState<SessionStore>({});
