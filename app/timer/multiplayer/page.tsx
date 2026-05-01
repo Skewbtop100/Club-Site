@@ -2388,24 +2388,6 @@ function SolveAndCubeRow({
   );
 }
 
-function SolveProgressDots({ count, done }: { count: number; done: number }) {
-  return (
-    <div style={{ display: 'inline-flex', gap: '0.3rem' }}>
-      {Array.from({ length: count }, (_, i) => {
-        const filled = i < done;
-        return (
-          <span key={i} style={{
-            width: 11, height: 11, borderRadius: '50%',
-            background: filled ? C.accent : 'transparent',
-            border: `2px solid ${filled ? C.accent : C.border}`,
-            display: 'inline-block',
-          }} />
-        );
-      })}
-    </div>
-  );
-}
-
 function ConfirmButton({
   color, onClick, children,
 }: {
@@ -2898,97 +2880,67 @@ function ResultsScreen({
   const me = room.members?.[userId];
   const isFinalRound = room.round >= room.maxRounds;
   const everyoneReady = Object.values(room.members || {}).every(m => m.ready);
+  const roundName = room.roundName || getRoundName(room.round, room.maxRounds);
 
   // Champion (final mode) — highest cumulative points, ties go to first.
   const champion = cumulative[0];
 
-  return (
-    <div className="mp-room-container mp-results-container" style={{
-      width: '100%',
-      maxWidth: isMobile ? '100%' : '720px',
-      padding: isMobile ? '0.5rem' : '2rem',
-      margin: '0 auto',
-      display: 'flex', flexDirection: 'column', gap: '1rem',
-    }}>
-      {isFinalRound && champion && (
-        <div style={{
-          background: `linear-gradient(135deg, ${C.accentDim}, ${C.successDim})`,
-          border: `1px solid ${C.borderHi}`, borderRadius: 14,
-          padding: '1rem', textAlign: 'center',
-          display: 'flex', flexDirection: 'column', gap: '0.4rem',
-        }}>
-          <div style={{ fontSize: '0.7rem', letterSpacing: '0.18em', textTransform: 'uppercase', color: C.muted, fontWeight: 700 }}>
-            🏆 Champion
-          </div>
-          <div className="mp-champion-name" style={{
-            fontSize: 'clamp(1.6rem, 5vw, 2.4rem)', fontWeight: 800,
-            color: C.success, letterSpacing: '-0.01em',
+  // ── Final-round path (champion + Play Again) — UNCHANGED from prior turn ──
+  if (isFinalRound) {
+    return (
+      <div className="mp-room-container mp-results-container" style={{
+        width: '100%',
+        maxWidth: isMobile ? '100%' : '720px',
+        padding: isMobile ? '0.5rem' : '2rem',
+        margin: '0 auto',
+        display: 'flex', flexDirection: 'column', gap: '1rem',
+      }}>
+        {champion && (
+          <div style={{
+            background: `linear-gradient(135deg, ${C.accentDim}, ${C.successDim})`,
+            border: `1px solid ${C.borderHi}`, borderRadius: 14,
+            padding: '1rem', textAlign: 'center',
+            display: 'flex', flexDirection: 'column', gap: '0.4rem',
           }}>
-            {champion.name}
+            <div style={{ fontSize: '0.7rem', letterSpacing: '0.18em', textTransform: 'uppercase', color: C.muted, fontWeight: 700 }}>
+              🏆 Champion
+            </div>
+            <div className="mp-champion-name" style={{
+              fontSize: 'clamp(1.6rem, 5vw, 2.4rem)', fontWeight: 800,
+              color: C.success, letterSpacing: '-0.01em',
+            }}>
+              {champion.name}
+            </div>
+            <div style={{ fontSize: '0.85rem', color: C.muted }}>
+              {champion.points} point{champion.points === 1 ? '' : 's'}
+            </div>
           </div>
-          <div style={{ fontSize: '0.85rem', color: C.muted }}>
-            {champion.points} point{champion.points === 1 ? '' : 's'}
-          </div>
-        </div>
-      )}
-
-      <Card>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.7rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-          <div>
-            <SectionLabel>{room.roundName || getRoundName(room.round, room.maxRounds)} results</SectionLabel>
-          </div>
-          <div style={{ fontSize: '0.72rem', color: C.muted }}>{room.round} / {room.maxRounds}</div>
-        </div>
-        <div style={{ overflowX: 'auto' }}>
+        )}
+        <Card>
+          <SectionLabel>{roundName} results</SectionLabel>
           <table style={tableStyle}>
             <thead>
-              <tr>
-                <Th>Rank</Th>
-                <Th>Name</Th>
-                <Th align="right">S1</Th>
-                <Th align="right">S2</Th>
-                <Th align="right">S3</Th>
-                <Th align="right">S4</Th>
-                <Th align="right">S5</Th>
-                <Th align="right">Avg</Th>
-                <Th align="right">Pts</Th>
-              </tr>
+              <tr><Th>Rank</Th><Th>Name</Th><Th align="right">Avg</Th><Th align="right">Pts</Th></tr>
             </thead>
             <tbody>
-              {ranked.map((r, i) => {
-                const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
-                const rankColor = i === 0 ? '#fbbf24' : i === 1 ? '#cbd5e1' : i === 2 ? '#d97706' : C.text;
-                return (
-                  <tr key={r.uid} style={{ background: r.uid === userId ? C.accentDim : 'transparent' }}>
-                    <Td><span style={{ color: rankColor, fontWeight: 800 }}>{r.dnf ? '—' : `${i + 1}${medal ? ' ' + medal : ''}`}</span></Td>
-                    <Td>{r.name}</Td>
-                    {r.solves.map((s, si) => (
-                      <Td key={si} align="right" style={{ fontFamily: 'JetBrains Mono, monospace', color: !s ? C.mutedDim : s.penalty === 'dnf' ? C.danger : C.text }}>
-                        {!s ? '—' : s.penalty === 'dnf' ? 'DNF' : fmtMs(effectiveSolveMs(s), false, 2)}
-                      </Td>
-                    ))}
-                    <Td align="right" style={{ color: r.dnf ? C.danger : C.success, fontFamily: 'JetBrains Mono, monospace', fontWeight: 700 }}>
-                      {r.dnf ? 'DNF' : fmtMs(r.average, false, 2)}
-                    </Td>
-                    <Td align="right" style={{ fontFamily: 'JetBrains Mono, monospace' }}>{r.points}</Td>
-                  </tr>
-                );
-              })}
+              {ranked.map((r, i) => (
+                <tr key={r.uid} style={{ background: r.uid === userId ? C.accentDim : 'transparent' }}>
+                  <Td><span style={{ color: i === 0 ? C.success : i < 3 ? C.accent : C.text, fontWeight: 700 }}>{r.dnf ? '—' : i + 1}</span></Td>
+                  <Td>{r.name}</Td>
+                  <Td align="right" style={{ color: r.dnf ? C.danger : C.text, fontFamily: 'JetBrains Mono, monospace' }}>
+                    {r.dnf ? 'DNF' : fmtMs(r.average, false, 2)}
+                  </Td>
+                  <Td align="right" style={{ fontFamily: 'JetBrains Mono, monospace' }}>{r.points}</Td>
+                </tr>
+              ))}
             </tbody>
           </table>
-        </div>
-      </Card>
-
-      {room.maxRounds > 1 && (
+        </Card>
         <Card>
           <SectionLabel>Standings</SectionLabel>
           <table style={tableStyle}>
             <thead>
-              <tr>
-                <Th>Rank</Th>
-                <Th>Name</Th>
-                <Th align="right">Total Pts</Th>
-              </tr>
+              <tr><Th>Rank</Th><Th>Name</Th><Th align="right">Total Pts</Th></tr>
             </thead>
             <tbody>
               {cumulative.map((r, i) => (
@@ -3001,53 +2953,417 @@ function ResultsScreen({
             </tbody>
           </table>
         </Card>
-      )}
-
-      {/* Action row */}
-      {isFinalRound ? (
         <div className="mp-action-grid" style={{
           display: 'grid',
           gridTemplateColumns: isMobile ? '1fr' : (isHost ? '1fr 1fr' : '1fr'),
           gap: '0.6rem',
         }}>
-          {isHost && (
-            <BigButton accent onClick={onPlayAgain}>Play Again</BigButton>
-          )}
+          {isHost && <BigButton accent onClick={onPlayAgain}>Play Again</BigButton>}
           <BigButton onClick={onLeave}>Leave</BigButton>
         </div>
-      ) : (
-        <>
-          <BigButton
-            accent={!me?.ready}
-            onClick={onReadyForNext}
-            style={isMobile ? { width: '100%' } : undefined}
-          >
-            {me?.ready ? 'Cancel Ready' : 'Ready for next round'}
-          </BigButton>
-          <div className="mp-action-grid" style={{
-            display: 'grid',
-            gridTemplateColumns: isMobile ? '1fr' : (isHost ? '1fr 1fr' : '1fr'),
-            gap: '0.6rem',
+      </div>
+    );
+  }
+
+  // ── Per-round path (between rounds) — REDESIGNED ─────────────────────────
+  const leaderPoints = cumulative[0]?.points ?? 0;
+  const myReady = !!me?.ready;
+
+  return (
+    <div className="mp-results-screen" style={{
+      width: '100%',
+      maxWidth: isMobile ? '100%' : '760px',
+      minHeight: isMobile ? 'calc(100dvh - 0px)' : 'auto',
+      padding: isMobile ? '0.85rem 0.75rem 1rem' : '1.5rem',
+      margin: '0 auto',
+      display: 'flex', flexDirection: 'column', gap: '0.85rem',
+      animation: 'mp-results-fade-in 0.32s cubic-bezier(0.2, 0.8, 0.3, 1) both',
+    }}>
+      {/* Round badge */}
+      <div style={{ display: 'flex', justifyContent: 'center' }}>
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
+          padding: '0.3rem 0.85rem',
+          background: C.accentDim, color: C.accent,
+          border: `1px solid ${C.borderHi}`,
+          borderRadius: 999,
+          fontSize: '0.66rem', fontWeight: 700,
+          letterSpacing: '0.15em', textTransform: 'uppercase',
+        }}>
+          <TrophyIcon size={12} /> {roundName} · Round {room.round} of {room.maxRounds}
+        </span>
+      </div>
+
+      {/* Round results card */}
+      <div style={{
+        background: C.card, border: `1px solid ${C.border}`, borderRadius: 14,
+        overflow: 'hidden',
+      }}>
+        <div style={{
+          padding: '0.7rem 0.9rem',
+          borderBottom: `1px solid ${C.border}`,
+          display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+        }}>
+          <SectionLabel>Round results</SectionLabel>
+          <span style={{ fontSize: '0.66rem', color: C.muted, letterSpacing: '0.08em' }}>
+            Avg of 5
+          </span>
+        </div>
+        {ranked.map((r, i) => (
+          <RoundResultRow
+            key={r.uid}
+            rank={i + 1}
+            name={r.name}
+            solves={r.solves}
+            average={r.average}
+            dnf={r.dnf}
+            points={r.points}
+            isMe={r.uid === userId}
+            isMobile={isMobile}
+            isLast={i === ranked.length - 1}
+          />
+        ))}
+      </div>
+
+      {/* Standings card — only when there are multiple rounds total */}
+      {room.maxRounds > 1 && (
+        <div style={{
+          background: C.card, border: `1px solid ${C.border}`, borderRadius: 14,
+          overflow: 'hidden',
+        }}>
+          <div style={{
+            padding: '0.7rem 0.9rem',
+            borderBottom: `1px solid ${C.border}`,
+            display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
           }}>
-            {isHost && (
-              <BigButton
-                success
-                disabled={!everyoneReady}
-                onClick={onNextRound}
-              >
-                Start Next Round
-              </BigButton>
-            )}
-            <BigButton onClick={onLeave}>Leave</BigButton>
+            <SectionLabel>Standings</SectionLabel>
+            <span style={{ fontSize: '0.66rem', color: C.muted, letterSpacing: '0.08em' }}>
+              After round {room.round}
+            </span>
           </div>
-          {!isHost && (
-            <div style={{ textAlign: 'center', color: C.muted, fontSize: '0.78rem', padding: '0.4rem' }}>
-              {everyoneReady ? 'Everyone ready — host can start.' : 'Waiting for everyone to ready up…'}
-            </div>
-          )}
-        </>
+          {cumulative.map((r, i) => (
+            <StandingsRow
+              key={r.uid}
+              rank={i + 1}
+              name={r.name}
+              points={r.points}
+              diff={r.points - leaderPoints}
+              isMe={r.uid === userId}
+              isLast={i === cumulative.length - 1}
+            />
+          ))}
+        </div>
       )}
+
+      {/* Spacer so action area pushes to the bottom on tall viewports */}
+      <div style={{ flex: '1 1 auto', minHeight: '0.25rem' }} />
+
+      {/* Actions card — primary buttons grouped together */}
+      <div style={{
+        background: C.card, border: `1px solid ${C.border}`, borderRadius: 14,
+        padding: '0.85rem',
+        display: 'flex', flexDirection: 'column', gap: '0.55rem',
+      }}>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: isHost ? '1fr 1fr' : '1fr',
+          gap: '0.5rem',
+        }}>
+          <ResultsActionButton
+            tone={myReady ? 'neutral' : 'accent'}
+            onClick={onReadyForNext}
+            icon={myReady ? <CloseIcon size={14} /> : <CheckIcon />}
+            label={myReady ? 'Cancel Ready' : 'Ready Up'}
+          />
+          {isHost && (
+            <ResultsActionButton
+              tone="success"
+              disabled={!everyoneReady}
+              onClick={onNextRound}
+              icon={<PlayIcon size={14} />}
+              label="Start Next Round"
+            />
+          )}
+        </div>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          gap: '0.4rem',
+          fontSize: '0.74rem',
+          color: everyoneReady ? C.success : C.muted,
+          fontWeight: 600, letterSpacing: '0.04em',
+        }}>
+          {everyoneReady ? (
+            <>
+              <CheckIcon /> Everyone&rsquo;s ready{isHost ? ' — start when you like' : ' — host can start'}
+            </>
+          ) : (
+            <>Waiting for {Object.values(room.members || {}).filter(m => !m.ready).length} player{Object.values(room.members || {}).filter(m => !m.ready).length === 1 ? '' : 's'}…</>
+          )}
+        </div>
+      </div>
+
+      {/* Leave — small secondary text button at the very bottom */}
+      <button
+        onClick={onLeave}
+        style={{
+          alignSelf: 'center',
+          background: 'transparent', color: C.muted,
+          border: 'none', padding: '0.55rem 0.85rem',
+          fontSize: '0.82rem', fontFamily: 'inherit', fontWeight: 600,
+          cursor: 'pointer', letterSpacing: '0.02em',
+          display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
+          transition: 'color 0.12s',
+        }}
+        onMouseEnter={e => (e.currentTarget.style.color = C.danger)}
+        onMouseLeave={e => (e.currentTarget.style.color = C.muted)}
+      >
+        <ExitIcon size={14} /> Leave race
+      </button>
+
+      <style>{`
+        @keyframes mp-results-fade-in {
+          from { opacity: 0; transform: translateY(10px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
     </div>
+  );
+}
+
+// ── Round results helpers ─────────────────────────────────────────────────
+
+const MEDAL_COLOR: Record<number, string> = { 1: '#fbbf24', 2: '#cbd5e1', 3: '#d97706' };
+
+function MedalBadge({ rank }: { rank: number }) {
+  if (rank > 3) {
+    return (
+      <span style={{
+        flexShrink: 0,
+        width: 28, height: 28, borderRadius: '50%',
+        background: C.cardAlt,
+        border: `1px solid ${C.border}`,
+        color: C.muted, fontSize: '0.78rem', fontWeight: 800,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      }}>{rank}</span>
+    );
+  }
+  const color = MEDAL_COLOR[rank];
+  return (
+    <span style={{
+      flexShrink: 0,
+      width: 30, height: 30, borderRadius: '50%',
+      background: `${color}1f`,
+      border: `1px solid ${color}66`,
+      color, fontSize: '0.78rem', fontWeight: 800,
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      boxShadow: rank === 1 ? `0 0 18px ${color}66, inset 0 0 8px ${color}22` : undefined,
+    }}>{rank}</span>
+  );
+}
+
+function RoundResultRow({
+  rank, name, solves, average, dnf, points, isMe, isMobile, isLast,
+}: {
+  rank: number;
+  name: string;
+  solves: (SolveData | null)[];
+  average: number;
+  dnf: boolean;
+  points: number;
+  isMe: boolean;
+  isMobile: boolean;
+  isLast: boolean;
+}) {
+  const isWinner = rank === 1 && !dnf;
+  return (
+    <div style={{
+      padding: isMobile ? '0.6rem 0.8rem' : '0.7rem 0.95rem',
+      borderBottom: isLast ? 'none' : `1px solid ${C.border}`,
+      borderLeft: isMe ? `3px solid ${C.accent}` : '3px solid transparent',
+      background: isWinner
+        ? `linear-gradient(135deg, ${C.accentDim} 0%, ${C.successDim} 100%)`
+        : 'transparent',
+      display: 'flex', flexDirection: 'column', gap: '0.45rem',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+        <MedalBadge rank={dnf ? 99 : rank} />
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.05rem' }}>
+          <div style={{
+            fontSize: '0.95rem', fontWeight: 700, color: C.text,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>
+            {name}{isMe ? <span style={{ color: C.accent, fontWeight: 700, marginLeft: '0.3rem' }}>(you)</span> : null}
+          </div>
+          <div style={{
+            fontSize: '0.6rem', color: C.muted,
+            letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700,
+          }}>
+            Average of 5
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.2rem', flexShrink: 0 }}>
+          <span style={{
+            fontFamily: 'JetBrains Mono, monospace',
+            fontSize: isMobile ? '1.25rem' : '1.45rem', fontWeight: 800,
+            fontVariantNumeric: 'tabular-nums',
+            color: dnf ? C.danger : C.success,
+            lineHeight: 1,
+          }}>{dnf ? 'DNF' : fmtMs(average, false, 2)}</span>
+          <span style={{
+            background: C.cardAlt, color: C.text,
+            border: `1px solid ${C.border}`, borderRadius: 999,
+            padding: '0.08rem 0.55rem',
+            fontFamily: 'JetBrains Mono, monospace',
+            fontSize: '0.66rem', fontWeight: 700,
+            fontVariantNumeric: 'tabular-nums',
+          }}>+{points} pts</span>
+        </div>
+      </div>
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)',
+        gap: isMobile ? '0.2rem' : '0.3rem',
+      }}>
+        {solves.map((s, i) => {
+          const sDnf = s?.penalty === 'dnf';
+          return (
+            <div key={i} style={{
+              fontFamily: 'JetBrains Mono, monospace',
+              fontSize: isMobile ? '0.66rem' : '0.78rem', fontWeight: 600,
+              fontVariantNumeric: 'tabular-nums',
+              textAlign: 'center',
+              padding: isMobile ? '0.18rem 0.05rem' : '0.25rem 0.1rem',
+              background: !s ? 'transparent' : 'rgba(255,255,255,0.03)',
+              border: `1px solid ${C.border}`,
+              borderRadius: 6,
+              color: !s ? C.mutedDim : sDnf ? C.danger : C.text,
+              letterSpacing: sDnf ? '0.04em' : '0',
+              minHeight: isMobile ? 22 : 26,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              overflow: 'hidden',
+            }}>
+              {!s ? '—' : sDnf ? 'DNF' : fmtMs(effectiveSolveMs(s), false, 2)}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function StandingsRow({
+  rank, name, points, diff, isMe, isLast,
+}: {
+  rank: number;
+  name: string;
+  points: number;
+  diff: number;       // points relative to leader; ≤0
+  isMe: boolean;
+  isLast: boolean;
+}) {
+  const isLeader = rank === 1;
+  return (
+    <div style={{
+      padding: '0.6rem 0.85rem',
+      borderBottom: isLast ? 'none' : `1px solid ${C.border}`,
+      borderLeft: isMe ? `3px solid ${C.accent}` : '3px solid transparent',
+      display: 'flex', alignItems: 'center', gap: '0.65rem',
+    }}>
+      <MedalBadge rank={rank} />
+      <div style={{
+        flex: 1, minWidth: 0,
+        fontSize: '0.92rem', fontWeight: 700, color: C.text,
+        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+      }}>
+        {name}{isMe ? <span style={{ color: C.accent, fontWeight: 700, marginLeft: '0.3rem' }}>(you)</span> : null}
+      </div>
+      <div style={{
+        display: 'flex', alignItems: 'baseline', gap: '0.45rem', flexShrink: 0,
+      }}>
+        <span style={{
+          fontFamily: 'JetBrains Mono, monospace',
+          fontSize: '1.05rem', fontWeight: 800,
+          color: isLeader ? C.success : C.text,
+          fontVariantNumeric: 'tabular-nums',
+        }}>{points}</span>
+        <span style={{
+          fontFamily: 'JetBrains Mono, monospace',
+          fontSize: '0.7rem', fontWeight: 700,
+          fontVariantNumeric: 'tabular-nums',
+          color: isLeader ? C.muted : (diff === 0 ? C.muted : C.danger),
+        }}>
+          {isLeader ? 'leader' : diff === 0 ? 'tied' : `${diff} pts`}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function ResultsActionButton({
+  tone, onClick, icon, label, disabled,
+}: {
+  tone: 'accent' | 'success' | 'neutral';
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+  disabled?: boolean;
+}) {
+  const palette = disabled
+    ? { bg: C.cardAlt, fg: C.mutedDim, border: C.border }
+    : tone === 'accent'  ? { bg: C.accent,  fg: '#0a0a0a', border: C.accent }
+    : tone === 'success' ? { bg: C.success, fg: '#0a0a0a', border: C.success }
+    : { bg: 'transparent', fg: C.text, border: C.border };
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        background: palette.bg, color: palette.fg,
+        border: `1px solid ${palette.border}`,
+        borderRadius: 12, padding: '0.85rem 0.95rem',
+        fontSize: '0.95rem', fontWeight: 800, fontFamily: 'inherit',
+        letterSpacing: '0.02em',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.6 : 1,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.45rem',
+        transition: 'transform 0.08s, opacity 0.15s',
+      }}
+      onMouseDown={e => { if (!disabled) e.currentTarget.style.transform = 'scale(0.985)'; }}
+      onMouseUp={e => (e.currentTarget.style.transform = 'scale(1)')}
+      onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+function PlayIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M5 3.5v17l15-8.5z" />
+    </svg>
+  );
+}
+
+function TrophyIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8 21h8" />
+      <path d="M12 17v4" />
+      <path d="M7 4h10v5a5 5 0 0 1-10 0V4z" />
+      <path d="M17 4h3a2 2 0 0 1 0 4h-3" />
+      <path d="M7 4H4a2 2 0 0 0 0 4h3" />
+    </svg>
+  );
+}
+
+function ExitIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <polyline points="16 17 21 12 16 7" />
+      <line x1="21" y1="12" x2="9" y2="12" />
+    </svg>
   );
 }
 
