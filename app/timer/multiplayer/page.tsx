@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Scrambow } from 'scrambow';
 import { QRCodeSVG } from 'qrcode.react';
+import type { TwistyPlayer as TwistyPlayerType } from 'cubing/twisty';
 import {
   ref,
   onValue,
@@ -63,6 +64,99 @@ function generateScramble(eventId: string): string {
   } catch {
     return '';
   }
+}
+
+// Map event ids → TwistyPlayer puzzle ids. (Mirrors main timer's PUZZLE_MAP.)
+const PUZZLE_MAP: Record<string, string> = {
+  '333':   '3x3x3',
+  '222':   '2x2x2',
+  '444':   '4x4x4',
+  '555':   '5x5x5',
+  '666':   '6x6x6',
+  '777':   '7x7x7',
+  'pyram': 'pyraminx',
+  'skewb': 'skewb',
+  'sq1':   'square1',
+  'clock': 'clock',
+  'minx':  'megaminx',
+};
+
+// 3D cube preview using cubing/twisty's TwistyPlayer Web Component.
+// Dynamic-imported so HTMLElement access doesn't break SSR.
+function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const playerRef = useRef<TwistyPlayerType | null>(null);
+  const puzzleId = PUZZLE_MAP[eventId];
+
+  useEffect(() => {
+    if (!puzzleId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const mod = await import('cubing/twisty');
+        if (cancelled || !containerRef.current) return;
+        const config = {
+          puzzle: puzzleId,
+          experimentalSetupAlg: scramble,
+          alg: '',
+          background: 'none',
+          controlPanel: 'none',
+          viewerLink: 'none',
+          hintFacelets: 'none',
+          backView: 'none',
+          visualization: '3D',
+        } as unknown as ConstructorParameters<typeof mod.TwistyPlayer>[0];
+        const player = new mod.TwistyPlayer(config);
+        const el = player as unknown as HTMLElement;
+        el.style.width = '100%';
+        el.style.height = '100%';
+        el.style.background = 'transparent';
+        containerRef.current.appendChild(el);
+        playerRef.current = player;
+      } catch (err) {
+        console.warn('[mp] TwistyPlayer load failed', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      const player = playerRef.current as unknown as HTMLElement | null;
+      const c = containerRef.current;
+      if (player && c && c.contains(player)) c.removeChild(player);
+      playerRef.current = null;
+    };
+    // Mount only — subsequent puzzle/scramble changes go through the next effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const player = playerRef.current;
+    if (!player || !puzzleId) return;
+    try {
+      (player as unknown as { puzzle: string }).puzzle = puzzleId;
+      (player as unknown as { experimentalSetupAlg: string }).experimentalSetupAlg = scramble;
+      (player as unknown as { alg: string }).alg = '';
+    } catch (err) {
+      console.warn('[mp] TwistyPlayer update failed', err);
+    }
+  }, [scramble, puzzleId]);
+
+  if (!puzzleId) {
+    return (
+      <div style={{
+        width: '100%', height: '100%', minHeight: 90,
+        fontSize: '0.7rem', color: C.mutedDim,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        No preview for this puzzle.
+      </div>
+    );
+  }
+  return (
+    <div ref={containerRef} style={{
+      width: '100%', height: '100%',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }} />
+  );
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -759,16 +853,24 @@ function MultiplayerPageInner() {
       fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
       display: 'flex', flexDirection: 'column',
     }}>
-      <TopBar
-        roomCode={view === 'room' ? roomCode : ''}
-        onBack={() => {
-          if (view === 'room') leaveRoom();
-          else if (view === 'lobby') router.push('/timer');
-          else { setView('lobby'); setErrorMsg(''); }
-        }}
-      />
+      {/* The mobile racing screen renders its own header (scramble + X
+          leave icon), so we suppress the global TopBar in that single case. */}
+      {!(isMobile && view === 'room' && room?.status === 'racing') && (
+        <TopBar
+          roomCode={view === 'room' ? roomCode : ''}
+          onBack={() => {
+            if (view === 'room') leaveRoom();
+            else if (view === 'lobby') router.push('/timer');
+            else { setView('lobby'); setErrorMsg(''); }
+          }}
+        />
+      )}
 
-      <main style={{ flex: '1 1 auto', minWidth: 0, padding: '1rem', display: 'flex', flexDirection: 'column' }}>
+      <main style={{
+        flex: '1 1 auto', minWidth: 0,
+        padding: (isMobile && view === 'room' && room?.status === 'racing') ? 0 : '1rem',
+        display: 'flex', flexDirection: 'column',
+      }}>
         {errorMsg && view !== 'room' && (
           <div style={{
             maxWidth: 480, margin: '0 auto 0.85rem', width: '100%',
@@ -1336,7 +1438,7 @@ const MP_HOLD_TO_START = true;
 const MP_INSPECTION_ENABLED = false;
 
 function RacingScreen({
-  isMobile, room, userId, onSubmitSolve,
+  isMobile, room, userId, onSubmitSolve, onLeave,
 }: RoomViewProps & { isHost: boolean }) {
   const me = room.members?.[userId];
   const myCurrent = me?.currentSolve ?? 0;
@@ -1360,9 +1462,9 @@ function RacingScreen({
   const isRoundDone = myCurrent >= SOLVES_PER_ROUND;
   const currentScramble = !isRoundDone ? (room.scrambles?.[String(myCurrent)] ?? '') : '';
 
-  const [scrambleShown, setScrambleShown] = useState(false);
-  // Pending = waiting for OK/+2/DNF confirmation after a stop. While pending,
-  // all touch/space input is ignored to prevent another solve from starting.
+  // Pending = awaiting OK / +2 / DNF confirmation. While pending, all
+  // touch/space input on the timer surface is ignored AND we drop the
+  // touchstart preventDefault so the confirm buttons receive their clicks.
   const [pending, setPending] = useState<{ ms: number; defaultDnf: boolean } | null>(null);
 
   const onSolveCommit = useCallback((ms: number, dnf: boolean) => {
@@ -1371,24 +1473,26 @@ function RacingScreen({
 
   const timer = useMpTimer(MP_INSPECTION_ENABLED, onSolveCommit);
 
-  const interactionLocked = !scrambleShown || isWaitingForOpponents || isRoundDone || !!pending;
+  const interactionLocked = isWaitingForOpponents || isRoundDone || !!pending;
 
   // Reset local + timer state at solve / round boundary.
   useEffect(() => {
-    setScrambleShown(false);
     setPending(null);
     timer.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myCurrent, room.round]);
 
   const confirmSolve = useCallback((penalty: Penalty) => {
-    if (!pending) return;
+    console.log('[mp] Penalty clicked', penalty, 'solveIndex:', myCurrent);
+    if (!pending) {
+      console.warn('[mp] confirmSolve ignored — no pending solve');
+      return;
+    }
     onSubmitSolve(myCurrent, pending.ms, penalty, currentScramble);
     setPending(null);
-    // The myCurrent-change effect will reset timer + scrambleShown.
+    // The myCurrent-change effect resets timer to idle.
   }, [pending, myCurrent, currentScramble, onSubmitSolve]);
 
-  // Touch handlers — mirror main timer's onTimerTouchStart / onTimerTouchEnd.
   const onTimerTouchStart = useCallback(() => {
     if (interactionLocked) return;
     if (timer.state === 'running') { timer.stop(); return; }
@@ -1408,8 +1512,9 @@ function RacingScreen({
     if (timer.state === 'armed') timer.fireRunning();
   }, [timer]);
 
-  // Keyboard — mirror main timer with auto-repeat guard. Hold-to-arm requires
-  // both keydown (start arming) and keyup (fire running after ≥350ms held).
+  // Keyboard — mirrors main timer. Auto-repeat guard via spaceHeldRef so
+  // holding space doesn't repeatedly fire keydown on platforms that don't
+  // expose the standalone repeat flag.
   const spaceHeldRef = useRef(false);
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -1444,12 +1549,7 @@ function RacingScreen({
     };
   }, [interactionLocked, timer]);
 
-  const [opponentsOpen, setOpponentsOpen] = useState(!isMobile);
-  useEffect(() => { setOpponentsOpen(!isMobile); }, [isMobile]);
-
-  const opponentCount = Object.keys(room.members || {}).length - 1;
-
-  // Display: while pending, freeze on the recorded time.
+  // Display values
   const displayValue = pending ? fmtMs(pending.ms, false, 2)
     : timer.state === 'inspecting' ? Math.max(0, Math.ceil(timer.inspectionMs / 1000)).toString()
     : timer.state === 'armed' ? '0.00'
@@ -1468,108 +1568,97 @@ function RacingScreen({
     : timer.state === 'running' ? C.accent
     : C.border;
 
+  // ── Mobile layout: header + tabs + S1..S5 strip + bottom nav ─────────
+  if (isMobile) {
+    return (
+      <MobileRacingLayout
+        room={room}
+        userId={userId}
+        myCurrent={myCurrent}
+        mySolves={mySolves}
+        isRoundDone={isRoundDone}
+        isWaitingForOpponents={isWaitingForOpponents}
+        currentScramble={currentScramble}
+        timer={timer}
+        pending={pending}
+        displayValue={displayValue}
+        timerColor={timerColor}
+        borderColor={borderColor}
+        interactionLocked={interactionLocked}
+        confirmSolve={confirmSolve}
+        onTimerTouchStart={onTimerTouchStart}
+        onTimerTouchEnd={onTimerTouchEnd}
+        onLeave={onLeave}
+      />
+    );
+  }
+
+  // ── Desktop layout (unchanged) ───────────────────────────────────────
   return (
     <div className="mp-race-container" style={{
       flex: '1 1 auto', minHeight: 0, width: '100%',
-      maxWidth: isMobile ? '100%' : '1100px',
-      margin: '0 auto',
+      maxWidth: '1100px', margin: '0 auto',
       display: 'flex', flexDirection: 'column', gap: '0.85rem',
-      padding: isMobile ? '0.5rem' : '0.5rem 0',
+      padding: '0.5rem 0',
     }}>
-      {/* Mobile: compact S1..S5 strip + tiny round label */}
-      {isMobile && (
-        <MobileSolveStrip
-          mySolves={mySolves}
-          current={myCurrent}
-          isRoundDone={isRoundDone}
-          roundLabel={room.roundName || getRoundName(room.round, room.maxRounds)}
-        />
-      )}
-
-      {/* Desktop: round header card + dot progress */}
-      {!isMobile && (
-        <div style={{
-          background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
-          padding: '0.6rem 0.85rem',
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.6rem',
-          flexWrap: 'wrap',
-        }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-            <div style={{ fontSize: '0.62rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: C.muted, fontWeight: 700 }}>
-              {room.roundName || getRoundName(room.round, room.maxRounds)}
-            </div>
-            <div style={{ fontSize: '0.78rem', color: C.text, fontWeight: 700 }}>
-              Solve {Math.min(myCurrent + 1, SOLVES_PER_ROUND)} of {SOLVES_PER_ROUND}
-            </div>
+      <div style={{
+        background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
+        padding: '0.6rem 0.85rem',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.6rem',
+        flexWrap: 'wrap',
+      }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+          <div style={{ fontSize: '0.62rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: C.muted, fontWeight: 700 }}>
+            {room.roundName || getRoundName(room.round, room.maxRounds)}
           </div>
-          <SolveProgressDots count={SOLVES_PER_ROUND} done={myCurrent} />
+          <div style={{ fontSize: '0.78rem', color: C.text, fontWeight: 700 }}>
+            Solve {Math.min(myCurrent + 1, SOLVES_PER_ROUND)} of {SOLVES_PER_ROUND}
+          </div>
         </div>
-      )}
+        <SolveProgressDots count={SOLVES_PER_ROUND} done={myCurrent} />
+      </div>
 
-      {/* Sync gate */}
       {isWaitingForOpponents && (
         <div style={{
           background: C.accentDim, border: `1px solid ${C.borderHi}`,
           borderRadius: 12, padding: '0.85rem 1rem', textAlign: 'center',
           color: C.accent, fontWeight: 700, fontSize: '0.92rem',
-        }}>
-          Waiting for opponents to catch up…
-        </div>
+        }}>Waiting for opponents to catch up…</div>
       )}
-
-      {/* Round done banner */}
       {isRoundDone && (
         <div style={{
           background: C.successDim, border: `1px solid ${C.success}`,
           borderRadius: 12, padding: '0.85rem 1rem', textAlign: 'center',
           color: C.success, fontWeight: 700, fontSize: '0.95rem',
-        }}>
-          You finished the round! Waiting for everyone else to finish…
-        </div>
+        }}>You finished the round! Waiting for everyone else to finish…</div>
       )}
 
-      {/* Scramble: hidden until tapped */}
       {!isRoundDone && !isWaitingForOpponents && (
         <div style={{
           background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
           padding: '0.7rem 0.9rem',
-          minHeight: 64,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          {scrambleShown ? (
-            <div style={{
-              fontFamily: 'JetBrains Mono, monospace',
-              fontSize: 'clamp(0.95rem, 2.4vw, 1.35rem)',
-              color: C.text, lineHeight: 1.5, letterSpacing: '0.04em',
-              whiteSpace: 'pre-wrap', wordBreak: 'break-word', textAlign: 'center',
-              width: '100%',
-            }}>
-              {currentScramble}
-            </div>
-          ) : (
-            <button
-              onClick={() => setScrambleShown(true)}
-              style={{
-                background: C.accentDim, color: C.accent,
-                border: `1px solid ${C.borderHi}`, borderRadius: 10,
-                padding: '0.6rem 1.1rem', fontSize: '0.92rem', fontWeight: 700,
-                fontFamily: 'inherit', cursor: 'pointer', letterSpacing: '0.02em',
-              }}
-            >Show Scramble</button>
-          )}
-        </div>
+          fontFamily: 'JetBrains Mono, monospace',
+          fontSize: 'clamp(0.95rem, 2.4vw, 1.35rem)',
+          color: C.text, lineHeight: 1.5, letterSpacing: '0.04em',
+          whiteSpace: 'pre-wrap', wordBreak: 'break-word', textAlign: 'center',
+        }}>{currentScramble}</div>
       )}
 
-      {/* Timer + opponents panel */}
       <div className="mp-race-grid" style={{
-        display: 'grid',
-        gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr',
-        gap: '0.85rem', minHeight: 0,
-        flex: '1 1 auto',
+        display: 'grid', gridTemplateColumns: '2fr 1fr',
+        gap: '0.85rem', minHeight: 0, flex: '1 1 auto',
       }}>
         <div
-          onTouchStart={(e) => { e.preventDefault(); onTimerTouchStart(); }}
-          onTouchEnd={(e) => { e.preventDefault(); onTimerTouchEnd(); }}
+          onTouchStart={(e) => {
+            if (interactionLocked) return;
+            e.preventDefault();
+            onTimerTouchStart();
+          }}
+          onTouchEnd={(e) => {
+            if (interactionLocked) return;
+            e.preventDefault();
+            onTimerTouchEnd();
+          }}
           style={{
             background: timer.state === 'armed' ? `${C.success}10` : C.card,
             border: `1px solid ${borderColor}`,
@@ -1594,15 +1683,12 @@ function RacingScreen({
             color: timerColor,
             textShadow: timer.state === 'armed' ? `0 0 30px ${C.success}55` : 'none',
             transition: 'color 0.12s',
-          }}>
-            {displayValue}
-          </div>
+          }}>{displayValue}</div>
           <div style={{ fontSize: '0.78rem', color: C.muted, marginTop: '0.85rem', letterSpacing: '0.04em', minHeight: '1.1rem' }}>
             {pending && 'Confirm your time'}
             {!pending && isRoundDone && 'Round complete'}
             {!pending && !isRoundDone && isWaitingForOpponents && 'Waiting for opponents…'}
-            {!pending && !isRoundDone && !isWaitingForOpponents && !scrambleShown && 'Show the scramble first'}
-            {!pending && !isRoundDone && !isWaitingForOpponents && scrambleShown && timer.state === 'idle' && 'Hold SPACE / press to arm'}
+            {!pending && !isRoundDone && !isWaitingForOpponents && timer.state === 'idle' && 'Hold SPACE / press to arm'}
             {!pending && timer.state === 'inspecting' && 'Hold to arm, release to start'}
             {!pending && timer.state === 'armed' && (<span style={{ color: C.success, fontWeight: 700 }}>RELEASE TO START</span>)}
             {!pending && timer.state === 'running' && 'Tap or press SPACE to stop'}
@@ -1620,117 +1706,269 @@ function RacingScreen({
             </div>
           )}
 
-          {/* Desktop only: in-timer S1..S5 strip (mobile shows it at top instead) */}
-          {!isMobile && (
-            <div style={{
-              marginTop: '1.5rem', display: 'flex', gap: '0.4rem',
-              flexWrap: 'wrap', justifyContent: 'center',
-            }}>
-              {Array.from({ length: SOLVES_PER_ROUND }, (_, i) => {
-                const s = mySolves[i];
-                const isCurrent = i === myCurrent && !isRoundDone;
-                return (
-                  <div key={i} style={{
-                    minWidth: 56, padding: '0.3rem 0.5rem',
-                    background: s ? C.cardAlt : 'transparent',
-                    border: `1px solid ${isCurrent ? C.accent : C.border}`,
-                    borderRadius: 8,
-                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.1rem',
-                  }}>
-                    <div style={{ fontSize: '0.55rem', letterSpacing: '0.12em', color: C.mutedDim, fontWeight: 700 }}>
-                      S{i + 1}
-                    </div>
-                    <div style={{
-                      fontFamily: 'JetBrains Mono, monospace', fontSize: '0.78rem', fontWeight: 700,
-                      fontVariantNumeric: 'tabular-nums',
-                      color: !s ? C.mutedDim : s.penalty === 'dnf' ? C.danger : C.text,
-                    }}>
-                      {!s ? '—' : s.penalty === 'dnf' ? 'DNF' : fmtMs(effectiveSolveMs(s), false, 2)}
-                    </div>
+          <div style={{
+            marginTop: '1.5rem', display: 'flex', gap: '0.4rem',
+            flexWrap: 'wrap', justifyContent: 'center',
+          }}>
+            {Array.from({ length: SOLVES_PER_ROUND }, (_, i) => {
+              const s = mySolves[i];
+              const isCurrent = i === myCurrent && !isRoundDone;
+              return (
+                <div key={i} style={{
+                  minWidth: 56, padding: '0.3rem 0.5rem',
+                  background: s ? C.cardAlt : 'transparent',
+                  border: `1px solid ${isCurrent ? C.accent : C.border}`,
+                  borderRadius: 8,
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.1rem',
+                }}>
+                  <div style={{ fontSize: '0.55rem', letterSpacing: '0.12em', color: C.mutedDim, fontWeight: 700 }}>
+                    S{i + 1}
                   </div>
-                );
-              })}
-            </div>
-          )}
+                  <div style={{
+                    fontFamily: 'JetBrains Mono, monospace', fontSize: '0.78rem', fontWeight: 700,
+                    fontVariantNumeric: 'tabular-nums',
+                    color: !s ? C.mutedDim : s.penalty === 'dnf' ? C.danger : C.text,
+                  }}>
+                    {!s ? '—' : s.penalty === 'dnf' ? 'DNF' : fmtMs(effectiveSolveMs(s), false, 2)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
-        {/* Opponents panel — collapsible on mobile */}
-        {(opponentsOpen || !isMobile) && (
-          <OpponentsPanel
-            room={room} userId={userId}
-            onClose={isMobile ? () => setOpponentsOpen(false) : undefined}
-          />
-        )}
-        {!opponentsOpen && isMobile && (
-          <button
-            onClick={() => setOpponentsOpen(true)}
-            style={{
-              background: C.cardAlt, color: C.text,
-              border: `1px solid ${C.border}`, borderRadius: 10,
-              padding: '0.6rem 0.85rem', fontSize: '0.85rem',
-              fontFamily: 'inherit', cursor: 'pointer', fontWeight: 700,
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem',
-            }}
-          >
-            <span aria-hidden>👥</span> {opponentCount} opponent{opponentCount === 1 ? '' : 's'}
-          </button>
-        )}
+        <OpponentsPanel room={room} userId={userId} />
       </div>
     </div>
   );
 }
 
-// Mobile compact strip — replaces the round-name + "Solve X of 5" header on
-// phones with a single row of S1..S5 (times / current marker / —) plus a
-// tiny round label below.
-function MobileSolveStrip({
-  mySolves, current, isRoundDone, roundLabel,
+// ── Mobile racing layout (header + tabs + bottom nav) ────────────────────
+function MobileRacingLayout({
+  room, userId, myCurrent, mySolves, isRoundDone, isWaitingForOpponents,
+  currentScramble, timer, pending, displayValue, timerColor, borderColor,
+  interactionLocked, confirmSolve, onTimerTouchStart, onTimerTouchEnd, onLeave,
 }: {
+  room: RoomData;
+  userId: string;
+  myCurrent: number;
   mySolves: SolveData[];
-  current: number;
   isRoundDone: boolean;
-  roundLabel: string;
+  isWaitingForOpponents: boolean;
+  currentScramble: string;
+  timer: ReturnType<typeof useMpTimer>;
+  pending: { ms: number; defaultDnf: boolean } | null;
+  displayValue: string;
+  timerColor: string;
+  borderColor: string;
+  interactionLocked: boolean;
+  confirmSolve: (p: Penalty) => void;
+  onTimerTouchStart: () => void;
+  onTimerTouchEnd: () => void;
+  onLeave: () => void;
 }) {
+  const [tab, setTab] = useState<'timer' | 'opponents'>('timer');
+  const roundLabel = room.roundName || getRoundName(room.round, room.maxRounds);
+
   return (
     <div style={{
-      background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
-      padding: '0.55rem 0.7rem',
-      display: 'flex', flexDirection: 'column', gap: '0.2rem',
+      flex: '1 1 auto', minHeight: 0, width: '100%',
+      display: 'flex', flexDirection: 'column',
+      background: C.bg,
     }}>
-      <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.3rem',
+      {/* Header: scramble centered + X leave (top-right) */}
+      <header style={{
+        position: 'relative',
+        padding: '0.55rem 2.4rem 0.55rem 0.7rem',
+        borderBottom: `1px solid ${C.border}`,
+        background: C.card,
+        minHeight: 44,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>
-        {Array.from({ length: SOLVES_PER_ROUND }, (_, i) => {
-          const s = mySolves[i];
-          const isCurrent = i === current && !isRoundDone;
-          const dnf = s?.penalty === 'dnf';
-          return (
+        <div style={{
+          fontFamily: 'JetBrains Mono, monospace',
+          fontSize: 'clamp(0.74rem, 3vw, 0.95rem)',
+          color: C.text, lineHeight: 1.35, letterSpacing: '0.03em',
+          textAlign: 'center', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+          maxWidth: '100%',
+        }}>
+          {isRoundDone ? '' : currentScramble}
+        </div>
+        <button
+          onClick={onLeave}
+          aria-label="Leave race"
+          title="Leave"
+          style={{
+            position: 'absolute', top: 6, right: 6,
+            width: 32, height: 32, borderRadius: 8,
+            background: 'transparent', color: C.muted,
+            border: `1px solid ${C.border}`,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', fontFamily: 'inherit',
+          }}
+        ><CloseIcon /></button>
+      </header>
+
+      {/* Tab content (Timer | Opponents) */}
+      <div style={{ flex: '1 1 auto', minHeight: 0, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+        {tab === 'timer' ? (
+          <div style={{
+            flex: '1 1 auto', display: 'flex', flexDirection: 'column',
+            gap: '0.7rem', padding: '0.7rem',
+          }}>
+            {isWaitingForOpponents && (
+              <div style={{
+                background: C.accentDim, border: `1px solid ${C.borderHi}`,
+                borderRadius: 12, padding: '0.7rem 0.9rem', textAlign: 'center',
+                color: C.accent, fontWeight: 700, fontSize: '0.88rem',
+              }}>Waiting for opponents to catch up…</div>
+            )}
+            {isRoundDone && (
+              <div style={{
+                background: C.successDim, border: `1px solid ${C.success}`,
+                borderRadius: 12, padding: '0.7rem 0.9rem', textAlign: 'center',
+                color: C.success, fontWeight: 700, fontSize: '0.92rem',
+              }}>Round complete — waiting for the others…</div>
+            )}
+
+            {/* Big timer */}
             <div
-              key={i}
-              className={isCurrent ? 'mp-solve-current' : undefined}
+              onTouchStart={(e) => {
+                if (interactionLocked) return;
+                e.preventDefault();
+                onTimerTouchStart();
+              }}
+              onTouchEnd={(e) => {
+                if (interactionLocked) return;
+                e.preventDefault();
+                onTimerTouchEnd();
+              }}
               style={{
-                fontFamily: 'JetBrains Mono, monospace',
-                fontSize: '0.92rem', fontWeight: 700,
-                fontVariantNumeric: 'tabular-nums',
-                textAlign: 'center',
-                padding: '0.25rem 0.1rem',
-                color: isCurrent ? C.accent
-                  : !s ? C.mutedDim
-                  : dnf ? C.danger : C.text,
-                letterSpacing: dnf ? '0.04em' : '0',
+                background: timer.state === 'armed' ? `${C.success}10` : C.card,
+                border: `1px solid ${borderColor}`,
+                borderRadius: 16, padding: '1.2rem 0.9rem',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                userSelect: 'none', cursor: interactionLocked ? 'default' : 'pointer',
+                textAlign: 'center', touchAction: 'manipulation',
+                transition: 'border-color 0.12s, background 0.12s',
+                minHeight: 200,
               }}
             >
-              {isCurrent && !s ? '●' : !s ? '—' : dnf ? 'DNF' : fmtMs(effectiveSolveMs(s), false, 2)}
+              {timer.state === 'inspecting' && (
+                <div style={{ fontSize: '0.62rem', letterSpacing: '0.15em', textTransform: 'uppercase', color: C.warn, marginBottom: '0.4rem', fontWeight: 700 }}>
+                  Inspection
+                </div>
+              )}
+              <div style={{
+                fontFamily: 'JetBrains Mono, monospace',
+                fontSize: 'clamp(3.4rem, 18vw, 6rem)',
+                fontWeight: 800, lineHeight: 0.95,
+                fontVariantNumeric: 'tabular-nums',
+                color: timerColor,
+                textShadow: timer.state === 'armed' ? `0 0 30px ${C.success}55` : 'none',
+                transition: 'color 0.12s',
+              }}>{displayValue}</div>
+              <div style={{ fontSize: '0.72rem', color: C.muted, marginTop: '0.7rem', letterSpacing: '0.04em', minHeight: '1.1rem' }}>
+                {pending && 'Confirm your time'}
+                {!pending && isRoundDone && 'Round complete'}
+                {!pending && !isRoundDone && isWaitingForOpponents && 'Waiting for opponents…'}
+                {!pending && !isRoundDone && !isWaitingForOpponents && timer.state === 'idle' && 'Hold to arm, release to start'}
+                {!pending && timer.state === 'inspecting' && 'Hold to arm, release to start'}
+                {!pending && timer.state === 'armed' && (<span style={{ color: C.success, fontWeight: 700 }}>RELEASE TO START</span>)}
+                {!pending && timer.state === 'running' && 'Tap to stop'}
+              </div>
+
+              {pending && (
+                <div
+                  onTouchStart={(e) => e.stopPropagation()}
+                  onTouchEnd={(e) => e.stopPropagation()}
+                  style={{
+                    marginTop: '1rem',
+                    display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem',
+                    width: '100%', maxWidth: 320,
+                    position: 'relative', zIndex: 2,
+                  }}
+                >
+                  <ConfirmButton color={C.success} onClick={(e) => { e.stopPropagation(); console.log('[mp] OK clicked'); confirmSolve('ok'); }}>OK</ConfirmButton>
+                  <ConfirmButton color={C.warn}    onClick={(e) => { e.stopPropagation(); console.log('[mp] +2 clicked'); confirmSolve('+2'); }}>+2</ConfirmButton>
+                  <ConfirmButton color={C.danger}  onClick={(e) => { e.stopPropagation(); console.log('[mp] DNF clicked'); confirmSolve('dnf'); }}>DNF</ConfirmButton>
+                </div>
+              )}
             </div>
-          );
-        })}
+
+            {/* Cube viz */}
+            {!isRoundDone && (
+              <div style={{
+                background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
+                padding: '0.4rem',
+                height: 130,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <CubeViewer eventId={room.event} scramble={currentScramble} />
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{ padding: '0.7rem' }}>
+            <OpponentsPanel room={room} userId={userId} />
+          </div>
+        )}
       </div>
+
+      {/* Solve strip + tiny round label, fixed above tabs */}
       <div style={{
-        fontSize: '0.6rem', letterSpacing: '0.12em', textTransform: 'uppercase',
-        color: C.mutedDim, fontWeight: 700, textAlign: 'center',
+        background: C.card, borderTop: `1px solid ${C.border}`,
+        padding: '0.45rem 0.7rem',
+        display: 'flex', flexDirection: 'column', gap: '0.15rem',
+        flexShrink: 0,
       }}>
-        {roundLabel} · Ao5
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.25rem',
+        }}>
+          {Array.from({ length: SOLVES_PER_ROUND }, (_, i) => {
+            const s = mySolves[i];
+            const isCurrent = i === myCurrent && !isRoundDone;
+            const dnf = s?.penalty === 'dnf';
+            return (
+              <div
+                key={i}
+                className={isCurrent ? 'mp-solve-current' : undefined}
+                style={{
+                  fontFamily: 'JetBrains Mono, monospace',
+                  fontSize: '0.86rem', fontWeight: 700,
+                  fontVariantNumeric: 'tabular-nums',
+                  textAlign: 'center',
+                  padding: '0.2rem 0.1rem',
+                  color: isCurrent ? C.accent
+                    : !s ? C.mutedDim
+                    : dnf ? C.danger : C.text,
+                  letterSpacing: dnf ? '0.04em' : '0',
+                }}
+              >
+                {isCurrent && !s ? '●' : !s ? '—' : dnf ? 'DNF' : fmtMs(effectiveSolveMs(s), false, 2)}
+              </div>
+            );
+          })}
+        </div>
+        <div style={{
+          fontSize: '0.58rem', letterSpacing: '0.12em', textTransform: 'uppercase',
+          color: C.mutedDim, fontWeight: 700, textAlign: 'center',
+        }}>
+          {roundLabel} · Ao5
+        </div>
       </div>
+
+      {/* Bottom 2-tab nav */}
+      <nav style={{
+        display: 'grid', gridTemplateColumns: '1fr 1fr',
+        background: C.card, borderTop: `1px solid ${C.border}`,
+        paddingBottom: 'env(safe-area-inset-bottom)',
+        flexShrink: 0,
+      }}>
+        <RaceTabButton active={tab === 'timer'} onClick={() => setTab('timer')} icon={<StopwatchIcon />} label="Timer" />
+        <RaceTabButton active={tab === 'opponents'} onClick={() => setTab('opponents')} icon={<UsersIcon />} label="Opponents" />
+      </nav>
+
       <style>{`
         @keyframes mp-pulse {
           0%, 100% { opacity: 1; transform: scale(1); }
@@ -1739,6 +1977,64 @@ function MobileSolveStrip({
         .mp-solve-current { animation: mp-pulse 1.1s ease-in-out infinite; }
       `}</style>
     </div>
+  );
+}
+
+// ── Tiny icons + tab button used by the mobile racing screen ─────────────
+function CloseIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  );
+}
+
+function StopwatchIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="10" y1="2" x2="14" y2="2" />
+      <circle cx="12" cy="14" r="8" />
+      <line x1="12" y1="10" x2="12" y2="14" />
+      <line x1="12" y1="14" x2="15" y2="16" />
+    </svg>
+  );
+}
+
+function UsersIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  );
+}
+
+function RaceTabButton({
+  active, onClick, icon, label,
+}: {
+  active: boolean; onClick: () => void; icon: React.ReactNode; label: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        background: 'transparent', border: 'none',
+        color: active ? C.accent : C.muted,
+        fontFamily: 'inherit', fontSize: '0.74rem', fontWeight: 700,
+        letterSpacing: '0.04em',
+        padding: '0.55rem 0.4rem 0.65rem',
+        display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '0.18rem',
+        cursor: 'pointer',
+        borderTop: `2px solid ${active ? C.accent : 'transparent'}`,
+        transition: 'color 0.12s, border-color 0.12s',
+      }}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
 
