@@ -956,8 +956,11 @@ function RacingScreen({
       </div>
 
       <style>{`
-        @media (min-width: 1025px) {
+        @media (min-width: 901px) {
           .mp-race-grid { grid-template-columns: 2fr 1fr !important; }
+        }
+        @media (max-width: 1024px) and (orientation: portrait) {
+          .mp-race-grid { grid-template-columns: 1fr !important; }
         }
       `}</style>
     </div>
