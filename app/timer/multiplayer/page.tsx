@@ -450,6 +450,66 @@ export default function MultiplayerPage() {
       fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
       display: 'flex', flexDirection: 'column',
     }}>
+      <style>{`
+        @media (max-width: 900px) {
+          /* Lobby */
+          .mp-lobby-buttons {
+            flex-direction: column !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            padding: 0 1rem !important;
+          }
+          .mp-lobby-buttons button {
+            width: 100% !important;
+          }
+
+          /* Forms (Create / Join) */
+          .mp-form-shell {
+            max-width: 100% !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 1.5rem 1rem !important;
+            border-radius: 12px !important;
+          }
+
+          /* Waiting room / shared room shell */
+          .mp-room-container {
+            max-width: 100% !important;
+            padding: 1rem !important;
+          }
+
+          /* Action button rows (Ready/Start, Next/Leave) */
+          .mp-action-grid {
+            grid-template-columns: 1fr !important;
+            flex-direction: column !important;
+            width: 100% !important;
+          }
+          .mp-action-grid button {
+            width: 100% !important;
+          }
+
+          /* Results / leaderboard */
+          .mp-results-container,
+          .mp-leaderboard {
+            max-width: 100% !important;
+            padding: 0.5rem !important;
+          }
+
+          /* Room code display on waiting screen */
+          .mp-room-code {
+            font-size: clamp(2rem, 8vw, 4rem) !important;
+          }
+
+          /* Catch-all: any remaining inline maxWidth caps go full-width */
+          [style*="max-width: 380"],
+          [style*="max-width: 420"],
+          [style*="max-width: 720"] {
+            max-width: 100% !important;
+            width: 100% !important;
+          }
+        }
+      `}</style>
+
       <TopBar
         roomCode={view === 'room' ? roomCode : ''}
         onBack={() => {
@@ -991,7 +1051,7 @@ function ResultsScreen({
   const isFinalRound = room.round >= room.maxRounds;
 
   return (
-    <div className="mp-room-container" style={{ width: '100%', maxWidth: 720, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+    <div className="mp-room-container mp-results-container" style={{ width: '100%', maxWidth: 720, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
       <Card>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.7rem' }}>
           <SectionLabel>Round {room.round} results</SectionLabel>
@@ -1099,7 +1159,7 @@ function Leaderboard({
   }, [room.members]);
 
   return (
-    <div style={{
+    <div className="mp-leaderboard" style={{
       background: C.card, border: `1px solid ${C.border}`,
       borderRadius: 14, padding: '0.7rem',
       display: 'flex', flexDirection: 'column', gap: '0.35rem',
@@ -1340,7 +1400,7 @@ function RoomCodeCard({ code }: { code: string }) {
       <div style={{ fontSize: '0.66rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: C.muted, fontWeight: 700 }}>
         Room code
       </div>
-      <div style={{
+      <div className="mp-room-code" style={{
         fontFamily: 'JetBrains Mono, monospace',
         fontSize: 'clamp(2.2rem, 8vw, 3.2rem)', fontWeight: 800,
         letterSpacing: '0.25em', color: C.accent,
