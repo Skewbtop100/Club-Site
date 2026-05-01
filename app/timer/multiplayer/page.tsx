@@ -465,6 +465,21 @@ function MultiplayerPageInner() {
     return () => window.removeEventListener('resize', check);
   }, []);
 
+  // While racing, lock both <html> and <body> overflow so iOS Safari can't
+  // rubber-band the document under our 100dvh wrapper.
+  useEffect(() => {
+    const racing = view === 'room' && room?.status === 'racing';
+    if (!racing) return;
+    const prevBody = document.body.style.overflow;
+    const prevHtml = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevBody;
+      document.documentElement.style.overflow = prevHtml;
+    };
+  }, [view, room?.status]);
+
   // Initial mount: pull user id + saved name
   useEffect(() => {
     const uid = getUserId();
@@ -1942,7 +1957,7 @@ function MobileRacingLayout({
       {/* Header: ⚙ left, ⏸ right. Subtle, low-contrast — doesn't distract. */}
       <header style={{
         flexShrink: 0,
-        padding: '0.45rem 0.6rem',
+        padding: '0.3rem 0.55rem',
         background: C.card,
         borderBottom: `1px solid ${C.border}`,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -1964,7 +1979,7 @@ function MobileRacingLayout({
             flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column',
           }}>
             {/* Scramble (compact, top, muted via ScrambleArea styling) */}
-            <div style={{ flexShrink: 0, padding: '0.55rem 0.7rem 0' }}>
+            <div style={{ flexShrink: 0, padding: '0.4rem 0.55rem 0' }}>
               {(isRoundDone || isWaitingForOpponents) ? (
                 <div style={{
                   background: isRoundDone ? C.successDim : C.accentDim,
@@ -1998,15 +2013,16 @@ function MobileRacingLayout({
                 onTimerTouchEnd();
               }}
               style={{
-                flex: '1 1 auto', minHeight: 0,
-                margin: '0.55rem 0.7rem',
+                flex: '1 1 0%', minHeight: 0,
+                margin: '0.4rem 0.55rem',
                 background: timer.state === 'armed' ? `${C.success}10` : 'transparent',
                 border: `1px solid ${borderColor}`,
-                borderRadius: 16, padding: '0.5rem',
+                borderRadius: 14, padding: '0.4rem',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                 userSelect: 'none', cursor: interactionLocked ? 'default' : 'pointer',
                 textAlign: 'center', touchAction: 'manipulation',
                 transition: 'border-color 0.12s, background 0.12s',
+                overflow: 'hidden',
               }}
             >
               {timer.state === 'inspecting' && (
@@ -2017,7 +2033,9 @@ function MobileRacingLayout({
               )}
               <div style={{
                 fontFamily: 'JetBrains Mono, monospace',
-                fontSize: 'clamp(5rem, 20vw, 12rem)',
+                // Floor dropped from 5rem → 3rem so small phones can shrink the
+                // text instead of pushing the layout past the viewport.
+                fontSize: 'clamp(3rem, 16vw, 9rem)',
                 fontWeight: 800, lineHeight: 0.95,
                 fontVariantNumeric: 'tabular-nums',
                 color: timerColor,
@@ -2025,8 +2043,8 @@ function MobileRacingLayout({
                 transition: 'color 0.12s',
               }}>{displayValue}</div>
               <div style={{
-                fontSize: '0.74rem', color: C.muted,
-                marginTop: '0.7rem', letterSpacing: '0.04em', minHeight: '1.1rem',
+                fontSize: '0.7rem', color: C.muted,
+                marginTop: '0.35rem', letterSpacing: '0.04em', minHeight: '0.9rem',
               }}>
                 {pending && 'Confirm your time'}
                 {!pending && isRoundDone && 'Round complete'}
@@ -2063,8 +2081,9 @@ function MobileRacingLayout({
         )}
       </div>
 
-      {/* S1..S5 + cube viz row, persistent above the tab bar. */}
-      <div style={{ padding: '0.45rem 0.7rem 0.5rem', flexShrink: 0 }}>
+      {/* S1..S5 + cube viz row, persistent above the tab bar. No bottom
+          padding — flush against the nav so there's no empty band. */}
+      <div style={{ padding: '0.35rem 0.55rem 0', flexShrink: 0 }}>
         <SolveAndCubeRow
           isMobile={true}
           mySolves={mySolves}
@@ -2193,10 +2212,10 @@ function RaceTabButton({
       style={{
         background: 'transparent', border: 'none',
         color: active ? C.accent : C.muted,
-        fontFamily: 'inherit', fontSize: '0.74rem', fontWeight: 700,
+        fontFamily: 'inherit', fontSize: '0.7rem', fontWeight: 700,
         letterSpacing: '0.04em',
-        padding: '0.55rem 0.4rem 0.65rem',
-        display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '0.18rem',
+        padding: '0.4rem 0.4rem 0.45rem',
+        display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '0.15rem',
         cursor: 'pointer',
         borderTop: `2px solid ${active ? C.accent : 'transparent'}`,
         transition: 'color 0.12s, border-color 0.12s',
@@ -2232,15 +2251,17 @@ function ScrambleArea({
   return (
     <div style={{
       background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
-      padding: isMobile ? '0.55rem 0.7rem' : '0.7rem 0.9rem',
-      minHeight: isMobile ? 50 : 64,
+      padding: isMobile ? '0.4rem 0.55rem' : '0.7rem 0.9rem',
+      minHeight: isMobile ? 38 : 64,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
     }}>
       {shown ? (
         <div style={{
           fontFamily: 'JetBrains Mono, monospace',
           fontSize,
-          color: C.muted, lineHeight: 1.5, letterSpacing: '0.04em',
+          color: C.muted,
+          lineHeight: isMobile ? 1.35 : 1.5,
+          letterSpacing: '0.04em',
           whiteSpace: 'pre-wrap', wordBreak: 'break-word', textAlign: 'center',
           width: '100%',
         }}>{scramble}</div>
@@ -2251,8 +2272,8 @@ function ScrambleArea({
           style={{
             background: C.accentDim, color: C.accent,
             border: `1px solid ${C.borderHi}`, borderRadius: 10,
-            padding: isMobile ? '0.5rem 0.95rem' : '0.6rem 1.2rem',
-            fontSize: isMobile ? '0.84rem' : '0.92rem',
+            padding: isMobile ? '0.35rem 0.85rem' : '0.6rem 1.2rem',
+            fontSize: isMobile ? '0.8rem' : '0.92rem',
             fontWeight: 700, fontFamily: 'inherit',
             cursor: 'pointer', letterSpacing: '0.02em',
           }}
@@ -2277,22 +2298,24 @@ function SolveAndCubeRow({
   scrambleShown: boolean;
   roundLabel?: string;
 }) {
-  const cubeSize = isMobile ? 120 : 160;
+  // Mobile cube shrunk 120 → 92px; the row was the single biggest fixed block
+  // in the mobile layout. Desktop keeps its original size.
+  const cubeSize = isMobile ? 92 : 160;
   return (
     <div style={{
       background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
-      padding: isMobile ? '0.55rem 0.65rem' : '0.75rem 0.9rem',
-      display: 'flex', flexDirection: 'column', gap: '0.4rem',
+      padding: isMobile ? '0.4rem 0.5rem' : '0.75rem 0.9rem',
+      display: 'flex', flexDirection: 'column', gap: isMobile ? '0.25rem' : '0.4rem',
     }}>
       <div style={{
         display: 'grid',
         gridTemplateColumns: `minmax(0, 1fr) ${cubeSize}px`,
-        gap: isMobile ? '0.5rem' : '0.85rem',
+        gap: isMobile ? '0.4rem' : '0.85rem',
         alignItems: 'center',
       }}>
         <div style={{
           display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
-          gap: isMobile ? '0.3rem' : '0.45rem',
+          gap: isMobile ? '0.25rem' : '0.45rem',
           minWidth: 0,
         }}>
           {Array.from({ length: SOLVES_PER_ROUND }, (_, i) => {
@@ -2305,10 +2328,10 @@ function SolveAndCubeRow({
                 className={isCurrent ? 'mp-solve-current' : undefined}
                 style={{
                   fontFamily: 'JetBrains Mono, monospace',
-                  fontSize: isMobile ? '0.78rem' : '0.92rem', fontWeight: 700,
+                  fontSize: isMobile ? '0.74rem' : '0.92rem', fontWeight: 700,
                   fontVariantNumeric: 'tabular-nums',
                   textAlign: 'center',
-                  padding: isMobile ? '0.4rem 0.2rem' : '0.55rem 0.3rem',
+                  padding: isMobile ? '0.3rem 0.15rem' : '0.55rem 0.3rem',
                   background: s ? C.cardAlt : 'transparent',
                   border: `1px solid ${isCurrent ? C.accent : C.border}`,
                   borderRadius: 999,
@@ -2316,7 +2339,7 @@ function SolveAndCubeRow({
                     : !s ? C.mutedDim
                     : dnf ? C.danger : C.text,
                   letterSpacing: dnf ? '0.04em' : '0',
-                  minHeight: isMobile ? 36 : 44,
+                  minHeight: isMobile ? 28 : 44,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   overflow: 'hidden',
                 }}
@@ -2329,7 +2352,7 @@ function SolveAndCubeRow({
         <div style={{
           width: cubeSize, height: cubeSize,
           background: C.cardAlt, border: `1px solid ${C.border}`, borderRadius: 10,
-          padding: 4,
+          padding: isMobile ? 2 : 4,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           flexShrink: 0,
           overflow: 'hidden',
@@ -2338,7 +2361,7 @@ function SolveAndCubeRow({
             <CubeViewer eventId={eventId} scramble={scramble} />
           ) : (
             <div style={{
-              fontSize: '0.6rem', letterSpacing: '0.12em', textTransform: 'uppercase',
+              fontSize: '0.58rem', letterSpacing: '0.12em', textTransform: 'uppercase',
               color: C.mutedDim, fontWeight: 700, textAlign: 'center',
             }}>{isRoundDone ? '—' : 'Hidden'}</div>
           )}
@@ -2346,7 +2369,7 @@ function SolveAndCubeRow({
       </div>
       {roundLabel && (
         <div style={{
-          fontSize: '0.58rem', letterSpacing: '0.12em', textTransform: 'uppercase',
+          fontSize: isMobile ? '0.55rem' : '0.6rem', letterSpacing: '0.12em', textTransform: 'uppercase',
           color: C.mutedDim, fontWeight: 700, textAlign: 'center',
         }}>
           {roundLabel} · Ao5
