@@ -450,49 +450,6 @@ export default function MultiplayerPage() {
       fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
       display: 'flex', flexDirection: 'column',
     }}>
-      <style>{`
-        /* Tablet / iPad (768px – 1023px) */
-        @media (min-width: 768px) and (max-width: 1023px) {
-          .mp-lobby-buttons {
-            max-width: 500px !important;
-          }
-          .mp-lobby-buttons button {
-            padding: 1.05rem 1.25rem !important;
-            font-size: 1.15rem !important;
-          }
-          .mp-form-shell {
-            max-width: 480px !important;
-          }
-          .mp-form-shell input,
-          .mp-form-shell select {
-            padding: 0.8rem 0.85rem !important;
-            font-size: 1rem !important;
-          }
-          .mp-room-container {
-            max-width: 600px !important;
-          }
-          .mp-room-container input,
-          .mp-room-container select {
-            padding: 0.75rem 0.8rem !important;
-            font-size: 0.98rem !important;
-          }
-          .mp-action-grid {
-            grid-template-columns: 1fr !important;
-          }
-          .mp-action-grid button {
-            padding: 1rem 1.25rem !important;
-            font-size: 1.05rem !important;
-          }
-          .mp-race-container {
-            max-width: 600px !important;
-          }
-          .mp-race-scramble {
-            font-size: 1.1rem !important;
-            padding: 0.9rem 1rem !important;
-          }
-        }
-      `}</style>
-
       <TopBar
         roomCode={view === 'room' ? roomCode : ''}
         onBack={() => {
@@ -999,7 +956,7 @@ function RacingScreen({
       </div>
 
       <style>{`
-        @media (min-width: 1024px) {
+        @media (min-width: 1025px) {
           .mp-race-grid { grid-template-columns: 2fr 1fr !important; }
         }
       `}</style>
