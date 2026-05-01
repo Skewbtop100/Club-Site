@@ -7,6 +7,9 @@ import { Scrambow } from 'scrambow';
 // access during Next.js server rendering.
 import type { TwistyPlayer as TwistyPlayerType } from 'cubing/twisty';
 import { useGanTimer } from './useGanTimer';
+import { useQiyiTimer } from './useQiyiTimer';
+
+type TimerBrand = 'gan' | 'qiyi';
 
 // ── Theme constants (lavender + mint, matches the screenshot) ───────────────
 const C = {
@@ -344,6 +347,7 @@ export default function TimerPage() {
   const [precision, setPrecision] = useState<Precision>('cs');
   const [holdToStart, setHoldToStart] = useState(true); // long-press arming
   const [scrambleFontSize, setScrambleFontSize] = useState<'sm' | 'md' | 'lg'>('md');
+  const [timerBrand, setTimerBrand] = useState<TimerBrand>('gan');
   // Default false to match SSR; updated after mount via matchMedia. Brief flash
   // possible on mobile pageload but no hydration mismatch.
   const [isMobile, setIsMobile] = useState(false);
@@ -513,6 +517,7 @@ export default function TimerPage() {
           precision?: Precision;
           holdToStart?: boolean;
           scrambleFontSize?: 'sm' | 'md' | 'lg';
+          timerBrand?: TimerBrand;
         };
         if (typeof parsed.inspectionEnabled === 'boolean') setInspectionEnabled(parsed.inspectionEnabled);
         if (parsed.precision === 'cs' || parsed.precision === 'ms') {
@@ -525,6 +530,9 @@ export default function TimerPage() {
         if (parsed.scrambleFontSize === 'sm' || parsed.scrambleFontSize === 'md' || parsed.scrambleFontSize === 'lg') {
           setScrambleFontSize(parsed.scrambleFontSize);
         }
+        if (parsed.timerBrand === 'gan' || parsed.timerBrand === 'qiyi') {
+          setTimerBrand(parsed.timerBrand);
+        }
       }
     } catch { /* ignore */ }
     prefsLoadedRef.current = true;
@@ -534,9 +542,9 @@ export default function TimerPage() {
   useEffect(() => {
     if (!prefsLoadedRef.current) return;
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify({ inspectionEnabled, precision, holdToStart, scrambleFontSize }));
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ inspectionEnabled, precision, holdToStart, scrambleFontSize, timerBrand }));
     } catch { /* ignore */ }
-  }, [inspectionEnabled, precision, holdToStart, scrambleFontSize]);
+  }, [inspectionEnabled, precision, holdToStart, scrambleFontSize, timerBrand]);
 
   // Stats — recomputed on every solves change
   const stats = useMemo(() => calcStats(solves), [solves]);
@@ -561,12 +569,10 @@ export default function TimerPage() {
 
   const timer = useTimer(onSolveCommit);
 
-  // ── GAN bluetooth timer ─────────────────────────────────────────────────
-  // When connected, the physical timer drives our state machine and SPACE /
-  // tap input is locked out so the device is the single source of truth.
-  // The display while running is driven by an explicit 10ms interval keyed
-  // off the HANDS_OFF timestamp — bypassing the timer hook's rAF loop so
-  // the on-screen counter is guaranteed to tick.
+  // ── Bluetooth timer (GAN + QiYi) ────────────────────────────────────────
+  // Both brands feed the same set of callbacks, so the rest of the page
+  // doesn't care which protocol is driving the solve. The active brand is
+  // selected in Settings; only one connection is live at a time.
   const ganTimerRef = useRef(timer);
   ganTimerRef.current = timer;
   const [ganDisplayMs, setGanDisplayMs] = useState(0);
@@ -581,35 +587,54 @@ export default function TimerPage() {
     ganStartTimeRef.current = null;
   }, []);
 
-  const gan = useGanTimer({
-    onSolveStart: () => {
-      // HANDS_OFF — physical timer started counting. Drive our display
-      // via a 10ms interval so the web counter ticks live with the device.
-      ganStartTimeRef.current = Date.now();
-      setGanDisplayMs(0);
-      if (ganIntervalRef.current != null) {
-        window.clearInterval(ganIntervalRef.current);
-      }
-      ganIntervalRef.current = window.setInterval(() => {
-        const start = ganStartTimeRef.current;
-        if (start != null) setGanDisplayMs(Date.now() - start);
-      }, 10);
-      ganTimerRef.current.startRunning();
-    },
-    onSolveStop: (finalMs: number) => {
-      // STOPPED — clear the interval and snap to the device's authoritative time.
-      stopGanInterval();
-      setGanDisplayMs(finalMs);
-      ganTimerRef.current.finishExternal(finalMs);
-    },
-    onIdle: () => {
-      // RESET — drop display to zero and return to idle.
-      stopGanInterval();
-      setGanDisplayMs(0);
-      ganTimerRef.current.reset();
-    },
+  const handleBtSolveStart = useCallback(() => {
+    ganStartTimeRef.current = Date.now();
+    setGanDisplayMs(0);
+    if (ganIntervalRef.current != null) {
+      window.clearInterval(ganIntervalRef.current);
+    }
+    ganIntervalRef.current = window.setInterval(() => {
+      const start = ganStartTimeRef.current;
+      if (start != null) setGanDisplayMs(Date.now() - start);
+    }, 10);
+    ganTimerRef.current.startRunning();
+  }, []);
+  const handleBtSolveStop = useCallback((finalMs: number) => {
+    stopGanInterval();
+    setGanDisplayMs(finalMs);
+    ganTimerRef.current.finishExternal(finalMs);
+  }, [stopGanInterval]);
+  const handleBtIdle = useCallback(() => {
+    stopGanInterval();
+    setGanDisplayMs(0);
+    ganTimerRef.current.reset();
+  }, [stopGanInterval]);
+
+  const ganHook = useGanTimer({
+    onSolveStart: handleBtSolveStart,
+    onSolveStop: handleBtSolveStop,
+    onIdle: handleBtIdle,
   });
+  const qiyiHook = useQiyiTimer({
+    onSolveStart: handleBtSolveStart,
+    onSolveStop: handleBtSolveStop,
+    onIdle: handleBtIdle,
+  });
+
+  // The "active" hook is whichever the user selected. Downstream code uses
+  // `gan` as the unified surface (state / connect / disconnect / liveState
+  // / deviceName), regardless of brand.
+  const gan = timerBrand === 'qiyi' ? qiyiHook : ganHook;
   const ganConnected = gan.state === 'connected';
+
+  // When the user switches brand, drop any lingering connection on the now-
+  // inactive hook so we never have two BT timers active at once.
+  useEffect(() => {
+    if (timerBrand === 'qiyi' && ganHook.state === 'connected') ganHook.disconnect();
+    if (timerBrand === 'gan'  && qiyiHook.state === 'connected') qiyiHook.disconnect();
+    // Disconnect functions are stable; depending only on the brand is fine.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timerBrand]);
 
   // Safety net: clear the interval on unmount or if the connection drops.
   useEffect(() => {
@@ -2280,6 +2305,8 @@ export default function TimerPage() {
           precision={precision} setPrecision={setPrecision}
           // Bluetooth
           gan={gan}
+          timerBrand={timerBrand}
+          setTimerBrand={setTimerBrand}
           // Display
           scrambleFontSize={scrambleFontSize} setScrambleFontSize={setScrambleFontSize}
         />
@@ -2676,6 +2703,8 @@ interface SettingsPanelProps {
   setPrecision: (p: Precision) => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   gan: any;
+  timerBrand: TimerBrand;
+  setTimerBrand: (b: TimerBrand) => void;
   scrambleFontSize: 'sm' | 'md' | 'lg';
   setScrambleFontSize: (s: 'sm' | 'md' | 'lg') => void;
 }
@@ -2718,12 +2747,32 @@ function SettingsPanel(props: SettingsPanelProps) {
   );
 
   const renderBluetooth = () => {
-    const { gan } = props;
+    const { gan, timerBrand, setTimerBrand } = props;
     const connected = gan.state === 'connected';
     const connecting = gan.state === 'connecting';
     const unsupported = gan.state === 'unsupported';
+    const brandLabel = timerBrand === 'qiyi' ? 'QiYi' : 'GAN';
+    const brandHint = timerBrand === 'qiyi'
+      ? 'Compatible with QiYi Smart Timer (QY-Timer). The device must be powered on and within range. Pairing uses Web Bluetooth — no QiYi app needed.'
+      : 'Compatible with the GAN Halo Smart Timer over Bluetooth. The physical pads control inspection and the timer while connected.';
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+        <SegmentedRow
+          label="Timer brand"
+          value={timerBrand}
+          onChange={(b: TimerBrand) => {
+            // Switching brand mid-connection drops the active connection
+            // (handled by the page's effect). Don't allow during connecting.
+            if (connecting) return;
+            setTimerBrand(b);
+          }}
+          options={[
+            { value: 'gan',  label: 'GAN',  title: 'GAN Halo Smart Timer' },
+            { value: 'qiyi', label: 'QiYi', title: 'QiYi Smart Timer (QY-Timer)' },
+          ]}
+          c={c}
+        />
+
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           gap: '0.75rem', padding: '0.75rem', borderRadius: 10,
@@ -2736,7 +2785,7 @@ function SettingsPanel(props: SettingsPanelProps) {
                 background: connected ? c.success : c.mutedDim,
                 flexShrink: 0,
               }} />
-              {connected ? 'Connected' : connecting ? 'Connecting…' : unsupported ? 'Not supported' : 'Disconnected'}
+              {connected ? `Connected (${brandLabel})` : connecting ? 'Connecting…' : unsupported ? 'Not supported' : `Disconnected — ${brandLabel}`}
             </span>
             {connected && gan.deviceName && (
               <span style={{ fontSize: '0.74rem', color: c.muted, fontFamily: '"JetBrains Mono", monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -2745,7 +2794,7 @@ function SettingsPanel(props: SettingsPanelProps) {
             )}
             {!connected && !connecting && !unsupported && (
               <span style={{ fontSize: '0.74rem', color: c.muted }}>
-                Pair your GAN Halo Smart Timer to record solves automatically.
+                Tap Connect to pair your {brandLabel} timer.
               </span>
             )}
           </div>
@@ -2771,15 +2820,21 @@ function SettingsPanel(props: SettingsPanelProps) {
             {connected ? 'Disconnect' : connecting ? 'Connecting…' : 'Connect'}
           </button>
         </div>
+
         {unsupported ? (
           <div style={{ fontSize: '0.78rem', color: c.mutedDim, lineHeight: 1.55 }}>
             Web Bluetooth is required. Use Chrome or Edge over HTTPS or localhost.
           </div>
         ) : (
           <div style={{ fontSize: '0.78rem', color: c.muted, lineHeight: 1.55 }}>
-            Compatible with the GAN Halo Smart Timer over Bluetooth. While
-            connected, the physical pads control inspection and the timer —
-            keyboard / tap input is paused so the device is the source of truth.
+            {brandHint}
+          </div>
+        )}
+        {timerBrand === 'qiyi' && !unsupported && (
+          <div style={{ fontSize: '0.7rem', color: c.mutedDim, lineHeight: 1.55 }}>
+            QiYi support uses a community-reverse-engineered protocol. If your
+            specific firmware revision rejects the handshake, please report
+            which device model you tested.
           </div>
         )}
       </div>

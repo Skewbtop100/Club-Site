@@ -9,6 +9,8 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@types/aes-js": "^3.1.4",
+    "aes-js": "^3.1.2",
     "cubing": "^0.63.3",
     "embla-carousel-autoplay": "^8.6.0",
     "embla-carousel-react": "^8.6.0",
