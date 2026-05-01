@@ -353,16 +353,16 @@ export default function TimerPage() {
   const [holdToStart, setHoldToStart] = useState(true); // long-press arming
   const [scrambleFontSize, setScrambleFontSize] = useState<'sm' | 'md' | 'lg'>('md');
   const [timerBrand, setTimerBrand] = useState<TimerBrand>('gan');
-  // Default false to match SSR; updated after mount via matchMedia. Brief flash
-  // possible on mobile pageload but no hydration mismatch.
+  // Default false to match SSR; updated after mount. Brief flash possible on
+  // mobile pageload but no hydration mismatch. 900px breakpoint puts iPad
+  // portrait (768) on mobile layout and iPad landscape (1024) on desktop.
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
-    const mq = window.matchMedia('(max-width: 700px)');
-    setIsMobile(mq.matches);
-    const onChange = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
+    const check = () => setIsMobile(window.innerWidth < 900);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
   }, []);
 
   // Mobile tab navigation + entry modals
