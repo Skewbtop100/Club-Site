@@ -14,6 +14,7 @@ import {
   onDisconnect,
   get,
   runTransaction,
+  serverTimestamp,
 } from 'firebase/database';
 import { rtdb } from '@/lib/firebase';
 
@@ -358,6 +359,7 @@ interface MemberData {
   totalPoints: number;
   connected: boolean;
   joinedAt: number;              // server timestamp; used to pick next host on migration
+  lastHeartbeat: number;         // server timestamp; refreshed every HEARTBEAT_INTERVAL_MS
 }
 
 interface RoomData {
@@ -411,6 +413,33 @@ function generateScrambles(eventId: string, n = SOLVES_PER_ROUND): Record<string
   for (let i = 0; i < n; i++) out[String(i)] = generateScramble(eventId);
   return out;
 }
+
+// ── Heartbeat / connection status ────────────────────────────────────────
+const HEARTBEAT_INTERVAL_MS = 5_000;
+const ONLINE_THRESHOLD_MS = 10_000;
+const IDLE_THRESHOLD_MS = 30_000;
+const STATUS_TICK_MS = 2_000;
+
+type ConnectionStatus = 'online' | 'idle' | 'disconnected';
+
+function getConnectionStatus(
+  member: { lastHeartbeat?: number } | undefined,
+  now: number,
+): ConnectionStatus {
+  if (!member) return 'disconnected';
+  const hb = member.lastHeartbeat ?? 0;
+  if (!hb) return 'disconnected';
+  const age = now - hb;
+  if (age < ONLINE_THRESHOLD_MS) return 'online';
+  if (age < IDLE_THRESHOLD_MS) return 'idle';
+  return 'disconnected';
+}
+
+const STATUS_LABEL: Record<ConnectionStatus, string> = {
+  online: 'Online',
+  idle: 'Reconnecting…',
+  disconnected: 'Disconnected',
+};
 
 // ── Host migration ───────────────────────────────────────────────────────
 // Runs as a Firebase transaction so concurrent attempts from multiple
@@ -648,6 +677,118 @@ function MultiplayerPageInner() {
     return () => window.clearTimeout(t);
   }, [hostTransferName]);
 
+  // ── Heartbeat ────────────────────────────────────────────────────────────
+  // Every player writes a server-side timestamp every HEARTBEAT_INTERVAL_MS.
+  // Other clients compute connection status from `now - lastHeartbeat`.
+  // We only run the heartbeat while we're an actual member of the room — if
+  // the host has kicked us, writing lastHeartbeat would silently resurrect a
+  // stub member entry on the server.
+  const isMemberOfRoom = !!(room?.members && userId && room.members[userId]);
+  useEffect(() => {
+    if (!roomCode || !userId || !isMemberOfRoom) return;
+    const hbRef = ref(rtdb, `rooms/${roomCode}/members/${userId}/lastHeartbeat`);
+    const writeBeat = () => {
+      set(hbRef, serverTimestamp()).catch(err => {
+        if (err && /permission/i.test(String(err))) return;
+        console.warn('[mp] heartbeat write failed', err);
+      });
+    };
+    writeBeat();
+    const id = window.setInterval(writeBeat, HEARTBEAT_INTERVAL_MS);
+    return () => window.clearInterval(id);
+  }, [roomCode, userId, isMemberOfRoom]);
+
+  // Periodic re-render so connection-status thresholds tick over without
+  // requiring snapshot updates. 2s is fast enough that a freshly disconnected
+  // player flips to 'idle' / 'disconnected' within one tick of crossing the
+  // boundary, but slow enough not to thrash the tree.
+  const [now, setNow] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), STATUS_TICK_MS);
+    return () => window.clearInterval(id);
+  }, []);
+
+  // ── Notifications (toast queue) ──────────────────────────────────────────
+  // Used for "X reconnected" and "X was removed (disconnected)" messages.
+  // Each notification auto-dismisses after 4s. The host-transfer banner is
+  // its own thing (kept separate so it stands out from chatter).
+  type Notif = { id: string; text: string; tone: 'info' | 'success' | 'warn' };
+  const [notifs, setNotifs] = useState<Notif[]>([]);
+  const pushNotif = useCallback((text: string, tone: Notif['tone']) => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setNotifs(prev => [...prev, { id, text, tone }]);
+    window.setTimeout(() => {
+      setNotifs(prev => prev.filter(n => n.id !== id));
+    }, 4000);
+  }, []);
+
+  // Reconnect detection: when a member's status flips from 'disconnected' →
+  // 'online' between status ticks, fire a toast for everyone except the
+  // member themselves.
+  const prevStatusRef = useRef<Record<string, ConnectionStatus>>({});
+  useEffect(() => {
+    if (!room?.members) return;
+    const cur: Record<string, ConnectionStatus> = {};
+    for (const [uid, m] of Object.entries(room.members)) {
+      cur[uid] = getConnectionStatus(m, now);
+    }
+    const prev = prevStatusRef.current;
+    for (const uid of Object.keys(cur)) {
+      if (uid === userId) continue;
+      if (prev[uid] === 'disconnected' && cur[uid] === 'online') {
+        const name = room.members[uid]?.name ?? 'A player';
+        pushNotif(`${name} reconnected`, 'success');
+      }
+    }
+    prevStatusRef.current = cur;
+  }, [now, room?.members, userId, pushNotif]);
+
+  // Removal-due-to-disconnect detection: track the previous snapshot of
+  // members. When a uid is gone and their *last seen* status was
+  // 'disconnected', we attribute the removal to a kick and toast the room.
+  // Voluntary leaves (status was 'online' at removal time) are silent.
+  const prevMembersRef = useRef<Record<string, { name: string; status: ConnectionStatus }>>({});
+  useEffect(() => {
+    if (!room?.members) {
+      prevMembersRef.current = {};
+      return;
+    }
+    const prev = prevMembersRef.current;
+    const cur = room.members;
+    for (const uid of Object.keys(prev)) {
+      if (cur[uid]) continue;
+      if (uid === userId) continue;
+      if (prev[uid].status === 'disconnected') {
+        pushNotif(`${prev[uid].name} was removed (disconnected)`, 'warn');
+      }
+    }
+    const next: typeof prev = {};
+    for (const [uid, m] of Object.entries(cur)) {
+      next[uid] = { name: m.name, status: getConnectionStatus(m, now) };
+    }
+    prevMembersRef.current = next;
+  }, [now, room?.members, userId, pushNotif]);
+
+  // ── Kicked detection ─────────────────────────────────────────────────────
+  // If we used to be in members and the latest snapshot says we're not, we
+  // were kicked (host removed us at round end after disconnect). Show a
+  // dedicated "rejoin?" prompt instead of dumping the user back to the lobby.
+  const [wasKicked, setWasKicked] = useState(false);
+  const wasMemberRef = useRef(false);
+  useEffect(() => {
+    if (!roomCode || !userId || !room) return;
+    const inMembers = !!room.members?.[userId];
+    if (inMembers) {
+      wasMemberRef.current = true;
+      if (wasKicked) setWasKicked(false);
+      return;
+    }
+    if (wasMemberRef.current) {
+      // We had been a member; the latest snapshot lost us.
+      setWasKicked(true);
+    }
+  }, [roomCode, userId, room, wasKicked]);
+
   // ── Actions ──────────────────────────────────────────────────────────────
   const persistName = useCallback((n: string) => {
     setDisplayName(n);
@@ -694,6 +835,7 @@ function MultiplayerPageInner() {
               totalPoints: 0,
               connected: true,
               joinedAt: now,
+              lastHeartbeat: 0,
             },
           },
         };
@@ -751,6 +893,7 @@ function MultiplayerPageInner() {
         totalPoints: existingMember?.totalPoints ?? 0,
         connected: true,
         joinedAt: existingMember?.joinedAt ?? Date.now(),
+        lastHeartbeat: 0,
       };
       await set(memberRef, memberData);
       console.log('[mp] joined', code);
@@ -780,6 +923,46 @@ function MultiplayerPageInner() {
     setView('lobby');
     setPendingRejoin('');
   }, [roomCode, userId]);
+
+  // After being kicked, the user can re-add themselves. They come back as a
+  // brand new member: fresh ready/solve state, no inherited round results,
+  // and a new joinedAt so they sort *after* anyone still in the room (host
+  // migration tie-break). Their userId stays the same so the rejoin probe and
+  // any saved share-links keep working.
+  const rejoinAfterKick = useCallback(async () => {
+    if (!roomCode || !userId) return;
+    const name = (displayName || localStorage.getItem('mp_display_name') || '').trim() || 'Player';
+    try {
+      const memberRef = ref(rtdb, `rooms/${roomCode}/members/${userId}`);
+      const memberData: MemberData = {
+        name,
+        ready: false,
+        currentSolve: 0,
+        roundAverage: null,
+        totalPoints: 0,
+        connected: true,
+        joinedAt: Date.now(),
+        lastHeartbeat: 0,
+      };
+      await set(memberRef, memberData);
+      try { localStorage.setItem(LAST_ROOM_KEY, roomCode); } catch {}
+      setWasKicked(false);
+      wasMemberRef.current = true;
+    } catch (err) {
+      console.error('[mp] rejoinAfterKick error', err);
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    }
+  }, [roomCode, userId, displayName]);
+
+  const dismissKicked = useCallback(() => {
+    setWasKicked(false);
+    wasMemberRef.current = false;
+    try { localStorage.removeItem(LAST_ROOM_KEY); } catch {}
+    setRoom(null);
+    setRoomCode('');
+    setView('lobby');
+    setPendingRejoin('');
+  }, []);
 
   // Leave temporarily — keep our room slot + LAST_ROOM_KEY so we can rejoin.
   // Navigate back to /timer; the rejoin probe on next visit will offer to come
@@ -869,6 +1052,7 @@ function MultiplayerPageInner() {
         totalPoints: existing?.totalPoints ?? 0,
         connected: true,
         joinedAt: existing?.joinedAt ?? Date.now(),
+        lastHeartbeat: 0,
       };
       await set(memberRef, memberData);
       setRoomCode(pendingRejoin);
@@ -1009,27 +1193,45 @@ function MultiplayerPageInner() {
   }, [roomCode, room, userId]);
 
   // ── Status transitions (host-driven) ─────────────────────────────────────
-  // Host: racing → results when every member has confirmed all 5 solves
-  // (currentSolve >= SOLVES_PER_ROUND). Awards round points to cumulative.
+  // Host: racing → results when every *online* member has confirmed all 5
+  // solves. Disconnected players don't block the round — when the round ends
+  // they get kicked from the room (their member entry is removed in the same
+  // update that flips status → results). Their solves never become an Ao5,
+  // so they're effectively a DNF for this round and don't appear in the
+  // results screen at all (they're no longer in members). Voluntary leaves
+  // and tab-closes that already removed the member naturally roll into the
+  // same code path: only members still present at the moment of transition
+  // are scored.
   useEffect(() => {
     if (!room || !roomCode) return;
     if (room.host !== userId) return;
     if (room.status !== 'racing') return;
-    const members = Object.entries(room.members || {});
-    if (members.length === 0) return;
-    const allDone = members.every(([, m]) => m.currentSolve >= SOLVES_PER_ROUND);
-    if (!allDone) return;
-    // Rank by Ao5 (DNF last). Award points: 1st=N, 2nd=N-1, ..., last=1; DNF=0.
-    const ranked = rankByRoundAverage(room.members);
+    const memberEntries = Object.entries(room.members || {});
+    if (memberEntries.length === 0) return;
+    const onlineEntries = memberEntries.filter(([, m]) => getConnectionStatus(m, now) !== 'disconnected');
+    if (onlineEntries.length === 0) return; // everyone disconnected; wait for someone to come back
+    const allOnlineDone = onlineEntries.every(([, m]) => m.currentSolve >= SOLVES_PER_ROUND);
+    if (!allOnlineDone) return;
+    // Score only online members (disconnected ones get kicked).
+    const onlineMembers: Record<string, MemberData> = Object.fromEntries(onlineEntries);
+    const ranked = rankByRoundAverage(onlineMembers);
     const updates: Record<string, unknown> = { status: 'results' };
     const N = ranked.length;
     ranked.forEach((r, i) => {
       const pts = r.dnf ? 0 : Math.max(1, N - i);
-      const prev = room.members[r.uid]?.totalPoints ?? 0;
+      const prev = onlineMembers[r.uid]?.totalPoints ?? 0;
       updates[`members/${r.uid}/totalPoints`] = prev + pts;
     });
+    // Kick disconnected members. The toast about removal fires on remaining
+    // clients via the prevMembersRef effect (last-seen status was
+    // 'disconnected' so the removal is attributed to the kick).
+    for (const [uid, m] of memberEntries) {
+      if (getConnectionStatus(m, now) === 'disconnected') {
+        updates[`members/${uid}`] = null;
+      }
+    }
     update(ref(rtdb, `rooms/${roomCode}`), updates);
-  }, [room?.status, room?.members, room?.host, roomCode, userId]);
+  }, [room?.status, room?.members, room?.host, roomCode, userId, now]);
 
   // ── Render ──────────────────────────────────────────────────────────────
   // While racing the page is locked to the visible viewport — height: 100dvh
@@ -1121,13 +1323,23 @@ function MultiplayerPageInner() {
           />
         )}
 
-        {view === 'room' && room && (
+        {view === 'room' && room && wasKicked && (
+          <KickedScreen
+            isMobile={isMobile}
+            roomCode={roomCode}
+            onRejoin={rejoinAfterKick}
+            onLeave={dismissKicked}
+          />
+        )}
+
+        {view === 'room' && room && !wasKicked && (
           <RoomView
             isMobile={isMobile}
             roomCode={roomCode}
             room={room}
             userId={userId}
             prefs={prefs}
+            now={now}
             onOpenSettings={() => setSettingsOpen(true)}
             onPause={() => setPauseOpen(true)}
             onToggleReady={toggleReady}
@@ -1146,6 +1358,11 @@ function MultiplayerPageInner() {
       {/* Host-transfer toast — auto-dismisses after 3s (set in effect). */}
       {hostTransferName && view === 'room' && (
         <HostTransferToast name={hostTransferName} />
+      )}
+
+      {/* Connection toasts (reconnects, kicks). Stacked under host toast. */}
+      {view === 'room' && notifs.length > 0 && (
+        <NotificationStack notifs={notifs} hostToastVisible={!!hostTransferName} />
       )}
 
       {/* Settings + Pause modals — overlay on top of everything. */}
@@ -1539,6 +1756,7 @@ interface RoomViewProps {
   room: RoomData;
   userId: string;
   prefs: MpPrefs;
+  now: number;                  // shared "now" tick for connection-status checks
   onOpenSettings: () => void;
   onPause: () => void;
   onToggleReady: () => void;
@@ -1563,7 +1781,7 @@ function RoomView(props: RoomViewProps) {
 
 // ── Waiting room ──────────────────────────────────────────────────────────
 function WaitingRoom({
-  isMobile, roomCode, room, userId, isHost,
+  isMobile, roomCode, room, userId, now, isHost,
   onToggleReady, onSetEvent, onSetMaxRounds, onStartRace,
 }: RoomViewProps & { isHost: boolean }) {
   const members = Object.entries(room.members || {});
@@ -1595,6 +1813,7 @@ function WaitingRoom({
               name={m.name}
               isHost={uid === room.host}
               isYou={uid === userId}
+              status={getConnectionStatus(m, now)}
               right={
                 m.ready ? (
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', color: C.success, fontWeight: 700, fontSize: '0.78rem' }}>
@@ -1672,7 +1891,7 @@ function WaitingRoom({
 
 // ── Racing screen ─────────────────────────────────────────────────────────
 function RacingScreen({
-  isMobile, room, userId, prefs, onSubmitSolve, onOpenSettings, onPause,
+  isMobile, room, userId, prefs, now, onSubmitSolve, onOpenSettings, onPause,
 }: RoomViewProps & { isHost: boolean }) {
   // Behaviour now driven by user prefs (Settings modal). The hook signature
   // unchanged: useMpTimer takes inspectionEnabled and the commit callback.
@@ -1826,6 +2045,7 @@ function RacingScreen({
         room={room}
         userId={userId}
         prefs={prefs}
+        now={now}
         myCurrent={myCurrent}
         mySolves={mySolves}
         isRoundDone={isRoundDone}
@@ -1973,7 +2193,7 @@ function RacingScreen({
           )}
         </div>
 
-        <OpponentsPanel room={room} userId={userId} />
+        <OpponentsPanel room={room} userId={userId} now={now} />
       </div>
 
       <SolveAndCubeRow
@@ -1991,7 +2211,7 @@ function RacingScreen({
 
 // ── Mobile racing layout (header + flex-1 timer + S1..S5/cube row + tabs) ─
 function MobileRacingLayout({
-  room, userId, prefs, myCurrent, mySolves, isRoundDone, isWaitingForOpponents,
+  room, userId, prefs, now, myCurrent, mySolves, isRoundDone, isWaitingForOpponents,
   currentScramble, scrambleShown, onRevealScramble,
   timer, pending, displayValue, timerColor, borderColor,
   interactionLocked, confirmSolve, onTimerTouchStart, onTimerTouchEnd,
@@ -2000,6 +2220,7 @@ function MobileRacingLayout({
   room: RoomData;
   userId: string;
   prefs: MpPrefs;
+  now: number;
   myCurrent: number;
   mySolves: SolveData[];
   isRoundDone: boolean;
@@ -2156,7 +2377,7 @@ function MobileRacingLayout({
           </div>
         ) : (
           <div style={{ flex: '1 1 auto', minHeight: 0, overflow: 'auto', padding: '0.7rem' }}>
-            <OpponentsPanel room={room} userId={userId} />
+            <OpponentsPanel room={room} userId={userId} now={now} />
           </div>
         )}
       </div>
@@ -2491,9 +2712,9 @@ function ConfirmButton({
 
 // ── OpponentsPanel ───────────────────────────────────────────────────────
 function OpponentsPanel({
-  room, userId, onClose,
+  room, userId, now, onClose,
 }: {
-  room: RoomData; userId: string; onClose?: () => void;
+  room: RoomData; userId: string; now: number; onClose?: () => void;
 }) {
   const rows = useMemo(() => {
     const list = Object.entries(room.members || {}).map(([uid, m]) => {
@@ -2527,6 +2748,7 @@ function OpponentsPanel({
         uid, name: m.name,
         currentSolve: m.currentSolve,
         solves, runningAvg, runningDnf,
+        status: getConnectionStatus(m, now),
       };
     });
     // Sort: you first, then by progress desc, then alphabetical.
@@ -2537,7 +2759,7 @@ function OpponentsPanel({
       return a.name.localeCompare(b.name);
     });
     return list;
-  }, [room.members, room.solves, userId]);
+  }, [room.members, room.solves, userId, now]);
 
   return (
     <div style={{
@@ -2585,6 +2807,7 @@ function OpponentsPanel({
                 display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
                 minWidth: 0,
               }}>
+                <StatusDot status={r.status} size={7} />
                 {r.uid === room.host && <HostBadge size={12} />}
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {r.name}{isYou ? ' (you)' : ''}
@@ -2955,7 +3178,7 @@ function MpExitConfirmModal({
 
 // ── Results ───────────────────────────────────────────────────────────────
 function ResultsScreen({
-  isMobile, room, userId, isHost,
+  isMobile, room, userId, now, isHost,
   onReadyForNext, onNextRound, onPlayAgain, onLeave,
 }: RoomViewProps & { isHost: boolean }) {
   const ranked = useMemo(() => rankByRoundAverageWithSolves(room.members, room.solves), [room.members, room.solves]);
@@ -3019,6 +3242,7 @@ function ResultsScreen({
                   <Td><span style={{ color: i === 0 ? C.success : i < 3 ? C.accent : C.text, fontWeight: 700 }}>{r.dnf ? '—' : i + 1}</span></Td>
                   <Td>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <StatusDot status={getConnectionStatus(room.members?.[r.uid], now)} size={8} />
                       {r.uid === room.host && <HostBadge size={13} />}
                       {r.name}
                     </span>
@@ -3044,6 +3268,7 @@ function ResultsScreen({
                   <Td><span style={{ color: i === 0 ? C.success : i < 3 ? C.accent : C.text, fontWeight: 700 }}>{i + 1}</span></Td>
                   <Td>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <StatusDot status={getConnectionStatus(room.members?.[r.uid], now)} size={8} />
                       {r.uid === room.host && <HostBadge size={13} />}
                       {r.name}
                     </span>
@@ -3121,6 +3346,7 @@ function ResultsScreen({
             points={r.points}
             isMe={r.uid === userId}
             isHost={r.uid === room.host}
+            status={getConnectionStatus(room.members?.[r.uid], now)}
             isMobile={isMobile}
             isLast={i === ranked.length - 1}
           />
@@ -3152,6 +3378,7 @@ function ResultsScreen({
               diff={r.points - leaderPoints}
               isMe={r.uid === userId}
               isHost={r.uid === room.host}
+              status={getConnectionStatus(room.members?.[r.uid], now)}
               isLast={i === cumulative.length - 1}
             />
           ))}
@@ -3265,7 +3492,7 @@ function MedalBadge({ rank }: { rank: number }) {
 }
 
 function RoundResultRow({
-  rank, name, solves, average, dnf, points, isMe, isHost, isMobile, isLast,
+  rank, name, solves, average, dnf, points, isMe, isHost, status, isMobile, isLast,
 }: {
   rank: number;
   name: string;
@@ -3275,6 +3502,7 @@ function RoundResultRow({
   points: number;
   isMe: boolean;
   isHost: boolean;
+  status: ConnectionStatus;
   isMobile: boolean;
   isLast: boolean;
 }) {
@@ -3297,6 +3525,7 @@ function RoundResultRow({
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
             display: 'flex', alignItems: 'center', gap: '0.35rem', minWidth: 0,
           }}>
+            <StatusDot status={status} size={8} />
             {isHost && <HostBadge size={14} />}
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {name}{isMe ? <span style={{ color: C.accent, fontWeight: 700, marginLeft: '0.3rem' }}>(you)</span> : null}
@@ -3359,7 +3588,7 @@ function RoundResultRow({
 }
 
 function StandingsRow({
-  rank, name, points, diff, isMe, isHost, isLast,
+  rank, name, points, diff, isMe, isHost, status, isLast,
 }: {
   rank: number;
   name: string;
@@ -3367,6 +3596,7 @@ function StandingsRow({
   diff: number;       // points relative to leader; ≤0
   isMe: boolean;
   isHost: boolean;
+  status: ConnectionStatus;
   isLast: boolean;
 }) {
   const isLeader = rank === 1;
@@ -3384,6 +3614,7 @@ function StandingsRow({
         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
         display: 'flex', alignItems: 'center', gap: '0.35rem',
       }}>
+        <StatusDot status={status} size={8} />
         {isHost && <HostBadge size={13} />}
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {name}{isMe ? <span style={{ color: C.accent, fontWeight: 700, marginLeft: '0.3rem' }}>(you)</span> : null}
@@ -3650,9 +3881,13 @@ function BigButton({
 }
 
 function MemberRow({
-  name, isHost, isYou, right,
+  name, isHost, isYou, status, right,
 }: {
-  name: string; isHost: boolean; isYou: boolean; right: React.ReactNode;
+  name: string;
+  isHost: boolean;
+  isYou: boolean;
+  status: ConnectionStatus;
+  right: React.ReactNode;
 }) {
   return (
     <div style={{
@@ -3662,6 +3897,7 @@ function MemberRow({
       borderRadius: 10,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', minWidth: 0 }}>
+        <StatusDot status={status} />
         {isHost && <HostBadge />}
         <span style={{ fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</span>
         {isYou && isHost && <Pill color={C.warn}>HOST</Pill>}
@@ -3757,6 +3993,168 @@ function HostBadge({ size = 14 }: { size?: number }) {
     >
       <CrownIcon size={size} />
     </span>
+  );
+}
+
+// Coloured presence dot. The dot is the `🟢🟡🔴` from the spec, expressed
+// as an SVG circle so it stays consistent across platforms (no emoji-font
+// drift). Tooltip is the human-readable status label.
+function StatusDot({ status, size = 8 }: { status: ConnectionStatus; size?: number }) {
+  const color =
+    status === 'online' ? C.success
+    : status === 'idle' ? C.warn
+    : C.danger;
+  const label = STATUS_LABEL[status];
+  return (
+    <span
+      title={label}
+      aria-label={label}
+      role="img"
+      style={{
+        display: 'inline-block',
+        flex: '0 0 auto',
+        width: size,
+        height: size,
+        borderRadius: '50%',
+        background: color,
+        boxShadow: status === 'online' ? `0 0 6px ${color}80` : 'none',
+        verticalAlign: 'middle',
+      }}
+    />
+  );
+}
+
+// Stacked toast queue for connection events. Sits below the host-transfer
+// toast (when present) so the two systems don't fight for the same screen
+// real estate. Each notification is keyed and dismisses itself via the
+// page's pushNotif setTimeout — this component is purely presentational.
+function NotificationStack({
+  notifs,
+  hostToastVisible,
+}: {
+  notifs: { id: string; text: string; tone: 'info' | 'success' | 'warn' }[];
+  hostToastVisible: boolean;
+}) {
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        top: hostToastVisible
+          ? 'calc(env(safe-area-inset-top) + 3.5rem)'
+          : 'calc(env(safe-area-inset-top) + 0.75rem)',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        zIndex: 999,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0.4rem',
+        alignItems: 'center',
+        pointerEvents: 'none',
+        maxWidth: 'calc(100vw - 2rem)',
+      }}
+    >
+      {notifs.map(n => {
+        const palette = n.tone === 'success'
+          ? { fg: C.success, border: C.success, bg: C.successDim }
+          : n.tone === 'warn'
+          ? { fg: C.warn, border: C.warn, bg: 'rgba(251,191,36,0.12)' }
+          : { fg: C.text, border: C.border, bg: C.card };
+        return (
+          <div
+            key={n.id}
+            role="status"
+            aria-live="polite"
+            style={{
+              background: palette.bg,
+              border: `1px solid ${palette.border}`,
+              color: palette.fg,
+              borderRadius: 999,
+              padding: '0.5rem 0.95rem',
+              fontSize: '0.82rem',
+              fontWeight: 700,
+              boxShadow: '0 6px 20px rgba(0,0,0,0.4)',
+              animation: 'mp-notif-in 0.22s ease-out',
+              pointerEvents: 'auto',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {n.text}
+          </div>
+        );
+      })}
+      <style>{`
+        @keyframes mp-notif-in {
+          from { opacity: 0; transform: translateY(-6px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// Shown in place of RoomView when the host has removed us at round end. The
+// user can either rejoin (re-adds a fresh member entry, losing prior round
+// totals) or leave for good. Identity (userId) is preserved so any saved
+// share-links still work.
+function KickedScreen({
+  isMobile,
+  roomCode,
+  onRejoin,
+  onLeave,
+}: {
+  isMobile: boolean;
+  roomCode: string;
+  onRejoin: () => void;
+  onLeave: () => void;
+}) {
+  return (
+    <div
+      style={{
+        flex: '1 1 auto',
+        display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+        gap: '1.25rem',
+        padding: isMobile ? '1.25rem' : '2rem',
+        width: '100%',
+        maxWidth: 460, margin: '0 auto',
+        textAlign: 'center',
+      }}
+    >
+      <div
+        style={{
+          width: 64, height: 64, borderRadius: '50%',
+          background: C.dangerDim, border: `1px solid ${C.danger}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: C.danger,
+        }}
+        aria-hidden="true"
+      >
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="15" y1="9" x2="9" y2="15" />
+          <line x1="9" y1="9" x2="15" y2="15" />
+        </svg>
+      </div>
+      <div>
+        <div style={{ fontSize: '1.3rem', fontWeight: 800, marginBottom: '0.4rem' }}>
+          You were removed from this room
+        </div>
+        <div style={{ color: C.muted, fontSize: '0.88rem', lineHeight: 1.5 }}>
+          You went offline during the round and the host removed you when it
+          ended. You can rejoin{' '}
+          <span style={{ fontFamily: 'JetBrains Mono, monospace', color: C.accent, letterSpacing: '0.15em', fontWeight: 700 }}>
+            {roomCode}
+          </span>{' '}
+          as a new member. Your previous points for this match will be reset.
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem', width: '100%' }}>
+        <BigButton onClick={onLeave}>Leave</BigButton>
+        <BigButton accent onClick={onRejoin}>Rejoin</BigButton>
+      </div>
+    </div>
   );
 }
 
