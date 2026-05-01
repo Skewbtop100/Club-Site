@@ -97,6 +97,104 @@ function fmtMs(ms: number | null, dnf?: boolean, precision: 2 | 3 = 2): string {
   return s.toFixed(precision);
 }
 
+// ── Timer state machine ─────────────────────────────────────────────────────
+// Ported verbatim from app/timer/page.tsx so multiplayer feels identical:
+// hold-to-arm (≥350ms), green-when-armed, inspection countdown if enabled,
+// and a state-based touch/space flow that doesn't fire on incidental taps.
+type MpTimerState = 'idle' | 'inspecting' | 'armed' | 'running' | 'stopped';
+
+function useMpTimer(
+  inspectionEnabled: boolean,
+  onSolveCommit: (ms: number, dnf: boolean) => void,
+) {
+  const [state, setState] = useState<MpTimerState>('idle');
+  const [displayMs, setDisplayMs] = useState(0);
+  const [inspectionMs, setInspectionMs] = useState(15000);
+
+  const runStartRef = useRef(0);
+  const inspStartRef = useRef(0);
+  const armStartRef = useRef(0);
+  const rafRef = useRef(0);
+
+  const stop = useCallback(() => {
+    if (state === 'running') {
+      const final = Date.now() - runStartRef.current;
+      cancelAnimationFrame(rafRef.current);
+      setDisplayMs(final);
+      setState('stopped');
+      const dnf = inspectionMs <= -2000;
+      inspStartRef.current = 0;
+      setInspectionMs(15000);
+      onSolveCommit(final, dnf);
+    }
+  }, [state, inspectionMs, onSolveCommit]);
+
+  // Tick loop
+  useEffect(() => {
+    if (state === 'running') {
+      const tick = () => {
+        setDisplayMs(Date.now() - runStartRef.current);
+        rafRef.current = requestAnimationFrame(tick);
+      };
+      rafRef.current = requestAnimationFrame(tick);
+      return () => cancelAnimationFrame(rafRef.current);
+    }
+    if (state === 'inspecting') {
+      const id = setInterval(() => {
+        const elapsed = Date.now() - inspStartRef.current;
+        setInspectionMs(15000 - elapsed);
+      }, 50);
+      return () => clearInterval(id);
+    }
+  }, [state]);
+
+  const beginInspection = useCallback(() => {
+    inspStartRef.current = Date.now();
+    setInspectionMs(15000);
+    setState('inspecting');
+  }, []);
+
+  const startArming = useCallback(() => {
+    armStartRef.current = Date.now();
+    setState('armed');
+  }, []);
+
+  const startRunning = useCallback(() => {
+    runStartRef.current = Date.now();
+    setDisplayMs(0);
+    setState('running');
+  }, []);
+
+  const fireRunning = useCallback(() => {
+    const heldFor = Date.now() - armStartRef.current;
+    if (heldFor < 350) {
+      // Released too early — return to inspecting (or idle).
+      setState(prev => prev === 'armed'
+        ? (inspectionMs > -2000 && inspStartRef.current > 0 ? 'inspecting' : 'idle')
+        : prev);
+      return;
+    }
+    runStartRef.current = Date.now();
+    setDisplayMs(0);
+    setState('running');
+  }, [inspectionMs]);
+
+  const reset = useCallback(() => {
+    cancelAnimationFrame(rafRef.current);
+    setState('idle');
+    setDisplayMs(0);
+    setInspectionMs(15000);
+    inspStartRef.current = 0;
+  }, []);
+
+  void inspectionEnabled; // prefs flag is consumed by the caller, not this hook
+
+  return {
+    state, displayMs, inspectionMs,
+    beginInspection, startArming, startRunning, fireRunning, stop, reset,
+  };
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────
 type Penalty = 'ok' | '+2' | 'dnf';
 type RoomStatus = 'waiting' | 'racing' | 'results';
@@ -1231,6 +1329,12 @@ function WaitingRoom({
 }
 
 // ── Racing screen ─────────────────────────────────────────────────────────
+// Multiplayer behaviour parity with main timer:
+//   - Hold-to-start always on (≥350ms hold to arm; release to begin)
+//   - Inspection off (multiplayer is a quick race; can be exposed later)
+const MP_HOLD_TO_START = true;
+const MP_INSPECTION_ENABLED = false;
+
 function RacingScreen({
   isMobile, room, userId, onSubmitSolve,
 }: RoomViewProps & { isHost: boolean }) {
@@ -1245,8 +1349,6 @@ function RacingScreen({
     return out;
   }, [room.solves, userId]);
 
-  // Sync gating: I can do solve N if min(others.currentSolve) >= N - 1.
-  // Equivalently, gap = myCurrent - min(others) must be ≤ 1.
   const otherCurrents = useMemo(() => {
     return Object.entries(room.members || {})
       .filter(([uid]) => uid !== userId)
@@ -1258,73 +1360,113 @@ function RacingScreen({
   const isRoundDone = myCurrent >= SOLVES_PER_ROUND;
   const currentScramble = !isRoundDone ? (room.scrambles?.[String(myCurrent)] ?? '') : '';
 
-  // Local timer state.
   const [scrambleShown, setScrambleShown] = useState(false);
-  const [phase, setPhase] = useState<'idle' | 'running' | 'pendingConfirm'>('idle');
-  const [elapsed, setElapsed] = useState(0);
-  const startTsRef = useRef<number>(0);
-  const [pending, setPending] = useState<{ ms: number } | null>(null);
+  // Pending = waiting for OK/+2/DNF confirmation after a stop. While pending,
+  // all touch/space input is ignored to prevent another solve from starting.
+  const [pending, setPending] = useState<{ ms: number; defaultDnf: boolean } | null>(null);
 
-  // Reset local state when the active solve index changes (next solve / next round).
+  const onSolveCommit = useCallback((ms: number, dnf: boolean) => {
+    setPending({ ms, defaultDnf: dnf });
+  }, []);
+
+  const timer = useMpTimer(MP_INSPECTION_ENABLED, onSolveCommit);
+
+  const interactionLocked = !scrambleShown || isWaitingForOpponents || isRoundDone || !!pending;
+
+  // Reset local + timer state at solve / round boundary.
   useEffect(() => {
     setScrambleShown(false);
-    setPhase('idle');
-    setElapsed(0);
     setPending(null);
+    timer.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myCurrent, room.round]);
 
-  // Timer tick.
-  useEffect(() => {
-    if (phase !== 'running') return;
-    const id = window.setInterval(() => {
-      setElapsed(Math.max(0, Date.now() - startTsRef.current));
-    }, 50);
-    return () => window.clearInterval(id);
-  }, [phase]);
-
-  const startTimer = useCallback(() => {
-    if (phase !== 'idle' || !scrambleShown || isWaitingForOpponents || isRoundDone) return;
-    startTsRef.current = Date.now();
-    setElapsed(0);
-    setPhase('running');
-  }, [phase, scrambleShown, isWaitingForOpponents, isRoundDone]);
-
-  const stopTimer = useCallback(() => {
-    if (phase !== 'running') return;
-    const ms = Math.max(0, Date.now() - startTsRef.current);
-    setElapsed(ms);
-    setPhase('pendingConfirm');
-    setPending({ ms });
-  }, [phase]);
-
   const confirmSolve = useCallback((penalty: Penalty) => {
-    if (phase !== 'pendingConfirm' || !pending) return;
+    if (!pending) return;
     onSubmitSolve(myCurrent, pending.ms, penalty, currentScramble);
-    // Local reset will happen via the myCurrent change effect.
-    setPhase('idle');
     setPending(null);
-  }, [phase, pending, myCurrent, currentScramble, onSubmitSolve]);
+    // The myCurrent-change effect will reset timer + scrambleShown.
+  }, [pending, myCurrent, currentScramble, onSubmitSolve]);
 
-  // Spacebar: start if idle (and scramble shown), stop if running.
+  // Touch handlers — mirror main timer's onTimerTouchStart / onTimerTouchEnd.
+  const onTimerTouchStart = useCallback(() => {
+    if (interactionLocked) return;
+    if (timer.state === 'running') { timer.stop(); return; }
+    if (timer.state === 'idle' || timer.state === 'stopped') {
+      if (MP_INSPECTION_ENABLED) timer.beginInspection();
+      else if (MP_HOLD_TO_START) timer.startArming();
+      else timer.startRunning();
+      return;
+    }
+    if (timer.state === 'inspecting') {
+      if (MP_HOLD_TO_START) timer.startArming();
+      else timer.startRunning();
+    }
+  }, [interactionLocked, timer]);
+
+  const onTimerTouchEnd = useCallback(() => {
+    if (timer.state === 'armed') timer.fireRunning();
+  }, [timer]);
+
+  // Keyboard — mirror main timer with auto-repeat guard. Hold-to-arm requires
+  // both keydown (start arming) and keyup (fire running after ≥350ms held).
+  const spaceHeldRef = useRef(false);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
+    const onKeyDown = (e: KeyboardEvent) => {
       if (e.code !== 'Space') return;
-      if (phase === 'running') { e.preventDefault(); stopTimer(); }
-      else if (phase === 'idle' && scrambleShown && !isWaitingForOpponents && !isRoundDone) {
-        e.preventDefault(); startTimer();
+      e.preventDefault();
+      if (spaceHeldRef.current) return;
+      spaceHeldRef.current = true;
+      if (interactionLocked && timer.state !== 'running') return;
+      if (timer.state === 'running') { timer.stop(); return; }
+      if (timer.state === 'idle' || timer.state === 'stopped') {
+        if (MP_INSPECTION_ENABLED) timer.beginInspection();
+        else if (MP_HOLD_TO_START) timer.startArming();
+        else timer.startRunning();
+        return;
+      }
+      if (timer.state === 'inspecting') {
+        if (MP_HOLD_TO_START) timer.startArming();
+        else timer.startRunning();
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [phase, scrambleShown, isWaitingForOpponents, isRoundDone, startTimer, stopTimer]);
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code !== 'Space') return;
+      e.preventDefault();
+      spaceHeldRef.current = false;
+      if (timer.state === 'armed') timer.fireRunning();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, [interactionLocked, timer]);
 
   const [opponentsOpen, setOpponentsOpen] = useState(!isMobile);
   useEffect(() => { setOpponentsOpen(!isMobile); }, [isMobile]);
 
   const opponentCount = Object.keys(room.members || {}).length - 1;
-  const timerDisplay = phase === 'pendingConfirm' && pending
-    ? fmtMs(pending.ms, false, 2)
-    : fmtMs(elapsed, false, 2);
+
+  // Display: while pending, freeze on the recorded time.
+  const displayValue = pending ? fmtMs(pending.ms, false, 2)
+    : timer.state === 'inspecting' ? Math.max(0, Math.ceil(timer.inspectionMs / 1000)).toString()
+    : timer.state === 'armed' ? '0.00'
+    : fmtMs(timer.displayMs, false, 2);
+
+  const timerColor =
+    pending ? C.warn
+    : timer.state === 'armed' ? C.success
+    : timer.state === 'running' ? C.accent
+    : timer.state === 'inspecting' ? (timer.inspectionMs <= 0 ? C.danger : timer.inspectionMs <= 3000 ? C.warn : C.text)
+    : C.text;
+
+  const borderColor =
+    pending ? C.warn
+    : timer.state === 'armed' ? C.success
+    : timer.state === 'running' ? C.accent
+    : C.border;
 
   return (
     <div className="mp-race-container" style={{
@@ -1334,23 +1476,35 @@ function RacingScreen({
       display: 'flex', flexDirection: 'column', gap: '0.85rem',
       padding: isMobile ? '0.5rem' : '0.5rem 0',
     }}>
-      {/* Round header + solve progress */}
-      <div style={{
-        background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
-        padding: '0.6rem 0.85rem',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.6rem',
-        flexWrap: 'wrap',
-      }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-          <div style={{ fontSize: '0.62rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: C.muted, fontWeight: 700 }}>
-            {room.roundName || getRoundName(room.round, room.maxRounds)}
+      {/* Mobile: compact S1..S5 strip + tiny round label */}
+      {isMobile && (
+        <MobileSolveStrip
+          mySolves={mySolves}
+          current={myCurrent}
+          isRoundDone={isRoundDone}
+          roundLabel={room.roundName || getRoundName(room.round, room.maxRounds)}
+        />
+      )}
+
+      {/* Desktop: round header card + dot progress */}
+      {!isMobile && (
+        <div style={{
+          background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
+          padding: '0.6rem 0.85rem',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.6rem',
+          flexWrap: 'wrap',
+        }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+            <div style={{ fontSize: '0.62rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: C.muted, fontWeight: 700 }}>
+              {room.roundName || getRoundName(room.round, room.maxRounds)}
+            </div>
+            <div style={{ fontSize: '0.78rem', color: C.text, fontWeight: 700 }}>
+              Solve {Math.min(myCurrent + 1, SOLVES_PER_ROUND)} of {SOLVES_PER_ROUND}
+            </div>
           </div>
-          <div style={{ fontSize: '0.78rem', color: C.text, fontWeight: 700 }}>
-            Solve {Math.min(myCurrent + 1, SOLVES_PER_ROUND)} of {SOLVES_PER_ROUND}
-          </div>
+          <SolveProgressDots count={SOLVES_PER_ROUND} done={myCurrent} />
         </div>
-        <SolveProgressDots count={SOLVES_PER_ROUND} done={myCurrent} />
-      </div>
+      )}
 
       {/* Sync gate */}
       {isWaitingForOpponents && (
@@ -1414,52 +1568,47 @@ function RacingScreen({
         flex: '1 1 auto',
       }}>
         <div
-          onClick={() => {
-            if (phase === 'idle') startTimer();
-            else if (phase === 'running') stopTimer();
-          }}
-          onTouchStart={(e) => {
-            if (phase === 'idle' || phase === 'running') {
-              e.preventDefault();
-              if (phase === 'idle') startTimer();
-              else stopTimer();
-            }
-          }}
+          onTouchStart={(e) => { e.preventDefault(); onTimerTouchStart(); }}
+          onTouchEnd={(e) => { e.preventDefault(); onTimerTouchEnd(); }}
           style={{
-            background: C.card,
-            border: `1px solid ${
-              phase === 'running' ? C.accent
-              : phase === 'pendingConfirm' ? C.warn
-              : C.border
-            }`,
+            background: timer.state === 'armed' ? `${C.success}10` : C.card,
+            border: `1px solid ${borderColor}`,
             borderRadius: 16, padding: '1.5rem 1rem',
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-            userSelect: 'none',
-            cursor: (phase === 'idle' && scrambleShown && !isWaitingForOpponents && !isRoundDone) || phase === 'running' ? 'pointer' : 'default',
+            userSelect: 'none', cursor: interactionLocked ? 'default' : 'pointer',
             textAlign: 'center', touchAction: 'manipulation',
-            transition: 'border-color 0.15s',
+            transition: 'border-color 0.12s, background 0.12s',
             minHeight: 220,
           }}
         >
+          {timer.state === 'inspecting' && (
+            <div style={{ fontSize: '0.65rem', letterSpacing: '0.15em', textTransform: 'uppercase', color: C.warn, marginBottom: '0.6rem', fontWeight: 700 }}>
+              Inspection
+            </div>
+          )}
           <div style={{
             fontFamily: 'JetBrains Mono, monospace',
             fontSize: 'clamp(3.5rem, 14vw, 7rem)',
             fontWeight: 800, lineHeight: 0.95,
             fontVariantNumeric: 'tabular-nums',
-            color: phase === 'running' ? C.accent : phase === 'pendingConfirm' ? C.warn : C.text,
+            color: timerColor,
+            textShadow: timer.state === 'armed' ? `0 0 30px ${C.success}55` : 'none',
+            transition: 'color 0.12s',
           }}>
-            {timerDisplay}
+            {displayValue}
           </div>
           <div style={{ fontSize: '0.78rem', color: C.muted, marginTop: '0.85rem', letterSpacing: '0.04em', minHeight: '1.1rem' }}>
-            {phase === 'idle' && !scrambleShown && !isRoundDone && 'Show the scramble first'}
-            {phase === 'idle' && scrambleShown && !isWaitingForOpponents && !isRoundDone && 'Tap or press SPACE to start'}
-            {phase === 'idle' && isWaitingForOpponents && 'Waiting for opponents…'}
-            {phase === 'running' && 'Tap or press SPACE to stop'}
-            {phase === 'pendingConfirm' && 'Confirm your time'}
-            {isRoundDone && 'Round complete'}
+            {pending && 'Confirm your time'}
+            {!pending && isRoundDone && 'Round complete'}
+            {!pending && !isRoundDone && isWaitingForOpponents && 'Waiting for opponents…'}
+            {!pending && !isRoundDone && !isWaitingForOpponents && !scrambleShown && 'Show the scramble first'}
+            {!pending && !isRoundDone && !isWaitingForOpponents && scrambleShown && timer.state === 'idle' && 'Hold SPACE / press to arm'}
+            {!pending && timer.state === 'inspecting' && 'Hold to arm, release to start'}
+            {!pending && timer.state === 'armed' && (<span style={{ color: C.success, fontWeight: 700 }}>RELEASE TO START</span>)}
+            {!pending && timer.state === 'running' && 'Tap or press SPACE to stop'}
           </div>
 
-          {phase === 'pendingConfirm' && pending && (
+          {pending && (
             <div style={{
               marginTop: '1.2rem',
               display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem',
@@ -1471,36 +1620,38 @@ function RacingScreen({
             </div>
           )}
 
-          {/* My solves so far */}
-          <div style={{
-            marginTop: '1.5rem', display: 'flex', gap: '0.4rem',
-            flexWrap: 'wrap', justifyContent: 'center',
-          }}>
-            {Array.from({ length: SOLVES_PER_ROUND }, (_, i) => {
-              const s = mySolves[i];
-              const isCurrent = i === myCurrent && !isRoundDone;
-              return (
-                <div key={i} style={{
-                  minWidth: 56, padding: '0.3rem 0.5rem',
-                  background: s ? C.cardAlt : 'transparent',
-                  border: `1px solid ${isCurrent ? C.accent : (s ? C.border : C.border)}`,
-                  borderRadius: 8,
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.1rem',
-                }}>
-                  <div style={{ fontSize: '0.55rem', letterSpacing: '0.12em', color: C.mutedDim, fontWeight: 700 }}>
-                    S{i + 1}
-                  </div>
-                  <div style={{
-                    fontFamily: 'JetBrains Mono, monospace', fontSize: '0.78rem', fontWeight: 700,
-                    fontVariantNumeric: 'tabular-nums',
-                    color: !s ? C.mutedDim : s.penalty === 'dnf' ? C.danger : C.text,
+          {/* Desktop only: in-timer S1..S5 strip (mobile shows it at top instead) */}
+          {!isMobile && (
+            <div style={{
+              marginTop: '1.5rem', display: 'flex', gap: '0.4rem',
+              flexWrap: 'wrap', justifyContent: 'center',
+            }}>
+              {Array.from({ length: SOLVES_PER_ROUND }, (_, i) => {
+                const s = mySolves[i];
+                const isCurrent = i === myCurrent && !isRoundDone;
+                return (
+                  <div key={i} style={{
+                    minWidth: 56, padding: '0.3rem 0.5rem',
+                    background: s ? C.cardAlt : 'transparent',
+                    border: `1px solid ${isCurrent ? C.accent : C.border}`,
+                    borderRadius: 8,
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.1rem',
                   }}>
-                    {!s ? '—' : s.penalty === 'dnf' ? 'DNF' : fmtMs(effectiveSolveMs(s), false, 2)}
+                    <div style={{ fontSize: '0.55rem', letterSpacing: '0.12em', color: C.mutedDim, fontWeight: 700 }}>
+                      S{i + 1}
+                    </div>
+                    <div style={{
+                      fontFamily: 'JetBrains Mono, monospace', fontSize: '0.78rem', fontWeight: 700,
+                      fontVariantNumeric: 'tabular-nums',
+                      color: !s ? C.mutedDim : s.penalty === 'dnf' ? C.danger : C.text,
+                    }}>
+                      {!s ? '—' : s.penalty === 'dnf' ? 'DNF' : fmtMs(effectiveSolveMs(s), false, 2)}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Opponents panel — collapsible on mobile */}
@@ -1525,6 +1676,68 @@ function RacingScreen({
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+// Mobile compact strip — replaces the round-name + "Solve X of 5" header on
+// phones with a single row of S1..S5 (times / current marker / —) plus a
+// tiny round label below.
+function MobileSolveStrip({
+  mySolves, current, isRoundDone, roundLabel,
+}: {
+  mySolves: SolveData[];
+  current: number;
+  isRoundDone: boolean;
+  roundLabel: string;
+}) {
+  return (
+    <div style={{
+      background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
+      padding: '0.55rem 0.7rem',
+      display: 'flex', flexDirection: 'column', gap: '0.2rem',
+    }}>
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.3rem',
+      }}>
+        {Array.from({ length: SOLVES_PER_ROUND }, (_, i) => {
+          const s = mySolves[i];
+          const isCurrent = i === current && !isRoundDone;
+          const dnf = s?.penalty === 'dnf';
+          return (
+            <div
+              key={i}
+              className={isCurrent ? 'mp-solve-current' : undefined}
+              style={{
+                fontFamily: 'JetBrains Mono, monospace',
+                fontSize: '0.92rem', fontWeight: 700,
+                fontVariantNumeric: 'tabular-nums',
+                textAlign: 'center',
+                padding: '0.25rem 0.1rem',
+                color: isCurrent ? C.accent
+                  : !s ? C.mutedDim
+                  : dnf ? C.danger : C.text,
+                letterSpacing: dnf ? '0.04em' : '0',
+              }}
+            >
+              {isCurrent && !s ? '●' : !s ? '—' : dnf ? 'DNF' : fmtMs(effectiveSolveMs(s), false, 2)}
+            </div>
+          );
+        })}
+      </div>
+      <div style={{
+        fontSize: '0.6rem', letterSpacing: '0.12em', textTransform: 'uppercase',
+        color: C.mutedDim, fontWeight: 700, textAlign: 'center',
+      }}>
+        {roundLabel} · Ao5
+      </div>
+      <style>{`
+        @keyframes mp-pulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50%      { opacity: 0.55; transform: scale(0.9); }
+        }
+        .mp-solve-current { animation: mp-pulse 1.1s ease-in-out infinite; }
+      `}</style>
     </div>
   );
 }
