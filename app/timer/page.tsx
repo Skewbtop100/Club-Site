@@ -1300,6 +1300,23 @@ export default function TimerPage() {
                 >
                   New Scramble
                 </button>
+                <button
+                  onClick={() => router.push('/timer/multiplayer')}
+                  title="Multiplayer Racing"
+                  aria-label="Multiplayer Racing"
+                  style={{
+                    background: 'transparent', color: C.text,
+                    border: `1px solid ${C.border}`, borderRadius: 8,
+                    padding: '0.32rem 0.6rem', fontSize: '0.78rem',
+                    fontFamily: 'inherit', cursor: 'pointer', fontWeight: 600,
+                    display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
+                    transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; e.currentTarget.style.borderColor = C.borderHi; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.text; e.currentTarget.style.borderColor = C.border; }}
+                >
+                  <span aria-hidden>👥</span> Race
+                </button>
                 <GanButton
                   state={gan.state}
                   onConnect={gan.connect}
@@ -1612,17 +1629,30 @@ export default function TimerPage() {
                       {currentSession?.name ?? 'Default'}
                     </div>
                   </div>
-                  <button
-                    onClick={() => { setNewSessionName(''); setSessionPanelOpen(true); }}
-                    aria-label="Sessions"
-                    title="Sessions"
-                    style={{
-                      width: 34, height: 34, borderRadius: 999,
-                      background: 'transparent', border: `1px solid ${C.border}`,
-                      color: C.muted, cursor: 'pointer',
-                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    }}
-                  ><IconPlus size={16} /></button>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <button
+                      onClick={() => router.push('/timer/multiplayer')}
+                      aria-label="Multiplayer Racing"
+                      title="Multiplayer Racing"
+                      style={{
+                        width: 34, height: 34, borderRadius: 999,
+                        background: 'transparent', border: `1px solid ${C.border}`,
+                        color: C.muted, cursor: 'pointer', fontSize: 16,
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      }}
+                    ><span aria-hidden>👥</span></button>
+                    <button
+                      onClick={() => { setNewSessionName(''); setSessionPanelOpen(true); }}
+                      aria-label="Sessions"
+                      title="Sessions"
+                      style={{
+                        width: 34, height: 34, borderRadius: 999,
+                        background: 'transparent', border: `1px solid ${C.border}`,
+                        color: C.muted, cursor: 'pointer',
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      }}
+                    ><IconPlus size={16} /></button>
+                  </div>
                 </div>
 
                 {/* Scramble row + refresh */}
