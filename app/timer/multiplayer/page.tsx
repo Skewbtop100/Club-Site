@@ -1583,13 +1583,20 @@ function RacingScreen({
     return out;
   }, [room.solves, userId]);
 
+  // Sync gating — single source of truth, applied identically on every
+  // breakpoint via the shared `isWaitingForOpponents` flag below.
+  //
+  //   canProceed: myIndex <= minOpponent + 1  (1-ahead allowed)
+  //   wait:      myIndex >  minOpponent + 1  (≥2-ahead → wait)
+  //
+  // Where myIndex = number of solves I have CONFIRMED (= members[me].currentSolve).
   const otherCurrents = useMemo(() => {
     return Object.entries(room.members || {})
       .filter(([uid]) => uid !== userId)
       .map(([, m]) => m.currentSolve);
   }, [room.members, userId]);
   const minOthers = otherCurrents.length === 0 ? Number.POSITIVE_INFINITY : Math.min(...otherCurrents);
-  const isWaitingForOpponents = otherCurrents.length > 0 && (myCurrent - minOthers) >= 1 && myCurrent < SOLVES_PER_ROUND;
+  const isWaitingForOpponents = otherCurrents.length > 0 && (myCurrent - minOthers) >= 2 && myCurrent < SOLVES_PER_ROUND;
 
   const isRoundDone = myCurrent >= SOLVES_PER_ROUND;
   const currentScramble = !isRoundDone ? (room.scrambles?.[String(myCurrent)] ?? '') : '';
@@ -1910,11 +1917,19 @@ function MobileRacingLayout({
   const roundLabel = room.roundName || getRoundName(room.round, room.maxRounds);
   void prefs;
 
+  // Bottom tab bar is rendered position: fixed so the layout never scrolls
+  // (mobile browser chrome / safe area no longer pushes content). The
+  // container reserves matching space at the bottom via paddingBottom.
+  const MP_NAV_BASE = 56; // px — intrinsic tab-button height
+
   return (
     <div style={{
       flex: '1 1 auto', minHeight: 0, width: '100%',
       display: 'flex', flexDirection: 'column',
       background: C.bg,
+      paddingBottom: `calc(${MP_NAV_BASE}px + env(safe-area-inset-bottom))`,
+      overflow: 'hidden',
+      position: 'relative',
     }}>
       {/* Header: ⚙ left, ⏸ right. Subtle, low-contrast — doesn't distract. */}
       <header style={{
@@ -2052,15 +2067,20 @@ function MobileRacingLayout({
         />
       </div>
 
-      {/* Bottom 2-tab nav — frosted glass. */}
+      {/* Bottom 2-tab nav — fixed to the viewport bottom so it never gets
+          pushed out of view by mobile browser chrome. paddingBottom inside
+          the nav handles the iOS home-indicator safe area. */}
       <nav style={{
+        position: 'fixed',
+        bottom: 0, left: 0, right: 0,
         display: 'grid', gridTemplateColumns: '1fr 1fr',
         background: 'rgba(20, 20, 20, 0.78)',
         backdropFilter: 'blur(12px) saturate(150%)',
         WebkitBackdropFilter: 'blur(12px) saturate(150%)',
         borderTop: `1px solid ${C.border}`,
         paddingBottom: 'env(safe-area-inset-bottom)',
-        flexShrink: 0,
+        minHeight: MP_NAV_BASE,
+        zIndex: 50,
       }}>
         <RaceTabButton active={tab === 'timer'} onClick={() => setTab('timer')} icon={<StopwatchIcon />} label="Timer" />
         <RaceTabButton active={tab === 'opponents'} onClick={() => setTab('opponents')} icon={<UsersIcon />} label="Opponents" />
