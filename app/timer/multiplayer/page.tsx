@@ -2579,8 +2579,16 @@ function OpponentsPanel({
             display: 'flex', flexDirection: 'column', gap: '0.4rem',
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.5rem' }}>
-              <div style={{ fontSize: '0.85rem', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {r.name}{isYou ? ' (you)' : ''}
+              <div style={{
+                fontSize: '0.85rem', fontWeight: 700,
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
+                minWidth: 0,
+              }}>
+                {r.uid === room.host && <HostBadge size={12} />}
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {r.name}{isYou ? ' (you)' : ''}
+                </span>
               </div>
               <div style={{
                 fontFamily: 'JetBrains Mono, monospace', fontSize: '0.78rem', fontWeight: 700,
@@ -2988,8 +2996,11 @@ function ResultsScreen({
             <div className="mp-champion-name" style={{
               fontSize: 'clamp(1.6rem, 5vw, 2.4rem)', fontWeight: 800,
               color: C.success, letterSpacing: '-0.01em',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              gap: '0.5rem',
             }}>
-              {champion.name}
+              {champion.uid === room.host && <HostBadge size={22} />}
+              <span>{champion.name}</span>
             </div>
             <div style={{ fontSize: '0.85rem', color: C.muted }}>
               {champion.points} point{champion.points === 1 ? '' : 's'}
@@ -3006,7 +3017,12 @@ function ResultsScreen({
               {ranked.map((r, i) => (
                 <tr key={r.uid} style={{ background: r.uid === userId ? C.accentDim : 'transparent' }}>
                   <Td><span style={{ color: i === 0 ? C.success : i < 3 ? C.accent : C.text, fontWeight: 700 }}>{r.dnf ? '—' : i + 1}</span></Td>
-                  <Td>{r.name}</Td>
+                  <Td>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                      {r.uid === room.host && <HostBadge size={13} />}
+                      {r.name}
+                    </span>
+                  </Td>
                   <Td align="right" style={{ color: r.dnf ? C.danger : C.text, fontFamily: 'JetBrains Mono, monospace' }}>
                     {r.dnf ? 'DNF' : fmtMs(r.average, false, 2)}
                   </Td>
@@ -3026,7 +3042,12 @@ function ResultsScreen({
               {cumulative.map((r, i) => (
                 <tr key={r.uid} style={{ background: r.uid === userId ? C.accentDim : 'transparent' }}>
                   <Td><span style={{ color: i === 0 ? C.success : i < 3 ? C.accent : C.text, fontWeight: 700 }}>{i + 1}</span></Td>
-                  <Td>{r.name}</Td>
+                  <Td>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                      {r.uid === room.host && <HostBadge size={13} />}
+                      {r.name}
+                    </span>
+                  </Td>
                   <Td align="right" style={{ fontFamily: 'JetBrains Mono, monospace' }}>{r.points}</Td>
                 </tr>
               ))}
@@ -3099,6 +3120,7 @@ function ResultsScreen({
             dnf={r.dnf}
             points={r.points}
             isMe={r.uid === userId}
+            isHost={r.uid === room.host}
             isMobile={isMobile}
             isLast={i === ranked.length - 1}
           />
@@ -3129,6 +3151,7 @@ function ResultsScreen({
               points={r.points}
               diff={r.points - leaderPoints}
               isMe={r.uid === userId}
+              isHost={r.uid === room.host}
               isLast={i === cumulative.length - 1}
             />
           ))}
@@ -3242,7 +3265,7 @@ function MedalBadge({ rank }: { rank: number }) {
 }
 
 function RoundResultRow({
-  rank, name, solves, average, dnf, points, isMe, isMobile, isLast,
+  rank, name, solves, average, dnf, points, isMe, isHost, isMobile, isLast,
 }: {
   rank: number;
   name: string;
@@ -3251,6 +3274,7 @@ function RoundResultRow({
   dnf: boolean;
   points: number;
   isMe: boolean;
+  isHost: boolean;
   isMobile: boolean;
   isLast: boolean;
 }) {
@@ -3271,8 +3295,12 @@ function RoundResultRow({
           <div style={{
             fontSize: '0.95rem', fontWeight: 700, color: C.text,
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            display: 'flex', alignItems: 'center', gap: '0.35rem', minWidth: 0,
           }}>
-            {name}{isMe ? <span style={{ color: C.accent, fontWeight: 700, marginLeft: '0.3rem' }}>(you)</span> : null}
+            {isHost && <HostBadge size={14} />}
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {name}{isMe ? <span style={{ color: C.accent, fontWeight: 700, marginLeft: '0.3rem' }}>(you)</span> : null}
+            </span>
           </div>
           <div style={{
             fontSize: '0.6rem', color: C.muted,
@@ -3331,13 +3359,14 @@ function RoundResultRow({
 }
 
 function StandingsRow({
-  rank, name, points, diff, isMe, isLast,
+  rank, name, points, diff, isMe, isHost, isLast,
 }: {
   rank: number;
   name: string;
   points: number;
   diff: number;       // points relative to leader; ≤0
   isMe: boolean;
+  isHost: boolean;
   isLast: boolean;
 }) {
   const isLeader = rank === 1;
@@ -3353,8 +3382,12 @@ function StandingsRow({
         flex: 1, minWidth: 0,
         fontSize: '0.92rem', fontWeight: 700, color: C.text,
         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        display: 'flex', alignItems: 'center', gap: '0.35rem',
       }}>
-        {name}{isMe ? <span style={{ color: C.accent, fontWeight: 700, marginLeft: '0.3rem' }}>(you)</span> : null}
+        {isHost && <HostBadge size={13} />}
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {name}{isMe ? <span style={{ color: C.accent, fontWeight: 700, marginLeft: '0.3rem' }}>(you)</span> : null}
+        </span>
       </div>
       <div style={{
         display: 'flex', alignItems: 'baseline', gap: '0.45rem', flexShrink: 0,
@@ -3629,17 +3662,10 @@ function MemberRow({
       borderRadius: 10,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', minWidth: 0 }}>
-        {isHost && (
-          <span
-            title="Host"
-            aria-label="Host"
-            style={{ color: C.warn, display: 'inline-flex', alignItems: 'center', flex: '0 0 auto' }}
-          >
-            <CrownIcon />
-          </span>
-        )}
+        {isHost && <HostBadge />}
         <span style={{ fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</span>
-        {isYou && <Pill color={isHost ? C.warn : C.muted}>You</Pill>}
+        {isYou && isHost && <Pill color={C.warn}>HOST</Pill>}
+        {isYou && !isHost && <Pill color={C.muted}>You</Pill>}
       </div>
       <div>{right}</div>
     </div>
@@ -3711,6 +3737,26 @@ function CrownIcon({ size = 14 }: { size?: number }) {
     >
       <path d="M3 7l4 3 5-6 5 6 4-3-2 12H5L3 7zm2.7 10h12.6l.4-2H5.3l.4 2z" />
     </svg>
+  );
+}
+
+// Inline gold crown next to a host's name. Use everywhere the host's name
+// appears so the role is identifiable at a glance.
+function HostBadge({ size = 14 }: { size?: number }) {
+  return (
+    <span
+      title="Host"
+      aria-label="Host"
+      style={{
+        color: C.warn,
+        display: 'inline-flex',
+        alignItems: 'center',
+        flex: '0 0 auto',
+        verticalAlign: 'middle',
+      }}
+    >
+      <CrownIcon size={size} />
+    </span>
   );
 }
 
