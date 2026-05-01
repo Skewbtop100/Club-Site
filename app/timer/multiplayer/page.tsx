@@ -111,6 +111,9 @@ interface MemberData {
   totalPoints?: number;
 }
 
+const ROOM_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+const LAST_ROOM_KEY = 'mp_last_room';
+
 interface RoomData {
   host: string;
   event: string;
@@ -119,6 +122,7 @@ interface RoomData {
   round: number;
   maxRounds: number;
   createdAt: number;
+  expiresAt?: number;
   countdownStart?: number | null;
   raceStart?: number | null;
   members: Record<string, MemberData>;
@@ -153,6 +157,10 @@ function MultiplayerPageInner() {
   // Active room
   const [roomCode, setRoomCode] = useState<string>('');
   const [room, setRoom] = useState<RoomData | null>(null);
+
+  // Saved room code from a prior session that's still active (for the
+  // "Rejoin {code}" lobby card). Empty string = nothing to rejoin.
+  const [pendingRejoin, setPendingRejoin] = useState<string>('');
 
   // Responsive: JS-based mobile detection (≤900px). Initial render is desktop;
   // the effect runs on mount and on resize.
@@ -189,6 +197,38 @@ function MultiplayerPageInner() {
     setView('join');
   }, [searchParams]);
 
+  // Probe a saved last-room (if any) on first mount. If it still exists
+  // and hasn't expired, surface a "Rejoin XXX" button on the lobby.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const saved = localStorage.getItem(LAST_ROOM_KEY);
+        if (!saved) return;
+        const code = saved.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+        if (code.length !== 6) {
+          localStorage.removeItem(LAST_ROOM_KEY);
+          return;
+        }
+        const snap = await get(ref(rtdb, `rooms/${code}`));
+        if (cancelled) return;
+        if (!snap.exists()) {
+          localStorage.removeItem(LAST_ROOM_KEY);
+          return;
+        }
+        const data = snap.val() as RoomData;
+        if (data.expiresAt != null && data.expiresAt < Date.now()) {
+          localStorage.removeItem(LAST_ROOM_KEY);
+          return;
+        }
+        setPendingRejoin(code);
+      } catch (err) {
+        console.error('[mp] rejoin probe failed', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // Subscribe to room
   useEffect(() => {
     if (!roomCode) return;
@@ -196,11 +236,23 @@ function MultiplayerPageInner() {
     const off = onValue(r, snap => {
       const v = snap.val() as RoomData | null;
       if (!v) {
-        // Room deleted (host left, etc.)
+        // Room no longer exists.
         setRoom(null);
         setRoomCode('');
         setView('lobby');
         setErrorMsg('Room no longer exists.');
+        try { localStorage.removeItem(LAST_ROOM_KEY); } catch {}
+        return;
+      }
+      // Expiry check — rooms older than 24h are considered stale.
+      if (v.expiresAt != null && v.expiresAt < Date.now()) {
+        setRoom(null);
+        setRoomCode('');
+        setView('lobby');
+        setErrorMsg('Room has expired.');
+        try { localStorage.removeItem(LAST_ROOM_KEY); } catch {}
+        // Best-effort delete; ignore failures.
+        remove(ref(rtdb, `rooms/${roomCode}`)).catch(() => {});
         return;
       }
       setRoom(v);
@@ -208,21 +260,15 @@ function MultiplayerPageInner() {
     return () => off();
   }, [roomCode]);
 
-  // Auto-cleanup: when our connection drops, remove our member entry.
-  // If we're the host and we leave, delete the whole room (everyone returns to lobby).
+  // Auto-cleanup on disconnect: only remove our own member entry. We
+  // intentionally do NOT delete the room when the host disconnects, so
+  // rooms persist across reloads and a returning host can resume.
   useEffect(() => {
     if (!roomCode || !userId || !room) return;
-    const isHost = room.host === userId;
     const memberRef = ref(rtdb, `rooms/${roomCode}/members/${userId}`);
-    const roomRef = ref(rtdb, `rooms/${roomCode}`);
     onDisconnect(memberRef).remove();
-    if (isHost) {
-      onDisconnect(roomRef).remove();
-    }
     return () => {
-      // Cancel disconnect handlers when this effect re-runs (host change, etc.)
       onDisconnect(memberRef).cancel();
-      onDisconnect(roomRef).cancel();
     };
   }, [roomCode, userId, room?.host]);
 
@@ -253,6 +299,7 @@ function MultiplayerPageInner() {
         const roomRef = ref(rtdb, `rooms/${code}`);
         const snap = await get(roomRef);
         if (snap.exists()) { console.log('[mp] code collision, retrying'); continue; }
+        const now = Date.now();
         const initial: RoomData = {
           host: uid,
           event: '333',
@@ -260,7 +307,8 @@ function MultiplayerPageInner() {
           status: 'waiting',
           round: 1,
           maxRounds: 5,
-          createdAt: Date.now(),
+          createdAt: now,
+          expiresAt: now + ROOM_TTL_MS,
           countdownStart: null,
           raceStart: null,
           members: {
@@ -277,6 +325,7 @@ function MultiplayerPageInner() {
         };
         await set(roomRef, initial);
         console.log('[mp] room created', code);
+        try { localStorage.setItem(LAST_ROOM_KEY, code); } catch {}
         setRoomCode(code);
         setView('room');
         return;
@@ -311,6 +360,13 @@ function MultiplayerPageInner() {
         setErrorMsg(`Room ${code} not found.`);
         return;
       }
+      const data = snap.val() as RoomData;
+      if (data.expiresAt != null && data.expiresAt < Date.now()) {
+        setErrorMsg(`Room ${code} has expired.`);
+        try { localStorage.removeItem(LAST_ROOM_KEY); } catch {}
+        remove(roomRef).catch(() => {});
+        return;
+      }
       const memberRef = ref(rtdb, `rooms/${code}/members/${uid}`);
       const memberData: MemberData = {
         name,
@@ -323,6 +379,7 @@ function MultiplayerPageInner() {
       };
       await set(memberRef, memberData);
       console.log('[mp] joined', code);
+      try { localStorage.setItem(LAST_ROOM_KEY, code); } catch {}
       setRoomCode(code);
       setView('room');
     } catch (err) {
@@ -334,16 +391,78 @@ function MultiplayerPageInner() {
 
   const leaveRoom = useCallback(async () => {
     if (!roomCode || !userId) return;
-    const isHost = room?.host === userId;
-    if (isHost) {
-      await remove(ref(rtdb, `rooms/${roomCode}`));
-    } else {
+    // Always just remove our own member entry — never delete the room.
+    // Rooms persist for 24h so a returning host can resume; the cleanup
+    // happens via the expiresAt check on next load.
+    try {
       await remove(ref(rtdb, `rooms/${roomCode}/members/${userId}`));
+    } catch (err) {
+      console.error('[mp] leaveRoom error', err);
     }
+    try { localStorage.removeItem(LAST_ROOM_KEY); } catch {}
     setRoom(null);
     setRoomCode('');
     setView('lobby');
-  }, [roomCode, userId, room?.host]);
+    setPendingRejoin('');
+  }, [roomCode, userId]);
+
+  // Rejoin a previously-active room. Re-adds our member entry (which was
+  // removed by onDisconnect when we last left) and switches to the room view.
+  const rejoinRoom = useCallback(async () => {
+    setErrorMsg('');
+    if (!pendingRejoin) return;
+    let uid = userId;
+    if (!uid) {
+      uid = getUserId();
+      setUserId(uid);
+    }
+    if (!uid) { setErrorMsg('Could not establish a user id.'); return; }
+    const name = (displayName || localStorage.getItem('mp_display_name') || '').trim();
+    if (!name) {
+      // No saved name — fall back to manual join with code pre-filled.
+      setJoinCode(pendingRejoin);
+      setView('join');
+      return;
+    }
+    try {
+      const roomRef = ref(rtdb, `rooms/${pendingRejoin}`);
+      const snap = await get(roomRef);
+      if (!snap.exists()) {
+        setErrorMsg('That room no longer exists.');
+        try { localStorage.removeItem(LAST_ROOM_KEY); } catch {}
+        setPendingRejoin('');
+        return;
+      }
+      const data = snap.val() as RoomData;
+      if (data.expiresAt != null && data.expiresAt < Date.now()) {
+        setErrorMsg('That room has expired.');
+        try { localStorage.removeItem(LAST_ROOM_KEY); } catch {}
+        setPendingRejoin('');
+        remove(roomRef).catch(() => {});
+        return;
+      }
+      const memberRef = ref(rtdb, `rooms/${pendingRejoin}/members/${uid}`);
+      const existing = data.members?.[uid];
+      // Preserve cumulative points etc. when the host (or anyone) returns.
+      const memberData: MemberData = {
+        name,
+        ready: existing?.ready ?? false,
+        time: existing?.time ?? null,
+        penalty: existing?.penalty ?? null,
+        finishedAt: existing?.finishedAt ?? null,
+        startedAt: existing?.startedAt ?? null,
+        totalPoints: existing?.totalPoints ?? 0,
+      };
+      await set(memberRef, memberData);
+      setRoomCode(pendingRejoin);
+      setView('room');
+      setPendingRejoin('');
+    } catch (err) {
+      console.error('[mp] rejoinRoom error', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setErrorMsg(`Couldn't rejoin: ${msg}`);
+    }
+  }, [pendingRejoin, userId, displayName]);
 
   // Host controls
   const setEvent = useCallback(async (eventId: string) => {
@@ -509,6 +628,12 @@ function MultiplayerPageInner() {
         {view === 'lobby' && (
           <Lobby
             isMobile={isMobile}
+            pendingRejoin={pendingRejoin}
+            onRejoin={rejoinRoom}
+            onDismissRejoin={() => {
+              try { localStorage.removeItem(LAST_ROOM_KEY); } catch {}
+              setPendingRejoin('');
+            }}
             onCreate={() => { setErrorMsg(''); setView('create'); }}
             onJoin={() => { setErrorMsg(''); setView('join'); }}
           />
@@ -583,7 +708,16 @@ function TopBar({ roomCode, onBack }: { roomCode: string; onBack: () => void }) 
 }
 
 // ── Lobby ─────────────────────────────────────────────────────────────────
-function Lobby({ isMobile, onCreate, onJoin }: { isMobile: boolean; onCreate: () => void; onJoin: () => void }) {
+function Lobby({
+  isMobile, pendingRejoin, onRejoin, onDismissRejoin, onCreate, onJoin,
+}: {
+  isMobile: boolean;
+  pendingRejoin?: string;
+  onRejoin?: () => void;
+  onDismissRejoin?: () => void;
+  onCreate: () => void;
+  onJoin: () => void;
+}) {
   return (
     <div style={{
       flex: '1 1 auto',
@@ -601,6 +735,40 @@ function Lobby({ isMobile, onCreate, onJoin }: { isMobile: boolean; onCreate: ()
           Race friends in real time. Same scramble, live leaderboard.
         </div>
       </div>
+
+      {pendingRejoin && (
+        <div style={{
+          width: '100%', maxWidth: 420,
+          background: C.accentDim, border: `1px solid ${C.borderHi}`,
+          borderRadius: 12, padding: '0.85rem 1rem',
+          display: 'flex', flexDirection: 'column', gap: '0.6rem',
+        }}>
+          <div style={{ fontSize: '0.78rem', color: C.muted, textAlign: 'center' }}>
+            You were in room{' '}
+            <span style={{
+              fontFamily: 'JetBrains Mono, monospace', color: C.accent,
+              fontWeight: 800, letterSpacing: '0.15em',
+            }}>{pendingRejoin}</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.5rem' }}>
+            <BigButton accent onClick={onRejoin ?? (() => {})}>
+              Rejoin {pendingRejoin}
+            </BigButton>
+            <button
+              onClick={onDismissRejoin}
+              aria-label="Dismiss"
+              title="Dismiss"
+              style={{
+                background: 'transparent', color: C.muted,
+                border: `1px solid ${C.border}`, borderRadius: 10,
+                padding: '0 0.85rem', fontSize: '1rem',
+                fontFamily: 'inherit', cursor: 'pointer', fontWeight: 700,
+              }}
+            >×</button>
+          </div>
+        </div>
+      )}
+
       <div className="mp-lobby-buttons" style={{
         display: 'flex',
         flexDirection: isMobile ? 'column' : 'row',
@@ -651,6 +819,16 @@ function JoinForm({
   onSubmit: () => void; onBack: () => void;
 }) {
   const isInvited = !!invitedCode;
+  const [scanning, setScanning] = useState(false);
+  const [scanFound, setScanFound] = useState<string>('');
+
+  const handleScanResult = useCallback((scanned: string) => {
+    setCode(scanned);
+    setScanFound(scanned);
+    setScanning(false);
+    window.setTimeout(() => setScanFound(''), 2500);
+  }, [setCode]);
+
   return (
     <FormShell isMobile={isMobile} title={isInvited ? 'Join Race' : 'Join Room'} onBack={onBack}>
       {isInvited ? (
@@ -668,17 +846,49 @@ function JoinForm({
           }}>{invitedCode}</div>
         </div>
       ) : (
-        <Field label="Room code">
-          <input
-            autoFocus
-            value={code}
-            onChange={e => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6))}
-            placeholder="ABC123"
-            maxLength={6}
-            onKeyDown={e => { if (e.key === 'Enter') onSubmit(); }}
-            style={{ ...inputStyle, fontFamily: 'JetBrains Mono, monospace', letterSpacing: '0.2em', textAlign: 'center', fontSize: '1.25rem' }}
-          />
-        </Field>
+        <>
+          <Field label="Room code">
+            <input
+              autoFocus
+              value={code}
+              onChange={e => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6))}
+              placeholder="ABC123"
+              maxLength={6}
+              onKeyDown={e => { if (e.key === 'Enter') onSubmit(); }}
+              style={{ ...inputStyle, fontFamily: 'JetBrains Mono, monospace', letterSpacing: '0.2em', textAlign: 'center', fontSize: '1.25rem' }}
+            />
+          </Field>
+          {scanFound && (
+            <div style={{
+              background: C.successDim, border: `1px solid ${C.success}`,
+              color: C.success, borderRadius: 10, padding: '0.55rem 0.75rem',
+              fontSize: '0.82rem', fontWeight: 700, textAlign: 'center',
+            }}>
+              Room code found: <span style={{ fontFamily: 'JetBrains Mono, monospace', letterSpacing: '0.18em' }}>{scanFound}</span>
+            </div>
+          )}
+          {!scanning ? (
+            <button
+              onClick={() => setScanning(true)}
+              type="button"
+              style={{
+                background: C.cardAlt, color: C.text,
+                border: `1px solid ${C.border}`, borderRadius: 10,
+                padding: '0.6rem 0.85rem', fontSize: '0.85rem',
+                fontFamily: 'inherit', cursor: 'pointer', fontWeight: 700,
+                letterSpacing: '0.02em',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem',
+              }}
+            >
+              <CameraIcon /> Scan QR Code
+            </button>
+          ) : (
+            <QrScanner
+              onResult={handleScanResult}
+              onCancel={() => setScanning(false)}
+            />
+          )}
+        </>
       )}
       <Field label="Display name">
         <input
@@ -693,6 +903,138 @@ function JoinForm({
       </Field>
       <BigButton accent onClick={onSubmit}>{isInvited ? 'Join Race' : 'Join'}</BigButton>
     </FormShell>
+  );
+}
+
+// ── QR scanner (uses html5-qrcode, dynamically imported) ─────────────────
+function extractRoomCode(decoded: string): string | null {
+  // Try parsing as URL first (the QR we generate is a URL with ?join=XXX).
+  try {
+    const url = new URL(decoded);
+    const join = url.searchParams.get('join');
+    if (join) {
+      const c = join.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+      if (c.length === 6) return c;
+    }
+  } catch {}
+  // Fall back: bare 6-char alphanumeric.
+  const bare = decoded.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+  if (bare.length === 6) return bare;
+  return null;
+}
+
+const QR_READER_ID = 'mp-qr-reader';
+
+function QrScanner({
+  onResult, onCancel,
+}: {
+  onResult: (code: string) => void;
+  onCancel: () => void;
+}) {
+  const [error, setError] = useState<string>('');
+  const [starting, setStarting] = useState(true);
+  // Track the live scanner so the unmount handler can stop the camera.
+  const scannerRef = useRef<{ stop: () => Promise<void>; clear: () => void } | null>(null);
+  const onResultRef = useRef(onResult);
+  useEffect(() => { onResultRef.current = onResult; }, [onResult]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let scanner: { stop: () => Promise<void>; clear: () => void } | null = null;
+
+    (async () => {
+      try {
+        const mod = await import('html5-qrcode');
+        if (cancelled) return;
+        const { Html5Qrcode } = mod;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        scanner = new (Html5Qrcode as any)(QR_READER_ID);
+        scannerRef.current = scanner;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (scanner as any).start(
+          { facingMode: 'environment' },
+          { fps: 10, qrbox: { width: 240, height: 240 } },
+          (decodedText: string) => {
+            const code = extractRoomCode(decodedText);
+            if (code) onResultRef.current(code);
+          },
+          () => { /* ignore per-frame decode errors */ },
+        );
+        if (cancelled) return;
+        setStarting(false);
+      } catch (err) {
+        console.error('[mp] QR scanner start failed', err);
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/Permission|denied|NotAllowed/i.test(msg)) {
+          setError('Camera access denied. Enter code manually.');
+        } else if (/NotFound|no camera/i.test(msg)) {
+          setError('No camera found on this device. Enter code manually.');
+        } else {
+          setError(`Couldn't start scanner: ${msg}`);
+        }
+        setStarting(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      const s = scannerRef.current;
+      if (s) {
+        s.stop()
+          .then(() => { try { s.clear(); } catch {} })
+          .catch(() => { try { s.clear(); } catch {} });
+        scannerRef.current = null;
+      }
+    };
+  }, []);
+
+  return (
+    <div style={{
+      background: C.cardAlt, border: `1px solid ${C.border}`,
+      borderRadius: 12, padding: '0.6rem',
+      display: 'flex', flexDirection: 'column', gap: '0.5rem',
+    }}>
+      {error ? (
+        <div style={{
+          color: C.danger, fontSize: '0.82rem',
+          padding: '0.6rem 0.4rem', textAlign: 'center', fontWeight: 600,
+        }}>{error}</div>
+      ) : (
+        <>
+          <div
+            id={QR_READER_ID}
+            style={{
+              width: '100%', minHeight: 240,
+              background: '#000', borderRadius: 8, overflow: 'hidden',
+            }}
+          />
+          {starting && (
+            <div style={{ fontSize: '0.78rem', color: C.muted, textAlign: 'center' }}>
+              Starting camera…
+            </div>
+          )}
+        </>
+      )}
+      <button
+        onClick={onCancel}
+        type="button"
+        style={{
+          background: 'transparent', color: C.muted,
+          border: `1px solid ${C.border}`, borderRadius: 8,
+          padding: '0.5rem 0.75rem', fontSize: '0.82rem',
+          fontFamily: 'inherit', cursor: 'pointer', fontWeight: 600,
+        }}
+      >Cancel Scan</button>
+    </div>
+  );
+}
+
+function CameraIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+      <circle cx="12" cy="13" r="4" />
+    </svg>
   );
 }
 
