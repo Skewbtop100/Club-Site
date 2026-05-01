@@ -26,6 +26,10 @@ const QIYI_UUID_SUFFIX  = '-0000-1001-8001-00805f9b07d0';
 const QIYI_CHRCT_WRITE  = '00000001' + QIYI_UUID_SUFFIX;
 const QIYI_CHRCT_READ   = '00000002' + QIYI_UUID_SUFFIX;
 const QIYI_AES_KEY      = new Uint8Array(16).fill(0x77);
+// csTimer line 9: QIYI_CIC_LIST = [0x0504]. Bluetooth Company Identifier
+// Code that the QiYi BLE module advertises. NOT to be confused with the
+// MAC prefix CC:A1 (an OUI on the MAC, not a CIC).
+const QIYI_CIC          = 0x0504;
 
 // Device-name regex straight from csTimer line 233: tail of `QY-Timer-XXXX-1234`
 // or `QY-Adapter-XXXX-1234`, capturing the last 4 hex chars.
@@ -115,6 +119,66 @@ function fallbackMacFromName(name: string): string | null {
   const tail = m[1];
   const prefix = name.startsWith('QY-Adapter') ? 'CC:A8' : 'CC:A1';
   return `${prefix}:00:00:${tail.slice(0, 2)}:${tail.slice(2, 4)}`;
+}
+
+// Try to capture the device MAC from a single BLE advertisement event before
+// gatt.connect() is called. Returns "AA:BB:CC:DD:EE:FF" or null if either:
+//   - the platform doesn't support watchAdvertisements()
+//   - no advertisement with CIC 0x0504 arrives within 3s
+//   - the manufacturer data is shorter than 6 bytes
+async function readMacFromAdvertisement(device: BluetoothDevice): Promise<string | null> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const dev = device as any;
+  if (typeof dev.watchAdvertisements !== 'function') {
+    // eslint-disable-next-line no-console
+    console.log('[QiYi] watchAdvertisements not supported on this device/browser');
+    return null;
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const cleanup = () => {
+      try { device.removeEventListener('advertisementreceived', listener as EventListener); } catch { /* ignore */ }
+      try { dev.unwatchAdvertisements?.(); } catch { /* ignore */ }
+      if (timer) { clearTimeout(timer); timer = null; }
+    };
+    const listener = (e: Event) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const evt = e as any;
+      const mfData: Map<number, DataView> | undefined = evt.manufacturerData;
+      // eslint-disable-next-line no-console
+      console.log('Manufacturer data:', mfData);
+      if (!mfData) return;
+      const dv = mfData.get(QIYI_CIC);
+      if (!dv || dv.byteLength < 6) return;
+      const bytes: string[] = [];
+      // csTimer reads i=5..0 (reversed order) to build the colon-MAC string.
+      for (let i = 5; i >= 0; i--) {
+        bytes.push(dv.getUint8(i).toString(16).padStart(2, '0'));
+      }
+      const mac = bytes.join(':').toUpperCase();
+      if (!settled) {
+        settled = true;
+        cleanup();
+        resolve(mac);
+      }
+    };
+    device.addEventListener('advertisementreceived', listener as EventListener);
+    Promise.resolve(dev.watchAdvertisements()).catch((err: unknown) => {
+      // eslint-disable-next-line no-console
+      console.warn('[QiYi] watchAdvertisements() failed', err);
+      if (!settled) { settled = true; cleanup(); resolve(null); }
+    });
+    timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        cleanup();
+        // eslint-disable-next-line no-console
+        console.log('[QiYi] no advertisement with CIC 0x0504 within 3s');
+        resolve(null);
+      }
+    }, 3000);
+  });
 }
 
 export function useQiyiTimer(callbacks: QiyiCallbacks) {
@@ -324,17 +388,21 @@ export function useQiyiTimer(callbacks: QiyiCallbacks) {
     setState('connecting');
 
     try {
-      // QiYi timers advertise as "QY-Timer-V2-XXXX" or similar. Accept the
-      // four prefixes seen in the wild — case-sensitive in Web Bluetooth, so
-      // include both `QY-Timer` and `QY-TIMER`.
-      const requestOpts: RequestDeviceOptions = {
+      // Filters (OR'd by the picker): manufacturer-data CIC filter catches
+      // QiYi devices even when the broadcast name is missing/clipped on
+      // some platforms; namePrefix filters catch the common firmware names.
+      // optionalManufacturerData declares the CIC we intend to read after
+      // pairing (required by Chrome to access manufacturerData later).
+      const requestOpts: RequestDeviceOptions & { optionalManufacturerData?: number[] } = {
         filters: [
-          { namePrefix: 'QY-Timer'   },  // QY-Timer-V2-XXXX, QY-Timer-V3-XXXX, …
-          { namePrefix: 'QY-Adapter' },  // QY-Adapter-XXXX-NNNN
-          { namePrefix: 'QY-TIMER'   },  // uppercase variant
-          { namePrefix: 'QiYi-Timer' },  // alternative naming
+          { manufacturerData: [{ companyIdentifier: QIYI_CIC }] }, // 0x0504 — canonical
+          { namePrefix: 'QY-Timer'   },  // QY-Timer-V2-XXXX, V3-XXXX, …
+          { namePrefix: 'QY-Adapter' },
+          { namePrefix: 'QY-TIMER'   },
+          { namePrefix: 'QiYi-Timer' },
         ],
         optionalServices: [QIYI_SERVICE],
+        optionalManufacturerData: [QIYI_CIC],
       };
       // eslint-disable-next-line no-console
       console.log('[QiYi] scanning for devices…');
@@ -350,6 +418,16 @@ export function useQiyiTimer(callbacks: QiyiCallbacks) {
       console.log('[QiYi] Selected device:', { name: device.name, id: device.id });
       setDeviceName(device.name ?? 'QiYi Timer');
       deviceRef.current = device;
+
+      // ── MAC extraction via watchAdvertisements (preferred) ──────────────
+      // Devices broadcast manufacturer data containing 6 MAC bytes (reversed)
+      // until they're connected. We listen for one advertisement BEFORE
+      // calling gatt.connect(), since post-connect they stop broadcasting.
+      // Falls back to the device-name-derived MAC if no event arrives within
+      // 3 seconds or the API is unavailable.
+      const macFromAdv = await readMacFromAdvertisement(device);
+      // eslint-disable-next-line no-console
+      console.log('[QiYi] MAC from advertisement:', macFromAdv ?? '(none)');
 
       const onDisconnected = () => {
         // eslint-disable-next-line no-console
@@ -404,12 +482,19 @@ export function useQiyiTimer(callbacks: QiyiCallbacks) {
       console.log('[QiYi] starting notifications');
       await notifyChar.startNotifications();
 
-      // Determine MAC — Web Bluetooth doesn't surface manufacturer-data on
-      // Chrome stable, so fall back to the device-name-derived MAC.
+      // Decide which MAC to send in the handshake. Preference order:
+      //   1) Real MAC from the manufacturer-data advertisement (CIC 0x0504)
+      //   2) Fallback MAC built from "QY-Timer-V2-XXXX-NNNN" name pattern
+      //   3) All-zeros placeholder (last resort; firmware may reject)
       const fallback = device.name ? fallbackMacFromName(device.name) : null;
-      const mac = fallback ?? '00:00:00:00:00:00';
+      const mac = macFromAdv ?? fallback ?? '00:00:00:00:00:00';
+      const macSource = macFromAdv ? '(from advertisement)'
+        : fallback ? '(from name)'
+        : '(placeholder — neither advertisement nor name matched)';
       // eslint-disable-next-line no-console
-      console.log('[QiYi] using MAC', mac, fallback ? '(from name)' : '(placeholder — name didn\'t match QY pattern)');
+      console.log('Extracted MAC:', mac, macSource);
+      // eslint-disable-next-line no-console
+      console.log('[QiYi] using MAC', mac, macSource);
 
       // eslint-disable-next-line no-console
       console.log('[QiYi] sending hello');
