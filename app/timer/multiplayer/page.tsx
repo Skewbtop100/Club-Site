@@ -942,19 +942,30 @@ function MultiplayerPageInner() {
   }, [room?.status, room?.members, room?.host, roomCode, userId]);
 
   // ── Render ──────────────────────────────────────────────────────────────
-  // Use 100dvh while racing so the layout fits exactly between mobile chrome
-  // (URL bar / safe-area / nav) without scrolling. Other views fall back to
-  // 100vh so a long lobby/results table can scroll naturally.
+  // While racing the page is locked to the visible viewport — height: 100dvh
+  // (dynamic viewport so iOS Safari URL-bar dynamics don't cause overflow),
+  // overflow hidden so the document body itself can never scroll, and safe-
+  // area paddings so notch / home-indicator never overlap the layout. Other
+  // views (lobby / create / join / waiting / results) fall back to 100vh
+  // and scroll normally.
   const isRacing = view === 'room' && room?.status === 'racing';
   return (
     <div style={{
       ...(isRacing
-        ? { height: '100dvh' }
+        ? {
+            // dvh tracks the visible viewport on mobile so URL-bar dynamics
+            // don't cause the layout to overflow. Older browsers without dvh
+            // (~Safari <15.4 / Chrome <108) gracefully degrade — still works,
+            // just with the classic vh quirk.
+            height: '100dvh',
+            paddingTop: 'env(safe-area-inset-top)',
+            paddingBottom: 'env(safe-area-inset-bottom)',
+            overflow: 'hidden',
+          }
         : { minHeight: '100vh' }),
       background: C.bg, color: C.text,
       fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
       display: 'flex', flexDirection: 'column',
-      overflow: isRacing ? 'hidden' : undefined,
     }}>
       {/* The racing screen renders its own header (settings + pause icons)
           on every breakpoint, so we suppress the global TopBar there. */}
@@ -1917,19 +1928,16 @@ function MobileRacingLayout({
   const roundLabel = room.roundName || getRoundName(room.round, room.maxRounds);
   void prefs;
 
-  // Bottom tab bar is rendered position: fixed so the layout never scrolls
-  // (mobile browser chrome / safe area no longer pushes content). The
-  // container reserves matching space at the bottom via paddingBottom.
-  const MP_NAV_BASE = 56; // px — intrinsic tab-button height
-
+  // Layout strategy: this container fills the parent (which is the page
+  // wrapper locked to 100dvh + safe-area paddings + overflow:hidden). Inside,
+  // a flex column distributes height; only the timer area takes flex:1, every
+  // other section is flex-shrink:0. Bottom nav lives in normal flow.
   return (
     <div style={{
       flex: '1 1 auto', minHeight: 0, width: '100%',
       display: 'flex', flexDirection: 'column',
       background: C.bg,
-      paddingBottom: `calc(${MP_NAV_BASE}px + env(safe-area-inset-bottom))`,
       overflow: 'hidden',
-      position: 'relative',
     }}>
       {/* Header: ⚙ left, ⏸ right. Subtle, low-contrast — doesn't distract. */}
       <header style={{
@@ -1947,8 +1955,10 @@ function MobileRacingLayout({
         </IconButton>
       </header>
 
-      {/* Tab content area — flex: 1 so the timer fills all available space. */}
-      <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      {/* Tab content area — flex: 1 so the timer fills all available space.
+          overflow:hidden keeps any over-tall children clipped instead of
+          pushing the layout past the viewport. */}
+      <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {tab === 'timer' ? (
           <div style={{
             flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column',
@@ -2067,20 +2077,15 @@ function MobileRacingLayout({
         />
       </div>
 
-      {/* Bottom 2-tab nav — fixed to the viewport bottom so it never gets
-          pushed out of view by mobile browser chrome. paddingBottom inside
-          the nav handles the iOS home-indicator safe area. */}
+      {/* Bottom 2-tab nav — flex-shrink:0 in normal flow. Safe-area is
+          handled by the page wrapper, so no extra paddingBottom here. */}
       <nav style={{
-        position: 'fixed',
-        bottom: 0, left: 0, right: 0,
+        flexShrink: 0,
         display: 'grid', gridTemplateColumns: '1fr 1fr',
         background: 'rgba(20, 20, 20, 0.78)',
         backdropFilter: 'blur(12px) saturate(150%)',
         WebkitBackdropFilter: 'blur(12px) saturate(150%)',
         borderTop: `1px solid ${C.border}`,
-        paddingBottom: 'env(safe-area-inset-bottom)',
-        minHeight: MP_NAV_BASE,
-        zIndex: 50,
       }}>
         <RaceTabButton active={tab === 'timer'} onClick={() => setTab('timer')} icon={<StopwatchIcon />} label="Timer" />
         <RaceTabButton active={tab === 'opponents'} onClick={() => setTab('opponents')} icon={<UsersIcon />} label="Opponents" />
