@@ -450,6 +450,49 @@ export default function MultiplayerPage() {
       fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
       display: 'flex', flexDirection: 'column',
     }}>
+      <style>{`
+        /* Tablet / iPad (768px – 1023px) */
+        @media (min-width: 768px) and (max-width: 1023px) {
+          .mp-lobby-buttons {
+            max-width: 500px !important;
+          }
+          .mp-lobby-buttons button {
+            padding: 1.05rem 1.25rem !important;
+            font-size: 1.15rem !important;
+          }
+          .mp-form-shell {
+            max-width: 480px !important;
+          }
+          .mp-form-shell input,
+          .mp-form-shell select {
+            padding: 0.8rem 0.85rem !important;
+            font-size: 1rem !important;
+          }
+          .mp-room-container {
+            max-width: 600px !important;
+          }
+          .mp-room-container input,
+          .mp-room-container select {
+            padding: 0.75rem 0.8rem !important;
+            font-size: 0.98rem !important;
+          }
+          .mp-action-grid {
+            grid-template-columns: 1fr !important;
+          }
+          .mp-action-grid button {
+            padding: 1rem 1.25rem !important;
+            font-size: 1.05rem !important;
+          }
+          .mp-race-container {
+            max-width: 600px !important;
+          }
+          .mp-race-scramble {
+            font-size: 1.1rem !important;
+            padding: 0.9rem 1rem !important;
+          }
+        }
+      `}</style>
+
       <TopBar
         roomCode={view === 'room' ? roomCode : ''}
         onBack={() => {
@@ -557,7 +600,7 @@ function Lobby({ onCreate, onJoin }: { onCreate: () => void; onJoin: () => void 
           Race friends in real time. Same scramble, live leaderboard.
         </div>
       </div>
-      <div style={{
+      <div className="mp-lobby-buttons" style={{
         display: 'grid', gridTemplateColumns: '1fr', gap: '0.7rem',
         width: '100%', maxWidth: 380,
       }}>
@@ -676,7 +719,7 @@ function WaitingRoom({
   const me = room.members?.[userId];
 
   return (
-    <div style={{ width: '100%', maxWidth: 720, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+    <div className="mp-room-container" style={{ width: '100%', maxWidth: 720, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
       <RoomCodeCard code={roomCode} />
 
       <Card>
@@ -731,7 +774,7 @@ function WaitingRoom({
         </Card>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: isHost ? '1fr 1fr' : '1fr', gap: '0.6rem' }}>
+      <div className="mp-action-grid" style={{ display: 'grid', gridTemplateColumns: isHost ? '1fr 1fr' : '1fr', gap: '0.6rem' }}>
         <BigButton
           accent={!!me?.ready ? false : true}
           onClick={onToggleReady}
@@ -883,7 +926,7 @@ function RacingScreen({
   const timerDisplay = fmtMs(elapsed, false, 2);
 
   return (
-    <div style={{
+    <div className="mp-race-container" style={{
       flex: '1 1 auto', minHeight: 0, width: '100%', maxWidth: 1100, margin: '0 auto',
       display: 'grid',
       gridTemplateColumns: 'minmax(0, 1fr)',
@@ -892,7 +935,7 @@ function RacingScreen({
       padding: '0.5rem 0',
     }}>
       {/* Scramble */}
-      <div style={{
+      <div className="mp-race-scramble" style={{
         fontFamily: 'JetBrains Mono, monospace',
         fontSize: 'clamp(0.85rem, 2vw, 1.2rem)',
         color: C.text, lineHeight: 1.5, letterSpacing: '0.04em',
@@ -956,7 +999,7 @@ function RacingScreen({
       </div>
 
       <style>{`
-        @media (min-width: 760px) {
+        @media (min-width: 1024px) {
           .mp-race-grid { grid-template-columns: 2fr 1fr !important; }
         }
       `}</style>
@@ -988,7 +1031,7 @@ function ResultsScreen({
   const isFinalRound = room.round >= room.maxRounds;
 
   return (
-    <div style={{ width: '100%', maxWidth: 720, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+    <div className="mp-room-container" style={{ width: '100%', maxWidth: 720, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
       <Card>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.7rem' }}>
           <SectionLabel>Round {room.round} results</SectionLabel>
@@ -1042,7 +1085,7 @@ function ResultsScreen({
         </Card>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: isHost ? '1fr 1fr' : '1fr', gap: '0.6rem' }}>
+      <div className="mp-action-grid" style={{ display: 'grid', gridTemplateColumns: isHost ? '1fr 1fr' : '1fr', gap: '0.6rem' }}>
         {isHost ? (
           <BigButton accent onClick={onNextRound}>
             {isFinalRound ? 'Finish & Reset' : 'Next Round'}
@@ -1243,7 +1286,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function FormShell({ title, children, onBack }: { title: string; children: React.ReactNode; onBack: () => void }) {
   void onBack;
   return (
-    <div style={{ width: '100%', maxWidth: 420, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+    <div className="mp-form-shell" style={{ width: '100%', maxWidth: 420, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
       <div style={{ fontSize: '1.2rem', fontWeight: 800, textAlign: 'center' }}>{title}</div>
       {children}
     </div>
