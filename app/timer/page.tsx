@@ -631,6 +631,13 @@ export default function TimerPage() {
   // / deviceName), regardless of brand.
   const gan = timerBrand === 'qiyi' ? qiyiHook : ganHook;
   const ganConnected = gan.state === 'connected';
+  // Human-readable label for whichever brand is currently connected. We
+  // check each hook directly so the label is correct even mid-transition
+  // when one hook has fully connected and the other hasn't dropped yet.
+  const connectedTimerName: string | null =
+    ganHook.state === 'connected' ? 'GAN Timer'
+      : qiyiHook.state === 'connected' ? 'QiYi Timer'
+      : null;
 
   // When the user switches brand, drop any lingering connection on the now-
   // inactive hook so we never have two BT timers active at once.
@@ -1328,13 +1335,13 @@ export default function TimerPage() {
               transition: 'border-color 0.15s',
             }}
           >
-            {ganConnected && (
+            {connectedTimerName && (
               <div style={{
                 display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
                 fontSize: '0.66rem', letterSpacing: '0.15em', textTransform: 'uppercase',
                 color: C.success, marginBottom: '0.85rem', fontWeight: 700,
               }}>
-                <IconBluetooth size={12} /> Using GAN Timer
+                <IconBluetooth size={12} /> {connectedTimerName.toUpperCase()} CONNECTED
               </div>
             )}
             {timer.state === 'inspecting' && (
@@ -1664,13 +1671,13 @@ export default function TimerPage() {
                     transition: 'background 0.12s',
                   }}
                 >
-                  {ganConnected && (
+                  {connectedTimerName && (
                     <div style={{
                       display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
                       fontSize: '0.6rem', letterSpacing: '0.15em', textTransform: 'uppercase',
                       color: C.success, marginBottom: '0.5rem', fontWeight: 700,
                     }}>
-                      <IconBluetooth size={11} /> Using GAN Timer
+                      <IconBluetooth size={11} /> {connectedTimerName.toUpperCase()} CONNECTED
                     </div>
                   )}
                   {timer.state === 'inspecting' && (
