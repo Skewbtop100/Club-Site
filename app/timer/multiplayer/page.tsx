@@ -1154,6 +1154,9 @@ function MultiplayerPageInner() {
   }, [roomCode, userId, room]);
 
   // Host: advance to next round, gen 5 fresh scrambles, reset solves.
+  // Members who are still disconnected at round-start are removed here —
+  // this is the deferred kick that we held off on at round-end (so they
+  // had a window to reconnect during the results screen).
   const nextRound = useCallback(async () => {
     if (!roomCode || !room || room.host !== userId) return;
     const newRound = room.round + 1;
@@ -1165,15 +1168,20 @@ function MultiplayerPageInner() {
       scrambles: generateScrambles(room.event),
       solves: null,
     };
-    for (const uid of Object.keys(room.members || {})) {
+    for (const [uid, m] of Object.entries(room.members || {})) {
+      if (getConnectionStatus(m, now) === 'disconnected') {
+        updates[`members/${uid}`] = null;
+        continue;
+      }
       updates[`members/${uid}/currentSolve`] = 0;
       updates[`members/${uid}/roundAverage`] = null;
       updates[`members/${uid}/ready`] = false;
     }
     await update(ref(rtdb, `rooms/${roomCode}`), updates);
-  }, [roomCode, room, userId]);
+  }, [roomCode, room, userId, now]);
 
-  // Host: reset everything for another full match. Clears totalPoints.
+  // Host: reset everything for another full match. Clears totalPoints. Same
+  // deferred-kick rule applies: disconnected members are removed here.
   const playAgain = useCallback(async () => {
     if (!roomCode || !room || room.host !== userId) return;
     const updates: Record<string, unknown> = {
@@ -1183,28 +1191,37 @@ function MultiplayerPageInner() {
       scrambles: null,
       solves: null,
     };
-    for (const uid of Object.keys(room.members || {})) {
+    for (const [uid, m] of Object.entries(room.members || {})) {
+      if (getConnectionStatus(m, now) === 'disconnected') {
+        updates[`members/${uid}`] = null;
+        continue;
+      }
       updates[`members/${uid}/currentSolve`] = 0;
       updates[`members/${uid}/roundAverage`] = null;
       updates[`members/${uid}/totalPoints`] = 0;
       updates[`members/${uid}/ready`] = false;
     }
     await update(ref(rtdb, `rooms/${roomCode}`), updates);
-  }, [roomCode, room, userId]);
+  }, [roomCode, room, userId, now]);
 
-  // ── Status transitions (host-driven) ─────────────────────────────────────
-  // Host: racing → results when every *online* member has confirmed all 5
-  // solves. Disconnected players don't block the round — when the round ends
-  // they get kicked from the room (their member entry is removed in the same
-  // update that flips status → results). Their solves never become an Ao5,
-  // so they're effectively a DNF for this round and don't appear in the
-  // results screen at all (they're no longer in members). Voluntary leaves
-  // and tab-closes that already removed the member naturally roll into the
-  // same code path: only members still present at the moment of transition
-  // are scored.
+  // ── Status transitions (host-driven, with disconnected-host fallback) ───
+  // Round-end logic: racing → results when every non-disconnected member has
+  // confirmed all 5 solves. Disconnected players don't block the round and
+  // are NOT kicked here — they're given DNF for any incomplete solves so the
+  // results screen still ranks them, and they keep their slot in the room so
+  // they have a window to reconnect. Kicks happen at the start of the next
+  // round (in `nextRound` / `playAgain`) only if they're still disconnected.
+  //
+  // Trigger source: the host normally runs this. If the host is disconnected
+  // we fall back to the earliest-joined non-disconnected member so the round
+  // can still wrap up without waiting for the server-side onDisconnect (and
+  // the subsequent host migration). Each client computes the same trigger
+  // uid from the same room snapshot, so only one client writes — and even
+  // if a borderline `now` causes two clients to think they're the trigger,
+  // the writes are idempotent (DNF fills are deterministic — confirmedAt is
+  // 0 — and totalPoints uses the snapshot's `prev` not a read-modify-write).
   useEffect(() => {
     if (!room || !roomCode) return;
-    if (room.host !== userId) return;
     if (room.status !== 'racing') return;
     const memberEntries = Object.entries(room.members || {});
     if (memberEntries.length === 0) return;
@@ -1212,26 +1229,88 @@ function MultiplayerPageInner() {
     if (onlineEntries.length === 0) return; // everyone disconnected; wait for someone to come back
     const allOnlineDone = onlineEntries.every(([, m]) => m.currentSolve >= SOLVES_PER_ROUND);
     if (!allOnlineDone) return;
-    // Score only online members (disconnected ones get kicked).
-    const onlineMembers: Record<string, MemberData> = Object.fromEntries(onlineEntries);
-    const ranked = rankByRoundAverage(onlineMembers);
+
+    // Pick trigger: host if online, else earliest-joined online member.
+    const hostMember = room.host ? room.members?.[room.host] : undefined;
+    const hostOnline = !!hostMember && getConnectionStatus(hostMember, now) !== 'disconnected';
+    let triggerUid: string;
+    if (hostOnline) {
+      triggerUid = room.host;
+    } else {
+      const sortedOnline = onlineEntries
+        .slice()
+        .sort(([, a], [, b]) => (a.joinedAt ?? 0) - (b.joinedAt ?? 0));
+      triggerUid = sortedOnline[0]?.[0] ?? '';
+    }
+    if (triggerUid !== userId) return;
+
+    // Build the synthesised members map: online entries pass through; for
+    // each disconnected entry with incomplete solves, fill DNF for missing
+    // slots and compute their Ao5 (which will usually itself be DNF). The
+    // synthesised map drives ranking so disconnected players are scored
+    // alongside online players (DNFs rank last and earn 0 points).
     const updates: Record<string, unknown> = { status: 'results' };
+    const synthMembers: Record<string, MemberData> = {};
+    for (const [uid, m] of memberEntries) {
+      synthMembers[uid] = m;
+      if (getConnectionStatus(m, now) !== 'disconnected') continue;
+      if (m.currentSolve >= SOLVES_PER_ROUND) continue;
+      const filled: SolveData[] = [];
+      for (let i = 0; i < SOLVES_PER_ROUND; i++) {
+        const existing = room.solves?.[uid]?.[String(i)];
+        if (existing) {
+          filled.push(existing);
+        } else {
+          const dnfSolve: SolveData = {
+            time: 0,
+            penalty: 'dnf',
+            confirmedAt: 0, // deterministic so concurrent triggers don't thrash
+            scramble: room.scrambles?.[String(i)] ?? '',
+          };
+          updates[`solves/${uid}/${i}`] = dnfSolve;
+          filled.push(dnfSolve);
+        }
+      }
+      const ao5 = computeAo5(filled);
+      updates[`members/${uid}/currentSolve`] = SOLVES_PER_ROUND;
+      updates[`members/${uid}/roundAverage`] = ao5;
+      synthMembers[uid] = {
+        ...m,
+        currentSolve: SOLVES_PER_ROUND,
+        roundAverage: ao5,
+      };
+    }
+
+    // Rank everyone (online + DNF-filled disconnected). Award round points.
+    const ranked = rankByRoundAverage(synthMembers);
     const N = ranked.length;
     ranked.forEach((r, i) => {
       const pts = r.dnf ? 0 : Math.max(1, N - i);
-      const prev = onlineMembers[r.uid]?.totalPoints ?? 0;
+      const prev = synthMembers[r.uid]?.totalPoints ?? 0;
       updates[`members/${r.uid}/totalPoints`] = prev + pts;
     });
-    // Kick disconnected members. The toast about removal fires on remaining
-    // clients via the prevMembersRef effect (last-seen status was
-    // 'disconnected' so the removal is attributed to the kick).
-    for (const [uid, m] of memberEntries) {
-      if (getConnectionStatus(m, now) === 'disconnected') {
-        updates[`members/${uid}`] = null;
+
+    update(ref(rtdb, `rooms/${roomCode}`), updates);
+  }, [room?.status, room?.members, room?.host, room?.solves, room?.scrambles, roomCode, userId, now]);
+
+  // Toast: when status flips racing → results, announce any member who was
+  // disconnected at the moment the round ended. The detection runs on every
+  // client (so all online players see the toast), gated by a ref-tracked
+  // status transition to fire exactly once per round.
+  const prevRoundStatusRef = useRef<RoomStatus | null>(null);
+  useEffect(() => {
+    if (!room?.status) return;
+    const prev = prevRoundStatusRef.current;
+    prevRoundStatusRef.current = room.status;
+    if (prev === 'racing' && room.status === 'results') {
+      for (const [uid, m] of Object.entries(room.members || {})) {
+        if (uid === userId) continue;
+        if (getConnectionStatus(m, now) === 'disconnected') {
+          pushNotif(`${m.name} was disconnected during round`, 'warn');
+        }
       }
     }
-    update(ref(rtdb, `rooms/${roomCode}`), updates);
-  }, [room?.status, room?.members, room?.host, roomCode, userId, now]);
+  }, [room?.status, room?.members, userId, now, pushNotif]);
 
   // ── Render ──────────────────────────────────────────────────────────────
   // While racing the page is locked to the visible viewport — height: 100dvh
@@ -1915,11 +1994,17 @@ function RacingScreen({
   //   wait:      myIndex >  minOpponent + 1  (≥2-ahead → wait)
   //
   // Where myIndex = number of solves I have CONFIRMED (= members[me].currentSolve).
+  //
+  // Disconnected players are excluded from the sync calculation — they could
+  // be reconnecting (idle) or fully gone, but either way the round must not
+  // stall on them. If they reconnect mid-round they re-enter the gate at
+  // their actual currentSolve, which may briefly stall faster racers (1-
+  // ahead rule applies again immediately).
   const otherCurrents = useMemo(() => {
     return Object.entries(room.members || {})
-      .filter(([uid]) => uid !== userId)
+      .filter(([uid, m]) => uid !== userId && getConnectionStatus(m, now) !== 'disconnected')
       .map(([, m]) => m.currentSolve);
-  }, [room.members, userId]);
+  }, [room.members, userId, now]);
   const minOthers = otherCurrents.length === 0 ? Number.POSITIVE_INFINITY : Math.min(...otherCurrents);
   const isWaitingForOpponents = otherCurrents.length > 0 && (myCurrent - minOthers) >= 2 && myCurrent < SOLVES_PER_ROUND;
 
@@ -2824,18 +2909,28 @@ function OpponentsPanel({
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.25rem' }}>
               {r.solves.map((s, i) => {
                 const isCurrent = i === r.currentSolve;
+                const empty = !s;
+                const isDisconnected = r.status === 'disconnected';
                 return (
-                  <div key={i} style={{
-                    fontFamily: 'JetBrains Mono, monospace',
-                    fontSize: '0.7rem', fontWeight: 700,
-                    fontVariantNumeric: 'tabular-nums',
-                    padding: '0.25rem 0.2rem',
-                    background: s ? '#0a0a0a' : 'transparent',
-                    border: `1px solid ${isCurrent && !s ? C.accent : C.border}`,
-                    borderRadius: 6, textAlign: 'center',
-                    color: !s ? (isCurrent ? C.accent : C.mutedDim) : s.penalty === 'dnf' ? C.danger : C.text,
-                  }}>
-                    {!s ? (isCurrent ? '●' : '—') : s.penalty === 'dnf' ? 'DNF' : fmtMs(effectiveSolveMs(s), false, 2)}
+                  <div
+                    key={i}
+                    title={empty && isDisconnected ? 'Waiting — player is disconnected' : undefined}
+                    style={{
+                      fontFamily: 'JetBrains Mono, monospace',
+                      fontSize: '0.7rem', fontWeight: 700,
+                      fontVariantNumeric: 'tabular-nums',
+                      padding: '0.25rem 0.2rem',
+                      background: s ? '#0a0a0a' : 'transparent',
+                      border: `1px solid ${isCurrent && empty && !isDisconnected ? C.accent : C.border}`,
+                      borderRadius: 6, textAlign: 'center',
+                      color: empty
+                        ? (isDisconnected ? C.warn : isCurrent ? C.accent : C.mutedDim)
+                        : s.penalty === 'dnf' ? C.danger : C.text,
+                    }}
+                  >
+                    {empty
+                      ? (isDisconnected ? '⋯' : isCurrent ? '●' : '—')
+                      : s.penalty === 'dnf' ? 'DNF' : fmtMs(effectiveSolveMs(s), false, 2)}
                   </div>
                 );
               })}
