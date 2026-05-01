@@ -388,20 +388,17 @@ export function useQiyiTimer(callbacks: QiyiCallbacks) {
     setState('connecting');
 
     try {
-      // Filters (OR'd by the picker): manufacturer-data CIC filter catches
-      // QiYi devices even when the broadcast name is missing/clipped on
-      // some platforms; namePrefix filters catch the common firmware names.
-      // optionalManufacturerData declares the CIC we intend to read after
-      // pairing (required by Chrome to access manufacturerData later).
+      // DEBUG MODE: acceptAllDevices so the user can see and select ANY
+      // nearby BLE device. This lets us discover what services the QiYi
+      // timer actually exposes on this firmware, in case the canonical
+      // 0x0504 manufacturer-data filter doesn't surface it.
       const requestOpts: RequestDeviceOptions & { optionalManufacturerData?: number[] } = {
-        filters: [
-          { manufacturerData: [{ companyIdentifier: QIYI_CIC }] }, // 0x0504 — canonical
-          { namePrefix: 'QY-Timer'   },  // QY-Timer-V2-XXXX, V3-XXXX, …
-          { namePrefix: 'QY-Adapter' },
-          { namePrefix: 'QY-TIMER'   },
-          { namePrefix: 'QiYi-Timer' },
+        acceptAllDevices: true,
+        optionalServices: [
+          QIYI_SERVICE,                                  // 0000fd50-…
+          '0000ffd0-0000-1000-8000-00805f9b34fb',        // common alt service
+          '0000ffd5-0000-1000-8000-00805f9b34fb',        // common alt service
         ],
-        optionalServices: [QIYI_SERVICE],
         optionalManufacturerData: [QIYI_CIC],
       };
       // eslint-disable-next-line no-console
@@ -413,7 +410,9 @@ export function useQiyiTimer(callbacks: QiyiCallbacks) {
       const device = await bt.requestDevice(requestOpts);
 
       // eslint-disable-next-line no-console
-      console.log('QiYi device found:', device.name);
+      console.log('Selected device name:', device.name);
+      // eslint-disable-next-line no-console
+      console.log('Selected device id:', device.id);
       // eslint-disable-next-line no-console
       console.log('[QiYi] Selected device:', { name: device.name, id: device.id });
       setDeviceName(device.name ?? 'QiYi Timer');
@@ -445,8 +444,11 @@ export function useQiyiTimer(callbacks: QiyiCallbacks) {
       // Enumerate primary services to help diagnose "wrong device picked" cases.
       try {
         const services = await server.getPrimaryServices();
+        const uuids = services.map(s => s.uuid);
         // eslint-disable-next-line no-console
-        console.log('[QiYi] device exposes services:', services.map(s => s.uuid));
+        console.log('Available services:', uuids);
+        // eslint-disable-next-line no-console
+        console.log('[QiYi] device exposes services:', uuids);
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn('[QiYi] could not enumerate services (may need optionalServices)', err);
