@@ -142,6 +142,16 @@ export default function MultiplayerPage() {
   const [roomCode, setRoomCode] = useState<string>('');
   const [room, setRoom] = useState<RoomData | null>(null);
 
+  // Responsive: JS-based mobile detection (≤900px). Initial render is desktop;
+  // the effect runs on mount and on resize.
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth <= 900);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
   // Initial mount: pull user id + saved name
   useEffect(() => {
     const uid = getUserId();
@@ -450,66 +460,6 @@ export default function MultiplayerPage() {
       fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
       display: 'flex', flexDirection: 'column',
     }}>
-      <style>{`
-        @media (max-width: 900px) {
-          /* Lobby */
-          .mp-lobby-buttons {
-            flex-direction: column !important;
-            width: 100% !important;
-            max-width: 100% !important;
-            padding: 0 1rem !important;
-          }
-          .mp-lobby-buttons button {
-            width: 100% !important;
-          }
-
-          /* Forms (Create / Join) */
-          .mp-form-shell {
-            max-width: 100% !important;
-            width: 100% !important;
-            margin: 0 !important;
-            padding: 1.5rem 1rem !important;
-            border-radius: 12px !important;
-          }
-
-          /* Waiting room / shared room shell */
-          .mp-room-container {
-            max-width: 100% !important;
-            padding: 1rem !important;
-          }
-
-          /* Action button rows (Ready/Start, Next/Leave) */
-          .mp-action-grid {
-            grid-template-columns: 1fr !important;
-            flex-direction: column !important;
-            width: 100% !important;
-          }
-          .mp-action-grid button {
-            width: 100% !important;
-          }
-
-          /* Results / leaderboard */
-          .mp-results-container,
-          .mp-leaderboard {
-            max-width: 100% !important;
-            padding: 0.5rem !important;
-          }
-
-          /* Room code display on waiting screen */
-          .mp-room-code {
-            font-size: clamp(2rem, 8vw, 4rem) !important;
-          }
-
-          /* Catch-all: any remaining inline maxWidth caps go full-width */
-          [style*="max-width: 380"],
-          [style*="max-width: 420"],
-          [style*="max-width: 720"] {
-            max-width: 100% !important;
-            width: 100% !important;
-          }
-        }
-      `}</style>
-
       <TopBar
         roomCode={view === 'room' ? roomCode : ''}
         onBack={() => {
@@ -531,6 +481,7 @@ export default function MultiplayerPage() {
 
         {view === 'lobby' && (
           <Lobby
+            isMobile={isMobile}
             onCreate={() => { setErrorMsg(''); setView('create'); }}
             onJoin={() => { setErrorMsg(''); setView('join'); }}
           />
@@ -538,6 +489,7 @@ export default function MultiplayerPage() {
 
         {view === 'create' && (
           <CreateForm
+            isMobile={isMobile}
             name={createName}
             setName={setCreateName}
             onSubmit={createRoom}
@@ -547,6 +499,7 @@ export default function MultiplayerPage() {
 
         {view === 'join' && (
           <JoinForm
+            isMobile={isMobile}
             code={joinCode}
             setCode={setJoinCode}
             name={joinName}
@@ -558,6 +511,7 @@ export default function MultiplayerPage() {
 
         {view === 'room' && room && (
           <RoomView
+            isMobile={isMobile}
             roomCode={roomCode}
             room={room}
             userId={userId}
@@ -601,13 +555,15 @@ function TopBar({ roomCode, onBack }: { roomCode: string; onBack: () => void }) 
 }
 
 // ── Lobby ─────────────────────────────────────────────────────────────────
-function Lobby({ onCreate, onJoin }: { onCreate: () => void; onJoin: () => void }) {
+function Lobby({ isMobile, onCreate, onJoin }: { isMobile: boolean; onCreate: () => void; onJoin: () => void }) {
   return (
     <div style={{
       flex: '1 1 auto',
       display: 'flex', flexDirection: 'column',
       alignItems: 'center', justifyContent: 'center',
-      gap: '1.5rem', padding: '2rem 1rem',
+      gap: '1.5rem',
+      padding: isMobile ? '1rem' : '2rem',
+      width: '100%',
     }}>
       <div style={{ textAlign: 'center' }}>
         <div style={{ fontSize: 'clamp(1.6rem, 6vw, 2.4rem)', fontWeight: 800, letterSpacing: '-0.02em' }}>
@@ -618,11 +574,13 @@ function Lobby({ onCreate, onJoin }: { onCreate: () => void; onJoin: () => void 
         </div>
       </div>
       <div className="mp-lobby-buttons" style={{
-        display: 'grid', gridTemplateColumns: '1fr', gap: '0.7rem',
-        width: '100%', maxWidth: 380,
+        display: 'flex',
+        flexDirection: isMobile ? 'column' : 'row',
+        gap: '1rem',
+        width: isMobile ? '100%' : 'auto',
       }}>
-        <BigButton accent onClick={onCreate}>Create Room</BigButton>
-        <BigButton onClick={onJoin}>Join Room</BigButton>
+        <BigButton accent onClick={onCreate} style={{ width: isMobile ? '100%' : '200px' }}>Create Room</BigButton>
+        <BigButton onClick={onJoin} style={{ width: isMobile ? '100%' : '200px' }}>Join Room</BigButton>
       </div>
     </div>
   );
@@ -630,13 +588,14 @@ function Lobby({ onCreate, onJoin }: { onCreate: () => void; onJoin: () => void 
 
 // ── CreateForm ────────────────────────────────────────────────────────────
 function CreateForm({
-  name, setName, onSubmit, onBack,
+  isMobile, name, setName, onSubmit, onBack,
 }: {
+  isMobile: boolean;
   name: string; setName: (v: string) => void;
   onSubmit: () => void; onBack: () => void;
 }) {
   return (
-    <FormShell title="Create Room" onBack={onBack}>
+    <FormShell isMobile={isMobile} title="Create Room" onBack={onBack}>
       <Field label="Display name">
         <input
           autoFocus
@@ -655,14 +614,15 @@ function CreateForm({
 
 // ── JoinForm ──────────────────────────────────────────────────────────────
 function JoinForm({
-  code, setCode, name, setName, onSubmit, onBack,
+  isMobile, code, setCode, name, setName, onSubmit, onBack,
 }: {
+  isMobile: boolean;
   code: string; setCode: (v: string) => void;
   name: string; setName: (v: string) => void;
   onSubmit: () => void; onBack: () => void;
 }) {
   return (
-    <FormShell title="Join Room" onBack={onBack}>
+    <FormShell isMobile={isMobile} title="Join Room" onBack={onBack}>
       <Field label="Room code">
         <input
           autoFocus
@@ -691,6 +651,7 @@ function JoinForm({
 
 // ── RoomView (router by status) ───────────────────────────────────────────
 function RoomView(props: {
+  isMobile: boolean;
   roomCode: string;
   room: RoomData;
   userId: string;
@@ -719,9 +680,10 @@ function RoomView(props: {
 
 // ── Waiting room ──────────────────────────────────────────────────────────
 function WaitingRoom({
-  roomCode, room, userId, isHost,
+  isMobile, roomCode, room, userId, isHost,
   onToggleReady, onSetEvent, onSetMaxRounds, onStartRace,
 }: {
+  isMobile: boolean;
   roomCode: string; room: RoomData; userId: string; isHost: boolean;
   onToggleReady: () => void;
   onSetEvent: (id: string) => void;
@@ -736,7 +698,13 @@ function WaitingRoom({
   const me = room.members?.[userId];
 
   return (
-    <div className="mp-room-container" style={{ width: '100%', maxWidth: 720, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+    <div className="mp-room-container" style={{
+      width: '100%',
+      maxWidth: isMobile ? '100%' : '720px',
+      padding: isMobile ? '1rem' : '2rem',
+      margin: '0 auto',
+      display: 'flex', flexDirection: 'column', gap: '1rem',
+    }}>
       <RoomCodeCard code={roomCode} />
 
       <Card>
@@ -791,10 +759,16 @@ function WaitingRoom({
         </Card>
       )}
 
-      <div className="mp-action-grid" style={{ display: 'grid', gridTemplateColumns: isHost ? '1fr 1fr' : '1fr', gap: '0.6rem' }}>
+      <div className="mp-action-grid" style={{
+        display: 'grid',
+        gridTemplateColumns: isMobile ? '1fr' : (isHost ? '1fr 1fr' : '1fr'),
+        gap: '0.6rem',
+        width: isMobile ? '100%' : 'auto',
+      }}>
         <BigButton
           accent={!!me?.ready ? false : true}
           onClick={onToggleReady}
+          style={isMobile ? { width: '100%' } : undefined}
         >
           {me?.ready ? 'Cancel Ready' : 'Ready'}
         </BigButton>
@@ -803,6 +777,7 @@ function WaitingRoom({
             success
             disabled={!allReady}
             onClick={onStartRace}
+            style={isMobile ? { width: '100%' } : undefined}
           >
             Start Race
           </BigButton>
@@ -816,6 +791,7 @@ function WaitingRoom({
 function CountdownScreen({
   room,
 }: {
+  isMobile: boolean;
   roomCode: string; room: RoomData; userId: string; isHost: boolean;
   onToggleReady: () => void;
   onSetEvent: (id: string) => void;
@@ -869,9 +845,10 @@ function CountdownScreen({
 
 // ── Racing screen ─────────────────────────────────────────────────────────
 function RacingScreen({
-  roomCode, room, userId, isHost,
+  isMobile, roomCode, room, userId, isHost,
   onSubmitTime,
 }: {
+  isMobile: boolean;
   roomCode: string; room: RoomData; userId: string; isHost: boolean;
   onToggleReady: () => void;
   onSetEvent: (id: string) => void;
@@ -944,12 +921,14 @@ function RacingScreen({
 
   return (
     <div className="mp-race-container" style={{
-      flex: '1 1 auto', minHeight: 0, width: '100%', maxWidth: 1100, margin: '0 auto',
+      flex: '1 1 auto', minHeight: 0, width: '100%',
+      maxWidth: isMobile ? '100%' : '1100px',
+      margin: '0 auto',
       display: 'grid',
       gridTemplateColumns: 'minmax(0, 1fr)',
       gridTemplateRows: 'auto 1fr auto',
       gap: '0.85rem',
-      padding: '0.5rem 0',
+      padding: isMobile ? '0.5rem' : '0.5rem 0',
     }}>
       {/* Scramble */}
       <div className="mp-race-scramble" style={{
@@ -966,7 +945,8 @@ function RacingScreen({
 
       {/* Center: timer + leaderboard */}
       <div className="mp-race-grid" style={{
-        display: 'grid', gridTemplateColumns: '1fr',
+        display: 'grid',
+        gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr',
         gap: '0.85rem', minHeight: 0,
       }}>
         <div
@@ -1014,24 +994,16 @@ function RacingScreen({
       <div style={{ fontSize: '0.7rem', color: C.muted, textAlign: 'center' }}>
         Round {room.round} / {room.maxRounds}
       </div>
-
-      <style>{`
-        @media (min-width: 901px) {
-          .mp-race-grid { grid-template-columns: 2fr 1fr !important; }
-        }
-        @media (max-width: 1024px) and (orientation: portrait) {
-          .mp-race-grid { grid-template-columns: 1fr !important; }
-        }
-      `}</style>
     </div>
   );
 }
 
 // ── Results ───────────────────────────────────────────────────────────────
 function ResultsScreen({
-  room, userId, isHost,
+  isMobile, room, userId, isHost,
   onNextRound, onLeave,
 }: {
+  isMobile: boolean;
   roomCode: string; room: RoomData; userId: string; isHost: boolean;
   onToggleReady: () => void;
   onSetEvent: (id: string) => void;
@@ -1051,7 +1023,13 @@ function ResultsScreen({
   const isFinalRound = room.round >= room.maxRounds;
 
   return (
-    <div className="mp-room-container mp-results-container" style={{ width: '100%', maxWidth: 720, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+    <div className="mp-room-container mp-results-container" style={{
+      width: '100%',
+      maxWidth: isMobile ? '100%' : '720px',
+      padding: isMobile ? '0.5rem' : '2rem',
+      margin: '0 auto',
+      display: 'flex', flexDirection: 'column', gap: '1rem',
+    }}>
       <Card>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.7rem' }}>
           <SectionLabel>Round {room.round} results</SectionLabel>
@@ -1105,9 +1083,14 @@ function ResultsScreen({
         </Card>
       )}
 
-      <div className="mp-action-grid" style={{ display: 'grid', gridTemplateColumns: isHost ? '1fr 1fr' : '1fr', gap: '0.6rem' }}>
+      <div className="mp-action-grid" style={{
+        display: 'grid',
+        gridTemplateColumns: isMobile ? '1fr' : (isHost ? '1fr 1fr' : '1fr'),
+        gap: '0.6rem',
+        width: isMobile ? '100%' : 'auto',
+      }}>
         {isHost ? (
-          <BigButton accent onClick={onNextRound}>
+          <BigButton accent onClick={onNextRound} style={isMobile ? { width: '100%' } : undefined}>
             {isFinalRound ? 'Finish & Reset' : 'Next Round'}
           </BigButton>
         ) : (
@@ -1115,7 +1098,7 @@ function ResultsScreen({
             Waiting for host to advance the round…
           </div>
         )}
-        <BigButton onClick={onLeave}>Leave</BigButton>
+        <BigButton onClick={onLeave} style={isMobile ? { width: '100%' } : undefined}>Leave</BigButton>
       </div>
     </div>
   );
@@ -1303,10 +1286,15 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function FormShell({ title, children, onBack }: { title: string; children: React.ReactNode; onBack: () => void }) {
+function FormShell({ isMobile, title, children, onBack }: { isMobile: boolean; title: string; children: React.ReactNode; onBack: () => void }) {
   void onBack;
   return (
-    <div className="mp-form-shell" style={{ width: '100%', maxWidth: 420, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+    <div className="mp-form-shell" style={{
+      width: isMobile ? '100%' : '420px',
+      padding: isMobile ? '1rem' : '2rem',
+      margin: '0 auto',
+      display: 'flex', flexDirection: 'column', gap: '0.85rem',
+    }}>
       <div style={{ fontSize: '1.2rem', fontWeight: 800, textAlign: 'center' }}>{title}</div>
       {children}
     </div>
@@ -1314,13 +1302,14 @@ function FormShell({ title, children, onBack }: { title: string; children: React
 }
 
 function BigButton({
-  children, onClick, accent, success, disabled,
+  children, onClick, accent, success, disabled, style,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   accent?: boolean;
   success?: boolean;
   disabled?: boolean;
+  style?: React.CSSProperties;
 }) {
   const bg = disabled ? C.cardAlt
     : success ? C.success
@@ -1342,6 +1331,7 @@ function BigButton({
         letterSpacing: '0.02em',
         transition: 'transform 0.08s, opacity 0.15s',
         opacity: disabled ? 0.6 : 1,
+        ...style,
       }}
       onMouseDown={e => { if (!disabled) e.currentTarget.style.transform = 'scale(0.985)'; }}
       onMouseUp={e => (e.currentTarget.style.transform = 'scale(1)')}
