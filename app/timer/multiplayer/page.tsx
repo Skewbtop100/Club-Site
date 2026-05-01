@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Scrambow } from 'scrambow';
+import { QRCodeSVG } from 'qrcode.react';
 import {
   ref,
   onValue,
@@ -125,7 +126,17 @@ interface RoomData {
 
 // ── Page ───────────────────────────────────────────────────────────────────
 export default function MultiplayerPage() {
+  // Suspense boundary required for useSearchParams in Next 16.
+  return (
+    <Suspense fallback={<div style={{ minHeight: '100vh', background: C.bg }} />}>
+      <MultiplayerPageInner />
+    </Suspense>
+  );
+}
+
+function MultiplayerPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   // Identity (persisted)
   const [userId, setUserId] = useState<string>('');
@@ -136,6 +147,7 @@ export default function MultiplayerPage() {
   const [createName, setCreateName] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [joinName, setJoinName] = useState('');
+  const [invitedCode, setInvitedCode] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
 
   // Active room
@@ -161,6 +173,21 @@ export default function MultiplayerPage() {
     setCreateName(savedName);
     setJoinName(savedName);
   }, []);
+
+  // Auto-join via ?join=ABC123 — pre-fill the join form and switch view.
+  // Only runs once on first mount; users can manually navigate away after.
+  const autoJoinedRef = useRef(false);
+  useEffect(() => {
+    if (autoJoinedRef.current) return;
+    const raw = searchParams.get('join');
+    if (!raw) return;
+    const code = raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+    if (code.length !== 6) return;
+    autoJoinedRef.current = true;
+    setInvitedCode(code);
+    setJoinCode(code);
+    setView('join');
+  }, [searchParams]);
 
   // Subscribe to room
   useEffect(() => {
@@ -504,6 +531,7 @@ export default function MultiplayerPage() {
             setCode={setJoinCode}
             name={joinName}
             setName={setJoinName}
+            invitedCode={invitedCode}
             onSubmit={joinRoom}
             onBack={() => setView('lobby')}
           />
@@ -614,28 +642,47 @@ function CreateForm({
 
 // ── JoinForm ──────────────────────────────────────────────────────────────
 function JoinForm({
-  isMobile, code, setCode, name, setName, onSubmit, onBack,
+  isMobile, code, setCode, name, setName, invitedCode, onSubmit, onBack,
 }: {
   isMobile: boolean;
   code: string; setCode: (v: string) => void;
   name: string; setName: (v: string) => void;
+  invitedCode?: string;
   onSubmit: () => void; onBack: () => void;
 }) {
+  const isInvited = !!invitedCode;
   return (
-    <FormShell isMobile={isMobile} title="Join Room" onBack={onBack}>
-      <Field label="Room code">
-        <input
-          autoFocus
-          value={code}
-          onChange={e => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6))}
-          placeholder="ABC123"
-          maxLength={6}
-          onKeyDown={e => { if (e.key === 'Enter') onSubmit(); }}
-          style={{ ...inputStyle, fontFamily: 'JetBrains Mono, monospace', letterSpacing: '0.2em', textAlign: 'center', fontSize: '1.25rem' }}
-        />
-      </Field>
+    <FormShell isMobile={isMobile} title={isInvited ? 'Join Race' : 'Join Room'} onBack={onBack}>
+      {isInvited ? (
+        <div style={{
+          background: C.accentDim, border: `1px solid ${C.borderHi}`,
+          borderRadius: 12, padding: '0.85rem 1rem', textAlign: 'center',
+        }}>
+          <div style={{ fontSize: '0.78rem', color: C.muted, marginBottom: '0.3rem' }}>
+            You&rsquo;ve been invited to room
+          </div>
+          <div style={{
+            fontFamily: 'JetBrains Mono, monospace',
+            fontSize: 'clamp(1.6rem, 6vw, 2.2rem)', fontWeight: 800,
+            letterSpacing: '0.25em', color: C.accent,
+          }}>{invitedCode}</div>
+        </div>
+      ) : (
+        <Field label="Room code">
+          <input
+            autoFocus
+            value={code}
+            onChange={e => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6))}
+            placeholder="ABC123"
+            maxLength={6}
+            onKeyDown={e => { if (e.key === 'Enter') onSubmit(); }}
+            style={{ ...inputStyle, fontFamily: 'JetBrains Mono, monospace', letterSpacing: '0.2em', textAlign: 'center', fontSize: '1.25rem' }}
+          />
+        </Field>
+      )}
       <Field label="Display name">
         <input
+          autoFocus={isInvited}
           value={name}
           onChange={e => setName(e.target.value)}
           placeholder="Your name"
@@ -644,7 +691,7 @@ function JoinForm({
           style={inputStyle}
         />
       </Field>
-      <BigButton accent onClick={onSubmit}>Join</BigButton>
+      <BigButton accent onClick={onSubmit}>{isInvited ? 'Join Race' : 'Join'}</BigButton>
     </FormShell>
   );
 }
@@ -706,6 +753,7 @@ function WaitingRoom({
       display: 'flex', flexDirection: 'column', gap: '1rem',
     }}>
       <RoomCodeCard code={roomCode} />
+      <SharePanel roomCode={roomCode} />
 
       <Card>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
@@ -1413,5 +1461,117 @@ function CheckIcon() {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="20 6 9 17 4 12" />
     </svg>
+  );
+}
+
+// ── SharePanel: QR code + Copy Link + Share buttons ──────────────────────
+function SharePanel({ roomCode }: { roomCode: string }) {
+  const [joinUrl, setJoinUrl] = useState<string>('');
+  const [copied, setCopied] = useState(false);
+  const [canShare, setCanShare] = useState(false);
+
+  // window.location is only safe to read on the client.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !roomCode) return;
+    setJoinUrl(`${window.location.origin}/timer/multiplayer?join=${roomCode}`);
+    setCanShare(typeof navigator !== 'undefined' && typeof navigator.share === 'function');
+  }, [roomCode]);
+
+  const onCopyLink = useCallback(async () => {
+    if (!joinUrl) return;
+    try {
+      await navigator.clipboard.writeText(joinUrl);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('[mp] copy link failed', err);
+    }
+  }, [joinUrl]);
+
+  const onShare = useCallback(async () => {
+    if (!joinUrl) return;
+    try {
+      await navigator.share({
+        title: 'Join my speedcubing race!',
+        text: `Join room ${roomCode} on Precision Velocity Timer`,
+        url: joinUrl,
+      });
+    } catch (err) {
+      // User canceled (AbortError) — silently ignore. Log others.
+      if (err instanceof Error && err.name !== 'AbortError') {
+        console.error('[mp] share failed', err);
+      }
+    }
+  }, [joinUrl, roomCode]);
+
+  return (
+    <div style={{
+      background: C.card, border: `1px solid ${C.border}`,
+      borderRadius: 14, padding: '1rem',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.7rem',
+    }}>
+      <div style={{
+        background: '#0a0a0a', border: `1px solid ${C.border}`,
+        borderRadius: 12, padding: '0.6rem',
+        lineHeight: 0,
+      }}>
+        {joinUrl ? (
+          <QRCodeSVG
+            value={joinUrl}
+            size={180}
+            bgColor="#0a0a0a"
+            fgColor="#A78BFA"
+            level="M"
+          />
+        ) : (
+          <div style={{ width: 180, height: 180 }} />
+        )}
+      </div>
+      <div style={{
+        fontSize: '0.66rem', letterSpacing: '0.12em',
+        textTransform: 'uppercase', color: C.muted, fontWeight: 700,
+      }}>
+        Scan to join
+      </div>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: canShare ? '1fr 1fr' : '1fr',
+        gap: '0.5rem', width: '100%',
+      }}>
+        <button
+          onClick={onCopyLink}
+          disabled={!joinUrl}
+          style={{
+            background: copied ? C.successDim : C.accentDim,
+            color: copied ? C.success : C.accent,
+            border: `1px solid ${copied ? C.success : C.borderHi}`,
+            borderRadius: 10,
+            padding: '0.6rem 0.85rem', fontSize: '0.85rem',
+            fontFamily: 'inherit', cursor: joinUrl ? 'pointer' : 'not-allowed',
+            fontWeight: 700, letterSpacing: '0.02em',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem',
+            transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+          }}
+        >
+          <span aria-hidden>📋</span> {copied ? 'Copied!' : 'Copy Link'}
+        </button>
+        {canShare && (
+          <button
+            onClick={onShare}
+            disabled={!joinUrl}
+            style={{
+              background: C.cardAlt, color: C.text,
+              border: `1px solid ${C.border}`, borderRadius: 10,
+              padding: '0.6rem 0.85rem', fontSize: '0.85rem',
+              fontFamily: 'inherit', cursor: joinUrl ? 'pointer' : 'not-allowed',
+              fontWeight: 700, letterSpacing: '0.02em',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem',
+            }}
+          >
+            <span aria-hidden>📤</span> Share
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
