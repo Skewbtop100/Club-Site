@@ -98,34 +98,78 @@ function fmtMs(ms: number | null, dnf?: boolean, precision: 2 | 3 = 2): string {
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────
-type Penalty = 'ok' | '+2' | 'dnf' | null;
-type RoomStatus = 'waiting' | 'countdown' | 'solving' | 'results';
+type Penalty = 'ok' | '+2' | 'dnf';
+type RoomStatus = 'waiting' | 'racing' | 'results';
+const SOLVES_PER_ROUND = 5;
+const ROOM_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+const LAST_ROOM_KEY = 'mp_last_room';
+
+interface SolveData {
+  time: number;          // raw ms (NOT including +2 adjustment)
+  penalty: Penalty;      // 'ok' | '+2' | 'dnf'
+  confirmedAt: number;
+  scramble: string;
+}
 
 interface MemberData {
   name: string;
   ready: boolean;
-  time: number | null;
-  penalty: Penalty;
-  finishedAt: number | null;
-  startedAt?: number | null;
-  totalPoints?: number;
+  currentSolve: number;          // 0..5 — index of next solve to do
+  roundAverage: number | null;   // ms, set after solve 5 confirmed; null if pending or DNF
+  totalPoints: number;
+  connected: boolean;
 }
-
-const ROOM_TTL_MS = 24 * 60 * 60 * 1000; // 24h
-const LAST_ROOM_KEY = 'mp_last_room';
 
 interface RoomData {
   host: string;
   event: string;
-  scramble: string;
   status: RoomStatus;
   round: number;
   maxRounds: number;
+  roundName: string;
   createdAt: number;
   expiresAt?: number;
-  countdownStart?: number | null;
-  raceStart?: number | null;
+  scrambles?: Record<string, string>;                       // {"0": "...", ...}
   members: Record<string, MemberData>;
+  solves?: Record<string, Record<string, SolveData>>;       // {uid: {0: {...}}}
+}
+
+// ── Round / scoring helpers ──────────────────────────────────────────────
+function getRoundName(round: number, maxRounds: number): string {
+  if (maxRounds === 1) return 'Final';
+  if (maxRounds === 2) return round === 1 ? 'First Round' : 'Final';
+  if (maxRounds === 3) {
+    if (round === 1) return 'First Round';
+    if (round === 2) return 'Second Round';
+    return 'Final';
+  }
+  // maxRounds === 4
+  if (round === 1) return 'First Round';
+  if (round === 2) return 'Second Round';
+  if (round === 3) return 'Semi Final';
+  return 'Final';
+}
+
+function effectiveSolveMs(s: SolveData): number {
+  if (s.penalty === 'dnf') return Number.POSITIVE_INFINITY;
+  return s.penalty === '+2' ? s.time + 2000 : s.time;
+}
+
+// Average of 5 with best+worst dropped, WCA-style. Returns null when DNF.
+function computeAo5(solves: SolveData[]): number | null {
+  if (solves.length !== 5) return null;
+  const dnfCount = solves.filter(s => s.penalty === 'dnf').length;
+  if (dnfCount >= 2) return null;
+  const eff = solves.map(effectiveSolveMs).sort((a, b) => a - b);
+  const middle3 = eff.slice(1, 4);
+  if (middle3.some(v => !Number.isFinite(v))) return null;
+  return (middle3[0] + middle3[1] + middle3[2]) / 3;
+}
+
+function generateScrambles(eventId: string, n = SOLVES_PER_ROUND): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (let i = 0; i < n; i++) out[String(i)] = generateScramble(eventId);
+  return out;
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────
@@ -303,23 +347,20 @@ function MultiplayerPageInner() {
         const initial: RoomData = {
           host: uid,
           event: '333',
-          scramble: generateScramble('333'),
           status: 'waiting',
           round: 1,
-          maxRounds: 5,
+          maxRounds: 3,
+          roundName: getRoundName(1, 3),
           createdAt: now,
           expiresAt: now + ROOM_TTL_MS,
-          countdownStart: null,
-          raceStart: null,
           members: {
             [uid]: {
               name,
               ready: false,
-              time: null,
-              penalty: null,
-              finishedAt: null,
-              startedAt: null,
+              currentSolve: 0,
+              roundAverage: null,
               totalPoints: 0,
+              connected: true,
             },
           },
         };
@@ -368,14 +409,14 @@ function MultiplayerPageInner() {
         return;
       }
       const memberRef = ref(rtdb, `rooms/${code}/members/${uid}`);
+      const existingMember = data.members?.[uid];
       const memberData: MemberData = {
         name,
-        ready: false,
-        time: null,
-        penalty: null,
-        finishedAt: null,
-        startedAt: null,
-        totalPoints: 0,
+        ready: existingMember?.ready ?? false,
+        currentSolve: existingMember?.currentSolve ?? 0,
+        roundAverage: existingMember?.roundAverage ?? null,
+        totalPoints: existingMember?.totalPoints ?? 0,
+        connected: true,
       };
       await set(memberRef, memberData);
       console.log('[mp] joined', code);
@@ -443,15 +484,14 @@ function MultiplayerPageInner() {
       }
       const memberRef = ref(rtdb, `rooms/${pendingRejoin}/members/${uid}`);
       const existing = data.members?.[uid];
-      // Preserve cumulative points etc. when the host (or anyone) returns.
+      // Preserve cumulative points / round progress on return.
       const memberData: MemberData = {
         name,
         ready: existing?.ready ?? false,
-        time: existing?.time ?? null,
-        penalty: existing?.penalty ?? null,
-        finishedAt: existing?.finishedAt ?? null,
-        startedAt: existing?.startedAt ?? null,
+        currentSolve: existing?.currentSolve ?? 0,
+        roundAverage: existing?.roundAverage ?? null,
         totalPoints: existing?.totalPoints ?? 0,
+        connected: true,
       };
       await set(memberRef, memberData);
       setRoomCode(pendingRejoin);
@@ -467,15 +507,16 @@ function MultiplayerPageInner() {
   // Host controls
   const setEvent = useCallback(async (eventId: string) => {
     if (!roomCode || !room || room.host !== userId) return;
-    await update(ref(rtdb, `rooms/${roomCode}`), {
-      event: eventId,
-      scramble: generateScramble(eventId),
-    });
+    await update(ref(rtdb, `rooms/${roomCode}`), { event: eventId });
   }, [roomCode, room, userId]);
 
   const setMaxRounds = useCallback(async (n: number) => {
     if (!roomCode || !room || room.host !== userId) return;
-    await update(ref(rtdb, `rooms/${roomCode}`), { maxRounds: n });
+    await update(ref(rtdb, `rooms/${roomCode}`), {
+      maxRounds: n,
+      // Refresh round name in case round 1 already shown — getRoundName depends on maxRounds
+      roundName: getRoundName(room.round, n),
+    });
   }, [roomCode, room, userId]);
 
   const toggleReady = useCallback(async () => {
@@ -487,116 +528,130 @@ function MultiplayerPageInner() {
     });
   }, [roomCode, room, userId]);
 
+  // Host: pre-generate 5 scrambles, reset member solve progress, status → racing.
   const startRace = useCallback(async () => {
     if (!roomCode || !room || room.host !== userId) return;
     const members = Object.entries(room.members || {});
     if (members.length < 1) return;
-    const allReady = members.every(([, m]) => m.ready);
-    if (!allReady) return;
-    // Reset member round results
-    const memberUpdates: Record<string, unknown> = {};
+    if (!members.every(([, m]) => m.ready)) return;
+    const updates: Record<string, unknown> = {
+      status: 'racing',
+      roundName: getRoundName(room.round, room.maxRounds),
+      scrambles: generateScrambles(room.event),
+      // Wipe any leftover round solves
+      solves: null,
+    };
     for (const [uid] of members) {
-      memberUpdates[`members/${uid}/time`] = null;
-      memberUpdates[`members/${uid}/penalty`] = null;
-      memberUpdates[`members/${uid}/finishedAt`] = null;
-      memberUpdates[`members/${uid}/startedAt`] = null;
+      updates[`members/${uid}/currentSolve`] = 0;
+      updates[`members/${uid}/roundAverage`] = null;
+      updates[`members/${uid}/ready`] = false;
     }
-    // 3-second countdown, then GO. raceStart computed on each client from
-    // countdownStart + 3000.
-    const now = Date.now();
-    await update(ref(rtdb, `rooms/${roomCode}`), {
-      ...memberUpdates,
-      status: 'countdown',
-      countdownStart: now,
-      raceStart: now + 3000,
-      // keep current scramble — host already has one
-    });
+    await update(ref(rtdb, `rooms/${roomCode}`), updates);
   }, [roomCode, room, userId]);
 
-  const submitTime = useCallback(async (timeMs: number, penalty: Penalty) => {
-    if (!roomCode || !userId) return;
-    await update(ref(rtdb, `rooms/${roomCode}/members/${userId}`), {
-      time: timeMs,
-      penalty: penalty ?? 'ok',
-      finishedAt: Date.now(),
-    });
-  }, [roomCode, userId]);
+  // Member: confirm a solve. Writes the solve and bumps currentSolve.
+  // If this was solve 5, also computes and stores roundAverage.
+  const submitSolve = useCallback(async (
+    index: number,
+    timeMs: number,
+    penalty: Penalty,
+    scramble: string,
+  ) => {
+    if (!roomCode || !userId || !room) return;
+    const updates: Record<string, unknown> = {
+      [`solves/${userId}/${index}`]: {
+        time: timeMs,
+        penalty,
+        confirmedAt: Date.now(),
+        scramble,
+      },
+      [`members/${userId}/currentSolve`]: index + 1,
+    };
+    if (index === SOLVES_PER_ROUND - 1) {
+      // Compose all 5 solves locally to compute Ao5 immediately.
+      const all: SolveData[] = [];
+      for (let i = 0; i < SOLVES_PER_ROUND - 1; i++) {
+        const existing = room.solves?.[userId]?.[String(i)];
+        if (existing) all.push(existing);
+      }
+      all.push({ time: timeMs, penalty, confirmedAt: Date.now(), scramble });
+      if (all.length === SOLVES_PER_ROUND) {
+        updates[`members/${userId}/roundAverage`] = computeAo5(all);
+      }
+    }
+    await update(ref(rtdb, `rooms/${roomCode}`), updates);
+  }, [roomCode, userId, room]);
 
+  // Member: mark "ready for next round" on the results screen.
+  const readyForNext = useCallback(async () => {
+    if (!roomCode || !userId || !room) return;
+    const me = room.members?.[userId];
+    if (!me) return;
+    await update(ref(rtdb, `rooms/${roomCode}/members/${userId}`), {
+      ready: !me.ready,
+    });
+  }, [roomCode, userId, room]);
+
+  // Host: advance to next round, gen 5 fresh scrambles, reset solves.
   const nextRound = useCallback(async () => {
     if (!roomCode || !room || room.host !== userId) return;
     const newRound = room.round + 1;
-    if (newRound > room.maxRounds) {
-      // End of match — back to waiting and reset rounds. Keep cumulative points.
-      const memberUpdates: Record<string, unknown> = {};
-      for (const uid of Object.keys(room.members || {})) {
-        memberUpdates[`members/${uid}/ready`] = false;
-        memberUpdates[`members/${uid}/time`] = null;
-        memberUpdates[`members/${uid}/penalty`] = null;
-        memberUpdates[`members/${uid}/finishedAt`] = null;
-        memberUpdates[`members/${uid}/startedAt`] = null;
-        memberUpdates[`members/${uid}/totalPoints`] = 0;
-      }
-      await update(ref(rtdb, `rooms/${roomCode}`), {
-        ...memberUpdates,
-        status: 'waiting',
-        round: 1,
-        countdownStart: null,
-        raceStart: null,
-        scramble: generateScramble(room.event),
-      });
-      return;
-    }
-    const memberUpdates: Record<string, unknown> = {};
-    for (const uid of Object.keys(room.members || {})) {
-      memberUpdates[`members/${uid}/ready`] = false;
-      memberUpdates[`members/${uid}/time`] = null;
-      memberUpdates[`members/${uid}/penalty`] = null;
-      memberUpdates[`members/${uid}/finishedAt`] = null;
-      memberUpdates[`members/${uid}/startedAt`] = null;
-    }
-    await update(ref(rtdb, `rooms/${roomCode}`), {
-      ...memberUpdates,
-      status: 'waiting',
+    if (newRound > room.maxRounds) return; // shouldn't be called past final
+    const updates: Record<string, unknown> = {
+      status: 'racing',
       round: newRound,
-      countdownStart: null,
-      raceStart: null,
-      scramble: generateScramble(room.event),
-    });
+      roundName: getRoundName(newRound, room.maxRounds),
+      scrambles: generateScrambles(room.event),
+      solves: null,
+    };
+    for (const uid of Object.keys(room.members || {})) {
+      updates[`members/${uid}/currentSolve`] = 0;
+      updates[`members/${uid}/roundAverage`] = null;
+      updates[`members/${uid}/ready`] = false;
+    }
+    await update(ref(rtdb, `rooms/${roomCode}`), updates);
+  }, [roomCode, room, userId]);
+
+  // Host: reset everything for another full match. Clears totalPoints.
+  const playAgain = useCallback(async () => {
+    if (!roomCode || !room || room.host !== userId) return;
+    const updates: Record<string, unknown> = {
+      status: 'waiting',
+      round: 1,
+      roundName: getRoundName(1, room.maxRounds),
+      scrambles: null,
+      solves: null,
+    };
+    for (const uid of Object.keys(room.members || {})) {
+      updates[`members/${uid}/currentSolve`] = 0;
+      updates[`members/${uid}/roundAverage`] = null;
+      updates[`members/${uid}/totalPoints`] = 0;
+      updates[`members/${uid}/ready`] = false;
+    }
+    await update(ref(rtdb, `rooms/${roomCode}`), updates);
   }, [roomCode, room, userId]);
 
   // ── Status transitions (host-driven) ─────────────────────────────────────
-  // Host transitions: countdown → solving when raceStart elapses.
+  // Host: racing → results when every member has confirmed all 5 solves
+  // (currentSolve >= SOLVES_PER_ROUND). Awards round points to cumulative.
   useEffect(() => {
     if (!room || !roomCode) return;
     if (room.host !== userId) return;
-    if (room.status !== 'countdown' || !room.raceStart) return;
-    const delay = Math.max(0, room.raceStart - Date.now());
-    const t = setTimeout(() => {
-      update(ref(rtdb, `rooms/${roomCode}`), { status: 'solving' });
-    }, delay);
-    return () => clearTimeout(t);
-  }, [room?.status, room?.raceStart, room?.host, roomCode, userId]);
-
-  // Host transitions: solving → results when all members have finishedAt set.
-  useEffect(() => {
-    if (!room || !roomCode) return;
-    if (room.host !== userId) return;
-    if (room.status !== 'solving') return;
-    const members = Object.values(room.members || {});
+    if (room.status !== 'racing') return;
+    const members = Object.entries(room.members || {});
     if (members.length === 0) return;
-    const allFinished = members.every(m => m.finishedAt != null);
-    if (!allFinished) return;
-    // Compute points and bump cumulative totals.
-    const ranked = computeRanking(room.members);
-    const memberUpdates: Record<string, unknown> = {};
-    ranked.forEach(({ uid, points }) => {
-      const prev = room.members[uid]?.totalPoints ?? 0;
-      memberUpdates[`members/${uid}/totalPoints`] = prev + points;
+    const allDone = members.every(([, m]) => m.currentSolve >= SOLVES_PER_ROUND);
+    if (!allDone) return;
+    // Rank by Ao5 (DNF last). Award points: 1st=N, 2nd=N-1, ..., last=1; DNF=0.
+    const ranked = rankByRoundAverage(room.members);
+    const updates: Record<string, unknown> = { status: 'results' };
+    const N = ranked.length;
+    ranked.forEach((r, i) => {
+      const pts = r.dnf ? 0 : Math.max(1, N - i);
+      const prev = room.members[r.uid]?.totalPoints ?? 0;
+      updates[`members/${r.uid}/totalPoints`] = prev + pts;
     });
-    update(ref(rtdb, `rooms/${roomCode}`), {
-      ...memberUpdates,
-      status: 'results',
-    });
+    update(ref(rtdb, `rooms/${roomCode}`), updates);
   }, [room?.status, room?.members, room?.host, roomCode, userId]);
 
   // ── Render ──────────────────────────────────────────────────────────────
@@ -672,8 +727,10 @@ function MultiplayerPageInner() {
             onSetEvent={setEvent}
             onSetMaxRounds={setMaxRounds}
             onStartRace={startRace}
-            onSubmitTime={submitTime}
+            onSubmitSolve={submitSolve}
+            onReadyForNext={readyForNext}
             onNextRound={nextRound}
+            onPlayAgain={playAgain}
             onLeave={leaveRoom}
           />
         )}
@@ -1039,7 +1096,7 @@ function CameraIcon() {
 }
 
 // ── RoomView (router by status) ───────────────────────────────────────────
-function RoomView(props: {
+interface RoomViewProps {
   isMobile: boolean;
   roomCode: string;
   room: RoomData;
@@ -1048,22 +1105,19 @@ function RoomView(props: {
   onSetEvent: (id: string) => void;
   onSetMaxRounds: (n: number) => void;
   onStartRace: () => void;
-  onSubmitTime: (ms: number, penalty: Penalty) => void;
+  onSubmitSolve: (index: number, time: number, penalty: Penalty, scramble: string) => void;
+  onReadyForNext: () => void;
   onNextRound: () => void;
+  onPlayAgain: () => void;
   onLeave: () => void;
-}) {
+}
+
+function RoomView(props: RoomViewProps) {
   const { room, userId } = props;
   const isHost = room.host === userId;
 
-  if (room.status === 'waiting') {
-    return <WaitingRoom {...props} isHost={isHost} />;
-  }
-  if (room.status === 'countdown') {
-    return <CountdownScreen {...props} isHost={isHost} />;
-  }
-  if (room.status === 'solving') {
-    return <RacingScreen {...props} isHost={isHost} />;
-  }
+  if (room.status === 'waiting') return <WaitingRoom {...props} isHost={isHost} />;
+  if (room.status === 'racing')  return <RacingScreen {...props} isHost={isHost} />;
   return <ResultsScreen {...props} isHost={isHost} />;
 }
 
@@ -1071,17 +1125,7 @@ function RoomView(props: {
 function WaitingRoom({
   isMobile, roomCode, room, userId, isHost,
   onToggleReady, onSetEvent, onSetMaxRounds, onStartRace,
-}: {
-  isMobile: boolean;
-  roomCode: string; room: RoomData; userId: string; isHost: boolean;
-  onToggleReady: () => void;
-  onSetEvent: (id: string) => void;
-  onSetMaxRounds: (n: number) => void;
-  onStartRace: () => void;
-  onSubmitTime: (ms: number, penalty: Penalty) => void;
-  onNextRound: () => void;
-  onLeave: () => void;
-}) {
+}: RoomViewProps & { isHost: boolean }) {
   const members = Object.entries(room.members || {});
   const allReady = members.length > 0 && members.every(([, m]) => m.ready);
   const me = room.members?.[userId];
@@ -1100,7 +1144,9 @@ function WaitingRoom({
       <Card>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
           <SectionLabel>Players ({members.length})</SectionLabel>
-          <div style={{ fontSize: '0.7rem', color: C.muted }}>Round {room.round} / {room.maxRounds}</div>
+          <div style={{ fontSize: '0.7rem', color: C.muted }}>
+            {getRoundName(room.round, room.maxRounds)} • {room.round} / {room.maxRounds}
+          </div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
           {members.map(([uid, m]) => (
@@ -1136,15 +1182,22 @@ function WaitingRoom({
                 {EVENTS.map(ev => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
               </select>
             </Field>
-            <Field label="Rounds">
+            <Field label="Rounds (1–4)">
               <select
                 value={room.maxRounds}
                 onChange={e => onSetMaxRounds(parseInt(e.target.value, 10))}
                 style={inputStyle}
               >
-                {[1,2,3,4,5,6,7,8,9,10].map(n => <option key={n} value={n}>{n}</option>)}
+                {[1, 2, 3, 4].map(n => (
+                  <option key={n} value={n}>
+                    {n} — {Array.from({ length: n }, (_, i) => getRoundName(i + 1, n)).join(' → ')}
+                  </option>
+                ))}
               </select>
             </Field>
+          </div>
+          <div style={{ marginTop: '0.6rem', fontSize: '0.72rem', color: C.muted, lineHeight: 1.45 }}>
+            Each round is 5 solves, ranked by Average of 5 (drop best + worst, WCA style).
           </div>
         </Card>
       )}
@@ -1156,7 +1209,7 @@ function WaitingRoom({
         width: isMobile ? '100%' : 'auto',
       }}>
         <BigButton
-          accent={!!me?.ready ? false : true}
+          accent={!me?.ready}
           onClick={onToggleReady}
           style={isMobile ? { width: '100%' } : undefined}
         >
@@ -1177,177 +1230,213 @@ function WaitingRoom({
   );
 }
 
-// ── Countdown ─────────────────────────────────────────────────────────────
-function CountdownScreen({
-  room,
-}: {
-  isMobile: boolean;
-  roomCode: string; room: RoomData; userId: string; isHost: boolean;
-  onToggleReady: () => void;
-  onSetEvent: (id: string) => void;
-  onSetMaxRounds: (n: number) => void;
-  onStartRace: () => void;
-  onSubmitTime: (ms: number, penalty: Penalty) => void;
-  onNextRound: () => void;
-  onLeave: () => void;
-}) {
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    const id = window.setInterval(() => setTick(t => t + 1), 100);
-    return () => window.clearInterval(id);
-  }, []);
-  void tick;
-
-  const ms = (room.raceStart ?? 0) - Date.now();
-  const big = ms > 2000 ? '3' : ms > 1000 ? '2' : ms > 0 ? '1' : 'GO!';
-  const isGo = ms <= 0;
-
-  return (
-    <div style={{ flex: '1 1 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1.25rem', padding: '2rem 1rem', textAlign: 'center' }}>
-      <div style={{
-        fontFamily: 'JetBrains Mono, monospace',
-        fontSize: 'clamp(6rem, 28vw, 16rem)',
-        fontWeight: 800, lineHeight: 0.95,
-        color: isGo ? C.success : C.accent,
-        textShadow: isGo ? `0 0 60px ${C.success}77` : `0 0 50px ${C.accent}55`,
-        transition: 'transform 0.15s, color 0.15s',
-        transform: isGo ? 'scale(1.05)' : 'scale(1)',
-      }}>
-        {big}
-      </div>
-      {isGo && (
-        <div style={{
-          maxWidth: 720, width: '100%',
-          fontFamily: 'JetBrains Mono, monospace',
-          fontSize: 'clamp(0.95rem, 2.4vw, 1.4rem)',
-          color: C.text, lineHeight: 1.5, letterSpacing: '0.04em',
-          padding: '0.85rem 1rem',
-          background: C.card, border: `1px solid ${C.borderHi}`,
-          borderRadius: 12,
-          whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-        }}>
-          {room.scramble}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── Racing screen ─────────────────────────────────────────────────────────
 function RacingScreen({
-  isMobile, roomCode, room, userId, isHost,
-  onSubmitTime,
-}: {
-  isMobile: boolean;
-  roomCode: string; room: RoomData; userId: string; isHost: boolean;
-  onToggleReady: () => void;
-  onSetEvent: (id: string) => void;
-  onSetMaxRounds: (n: number) => void;
-  onStartRace: () => void;
-  onSubmitTime: (ms: number, penalty: Penalty) => void;
-  onNextRound: () => void;
-  onLeave: () => void;
-}) {
-  void roomCode; void isHost;
+  isMobile, room, userId, onSubmitSolve,
+}: RoomViewProps & { isHost: boolean }) {
   const me = room.members?.[userId];
-  const myFinished = me?.finishedAt != null;
-  const raceStart = room.raceStart ?? Date.now();
+  const myCurrent = me?.currentSolve ?? 0;
+  const mySolves = useMemo(() => {
+    const out: SolveData[] = [];
+    for (let i = 0; i < SOLVES_PER_ROUND; i++) {
+      const s = room.solves?.[userId]?.[String(i)];
+      if (s) out.push(s);
+    }
+    return out;
+  }, [room.solves, userId]);
 
-  // Local timer state — runs from raceStart until I tap to stop.
+  // Sync gating: I can do solve N if min(others.currentSolve) >= N - 1.
+  // Equivalently, gap = myCurrent - min(others) must be ≤ 1.
+  const otherCurrents = useMemo(() => {
+    return Object.entries(room.members || {})
+      .filter(([uid]) => uid !== userId)
+      .map(([, m]) => m.currentSolve);
+  }, [room.members, userId]);
+  const minOthers = otherCurrents.length === 0 ? Number.POSITIVE_INFINITY : Math.min(...otherCurrents);
+  const isWaitingForOpponents = otherCurrents.length > 0 && (myCurrent - minOthers) >= 1 && myCurrent < SOLVES_PER_ROUND;
+
+  const isRoundDone = myCurrent >= SOLVES_PER_ROUND;
+  const currentScramble = !isRoundDone ? (room.scrambles?.[String(myCurrent)] ?? '') : '';
+
+  // Local timer state.
+  const [scrambleShown, setScrambleShown] = useState(false);
+  const [phase, setPhase] = useState<'idle' | 'running' | 'pendingConfirm'>('idle');
   const [elapsed, setElapsed] = useState(0);
-  const [running, setRunning] = useState(true);
-  const stoppedAtRef = useRef<number | null>(null);
+  const startTsRef = useRef<number>(0);
+  const [pending, setPending] = useState<{ ms: number } | null>(null);
 
-  // Re-render every 50ms while running.
+  // Reset local state when the active solve index changes (next solve / next round).
   useEffect(() => {
-    if (!running || myFinished) return;
+    setScrambleShown(false);
+    setPhase('idle');
+    setElapsed(0);
+    setPending(null);
+  }, [myCurrent, room.round]);
+
+  // Timer tick.
+  useEffect(() => {
+    if (phase !== 'running') return;
     const id = window.setInterval(() => {
-      setElapsed(Math.max(0, Date.now() - raceStart));
+      setElapsed(Math.max(0, Date.now() - startTsRef.current));
     }, 50);
     return () => window.clearInterval(id);
-  }, [running, raceStart, myFinished]);
+  }, [phase]);
 
-  // If I've already submitted (e.g. reload), reflect that.
-  useEffect(() => {
-    if (myFinished && me) {
-      setRunning(false);
-      const t = me.time ?? 0;
-      setElapsed(t);
-      stoppedAtRef.current = t;
-    }
-  }, [myFinished, me?.time]);
+  const startTimer = useCallback(() => {
+    if (phase !== 'idle' || !scrambleShown || isWaitingForOpponents || isRoundDone) return;
+    startTsRef.current = Date.now();
+    setElapsed(0);
+    setPhase('running');
+  }, [phase, scrambleShown, isWaitingForOpponents, isRoundDone]);
 
-  const stop = useCallback(() => {
-    if (myFinished || !running) return;
-    const ms = Math.max(0, Date.now() - raceStart);
-    stoppedAtRef.current = ms;
+  const stopTimer = useCallback(() => {
+    if (phase !== 'running') return;
+    const ms = Math.max(0, Date.now() - startTsRef.current);
     setElapsed(ms);
-    setRunning(false);
-    onSubmitTime(ms, 'ok');
-  }, [myFinished, running, raceStart, onSubmitTime]);
+    setPhase('pendingConfirm');
+    setPending({ ms });
+  }, [phase]);
 
-  const markDnf = useCallback(() => {
-    if (myFinished) return;
-    const ms = Math.max(0, Date.now() - raceStart);
-    stoppedAtRef.current = ms;
-    setElapsed(ms);
-    setRunning(false);
-    onSubmitTime(ms, 'dnf');
-  }, [myFinished, raceStart, onSubmitTime]);
+  const confirmSolve = useCallback((penalty: Penalty) => {
+    if (phase !== 'pendingConfirm' || !pending) return;
+    onSubmitSolve(myCurrent, pending.ms, penalty, currentScramble);
+    // Local reset will happen via the myCurrent change effect.
+    setPhase('idle');
+    setPending(null);
+  }, [phase, pending, myCurrent, currentScramble, onSubmitSolve]);
 
-  // Spacebar to stop
+  // Spacebar: start if idle (and scramble shown), stop if running.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !myFinished && running) {
-        e.preventDefault();
-        stop();
+      if (e.code !== 'Space') return;
+      if (phase === 'running') { e.preventDefault(); stopTimer(); }
+      else if (phase === 'idle' && scrambleShown && !isWaitingForOpponents && !isRoundDone) {
+        e.preventDefault(); startTimer();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [stop, myFinished, running]);
+  }, [phase, scrambleShown, isWaitingForOpponents, isRoundDone, startTimer, stopTimer]);
 
-  const timerDisplay = fmtMs(elapsed, false, 2);
+  const [opponentsOpen, setOpponentsOpen] = useState(!isMobile);
+  useEffect(() => { setOpponentsOpen(!isMobile); }, [isMobile]);
+
+  const opponentCount = Object.keys(room.members || {}).length - 1;
+  const timerDisplay = phase === 'pendingConfirm' && pending
+    ? fmtMs(pending.ms, false, 2)
+    : fmtMs(elapsed, false, 2);
 
   return (
     <div className="mp-race-container" style={{
       flex: '1 1 auto', minHeight: 0, width: '100%',
       maxWidth: isMobile ? '100%' : '1100px',
       margin: '0 auto',
-      display: 'grid',
-      gridTemplateColumns: 'minmax(0, 1fr)',
-      gridTemplateRows: 'auto 1fr auto',
-      gap: '0.85rem',
+      display: 'flex', flexDirection: 'column', gap: '0.85rem',
       padding: isMobile ? '0.5rem' : '0.5rem 0',
     }}>
-      {/* Scramble */}
-      <div className="mp-race-scramble" style={{
-        fontFamily: 'JetBrains Mono, monospace',
-        fontSize: 'clamp(0.85rem, 2vw, 1.2rem)',
-        color: C.text, lineHeight: 1.5, letterSpacing: '0.04em',
-        padding: '0.7rem 0.9rem',
-        background: C.card, border: `1px solid ${C.border}`,
-        borderRadius: 12,
-        whiteSpace: 'pre-wrap', wordBreak: 'break-word', textAlign: 'center',
+      {/* Round header + solve progress */}
+      <div style={{
+        background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
+        padding: '0.6rem 0.85rem',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.6rem',
+        flexWrap: 'wrap',
       }}>
-        {room.scramble}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+          <div style={{ fontSize: '0.62rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: C.muted, fontWeight: 700 }}>
+            {room.roundName || getRoundName(room.round, room.maxRounds)}
+          </div>
+          <div style={{ fontSize: '0.78rem', color: C.text, fontWeight: 700 }}>
+            Solve {Math.min(myCurrent + 1, SOLVES_PER_ROUND)} of {SOLVES_PER_ROUND}
+          </div>
+        </div>
+        <SolveProgressDots count={SOLVES_PER_ROUND} done={myCurrent} />
       </div>
 
-      {/* Center: timer + leaderboard */}
+      {/* Sync gate */}
+      {isWaitingForOpponents && (
+        <div style={{
+          background: C.accentDim, border: `1px solid ${C.borderHi}`,
+          borderRadius: 12, padding: '0.85rem 1rem', textAlign: 'center',
+          color: C.accent, fontWeight: 700, fontSize: '0.92rem',
+        }}>
+          Waiting for opponents to catch up…
+        </div>
+      )}
+
+      {/* Round done banner */}
+      {isRoundDone && (
+        <div style={{
+          background: C.successDim, border: `1px solid ${C.success}`,
+          borderRadius: 12, padding: '0.85rem 1rem', textAlign: 'center',
+          color: C.success, fontWeight: 700, fontSize: '0.95rem',
+        }}>
+          You finished the round! Waiting for everyone else to finish…
+        </div>
+      )}
+
+      {/* Scramble: hidden until tapped */}
+      {!isRoundDone && !isWaitingForOpponents && (
+        <div style={{
+          background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
+          padding: '0.7rem 0.9rem',
+          minHeight: 64,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          {scrambleShown ? (
+            <div style={{
+              fontFamily: 'JetBrains Mono, monospace',
+              fontSize: 'clamp(0.95rem, 2.4vw, 1.35rem)',
+              color: C.text, lineHeight: 1.5, letterSpacing: '0.04em',
+              whiteSpace: 'pre-wrap', wordBreak: 'break-word', textAlign: 'center',
+              width: '100%',
+            }}>
+              {currentScramble}
+            </div>
+          ) : (
+            <button
+              onClick={() => setScrambleShown(true)}
+              style={{
+                background: C.accentDim, color: C.accent,
+                border: `1px solid ${C.borderHi}`, borderRadius: 10,
+                padding: '0.6rem 1.1rem', fontSize: '0.92rem', fontWeight: 700,
+                fontFamily: 'inherit', cursor: 'pointer', letterSpacing: '0.02em',
+              }}
+            >Show Scramble</button>
+          )}
+        </div>
+      )}
+
+      {/* Timer + opponents panel */}
       <div className="mp-race-grid" style={{
         display: 'grid',
         gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr',
         gap: '0.85rem', minHeight: 0,
+        flex: '1 1 auto',
       }}>
         <div
-          onClick={stop}
-          onTouchStart={(e) => { e.preventDefault(); stop(); }}
+          onClick={() => {
+            if (phase === 'idle') startTimer();
+            else if (phase === 'running') stopTimer();
+          }}
+          onTouchStart={(e) => {
+            if (phase === 'idle' || phase === 'running') {
+              e.preventDefault();
+              if (phase === 'idle') startTimer();
+              else stopTimer();
+            }
+          }}
           style={{
-            background: C.card, border: `1px solid ${myFinished ? C.success : C.border}`,
+            background: C.card,
+            border: `1px solid ${
+              phase === 'running' ? C.accent
+              : phase === 'pendingConfirm' ? C.warn
+              : C.border
+            }`,
             borderRadius: 16, padding: '1.5rem 1rem',
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-            userSelect: 'none', cursor: myFinished ? 'default' : 'pointer', textAlign: 'center',
-            touchAction: 'manipulation',
+            userSelect: 'none',
+            cursor: (phase === 'idle' && scrambleShown && !isWaitingForOpponents && !isRoundDone) || phase === 'running' ? 'pointer' : 'default',
+            textAlign: 'center', touchAction: 'manipulation',
             transition: 'border-color 0.15s',
             minHeight: 220,
           }}
@@ -1357,33 +1446,251 @@ function RacingScreen({
             fontSize: 'clamp(3.5rem, 14vw, 7rem)',
             fontWeight: 800, lineHeight: 0.95,
             fontVariantNumeric: 'tabular-nums',
-            color: myFinished ? C.success : C.text,
+            color: phase === 'running' ? C.accent : phase === 'pendingConfirm' ? C.warn : C.text,
           }}>
             {timerDisplay}
           </div>
-          <div style={{ fontSize: '0.75rem', color: C.muted, marginTop: '1rem', letterSpacing: '0.06em' }}>
-            {myFinished ? 'Time submitted — waiting for others' : 'Tap or press SPACE to stop'}
+          <div style={{ fontSize: '0.78rem', color: C.muted, marginTop: '0.85rem', letterSpacing: '0.04em', minHeight: '1.1rem' }}>
+            {phase === 'idle' && !scrambleShown && !isRoundDone && 'Show the scramble first'}
+            {phase === 'idle' && scrambleShown && !isWaitingForOpponents && !isRoundDone && 'Tap or press SPACE to start'}
+            {phase === 'idle' && isWaitingForOpponents && 'Waiting for opponents…'}
+            {phase === 'running' && 'Tap or press SPACE to stop'}
+            {phase === 'pendingConfirm' && 'Confirm your time'}
+            {isRoundDone && 'Round complete'}
           </div>
-          {!myFinished && (
-            <button
-              onClick={(e) => { e.stopPropagation(); markDnf(); }}
-              style={{
-                marginTop: '1rem',
-                background: 'transparent', color: C.danger,
-                border: `1px solid ${C.danger}`, borderRadius: 8,
-                padding: '0.4rem 0.8rem', fontSize: '0.78rem',
-                fontFamily: 'inherit', cursor: 'pointer', fontWeight: 600,
-              }}
-            >DNF</button>
+
+          {phase === 'pendingConfirm' && pending && (
+            <div style={{
+              marginTop: '1.2rem',
+              display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem',
+              width: '100%', maxWidth: 360,
+            }}>
+              <ConfirmButton color={C.success} onClick={(e) => { e.stopPropagation(); confirmSolve('ok'); }}>OK</ConfirmButton>
+              <ConfirmButton color={C.warn}    onClick={(e) => { e.stopPropagation(); confirmSolve('+2'); }}>+2</ConfirmButton>
+              <ConfirmButton color={C.danger}  onClick={(e) => { e.stopPropagation(); confirmSolve('dnf'); }}>DNF</ConfirmButton>
+            </div>
           )}
+
+          {/* My solves so far */}
+          <div style={{
+            marginTop: '1.5rem', display: 'flex', gap: '0.4rem',
+            flexWrap: 'wrap', justifyContent: 'center',
+          }}>
+            {Array.from({ length: SOLVES_PER_ROUND }, (_, i) => {
+              const s = mySolves[i];
+              const isCurrent = i === myCurrent && !isRoundDone;
+              return (
+                <div key={i} style={{
+                  minWidth: 56, padding: '0.3rem 0.5rem',
+                  background: s ? C.cardAlt : 'transparent',
+                  border: `1px solid ${isCurrent ? C.accent : (s ? C.border : C.border)}`,
+                  borderRadius: 8,
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.1rem',
+                }}>
+                  <div style={{ fontSize: '0.55rem', letterSpacing: '0.12em', color: C.mutedDim, fontWeight: 700 }}>
+                    S{i + 1}
+                  </div>
+                  <div style={{
+                    fontFamily: 'JetBrains Mono, monospace', fontSize: '0.78rem', fontWeight: 700,
+                    fontVariantNumeric: 'tabular-nums',
+                    color: !s ? C.mutedDim : s.penalty === 'dnf' ? C.danger : C.text,
+                  }}>
+                    {!s ? '—' : s.penalty === 'dnf' ? 'DNF' : fmtMs(effectiveSolveMs(s), false, 2)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
-        <Leaderboard room={room} userId={userId} live raceStart={raceStart} />
+        {/* Opponents panel — collapsible on mobile */}
+        {(opponentsOpen || !isMobile) && (
+          <OpponentsPanel
+            room={room} userId={userId}
+            onClose={isMobile ? () => setOpponentsOpen(false) : undefined}
+          />
+        )}
+        {!opponentsOpen && isMobile && (
+          <button
+            onClick={() => setOpponentsOpen(true)}
+            style={{
+              background: C.cardAlt, color: C.text,
+              border: `1px solid ${C.border}`, borderRadius: 10,
+              padding: '0.6rem 0.85rem', fontSize: '0.85rem',
+              fontFamily: 'inherit', cursor: 'pointer', fontWeight: 700,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem',
+            }}
+          >
+            <span aria-hidden>👥</span> {opponentCount} opponent{opponentCount === 1 ? '' : 's'}
+          </button>
+        )}
       </div>
+    </div>
+  );
+}
 
-      <div style={{ fontSize: '0.7rem', color: C.muted, textAlign: 'center' }}>
-        Round {room.round} / {room.maxRounds}
+function SolveProgressDots({ count, done }: { count: number; done: number }) {
+  return (
+    <div style={{ display: 'inline-flex', gap: '0.3rem' }}>
+      {Array.from({ length: count }, (_, i) => {
+        const filled = i < done;
+        return (
+          <span key={i} style={{
+            width: 11, height: 11, borderRadius: '50%',
+            background: filled ? C.accent : 'transparent',
+            border: `2px solid ${filled ? C.accent : C.border}`,
+            display: 'inline-block',
+          }} />
+        );
+      })}
+    </div>
+  );
+}
+
+function ConfirmButton({
+  color, onClick, children,
+}: {
+  color: string;
+  onClick: (e: React.MouseEvent) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        background: color, color: '#0a0a0a',
+        border: `1px solid ${color}`, borderRadius: 12,
+        padding: '0.7rem 0.85rem', fontSize: '1rem', fontWeight: 800,
+        fontFamily: 'inherit', cursor: 'pointer',
+        letterSpacing: '0.02em',
+      }}
+    >{children}</button>
+  );
+}
+
+// ── OpponentsPanel ───────────────────────────────────────────────────────
+function OpponentsPanel({
+  room, userId, onClose,
+}: {
+  room: RoomData; userId: string; onClose?: () => void;
+}) {
+  const rows = useMemo(() => {
+    const list = Object.entries(room.members || {}).map(([uid, m]) => {
+      const solves: (SolveData | null)[] = [];
+      for (let i = 0; i < SOLVES_PER_ROUND; i++) {
+        solves.push(room.solves?.[uid]?.[String(i)] ?? null);
+      }
+      // Running average: for now just show the WCA Ao5 if all 5 done; else show
+      // current mean of finished solves (excluding DNFs unless ≥2).
+      let runningAvg: number | null = null;
+      let runningDnf = false;
+      if (solves.every(s => s != null)) {
+        const all = solves.filter(Boolean) as SolveData[];
+        const ao5 = computeAo5(all);
+        runningAvg = ao5;
+        runningDnf = ao5 == null;
+      } else {
+        const done = solves.filter(Boolean) as SolveData[];
+        if (done.length > 0) {
+          const dnfs = done.filter(s => s.penalty === 'dnf').length;
+          if (dnfs < done.length) {
+            const sum = done
+              .filter(s => s.penalty !== 'dnf')
+              .reduce((acc, s) => acc + (s.penalty === '+2' ? s.time + 2000 : s.time), 0);
+            const cnt = done.filter(s => s.penalty !== 'dnf').length;
+            runningAvg = cnt > 0 ? sum / cnt : null;
+          }
+        }
+      }
+      return {
+        uid, name: m.name,
+        currentSolve: m.currentSolve,
+        solves, runningAvg, runningDnf,
+      };
+    });
+    // Sort: you first, then by progress desc, then alphabetical.
+    list.sort((a, b) => {
+      if (a.uid === userId && b.uid !== userId) return -1;
+      if (b.uid === userId && a.uid !== userId) return 1;
+      if (a.currentSolve !== b.currentSolve) return b.currentSolve - a.currentSolve;
+      return a.name.localeCompare(b.name);
+    });
+    return list;
+  }, [room.members, room.solves, userId]);
+
+  return (
+    <div style={{
+      background: C.card, border: `1px solid ${C.border}`,
+      borderRadius: 14, padding: '0.7rem',
+      display: 'flex', flexDirection: 'column', gap: '0.45rem',
+      minHeight: 0, overflow: 'auto',
+    }}>
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        padding: '0.1rem 0.3rem 0.4rem',
+      }}>
+        <div style={{
+          fontSize: '0.62rem', letterSpacing: '0.12em',
+          textTransform: 'uppercase', color: C.muted, fontWeight: 700,
+        }}>
+          Opponents
+        </div>
+        {onClose && (
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              background: 'transparent', color: C.muted,
+              border: `1px solid ${C.border}`, borderRadius: 8,
+              padding: '0.15rem 0.5rem', fontSize: '0.85rem',
+              fontFamily: 'inherit', cursor: 'pointer',
+            }}
+          >×</button>
+        )}
       </div>
+      {rows.map(r => {
+        const isYou = r.uid === userId;
+        return (
+          <div key={r.uid} style={{
+            background: isYou ? C.accentDim : C.cardAlt,
+            border: `1px solid ${isYou ? C.borderHi : 'transparent'}`,
+            borderRadius: 10, padding: '0.5rem 0.6rem',
+            display: 'flex', flexDirection: 'column', gap: '0.4rem',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.5rem' }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {r.name}{isYou ? ' (you)' : ''}
+              </div>
+              <div style={{
+                fontFamily: 'JetBrains Mono, monospace', fontSize: '0.78rem', fontWeight: 700,
+                color: r.runningDnf ? C.danger : (r.runningAvg != null ? C.success : C.muted),
+                fontVariantNumeric: 'tabular-nums',
+              }}>
+                {r.runningDnf ? 'DNF' : r.runningAvg != null ? `Ao: ${fmtMs(r.runningAvg, false, 2)}` : `S${r.currentSolve + 1}/${SOLVES_PER_ROUND}`}
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.25rem' }}>
+              {r.solves.map((s, i) => {
+                const isCurrent = i === r.currentSolve;
+                return (
+                  <div key={i} style={{
+                    fontFamily: 'JetBrains Mono, monospace',
+                    fontSize: '0.7rem', fontWeight: 700,
+                    fontVariantNumeric: 'tabular-nums',
+                    padding: '0.25rem 0.2rem',
+                    background: s ? '#0a0a0a' : 'transparent',
+                    border: `1px solid ${isCurrent && !s ? C.accent : C.border}`,
+                    borderRadius: 6, textAlign: 'center',
+                    color: !s ? (isCurrent ? C.accent : C.mutedDim) : s.penalty === 'dnf' ? C.danger : C.text,
+                  }}>
+                    {!s ? (isCurrent ? '●' : '—') : s.penalty === 'dnf' ? 'DNF' : fmtMs(effectiveSolveMs(s), false, 2)}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1391,26 +1698,21 @@ function RacingScreen({
 // ── Results ───────────────────────────────────────────────────────────────
 function ResultsScreen({
   isMobile, room, userId, isHost,
-  onNextRound, onLeave,
-}: {
-  isMobile: boolean;
-  roomCode: string; room: RoomData; userId: string; isHost: boolean;
-  onToggleReady: () => void;
-  onSetEvent: (id: string) => void;
-  onSetMaxRounds: (n: number) => void;
-  onStartRace: () => void;
-  onSubmitTime: (ms: number, penalty: Penalty) => void;
-  onNextRound: () => void;
-  onLeave: () => void;
-}) {
-  const ranked = useMemo(() => computeRanking(room.members), [room.members]);
+  onReadyForNext, onNextRound, onPlayAgain, onLeave,
+}: RoomViewProps & { isHost: boolean }) {
+  const ranked = useMemo(() => rankByRoundAverageWithSolves(room.members, room.solves), [room.members, room.solves]);
   const cumulative = useMemo(() => {
     return Object.entries(room.members || {})
       .map(([uid, m]) => ({ uid, name: m.name, points: m.totalPoints ?? 0 }))
       .sort((a, b) => b.points - a.points);
   }, [room.members]);
 
+  const me = room.members?.[userId];
   const isFinalRound = room.round >= room.maxRounds;
+  const everyoneReady = Object.values(room.members || {}).every(m => m.ready);
+
+  // Champion (final mode) — highest cumulative points, ties go to first.
+  const champion = cumulative[0];
 
   return (
     <div className="mp-room-container mp-results-container" style={{
@@ -1420,33 +1722,73 @@ function ResultsScreen({
       margin: '0 auto',
       display: 'flex', flexDirection: 'column', gap: '1rem',
     }}>
+      {isFinalRound && champion && (
+        <div style={{
+          background: `linear-gradient(135deg, ${C.accentDim}, ${C.successDim})`,
+          border: `1px solid ${C.borderHi}`, borderRadius: 14,
+          padding: '1rem', textAlign: 'center',
+          display: 'flex', flexDirection: 'column', gap: '0.4rem',
+        }}>
+          <div style={{ fontSize: '0.7rem', letterSpacing: '0.18em', textTransform: 'uppercase', color: C.muted, fontWeight: 700 }}>
+            🏆 Champion
+          </div>
+          <div className="mp-champion-name" style={{
+            fontSize: 'clamp(1.6rem, 5vw, 2.4rem)', fontWeight: 800,
+            color: C.success, letterSpacing: '-0.01em',
+          }}>
+            {champion.name}
+          </div>
+          <div style={{ fontSize: '0.85rem', color: C.muted }}>
+            {champion.points} point{champion.points === 1 ? '' : 's'}
+          </div>
+        </div>
+      )}
+
       <Card>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.7rem' }}>
-          <SectionLabel>Round {room.round} results</SectionLabel>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.7rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div>
+            <SectionLabel>{room.roundName || getRoundName(room.round, room.maxRounds)} results</SectionLabel>
+          </div>
           <div style={{ fontSize: '0.72rem', color: C.muted }}>{room.round} / {room.maxRounds}</div>
         </div>
-        <table style={tableStyle}>
-          <thead>
-            <tr>
-              <Th>Rank</Th>
-              <Th>Name</Th>
-              <Th align="right">Time</Th>
-              <Th align="right">Pts</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {ranked.map((r, i) => (
-              <tr key={r.uid} style={{ background: r.uid === userId ? C.accentDim : 'transparent' }}>
-                <Td><span style={{ color: i === 0 ? C.success : i < 3 ? C.accent : C.text, fontWeight: 700 }}>{r.dnf ? '—' : i + 1}</span></Td>
-                <Td>{r.name}</Td>
-                <Td align="right" style={{ color: r.dnf ? C.danger : C.text, fontFamily: 'JetBrains Mono, monospace' }}>
-                  {r.dnf ? 'DNF' : fmtMs(r.effectiveTime, false, 2)}
-                </Td>
-                <Td align="right" style={{ fontFamily: 'JetBrains Mono, monospace' }}>{r.points}</Td>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={tableStyle}>
+            <thead>
+              <tr>
+                <Th>Rank</Th>
+                <Th>Name</Th>
+                <Th align="right">S1</Th>
+                <Th align="right">S2</Th>
+                <Th align="right">S3</Th>
+                <Th align="right">S4</Th>
+                <Th align="right">S5</Th>
+                <Th align="right">Avg</Th>
+                <Th align="right">Pts</Th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {ranked.map((r, i) => {
+                const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
+                const rankColor = i === 0 ? '#fbbf24' : i === 1 ? '#cbd5e1' : i === 2 ? '#d97706' : C.text;
+                return (
+                  <tr key={r.uid} style={{ background: r.uid === userId ? C.accentDim : 'transparent' }}>
+                    <Td><span style={{ color: rankColor, fontWeight: 800 }}>{r.dnf ? '—' : `${i + 1}${medal ? ' ' + medal : ''}`}</span></Td>
+                    <Td>{r.name}</Td>
+                    {r.solves.map((s, si) => (
+                      <Td key={si} align="right" style={{ fontFamily: 'JetBrains Mono, monospace', color: !s ? C.mutedDim : s.penalty === 'dnf' ? C.danger : C.text }}>
+                        {!s ? '—' : s.penalty === 'dnf' ? 'DNF' : fmtMs(effectiveSolveMs(s), false, 2)}
+                      </Td>
+                    ))}
+                    <Td align="right" style={{ color: r.dnf ? C.danger : C.success, fontFamily: 'JetBrains Mono, monospace', fontWeight: 700 }}>
+                      {r.dnf ? 'DNF' : fmtMs(r.average, false, 2)}
+                    </Td>
+                    <Td align="right" style={{ fontFamily: 'JetBrains Mono, monospace' }}>{r.points}</Td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </Card>
 
       {room.maxRounds > 1 && (
@@ -1473,109 +1815,50 @@ function ResultsScreen({
         </Card>
       )}
 
-      <div className="mp-action-grid" style={{
-        display: 'grid',
-        gridTemplateColumns: isMobile ? '1fr' : (isHost ? '1fr 1fr' : '1fr'),
-        gap: '0.6rem',
-        width: isMobile ? '100%' : 'auto',
-      }}>
-        {isHost ? (
-          <BigButton accent onClick={onNextRound} style={isMobile ? { width: '100%' } : undefined}>
-            {isFinalRound ? 'Finish & Reset' : 'Next Round'}
+      {/* Action row */}
+      {isFinalRound ? (
+        <div className="mp-action-grid" style={{
+          display: 'grid',
+          gridTemplateColumns: isMobile ? '1fr' : (isHost ? '1fr 1fr' : '1fr'),
+          gap: '0.6rem',
+        }}>
+          {isHost && (
+            <BigButton accent onClick={onPlayAgain}>Play Again</BigButton>
+          )}
+          <BigButton onClick={onLeave}>Leave</BigButton>
+        </div>
+      ) : (
+        <>
+          <BigButton
+            accent={!me?.ready}
+            onClick={onReadyForNext}
+            style={isMobile ? { width: '100%' } : undefined}
+          >
+            {me?.ready ? 'Cancel Ready' : 'Ready for next round'}
           </BigButton>
-        ) : (
-          <div style={{ textAlign: 'center', color: C.muted, fontSize: '0.82rem', padding: '0.75rem' }}>
-            Waiting for host to advance the round…
-          </div>
-        )}
-        <BigButton onClick={onLeave} style={isMobile ? { width: '100%' } : undefined}>Leave</BigButton>
-      </div>
-    </div>
-  );
-}
-
-// ── Leaderboard ──────────────────────────────────────────────────────────
-function Leaderboard({
-  room, userId, live, raceStart,
-}: {
-  room: RoomData; userId: string; live: boolean; raceStart: number;
-}) {
-  const [, force] = useState(0);
-  useEffect(() => {
-    if (!live) return;
-    const id = window.setInterval(() => force(t => t + 1), 100);
-    return () => window.clearInterval(id);
-  }, [live]);
-
-  const rows = useMemo(() => {
-    const list = Object.entries(room.members || {}).map(([uid, m]) => ({
-      uid,
-      name: m.name,
-      finished: m.finishedAt != null,
-      time: m.time,
-      penalty: m.penalty,
-    }));
-    // Order: finished (best first) → still solving (alphabetical)
-    list.sort((a, b) => {
-      if (a.finished && !b.finished) return -1;
-      if (!a.finished && b.finished) return 1;
-      if (a.finished && b.finished) {
-        const aDnf = a.penalty === 'dnf';
-        const bDnf = b.penalty === 'dnf';
-        if (aDnf && !bDnf) return 1;
-        if (!aDnf && bDnf) return -1;
-        return (a.time ?? 0) - (b.time ?? 0);
-      }
-      return a.name.localeCompare(b.name);
-    });
-    return list;
-  }, [room.members]);
-
-  return (
-    <div className="mp-leaderboard" style={{
-      background: C.card, border: `1px solid ${C.border}`,
-      borderRadius: 14, padding: '0.7rem',
-      display: 'flex', flexDirection: 'column', gap: '0.35rem',
-      minHeight: 0, overflow: 'auto',
-    }}>
-      <div style={{
-        fontSize: '0.62rem', letterSpacing: '0.12em',
-        textTransform: 'uppercase', color: C.muted, fontWeight: 700,
-        padding: '0.1rem 0.3rem 0.4rem',
-      }}>
-        Live leaderboard
-      </div>
-      {rows.map(r => {
-        const isYou = r.uid === userId;
-        const dnf = r.penalty === 'dnf';
-        const liveMs = !r.finished ? Math.max(0, Date.now() - raceStart) : (r.time ?? 0);
-        return (
-          <div key={r.uid} style={{
-            display: 'grid', gridTemplateColumns: '1fr auto',
-            alignItems: 'center', gap: '0.5rem',
-            padding: '0.45rem 0.55rem',
-            background: isYou ? C.accentDim : C.cardAlt,
-            border: `1px solid ${isYou ? C.borderHi : 'transparent'}`,
-            borderRadius: 10,
+          <div className="mp-action-grid" style={{
+            display: 'grid',
+            gridTemplateColumns: isMobile ? '1fr' : (isHost ? '1fr 1fr' : '1fr'),
+            gap: '0.6rem',
           }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem', minWidth: 0 }}>
-              <div style={{ fontSize: '0.85rem', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {r.name}{isYou ? ' (you)' : ''}
-              </div>
-              <div style={{ fontSize: '0.62rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: r.finished ? (dnf ? C.danger : C.success) : C.muted, fontWeight: 700 }}>
-                {r.finished ? (dnf ? 'DNF' : 'Finished') : 'Solving'}
-              </div>
-            </div>
-            <div style={{
-              fontFamily: 'JetBrains Mono, monospace', fontVariantNumeric: 'tabular-nums',
-              fontWeight: 700, fontSize: '1rem',
-              color: dnf ? C.danger : (r.finished ? C.success : C.text),
-            }}>
-              {dnf ? 'DNF' : fmtMs(liveMs, false, 2)}
-            </div>
+            {isHost && (
+              <BigButton
+                success
+                disabled={!everyoneReady}
+                onClick={onNextRound}
+              >
+                Start Next Round
+              </BigButton>
+            )}
+            <BigButton onClick={onLeave}>Leave</BigButton>
           </div>
-        );
-      })}
+          {!isHost && (
+            <div style={{ textAlign: 'center', color: C.muted, fontSize: '0.78rem', padding: '0.4rem' }}>
+              {everyoneReady ? 'Everyone ready — host can start.' : 'Waiting for everyone to ready up…'}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -1584,31 +1867,50 @@ function Leaderboard({
 interface Ranked {
   uid: string;
   name: string;
-  effectiveTime: number;
+  solves: (SolveData | null)[];
+  average: number;        // ms; 0 if dnf
   dnf: boolean;
-  points: number;
+  points: number;         // computed at display, not used for cumulative (server already added)
 }
 
-function computeRanking(members: Record<string, MemberData> | undefined): Ranked[] {
+// Rank by Ao5 (DNF last). Points: 1st=N, 2nd=N-1, ..., last=1; DNF=0.
+// (Server has already added these points to cumulative when transitioning
+// racing → results — this just produces the per-round table.)
+function rankByRoundAverage(members: Record<string, MemberData> | undefined): Ranked[] {
   const list: Ranked[] = Object.entries(members || {}).map(([uid, m]) => {
-    const dnf = m.penalty === 'dnf' || m.time == null;
-    const eff = m.time == null ? Number.MAX_SAFE_INTEGER : (m.penalty === '+2' ? m.time + 2000 : m.time);
-    return { uid, name: m.name, effectiveTime: eff, dnf, points: 0 };
+    const dnf = m.roundAverage == null;
+    return {
+      uid, name: m.name,
+      solves: [],   // filled in below; left empty here so this fn can be used without solves
+      average: dnf ? 0 : (m.roundAverage as number),
+      dnf,
+      points: 0,
+    };
   });
-  // Sort by dnf last, then by effective time
   list.sort((a, b) => {
     if (a.dnf && !b.dnf) return 1;
     if (!a.dnf && b.dnf) return -1;
-    return a.effectiveTime - b.effectiveTime;
+    return a.average - b.average;
   });
-  // Points: 1st=5, 2nd=3, 3rd=2, 4th+=1, DNF=0
-  const POINTS = [5, 3, 2];
-  list.forEach((r, i) => {
-    if (r.dnf) r.points = 0;
-    else if (i < 3) r.points = POINTS[i];
-    else r.points = 1;
-  });
+  const N = list.length;
+  list.forEach((r, i) => { r.points = r.dnf ? 0 : Math.max(1, N - i); });
   return list;
+}
+
+// Variant used by ResultsScreen so we can show S1..S5 alongside the avg.
+function rankByRoundAverageWithSolves(
+  members: Record<string, MemberData> | undefined,
+  solves: Record<string, Record<string, SolveData>> | undefined,
+): Ranked[] {
+  const ranked = rankByRoundAverage(members);
+  for (const r of ranked) {
+    const s: (SolveData | null)[] = [];
+    for (let i = 0; i < SOLVES_PER_ROUND; i++) {
+      s.push(solves?.[r.uid]?.[String(i)] ?? null);
+    }
+    r.solves = s;
+  }
+  return ranked;
 }
 
 // ── Tiny UI primitives ───────────────────────────────────────────────────
