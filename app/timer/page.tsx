@@ -149,6 +149,28 @@ function fmtMs(ms: number | null | undefined, dnf = false, precision: Precision 
   return `${m}:${String(s).padStart(2, '0')}.${csStr}`;
 }
 
+// Scale the big timer display down based on text length so multi-minute
+// times ("11:23.456" — 9 chars) don't overflow on narrow viewports. The
+// brackets target the four common shapes:
+//   ≤ 5  "12.34"      (sub-minute, default cs)
+//   6-7  "1:23.45"    (single-digit minutes)
+//   8-9  "11:23.456"  (multi-digit minutes / ms precision)
+//   10+  pathological cases — keep readable.
+// Sub-minute base sizes are unchanged; longer strings step down.
+function getTimerFontSize(text: string, isMobile: boolean): string {
+  const len = text.length;
+  if (isMobile) {
+    if (len <= 5) return 'clamp(3.5rem, 22vw, 7rem)';
+    if (len <= 7) return 'clamp(2.8rem, 17vw, 5.5rem)';
+    if (len <= 9) return 'clamp(2.2rem, 13vw, 4.5rem)';
+    return 'clamp(1.8rem, 11vw, 3.8rem)';
+  }
+  if (len <= 5) return 'clamp(4rem, 16vw, 11rem)';
+  if (len <= 7) return 'clamp(3.2rem, 12vw, 8.5rem)';
+  if (len <= 9) return 'clamp(2.6rem, 10vw, 7rem)';
+  return 'clamp(2.2rem, 8vw, 6rem)';
+}
+
 /** Mean of the middle of last n solves (drop best+worst). DNF in middle = DNF. */
 function avgOfN(solves: Solve[], n: number): number | null {
   if (solves.length < n) return null;
@@ -1384,11 +1406,11 @@ export default function TimerPage() {
             )}
             <div style={{
               fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
-              fontSize: 'clamp(4rem, 16vw, 11rem)',
+              fontSize: getTimerFontSize(timerDisplay, false),
               fontWeight: 700, lineHeight: 0.95,
               fontVariantNumeric: 'tabular-nums',
               color: timerColor,
-              transition: 'color 0.12s',
+              transition: 'color 0.12s, font-size 0.12s',
               textShadow: timer.state === 'armed' ? `0 0 30px ${C.success}55` : 'none',
             }}>
               {timerDisplay}
@@ -1755,11 +1777,11 @@ export default function TimerPage() {
                   )}
                   <div style={{
                     fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
-                    fontSize: 'clamp(3.5rem, 22vw, 7rem)',
+                    fontSize: getTimerFontSize(timerDisplay, true),
                     fontWeight: 700, lineHeight: 0.95,
                     fontVariantNumeric: 'tabular-nums',
                     color: timerColor,
-                    transition: 'color 0.12s',
+                    transition: 'color 0.12s, font-size 0.12s',
                     textShadow: timer.state === 'armed' ? `0 0 30px ${C.success}55` : 'none',
                   }}>
                     {timerDisplay}

@@ -194,6 +194,25 @@ function fmtMs(ms: number | null, dnf?: boolean, precision: 2 | 3 = 2): string {
   return s.toFixed(precision);
 }
 
+// Length-based font scaling for the racing-screen big timer. Matches the
+// pattern used in the single-player timer (see app/timer/page.tsx ::
+// getTimerFontSize) but anchored to this screen's existing base clamps so
+// sub-minute times render unchanged. Step ratios are ~80% / ~63% / ~51%
+// of the base for 6-7 / 8-9 / 10+ char strings respectively.
+function getMpTimerFontSize(text: string, isMobile: boolean): string {
+  const len = text.length;
+  if (isMobile) {
+    if (len <= 5) return 'clamp(3rem, 16vw, 9rem)';
+    if (len <= 7) return 'clamp(2.4rem, 12.5vw, 7rem)';
+    if (len <= 9) return 'clamp(1.9rem, 9.5vw, 5.5rem)';
+    return 'clamp(1.5rem, 8vw, 4.5rem)';
+  }
+  if (len <= 5) return 'clamp(5rem, 12vw, 11rem)';
+  if (len <= 7) return 'clamp(4rem, 9.5vw, 8.5rem)';
+  if (len <= 9) return 'clamp(3.2rem, 7.5vw, 7rem)';
+  return 'clamp(2.6rem, 6vw, 5.5rem)';
+}
+
 // ── Multiplayer prefs (persisted to localStorage) ───────────────────────────
 const MP_PREFS_KEY = 'pv.timer.mp.prefs.v1';
 
@@ -2251,12 +2270,12 @@ function RacingScreen({
           )}
           <div style={{
             fontFamily: 'JetBrains Mono, monospace',
-            fontSize: 'clamp(5rem, 12vw, 11rem)',
+            fontSize: getMpTimerFontSize(displayValue, false),
             fontWeight: 800, lineHeight: 0.95,
             fontVariantNumeric: 'tabular-nums',
             color: timerColor,
             textShadow: timer.state === 'armed' ? `0 0 30px ${C.success}55` : 'none',
-            transition: 'color 0.12s',
+            transition: 'color 0.12s, font-size 0.12s',
           }}>{displayValue}</div>
           <div style={{ fontSize: '0.78rem', color: C.muted, marginTop: '0.85rem', letterSpacing: '0.04em', minHeight: '1.1rem' }}>
             {pending && 'Confirm your time'}
@@ -2429,12 +2448,14 @@ function MobileRacingLayout({
                 fontFamily: 'JetBrains Mono, monospace',
                 // Floor dropped from 5rem → 3rem so small phones can shrink the
                 // text instead of pushing the layout past the viewport.
-                fontSize: 'clamp(3rem, 16vw, 9rem)',
+                // getMpTimerFontSize additionally scales for multi-digit
+                // minute strings ("11:23.456") so they fit on narrow widths.
+                fontSize: getMpTimerFontSize(displayValue, true),
                 fontWeight: 800, lineHeight: 0.95,
                 fontVariantNumeric: 'tabular-nums',
                 color: timerColor,
                 textShadow: timer.state === 'armed' ? `0 0 30px ${C.success}55` : 'none',
-                transition: 'color 0.12s',
+                transition: 'color 0.12s, font-size 0.12s',
               }}>{displayValue}</div>
               <div style={{
                 fontSize: '0.7rem', color: C.muted,
