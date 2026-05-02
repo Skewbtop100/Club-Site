@@ -2655,8 +2655,11 @@ function GanButton({
     <button
       onClick={() => {
         if (isUnsupported) {
+          const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent);
           // eslint-disable-next-line no-alert
-          alert('Web Bluetooth is required for GAN timer support. Use Chrome or Edge over HTTPS / localhost.');
+          alert(isIOS
+            ? "iOS browsers don't support Web Bluetooth. Install Bluefy from the App Store and open this site in Bluefy to use a smart timer."
+            : 'Web Bluetooth is required for smart-timer support. Use Chrome or Edge over HTTPS / localhost.');
           return;
         }
         if (isConnected) onDisconnect(); else if (!isConnecting) onConnect();
@@ -2982,6 +2985,12 @@ function SettingsPanel(props: SettingsPanelProps) {
     const brandHint = timerBrand === 'qiyi'
       ? 'Compatible with QiYi Smart Timer (QY-Timer). The device must be powered on and within range. Pairing uses Web Bluetooth — no QiYi app needed.'
       : 'Compatible with the GAN Halo Smart Timer over Bluetooth. The physical pads control inspection and the timer while connected.';
+    // iOS doesn't expose Web Bluetooth in any system browser (Apple
+    // restriction — Safari, iOS Chrome, iOS Edge are all WebKit and all
+    // missing the API), so the generic "use Chrome or Edge" advice is
+    // misleading. Bluefy is a third-party WebKit-based browser that ships
+    // its own BLE bridge to Web Bluetooth, which is the practical workaround.
+    const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent);
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
         <SegmentedRow
@@ -3049,8 +3058,47 @@ function SettingsPanel(props: SettingsPanelProps) {
         </div>
 
         {unsupported ? (
-          <div style={{ fontSize: '0.78rem', color: c.mutedDim, lineHeight: 1.55 }}>
-            Web Bluetooth is required. Use Chrome or Edge over HTTPS or localhost.
+          <div
+            style={{
+              border: `1px solid ${c.borderHi}`,
+              background: c.accentDim,
+              borderRadius: 10,
+              padding: '0.7rem 0.85rem',
+              display: 'flex', flexDirection: 'column', gap: '0.45rem',
+            }}
+          >
+            <div style={{
+              fontSize: '0.82rem', fontWeight: 700, color: c.accent,
+              letterSpacing: '0.01em',
+            }}>
+              {isIOS ? 'iOS Bluetooth limitation' : 'Web Bluetooth not available'}
+            </div>
+            <div style={{ fontSize: '0.78rem', color: c.muted, lineHeight: 1.55 }}>
+              {isIOS
+                ? "Apple's Safari and other iOS browsers don't support Web Bluetooth. To use a smart timer on iPhone, install Bluefy browser from the App Store and open this site in Bluefy."
+                : 'Web Bluetooth is required. Use Chrome or Edge over HTTPS or localhost.'}
+            </div>
+            {isIOS && (
+              <a
+                href="https://apps.apple.com/app/bluefy-web-ble-browser/id1492822055"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  alignSelf: 'flex-start',
+                  marginTop: '0.15rem',
+                  padding: '0.45rem 0.8rem',
+                  borderRadius: 8,
+                  background: c.accent,
+                  color: '#0a0a0a',
+                  fontSize: '0.78rem', fontWeight: 700,
+                  letterSpacing: '0.02em',
+                  textDecoration: 'none',
+                  border: `1px solid ${c.accent}`,
+                }}
+              >
+                Get Bluefy Browser
+              </a>
+            )}
           </div>
         ) : (
           <div style={{ fontSize: '0.78rem', color: c.muted, lineHeight: 1.55 }}>
