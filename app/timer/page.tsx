@@ -218,7 +218,7 @@ function calcStats(solves: Solve[]): Stats {
 // ── Custom hook: timer state machine ────────────────────────────────────────
 type TimerState = 'idle' | 'inspecting' | 'armed' | 'running' | 'stopped';
 
-function useTimer(onSolveCommit: (ms: number, dnf: boolean) => void) {
+function useTimer(onSolveCommit: (ms: number, dnf: boolean) => void, holdTimeMs: number) {
   const [state, setState] = useState<TimerState>('idle');
   const [displayMs, setDisplayMs] = useState(0);
   const [inspectionMs, setInspectionMs] = useState(15000);
@@ -282,17 +282,18 @@ function useTimer(onSolveCommit: (ms: number, dnf: boolean) => void) {
   }, []);
 
   const fireRunning = useCallback(() => {
-    // Only commits if held long enough
+    // Only commits if held long enough. The threshold is user-configurable
+    // via Settings → Timer → "Hold time"; default 550 ms matches the WCA
+    // Stackmat standard. Releasing early bounces back to inspecting/idle.
     const heldFor = Date.now() - armStartRef.current;
-    if (heldFor < 350) {
-      // Released too early — return to inspecting (or idle)
+    if (heldFor < holdTimeMs) {
       setState(prev => prev === 'armed' ? (inspectionMs > -2000 && inspStartRef.current > 0 ? 'inspecting' : 'idle') : prev);
       return;
     }
     runStartRef.current = Date.now();
     setDisplayMs(0);
     setState('running');
-  }, [inspectionMs]);
+  }, [inspectionMs, holdTimeMs]);
 
   const reset = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
@@ -374,6 +375,9 @@ export default function TimerPage() {
   const [inspectionEnabled, setInspectionEnabled] = useState(true);
   const [precision, setPrecision] = useState<Precision>('cs');
   const [holdToStart, setHoldToStart] = useState(true); // long-press arming
+  // How long the user must hold SPACE / touch before the timer arms (ms).
+  // Default 550 = WCA Stackmat standard. Configurable in Settings → Timer.
+  const [holdTimeMs, setHoldTimeMs] = useState(550);
   const [scrambleFontSize, setScrambleFontSize] = useState<'sm' | 'md' | 'lg'>('md');
   const [timerBrand, setTimerBrand] = useState<TimerBrand>('gan');
   // QiYi diagnostic mode — when on, surfaces the last 10 raw BLE packets
@@ -549,6 +553,7 @@ export default function TimerPage() {
           showMs?: boolean;          // legacy (boolean) — migrated to `precision`
           precision?: Precision;
           holdToStart?: boolean;
+          holdTimeMs?: number;
           scrambleFontSize?: 'sm' | 'md' | 'lg';
           timerBrand?: TimerBrand;
           qiyiDebugMode?: boolean;
@@ -561,6 +566,11 @@ export default function TimerPage() {
           setPrecision('cs');
         }
         if (typeof parsed.holdToStart === 'boolean')       setHoldToStart(parsed.holdToStart);
+        if (typeof parsed.holdTimeMs === 'number' && Number.isFinite(parsed.holdTimeMs)) {
+          // Clamp to slider range (200–1000 ms) so old / corrupted values
+          // can't push the timer into a useless state.
+          setHoldTimeMs(Math.max(200, Math.min(1000, Math.round(parsed.holdTimeMs))));
+        }
         if (parsed.scrambleFontSize === 'sm' || parsed.scrambleFontSize === 'md' || parsed.scrambleFontSize === 'lg') {
           setScrambleFontSize(parsed.scrambleFontSize);
         }
@@ -577,9 +587,9 @@ export default function TimerPage() {
   useEffect(() => {
     if (!prefsLoadedRef.current) return;
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify({ inspectionEnabled, precision, holdToStart, scrambleFontSize, timerBrand, qiyiDebugMode }));
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ inspectionEnabled, precision, holdToStart, holdTimeMs, scrambleFontSize, timerBrand, qiyiDebugMode }));
     } catch { /* ignore */ }
-  }, [inspectionEnabled, precision, holdToStart, scrambleFontSize, timerBrand, qiyiDebugMode]);
+  }, [inspectionEnabled, precision, holdToStart, holdTimeMs, scrambleFontSize, timerBrand, qiyiDebugMode]);
 
   // Stats — recomputed on every solves change
   const stats = useMemo(() => calcStats(solves), [solves]);
@@ -602,7 +612,7 @@ export default function TimerPage() {
     setScramble(generateScramble(eventId));
   }, [scramble, eventId]);
 
-  const timer = useTimer(onSolveCommit);
+  const timer = useTimer(onSolveCommit, holdTimeMs);
 
   // Keep the screen on while the user is actively solving (inspecting /
   // armed / running). We deliberately drop the lock on 'stopped' and 'idle'
@@ -2406,6 +2416,7 @@ export default function TimerPage() {
           // Timer
           inspectionEnabled={inspectionEnabled} setInspectionEnabled={setInspectionEnabled}
           holdToStart={holdToStart} setHoldToStart={setHoldToStart}
+          holdTimeMs={holdTimeMs} setHoldTimeMs={setHoldTimeMs}
           precision={precision} setPrecision={setPrecision}
           // Bluetooth
           gan={gan}
@@ -2977,6 +2988,8 @@ interface SettingsPanelProps {
   setInspectionEnabled: (v: boolean) => void;
   holdToStart: boolean;
   setHoldToStart: (v: boolean) => void;
+  holdTimeMs: number;
+  setHoldTimeMs: (n: number) => void;
   precision: Precision;
   setPrecision: (p: Precision) => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -3013,6 +3026,13 @@ function SettingsPanel(props: SettingsPanelProps) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
       <ToggleRow label="Inspection time" value={props.inspectionEnabled} onChange={props.setInspectionEnabled} />
       <ToggleRow label="Hold to start"   value={props.holdToStart}        onChange={props.setHoldToStart} />
+      {props.holdToStart && (
+        <HoldTimeSlider
+          value={props.holdTimeMs}
+          onChange={props.setHoldTimeMs}
+          c={c}
+        />
+      )}
       <SegmentedRow
         label="Timer precision"
         value={props.precision}
@@ -3601,6 +3621,97 @@ function QiyiDebugOverlay({ packets, C: c }: { packets: QiyiPacket[]; C: typeof 
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// Slider for the long-press arming threshold (Settings → Timer → "Hold
+// time"). Shown only when "Hold to start" is enabled. 200–1000 ms range
+// in 50 ms increments — narrow enough to avoid accidental sub-100ms
+// arms but generous enough for slow-to-press cubers.
+const HOLD_TIME_MIN = 200;
+const HOLD_TIME_MAX = 1000;
+const HOLD_TIME_STEP = 50;
+const HOLD_TIME_DEFAULT = 550;
+function HoldTimeSlider({
+  value,
+  onChange,
+  c,
+}: {
+  value: number;
+  onChange: (n: number) => void;
+  c: typeof C;
+}) {
+  // Track-fill percentage for the lavender accent overlay.
+  const pct = Math.max(0, Math.min(100,
+    ((value - HOLD_TIME_MIN) / (HOLD_TIME_MAX - HOLD_TIME_MIN)) * 100,
+  ));
+  const trackBg =
+    `linear-gradient(to right, ${c.accent} 0%, ${c.accent} ${pct}%, rgba(255,255,255,0.1) ${pct}%, rgba(255,255,255,0.1) 100%)`;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', fontSize: '0.85rem' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '0.6rem' }}>
+        <span style={{ color: c.text }}>Hold time</span>
+        <span style={{
+          color: c.accent, fontWeight: 700,
+          fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
+          fontVariantNumeric: 'tabular-nums',
+        }}>
+          {value}ms
+        </span>
+      </div>
+      <input
+        type="range"
+        min={HOLD_TIME_MIN}
+        max={HOLD_TIME_MAX}
+        step={HOLD_TIME_STEP}
+        value={value}
+        onChange={e => onChange(parseInt(e.target.value, 10))}
+        aria-label="Hold time before timer arms"
+        style={{
+          appearance: 'none',
+          WebkitAppearance: 'none',
+          width: '100%',
+          height: 6,
+          borderRadius: 999,
+          background: trackBg,
+          outline: 'none',
+          cursor: 'pointer',
+        }}
+      />
+      <div style={{
+        display: 'flex', justifyContent: 'space-between',
+        fontSize: '0.7rem', color: c.mutedDim,
+      }}>
+        <span>Fast ({HOLD_TIME_MIN}ms)</span>
+        <span style={{ color: value === HOLD_TIME_DEFAULT ? c.muted : c.mutedDim }}>
+          WCA standard: {HOLD_TIME_DEFAULT}ms
+        </span>
+        <span>Slow ({HOLD_TIME_MAX}ms)</span>
+      </div>
+      <style>{`
+        input[type="range"]::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 18px;
+          height: 18px;
+          border-radius: 50%;
+          background: ${c.accent};
+          border: 2px solid ${c.bg};
+          box-shadow: 0 0 0 1px ${c.borderHi};
+          cursor: pointer;
+          margin-top: -6px;
+        }
+        input[type="range"]::-moz-range-thumb {
+          width: 18px;
+          height: 18px;
+          border-radius: 50%;
+          background: ${c.accent};
+          border: 2px solid ${c.bg};
+          box-shadow: 0 0 0 1px ${c.borderHi};
+          cursor: pointer;
+        }
+      `}</style>
     </div>
   );
 }
