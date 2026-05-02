@@ -7,7 +7,7 @@ import { Scrambow } from 'scrambow';
 // access during Next.js server rendering.
 import type { TwistyPlayer as TwistyPlayerType } from 'cubing/twisty';
 import { useGanTimer } from './useGanTimer';
-import { useQiyiTimer } from './useQiyiTimer';
+import { useQiyiTimer, type QiyiPacket } from './useQiyiTimer';
 
 type TimerBrand = 'gan' | 'qiyi';
 
@@ -353,6 +353,11 @@ export default function TimerPage() {
   const [holdToStart, setHoldToStart] = useState(true); // long-press arming
   const [scrambleFontSize, setScrambleFontSize] = useState<'sm' | 'md' | 'lg'>('md');
   const [timerBrand, setTimerBrand] = useState<TimerBrand>('gan');
+  // QiYi diagnostic mode — when on, surfaces the last 10 raw BLE packets
+  // received from the timer in a fixed overlay so the user can confirm
+  // data is arriving even when the parser silently drops it. Only useful
+  // for unknown firmware variants (e.g. QY-Timer-V2-3650).
+  const [qiyiDebugMode, setQiyiDebugMode] = useState(false);
   // Default false to match SSR; updated after mount. Brief flash possible on
   // mobile pageload but no hydration mismatch. 900px breakpoint puts iPad
   // portrait (768) on mobile layout and iPad landscape (1024) on desktop.
@@ -523,6 +528,7 @@ export default function TimerPage() {
           holdToStart?: boolean;
           scrambleFontSize?: 'sm' | 'md' | 'lg';
           timerBrand?: TimerBrand;
+          qiyiDebugMode?: boolean;
         };
         if (typeof parsed.inspectionEnabled === 'boolean') setInspectionEnabled(parsed.inspectionEnabled);
         if (parsed.precision === 'cs' || parsed.precision === 'ms') {
@@ -538,6 +544,7 @@ export default function TimerPage() {
         if (parsed.timerBrand === 'gan' || parsed.timerBrand === 'qiyi') {
           setTimerBrand(parsed.timerBrand);
         }
+        if (typeof parsed.qiyiDebugMode === 'boolean') setQiyiDebugMode(parsed.qiyiDebugMode);
       }
     } catch { /* ignore */ }
     prefsLoadedRef.current = true;
@@ -547,9 +554,9 @@ export default function TimerPage() {
   useEffect(() => {
     if (!prefsLoadedRef.current) return;
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify({ inspectionEnabled, precision, holdToStart, scrambleFontSize, timerBrand }));
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ inspectionEnabled, precision, holdToStart, scrambleFontSize, timerBrand, qiyiDebugMode }));
     } catch { /* ignore */ }
-  }, [inspectionEnabled, precision, holdToStart, scrambleFontSize, timerBrand]);
+  }, [inspectionEnabled, precision, holdToStart, scrambleFontSize, timerBrand, qiyiDebugMode]);
 
   // Stats — recomputed on every solves change
   const stats = useMemo(() => calcStats(solves), [solves]);
@@ -2373,9 +2380,19 @@ export default function TimerPage() {
           gan={gan}
           timerBrand={timerBrand}
           setTimerBrand={setTimerBrand}
+          qiyiDebugMode={qiyiDebugMode}
+          setQiyiDebugMode={setQiyiDebugMode}
           // Display
           scrambleFontSize={scrambleFontSize} setScrambleFontSize={setScrambleFontSize}
         />
+      )}
+
+      {/* QiYi DEBUG MODE overlay — last 10 raw BLE packets. Visible only
+          when the QiYi brand is selected AND the user has flipped the
+          toggle in Settings → Bluetooth. Lets the user verify data is
+          actually arriving from unfamiliar firmware (e.g. V2-3650). */}
+      {timerBrand === 'qiyi' && qiyiDebugMode && (
+        <QiyiDebugOverlay packets={qiyiHook.recentPackets} C={C} />
       )}
 
       {/* Solve detail modal — shows time, full scramble, and penalty editor */}
@@ -2937,6 +2954,8 @@ interface SettingsPanelProps {
   setTimerBrand: (b: TimerBrand) => void;
   scrambleFontSize: 'sm' | 'md' | 'lg';
   setScrambleFontSize: (s: 'sm' | 'md' | 'lg') => void;
+  qiyiDebugMode: boolean;
+  setQiyiDebugMode: (v: boolean) => void;
 }
 
 const SETTINGS_SECTIONS: { id: SettingsSectionId; label: string; icon: React.ReactNode }[] = [
@@ -3118,6 +3137,25 @@ function SettingsPanel(props: SettingsPanelProps) {
             QiYi support uses a community-reverse-engineered protocol. If your
             specific firmware revision rejects the handshake, please report
             which device model you tested.
+          </div>
+        )}
+        {timerBrand === 'qiyi' && (
+          <div style={{
+            marginTop: '0.25rem',
+            paddingTop: '0.7rem',
+            borderTop: `1px solid ${c.border}`,
+            display: 'flex', flexDirection: 'column', gap: '0.45rem',
+          }}>
+            <ToggleRow
+              label="Debug mode (raw packet log)"
+              value={props.qiyiDebugMode}
+              onChange={props.setQiyiDebugMode}
+            />
+            <div style={{ fontSize: '0.7rem', color: c.mutedDim, lineHeight: 1.5 }}>
+              When on, a small overlay shows the last 10 raw BLE packets
+              received from the timer. Use this to confirm whether data is
+              arriving from an unfamiliar firmware (e.g. QY-Timer-V2).
+            </div>
           </div>
         )}
       </div>
@@ -3471,6 +3509,67 @@ function ModalShell({ title, onClose, headerAction, children }: { title: string;
         </div>
         {children}
       </div>
+    </div>
+  );
+}
+
+// Fixed-position diagnostic overlay for the QiYi BLE protocol. Shows the
+// most recent N raw notification packets received from any subscribed
+// characteristic, oldest at top, newest at bottom. Used to confirm "data
+// IS arriving" when debugging unfamiliar firmware (e.g. QY-Timer-V2-3650)
+// where the canonical parser silently drops everything.
+function QiyiDebugOverlay({ packets, C: c }: { packets: QiyiPacket[]; C: typeof C }) {
+  return (
+    <div
+      role="region"
+      aria-label="QiYi raw packet log"
+      style={{
+        position: 'fixed',
+        bottom: 'calc(env(safe-area-inset-bottom) + 0.75rem)',
+        left: '0.75rem',
+        zIndex: 900,
+        maxWidth: 'min(420px, calc(100vw - 1.5rem))',
+        background: c.card,
+        border: `1px solid ${c.borderHi}`,
+        borderRadius: 10,
+        padding: '0.55rem 0.65rem',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.55)',
+        fontFamily: 'JetBrains Mono, ui-monospace, SFMono-Regular, monospace',
+        fontSize: '0.66rem',
+        lineHeight: 1.45,
+        color: c.text,
+        pointerEvents: 'none',  // overlay shouldn't intercept timer taps
+      }}
+    >
+      <div style={{
+        fontFamily: 'inherit',
+        fontSize: '0.6rem',
+        letterSpacing: '0.12em',
+        textTransform: 'uppercase',
+        fontWeight: 700,
+        color: c.accent,
+        marginBottom: '0.35rem',
+      }}>
+        QiYi DEBUG — last {packets.length}/10 packets
+      </div>
+      {packets.length === 0 ? (
+        <div style={{ color: c.mutedDim }}>(no packets received yet — connect a timer)</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+          {packets.map((p, i) => {
+            // UUID can be long; show last 4-byte field for compactness.
+            const shortUuid = p.uuid.split('-')[0];
+            return (
+              <div key={`${p.ts}-${i}`} style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ color: c.muted, fontSize: '0.6rem' }}>
+                  {new Date(p.ts).toLocaleTimeString()} · {shortUuid}
+                </span>
+                <span style={{ color: c.text, wordBreak: 'break-all' }}>{p.hex}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

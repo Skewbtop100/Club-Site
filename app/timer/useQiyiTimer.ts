@@ -19,6 +19,36 @@ export interface QiyiCallbacks {
   onGetSet?: () => void;
 }
 
+// One captured raw notification, surfaced via the hook so the Settings
+// panel's DEBUG MODE overlay can render it. We keep the most recent N for
+// diagnosing unknown firmware (e.g. QY-Timer-V2-3650 vs the original
+// QY-Timer protocol — the parser may silently drop packets that don't
+// match the expected handshake/CRC, so seeing the bytes proves data IS
+// flowing even when no solve fires).
+export interface QiyiPacket {
+  ts: number;       // Date.now() at receipt
+  uuid: string;     // characteristic UUID source
+  hex: string;      // space-separated hex bytes
+}
+const DEBUG_PACKET_BUFFER = 10;
+
+// Common BLE service UUIDs we're willing to access post-connect. Web
+// Bluetooth's security model requires you to declare every service you'll
+// ever call getPrimaryService() on, *up front* in optionalServices — there's
+// no "give me everything." So we ask for a broad set of candidates that
+// cover known QiYi variants plus common BLE-UART/Nordic patterns; whichever
+// the V2 firmware actually exposes will be discoverable post-connect.
+const QIYI_OPTIONAL_SERVICES: BluetoothServiceUUID[] = [
+  '0000fd50-0000-1000-8000-00805f9b34fb',  // canonical QiYi (QIYI_SERVICE)
+  '0000ffd0-0000-1000-8000-00805f9b34fb',  // common alt
+  '0000ffd5-0000-1000-8000-00805f9b34fb',  // common alt
+  '0000fff0-0000-1000-8000-00805f9b34fb',  // HM-10 / Nordic UART-style
+  '0000ffe0-0000-1000-8000-00805f9b34fb',  // HM-10 simple BLE service
+  '0000fee0-0000-1000-8000-00805f9b34fb',  // Mi Band style
+  '0000ff00-0000-1000-8000-00805f9b34fb',  // generic vendor
+  '6e400001-b5a3-f393-e0a9-e50e24dcca9e',  // Nordic UART service (NUS)
+];
+
 // ── BLE constants — verbatim from csTimer src/js/hardware/qiyitimer.js
 //    (cs0x7f/cstimer @ master). ──────────────────────────────────────────────
 const QIYI_SERVICE      = '0000fd50-0000-1000-8000-00805f9b34fb';
@@ -189,6 +219,11 @@ export function useQiyiTimer(callbacks: QiyiCallbacks) {
   const [state, setState] = useState<QiyiState>(supported ? 'idle' : 'unsupported');
   const [deviceName, setDeviceName] = useState<string | null>(null);
   const [liveState, setLiveState] = useState<QiyiLiveState>('idle');
+  // Last N raw notifications received from any subscribed characteristic.
+  // Surfaced for the Settings → Bluetooth → DEBUG MODE overlay so the user
+  // can confirm "data IS arriving from the device" even when the parser
+  // silently drops it. Capped at DEBUG_PACKET_BUFFER to keep memory bounded.
+  const [recentPackets, setRecentPackets] = useState<QiyiPacket[]>([]);
 
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -203,21 +238,44 @@ export function useQiyiTimer(callbacks: QiyiCallbacks) {
   const writeCharRef = useRef<BluetoothRemoteGATTCharacteristic | null>(null);
   const notifyCharRef = useRef<BluetoothRemoteGATTCharacteristic | null>(null);
   const onDisconnectedRef = useRef<((e: Event) => void) | null>(null);
-  const notifyHandlerRef = useRef<((e: Event) => void) | null>(null);
+  // Every char we attached a listener to during connect, with the listener.
+  // Used by teardown to remove listeners + stop notifications cleanly. We
+  // keep this as a flat list (not a Map) because the same characteristic
+  // can have BOTH the universal hex-logger AND the canonical parser
+  // attached, and we need to detach both individually.
+  const subscribedRef = useRef<Array<{
+    char: BluetoothRemoteGATTCharacteristic;
+    handler: (e: Event) => void;
+  }>>([]);
 
   // Reassembly state — mirrors csTimer waitPkg/payloadLen/payloadData.
   const waitPkgRef = useRef<number>(0);
   const payloadLenRef = useRef<number>(0);
   const payloadDataRef = useRef<number[]>([]);
 
+  const pushDebugPacket = useCallback((uuid: string, bytes: Uint8Array) => {
+    const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
+    setRecentPackets(prev => {
+      const next = prev.concat({ ts: Date.now(), uuid, hex });
+      return next.length > DEBUG_PACKET_BUFFER ? next.slice(-DEBUG_PACKET_BUFFER) : next;
+    });
+  }, []);
+
   const teardown = useCallback(() => {
     const dev = deviceRef.current;
-    const notify = notifyCharRef.current;
-    const handler = notifyHandlerRef.current;
-    if (notify && handler) {
-      try { notify.removeEventListener('characteristicvaluechanged', handler); } catch { /* ignore */ }
-      try { notify.stopNotifications(); } catch { /* ignore */ }
+    // Detach every listener we attached during connect.
+    for (const { char, handler } of subscribedRef.current) {
+      try { char.removeEventListener('characteristicvaluechanged', handler); } catch { /* ignore */ }
     }
+    // Stop notifications once per characteristic (a char may have multiple
+    // listeners attached but only one notification subscription).
+    const stopped = new Set<BluetoothRemoteGATTCharacteristic>();
+    for (const { char } of subscribedRef.current) {
+      if (stopped.has(char)) continue;
+      stopped.add(char);
+      try { char.stopNotifications(); } catch { /* ignore */ }
+    }
+    subscribedRef.current = [];
     if (dev && onDisconnectedRef.current) {
       try { dev.removeEventListener('gattserverdisconnected', onDisconnectedRef.current); } catch { /* ignore */ }
     }
@@ -228,7 +286,6 @@ export function useQiyiTimer(callbacks: QiyiCallbacks) {
     writeCharRef.current = null;
     notifyCharRef.current = null;
     onDisconnectedRef.current = null;
-    notifyHandlerRef.current = null;
     waitPkgRef.current = 0;
     payloadLenRef.current = 0;
     payloadDataRef.current = [];
@@ -388,17 +445,17 @@ export function useQiyiTimer(callbacks: QiyiCallbacks) {
     setState('connecting');
 
     try {
-      // DEBUG MODE: acceptAllDevices so the user can see and select ANY
-      // nearby BLE device. This lets us discover what services the QiYi
-      // timer actually exposes on this firmware, in case the canonical
-      // 0x0504 manufacturer-data filter doesn't surface it.
+      // Filter scope: every QiYi variant we know about advertises with
+      // either a "QY-Timer-…" or a "QY-Adapter-…" name; both share the
+      // "QY-" prefix. Listing both prefixes (per the task spec) keeps the
+      // intent explicit even though "QY-" alone would suffice. Devices
+      // matching ANY filter are shown.
       const requestOpts: RequestDeviceOptions & { optionalManufacturerData?: number[] } = {
-        acceptAllDevices: true,
-        optionalServices: [
-          QIYI_SERVICE,                                  // 0000fd50-…
-          '0000ffd0-0000-1000-8000-00805f9b34fb',        // common alt service
-          '0000ffd5-0000-1000-8000-00805f9b34fb',        // common alt service
+        filters: [
+          { namePrefix: 'QY-Timer' },
+          { namePrefix: 'QY-' },
         ],
+        optionalServices: QIYI_OPTIONAL_SERVICES,
         optionalManufacturerData: [QIYI_CIC],
       };
       // eslint-disable-next-line no-console
@@ -410,13 +467,11 @@ export function useQiyiTimer(callbacks: QiyiCallbacks) {
       const device = await bt.requestDevice(requestOpts);
 
       // eslint-disable-next-line no-console
-      console.log('Selected device name:', device.name);
-      // eslint-disable-next-line no-console
-      console.log('Selected device id:', device.id);
-      // eslint-disable-next-line no-console
       console.log('[QiYi] Selected device:', { name: device.name, id: device.id });
       setDeviceName(device.name ?? 'QiYi Timer');
       deviceRef.current = device;
+      // Reset the debug ring on every fresh connect attempt.
+      setRecentPackets([]);
 
       // ── MAC extraction via watchAdvertisements (preferred) ──────────────
       // Devices broadcast manufacturer data containing 6 MAC bytes (reversed)
@@ -441,48 +496,86 @@ export function useQiyiTimer(callbacks: QiyiCallbacks) {
       // eslint-disable-next-line no-console
       console.log('[QiYi] connecting GATT…');
       const server = await device.gatt.connect();
-      // Enumerate primary services to help diagnose "wrong device picked" cases.
-      try {
-        const services = await server.getPrimaryServices();
-        const uuids = services.map(s => s.uuid);
-        // eslint-disable-next-line no-console
-        console.log('Available services:', uuids);
-        // eslint-disable-next-line no-console
-        console.log('[QiYi] device exposes services:', uuids);
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('[QiYi] could not enumerate services (may need optionalServices)', err);
-      }
-      // eslint-disable-next-line no-console
-      console.log('[QiYi] getting primary service', QIYI_SERVICE);
-      const service = await server.getPrimaryService(QIYI_SERVICE);
-      // eslint-disable-next-line no-console
-      console.log('[QiYi] getting characteristics');
-      try {
-        const allChars = await service.getCharacteristics();
-        // eslint-disable-next-line no-console
-        console.log('[QiYi] service exposes characteristics:', allChars.map(c => ({ uuid: c.uuid, props: c.properties })));
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('[QiYi] could not list characteristics', err);
-      }
-      const writeChar  = await service.getCharacteristic(QIYI_CHRCT_WRITE);
-      const notifyChar = await service.getCharacteristic(QIYI_CHRCT_READ);
-      writeCharRef.current = writeChar;
-      notifyCharRef.current = notifyChar;
 
-      const handler = (e: Event) => {
-        const ch = e.target as BluetoothRemoteGATTCharacteristic;
-        const v = ch.value;
-        if (!v) return;
-        const bytes = new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
-        void handleNotify(bytes);
-      };
-      notifyHandlerRef.current = handler;
-      notifyChar.addEventListener('characteristicvaluechanged', handler);
+      // ── Diagnostic discovery: dump every primary service + every
+      // characteristic, then subscribe to ALL notifiable characteristics.
+      // The canonical QIYI_CHRCT_READ also gets the existing parser hooked
+      // up so the established handshake / state machine continues to work
+      // unchanged when the firmware does match. Other notifiables get a
+      // log-only listener so we can see what V2-3650 actually emits and
+      // decide later whether to extend the parser. ───────────────────────
+      let services: BluetoothRemoteGATTService[] = [];
+      try {
+        services = await server.getPrimaryServices();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[QiYi] getPrimaryServices() failed (likely missing optionalServices)', err);
+      }
       // eslint-disable-next-line no-console
-      console.log('[QiYi] starting notifications');
-      await notifyChar.startNotifications();
+      console.log('[QiYi] discovered', services.length, 'primary service(s)');
+
+      for (const svc of services) {
+        // eslint-disable-next-line no-console
+        console.log('[QiYi] Service:', svc.uuid);
+        let chars: BluetoothRemoteGATTCharacteristic[] = [];
+        try {
+          chars = await svc.getCharacteristics();
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[QiYi] getCharacteristics() failed for', svc.uuid, err);
+          continue;
+        }
+        for (const ch of chars) {
+          // eslint-disable-next-line no-console
+          console.log('[QiYi] -- Char:', ch.uuid, 'props:', ch.properties);
+
+          // Capture the canonical write char if we see it.
+          if (ch.uuid === QIYI_CHRCT_WRITE && (ch.properties.write || ch.properties.writeWithoutResponse)) {
+            writeCharRef.current = ch;
+          }
+
+          if (!ch.properties.notify) continue;
+
+          // Universal logging listener — fires for EVERY notifiable char.
+          // Logs the source UUID + raw bytes and pushes to the debug ring.
+          const debugListener = (e: Event) => {
+            const c = e.target as BluetoothRemoteGATTCharacteristic;
+            const v = c.value;
+            if (!v) return;
+            const bytes = new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+            const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
+            // eslint-disable-next-line no-console
+            console.log('[QiYi] Data from', c.uuid, ':', hex);
+            pushDebugPacket(c.uuid, bytes);
+          };
+          ch.addEventListener('characteristicvaluechanged', debugListener);
+          subscribedRef.current.push({ char: ch, handler: debugListener });
+
+          // Canonical read char additionally feeds the existing parser. We
+          // attach a *second* listener (rather than gating inside the debug
+          // listener) so the parsing path is identical to the original code
+          // when the firmware matches.
+          if (ch.uuid === QIYI_CHRCT_READ) {
+            notifyCharRef.current = ch;
+            const parseListener = (e: Event) => {
+              const c = e.target as BluetoothRemoteGATTCharacteristic;
+              const v = c.value;
+              if (!v) return;
+              const bytes = new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+              void handleNotify(bytes);
+            };
+            ch.addEventListener('characteristicvaluechanged', parseListener);
+            subscribedRef.current.push({ char: ch, handler: parseListener });
+          }
+
+          try {
+            await ch.startNotifications();
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.warn('[QiYi] startNotifications() failed for', ch.uuid, err);
+          }
+        }
+      }
 
       // Decide which MAC to send in the handshake. Preference order:
       //   1) Real MAC from the manufacturer-data advertisement (CIC 0x0504)
@@ -494,13 +587,21 @@ export function useQiyiTimer(callbacks: QiyiCallbacks) {
         : fallback ? '(from name)'
         : '(placeholder — neither advertisement nor name matched)';
       // eslint-disable-next-line no-console
-      console.log('Extracted MAC:', mac, macSource);
-      // eslint-disable-next-line no-console
       console.log('[QiYi] using MAC', mac, macSource);
 
-      // eslint-disable-next-line no-console
-      console.log('[QiYi] sending hello');
-      await sendHello(mac);
+      if (writeCharRef.current) {
+        // eslint-disable-next-line no-console
+        console.log('[QiYi] sending hello');
+        try {
+          await sendHello(mac);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[QiYi] hello send failed (continuing — debug subscriptions still active)', err);
+        }
+      } else {
+        // eslint-disable-next-line no-console
+        console.warn('[QiYi] no canonical write characteristic (' + QIYI_CHRCT_WRITE + ') found — skipping hello handshake. Watch the discovery log above for an alternative write char and incoming notifications.');
+      }
 
       // eslint-disable-next-line no-console
       console.log('[QiYi] connected');
@@ -520,5 +621,5 @@ export function useQiyiTimer(callbacks: QiyiCallbacks) {
 
   useEffect(() => () => teardown(), [teardown]);
 
-  return { state, connect, disconnect, supported, deviceName, liveState };
+  return { state, connect, disconnect, supported, deviceName, liveState, recentPackets };
 }
