@@ -1601,18 +1601,25 @@ export default function TimerPage() {
             // below a scrollable main content area — no fixed positioning,
             // no padding hacks, no z-index stacking. The top safe-area
             // inset keeps content clear of the iOS notch when running
-            // standalone with viewport-fit: cover.
-            height: '100vh',
+            // standalone with viewport-fit: cover. dvh tracks the visible
+            // viewport on iOS so the URL-bar dynamics don't expose a strip
+            // of empty space below the bottom nav (the regression we're
+            // fixing here).
+            height: '100dvh',
             width: '100%',
             display: 'flex', flexDirection: 'column',
             background: C.bg, color: C.text,
             overflow: 'hidden',
             paddingTop: 'env(safe-area-inset-top)',
           }}>
-            {/* ── MAIN: scrollable content area (one tab at a time) ─────── */}
+            {/* ── MAIN: tab content area, locked to the viewport.
+                Each tab manages its own internal scroll where needed
+                (e.g. the solves list). At the page level there is no
+                scrolling — the screen is fully locked to 100dvh and the
+                bottom nav stays in flex flow with flexShrink: 0. */}
             <main style={{
               flex: 1, minHeight: 0,
-              overflowY: 'auto',
+              overflow: 'hidden',
               display: 'flex', flexDirection: 'column',
             }}>
             {/* ── TIMER TAB ─────────────────────────────────────────────── */}
@@ -1655,7 +1662,10 @@ export default function TimerPage() {
                         width: '100%', appearance: 'none', WebkitAppearance: 'none',
                         background: 'transparent', color: C.text,
                         border: 'none', borderRadius: 999,
-                        padding: '0.15rem 1.2rem 0 0.7rem',
+                        // Symmetric horizontal padding now that the dropdown
+                        // chevron is gone — the event name centres cleanly
+                        // above the session label.
+                        padding: '0.15rem 0.7rem 0 0.7rem',
                         fontSize: '0.92rem', fontWeight: 600, fontFamily: 'inherit',
                         outline: 'none', textAlign: 'center', textAlignLast: 'center',
                       }}
@@ -1664,11 +1674,6 @@ export default function TimerPage() {
                         <option key={ev.id} value={ev.id}>{ev.name}</option>
                       ))}
                     </select>
-                    <span style={{
-                      position: 'absolute', right: '0.4rem', top: '0.45rem',
-                      color: C.muted,
-                      fontSize: '0.7rem', pointerEvents: 'none',
-                    }}>▾</span>
                     <div style={{
                       fontSize: '0.6rem', color: C.mutedDim,
                       letterSpacing: '0.05em', fontWeight: 600,
@@ -1685,10 +1690,10 @@ export default function TimerPage() {
                       style={{
                         width: 34, height: 34, borderRadius: 999,
                         background: 'transparent', border: `1px solid ${C.border}`,
-                        color: C.muted, cursor: 'pointer', fontSize: 16,
+                        color: C.muted, cursor: 'pointer',
                         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                       }}
-                    ><span aria-hidden>👥</span></button>
+                    ><IconUsers size={16} /></button>
                     <button
                       onClick={() => { setNewSessionName(''); setSessionPanelOpen(true); }}
                       aria-label="Sessions"
@@ -3908,5 +3913,6 @@ function IconCheck(p: IconProps)      { return <IconBase {...p}><path d="M5 12l5
 function IconTrash(p: IconProps)      { return <IconBase {...p}><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6"/><path d="M14 11v6"/></IconBase>; }
 function IconCube(p: IconProps)       { return <IconBase {...p}><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5"/><path d="M12 12L4 7.5"/><path d="M12 12v9"/></IconBase>; }
 function IconBluetooth(p: IconProps)  { return <IconBase {...p}><path d="M7 7l10 10-5 5V2l5 5L7 17"/></IconBase>; }
+function IconUsers(p: IconProps)      { return <IconBase {...p}><path d="M16 11a4 4 0 1 0-4-4"/><path d="M2 21v-1a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v1"/><circle cx={9} cy={7} r={4}/><path d="M22 21v-1a5 5 0 0 0-4-4.9"/></IconBase>; }
 function IconKeyboard(p: IconProps)   { return <IconBase {...p}><rect x={2}  y={6}  width={20} height={12} rx={2}/><path d="M6 10h0M10 10h0M14 10h0M18 10h0M6 14h0M10 14h4M18 14h0"/></IconBase>; }
 function IconPalette(p: IconProps)    { return <IconBase {...p}><path d="M12 3a9 9 0 1 0 0 18c1.1 0 2-.9 2-2 0-.5-.2-1-.5-1.4-.3-.4-.5-.9-.5-1.4 0-1.1.9-2 2-2H17a4 4 0 0 0 4-4 8 8 0 0 0-9-7.2"/><circle cx={7.5}  cy={11} r={1}/><circle cx={9.5}  cy={7}  r={1}/><circle cx={14.5} cy={7}  r={1}/><circle cx={17.5} cy={11} r={1}/></IconBase>; }
