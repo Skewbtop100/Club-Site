@@ -17,6 +17,7 @@ import {
   serverTimestamp,
 } from 'firebase/database';
 import { rtdb } from '@/lib/firebase';
+import { useWakeLock } from '../useWakeLock';
 
 // ── Theme ──────────────────────────────────────────────────────────────────
 const C = {
@@ -541,6 +542,13 @@ function MultiplayerPageInner() {
       document.documentElement.style.overflow = prevHtml;
     };
   }, [view, room?.status]);
+
+  // Keep the screen on for the entire racing phase — solves can take longer
+  // than mobile auto-dim timeouts (30–60 s), and dimming mid-solve is
+  // disruptive. We hold the lock across the whole round (not just the local
+  // timer state) so a player waiting on opponents at solve N+1 doesn't lose
+  // the screen either. Released on lobby/waiting/results and on unmount.
+  useWakeLock(view === 'room' && room?.status === 'racing');
 
   // Initial mount: pull user id + saved name
   useEffect(() => {

@@ -8,6 +8,7 @@ import { Scrambow } from 'scrambow';
 import type { TwistyPlayer as TwistyPlayerType } from 'cubing/twisty';
 import { useGanTimer } from './useGanTimer';
 import { useQiyiTimer, type QiyiPacket } from './useQiyiTimer';
+import { useWakeLock } from './useWakeLock';
 
 type TimerBrand = 'gan' | 'qiyi';
 
@@ -580,6 +581,15 @@ export default function TimerPage() {
   }, [scramble, eventId]);
 
   const timer = useTimer(onSolveCommit);
+
+  // Keep the screen on while the user is actively solving (inspecting /
+  // armed / running). We deliberately drop the lock on 'stopped' and 'idle'
+  // so the device can save power between solves. Browser auto-releases on
+  // tab hide; the hook re-acquires when the user returns and is still in
+  // an active state.
+  useWakeLock(
+    timer.state === 'inspecting' || timer.state === 'armed' || timer.state === 'running',
+  );
 
   // ── Bluetooth timer (GAN + QiYi) ────────────────────────────────────────
   // Both brands feed the same set of callbacks, so the rest of the page
