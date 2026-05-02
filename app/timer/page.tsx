@@ -902,14 +902,13 @@ export default function TimerPage() {
   function commitManualEntry() {
     const ms = parseManualTime(manualEntryValue);
     if (ms == null) return;
-    setSolves(prev => [
-      ...prev,
-      {
-        id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-        ms, penalty: 'none',
-        scramble, event: eventId, ts: Date.now(),
-      },
-    ]);
+    // Route manual entry through the same path the GAN/QiYi bluetooth
+    // hooks take for externally-measured times: finishExternal sets
+    // state='stopped', writes the entered ms onto the big-timer display,
+    // and calls onSolveCommit — which both appends the solve AND rolls a
+    // fresh scramble. So manual entry now ends up exactly as if the user
+    // had finished a normal solve at that time.
+    timer.finishExternal(ms);
     setManualEntryOpen(false);
     setManualEntryValue('');
   }
