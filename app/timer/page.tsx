@@ -2990,6 +2990,8 @@ function SettingsPanel(props: SettingsPanelProps) {
     // missing the API), so the generic "use Chrome or Edge" advice is
     // misleading. Bluefy is a third-party WebKit-based browser that ships
     // its own BLE bridge to Web Bluetooth, which is the practical workaround.
+    // When Bluefy is in use `navigator.bluetooth` exists → `unsupported` is
+    // false → this whole branch never renders, so the iOS hint is hidden.
     const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent);
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
@@ -3071,11 +3073,11 @@ function SettingsPanel(props: SettingsPanelProps) {
               fontSize: '0.82rem', fontWeight: 700, color: c.accent,
               letterSpacing: '0.01em',
             }}>
-              {isIOS ? 'iOS Bluetooth limitation' : 'Web Bluetooth not available'}
+              {isIOS ? 'iOS дээр Bluetooth ашиглах' : 'Web Bluetooth not available'}
             </div>
             <div style={{ fontSize: '0.78rem', color: c.muted, lineHeight: 1.55 }}>
               {isIOS
-                ? "Apple's Safari and other iOS browsers don't support Web Bluetooth. To use a smart timer on iPhone, install Bluefy browser from the App Store and open this site in Bluefy."
+                ? 'Safari, Chrome, Edge зэрэг iOS-ийн browser-ууд Bluetooth timer-ийг дэмждэггүй. Smart timer ашиглахын тулд Bluefy browser-ыг татаж аваад, энэ сайтыг Bluefy дотор нээнэ үү.'
                 : 'Web Bluetooth is required. Use Chrome or Edge over HTTPS or localhost.'}
             </div>
             {isIOS && (
@@ -3085,18 +3087,24 @@ function SettingsPanel(props: SettingsPanelProps) {
                 rel="noopener noreferrer"
                 style={{
                   alignSelf: 'flex-start',
-                  marginTop: '0.15rem',
-                  padding: '0.45rem 0.8rem',
-                  borderRadius: 8,
+                  marginTop: '0.25rem',
+                  padding: '0.65rem 1.1rem',
+                  borderRadius: 10,
                   background: c.accent,
                   color: '#0a0a0a',
-                  fontSize: '0.78rem', fontWeight: 700,
+                  fontSize: '0.9rem', fontWeight: 800,
                   letterSpacing: '0.02em',
                   textDecoration: 'none',
                   border: `1px solid ${c.accent}`,
+                  boxShadow: '0 4px 14px rgba(167,139,250,0.35)',
+                  display: 'inline-flex', alignItems: 'center', gap: '0.45rem',
                 }}
               >
-                Get Bluefy Browser
+                Bluefy татах
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M7 17L17 7" />
+                  <polyline points="8 7 17 7 17 16" />
+                </svg>
               </a>
             )}
           </div>
