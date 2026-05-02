@@ -1593,6 +1593,13 @@ export default function TimerPage() {
           return { all, best, ao5s, ao12s, pbIndices };
         })();
 
+        // Bottom-edge handling differs by platform: iOS draws a home
+        // indicator inside the web viewport so we need to pad past it,
+        // but Android puts the gesture/button bar OUTSIDE the viewport,
+        // so adding env(safe-area-inset-bottom) there leaves a black
+        // strip below the bottom nav. Detect once and apply selectively.
+        const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent);
+
         return (
           <div style={{
             position: 'relative', zIndex: 1,
@@ -1603,15 +1610,30 @@ export default function TimerPage() {
             // inset keeps content clear of the iOS notch when running
             // standalone with viewport-fit: cover. dvh tracks the visible
             // viewport on iOS so the URL-bar dynamics don't expose a strip
-            // of empty space below the bottom nav (the regression we're
-            // fixing here).
+            // of empty space below the bottom nav. maxHeight pins the
+            // ceiling so a momentary content overflow can't push the
+            // root past the visible viewport on Android either.
             height: '100dvh',
+            maxHeight: '100dvh',
             width: '100%',
             display: 'flex', flexDirection: 'column',
             background: C.bg, color: C.text,
             overflow: 'hidden',
             paddingTop: 'env(safe-area-inset-top)',
           }}>
+            {/* Page-scoped global lock. Setting overflow:hidden on
+                <html>/<body> here (rather than in globals.css) keeps the
+                rule from leaking out to the rest of the site, which
+                relies on normal document scrolling. overscroll-behavior
+                kills the rubber-band scroll some Android browsers do at
+                the top/bottom of the document even with overflow:hidden. */}
+            <style>{`
+              html, body {
+                height: 100%;
+                overscroll-behavior: none;
+                overflow: hidden;
+              }
+            `}</style>
             {/* ── MAIN: tab content area, locked to the viewport.
                 Each tab manages its own internal scroll where needed
                 (e.g. the solves list). At the page level there is no
@@ -2125,12 +2147,16 @@ export default function TimerPage() {
               )}
 
               <nav style={{
-                // 56px of tab content + the iOS bottom safe-area inset
-                // (home indicator) below it, so the buttons sit above
-                // the indicator and the bg color extends to the edge.
-                height: 'calc(56px + env(safe-area-inset-bottom))',
-                paddingBottom: 'env(safe-area-inset-bottom)',
+                // iOS: 56 px of tab content plus the home-indicator inset
+                // below it, so the buttons sit above the indicator and the
+                // background color extends to the screen edge.
+                // Android (and everywhere else): just 56 px — the gesture
+                // bar lives outside the web viewport, and adding the inset
+                // there would leave a black strip below the nav.
+                height: isIOS ? 'calc(56px + env(safe-area-inset-bottom))' : '56px',
+                paddingBottom: isIOS ? 'env(safe-area-inset-bottom)' : 0,
                 boxSizing: 'border-box',
+                flexShrink: 0,
                 display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
                 background: C.card, borderTop: `1px solid ${C.border}`,
               }}>
