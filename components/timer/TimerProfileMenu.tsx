@@ -26,6 +26,17 @@ function initialOf(name: string | null | undefined): string {
   return cp ? String.fromCodePoint(cp).toUpperCase() : '?';
 }
 
+// Optional extra menu item slot. The mobile timer header uses this to
+// inject Multiplayer + "Шинэ session" entries at the top of the dropdown
+// (those buttons used to live in the header itself but were too crowded).
+// Renders above the standard Профайл / Нүүр хуудас / Гарах items, with a
+// divider in between. Label text owns its own emoji/glyph since emojis
+// don't recolor through the icon-tint prop.
+export interface TimerProfileMenuExtra {
+  label: string;
+  onClick: () => void;
+}
+
 export interface TimerProfileMenuProps {
   /**
    * Avatar size in px. Default 30 — picks a size that visually matches
@@ -43,12 +54,18 @@ export interface TimerProfileMenuProps {
    * when there isn't room below (see autoFlip effect).
    */
   align?: 'left' | 'right';
+  /**
+   * Extra menu items inserted as the FIRST group in the dropdown. The
+   * dropdown auto-closes after the callback fires.
+   */
+  extras?: TimerProfileMenuExtra[];
 }
 
 export default function TimerProfileMenu({
   size = 30,
   redirectAfterLogin = '/timer',
   align = 'right',
+  extras,
 }: TimerProfileMenuProps) {
   const router = useRouter();
   const { user, signOut, loading } = useAuth();
@@ -238,6 +255,20 @@ export default function TimerProfileMenu({
           </div>
 
           <Divider />
+
+          {extras && extras.length > 0 && (
+            <>
+              {extras.map((item, i) => (
+                <MenuItem
+                  key={`extra-${i}`}
+                  onClick={() => { setOpen(false); item.onClick(); }}
+                >
+                  {item.label}
+                </MenuItem>
+              ))}
+              <Divider />
+            </>
+          )}
 
           <MenuItem onClick={() => handleNav('/profile')} icon={<UserIcon />}>Профайл</MenuItem>
           <MenuItem onClick={() => handleNav('/')}        icon={<HomeIcon />}>Нүүр хуудас</MenuItem>

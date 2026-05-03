@@ -1664,7 +1664,7 @@ export default function TimerPage() {
                       onClick={() => setSettingsOpen(true)}
                       aria-label="Settings"
                       style={{
-                        width: 34, height: 34, borderRadius: 999,
+                        width: 32, height: 32, borderRadius: 999,
                         background: 'transparent', border: 'none',
                         color: C.muted, cursor: 'pointer',
                         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -1674,7 +1674,7 @@ export default function TimerPage() {
                       state={gan.state}
                       onConnect={gan.connect}
                       onDisconnect={gan.disconnect}
-                      size={34}
+                      size={32}
                       iconSize={16}
                     />
                   </div>
@@ -1707,30 +1707,19 @@ export default function TimerPage() {
                       {currentSession?.name ?? 'Default'}
                     </div>
                   </div>
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                    <button
-                      onClick={() => router.push('/timer/multiplayer')}
-                      aria-label="Multiplayer Racing"
-                      title="Multiplayer Racing"
-                      style={{
-                        width: 34, height: 34, borderRadius: 999,
-                        background: 'transparent', border: `1px solid ${C.border}`,
-                        color: C.muted, cursor: 'pointer',
-                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      }}
-                    ><IconUsers size={16} /></button>
-                    <TimerProfileMenu size={30} redirectAfterLogin="/timer" align="right" />
-                    <button
-                      onClick={() => { setNewSessionName(''); setSessionPanelOpen(true); }}
-                      aria-label="Sessions"
-                      title="Sessions"
-                      style={{
-                        width: 34, height: 34, borderRadius: 999,
-                        background: 'transparent', border: `1px solid ${C.border}`,
-                        color: C.muted, cursor: 'pointer',
-                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      }}
-                    ><IconPlus size={16} /></button>
+                  <div style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    {/* Avatar-only right cluster — Multiplayer + "Шинэ
+                        session" actions moved into this dropdown so the
+                        capsule stays uncluttered on phones. */}
+                    <TimerProfileMenu
+                      size={32}
+                      redirectAfterLogin="/timer"
+                      align="right"
+                      extras={[
+                        { label: '👥 Multiplayer',  onClick: () => router.push('/timer/multiplayer') },
+                        { label: '+ Шинэ session', onClick: () => { setNewSessionName(''); setSessionPanelOpen(true); } },
+                      ]}
+                    />
                   </div>
                 </div>
 
