@@ -340,92 +340,167 @@ interface LiveActivity {
   rooms: ActiveRoom[];
 }
 
+// Staleness thresholds — we don't trust the `connected` flag on its own
+// because clients sometimes lose their `onDisconnect` handler (refresh
+// before it registers, mobile app-switch killing the websocket without
+// firing `onDisconnect`, etc.). Heartbeat age is the source of truth:
+//
+//   ≤ 15s — Online (counted in "Online хүн" + "Уралдаж байгаа").
+//   ≤ 30s — Tolerated for the room itself; it stays in the active list
+//           as long as at least one member is within this window.
+//   > 60s — Abandoned. Member is hidden everywhere and a room with all
+//           members past this threshold disappears from the hub.
+//
+// `lastHeartbeat === 0` is the "just joined, server hasn't written one
+// yet" marker — treated as online. Same convention as the in-room
+// connection-status checker.
+const HB_ONLINE_MS    = 15_000;
+const HB_ROOM_OK_MS   = 30_000;
+const HB_ABANDONED_MS = 60_000;
+// Auto-stale rooms older than this regardless of heartbeats. Mirrors the
+// 24h ROOM_TTL_MS in the multiplayer page but tighter — the hub list is
+// for "happening now", not "still technically alive".
+const ROOM_AGE_CAP_MS = 6 * 60 * 60 * 1000;
+
+function isMemberOnline(lastHeartbeat: number, now: number): boolean {
+  if (lastHeartbeat === 0) return true;
+  return (now - lastHeartbeat) <= HB_ONLINE_MS;
+}
+function isMemberRoomActive(lastHeartbeat: number, now: number): boolean {
+  if (lastHeartbeat === 0) return true;
+  return (now - lastHeartbeat) <= HB_ROOM_OK_MS;
+}
+function isMemberAbandoned(lastHeartbeat: number, now: number): boolean {
+  if (lastHeartbeat === 0) return false;
+  return (now - lastHeartbeat) > HB_ABANDONED_MS;
+}
+
+// Raw RTDB snapshot shape — narrow enough that the compute step doesn't
+// need to repeat all the runtime guards.
+type RawRoomMap = Record<string, {
+  status?: string;
+  event?: string;
+  round?: number;
+  maxRounds?: number;
+  host?: string;
+  createdAt?: number;
+  members?: Record<string, {
+    name?: string;
+    connected?: boolean;
+    lastHeartbeat?: number;
+    currentSolve?: number;
+    roundAverage?: number | null;
+    totalPoints?: number;
+    queued?: boolean;
+  }>;
+}> | null;
+
+function deriveLiveActivity(val: RawRoomMap, now: number): Omit<LiveActivity, 'loaded'> {
+  const rooms: ActiveRoom[] = [];
+  let totalPlayers = 0;
+  let currentlyRacing = 0;
+  if (val) {
+    for (const code of Object.keys(val)) {
+      const room = val[code];
+      if (!room) continue;
+      // Only waiting/racing rooms are "active". 'results' is the
+      // post-match screen — not visible in the hub. Anything else
+      // (legacy, unknown) is dropped.
+      const status = room.status;
+      if (status !== 'waiting' && status !== 'racing') continue;
+      // Hard age cap — older rooms are stale regardless of state.
+      const createdAt = typeof room.createdAt === 'number' ? room.createdAt : 0;
+      if (createdAt > 0 && (now - createdAt) > ROOM_AGE_CAP_MS) continue;
+
+      const memberMap = room.members ?? {};
+      const members: ActiveMember[] = [];
+      for (const uid of Object.keys(memberMap)) {
+        const m = memberMap[uid] ?? {};
+        const lastHeartbeat = typeof m.lastHeartbeat === 'number' ? m.lastHeartbeat : 0;
+        const explicitlyOffline = m.connected === false;
+        // Drop members the client has explicitly marked offline OR
+        // whose heartbeat puts them past the abandoned threshold.
+        // The room-active threshold (30s) decides which members
+        // KEEP a room visible; for inclusion in the per-member
+        // lists we use the stricter 15s online check downstream.
+        if (explicitlyOffline) continue;
+        if (isMemberAbandoned(lastHeartbeat, now)) continue;
+        members.push({
+          uid,
+          name: typeof m.name === 'string' && m.name.length > 0 ? m.name : 'Player',
+          connected: true,
+          lastHeartbeat,
+          currentSolve: typeof m.currentSolve === 'number' ? m.currentSolve : 0,
+          roundAverage: typeof m.roundAverage === 'number' ? m.roundAverage : null,
+          totalPoints: typeof m.totalPoints === 'number' ? m.totalPoints : 0,
+          queued: m.queued === true,
+        });
+      }
+      if (members.length === 0) continue;
+      // Need at least one member with a recent heartbeat (≤30s) for
+      // the room to count as "alive". A room of survivors who all
+      // went silent ~45s ago is dropped here even though they're
+      // not yet at the 60s abandoned threshold.
+      const anyAlive = members.some(m => isMemberRoomActive(m.lastHeartbeat, now));
+      if (!anyAlive) continue;
+
+      totalPlayers += members.filter(m => isMemberOnline(m.lastHeartbeat, now)).length;
+      if (status === 'racing') {
+        currentlyRacing += members.filter(m =>
+          !m.queued && isMemberOnline(m.lastHeartbeat, now)
+        ).length;
+      }
+      const hostUid = typeof room.host === 'string' ? room.host : '';
+      const hostMember = members.find(m => m.uid === hostUid);
+      rooms.push({
+        code,
+        status,
+        event: typeof room.event === 'string' ? room.event : '333',
+        round: typeof room.round === 'number' ? room.round : 1,
+        maxRounds: typeof room.maxRounds === 'number' ? room.maxRounds : 1,
+        hostUid,
+        hostName: hostMember?.name ?? memberMap[hostUid]?.name ?? '',
+        members,
+        createdAt,
+      });
+    }
+  }
+  // Newest first feels right for "what's happening now".
+  rooms.sort((a, b) => b.createdAt - a.createdAt);
+  return { activeRooms: rooms.length, totalPlayers, currentlyRacing, rooms };
+}
+
 function useLiveActivity(): LiveActivity {
-  const [data, setData] = useState<LiveActivity>({
-    activeRooms: 0, totalPlayers: 0, currentlyRacing: 0,
-    loaded: false, rooms: [],
-  });
+  // Two-stage state: raw RTDB snapshot kept in a ref-like state so we
+  // can re-derive on every minute tick (heartbeat staleness changes
+  // even when the snapshot doesn't), and the derived view that
+  // components actually read.
+  const [raw, setRaw] = useState<RawRoomMap>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [tick, setTick] = useState(0);
+
   useEffect(() => {
     const r = rtdbRef(rtdb, 'rooms');
-    const unsub = onValue(r, (snap) => {
-      const val = snap.val() as Record<string, {
-        status?: string;
-        event?: string;
-        round?: number;
-        maxRounds?: number;
-        host?: string;
-        createdAt?: number;
-        members?: Record<string, {
-          name?: string;
-          connected?: boolean;
-          lastHeartbeat?: number;
-          currentSolve?: number;
-          roundAverage?: number | null;
-          totalPoints?: number;
-          queued?: boolean;
-        }>;
-      }> | null;
-      const rooms: ActiveRoom[] = [];
-      let totalPlayers = 0;
-      let currentlyRacing = 0;
-      if (val) {
-        for (const code of Object.keys(val)) {
-          const room = val[code];
-          if (!room) continue;
-          const status = room.status;
-          if (status !== 'waiting' && status !== 'racing') continue;
-          const memberMap = room.members ?? {};
-          const members: ActiveMember[] = [];
-          for (const uid of Object.keys(memberMap)) {
-            const m = memberMap[uid] ?? {};
-            const connected = m.connected !== false;
-            if (!connected) continue;
-            members.push({
-              uid,
-              name: typeof m.name === 'string' && m.name.length > 0 ? m.name : 'Player',
-              connected,
-              lastHeartbeat: typeof m.lastHeartbeat === 'number' ? m.lastHeartbeat : 0,
-              currentSolve: typeof m.currentSolve === 'number' ? m.currentSolve : 0,
-              roundAverage: typeof m.roundAverage === 'number' ? m.roundAverage : null,
-              totalPoints: typeof m.totalPoints === 'number' ? m.totalPoints : 0,
-              queued: m.queued === true,
-            });
-          }
-          if (members.length === 0) continue;
-          totalPlayers += members.length;
-          if (status === 'racing') {
-            currentlyRacing += members.filter(m => !m.queued).length;
-          }
-          const hostUid = typeof room.host === 'string' ? room.host : '';
-          const hostMember = members.find(m => m.uid === hostUid);
-          rooms.push({
-            code,
-            status,
-            event: typeof room.event === 'string' ? room.event : '333',
-            round: typeof room.round === 'number' ? room.round : 1,
-            maxRounds: typeof room.maxRounds === 'number' ? room.maxRounds : 1,
-            hostUid,
-            hostName: hostMember?.name ?? memberMap[hostUid]?.name ?? '',
-            members,
-            createdAt: typeof room.createdAt === 'number' ? room.createdAt : 0,
-          });
-        }
-      }
-      // Newest first feels right for "what's happening now".
-      rooms.sort((a, b) => b.createdAt - a.createdAt);
-      setData({
-        activeRooms: rooms.length,
-        totalPlayers,
-        currentlyRacing,
-        loaded: true,
-        rooms,
-      });
-    }, () => {
-      setData(d => ({ ...d, loaded: true }));
-    });
+    const unsub = onValue(
+      r,
+      (snap) => { setRaw(snap.val() as RawRoomMap); setLoaded(true); },
+      ()    => { setLoaded(true); },
+    );
     return () => unsub();
   }, []);
-  return data;
+
+  useEffect(() => {
+    const id = window.setInterval(() => setTick(t => t + 1), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  return useMemo<LiveActivity>(() => {
+    const derived = deriveLiveActivity(raw, Date.now());
+    return { ...derived, loaded };
+    // tick intentionally included — it's a "now-changed" pulse so the
+    // memo recomputes against a fresh Date.now() / heartbeat windows.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [raw, loaded, tick]);
 }
 
 // ── Leaderboard hook (with 5-min module-level cache) ──────────────────────
@@ -636,21 +711,21 @@ function LiveActivityCard() {
         gap: '0.55rem',
       }}>
         <ClickableStatTile
-          label="Идэвхтэй өрөө"
+          label="Идэвхтэй"
           value={live.loaded ? String(live.activeRooms) : '—'}
           accent={C.accent}
           active={panel === 'rooms'}
           onClick={() => togglePanel('rooms')}
         />
         <ClickableStatTile
-          label="Online хүн"
+          label="Online"
           value={live.loaded ? String(live.totalPlayers) : '—'}
           accent={C.success}
           active={panel === 'online'}
           onClick={() => togglePanel('online')}
         />
         <ClickableStatTile
-          label="Уралдаж байгаа"
+          label="Уралдаж"
           value={live.loaded ? String(live.currentlyRacing) : '—'}
           accent={C.warn}
           active={panel === 'racing'}
@@ -695,10 +770,10 @@ function ClickableStatTile({
       onClick={onClick}
       aria-expanded={active}
       style={{
-        padding: '0.7rem 0.8rem', borderRadius: 12,
+        padding: '0.65rem 0.6rem', borderRadius: 12,
         background: active ? C.accentDim : 'rgba(255,255,255,0.03)',
         border: `1px solid ${active ? C.borderHi : C.border}`,
-        display: 'flex', flexDirection: 'column', gap: '0.2rem',
+        display: 'flex', flexDirection: 'column', gap: '0.18rem',
         minWidth: 0,
         color: C.text, fontFamily: 'inherit', cursor: 'pointer',
         textAlign: 'left',
@@ -707,13 +782,17 @@ function ClickableStatTile({
     >
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        gap: '0.3rem',
+        gap: '0.25rem',
       }}>
+        {/* Tighter typography — short label words ("Идэвхтэй", "Online",
+            "Уралдаж") fit in even the narrowest 3-col mobile layout
+            without ellipsis. We deliberately drop the overflow:hidden
+            cascade so a slightly-too-wide label wraps to a second line
+            instead of being silently clipped. */}
         <span style={{
-          fontSize: '0.62rem', color: C.muted, letterSpacing: '0.1em',
+          fontSize: '0.58rem', color: C.muted, letterSpacing: '0.06em',
           textTransform: 'uppercase', fontWeight: 700,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          minWidth: 0,
+          lineHeight: 1.2,
         }}>{label}</span>
         <span aria-hidden="true" style={{
           fontSize: '0.7rem', color: C.muted,
@@ -889,10 +968,16 @@ function OnlineUsersPanel({
   // (in theory) appear in multiple rooms if a user joined multiple in
   // different tabs, so de-duping by uid alone would lose information.
   // Keys are `${uid}@${roomCode}` to allow that without React warnings.
+  //
+  // Both modes apply the 15s heartbeat freshness gate at row-build time
+  // (the upstream hook only filters at the 60s "abandoned" threshold so
+  // that a room with one stale member still surfaces its alive ones).
+  const now = Date.now();
   const rows: { member: ActiveMember; room: ActiveRoom }[] = [];
   for (const room of rooms) {
     if (mode === 'racing' && room.status !== 'racing') continue;
     for (const member of room.members) {
+      if (!isMemberOnline(member.lastHeartbeat, now)) continue;
       if (mode === 'racing' && member.queued) continue;
       rows.push({ member, room });
     }
@@ -908,7 +993,6 @@ function OnlineUsersPanel({
       </div>
     );
   }
-  const now = Date.now();
   return (
     <div style={panelStyle()}>
       {rows.map(({ member, room }) => (
@@ -1207,11 +1291,18 @@ function RoomDetailMemberRow({
 }
 
 // ── Section: Personal Stats ───────────────────────────────────────────────
+// Surfaced when subscribeUserMatches errors out (most often: missing
+// composite Firestore index). The hub's match-derived sections render
+// this in place of their normal empty-state copy so users see the
+// problem instead of "Анхны тоглолтоо хий!" misleadingly.
+const MATCHES_ERROR_TEXT = 'Тоглолтын түүх ачааллагдаагүй';
+
 function PersonalStatsCard({
-  matches, loaded, uid, signedIn,
+  matches, loaded, error, uid, signedIn,
 }: {
   matches: MatchHistory[];
   loaded: boolean;
+  error: boolean;
   uid: string;
   signedIn: boolean;
 }) {
@@ -1221,6 +1312,10 @@ function PersonalStatsCard({
       {!signedIn ? (
         <div style={{ color: C.muted, fontSize: '0.88rem', padding: '0.4rem 0' }}>
           Нэвтэрч статистик харах
+        </div>
+      ) : error ? (
+        <div style={{ color: C.danger, fontSize: '0.88rem', padding: '0.4rem 0' }}>
+          {MATCHES_ERROR_TEXT}
         </div>
       ) : !loaded ? (
         <div style={{ color: C.muted, fontSize: '0.88rem', padding: '0.4rem 0' }}>
@@ -1267,10 +1362,11 @@ function PersonalStatsCard({
 
 // ── Section: Recent Matches ───────────────────────────────────────────────
 function RecentMatchesCard({
-  matches, loaded, uid, signedIn, onOpen,
+  matches, loaded, error, uid, signedIn, onOpen,
 }: {
   matches: MatchHistory[];
   loaded: boolean;
+  error: boolean;
   uid: string;
   signedIn: boolean;
   onOpen: (m: MatchHistory) => void;
@@ -1298,6 +1394,10 @@ function RecentMatchesCard({
       {!signedIn ? (
         <div style={{ color: C.muted, fontSize: '0.88rem', padding: '0.4rem 0' }}>
           Нэвтэрч тоглолтоо харах
+        </div>
+      ) : error ? (
+        <div style={{ color: C.danger, fontSize: '0.88rem', padding: '0.4rem 0' }}>
+          {MATCHES_ERROR_TEXT}
         </div>
       ) : !loaded ? (
         <div style={{ color: C.muted, fontSize: '0.88rem', padding: '0.4rem 0' }}>
@@ -1553,10 +1653,11 @@ function LeaderboardRow({
 
 // ── Section: Event Averages ───────────────────────────────────────────────
 function EventAveragesCard({
-  matches, loaded, uid, signedIn,
+  matches, loaded, error, uid, signedIn,
 }: {
   matches: MatchHistory[];
   loaded: boolean;
+  error: boolean;
   uid: string;
   signedIn: boolean;
 }) {
@@ -1566,6 +1667,10 @@ function EventAveragesCard({
       {!signedIn ? (
         <div style={{ color: C.muted, fontSize: '0.88rem', padding: '0.4rem 0' }}>
           Нэвтэрч дунджаа харах
+        </div>
+      ) : error ? (
+        <div style={{ color: C.danger, fontSize: '0.88rem', padding: '0.4rem 0' }}>
+          {MATCHES_ERROR_TEXT}
         </div>
       ) : !loaded ? (
         <div style={{ color: C.muted, fontSize: '0.88rem', padding: '0.4rem 0' }}>
@@ -1626,17 +1731,18 @@ function EventAveragesCard({
 
 // ── Section: Achievements ─────────────────────────────────────────────────
 function AchievementsCard({
-  matches, loaded, uid, signedIn,
+  matches, loaded, error, uid, signedIn,
 }: {
   matches: MatchHistory[];
   loaded: boolean;
+  error: boolean;
   uid: string;
   signedIn: boolean;
 }) {
   const stats = useMemo(() => derivePersonalStats(matches, uid), [matches, uid]);
   const items = useMemo(() => deriveAchievements(stats), [stats]);
   const [openId, setOpenId] = useState<string | null>(null);
-  const showLocked = signedIn && loaded;
+  const showLocked = signedIn && loaded && !error;
 
   return (
     <Section
@@ -1653,6 +1759,10 @@ function AchievementsCard({
       {!signedIn ? (
         <div style={{ color: C.muted, fontSize: '0.88rem', padding: '0.4rem 0' }}>
           Нэвтэрч амжилтаа харах
+        </div>
+      ) : error ? (
+        <div style={{ color: C.danger, fontSize: '0.88rem', padding: '0.4rem 0' }}>
+          {MATCHES_ERROR_TEXT}
         </div>
       ) : !loaded ? (
         <div style={{ color: C.muted, fontSize: '0.88rem', padding: '0.4rem 0' }}>
@@ -2077,26 +2187,54 @@ export default function MultiplayerHub({
 
   const [matches, setMatches] = useState<MatchHistory[]>([]);
   const [matchesLoaded, setMatchesLoaded] = useState(!signedIn);
+  // Set when subscribeUserMatches' onError fires. The most common cause
+  // is a missing composite Firestore index on
+  //   matchHistory: playerUids (array-contains) + playedAt (desc)
+  // — the SDK logs a console error with a one-click "create index"
+  // link from the Firebase console. Wrapping the subscription so the
+  // hub doesn't blank-render is the only thing we can do client-side.
+  const [matchesError, setMatchesError] = useState(false);
   const [openMatch, setOpenMatch] = useState<MatchHistory | null>(null);
 
   useEffect(() => {
     if (!uid) {
       setMatches([]);
       setMatchesLoaded(true);
+      setMatchesError(false);
       return;
     }
     setMatchesLoaded(false);
-    const unsub = subscribeUserMatches(uid, rows => {
-      setMatches(rows);
-      setMatchesLoaded(true);
-    }, {
-      limit: 100,
-      onError: err => {
-        console.error('[hub] subscribeUserMatches', err);
+    setMatchesError(false);
+    let unsub: (() => void) | null = null;
+    try {
+      // Composite index needed:
+      //   matchHistory: playerUids (array-contains) + playedAt (desc)
+      //
+      // To create: open the Firebase console link printed in the
+      // browser console error (it auto-fills the index spec), or add
+      // it manually under Firestore → Indexes → Composite. Until the
+      // index exists, this query fails with FAILED_PRECONDITION and we
+      // surface "Тоглолтын түүх ачааллагдаагүй" rather than crash.
+      unsub = subscribeUserMatches(uid, rows => {
+        setMatches(rows);
         setMatchesLoaded(true);
-      },
-    });
-    return () => unsub();
+        setMatchesError(false);
+      }, {
+        limit: 100,
+        onError: err => {
+          console.error('[hub] subscribeUserMatches', err);
+          setMatches([]);
+          setMatchesLoaded(true);
+          setMatchesError(true);
+        },
+      });
+    } catch (err) {
+      // Synchronous failures (e.g. client init not ready) — same fate.
+      console.error('[hub] subscribeUserMatches setup', err);
+      setMatchesLoaded(true);
+      setMatchesError(true);
+    }
+    return () => { if (unsub) unsub(); };
   }, [uid]);
 
   // Achievement reconciliation — when matches load (or change), compute
@@ -2107,7 +2245,7 @@ export default function MultiplayerHub({
   // for IDs we've already tried this session.
   const achievementTriedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (!uid || !matchesLoaded) return;
+    if (!uid || !matchesLoaded || matchesError) return;
     const stats = derivePersonalStats(matches, uid);
     const items = deriveAchievements(stats).filter(a => a.unlocked);
     if (items.length === 0) return;
@@ -2133,7 +2271,7 @@ export default function MultiplayerHub({
       }
     })();
     return () => { cancelled = true; };
-  }, [uid, matchesLoaded, matches]);
+  }, [uid, matchesLoaded, matchesError, matches]);
 
   // Two-column desktop layout above 900px (matches the requirements'
   // breakpoint). Mobile gets one stacked column.
@@ -2184,12 +2322,14 @@ export default function MultiplayerHub({
         <PersonalStatsCard
           matches={matches}
           loaded={matchesLoaded}
+          error={matchesError}
           uid={uid}
           signedIn={signedIn}
         />
         <RecentMatchesCard
           matches={matches}
           loaded={matchesLoaded}
+          error={matchesError}
           uid={uid}
           signedIn={signedIn}
           onOpen={setOpenMatch}
@@ -2203,6 +2343,7 @@ export default function MultiplayerHub({
       <EventAveragesCard
         matches={matches}
         loaded={matchesLoaded}
+        error={matchesError}
         uid={uid}
         signedIn={signedIn}
       />
@@ -2211,6 +2352,7 @@ export default function MultiplayerHub({
       <AchievementsCard
         matches={matches}
         loaded={matchesLoaded}
+        error={matchesError}
         uid={uid}
         signedIn={signedIn}
       />
