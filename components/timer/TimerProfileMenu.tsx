@@ -238,35 +238,31 @@ export default function TimerProfileMenu({
             color: C.text,
           }}
         >
-          {/* Header — name + email + points balance */}
+          {/* Header — name + email + points-on-its-own-line */}
           <div style={{
             padding: '0.55rem 0.65rem 0.6rem',
-            display: 'flex', flexDirection: 'column', gap: '0.15rem',
+            display: 'flex', flexDirection: 'column', gap: '0.18rem',
             minWidth: 0,
           }}>
             <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              gap: '0.4rem',
-            }}>
-              <div style={{
-                fontSize: '0.85rem', fontWeight: 700, color: C.text,
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                minWidth: 0,
-              }}>{user.displayName}</div>
-              <span title="Point" style={{
-                display: 'inline-flex', alignItems: 'center', gap: '0.2rem',
-                fontSize: '0.78rem', fontWeight: 800,
-                color: C.accent,
-                fontFamily: 'JetBrains Mono, monospace',
-                flexShrink: 0,
-              }}>
-                💎 {user.points ?? 0}
-              </span>
-            </div>
+              fontSize: '0.85rem', fontWeight: 700, color: C.text,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>{user.displayName}</div>
             <div style={{
               fontSize: '0.7rem', color: C.muted,
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             }}>{user.email}</div>
+            <div title="Point" style={{
+              display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+              fontSize: '0.74rem', fontWeight: 700,
+              color: C.accent,
+              marginTop: '0.1rem',
+            }}>
+              <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.8rem', fontWeight: 800 }}>
+                💎 {user.points ?? 0}
+              </span>
+              <span style={{ color: C.muted, fontWeight: 600 }}>point</span>
+            </div>
           </div>
 
           <Divider />

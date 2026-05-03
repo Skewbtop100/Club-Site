@@ -1118,24 +1118,7 @@ export default function TimerPage() {
               onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; }}
               onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.muted; }}
             >⚙</button>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
-              {user && (
-                <button
-                  onClick={() => router.push('/profile')}
-                  aria-label="Point дэлгэрэнгүй"
-                  title="Point дэлгэрэнгүй"
-                  style={{
-                    height: 30, padding: '0 0.55rem', borderRadius: 999,
-                    background: C.accentDim, border: `1px solid ${C.borderHi}`,
-                    color: C.accent, cursor: 'pointer',
-                    display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
-                    fontFamily: 'JetBrains Mono, monospace',
-                    fontSize: '0.78rem', fontWeight: 800,
-                  }}
-                >💎 {user.points ?? 0}</button>
-              )}
-              <TimerProfileMenu size={28} redirectAfterLogin="/timer" align="right" />
-            </div>
+            <TimerProfileMenu size={28} redirectAfterLogin="/timer" align="right" />
           </div>
 
           {/* Session selector — clickable name with dropdown panel */}
@@ -1806,21 +1789,6 @@ export default function TimerPage() {
                       onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; e.currentTarget.style.borderColor = C.borderHi; }}
                       onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.muted; e.currentTarget.style.borderColor = C.border; }}
                     ><IconPlus size={16} /></button>
-                    {user && (
-                      <button
-                        onClick={() => router.push('/profile')}
-                        aria-label="Point дэлгэрэнгүй"
-                        title="Point дэлгэрэнгүй"
-                        style={{
-                          height: 32, padding: '0 0.55rem', borderRadius: 999,
-                          background: C.accentDim, border: `1px solid ${C.borderHi}`,
-                          color: C.accent, cursor: 'pointer',
-                          display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
-                          fontFamily: 'JetBrains Mono, monospace',
-                          fontSize: '0.78rem', fontWeight: 800,
-                        }}
-                      >💎 {user.points ?? 0}</button>
-                    )}
                     <TimerProfileMenu
                       size={32}
                       redirectAfterLogin="/timer"
