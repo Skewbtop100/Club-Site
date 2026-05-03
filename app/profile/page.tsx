@@ -1,10 +1,17 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth, type UserRole } from '@/lib/auth-context';
-import { getAthlete } from '@/lib/firebase/services/athletes';
+import { getAthletes, getAthlete } from '@/lib/firebase/services/athletes';
+import {
+  cancelAthleteRequest,
+  submitAthleteRequest,
+  subscribeUserRequests,
+  tsToMs,
+} from '@/lib/firebase/services/athleteRequests';
+import type { Athlete, AthleteRequest } from '@/lib/types';
 
 const ROLE_BADGE: Record<UserRole, { label: string; fg: string; bg: string; border: string }> = {
   member:  { label: 'Гишүүн',   fg: '#a78bfa', bg: 'rgba(167,139,250,0.15)', border: 'rgba(167,139,250,0.45)' },
@@ -284,6 +291,17 @@ export default function ProfilePage() {
           </div>
         </div>
 
+        {/* ── Athlete-link card (3-state: linked / pending / claim CTA) ── */}
+        <AthleteLinkSection
+          uid={user.uid}
+          userDisplayName={user.displayName}
+          userEmail={user.email}
+          userPhotoURL={user.photoURL}
+          linkedAthleteId={user.athleteId}
+          linkedAthleteName={user.athleteId ? athleteName : null}
+          onToast={showToast}
+        />
+
         {/* ── Unlocked tools ───────────────────────────────────────────── */}
         <div style={cardStyle}>
           <div style={{
@@ -513,5 +531,454 @@ function SignOutIcon() {
       <polyline points="16 17 21 12 16 7" />
       <line x1="21" y1="12" x2="9" y2="12" />
     </svg>
+  );
+}
+
+// ── Athlete-link section ─────────────────────────────────────────────────
+//
+// Renders one of four states based on the user's link + request history:
+//   1. Linked       — green card pointing to /competition?athlete=…
+//   2. Pending      — yellow card with cancel button
+//   3. Recently     — red banner showing the rejection reason (above CTA),
+//      rejected     — followed by the CTA card so the user can try again
+//   4. None         — purple CTA "Тамирчин болохыг хүсэх"
+//
+// Subscribes to the user's own request docs (single `where uid == X`,
+// no composite index needed).
+function AthleteLinkSection({
+  uid, userDisplayName, userEmail, userPhotoURL,
+  linkedAthleteId, linkedAthleteName, onToast,
+}: {
+  uid: string;
+  userDisplayName: string;
+  userEmail: string;
+  userPhotoURL: string | null;
+  linkedAthleteId: string | null;
+  linkedAthleteName: string | null;
+  onToast: (msg: string) => void;
+}) {
+  const [requests, setRequests] = useState<AthleteRequest[]>([]);
+  const [requestsLoaded, setRequestsLoaded] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+
+  useEffect(() => {
+    if (!uid) return;
+    const unsub = subscribeUserRequests(
+      uid,
+      (rows) => { setRequests(rows); setRequestsLoaded(true); },
+      (err) => { console.error('[profile] subscribeUserRequests', err); setRequestsLoaded(true); },
+    );
+    return () => unsub();
+  }, [uid]);
+
+  const pending = useMemo(() => requests.find(r => r.status === 'pending') ?? null, [requests]);
+  const latestRejected = useMemo(() => {
+    const rejected = requests
+      .filter(r => r.status === 'rejected')
+      .sort((a, b) => (tsToMs(b.resolvedAt) ?? 0) - (tsToMs(a.resolvedAt) ?? 0));
+    return rejected[0] ?? null;
+  }, [requests]);
+
+  const cardStyle: React.CSSProperties = {
+    background: 'var(--card)',
+    border: '1px solid rgba(255,255,255,0.07)',
+    borderRadius: 16,
+    padding: '1.4rem',
+    boxShadow: '0 8px 30px rgba(0,0,0,0.25)',
+  };
+
+  // Don't render anything until we know the request state — avoids a flash
+  // of the CTA before the pending card appears.
+  if (!requestsLoaded) return null;
+
+  // 1. Linked → green confirmation
+  if (linkedAthleteId) {
+    return (
+      <div style={{
+        ...cardStyle,
+        borderColor: 'rgba(52,211,153,0.45)',
+        background: 'linear-gradient(180deg, rgba(52,211,153,0.08), var(--card))',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
+          <div style={{ fontSize: '1.4rem' }} aria-hidden="true">✅</div>
+          <div style={{ minWidth: 0, flex: '1 1 auto' }}>
+            <div style={{ fontSize: '1rem', fontWeight: 800, color: '#34d399' }}>
+              Баталгаажсан тамирчин
+            </div>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text)', marginTop: '0.2rem', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {linkedAthleteName ?? '…'}
+            </div>
+          </div>
+          {linkedAthleteName && (
+            <Link
+              href={`/competition?athlete=${encodeURIComponent(linkedAthleteId)}`}
+              style={{
+                flexShrink: 0,
+                padding: '0.5rem 0.85rem', borderRadius: 9,
+                background: 'rgba(52,211,153,0.12)', color: '#34d399',
+                border: '1px solid rgba(52,211,153,0.45)',
+                fontSize: '0.82rem', fontWeight: 700, textDecoration: 'none',
+              }}
+            >
+              Профайл харах
+            </Link>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Pending → yellow waiting card
+  if (pending) {
+    const handleCancel = async () => {
+      if (cancelling) return;
+      setCancelling(true);
+      try {
+        await cancelAthleteRequest(pending.id);
+        onToast('Хүсэлт цуцлагдлаа');
+      } catch (err) {
+        onToast(err instanceof Error ? err.message : String(err));
+      } finally {
+        setCancelling(false);
+      }
+    };
+    return (
+      <div style={{
+        ...cardStyle,
+        borderColor: 'rgba(251,191,36,0.45)',
+        background: 'linear-gradient(180deg, rgba(251,191,36,0.08), var(--card))',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.7rem' }}>
+          <div style={{ fontSize: '1.4rem' }} aria-hidden="true">⏳</div>
+          <div style={{ minWidth: 0, flex: '1 1 auto' }}>
+            <div style={{ fontSize: '1rem', fontWeight: 800, color: '#fbbf24' }}>
+              Хүсэлт хүлээгдэж байна
+            </div>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text)', marginTop: '0.2rem' }}>
+              {pending.athleteName}
+            </div>
+            <div style={{ fontSize: '0.74rem', color: 'var(--muted)', marginTop: '0.35rem' }}>
+              Админ зөвшөөрөхийг хүлээнэ үү.
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={handleCancel}
+          disabled={cancelling}
+          style={{
+            marginTop: '0.85rem', width: '100%',
+            padding: '0.6rem 0.85rem', borderRadius: 9,
+            background: 'transparent', color: '#fbbf24',
+            border: '1px solid rgba(251,191,36,0.4)',
+            fontSize: '0.85rem', fontWeight: 700, fontFamily: 'inherit',
+            cursor: cancelling ? 'not-allowed' : 'pointer',
+            opacity: cancelling ? 0.6 : 1,
+          }}
+        >
+          Хүсэлт цуцлах
+        </button>
+      </div>
+    );
+  }
+
+  // 3. Recently rejected → red banner above CTA, plus CTA below
+  // 4. None → just the CTA
+  return (
+    <>
+      {latestRejected && (
+        <div style={{
+          background: 'rgba(239,68,68,0.08)',
+          border: '1px solid rgba(239,68,68,0.45)',
+          borderRadius: 12, padding: '0.85rem 1rem',
+          color: '#fca5a5', fontSize: '0.86rem', lineHeight: 1.55,
+        }}>
+          <div style={{ fontWeight: 700, color: '#ef4444', marginBottom: '0.2rem' }}>
+            ❌ Хүсэлт татгалзагдсан
+          </div>
+          {latestRejected.athleteName} —{' '}
+          <span style={{ color: 'var(--text)' }}>
+            {latestRejected.rejectReason || 'Шалтгаан тэмдэглэгдээгүй.'}
+          </span>
+        </div>
+      )}
+
+      <div style={{
+        ...cardStyle,
+        borderColor: 'rgba(167,139,250,0.35)',
+        background: 'linear-gradient(180deg, rgba(167,139,250,0.06), var(--card))',
+        textAlign: 'center',
+      }}>
+        <div style={{ fontSize: '1.6rem', marginBottom: '0.35rem' }} aria-hidden="true">🏆</div>
+        <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text)' }}>
+          Та клубын тамирчин уу?
+        </div>
+        <div style={{ fontSize: '0.86rem', color: 'var(--muted)', marginTop: '0.35rem', lineHeight: 1.5 }}>
+          Профайлаа баталгаажуулж нэмэлт боломжуудыг ашиглаарай
+        </div>
+        <button
+          onClick={() => setModalOpen(true)}
+          style={{
+            marginTop: '1rem',
+            padding: '0.75rem 1.4rem', borderRadius: 10,
+            background: 'linear-gradient(135deg, var(--accent), var(--accent2))',
+            color: '#fff', border: 'none',
+            fontSize: '0.92rem', fontWeight: 800, letterSpacing: '0.02em',
+            fontFamily: 'inherit', cursor: 'pointer',
+            transition: 'opacity 0.15s',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.opacity = '0.88'; }}
+          onMouseLeave={e => { e.currentTarget.style.opacity = '1'; }}
+        >
+          Тамирчин болохыг хүсэх
+        </button>
+      </div>
+
+      {modalOpen && (
+        <AthleteSelectionModal
+          uid={uid}
+          userDisplayName={userDisplayName}
+          userEmail={userEmail}
+          userPhotoURL={userPhotoURL}
+          onClose={() => setModalOpen(false)}
+          onSubmitted={() => { setModalOpen(false); onToast('Хүсэлт илгээгдлээ. Админ зөвшөөрөхийг хүлээнэ үү.'); }}
+        />
+      )}
+    </>
+  );
+}
+
+// ── Athlete selection modal ──────────────────────────────────────────────
+function AthleteSelectionModal({
+  uid, userDisplayName, userEmail, userPhotoURL,
+  onClose, onSubmitted,
+}: {
+  uid: string;
+  userDisplayName: string;
+  userEmail: string;
+  userPhotoURL: string | null;
+  onClose: () => void;
+  onSubmitted: () => void;
+}) {
+  const [athletes, setAthletes] = useState<Athlete[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState<Athlete | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    getAthletes()
+      .then(list => { if (!cancelled) { setAthletes(list); setLoading(false); } })
+      .catch(err => {
+        if (cancelled) return;
+        console.error('[profile] getAthletes', err);
+        setError('Тамирчдын жагсаалт ачаалж чадсангүй.');
+        setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Available = not yet linked to anyone. ownerId may be missing on legacy
+  // docs (those are also available — falsy ownerId means free).
+  const RESULT_LIMIT = 10;
+  const matched = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const list = athletes
+      .filter(a => !a.ownerId)
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .filter(a => {
+        if (!q) return true;
+        const name = `${a.name} ${a.lastName ?? ''}`.toLowerCase();
+        return name.includes(q) || (a.wcaId ?? '').toLowerCase().includes(q);
+      });
+    return { list: list.slice(0, RESULT_LIMIT), totalMatched: list.length };
+  }, [athletes, search]);
+
+  const handleSubmit = useCallback(async () => {
+    if (!selected || submitting) return;
+    setSubmitting(true);
+    setError('');
+    try {
+      await submitAthleteRequest({
+        uid,
+        userDisplayName,
+        userEmail,
+        userPhotoURL,
+        athleteId: selected.id,
+        athleteName: `${selected.name}${selected.lastName ? ' ' + selected.lastName : ''}`,
+      });
+      onSubmitted();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }, [selected, submitting, uid, userDisplayName, userEmail, userPhotoURL, onSubmitted]);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1500,
+        background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '1rem',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: 480,
+          background: 'var(--card)', border: '1px solid rgba(255,255,255,0.1)',
+          borderRadius: 16,
+          boxShadow: '0 24px 60px rgba(0,0,0,0.65)',
+          display: 'flex', flexDirection: 'column',
+          maxHeight: 'calc(100dvh - 2rem)', overflow: 'hidden',
+        }}
+      >
+        <header style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0.85rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.07)',
+        }}>
+          <div style={{ fontSize: '1rem', fontWeight: 700 }}>Тамирчингаа сонгох</div>
+          <button
+            onClick={onClose}
+            aria-label="Хаах"
+            style={{
+              width: 28, height: 28, borderRadius: 7,
+              background: 'transparent', border: '1px solid rgba(255,255,255,0.1)',
+              color: 'var(--muted)', cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >×</button>
+        </header>
+
+        <div style={{ padding: '1rem', overflow: 'auto' }}>
+          <input
+            autoFocus
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Тамирчны нэр / WCA ID хайх..."
+            style={{
+              width: '100%', padding: '0.6rem 0.8rem',
+              background: 'var(--input-bg)', color: 'var(--text)',
+              border: '1px solid var(--input-border)', borderRadius: 9,
+              fontSize: '0.92rem', fontFamily: 'inherit', outline: 'none',
+              boxSizing: 'border-box',
+            }}
+          />
+
+          <div style={{
+            marginTop: '0.6rem',
+            maxHeight: 360, overflow: 'auto',
+            border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10,
+          }}>
+            {loading ? (
+              <div style={{ padding: '1.2rem', textAlign: 'center', color: 'var(--muted)', fontSize: '0.86rem' }}>
+                Уншиж байна…
+              </div>
+            ) : matched.list.length === 0 ? (
+              <div style={{ padding: '1.2rem', textAlign: 'center', color: 'var(--muted)', fontSize: '0.86rem' }}>
+                Боломжтой тамирчин олдсонгүй.
+              </div>
+            ) : (
+              matched.list.map(a => {
+                const isSelected = selected?.id === a.id;
+                const fullName = `${a.name}${a.lastName ? ' ' + a.lastName : ''}`;
+                return (
+                  <button
+                    key={a.id}
+                    onClick={() => setSelected(a)}
+                    style={{
+                      width: '100%', textAlign: 'left',
+                      display: 'flex', alignItems: 'center', gap: '0.6rem',
+                      padding: '0.55rem 0.75rem',
+                      background: isSelected ? 'rgba(124,58,237,0.18)' : 'transparent',
+                      border: 'none', borderBottom: '1px solid rgba(255,255,255,0.05)',
+                      color: 'var(--text)', cursor: 'pointer', fontFamily: 'inherit',
+                    }}
+                  >
+                    <AthleteThumb name={a.name} url={a.imageUrl ?? null} size={32} />
+                    <span style={{ flex: '1 1 auto', fontWeight: 600 }}>{fullName}</span>
+                    {a.wcaId && (
+                      <span style={{ fontFamily: 'monospace', fontSize: '0.74rem', color: 'var(--muted)' }}>
+                        {a.wcaId}
+                      </span>
+                    )}
+                  </button>
+                );
+              })
+            )}
+          </div>
+
+          {matched.totalMatched > RESULT_LIMIT && (
+            <div style={{ marginTop: '0.45rem', fontSize: '0.74rem', color: 'var(--muted)' }}>
+              {matched.list.length} / {matched.totalMatched} харуулж байна — нэрээ оруулж нарийсгана уу.
+            </div>
+          )}
+
+          {error && (
+            <div style={{
+              marginTop: '0.75rem', padding: '0.55rem 0.75rem',
+              background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.4)',
+              borderRadius: 8, color: '#fca5a5', fontSize: '0.82rem',
+            }}>
+              {error}
+            </div>
+          )}
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.55rem', marginTop: '1rem' }}>
+            <button
+              onClick={onClose}
+              style={{
+                padding: '0.7rem 0.85rem', borderRadius: 9,
+                background: 'transparent', color: 'var(--text)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                fontSize: '0.9rem', fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer',
+              }}
+            >Болих</button>
+            <button
+              onClick={handleSubmit}
+              disabled={!selected || submitting}
+              style={{
+                padding: '0.7rem 0.85rem', borderRadius: 9,
+                background: !selected || submitting ? 'var(--input-bg)' : 'linear-gradient(135deg, var(--accent), var(--accent2))',
+                color: '#fff', border: 'none',
+                fontSize: '0.9rem', fontWeight: 800, fontFamily: 'inherit',
+                cursor: !selected || submitting ? 'not-allowed' : 'pointer',
+                opacity: !selected ? 0.55 : 1,
+              }}
+            >{submitting ? 'Илгээж байна…' : 'Хүсэлт илгээх'}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AthleteThumb({ name, url, size }: { name: string; url: string | null; size: number }) {
+  const [broken, setBroken] = useState(false);
+  useEffect(() => { setBroken(false); }, [url]);
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      width: size, height: size, borderRadius: '50%', overflow: 'hidden',
+      background: 'linear-gradient(135deg, var(--accent), var(--accent2))',
+      color: '#fff', fontSize: size * 0.42, fontWeight: 800, lineHeight: 1,
+      flexShrink: 0,
+    }}>
+      {url && !broken ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={url}
+          alt=""
+          referrerPolicy="no-referrer"
+          onError={() => setBroken(true)}
+          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+        />
+      ) : initialOf(name)}
+    </span>
   );
 }

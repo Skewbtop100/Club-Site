@@ -6,6 +6,30 @@ export interface Athlete {
   wcaId?: string;
   birthDate?: string;
   imageUrl?: string;
+  // Set when an authenticated user has been linked to this athlete
+  // (via /admin/users manual link or by approving an athleteRequest).
+  // Cleared back to null on unlink. Drives the "available for claim"
+  // filter in the Profile page selection modal.
+  ownerId?: string | null;
+}
+
+export type AthleteRequestStatus = 'pending' | 'approved' | 'rejected';
+
+export interface AthleteRequest {
+  id: string;
+  uid: string;
+  userDisplayName: string;
+  userEmail: string;
+  userPhotoURL: string | null;
+  athleteId: string;
+  athleteName: string;
+  status: AthleteRequestStatus;
+  // serverTimestamp() values; null while the writing client awaits the
+  // server round-trip. Read with helpers that coerce to ms.
+  requestedAt: unknown;
+  resolvedAt: unknown;
+  resolvedBy: string | null;
+  rejectReason: string | null;
 }
 
 export interface CompetitionAthlete {

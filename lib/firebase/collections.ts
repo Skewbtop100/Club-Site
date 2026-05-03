@@ -13,18 +13,26 @@ import {
   DocumentData,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import type { Athlete, Competition, Result, WcaRecordDoc, EventVisibility } from '@/lib/types';
+import type {
+  Athlete,
+  AthleteRequest,
+  Competition,
+  Result,
+  WcaRecordDoc,
+  EventVisibility,
+} from '@/lib/types';
 
 // ── Collection name constants ────────────────────────────────────────────────
 
 export const COL = {
-  ATHLETES:    'athletes',
-  COMPETITIONS:'competitions',
-  RESULTS:     'results',
-  USERS:       'users',
-  ASSIGNMENTS: 'assignments',
-  WCA_RECORDS: 'wcaRecords',
-  SETTINGS:    'settings',
+  ATHLETES:         'athletes',
+  COMPETITIONS:     'competitions',
+  RESULTS:          'results',
+  USERS:            'users',
+  ASSIGNMENTS:      'assignments',
+  WCA_RECORDS:      'wcaRecords',
+  SETTINGS:         'settings',
+  ATHLETE_REQUESTS: 'athleteRequests',
 } as const;
 
 export const DOC = {
@@ -95,4 +103,20 @@ export function userDoc(id: string) {
 
 export function usersCol() {
   return collection(db, COL.USERS);
+}
+
+// ── athleteRequests ──────────────────────────────────────────────────────
+//
+// User-initiated "I am this athlete" claims. Approved by an admin from
+// /admin/users → Хүсэлтүүд tab; the approval batch flips the request to
+// 'approved' and writes the bidirectional users.athleteId / athletes.ownerId
+// link in one transaction so partial states can't leak.
+export const athleteRequestsCol = collection(db, COL.ATHLETE_REQUESTS).withConverter(
+  makeConverter<AthleteRequest>(),
+) as CollectionReference<AthleteRequest>;
+
+export function athleteRequestDoc(id: string): DocumentReference<AthleteRequest> {
+  return doc(db, COL.ATHLETE_REQUESTS, id).withConverter(
+    makeConverter<AthleteRequest>(),
+  ) as DocumentReference<AthleteRequest>;
 }

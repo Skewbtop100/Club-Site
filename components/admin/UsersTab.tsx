@@ -15,6 +15,7 @@ import {
 import { db } from '@/lib/firebase';
 import { useAuth, type UserRole } from '@/lib/auth-context';
 import { getAthletes } from '@/lib/firebase/services/athletes';
+import { rejectOrphansForAthlete } from '@/lib/firebase/services/athleteRequests';
 import type { Athlete } from '@/lib/types';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -207,6 +208,14 @@ export default function UsersTab() {
         batch.update(doc(db, 'athletes', prevAthleteId), { ownerId: null });
       }
       await batch.commit();
+      // Auto-reject any pending claims for this athlete now that it's
+      // taken — runs in a separate batch (best-effort; the main link
+      // succeeded above so we shouldn't fail the whole action if this
+      // fan-out write hits a transient error).
+      const adminUid = currentUser?.uid ?? 'legacy-admin';
+      rejectOrphansForAthlete(newAthleteId, adminUid).catch(err => {
+        console.error('[users-tab] rejectOrphansForAthlete', err);
+      });
       showToast('Тамирчинтай холбогдлоо');
       setModal(null);
     } catch (err) {
