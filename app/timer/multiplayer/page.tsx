@@ -19,6 +19,7 @@ import {
 import { rtdb } from '@/lib/firebase';
 import { useWakeLock } from '../useWakeLock';
 import { saveMatchHistory, type RoundSnapshotInput } from '@/lib/firebase/services/matchHistory';
+import TimerProfileMenu from '@/components/timer/TimerProfileMenu';
 
 // ── Theme ──────────────────────────────────────────────────────────────────
 const C = {
@@ -1673,6 +1674,7 @@ function TopBar({ roomCode, onBack }: { roomCode: string; onBack: () => void }) 
       padding: '0.7rem 0.95rem',
       borderBottom: `1px solid ${C.border}`,
       background: C.card,
+      gap: '0.6rem',
     }}>
       <button
         onClick={onBack}
@@ -1680,12 +1682,19 @@ function TopBar({ roomCode, onBack }: { roomCode: string; onBack: () => void }) 
           background: 'transparent', border: `1px solid ${C.border}`,
           color: C.muted, borderRadius: 8, padding: '0.35rem 0.65rem',
           fontSize: '0.78rem', fontFamily: 'inherit', cursor: 'pointer',
+          flexShrink: 0,
         }}
       >← {roomCode ? 'Leave' : 'Back'}</button>
-      <div style={{ fontSize: '0.85rem', fontWeight: 700, letterSpacing: '0.04em' }}>
+      <div style={{
+        fontSize: '0.85rem', fontWeight: 700, letterSpacing: '0.04em',
+        flex: '0 1 auto', minWidth: 0,
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }}>
         Multiplayer Racing
       </div>
-      <div style={{ width: 64 }} />
+      <div style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center' }}>
+        <TimerProfileMenu size={30} redirectAfterLogin="/timer/multiplayer" align="right" />
+      </div>
     </header>
   );
 }

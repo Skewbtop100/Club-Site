@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import TimerProfileMenu from '@/components/timer/TimerProfileMenu';
 import { Scrambow } from 'scrambow';
 // Type-only import; runtime is dynamic-imported below to avoid HTMLElement
 // access during Next.js server rendering.
@@ -1033,10 +1034,11 @@ export default function TimerPage() {
           minHeight: 0,
           overflow: 'hidden',
         }}>
-          {/* Top: Settings cog only — exit lives in the Settings panel,
-              solve count moved to the Performance panel on the right. */}
+          {/* Top: Settings cog + profile avatar — exit lives in the
+              Settings panel, solve count moved to the Performance panel
+              on the right. */}
           <div style={{
-            display: 'flex', alignItems: 'center',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             padding: '0.85rem 1rem 0.6rem',
             borderBottom: `1px solid ${C.border}`,
           }}>
@@ -1054,6 +1056,7 @@ export default function TimerPage() {
               onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; }}
               onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.muted; }}
             >⚙</button>
+            <TimerProfileMenu size={28} redirectAfterLogin="/timer" align="right" />
           </div>
 
           {/* Session selector — clickable name with dropdown panel */}
@@ -1716,6 +1719,7 @@ export default function TimerPage() {
                         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                       }}
                     ><IconUsers size={16} /></button>
+                    <TimerProfileMenu size={30} redirectAfterLogin="/timer" align="right" />
                     <button
                       onClick={() => { setNewSessionName(''); setSessionPanelOpen(true); }}
                       aria-label="Sessions"
