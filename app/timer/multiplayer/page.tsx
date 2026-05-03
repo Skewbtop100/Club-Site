@@ -386,6 +386,13 @@ interface MemberData {
   connected: boolean;
   joinedAt: number;              // server timestamp; used to pick next host on migration
   lastHeartbeat: number;         // server timestamp; refreshed every HEARTBEAT_INTERVAL_MS
+  /**
+   * True when the member joined while a race was in progress. They are
+   * spectators for the current round (excluded from the round-completion
+   * check + the standings) and get promoted to a normal member at the
+   * top of the next round (`nextRound` clears this flag).
+   */
+  queued?: boolean;
 }
 
 interface RoomData {
@@ -575,6 +582,13 @@ function MultiplayerPageInner() {
   // dictates the title/body/confirm-label shown in MpLeaveConfirmModal.
   // 'immediate' is excluded because it bypasses the modal entirely.
   const [leaveModalKind, setLeaveModalKind] = useState<Exclude<LeaveKind, 'immediate'> | null>(null);
+  // Pending mid-round join: when the user submits the join form for a
+  // room that's already in 'racing' status, we hold the join params here
+  // and render a confirmation modal instead of immediately writing the
+  // member entry. Resolved by user action in the modal (queue or cancel).
+  const [pendingMidRoundJoin, setPendingMidRoundJoin] = useState<
+    { code: string; name: string; uid: string } | null
+  >(null);
   // Fade-out gate. Flipped true right before we router.push('/timer') after
   // a confirmed leave so the room view dissolves instead of cutting away.
   const [isLeaving, setIsLeaving] = useState(false);
@@ -1069,6 +1083,35 @@ function MultiplayerPageInner() {
     }
   }, [createName, userId, persistName]);
 
+  // Inner write — used both by the normal join path and by the mid-round
+  // queue-confirmation path. When `queued` is true the new member will
+  // not participate in the current round (round-end check excludes
+  // them); the host's `nextRound` clears the flag.
+  const performJoin = useCallback(async (
+    code: string,
+    uid: string,
+    name: string,
+    queued: boolean,
+    existingMember: MemberData | undefined,
+  ): Promise<void> => {
+    const memberRef = ref(rtdb, `rooms/${code}/members/${uid}`);
+    const memberData: MemberData = {
+      name,
+      ready: existingMember?.ready ?? false,
+      currentSolve: existingMember?.currentSolve ?? 0,
+      roundAverage: existingMember?.roundAverage ?? null,
+      totalPoints: existingMember?.totalPoints ?? 0,
+      connected: true,
+      joinedAt: existingMember?.joinedAt ?? Date.now(),
+      lastHeartbeat: 0,
+      ...(queued ? { queued: true } : {}),
+    };
+    await set(memberRef, memberData);
+    try { localStorage.setItem(LAST_ROOM_KEY, code); } catch {}
+    setRoomCode(code);
+    setView('room');
+  }, []);
+
   const joinRoom = useCallback(async () => {
     setErrorMsg('');
     const code = joinCode.trim().toUpperCase();
@@ -1097,29 +1140,51 @@ function MultiplayerPageInner() {
         remove(roomRef).catch(() => {});
         return;
       }
-      const memberRef = ref(rtdb, `rooms/${code}/members/${uid}`);
+      // Existing members (including a returning user with the same uid)
+      // skip the queue prompt entirely — they were already part of the
+      // round before any disconnect/refresh.
       const existingMember = data.members?.[uid];
-      const memberData: MemberData = {
-        name,
-        ready: existingMember?.ready ?? false,
-        currentSolve: existingMember?.currentSolve ?? 0,
-        roundAverage: existingMember?.roundAverage ?? null,
-        totalPoints: existingMember?.totalPoints ?? 0,
-        connected: true,
-        joinedAt: existingMember?.joinedAt ?? Date.now(),
-        lastHeartbeat: 0,
-      };
-      await set(memberRef, memberData);
+      if (data.status === 'racing' && !existingMember) {
+        setPendingMidRoundJoin({ code, name, uid });
+        return;
+      }
+      await performJoin(code, uid, name, false, existingMember);
       console.log('[mp] joined', code);
-      try { localStorage.setItem(LAST_ROOM_KEY, code); } catch {}
-      setRoomCode(code);
-      setView('room');
     } catch (err) {
       console.error('[mp] joinRoom error', err);
       const msg = err instanceof Error ? err.message : String(err);
       setErrorMsg(`Couldn't join: ${msg}. Check Firebase RTDB is enabled and rules allow reads/writes.`);
     }
-  }, [joinCode, joinName, userId, persistName]);
+  }, [joinCode, joinName, userId, persistName, performJoin]);
+
+  const confirmMidRoundJoin = useCallback(async () => {
+    if (!pendingMidRoundJoin) return;
+    const { code, uid, name } = pendingMidRoundJoin;
+    setPendingMidRoundJoin(null);
+    try {
+      // Re-read the room so we don't clobber a fresh existing-member
+      // snapshot (e.g. status flipped to 'results' during the prompt).
+      const snap = await get(ref(rtdb, `rooms/${code}`));
+      if (!snap.exists()) {
+        setErrorMsg(`Room ${code} not found.`);
+        return;
+      }
+      const data = snap.val() as RoomData;
+      const existingMember = data.members?.[uid];
+      // If the round wrapped up while the modal was open the user can
+      // join normally — no need to mark them queued any more.
+      const queued = data.status === 'racing' && !existingMember;
+      await performJoin(code, uid, name, queued, existingMember);
+      console.log('[mp] joined (queued=' + queued + ')', code);
+    } catch (err) {
+      console.error('[mp] confirmMidRoundJoin error', err);
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    }
+  }, [pendingMidRoundJoin, performJoin]);
+
+  const cancelMidRoundJoin = useCallback(() => {
+    setPendingMidRoundJoin(null);
+  }, []);
 
   const leaveRoom = useCallback(async () => {
     if (!roomCode || !userId) return;
@@ -1417,6 +1482,10 @@ function MultiplayerPageInner() {
       updates[`members/${uid}/currentSolve`] = 0;
       updates[`members/${uid}/roundAverage`] = null;
       updates[`members/${uid}/ready`] = false;
+      // Promote anyone who joined mid-round during the previous round —
+      // they participate normally from this round forward. Setting to
+      // null removes the field entirely, keeping the doc tidy.
+      if (m.queued) updates[`members/${uid}/queued`] = null;
     }
     await update(ref(rtdb, `rooms/${roomCode}`), updates);
   }, [roomCode, room, userId, now]);
@@ -1441,6 +1510,7 @@ function MultiplayerPageInner() {
       updates[`members/${uid}/roundAverage`] = null;
       updates[`members/${uid}/totalPoints`] = 0;
       updates[`members/${uid}/ready`] = false;
+      if (m.queued) updates[`members/${uid}/queued`] = null;
     }
     await update(ref(rtdb, `rooms/${roomCode}`), updates);
   }, [roomCode, room, userId, now]);
@@ -1466,7 +1536,12 @@ function MultiplayerPageInner() {
     if (room.status !== 'racing') return;
     const memberEntries = Object.entries(room.members || {});
     if (memberEntries.length === 0) return;
-    const onlineEntries = memberEntries.filter(([, m]) => getConnectionStatus(m, now) !== 'disconnected');
+    // Queued members are spectators for the current round — they neither
+    // count toward the round-end gate nor get DNF-filled below. They'll
+    // join the active set when the host advances to the next round.
+    const onlineEntries = memberEntries.filter(([, m]) =>
+      getConnectionStatus(m, now) !== 'disconnected' && !m.queued
+    );
     if (onlineEntries.length === 0) return; // everyone disconnected; wait for someone to come back
     const allOnlineDone = onlineEntries.every(([, m]) => m.currentSolve >= SOLVES_PER_ROUND);
     if (!allOnlineDone) return;
@@ -1493,6 +1568,9 @@ function MultiplayerPageInner() {
     const updates: Record<string, unknown> = { status: 'results' };
     const synthMembers: Record<string, MemberData> = {};
     for (const [uid, m] of memberEntries) {
+      // Queued members aren't part of this round at all — keep them in
+      // the snapshot (so they survive the writeback) but don't rank them.
+      if (m.queued) continue;
       synthMembers[uid] = m;
       if (getConnectionStatus(m, now) !== 'disconnected') continue;
       if (m.currentSolve >= SOLVES_PER_ROUND) continue;
@@ -1714,7 +1792,58 @@ function MultiplayerPageInner() {
           onConfirm={confirmedLeave}
         />
       )}
+      {pendingMidRoundJoin && (
+        <MpQueueConfirmModal
+          isMobile={isMobile}
+          onCancel={cancelMidRoundJoin}
+          onConfirm={confirmMidRoundJoin}
+        />
+      )}
     </div>
+  );
+}
+
+// ── MpQueueConfirmModal ──────────────────────────────────────────────────
+//
+// Shown when the user submits the join form for a room whose status is
+// already 'racing'. Two-button confirmation: queue (write member with
+// queued: true) or cancel (no-op, user stays on the join form).
+function MpQueueConfirmModal({
+  isMobile, onCancel, onConfirm,
+}: {
+  isMobile: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <ModalShell isMobile={isMobile} title="Тоглолт эхэлчихсэн байна" onClose={onCancel} maxWidth={360}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <div style={{ fontSize: '0.92rem', color: C.text, lineHeight: 1.55 }}>
+          Та одоо нэгдвэл одоогийн round дуустал хүлээх болно. Дараагийн round-д хамт уралдах боломжтой.
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+          <button
+            onClick={onCancel}
+            style={{
+              background: 'transparent', color: C.text,
+              border: `1px solid ${C.border}`, borderRadius: 10,
+              padding: '0.75rem 0.85rem', fontSize: '0.95rem',
+              fontFamily: 'inherit', cursor: 'pointer', fontWeight: 700,
+            }}
+          >Болих</button>
+          <button
+            onClick={onConfirm}
+            autoFocus
+            style={{
+              background: C.accent, color: '#0a0a0a',
+              border: `1px solid ${C.accent}`, borderRadius: 10,
+              padding: '0.75rem 0.85rem', fontSize: '0.95rem',
+              fontFamily: 'inherit', cursor: 'pointer', fontWeight: 800,
+            }}
+          >Хүлээх</button>
+        </div>
+      </div>
+    </ModalShell>
   );
 }
 
@@ -2031,10 +2160,60 @@ interface RoomViewProps {
 function RoomView(props: RoomViewProps) {
   const { room, userId } = props;
   const isHost = room.host === userId;
+  const me = room.members?.[userId];
+
+  // Mid-round joiner: while the round we joined into is still racing,
+  // we render a static waiting screen instead of the active timer UI.
+  // The host's `nextRound` clears `queued`, so when status flips back to
+  // 'racing' for the next round we fall through into RacingScreen
+  // automatically.
+  if (me?.queued && room.status === 'racing') {
+    return <QueuedWaitScreen {...props} />;
+  }
 
   if (room.status === 'waiting') return <WaitingRoom {...props} isHost={isHost} />;
   if (room.status === 'racing')  return <RacingScreen {...props} isHost={isHost} />;
   return <ResultsScreen {...props} isHost={isHost} />;
+}
+
+// Spectator screen for users who joined while a race was already in
+// progress. Pure UI — the join-time write set `queued: true` and the
+// round-end / next-round transitions own the lifecycle.
+function QueuedWaitScreen({ isMobile, room, onLeave }: RoomViewProps) {
+  return (
+    <div style={{
+      flex: '1 1 auto',
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      gap: '1.25rem',
+      padding: isMobile ? '1.5rem 1rem' : '2.5rem 2rem',
+      textAlign: 'center',
+    }}>
+      <div style={{
+        width: 64, height: 64, borderRadius: 16,
+        background: C.accentDim, border: `1px solid ${C.borderHi}`,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 30,
+      }}>⏳</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxWidth: 360 }}>
+        <div style={{ fontSize: '1.1rem', fontWeight: 800, color: C.text }}>
+          Дараагийн round-ыг хүлээж байна…
+        </div>
+        <div style={{ fontSize: '0.88rem', color: C.muted, lineHeight: 1.55 }}>
+          Тоглолт {room.round} / {room.maxRounds} round-н дунд явагдаж байна. Дараагийн round-аас та хамт уралдах болно.
+        </div>
+      </div>
+      <button
+        onClick={onLeave}
+        style={{
+          background: 'transparent', color: C.muted,
+          border: `1px solid ${C.border}`, borderRadius: 10,
+          padding: '0.6rem 1rem', fontSize: '0.88rem', fontWeight: 700,
+          fontFamily: 'inherit', cursor: 'pointer',
+        }}
+      >Гарах</button>
+    </div>
+  );
 }
 
 // ── Waiting room ──────────────────────────────────────────────────────────

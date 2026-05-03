@@ -299,41 +299,127 @@ function aggregateLeaderboard(
 }
 
 // ── Live activity hook ────────────────────────────────────────────────────
+//
+// Subscribes to `rooms/` and surfaces both aggregate counts and the full
+// room/member detail the expanded panels need. We deliberately key
+// everything by mp_user_id (the RTDB room.members key) — that's a
+// localStorage-scoped random ID and NOT the Firebase auth uid, so any
+// per-uid data we surface is the multiplayer identity, not the auth user.
+
+export interface ActiveMember {
+  /** RTDB key — the localStorage mp_user_id, NOT the Firebase auth uid. */
+  uid: string;
+  name: string;
+  connected: boolean;
+  lastHeartbeat: number;
+  currentSolve: number;
+  roundAverage: number | null;
+  totalPoints: number;
+  /** Set when the member joined while a race was already in progress. */
+  queued?: boolean;
+}
+
+export interface ActiveRoom {
+  /** Internal key — never displayed to the user. */
+  code: string;
+  status: 'waiting' | 'racing';
+  event: string;
+  round: number;
+  maxRounds: number;
+  hostUid: string;
+  hostName: string;
+  members: ActiveMember[];
+  createdAt: number;
+}
+
 interface LiveActivity {
   activeRooms: number;
   totalPlayers: number;
   currentlyRacing: number;
   loaded: boolean;
+  rooms: ActiveRoom[];
 }
 
 function useLiveActivity(): LiveActivity {
   const [data, setData] = useState<LiveActivity>({
-    activeRooms: 0, totalPlayers: 0, currentlyRacing: 0, loaded: false,
+    activeRooms: 0, totalPlayers: 0, currentlyRacing: 0,
+    loaded: false, rooms: [],
   });
   useEffect(() => {
     const r = rtdbRef(rtdb, 'rooms');
     const unsub = onValue(r, (snap) => {
-      let activeRooms = 0;
-      let totalPlayers = 0;
-      let currentlyRacing = 0;
       const val = snap.val() as Record<string, {
         status?: string;
-        members?: Record<string, { connected?: boolean }>;
+        event?: string;
+        round?: number;
+        maxRounds?: number;
+        host?: string;
+        createdAt?: number;
+        members?: Record<string, {
+          name?: string;
+          connected?: boolean;
+          lastHeartbeat?: number;
+          currentSolve?: number;
+          roundAverage?: number | null;
+          totalPoints?: number;
+          queued?: boolean;
+        }>;
       }> | null;
+      const rooms: ActiveRoom[] = [];
+      let totalPlayers = 0;
+      let currentlyRacing = 0;
       if (val) {
         for (const code of Object.keys(val)) {
           const room = val[code];
           if (!room) continue;
           const status = room.status;
           if (status !== 'waiting' && status !== 'racing') continue;
-          activeRooms += 1;
-          const members = room.members ?? {};
-          const memberCount = Object.values(members).filter(m => m && m.connected !== false).length;
-          totalPlayers += memberCount;
-          if (status === 'racing') currentlyRacing += memberCount;
+          const memberMap = room.members ?? {};
+          const members: ActiveMember[] = [];
+          for (const uid of Object.keys(memberMap)) {
+            const m = memberMap[uid] ?? {};
+            const connected = m.connected !== false;
+            if (!connected) continue;
+            members.push({
+              uid,
+              name: typeof m.name === 'string' && m.name.length > 0 ? m.name : 'Player',
+              connected,
+              lastHeartbeat: typeof m.lastHeartbeat === 'number' ? m.lastHeartbeat : 0,
+              currentSolve: typeof m.currentSolve === 'number' ? m.currentSolve : 0,
+              roundAverage: typeof m.roundAverage === 'number' ? m.roundAverage : null,
+              totalPoints: typeof m.totalPoints === 'number' ? m.totalPoints : 0,
+              queued: m.queued === true,
+            });
+          }
+          if (members.length === 0) continue;
+          totalPlayers += members.length;
+          if (status === 'racing') {
+            currentlyRacing += members.filter(m => !m.queued).length;
+          }
+          const hostUid = typeof room.host === 'string' ? room.host : '';
+          const hostMember = members.find(m => m.uid === hostUid);
+          rooms.push({
+            code,
+            status,
+            event: typeof room.event === 'string' ? room.event : '333',
+            round: typeof room.round === 'number' ? room.round : 1,
+            maxRounds: typeof room.maxRounds === 'number' ? room.maxRounds : 1,
+            hostUid,
+            hostName: hostMember?.name ?? memberMap[hostUid]?.name ?? '',
+            members,
+            createdAt: typeof room.createdAt === 'number' ? room.createdAt : 0,
+          });
         }
       }
-      setData({ activeRooms, totalPlayers, currentlyRacing, loaded: true });
+      // Newest first feels right for "what's happening now".
+      rooms.sort((a, b) => b.createdAt - a.createdAt);
+      setData({
+        activeRooms: rooms.length,
+        totalPlayers,
+        currentlyRacing,
+        loaded: true,
+        rooms,
+      });
     }, () => {
       setData(d => ({ ...d, loaded: true }));
     });
@@ -497,8 +583,36 @@ function StatTile({
 }
 
 // ── Section: Live Activity ────────────────────────────────────────────────
+//
+// Three clickable counters that expand a detail panel beneath the card.
+// Single-open accordion: clicking a different tile collapses the prior
+// one; clicking the same tile collapses it.
+
+type LivePanel = 'rooms' | 'online' | 'racing' | null;
+
 function LiveActivityCard() {
   const live = useLiveActivity();
+  const [panel, setPanel] = useState<LivePanel>(null);
+  const [openRoom, setOpenRoom] = useState<ActiveRoom | null>(null);
+
+  // Keep `openRoom` in sync with the live snapshot so the modal updates
+  // its content as the underlying room mutates (members joining/leaving,
+  // round flipping racing/results).
+  useEffect(() => {
+    if (!openRoom) return;
+    const fresh = live.rooms.find(r => r.code === openRoom.code);
+    if (!fresh) {
+      // Room ended (status became 'results' or was deleted) — close.
+      setOpenRoom(null);
+      return;
+    }
+    if (fresh !== openRoom) setOpenRoom(fresh);
+  }, [live.rooms, openRoom]);
+
+  const togglePanel = (next: LivePanel) => {
+    setPanel(curr => (curr === next ? null : next));
+  };
+
   return (
     <Section
       icon="🟢"
@@ -521,22 +635,43 @@ function LiveActivityCard() {
         display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
         gap: '0.55rem',
       }}>
-        <StatTile
+        <ClickableStatTile
           label="Идэвхтэй өрөө"
           value={live.loaded ? String(live.activeRooms) : '—'}
           accent={C.accent}
+          active={panel === 'rooms'}
+          onClick={() => togglePanel('rooms')}
         />
-        <StatTile
+        <ClickableStatTile
           label="Online хүн"
           value={live.loaded ? String(live.totalPlayers) : '—'}
           accent={C.success}
+          active={panel === 'online'}
+          onClick={() => togglePanel('online')}
         />
-        <StatTile
-          label="Тоглож байгаа"
+        <ClickableStatTile
+          label="Уралдаж байгаа"
           value={live.loaded ? String(live.currentlyRacing) : '—'}
           accent={C.warn}
+          active={panel === 'racing'}
+          onClick={() => togglePanel('racing')}
         />
       </div>
+
+      {panel === 'rooms' && (
+        <ActiveRoomsPanel rooms={live.rooms} onOpen={setOpenRoom} />
+      )}
+      {panel === 'online' && (
+        <OnlineUsersPanel rooms={live.rooms} mode="online" />
+      )}
+      {panel === 'racing' && (
+        <OnlineUsersPanel rooms={live.rooms} mode="racing" />
+      )}
+
+      {openRoom && (
+        <RoomDetailModal room={openRoom} onClose={() => setOpenRoom(null)} />
+      )}
+
       <style>{`
         @keyframes mphPulse {
           0%   { box-shadow: 0 0 0 0 rgba(52,211,153,0.6); }
@@ -545,6 +680,529 @@ function LiveActivityCard() {
         }
       `}</style>
     </Section>
+  );
+}
+
+function ClickableStatTile({
+  label, value, accent, active, onClick,
+}: {
+  label: string; value: string; accent?: string;
+  active: boolean; onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={active}
+      style={{
+        padding: '0.7rem 0.8rem', borderRadius: 12,
+        background: active ? C.accentDim : 'rgba(255,255,255,0.03)',
+        border: `1px solid ${active ? C.borderHi : C.border}`,
+        display: 'flex', flexDirection: 'column', gap: '0.2rem',
+        minWidth: 0,
+        color: C.text, fontFamily: 'inherit', cursor: 'pointer',
+        textAlign: 'left',
+        transition: 'background 0.15s, border-color 0.15s',
+      }}
+    >
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        gap: '0.3rem',
+      }}>
+        <span style={{
+          fontSize: '0.62rem', color: C.muted, letterSpacing: '0.1em',
+          textTransform: 'uppercase', fontWeight: 700,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          minWidth: 0,
+        }}>{label}</span>
+        <span aria-hidden="true" style={{
+          fontSize: '0.7rem', color: C.muted,
+          transform: active ? 'rotate(180deg)' : 'rotate(0deg)',
+          transition: 'transform 0.15s',
+          flexShrink: 0,
+        }}>▾</span>
+      </div>
+      <div style={{
+        fontSize: '1.25rem', fontWeight: 800,
+        color: accent ?? C.text,
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }}>
+        {value}
+      </div>
+    </button>
+  );
+}
+
+// ── Connection-status helper ──────────────────────────────────────────────
+//
+// Mirrors the multiplayer page's getConnectionStatus thresholds so the
+// hub's connection dots match what players inside the room see.
+const HEARTBEAT_GOOD_MS = 12000;
+const HEARTBEAT_WEAK_MS = 25000;
+
+function memberConnectionDot(m: ActiveMember, now: number): {
+  color: string; label: string;
+} {
+  if (!m.connected) return { color: C.danger, label: 'Disconnected' };
+  if (m.lastHeartbeat === 0) return { color: C.success, label: 'Online' };
+  const age = now - m.lastHeartbeat;
+  if (age <= HEARTBEAT_GOOD_MS) return { color: C.success, label: 'Online' };
+  if (age <= HEARTBEAT_WEAK_MS) return { color: C.warn,    label: 'Сул' };
+  return { color: C.danger, label: 'Disconnected' };
+}
+
+function statusLabel(status: 'waiting' | 'racing'): string {
+  return status === 'racing' ? 'Уралдаж байна' : 'Хүлээж байна';
+}
+function statusIcon(status: 'waiting' | 'racing'): string {
+  return status === 'racing' ? '🏁' : '⏳';
+}
+
+// "5 мин өмнө эхэлсэн" / "10 мин өмнө үүссэн" — distinguishes racing
+// from waiting since the room schema only exposes createdAt (no
+// per-status timestamps).
+function formatRoomAge(createdAtMs: number, status: 'waiting' | 'racing'): string {
+  if (!createdAtMs) return '';
+  const verb = status === 'racing' ? 'эхэлсэн' : 'үүссэн';
+  const diff = Math.max(0, Date.now() - createdAtMs);
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return `Дөнгөж сая ${verb}`;
+  if (min < 60) return `${min} мин өмнө ${verb}`;
+  const hr = Math.floor(min / 60);
+  return `${hr} цагийн өмнө ${verb}`;
+}
+
+function panelStyle(): React.CSSProperties {
+  return {
+    marginTop: '0.85rem',
+    background: 'rgba(255,255,255,0.02)',
+    border: `1px solid ${C.border}`,
+    borderRadius: 12,
+    padding: '0.75rem',
+    display: 'flex', flexDirection: 'column', gap: '0.5rem',
+    animation: 'mphFade 0.18s ease-out',
+  };
+}
+
+// ── Active rooms panel ────────────────────────────────────────────────────
+function ActiveRoomsPanel({
+  rooms, onOpen,
+}: { rooms: ActiveRoom[]; onOpen: (r: ActiveRoom) => void }) {
+  if (rooms.length === 0) {
+    return (
+      <div style={panelStyle()}>
+        <div style={{ color: C.muted, fontSize: '0.86rem', textAlign: 'center' }}>
+          Идэвхтэй өрөө байхгүй байна
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div style={panelStyle()}>
+      {rooms.map(r => (
+        <ActiveRoomRow key={r.code} room={r} onOpen={() => onOpen(r)} />
+      ))}
+      <style>{`
+        @keyframes mphFade {
+          from { opacity: 0; transform: translateY(-4px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function ActiveRoomRow({ room, onOpen }: { room: ActiveRoom; onOpen: () => void }) {
+  const playerNames = room.members.slice(0, 3).map(m => m.name).join(', ');
+  const extra = Math.max(0, room.members.length - 3);
+  const hostName = room.hostName || '—';
+  return (
+    <div style={{
+      background: 'rgba(255,255,255,0.03)',
+      border: `1px solid ${C.border}`,
+      borderRadius: 11,
+      padding: '0.7rem 0.8rem',
+      display: 'flex', flexDirection: 'column', gap: '0.5rem',
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: '0.55rem',
+        flexWrap: 'wrap',
+      }}>
+        <span style={{ fontSize: '1rem', lineHeight: 1 }} aria-hidden="true">
+          {statusIcon(room.status)}
+        </span>
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          padding: '0 0.45rem', height: 22, borderRadius: 7,
+          background: C.accentDim, border: `1px solid ${C.borderHi}`,
+          fontSize: '0.7rem', fontWeight: 800, color: '#c4b5fd',
+        }}>{eventLabel(room.event)}</span>
+        <span style={{ fontSize: '0.78rem', fontWeight: 700, color: C.text }}>
+          {room.members.length} тоглогч
+        </span>
+        {room.status === 'racing' && (
+          <span style={{ fontSize: '0.74rem', fontWeight: 700, color: C.warn }}>
+            Round {room.round}/{room.maxRounds}
+          </span>
+        )}
+        <span style={{
+          marginLeft: 'auto',
+          fontSize: '0.7rem', color: C.muted,
+        }}>{formatRoomAge(room.createdAt, room.status)}</span>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.18rem' }}>
+        <div style={{ fontSize: '0.78rem', color: C.text, fontWeight: 600 }}>
+          <span aria-hidden="true">👑</span> {hostName}
+        </div>
+        <div style={{
+          fontSize: '0.74rem', color: C.muted,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {playerNames}{extra > 0 ? ` +${extra}` : ''}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button
+          type="button"
+          onClick={onOpen}
+          style={{
+            background: 'transparent', color: C.accent,
+            border: `1px solid ${C.borderHi}`,
+            borderRadius: 8, padding: '0.32rem 0.7rem',
+            fontSize: '0.74rem', fontWeight: 700,
+            fontFamily: 'inherit', cursor: 'pointer',
+            letterSpacing: '0.02em',
+          }}
+        >Дэлгэрэнгүй</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Online / Racing users panel ───────────────────────────────────────────
+function OnlineUsersPanel({
+  rooms, mode,
+}: { rooms: ActiveRoom[]; mode: 'online' | 'racing' }) {
+  // Build a flat list — one row per (uid, room). The same mp_user_id can
+  // (in theory) appear in multiple rooms if a user joined multiple in
+  // different tabs, so de-duping by uid alone would lose information.
+  // Keys are `${uid}@${roomCode}` to allow that without React warnings.
+  const rows: { member: ActiveMember; room: ActiveRoom }[] = [];
+  for (const room of rooms) {
+    if (mode === 'racing' && room.status !== 'racing') continue;
+    for (const member of room.members) {
+      if (mode === 'racing' && member.queued) continue;
+      rows.push({ member, room });
+    }
+  }
+  if (rows.length === 0) {
+    return (
+      <div style={panelStyle()}>
+        <div style={{ color: C.muted, fontSize: '0.86rem', textAlign: 'center' }}>
+          {mode === 'online'
+            ? 'Online хүн байхгүй байна'
+            : 'Одоогоор хэн ч уралдаагүй байна'}
+        </div>
+      </div>
+    );
+  }
+  const now = Date.now();
+  return (
+    <div style={panelStyle()}>
+      {rows.map(({ member, room }) => (
+        <OnlineUserRow
+          key={`${member.uid}@${room.code}`}
+          member={member}
+          room={room}
+          now={now}
+          mode={mode}
+        />
+      ))}
+    </div>
+  );
+}
+
+function OnlineUserRow({
+  member, room, now, mode,
+}: {
+  member: ActiveMember; room: ActiveRoom; now: number;
+  mode: 'online' | 'racing';
+}) {
+  const dot = memberConnectionDot(member, now);
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: '0.6rem',
+      padding: '0.55rem 0.7rem',
+      background: 'rgba(255,255,255,0.03)',
+      border: `1px solid ${C.border}`,
+      borderRadius: 11,
+    }}>
+      <Thumb name={member.name} url={null} size={32} />
+      <div style={{ minWidth: 0, flex: '1 1 auto' }}>
+        <div style={{
+          display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
+          fontSize: '0.86rem', fontWeight: 700, color: C.text,
+          maxWidth: '100%',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          <span style={{
+            width: 7, height: 7, borderRadius: '50%',
+            background: dot.color, flexShrink: 0,
+          }} />
+          <span style={{
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>{member.name}</span>
+        </div>
+        <div style={{
+          fontSize: '0.72rem', color: C.muted, marginTop: '0.1rem',
+        }}>
+          {mode === 'racing' ? (
+            <>
+              {eventLabel(room.event)} · Round {room.round}/{room.maxRounds}
+              {' · '}
+              <span style={{ color: C.text, fontWeight: 700 }}>
+                Solve {Math.min(member.currentSolve + 1, 5)}/5
+              </span>
+            </>
+          ) : (
+            <>
+              {room.status === 'racing' ? '🏁 Уралдаж байна' : '⏳ Хүлээж байна'}
+              {' · '}{eventLabel(room.event)} өрөөнд
+              {member.queued && <span style={{ color: C.warn }}>{' · '}queued</span>}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Room detail modal ─────────────────────────────────────────────────────
+function RoomDetailModal({
+  room, onClose,
+}: { room: ActiveRoom; onClose: () => void }) {
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
+  // 1Hz tick so connection dots reflect heartbeat staleness while the
+  // modal is open. Cheap (single setInterval, no re-fetch).
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const sortedMembers = useMemo(() => {
+    // Active members first (highest totalPoints), queued at the bottom.
+    const active = room.members.filter(m => !m.queued)
+      .slice()
+      .sort((a, b) => b.totalPoints - a.totalPoints);
+    const queued = room.members.filter(m => m.queued);
+    return { active, queued };
+  }, [room.members]);
+
+  const showStandings = sortedMembers.active.some(m => m.totalPoints > 0);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1500,
+        background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '1rem',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: 520,
+          background: C.card, border: `1px solid ${C.border}`,
+          borderRadius: 16,
+          boxShadow: '0 24px 60px rgba(0,0,0,0.7)',
+          display: 'flex', flexDirection: 'column',
+          maxHeight: 'calc(100dvh - 2rem)', overflow: 'hidden',
+        }}
+      >
+        <header style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0.95rem 1rem',
+          borderBottom: `1px solid ${C.border}`,
+          gap: '0.6rem',
+        }}>
+          <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.18rem' }}>
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: '0.45rem',
+              fontSize: '0.95rem', fontWeight: 800,
+            }}>
+              <span aria-hidden="true">{statusIcon(room.status)}</span>
+              <span>{statusLabel(room.status)}</span>
+            </div>
+            <div style={{ fontSize: '0.76rem', color: C.muted }}>
+              {eventName(room.event)} · {room.maxRounds} раунд
+              {room.status === 'racing' && (
+                <> · Round {room.round} of {room.maxRounds}</>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Хаах"
+            style={{
+              width: 30, height: 30, borderRadius: 8,
+              background: 'transparent', border: `1px solid ${C.border}`,
+              color: C.muted, cursor: 'pointer', fontFamily: 'inherit',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >×</button>
+        </header>
+
+        <div style={{
+          padding: '1rem', overflow: 'auto',
+          display: 'flex', flexDirection: 'column', gap: '1rem',
+        }}>
+          <section>
+            <SectionHeading>Тоглогчид</SectionHeading>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              {sortedMembers.active.map(m => (
+                <RoomDetailMemberRow
+                  key={m.uid}
+                  member={m}
+                  isHost={m.uid === room.hostUid}
+                  racing={room.status === 'racing'}
+                  now={now}
+                  queued={false}
+                />
+              ))}
+              {sortedMembers.queued.length > 0 && (
+                <>
+                  <div style={{
+                    fontSize: '0.66rem', fontWeight: 700, color: C.muted,
+                    letterSpacing: '0.1em', textTransform: 'uppercase',
+                    marginTop: '0.4rem',
+                  }}>Хүлээж байгаа</div>
+                  {sortedMembers.queued.map(m => (
+                    <RoomDetailMemberRow
+                      key={m.uid}
+                      member={m}
+                      isHost={m.uid === room.hostUid}
+                      racing={room.status === 'racing'}
+                      now={now}
+                      queued
+                    />
+                  ))}
+                </>
+              )}
+            </div>
+          </section>
+
+          {showStandings && (
+            <section>
+              <SectionHeading>Эрэмбэ</SectionHeading>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                {sortedMembers.active.map((m, i) => (
+                  <div key={m.uid} style={{
+                    display: 'flex', alignItems: 'center', gap: '0.55rem',
+                    padding: '0.45rem 0.65rem',
+                    background: 'rgba(255,255,255,0.03)',
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 9,
+                    fontSize: '0.82rem',
+                  }}>
+                    <span style={{
+                      width: 22, height: 22, borderRadius: 6,
+                      background: i === 0 ? 'rgba(251,191,36,0.16)' : 'rgba(255,255,255,0.05)',
+                      border: `1px solid ${C.border}`,
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '0.7rem', fontWeight: 800,
+                      color: i === 0 ? C.warn : C.text, flexShrink: 0,
+                    }}>{i + 1}</span>
+                    <span style={{
+                      flex: '1 1 auto', minWidth: 0, fontWeight: 700,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>{m.name}</span>
+                    <span style={{
+                      fontFamily: 'JetBrains Mono, monospace', color: C.text, fontWeight: 800,
+                    }}>
+                      {m.totalPoints}
+                      <span style={{ color: C.muted, fontWeight: 600 }}> оноо</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RoomDetailMemberRow({
+  member, isHost, racing, now, queued,
+}: {
+  member: ActiveMember; isHost: boolean; racing: boolean; now: number;
+  queued: boolean;
+}) {
+  const dot = memberConnectionDot(member, now);
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: '0.55rem',
+      padding: '0.55rem 0.7rem',
+      background: queued ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.03)',
+      border: `1px solid ${C.border}`,
+      borderRadius: 10,
+      opacity: queued ? 0.6 : 1,
+    }}>
+      <Thumb name={member.name} url={null} size={32} />
+      <div style={{ minWidth: 0, flex: '1 1 auto' }}>
+        <div style={{
+          display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
+          fontSize: '0.86rem', fontWeight: 700, color: C.text,
+          maxWidth: '100%',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          <span style={{
+            width: 7, height: 7, borderRadius: '50%',
+            background: dot.color, flexShrink: 0,
+          }} />
+          <span style={{
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>{member.name}</span>
+          {isHost && <span aria-hidden="true">👑</span>}
+        </div>
+        <div style={{
+          fontSize: '0.72rem', color: C.muted, marginTop: '0.1rem',
+        }}>
+          {racing && !queued ? (
+            <>
+              <span style={{ color: C.text, fontWeight: 700 }}>
+                Solve {Math.min(member.currentSolve + 1, 5)}/5
+              </span>
+              {member.roundAverage != null && (
+                <>
+                  {' · '}
+                  Энэ round-н Ao5{' '}
+                  <span style={{
+                    fontFamily: 'JetBrains Mono, monospace', color: C.text, fontWeight: 700,
+                  }}>{fmtMs(member.roundAverage)}</span>
+                </>
+              )}
+            </>
+          ) : queued ? (
+            'Дараагийн round-ыг хүлээж байна'
+          ) : (
+            'Бэлэн'
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
