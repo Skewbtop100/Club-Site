@@ -24,6 +24,8 @@ import {
   updateDoc,
 } from 'firebase/firestore';
 import { auth, db, googleProvider } from './firebase';
+import { awardDailyLoginIfNew, consumeAthleteLinkedToast } from './points';
+import { showToast } from './toast';
 
 export type UserRole = 'member' | 'athlete' | 'admin';
 
@@ -118,6 +120,35 @@ async function upsertUserDoc(fbUser: FirebaseUser): Promise<AppUser> {
   };
 }
 
+// Best-effort awards/toasts that run AFTER the user doc is upserted.
+// Returns the latest balance (if any award fired) so AuthProvider can
+// keep its in-memory `user.points` in sync without an extra read.
+async function runPostLoginAwards(uid: string): Promise<{ newBalance: number | null }> {
+  let newBalance: number | null = null;
+  // 1. Daily login bonus — idempotent on local calendar day.
+  try {
+    const r = await awardDailyLoginIfNew(uid);
+    if (r.awarded) {
+      newBalance = r.balance;
+      showToast({ msg: 'Өдөр тутмын бонус +5 💎', tone: 'success' });
+    }
+  } catch (err) {
+    console.warn('[auth] daily-login award failed', err);
+  }
+  // 2. Athlete-linked toast — fires once after admin approval. The points
+  //    were already awarded at approval time; this just surfaces the
+  //    celebration on first login afterwards.
+  try {
+    const linked = await consumeAthleteLinkedToast(uid);
+    if (linked) {
+      showToast({ msg: 'Тамирчинтай холбогдсон! +100 💎', tone: 'success' });
+    }
+  } catch (err) {
+    console.warn('[auth] athlete-linked toast check failed', err);
+  }
+  return { newBalance };
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -137,6 +168,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const appUser = await upsertUserDoc(fbUser);
         if (inFlightRef.current === fbUser.uid) setUser(appUser);
+        // Side effects after the user is in state. Both are best-effort
+        // and isolated from the auth flow itself — a points failure must
+        // not block sign-in.
+        runPostLoginAwards(fbUser.uid).then(extra => {
+          if (inFlightRef.current !== fbUser.uid) return;
+          if (extra.newBalance !== null) {
+            setUser(prev => prev && prev.uid === fbUser.uid
+              ? { ...prev, points: extra.newBalance as number }
+              : prev);
+          }
+        }).catch(err => console.warn('[auth] post-login awards failed', err));
       } catch (err) {
         console.error('[auth] upsertUserDoc failed', err);
         if (inFlightRef.current === fbUser.uid) {

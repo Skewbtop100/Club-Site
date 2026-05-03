@@ -15,6 +15,10 @@ import {
   subscribeUserMatches,
   tsToMs as matchTsToMs,
 } from '@/lib/firebase/services/matchHistory';
+import {
+  subscribeRecentTransactions,
+  tsToMs as txTsToMs,
+} from '@/lib/points';
 import type {
   Athlete,
   AthleteRequest,
@@ -22,6 +26,7 @@ import type {
   MatchPlayerSummary,
   MatchPenalty,
   MatchSolve,
+  PointTransaction,
 } from '@/lib/types';
 
 const ROLE_BADGE: Record<UserRole, { label: string; fg: string; bg: string; border: string }> = {
@@ -358,6 +363,9 @@ export default function ProfilePage() {
 
         {/* ── Multiplayer stats + history ──────────────────────────────── */}
         <MultiplayerHistorySection uid={user.uid} />
+
+        {/* ── Point transactions ───────────────────────────────────────── */}
+        <PointTransactionsSection uid={user.uid} />
 
         {/* ── Actions ──────────────────────────────────────────────────── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem', marginTop: '0.25rem' }}>
@@ -1448,6 +1456,225 @@ function PlayerRow({ player, isMe }: { player: MatchPlayerSummary; isMe: boolean
       <span style={{ fontSize: '0.78rem', color: 'var(--muted)', whiteSpace: 'nowrap' }}>
         <span style={{ fontFamily: 'JetBrains Mono, monospace', color: 'var(--text)', fontWeight: 700 }}>{player.totalPoints}</span>{' '}оноо
       </span>
+    </div>
+  );
+}
+
+// ── Point transactions ──────────────────────────────────────────────────
+
+const REASON_ICONS: Record<string, string> = {
+  daily_login:    '🌅',
+  solve:          '⏱',
+  pb_set:         '🚀',
+  mp_played:      '🎮',
+  mp_won:         '🏆',
+  achievement:    '🏅',
+  athlete_linked: '👑',
+  admin_grant:    '🛠',
+};
+
+function reasonIcon(reason: string): string {
+  return REASON_ICONS[reason] ?? '💎';
+}
+
+function formatTxDate(ms: number | null): string {
+  if (!ms) return '—';
+  const d = new Date(ms);
+  const today = new Date();
+  const sameDay = d.getFullYear() === today.getFullYear()
+    && d.getMonth() === today.getMonth()
+    && d.getDate() === today.getDate();
+  const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  if (sameDay) return `Өнөөдөр ${time}`;
+  return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')} ${time}`;
+}
+
+function PointTransactionsSection({ uid }: { uid: string }) {
+  const [txs, setTxs] = useState<PointTransaction[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [allOpen, setAllOpen] = useState(false);
+
+  useEffect(() => {
+    if (!uid) return;
+    const unsub = subscribeRecentTransactions(uid, rows => {
+      setTxs(rows);
+      setLoaded(true);
+    }, {
+      // 100 in the modal-backed list, the card itself slices the first 20.
+      limit: 100,
+      onError: err => {
+        console.error('[profile] subscribeRecentTransactions', err);
+        setLoaded(true);
+      },
+    });
+    return () => unsub();
+  }, [uid]);
+
+  const cardStyle: React.CSSProperties = {
+    background: 'var(--card)',
+    border: '1px solid rgba(255,255,255,0.07)',
+    borderRadius: 16,
+    padding: '1.4rem',
+    boxShadow: '0 8px 30px rgba(0,0,0,0.25)',
+  };
+
+  const visible = txs.slice(0, 20);
+
+  return (
+    <>
+      <div style={cardStyle}>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: '0.5rem', marginBottom: '0.75rem',
+        }}>
+          <div style={{
+            fontSize: '0.7rem', fontWeight: 700, color: 'var(--muted)',
+            letterSpacing: '0.12em', textTransform: 'uppercase',
+          }}>
+            💎 Point гүйлгээ
+          </div>
+          {txs.length > 20 && (
+            <button
+              type="button"
+              onClick={() => setAllOpen(true)}
+              style={{
+                background: 'transparent', color: '#a78bfa',
+                border: 'none', fontSize: '0.78rem', fontWeight: 700,
+                cursor: 'pointer', fontFamily: 'inherit',
+              }}
+            >Бүгдийг харах →</button>
+          )}
+        </div>
+
+        {!loaded ? (
+          <div style={{ padding: '0.6rem 0', color: 'var(--muted)', fontSize: '0.86rem' }}>
+            Уншиж байна…
+          </div>
+        ) : visible.length === 0 ? (
+          <div style={{ padding: '0.6rem 0', color: 'var(--muted)', fontSize: '0.88rem' }}>
+            Гүйлгээ байхгүй байна
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+            {visible.map(t => <TxRow key={t.id} tx={t} />)}
+          </div>
+        )}
+      </div>
+
+      {allOpen && (
+        <PointTransactionsModal
+          txs={txs}
+          onClose={() => setAllOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+function TxRow({ tx }: { tx: PointTransaction }) {
+  const positive = tx.amount >= 0;
+  const ts = txTsToMs(tx.timestamp);
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: '0.7rem',
+      padding: '0.55rem 0.7rem',
+      background: 'rgba(255,255,255,0.03)',
+      border: '1px solid rgba(255,255,255,0.06)',
+      borderRadius: 10,
+    }}>
+      <span style={{
+        width: 32, height: 32, borderRadius: 9,
+        background: 'rgba(167,139,250,0.12)',
+        border: '1px solid rgba(167,139,250,0.35)',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: '1rem', flexShrink: 0,
+      }}>
+        {reasonIcon(tx.reason)}
+      </span>
+      <div style={{ minWidth: 0, flex: '1 1 auto' }}>
+        <div style={{
+          fontSize: '0.86rem', fontWeight: 700, color: 'var(--text)',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {tx.description}
+        </div>
+        <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginTop: '0.1rem' }}>
+          {formatTxDate(ts)}
+        </div>
+      </div>
+      <span style={{
+        fontFamily: 'JetBrains Mono, monospace',
+        fontSize: '0.92rem', fontWeight: 800,
+        color: positive ? '#34d399' : '#ef4444',
+        whiteSpace: 'nowrap',
+      }}>
+        {positive ? `+${tx.amount}` : tx.amount}
+      </span>
+    </div>
+  );
+}
+
+function PointTransactionsModal({
+  txs, onClose,
+}: { txs: PointTransaction[]; onClose: () => void }) {
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1500,
+        background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '1rem',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: 560,
+          background: 'var(--card)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          borderRadius: 16,
+          boxShadow: '0 24px 60px rgba(0,0,0,0.7)',
+          display: 'flex', flexDirection: 'column',
+          maxHeight: 'calc(100dvh - 2rem)', overflow: 'hidden',
+        }}
+      >
+        <header style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0.95rem 1rem',
+          borderBottom: '1px solid rgba(255,255,255,0.07)',
+        }}>
+          <div style={{ fontSize: '1rem', fontWeight: 800 }}>
+            💎 Бүх гүйлгээ
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Хаах"
+            style={{
+              width: 30, height: 30, borderRadius: 8,
+              background: 'transparent',
+              border: '1px solid rgba(255,255,255,0.1)',
+              color: 'var(--muted)', cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: 'inherit',
+            }}
+          >×</button>
+        </header>
+        <div style={{
+          padding: '1rem', overflow: 'auto',
+          display: 'flex', flexDirection: 'column', gap: '0.4rem',
+        }}>
+          {txs.length === 0
+            ? <div style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>Гүйлгээ байхгүй байна</div>
+            : txs.map(t => <TxRow key={t.id} tx={t} />)
+          }
+        </div>
+      </div>
     </div>
   );
 }

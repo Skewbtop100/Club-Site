@@ -190,8 +190,19 @@ export default function Navbar() {
                         )}
                       </span>
                       <div style={{ minWidth: 0, flex: '1 1 auto' }}>
-                        <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {user.displayName}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.4rem' }}>
+                          <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+                            {user.displayName}
+                          </div>
+                          <span title="Point" style={{
+                            display: 'inline-flex', alignItems: 'center', gap: '0.2rem',
+                            fontSize: '0.78rem', fontWeight: 800,
+                            color: '#a78bfa',
+                            fontFamily: 'JetBrains Mono, monospace',
+                            flexShrink: 0,
+                          }}>
+                            💎 {user.points ?? 0}
+                          </span>
                         </div>
                         <div style={{ fontSize: '0.7rem', color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {user.email}

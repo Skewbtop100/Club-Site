@@ -21,6 +21,9 @@ import { useWakeLock } from '../useWakeLock';
 import { saveMatchHistory, type RoundSnapshotInput } from '@/lib/firebase/services/matchHistory';
 import TimerProfileMenu from '@/components/timer/TimerProfileMenu';
 import MultiplayerHub from './MultiplayerHub';
+import { useAuth } from '@/lib/auth-context';
+import { awardMpMatchIfNew } from '@/lib/points';
+import { showToast } from '@/lib/toast';
 
 // ── Theme ──────────────────────────────────────────────────────────────────
 const C = {
@@ -539,6 +542,7 @@ export default function MultiplayerPage() {
 function MultiplayerPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { user: authUser } = useAuth();
 
   // Identity (persisted)
   const [userId, setUserId] = useState<string>('');
@@ -701,6 +705,53 @@ function MultiplayerPageInner() {
       });
     }
   }, [room, roomCode, userId]);
+
+  // Multiplayer points award — fires for EACH client (host + non-hosts)
+  // once per match when the room reaches its final results screen. The
+  // points service is idempotent on `matchId`, so a brief disconnect/
+  // remount that re-runs this effect is safe.
+  //
+  // We trigger off `room.status === 'results'` plus the final-round gate.
+  // Non-final-round 'results' (between-round results screen) doesn't end
+  // the match, so we skip those.
+  const mpAwardedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!authUser?.uid || !userId || !room) return;
+    if (room.status !== 'results') return;
+    if (room.round < room.maxRounds) return;
+    const me = (room.members ?? {})[userId];
+    if (!me) return;
+    const matchId = `${roomCode}-${room.createdAt}`;
+    if (mpAwardedRef.current.has(matchId)) return;
+    mpAwardedRef.current.add(matchId);
+
+    // Final-rank computation mirrors saveMatchHistory's tie-break: total
+    // points desc, then a stable order. We don't have access to the full
+    // ao5/best-single tie-breakers from the live RTDB snapshot, so a
+    // points-only sort is close enough for the toast — the canonical
+    // ranking lives in the persisted match-history doc.
+    const standings = Object.entries(room.members ?? {})
+      .map(([uid, m]) => ({ uid, totalPoints: m.totalPoints ?? 0 }))
+      .sort((a, b) => b.totalPoints - a.totalPoints);
+    const myRank = standings.findIndex(s => s.uid === userId) + 1;
+    if (myRank <= 0) return;
+
+    awardMpMatchIfNew(authUser.uid, matchId, myRank, room.event)
+      .then(result => {
+        if (!result.awarded) return;
+        showToast({
+          msg: result.won
+            ? `Multiplayer хожсон! +${result.amount} 💎`
+            : `Multiplayer тоглолт +${result.amount} 💎`,
+          tone: 'success',
+        });
+      })
+      .catch(err => console.warn('[points] mp match award failed', err));
+  }, [
+    room?.status, room?.round, room?.maxRounds,
+    room?.members, room?.createdAt, room?.event,
+    roomCode, userId, authUser?.uid, room,
+  ]);
 
   // Initial mount: pull user id + saved name
   useEffect(() => {

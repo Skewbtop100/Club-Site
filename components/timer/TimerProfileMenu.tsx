@@ -238,16 +238,31 @@ export default function TimerProfileMenu({
             color: C.text,
           }}
         >
-          {/* Header — name + email */}
+          {/* Header — name + email + points balance */}
           <div style={{
             padding: '0.55rem 0.65rem 0.6rem',
-            display: 'flex', flexDirection: 'column', gap: '0.1rem',
+            display: 'flex', flexDirection: 'column', gap: '0.15rem',
             minWidth: 0,
           }}>
             <div style={{
-              fontSize: '0.85rem', fontWeight: 700, color: C.text,
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            }}>{user.displayName}</div>
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              gap: '0.4rem',
+            }}>
+              <div style={{
+                fontSize: '0.85rem', fontWeight: 700, color: C.text,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                minWidth: 0,
+              }}>{user.displayName}</div>
+              <span title="Point" style={{
+                display: 'inline-flex', alignItems: 'center', gap: '0.2rem',
+                fontSize: '0.78rem', fontWeight: 800,
+                color: C.accent,
+                fontFamily: 'JetBrains Mono, monospace',
+                flexShrink: 0,
+              }}>
+                💎 {user.points ?? 0}
+              </span>
+            </div>
             <div style={{
               fontSize: '0.7rem', color: C.muted,
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',

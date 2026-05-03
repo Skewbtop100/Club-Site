@@ -69,6 +69,35 @@ export interface MatchHistory {
   playerUids: string[];
 }
 
+// ── Point transactions ───────────────────────────────────────────────────
+//
+// Append-only ledger of every point award/deduction. Each row carries
+// `balanceAfter` so the user's running balance at any historical moment
+// can be reconstructed without scanning the whole table. `reason` is the
+// machine-readable kind (must match a key in points.getEarnRules), while
+// `description` is the human-readable string shown in the UI.
+export type PointReason =
+  | 'daily_login'
+  | 'solve'
+  | 'pb_set'
+  | 'mp_played'
+  | 'mp_won'
+  | 'achievement'
+  | 'athlete_linked'
+  | 'admin_grant';
+
+export interface PointTransaction {
+  id: string;
+  uid: string;
+  amount: number;            // positive = earn, negative = spend
+  reason: PointReason | string;
+  description: string;
+  // serverTimestamp at write time. Read with tsToMs().
+  timestamp: unknown;
+  balanceAfter: number;
+  metadata?: Record<string, unknown>;
+}
+
 export type AthleteRequestStatus = 'pending' | 'approved' | 'rejected';
 
 export interface AthleteRequest {

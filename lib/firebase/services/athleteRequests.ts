@@ -18,6 +18,7 @@ import {
   userDoc,
 } from '@/lib/firebase/collections';
 import type { AthleteRequest } from '@/lib/types';
+import { awardAthleteLinked } from '@/lib/points';
 
 // Reason copy reused everywhere an admin-driven action invalidates a
 // pending request. Centralised so the message stays consistent in toasts,
@@ -151,6 +152,17 @@ export async function approveAthleteRequest(
   }
 
   await batch.commit();
+
+  // Award the athlete-linked points + queue the celebratory toast for the
+  // user's next login. Best-effort: a failure here doesn't roll back the
+  // approval (which already happened). Admin sees a console warning but
+  // the user can still log in normally; if needed, an admin can re-grant
+  // points manually from the points-admin tools.
+  try {
+    await awardAthleteLinked(request.uid);
+  } catch (err) {
+    console.warn('[athleteRequests] athlete-linked points award failed', err);
+  }
 }
 
 /** Admin rejects a pending request with an explicit reason. */

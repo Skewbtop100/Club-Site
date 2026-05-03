@@ -18,6 +18,7 @@ import type {
   AthleteRequest,
   Competition,
   MatchHistory,
+  PointTransaction,
   Result,
   WcaRecordDoc,
   EventVisibility,
@@ -35,6 +36,7 @@ export const COL = {
   SETTINGS:         'settings',
   ATHLETE_REQUESTS: 'athleteRequests',
   MATCH_HISTORY:    'matchHistory',
+  POINT_TRANSACTIONS: 'pointTransactions',
 } as const;
 
 export const DOC = {
@@ -139,4 +141,23 @@ export function matchHistoryDoc(id: string): DocumentReference<MatchHistory> {
   return doc(db, COL.MATCH_HISTORY, id).withConverter(
     makeConverter<MatchHistory>(),
   ) as DocumentReference<MatchHistory>;
+}
+
+// ── pointTransactions ────────────────────────────────────────────────────
+//
+// Append-only ledger of every points award/deduction. Documents are
+// written by lib/points.ts inside Firestore transactions that also
+// increment the user's `points` field, so the row's `balanceAfter` is
+// always consistent with the user doc at write time.
+//
+// Required composite index for "my recent transactions":
+//   pointTransactions: uid (asc) + timestamp (desc)
+export const pointTransactionsCol = collection(db, COL.POINT_TRANSACTIONS).withConverter(
+  makeConverter<PointTransaction>(),
+) as CollectionReference<PointTransaction>;
+
+export function pointTransactionDoc(id: string): DocumentReference<PointTransaction> {
+  return doc(db, COL.POINT_TRANSACTIONS, id).withConverter(
+    makeConverter<PointTransaction>(),
+  ) as DocumentReference<PointTransaction>;
 }

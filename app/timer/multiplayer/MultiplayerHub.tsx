@@ -5,7 +5,7 @@
 // event averages, achievements, how-to-play. The Create/Join callbacks the
 // host page passes in are the same ones that previously fed the Lobby.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ref as rtdbRef, onValue } from 'firebase/database';
 import { rtdb } from '@/lib/firebase';
@@ -20,6 +20,8 @@ import type {
   MatchHistory, MatchPlayerSummary, MatchSolve,
 } from '@/lib/types';
 import { useAuth } from '@/lib/auth-context';
+import { awardAchievementIfNew } from '@/lib/points';
+import { showToast } from '@/lib/toast';
 
 // ── Theme ─────────────────────────────────────────────────────────────────
 const C = {
@@ -1438,6 +1440,42 @@ export default function MultiplayerHub({
     });
     return () => unsub();
   }, [uid]);
+
+  // Achievement reconciliation — when matches load (or change), compute
+  // current unlocked achievements and award any that haven't been claimed
+  // yet. The points service is idempotent on `achievementId`, so a brief
+  // duplicate firing (e.g. matches list re-emits) is safe. We also track
+  // attempted IDs in a session-scoped ref to skip the network round-trip
+  // for IDs we've already tried this session.
+  const achievementTriedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!uid || !matchesLoaded) return;
+    const stats = derivePersonalStats(matches, uid);
+    const items = deriveAchievements(stats).filter(a => a.unlocked);
+    if (items.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      for (const a of items) {
+        if (cancelled) return;
+        if (achievementTriedRef.current.has(a.id)) continue;
+        achievementTriedRef.current.add(a.id);
+        try {
+          const r = await awardAchievementIfNew(uid, a.id, a.name);
+          if (r.awarded && !cancelled) {
+            showToast({
+              msg: `Амжилт нээгдлээ: ${a.name} +50 💎`,
+              tone: 'success',
+            });
+          }
+        } catch (err) {
+          console.warn('[points] achievement award failed', err);
+          // Drop the dedupe entry so a future render can retry.
+          achievementTriedRef.current.delete(a.id);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [uid, matchesLoaded, matches]);
 
   // Two-column desktop layout above 900px (matches the requirements'
   // breakpoint). Mobile gets one stacked column.

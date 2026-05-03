@@ -10,6 +10,9 @@ import type { TwistyPlayer as TwistyPlayerType } from 'cubing/twisty';
 import { useGanTimer } from './useGanTimer';
 import { useQiyiTimer, type QiyiPacket } from './useQiyiTimer';
 import { useWakeLock } from './useWakeLock';
+import { useAuth } from '@/lib/auth-context';
+import { awardSolvePointIfUnderLimit, awardPbPoints } from '@/lib/points';
+import { showToast } from '@/lib/toast';
 
 type TimerBrand = 'gan' | 'qiyi';
 
@@ -358,6 +361,7 @@ function makeDefaultSession(solves: Solve[] = []): Session {
 
 export default function TimerPage() {
   const router = useRouter();
+  const { user } = useAuth();
   const [eventId, setEventId] = useState<string>('333');
   // Empty initial value so server and client first-render match. The
   // existing eventId-change effect runs on mount and fills in the real
@@ -601,17 +605,50 @@ export default function TimerPage() {
   // here is more reliable than a length-comparison effect, which got out of
   // sync when switching events/sessions changed `solves.length` without a
   // new solve actually being added.
+  //
+  // Also awards points for logged-in users: 1 pt per solve (capped at 50/day)
+  // and 20 pt for a new PB on the active session+event. Both are best-effort
+  // — Firestore failures are logged but never throw upwards.
   const onSolveCommit = useCallback((ms: number, dnf: boolean) => {
-    setSolves(prev => [
-      ...prev,
-      {
-        id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-        ms, penalty: dnf ? 'dnf' : 'none',
-        scramble, event: eventId, ts: Date.now(),
-      },
-    ]);
+    let prevBestForEvent: number | null = null;
+    setSolves(prev => {
+      // PB detection: previous best (lowest finalMs, non-DNF) for the same
+      // event in the CURRENT session. Computed before the new solve is
+      // appended so a tied-or-faster time becomes the new PB.
+      for (const s of prev) {
+        if (s.event !== eventId) continue;
+        if (isDnf(s)) continue;
+        const v = finalMs(s);
+        if (prevBestForEvent === null || v < prevBestForEvent) prevBestForEvent = v;
+      }
+      return [
+        ...prev,
+        {
+          id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          ms, penalty: dnf ? 'dnf' : 'none',
+          scramble, event: eventId, ts: Date.now(),
+        },
+      ];
+    });
     setScramble(generateScramble(eventId));
-  }, [scramble, eventId]);
+
+    // Points awards — only for signed-in users; failures are swallowed so
+    // a flaky network never disrupts the actual solve flow.
+    const uid = user?.uid;
+    if (uid) {
+      // Solve point. No toast (would be spammy at 50/day).
+      awardSolvePointIfUnderLimit(uid).catch(err =>
+        console.warn('[points] solve award failed', err),
+      );
+      // PB award — non-DNF, strictly faster than the previous best (or
+      // first non-DNF in this session+event).
+      if (!dnf && (prevBestForEvent === null || ms < prevBestForEvent)) {
+        awardPbPoints(uid, eventId, ms, prevBestForEvent)
+          .then(() => showToast({ msg: 'Шинэ PB! +20 💎', tone: 'success' }))
+          .catch(err => console.warn('[points] PB award failed', err));
+      }
+    }
+  }, [scramble, eventId, user?.uid]);
 
   const timer = useTimer(onSolveCommit, holdTimeMs);
 
@@ -1056,7 +1093,24 @@ export default function TimerPage() {
               onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; }}
               onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.muted; }}
             >⚙</button>
-            <TimerProfileMenu size={28} redirectAfterLogin="/timer" align="right" />
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+              {user && (
+                <button
+                  onClick={() => router.push('/profile')}
+                  aria-label="Point дэлгэрэнгүй"
+                  title="Point дэлгэрэнгүй"
+                  style={{
+                    height: 30, padding: '0 0.55rem', borderRadius: 999,
+                    background: C.accentDim, border: `1px solid ${C.borderHi}`,
+                    color: C.accent, cursor: 'pointer',
+                    display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
+                    fontFamily: 'JetBrains Mono, monospace',
+                    fontSize: '0.78rem', fontWeight: 800,
+                  }}
+                >💎 {user.points ?? 0}</button>
+              )}
+              <TimerProfileMenu size={28} redirectAfterLogin="/timer" align="right" />
+            </div>
           </div>
 
           {/* Session selector — clickable name with dropdown panel */}
@@ -1727,6 +1781,21 @@ export default function TimerPage() {
                       onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; e.currentTarget.style.borderColor = C.borderHi; }}
                       onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.muted; e.currentTarget.style.borderColor = C.border; }}
                     ><IconPlus size={16} /></button>
+                    {user && (
+                      <button
+                        onClick={() => router.push('/profile')}
+                        aria-label="Point дэлгэрэнгүй"
+                        title="Point дэлгэрэнгүй"
+                        style={{
+                          height: 32, padding: '0 0.55rem', borderRadius: 999,
+                          background: C.accentDim, border: `1px solid ${C.borderHi}`,
+                          color: C.accent, cursor: 'pointer',
+                          display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
+                          fontFamily: 'JetBrains Mono, monospace',
+                          fontSize: '0.78rem', fontWeight: 800,
+                        }}
+                      >💎 {user.points ?? 0}</button>
+                    )}
                     <TimerProfileMenu
                       size={32}
                       redirectAfterLogin="/timer"
