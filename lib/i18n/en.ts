@@ -144,7 +144,7 @@ const en = {
   'admin.tab.results': '✎ Results Entry',
   'admin.tab.comp-results': '📋 Competition Results',
   'admin.tab.history': '📄 History',
-  'admin.tab.users': '🔑 Users',
+  'admin.tab.users': '👥 Users',
   'admin.tab.wca-records': '🌍 WCA Records',
   'admin.tab.events': '⚙ Events',
   'admin.tab.analytics': '📊 Analytics',

@@ -144,7 +144,7 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'admin.tab.results': '✎ Үр дүн оруулах',
   'admin.tab.comp-results': '📋 Тэмцээний үр дүн',
   'admin.tab.history': '📄 Түүх',
-  'admin.tab.users': '🔑 Хэрэглэгчид',
+  'admin.tab.users': '👥 Хэрэглэгчид',
   'admin.tab.wca-records': '🌍 WCA Рекорд',
   'admin.tab.events': '⚙ Үйл явдал',
   'admin.tab.analytics': '📊 Шинжилгээ',
