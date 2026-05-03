@@ -399,7 +399,7 @@ export default function TimerPage() {
   }, []);
 
   // Mobile tab navigation + entry modals
-  const [mobileTab, setMobileTab] = useState<'timer' | 'solves' | 'stats'>('timer');
+  const [mobileTab, setMobileTab] = useState<'timer' | 'solves' | 'stats' | 'tools'>('timer');
   const [mobileSearch, setMobileSearch] = useState('');
   const [manualEntryOpen, setManualEntryOpen] = useState(false);
   const [manualEntryValue, setManualEntryValue] = useState('');
@@ -1707,18 +1707,30 @@ export default function TimerPage() {
                       {currentSession?.name ?? 'Default'}
                     </div>
                   </div>
-                  <div style={{ display: 'inline-flex', alignItems: 'center' }}>
-                    {/* Avatar-only right cluster — Multiplayer + "Шинэ
-                        session" actions moved into this dropdown so the
-                        capsule stays uncluttered on phones. */}
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                    {/* Right cluster: visible "+" creates a session, then
+                        the avatar dropdown. Multiplayer used to live here
+                        as an icon and inside the dropdown — now it lives
+                        on the Нэмэлтүүд bottom-nav tab so we don't repeat
+                        ourselves. */}
+                    <button
+                      onClick={() => { setNewSessionName(''); setSessionPanelOpen(true); }}
+                      aria-label="Шинэ session"
+                      title="Шинэ session"
+                      style={{
+                        width: 32, height: 32, borderRadius: '50%',
+                        background: 'transparent', border: `1px solid ${C.border}`,
+                        color: C.muted, cursor: 'pointer',
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; e.currentTarget.style.borderColor = C.borderHi; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.muted; e.currentTarget.style.borderColor = C.border; }}
+                    ><IconPlus size={16} /></button>
                     <TimerProfileMenu
                       size={32}
                       redirectAfterLogin="/timer"
                       align="right"
-                      extras={[
-                        { label: '👥 Multiplayer',  onClick: () => router.push('/timer/multiplayer') },
-                        { label: '+ Шинэ session', onClick: () => { setNewSessionName(''); setSessionPanelOpen(true); } },
-                      ]}
                     />
                   </div>
                 </div>
@@ -2097,6 +2109,11 @@ export default function TimerPage() {
               </div>
             )}
 
+            {/* ── TOOLS TAB ─────────────────────────────────────────────── */}
+            {mobileTab === 'tools' && (
+              <ToolsTab onNavigate={(path) => router.push(path)} />
+            )}
+
             </main>
 
             {/* ── FOOTER: stats bar (timer tab only) + bottom nav.
@@ -2150,12 +2167,13 @@ export default function TimerPage() {
                 paddingBottom: isIOS ? 'env(safe-area-inset-bottom)' : 0,
                 boxSizing: 'border-box',
                 flexShrink: 0,
-                display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
+                display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)',
                 background: C.card, borderTop: `1px solid ${C.border}`,
               }}>
-                <BottomTab label="Timer"  icon={<IconStopwatch size={20} />} active={mobileTab === 'timer'}  onClick={() => setMobileTab('timer')} C={C} />
-                <BottomTab label="Solves" icon={<IconList size={20} />}      active={mobileTab === 'solves'} onClick={() => setMobileTab('solves')} C={C} />
-                <BottomTab label="Stats"  icon={<IconChart size={20} />}     active={mobileTab === 'stats'}  onClick={() => setMobileTab('stats')} C={C} />
+                <BottomTab label="Timer"      icon={<IconStopwatch size={20} />} active={mobileTab === 'timer'}  onClick={() => setMobileTab('timer')} C={C} />
+                <BottomTab label="Solves"     icon={<IconList size={20} />}      active={mobileTab === 'solves'} onClick={() => setMobileTab('solves')} C={C} />
+                <BottomTab label="Stats"      icon={<IconChart size={20} />}     active={mobileTab === 'stats'}  onClick={() => setMobileTab('stats')} C={C} />
+                <BottomTab label="Нэмэлтүүд" icon={<IconGrid size={20} />}      active={mobileTab === 'tools'}  onClick={() => setMobileTab('tools')} C={C} />
               </nav>
             </div>
           </div>
@@ -2863,6 +2881,276 @@ function MobileMicroStat({ label, value, accent }: { label: string; value: strin
         {value}
       </div>
     </div>
+  );
+}
+
+// ── Tools tab (mobile "Нэмэлтүүд") ──────────────────────────────────────
+//
+// Catalogue of side-tools the timer page surfaces. Hardcoded for now —
+// future iterations may pull this from Firestore (e.g., point-gated
+// unlocks). Each entry's `status` drives whether the card is clickable.
+type ToolStatus = 'available' | 'locked' | 'coming-soon';
+interface ToolDef {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  status: ToolStatus;
+  route: string;
+  color: string;
+}
+const TOOLS: ToolDef[] = [
+  {
+    id: 'multiplayer',
+    name: 'Multiplayer Racing',
+    description: 'Найзуудтайгаа хоорондоо өрсөлдөх',
+    icon: '👥',
+    status: 'available',
+    route: '/timer/multiplayer',
+    color: '#A78BFA',
+  },
+  {
+    id: 'algorithms',
+    name: 'Algorithms',
+    description: 'OLL, PLL, F2L сурах',
+    icon: '🧠',
+    status: 'coming-soon',
+    route: '/algorithms',
+    color: '#34D399',
+  },
+  {
+    id: 'trainer',
+    name: 'Trainer',
+    description: 'Тусгай дасгалын горим',
+    icon: '🎯',
+    status: 'coming-soon',
+    route: '/trainer',
+    color: '#fbbf24',
+  },
+];
+
+const TOOLS_VIEW_KEY = 'pv.tools.view';
+type ToolsView = 'grid' | 'list';
+
+function ToolsTab({ onNavigate }: { onNavigate: (path: string) => void }) {
+  // Default to grid; rehydrate from localStorage on mount. SSR-safe — we
+  // start with 'grid' so the server render and the first client render
+  // agree, then swap to the saved value once mounted.
+  const [view, setView] = useState<ToolsView>('grid');
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(TOOLS_VIEW_KEY);
+      if (saved === 'grid' || saved === 'list') setView(saved);
+    } catch { /* ignore corrupt storage */ }
+  }, []);
+  const updateView = (next: ToolsView) => {
+    setView(next);
+    try { window.localStorage.setItem(TOOLS_VIEW_KEY, next); } catch { /* ignore quota / private mode */ }
+  };
+
+  const handleClick = (tool: ToolDef) => {
+    if (tool.status !== 'available') return;
+    onNavigate(tool.route);
+  };
+
+  return (
+    <div style={{
+      flex: '1 1 auto', minHeight: 0, overflowY: 'auto',
+      padding: '0.85rem 0.85rem 1rem',
+      display: 'flex', flexDirection: 'column', gap: '0.85rem',
+    }}>
+      {/* Header — title + view toggle */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.6rem' }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: '1.05rem', fontWeight: 800, color: C.text, letterSpacing: '0.01em' }}>
+            Нэмэлтүүд
+          </div>
+          <div style={{ fontSize: '0.74rem', color: C.muted, marginTop: '0.15rem' }}>
+            Боломжтой багаж хэрэгслүүд
+          </div>
+        </div>
+        <div role="tablist" aria-label="View mode" style={{
+          display: 'inline-flex', flexShrink: 0,
+          background: C.cardAlt, border: `1px solid ${C.border}`, borderRadius: 8,
+          padding: 2,
+        }}>
+          <ViewToggleBtn active={view === 'grid'} onClick={() => updateView('grid')} aria-label="Grid view" title="Grid">
+            <IconGrid size={14} />
+          </ViewToggleBtn>
+          <ViewToggleBtn active={view === 'list'} onClick={() => updateView('list')} aria-label="List view" title="List">
+            <IconList size={14} />
+          </ViewToggleBtn>
+        </div>
+      </div>
+
+      {/* Body */}
+      {TOOLS.length === 0 ? (
+        <div style={{
+          padding: '2.4rem 1rem', textAlign: 'center',
+          color: C.muted, fontSize: '0.88rem', lineHeight: 1.55,
+        }}>
+          Удахгүй илүү боломжууд нэмэгдэнэ
+        </div>
+      ) : view === 'grid' ? (
+        <div className="pv-tools-grid">
+          {TOOLS.map(tool => <ToolGridCard key={tool.id} tool={tool} onClick={() => handleClick(tool)} />)}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          {TOOLS.map(tool => <ToolListRow key={tool.id} tool={tool} onClick={() => handleClick(tool)} />)}
+        </div>
+      )}
+
+      <style>{`
+        .pv-tools-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 0.65rem;
+        }
+        /* Tablets in landscape get the third column. Matches the timer
+           page's 'tablets are mobile' breakpoint (≤1024) so the grid
+           still expands when there's room. */
+        @media (min-width: 720px) and (orientation: landscape) {
+          .pv-tools-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function ViewToggleBtn({
+  active, onClick, children, ...rest
+}: { active: boolean; onClick: () => void; children: React.ReactNode } & React.AriaAttributes & { title?: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      role="tab"
+      aria-selected={active}
+      {...rest}
+      style={{
+        width: 32, height: 26, borderRadius: 6,
+        background: active ? C.accent : 'transparent',
+        color: active ? '#0a0a0a' : C.muted,
+        border: 'none', cursor: 'pointer',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'background 0.12s, color 0.12s',
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ToolBadge({ status }: { status: ToolStatus }) {
+  if (status === 'available') return null;
+  const isLocked = status === 'locked';
+  const fg = isLocked ? '#fbbf24' : C.muted;
+  const bg = isLocked ? 'rgba(251,191,36,0.12)' : 'rgba(255,255,255,0.05)';
+  const border = isLocked ? 'rgba(251,191,36,0.4)' : C.border;
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
+      padding: '0.18rem 0.5rem', borderRadius: 999,
+      fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.04em',
+      background: bg, color: fg, border: `1px solid ${border}`,
+      whiteSpace: 'nowrap',
+    }}>
+      {isLocked ? <><IconLock size={10} /> Цоожтой</> : 'Удахгүй'}
+    </span>
+  );
+}
+
+function ToolGridCard({ tool, onClick }: { tool: ToolDef; onClick: () => void }) {
+  const dim = tool.status !== 'available';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={dim}
+      aria-label={tool.name}
+      style={{
+        position: 'relative',
+        aspectRatio: '1 / 1',
+        padding: '0.85rem 0.7rem 0.7rem',
+        background: C.card,
+        border: `1px solid ${dim ? C.border : 'rgba(167,139,250,0.25)'}`,
+        borderRadius: 14,
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'space-between',
+        gap: '0.5rem', textAlign: 'center',
+        color: C.text, fontFamily: 'inherit',
+        cursor: dim ? 'not-allowed' : 'pointer',
+        opacity: dim ? 0.55 : 1,
+        transition: 'transform 0.15s, border-color 0.15s, box-shadow 0.15s',
+      }}
+      onMouseEnter={e => { if (!dim) { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.borderColor = 'rgba(167,139,250,0.55)'; e.currentTarget.style.boxShadow = '0 10px 28px rgba(0,0,0,0.35)'; } }}
+      onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.borderColor = dim ? C.border : 'rgba(167,139,250,0.25)'; e.currentTarget.style.boxShadow = 'none'; }}
+    >
+      <div style={{
+        width: 52, height: 52, borderRadius: 14,
+        background: `${tool.color}22`,
+        border: `1px solid ${tool.color}55`,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: '1.65rem', lineHeight: 1,
+        filter: dim ? 'saturate(0.6)' : 'none',
+      }} aria-hidden="true">{tool.icon}</div>
+      <div style={{
+        fontSize: '0.82rem', fontWeight: 700,
+        overflow: 'hidden', textOverflow: 'ellipsis',
+        display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+      }}>{tool.name}</div>
+      <ToolBadge status={tool.status} />
+    </button>
+  );
+}
+
+function ToolListRow({ tool, onClick }: { tool: ToolDef; onClick: () => void }) {
+  const dim = tool.status !== 'available';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={dim}
+      aria-label={tool.name}
+      style={{
+        width: '100%', textAlign: 'left',
+        display: 'flex', alignItems: 'center', gap: '0.7rem',
+        padding: '0.7rem 0.85rem',
+        background: C.card,
+        border: `1px solid ${C.border}`,
+        borderRadius: 12,
+        color: C.text, fontFamily: 'inherit',
+        cursor: dim ? 'not-allowed' : 'pointer',
+        opacity: dim ? 0.65 : 1,
+        transition: 'background 0.15s, border-color 0.15s',
+      }}
+      onMouseEnter={e => { if (!dim) { e.currentTarget.style.borderColor = 'rgba(167,139,250,0.45)'; e.currentTarget.style.background = C.cardAlt; } }}
+      onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.background = C.card; }}
+    >
+      <span style={{
+        width: 40, height: 40, borderRadius: 10, flexShrink: 0,
+        background: `${tool.color}22`,
+        border: `1px solid ${tool.color}55`,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: '1.3rem', lineHeight: 1,
+        filter: dim ? 'saturate(0.6)' : 'none',
+      }} aria-hidden="true">{tool.icon}</span>
+      <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+        <div style={{ fontSize: '0.92rem', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {tool.name}
+        </div>
+        <div style={{ fontSize: '0.74rem', color: C.muted, marginTop: '0.15rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {tool.description}
+        </div>
+      </div>
+      {tool.status === 'available' ? (
+        <span style={{ flexShrink: 0, color: C.accent, display: 'inline-flex' }}>
+          <IconArrowRight size={16} />
+        </span>
+      ) : (
+        <ToolBadge status={tool.status} />
+      )}
+    </button>
   );
 }
 
@@ -3933,5 +4221,8 @@ function IconTrash(p: IconProps)      { return <IconBase {...p}><path d="M4 7h16
 function IconCube(p: IconProps)       { return <IconBase {...p}><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5"/><path d="M12 12L4 7.5"/><path d="M12 12v9"/></IconBase>; }
 function IconBluetooth(p: IconProps)  { return <IconBase {...p}><path d="M7 7l10 10-5 5V2l5 5L7 17"/></IconBase>; }
 function IconUsers(p: IconProps)      { return <IconBase {...p}><path d="M16 11a4 4 0 1 0-4-4"/><path d="M2 21v-1a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v1"/><circle cx={9} cy={7} r={4}/><path d="M22 21v-1a5 5 0 0 0-4-4.9"/></IconBase>; }
+function IconGrid(p: IconProps)       { return <IconBase {...p}><rect x={3} y={3} width={7} height={7} rx={1.5}/><rect x={14} y={3} width={7} height={7} rx={1.5}/><rect x={3} y={14} width={7} height={7} rx={1.5}/><rect x={14} y={14} width={7} height={7} rx={1.5}/></IconBase>; }
+function IconArrowRight(p: IconProps) { return <IconBase {...p}><path d="M5 12h14"/><path d="M13 5l7 7-7 7"/></IconBase>; }
+function IconLock(p: IconProps)       { return <IconBase {...p}><rect x={4} y={11} width={16} height={10} rx={2}/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></IconBase>; }
 function IconKeyboard(p: IconProps)   { return <IconBase {...p}><rect x={2}  y={6}  width={20} height={12} rx={2}/><path d="M6 10h0M10 10h0M14 10h0M18 10h0M6 14h0M10 14h4M18 14h0"/></IconBase>; }
 function IconPalette(p: IconProps)    { return <IconBase {...p}><path d="M12 3a9 9 0 1 0 0 18c1.1 0 2-.9 2-2 0-.5-.2-1-.5-1.4-.3-.4-.5-.9-.5-1.4 0-1.1.9-2 2-2H17a4 4 0 0 0 4-4 8 8 0 0 0-9-7.2"/><circle cx={7.5}  cy={11} r={1}/><circle cx={9.5}  cy={7}  r={1}/><circle cx={14.5} cy={7}  r={1}/><circle cx={17.5} cy={11} r={1}/></IconBase>; }
