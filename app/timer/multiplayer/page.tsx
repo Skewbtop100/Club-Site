@@ -20,6 +20,7 @@ import { rtdb } from '@/lib/firebase';
 import { useWakeLock } from '../useWakeLock';
 import { saveMatchHistory, type RoundSnapshotInput } from '@/lib/firebase/services/matchHistory';
 import TimerProfileMenu from '@/components/timer/TimerProfileMenu';
+import MultiplayerHub from './MultiplayerHub';
 
 // ── Theme ──────────────────────────────────────────────────────────────────
 const C = {
@@ -1558,7 +1559,7 @@ function MultiplayerPageInner() {
         )}
 
         {view === 'lobby' && (
-          <Lobby
+          <MultiplayerHub
             isMobile={isMobile}
             pendingRejoin={pendingRejoin}
             onRejoin={rejoinRoom}
@@ -1696,81 +1697,6 @@ function TopBar({ roomCode, onBack }: { roomCode: string; onBack: () => void }) 
         <TimerProfileMenu size={30} redirectAfterLogin="/timer/multiplayer" align="right" />
       </div>
     </header>
-  );
-}
-
-// ── Lobby ─────────────────────────────────────────────────────────────────
-function Lobby({
-  isMobile, pendingRejoin, onRejoin, onDismissRejoin, onCreate, onJoin,
-}: {
-  isMobile: boolean;
-  pendingRejoin?: string;
-  onRejoin?: () => void;
-  onDismissRejoin?: () => void;
-  onCreate: () => void;
-  onJoin: () => void;
-}) {
-  return (
-    <div style={{
-      flex: '1 1 auto',
-      display: 'flex', flexDirection: 'column',
-      alignItems: 'center', justifyContent: 'center',
-      gap: '1.5rem',
-      padding: isMobile ? '1rem' : '2rem',
-      width: '100%',
-    }}>
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: 'clamp(1.6rem, 6vw, 2.4rem)', fontWeight: 800, letterSpacing: '-0.02em' }}>
-          Multiplayer Racing
-        </div>
-        <div style={{ color: C.muted, fontSize: '0.92rem', marginTop: '0.5rem' }}>
-          Race friends in real time. Same scramble, live leaderboard.
-        </div>
-      </div>
-
-      {pendingRejoin && (
-        <div style={{
-          width: '100%', maxWidth: 420,
-          background: C.accentDim, border: `1px solid ${C.borderHi}`,
-          borderRadius: 12, padding: '0.85rem 1rem',
-          display: 'flex', flexDirection: 'column', gap: '0.6rem',
-        }}>
-          <div style={{ fontSize: '0.78rem', color: C.muted, textAlign: 'center' }}>
-            You were in room{' '}
-            <span style={{
-              fontFamily: 'JetBrains Mono, monospace', color: C.accent,
-              fontWeight: 800, letterSpacing: '0.15em',
-            }}>{pendingRejoin}</span>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.5rem' }}>
-            <BigButton accent onClick={onRejoin ?? (() => {})}>
-              Rejoin {pendingRejoin}
-            </BigButton>
-            <button
-              onClick={onDismissRejoin}
-              aria-label="Dismiss"
-              title="Dismiss"
-              style={{
-                background: 'transparent', color: C.muted,
-                border: `1px solid ${C.border}`, borderRadius: 10,
-                padding: '0 0.85rem', fontSize: '1rem',
-                fontFamily: 'inherit', cursor: 'pointer', fontWeight: 700,
-              }}
-            >×</button>
-          </div>
-        </div>
-      )}
-
-      <div className="mp-lobby-buttons" style={{
-        display: 'flex',
-        flexDirection: isMobile ? 'column' : 'row',
-        gap: '1rem',
-        width: isMobile ? '100%' : 'auto',
-      }}>
-        <BigButton accent onClick={onCreate} style={{ width: isMobile ? '100%' : '200px' }}>Create Room</BigButton>
-        <BigButton onClick={onJoin} style={{ width: isMobile ? '100%' : '200px' }}>Join Room</BigButton>
-      </div>
-    </div>
   );
 }
 
