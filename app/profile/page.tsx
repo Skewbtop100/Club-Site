@@ -11,7 +11,18 @@ import {
   subscribeUserRequests,
   tsToMs,
 } from '@/lib/firebase/services/athleteRequests';
-import type { Athlete, AthleteRequest } from '@/lib/types';
+import {
+  subscribeUserMatches,
+  tsToMs as matchTsToMs,
+} from '@/lib/firebase/services/matchHistory';
+import type {
+  Athlete,
+  AthleteRequest,
+  MatchHistory,
+  MatchPlayerSummary,
+  MatchPenalty,
+  MatchSolve,
+} from '@/lib/types';
 
 const ROLE_BADGE: Record<UserRole, { label: string; fg: string; bg: string; border: string }> = {
   member:  { label: 'Гишүүн',   fg: '#a78bfa', bg: 'rgba(167,139,250,0.15)', border: 'rgba(167,139,250,0.45)' },
@@ -341,6 +352,9 @@ export default function ProfilePage() {
             </ul>
           )}
         </div>
+
+        {/* ── Multiplayer stats + history ──────────────────────────────── */}
+        <MultiplayerHistorySection uid={user.uid} />
 
         {/* ── Actions ──────────────────────────────────────────────────── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem', marginTop: '0.25rem' }}>
@@ -980,5 +994,457 @@ function AthleteThumb({ name, url, size }: { name: string; url: string | null; s
         />
       ) : initialOf(name)}
     </span>
+  );
+}
+
+// ── Multiplayer history + stats ──────────────────────────────────────────
+
+const EVENT_LABEL: Record<string, string> = {
+  '333': '3x3', '222': '2x2', '444': '4x4', '555': '5x5', '666': '6x6', '777': '7x7',
+  pyram: 'Pyraminx', skewb: 'Skewb', sq1: 'Square-1', clock: 'Clock', minx: 'Megaminx',
+};
+
+function eventLabel(id: string): string {
+  return EVENT_LABEL[id] ?? id.toUpperCase();
+}
+
+function rankIcon(rank: number): string {
+  if (rank === 1) return '🥇';
+  if (rank === 2) return '🥈';
+  if (rank === 3) return '🥉';
+  return '';
+}
+
+function fmtMs(ms: number | null): string {
+  if (ms === null || !Number.isFinite(ms)) return 'DNF';
+  const total = Math.round(ms);
+  const m = Math.floor(total / 60000);
+  const s = Math.floor((total % 60000) / 1000);
+  const cs = Math.floor((total % 1000) / 10);
+  if (m > 0) return `${m}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`;
+  return `${s}.${String(cs).padStart(2, '0')}`;
+}
+
+function formatMatchDate(ms: number | null): string {
+  if (!ms) return '—';
+  const d = new Date(ms);
+  return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function fmtSolveCell(s: MatchSolve): { text: string; isDNF: boolean; isPlus2: boolean } {
+  if (s.penalty === 'dnf') return { text: 'DNF', isDNF: true, isPlus2: false };
+  if (s.penalty === '+2') return { text: `${fmtMs(s.ms + 2000)}+`, isDNF: false, isPlus2: true };
+  return { text: fmtMs(s.ms), isDNF: false, isPlus2: false };
+}
+
+interface DerivedStats {
+  total: number;
+  wins: number;
+  winRate: number;
+  bestAo5: number | null;
+}
+
+function deriveStats(matches: MatchHistory[], uid: string): DerivedStats {
+  let wins = 0;
+  let bestAo5: number | null = null;
+  for (const m of matches) {
+    const me = m.players.find(p => p.uid === uid);
+    if (!me) continue;
+    if (me.finalRank === 1) wins += 1;
+    for (const ao5 of me.ao5s) {
+      if (ao5 == null) continue;
+      if (bestAo5 === null || ao5 < bestAo5) bestAo5 = ao5;
+    }
+  }
+  const total = matches.length;
+  return {
+    total,
+    wins,
+    winRate: total > 0 ? Math.round((wins / total) * 100) : 0,
+    bestAo5,
+  };
+}
+
+function MultiplayerHistorySection({ uid }: { uid: string }) {
+  const [matches, setMatches] = useState<MatchHistory[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [openMatch, setOpenMatch] = useState<MatchHistory | null>(null);
+
+  useEffect(() => {
+    if (!uid) return;
+    const unsub = subscribeUserMatches(uid, (rows) => {
+      setMatches(rows);
+      setLoaded(true);
+    }, {
+      limit: 20,
+      onError: (err) => {
+        console.error('[profile] subscribeUserMatches', err);
+        setLoaded(true);
+      },
+    });
+    return () => unsub();
+  }, [uid]);
+
+  const stats = useMemo(() => deriveStats(matches, uid), [matches, uid]);
+
+  const cardStyle: React.CSSProperties = {
+    background: 'var(--card)',
+    border: '1px solid rgba(255,255,255,0.07)',
+    borderRadius: 16,
+    padding: '1.4rem',
+    boxShadow: '0 8px 30px rgba(0,0,0,0.25)',
+  };
+
+  return (
+    <>
+      {/* Stats card — always renders so the structure is stable while
+          matches load. Numbers fall back to 0 / — until data arrives. */}
+      <div style={cardStyle}>
+        <div style={{
+          fontSize: '0.7rem', fontWeight: 700, color: 'var(--muted)',
+          letterSpacing: '0.12em', textTransform: 'uppercase',
+          marginBottom: '0.75rem',
+        }}>
+          Multiplayer статистик
+        </div>
+        <div className="mp-stats-grid">
+          <MpStat label="Нийт тоглолт"   value={loaded ? String(stats.total) : '—'} />
+          <MpStat label="Хожсон"          value={loaded ? String(stats.wins)  : '—'} accent="#34d399" />
+          <MpStat label="Хожих хувь"      value={loaded ? `${stats.winRate}%` : '—'} accent="#a78bfa" />
+          <MpStat label="Хамгийн сайн"    value={stats.bestAo5 != null ? fmtMs(stats.bestAo5) : '—'} mono accent="#fbbf24" />
+        </div>
+      </div>
+
+      {/* History list */}
+      <div style={cardStyle}>
+        <div style={{
+          fontSize: '0.7rem', fontWeight: 700, color: 'var(--muted)',
+          letterSpacing: '0.12em', textTransform: 'uppercase',
+          marginBottom: '0.75rem',
+        }}>
+          Multiplayer түүх
+        </div>
+
+        {!loaded ? (
+          <div style={{ padding: '0.6rem 0', color: 'var(--muted)', fontSize: '0.86rem' }}>Уншиж байна…</div>
+        ) : matches.length === 0 ? (
+          <div style={{ padding: '0.6rem 0', color: 'var(--muted)', fontSize: '0.88rem' }}>Тоглолт байхгүй байна</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
+            {matches.map(m => (
+              <MatchCard key={m.id} match={m} uid={uid} onOpen={() => setOpenMatch(m)} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {openMatch && (
+        <MatchDetailModal
+          match={openMatch}
+          uid={uid}
+          onClose={() => setOpenMatch(null)}
+        />
+      )}
+
+      <style>{`
+        .mp-stats-grid {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 0.55rem;
+        }
+        @media (max-width: 560px) {
+          .mp-stats-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+      `}</style>
+    </>
+  );
+}
+
+function MpStat({ label, value, accent, mono }: { label: string; value: string; accent?: string; mono?: boolean }) {
+  return (
+    <div style={{
+      padding: '0.65rem 0.75rem', borderRadius: 11,
+      background: 'rgba(255,255,255,0.03)',
+      border: '1px solid rgba(255,255,255,0.06)',
+      display: 'flex', flexDirection: 'column', gap: '0.18rem',
+      minWidth: 0,
+    }}>
+      <div style={{ fontSize: '0.62rem', color: 'var(--muted)', letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 700 }}>
+        {label}
+      </div>
+      <div style={{
+        fontSize: '1.2rem', fontWeight: 800,
+        color: accent ?? 'var(--text)',
+        fontFamily: mono ? 'JetBrains Mono, monospace' : undefined,
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function MatchCard({ match, uid, onOpen }: { match: MatchHistory; uid: string; onOpen: () => void }) {
+  const me = match.players.find(p => p.uid === uid);
+  const myBestAo5 = useMemo(() => {
+    if (!me) return null;
+    let best: number | null = null;
+    for (const a of me.ao5s) {
+      if (a == null) continue;
+      if (best === null || a < best) best = a;
+    }
+    return best;
+  }, [me]);
+  const opponents = Math.max(0, match.players.length - 1);
+  const playedAt = matchTsToMs(match.playedAt);
+  const rank = me?.finalRank ?? null;
+
+  return (
+    <button
+      onClick={onOpen}
+      style={{
+        width: '100%', textAlign: 'left',
+        background: 'rgba(255,255,255,0.03)',
+        border: '1px solid rgba(255,255,255,0.06)',
+        borderRadius: 12, padding: '0.85rem',
+        color: 'var(--text)', fontFamily: 'inherit', cursor: 'pointer',
+        display: 'flex', flexDirection: 'column', gap: '0.55rem',
+        transition: 'border-color 0.15s, background 0.15s',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(124,58,237,0.45)'; e.currentTarget.style.background = 'rgba(124,58,237,0.06)'; }}
+      onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)'; e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.6rem' }}>
+        <span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontWeight: 600 }}>
+          {formatMatchDate(playedAt)}
+        </span>
+        <span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontWeight: 600 }}>
+          {opponents === 0 ? 'Дан тоглолт' : `${opponents} өрсөлдөгч`}
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: 38, height: 38, borderRadius: 10,
+          background: 'rgba(124,58,237,0.12)',
+          border: '1px solid rgba(124,58,237,0.35)',
+          fontSize: '0.85rem', fontWeight: 800, color: '#c4b5fd',
+        }}>
+          {eventLabel(match.event)}
+        </span>
+        <div style={{ minWidth: 0, flex: '1 1 auto' }}>
+          <div style={{ fontSize: '0.92rem', fontWeight: 700 }}>
+            {match.totalRounds} раунд · {match.players.length} тоглогч
+          </div>
+          <div style={{ fontSize: '0.78rem', color: 'var(--muted)', marginTop: '0.15rem' }}>
+            Хамгийн сайн Ao5:{' '}
+            <span style={{ color: 'var(--text)', fontFamily: 'JetBrains Mono, monospace' }}>
+              {myBestAo5 != null ? fmtMs(myBestAo5) : '—'}
+            </span>
+          </div>
+        </div>
+        {rank !== null && (
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
+            padding: '0.35rem 0.7rem', borderRadius: 999,
+            background: rank === 1 ? 'rgba(52,211,153,0.15)' : 'rgba(255,255,255,0.05)',
+            border: `1px solid ${rank === 1 ? 'rgba(52,211,153,0.45)' : 'rgba(255,255,255,0.1)'}`,
+            color: rank === 1 ? '#34d399' : 'var(--text)',
+            fontSize: '0.78rem', fontWeight: 800, whiteSpace: 'nowrap',
+          }}>
+            {rankIcon(rank)} {rank}-р байр
+          </div>
+        )}
+      </div>
+    </button>
+  );
+}
+
+function MatchDetailModal({
+  match, uid, onClose,
+}: { match: MatchHistory; uid: string; onClose: () => void }) {
+  // Lock body scroll while modal is open so iOS Safari doesn't leak the
+  // touch-scroll into the page underneath.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
+  const playedAt = matchTsToMs(match.playedAt);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1500,
+        background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '1rem',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: 640,
+          background: 'var(--card)', border: '1px solid rgba(255,255,255,0.1)',
+          borderRadius: 16,
+          boxShadow: '0 24px 60px rgba(0,0,0,0.7)',
+          display: 'flex', flexDirection: 'column',
+          maxHeight: 'calc(100dvh - 2rem)', overflow: 'hidden',
+        }}
+      >
+        <header style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0.95rem 1rem',
+          borderBottom: '1px solid rgba(255,255,255,0.07)',
+          gap: '0.6rem',
+        }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: '1rem', fontWeight: 800 }}>
+              {eventLabel(match.event)} · {match.totalRounds} раунд
+            </div>
+            <div style={{ fontSize: '0.74rem', color: 'var(--muted)', marginTop: '0.15rem' }}>
+              {formatMatchDate(playedAt)}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Хаах"
+            style={{
+              width: 30, height: 30, borderRadius: 8,
+              background: 'transparent', border: '1px solid rgba(255,255,255,0.1)',
+              color: 'var(--muted)', cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >×</button>
+        </header>
+
+        <div style={{ padding: '1rem', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {/* Final standings */}
+          <section>
+            <SectionHeading>Эцсийн байр</SectionHeading>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              {match.players.map(p => (
+                <PlayerRow key={p.uid} player={p} isMe={p.uid === uid} />
+              ))}
+            </div>
+          </section>
+
+          {/* Per-round breakdown */}
+          {match.rounds.map(round => (
+            <section key={round.roundNumber}>
+              <SectionHeading>{round.roundName}</SectionHeading>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{
+                  width: '100%', borderCollapse: 'collapse',
+                  fontSize: '0.82rem',
+                }}>
+                  <thead>
+                    <tr style={{ color: 'var(--muted)', fontSize: '0.7rem', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                      <th style={cellStyle}>#</th>
+                      <th style={{ ...cellStyle, textAlign: 'left' }}>Нэр</th>
+                      {Array.from({ length: 5 }).map((_, i) => (
+                        <th key={i} style={cellStyle}>{i + 1}</th>
+                      ))}
+                      <th style={cellStyle}>Ao5</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {round.results.map(r => {
+                      const isMe = r.uid === uid;
+                      return (
+                        <tr key={r.uid} style={{
+                          background: isMe ? 'rgba(124,58,237,0.1)' : undefined,
+                          borderTop: '1px solid rgba(255,255,255,0.05)',
+                        }}>
+                          <td style={{ ...cellStyle, fontWeight: 700, color: r.rank === 1 ? '#34d399' : 'var(--text)' }}>
+                            {r.rank}
+                          </td>
+                          <td style={{ ...cellStyle, textAlign: 'left', fontWeight: isMe ? 700 : 600, color: isMe ? '#c4b5fd' : 'var(--text)' }}>
+                            {r.name}
+                          </td>
+                          {Array.from({ length: 5 }).map((_, i) => {
+                            const s = r.solves[i];
+                            const cell = s ? fmtSolveCell(s) : { text: '—', isDNF: false, isPlus2: false };
+                            return (
+                              <td
+                                key={i}
+                                style={{
+                                  ...cellStyle,
+                                  fontFamily: 'JetBrains Mono, monospace',
+                                  color: cell.isDNF ? '#ef4444' : cell.isPlus2 ? '#fbbf24' : 'var(--text)',
+                                }}
+                              >
+                                {cell.text}
+                              </td>
+                            );
+                          })}
+                          <td style={{
+                            ...cellStyle,
+                            fontFamily: 'JetBrains Mono, monospace', fontWeight: 800,
+                            color: r.ao5 == null ? '#ef4444' : 'var(--text)',
+                          }}>
+                            {r.ao5 == null ? 'DNF' : fmtMs(r.ao5)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const cellStyle: React.CSSProperties = {
+  padding: '0.45rem 0.5rem',
+  textAlign: 'center',
+  whiteSpace: 'nowrap',
+};
+
+function SectionHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      fontSize: '0.66rem', fontWeight: 700, color: 'var(--muted)',
+      letterSpacing: '0.12em', textTransform: 'uppercase',
+      marginBottom: '0.55rem',
+    }}>
+      {children}
+    </div>
+  );
+}
+
+function PlayerRow({ player, isMe }: { player: MatchPlayerSummary; isMe: boolean }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: '0.6rem',
+      padding: '0.55rem 0.7rem',
+      background: isMe ? 'rgba(124,58,237,0.12)' : 'rgba(255,255,255,0.03)',
+      border: `1px solid ${isMe ? 'rgba(124,58,237,0.45)' : 'rgba(255,255,255,0.06)'}`,
+      borderRadius: 10,
+    }}>
+      <span style={{
+        width: 26, height: 26, borderRadius: '50%',
+        background: player.finalRank === 1 ? 'rgba(52,211,153,0.18)' : 'rgba(255,255,255,0.05)',
+        border: `1px solid ${player.finalRank === 1 ? 'rgba(52,211,153,0.45)' : 'rgba(255,255,255,0.1)'}`,
+        color: player.finalRank === 1 ? '#34d399' : 'var(--text)',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: '0.78rem', fontWeight: 800, flexShrink: 0,
+      }}>{player.finalRank}</span>
+      <AthleteThumb name={player.name} url={player.photoURL} size={28} />
+      <span style={{ flex: '1 1 auto', minWidth: 0, fontWeight: isMe ? 800 : 600, color: isMe ? '#c4b5fd' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {player.name}{rankIcon(player.finalRank) && ` ${rankIcon(player.finalRank)}`}
+      </span>
+      <span style={{ fontSize: '0.78rem', color: 'var(--muted)', whiteSpace: 'nowrap' }}>
+        <span style={{ fontFamily: 'JetBrains Mono, monospace', color: 'var(--text)', fontWeight: 700 }}>{player.totalPoints}</span>{' '}оноо
+      </span>
+    </div>
   );
 }

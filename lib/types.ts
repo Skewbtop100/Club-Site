@@ -13,6 +13,62 @@ export interface Athlete {
   ownerId?: string | null;
 }
 
+// ── Multiplayer match history ────────────────────────────────────────────
+//
+// Persisted at the end of a multiplayer match (final round → results).
+// `playerUids` is duplicated alongside the players[] objects so we can
+// index `playerUids array-contains uid` for "matches I played in"
+// queries — Firestore can't index across array-of-objects fields.
+export type MatchPenalty = 'none' | '+2' | 'dnf';
+
+export interface MatchSolve {
+  ms: number;
+  penalty: MatchPenalty;
+}
+
+export interface MatchPlayerSummary {
+  uid: string;
+  name: string;
+  photoURL: string | null;
+  athleteId: string | null;
+  finalRank: number;
+  totalPoints: number;
+  roundsWon: number;
+  ao5s: (number | null)[];
+  bestSingle: number | null;
+}
+
+export interface MatchRoundResult {
+  uid: string;
+  name: string;
+  solves: MatchSolve[];
+  ao5: number | null;
+  rank: number;
+}
+
+export interface MatchRound {
+  roundNumber: number;
+  roundName: string;
+  scrambles: string[];
+  results: MatchRoundResult[];
+}
+
+export interface MatchHistory {
+  id: string;
+  roomCode: string;
+  event: string;
+  // Stored as Firestore Timestamps; use a coercer when reading.
+  playedAt: unknown;
+  finishedAt: unknown;
+  durationMs: number;
+  totalRounds: number;
+  hostId: string;
+  players: MatchPlayerSummary[];
+  winner: { uid: string; name: string } | null;
+  rounds: MatchRound[];
+  playerUids: string[];
+}
+
 export type AthleteRequestStatus = 'pending' | 'approved' | 'rejected';
 
 export interface AthleteRequest {

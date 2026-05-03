@@ -18,6 +18,7 @@ import {
 } from 'firebase/database';
 import { rtdb } from '@/lib/firebase';
 import { useWakeLock } from '../useWakeLock';
+import { saveMatchHistory, type RoundSnapshotInput } from '@/lib/firebase/services/matchHistory';
 
 // ── Theme ──────────────────────────────────────────────────────────────────
 const C = {
@@ -622,6 +623,82 @@ function MultiplayerPageInner() {
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
   }, [view, room?.status]);
+
+  // ── Match-history persistence ───────────────────────────────────────────
+  // Per-round scrambles + solves get wiped on `nextRound`, so a snapshot
+  // taken at match-end can only see the FINAL round. We accumulate each
+  // round's data into a host-local ref the moment we observe a
+  // `racing → results` transition; on the FINAL such transition the host
+  // writes one matchHistory doc covering every round.
+  //
+  // savedRef prevents double-writes from re-renders or status flickers.
+  // Both refs reset on a fresh `*→waiting` transition (Play Again).
+  const matchPrevStatusRef = useRef<RoomStatus | null>(null);
+  const pastRoundsRef = useRef<RoundSnapshotInput[]>([]);
+  const savedMatchRef = useRef(false);
+  useEffect(() => {
+    if (!room) return;
+    const prevStatus = matchPrevStatusRef.current;
+    matchPrevStatusRef.current = room.status;
+
+    // Reset on new-match boundary so a second match in the same room saves
+    // independently of the first.
+    if (prevStatus && prevStatus !== 'waiting' && room.status === 'waiting') {
+      savedMatchRef.current = false;
+      pastRoundsRef.current = [];
+    }
+
+    // Capture a snapshot the moment a round's results screen first appears.
+    // The room.solves / room.scrambles values still reflect the just-finished
+    // round at this point (they're wiped on nextRound, which fires later).
+    if (prevStatus === 'racing' && room.status === 'results') {
+      const r = room.round;
+      if (!pastRoundsRef.current.some(x => x.roundNumber === r)) {
+        const scrambles = Object.entries(room.scrambles ?? {})
+          .sort(([a], [b]) => Number(a) - Number(b))
+          .map(([, s]) => s as string);
+        // Snapshot via JSON round-trip — solves + members are plain data,
+        // and the deep clone prevents later RTDB updates from mutating the
+        // ref entry (since onValue hands us the same object on next push
+        // for unchanged subtrees in some adapter versions).
+        pastRoundsRef.current.push({
+          roundNumber: r,
+          roundName: room.roundName ?? getRoundName(r, room.maxRounds),
+          scrambles,
+          solves: JSON.parse(JSON.stringify(room.solves ?? {})),
+          membersAtRoundEnd: JSON.parse(JSON.stringify(room.members ?? {})),
+        });
+      }
+    }
+
+    // Final-round results — host writes once. Skip silently if we don't
+    // have all rounds (e.g., a fresh post-migration host that missed
+    // earlier transitions); a partial save would mislead the history UI.
+    const isFinalResults = room.status === 'results' && room.round >= room.maxRounds;
+    const isHost = !!userId && room.host === userId;
+    if (
+      isFinalResults &&
+      isHost &&
+      !savedMatchRef.current &&
+      pastRoundsRef.current.length === room.maxRounds
+    ) {
+      savedMatchRef.current = true;
+      console.log('[mp] saving match history...');
+      saveMatchHistory({
+        roomCode,
+        event: room.event,
+        hostId: userId,
+        matchStartedAtMs: room.createdAt,
+        totalRounds: room.maxRounds,
+        finalMembers: room.members ?? {},
+        pastRounds: pastRoundsRef.current.slice(),
+      }).catch(err => {
+        // UI failure is intentionally swallowed — match history is
+        // best-effort and shouldn't break the post-match flow.
+        console.error('[mp] save match history failed', err);
+      });
+    }
+  }, [room, roomCode, userId]);
 
   // Initial mount: pull user id + saved name
   useEffect(() => {

@@ -17,6 +17,7 @@ import type {
   Athlete,
   AthleteRequest,
   Competition,
+  MatchHistory,
   Result,
   WcaRecordDoc,
   EventVisibility,
@@ -33,6 +34,7 @@ export const COL = {
   WCA_RECORDS:      'wcaRecords',
   SETTINGS:         'settings',
   ATHLETE_REQUESTS: 'athleteRequests',
+  MATCH_HISTORY:    'matchHistory',
 } as const;
 
 export const DOC = {
@@ -119,4 +121,22 @@ export function athleteRequestDoc(id: string): DocumentReference<AthleteRequest>
   return doc(db, COL.ATHLETE_REQUESTS, id).withConverter(
     makeConverter<AthleteRequest>(),
   ) as DocumentReference<AthleteRequest>;
+}
+
+// ── matchHistory ─────────────────────────────────────────────────────────
+//
+// Permanent record of a finished multiplayer match. Written once by the
+// host (via lib/firebase/services/matchHistory.ts) when the final round
+// transitions racing → results.
+//
+// Required composite index for "matches I played in":
+//   matchHistory: playerUids (array-contains) + playedAt (desc)
+export const matchHistoryCol = collection(db, COL.MATCH_HISTORY).withConverter(
+  makeConverter<MatchHistory>(),
+) as CollectionReference<MatchHistory>;
+
+export function matchHistoryDoc(id: string): DocumentReference<MatchHistory> {
+  return doc(db, COL.MATCH_HISTORY, id).withConverter(
+    makeConverter<MatchHistory>(),
+  ) as DocumentReference<MatchHistory>;
 }
