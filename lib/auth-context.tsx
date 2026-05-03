@@ -20,6 +20,7 @@ import {
   getDoc,
   serverTimestamp,
   setDoc,
+  Timestamp,
   updateDoc,
 } from 'firebase/firestore';
 import { auth, db, googleProvider } from './firebase';
@@ -35,6 +36,10 @@ export interface AppUser {
   points: number;
   athleteId: string | null;
   unlockedTools: string[];
+  // Epoch ms; null if the field is missing or hasn't been written yet
+  // (serverTimestamp() resolves to null for the writing client until the
+  // server round-trip completes).
+  createdAt: number | null;
 }
 
 interface AuthContextValue {
@@ -42,6 +47,14 @@ interface AuthContextValue {
   loading: boolean;
   signInWithGoogle: () => Promise<AppUser | null>;
   signOut: () => Promise<void>;
+  updateProfile: (patch: { displayName?: string }) => Promise<void>;
+}
+
+function tsToMs(value: unknown): number | null {
+  if (!value) return null;
+  if (value instanceof Timestamp) return value.toMillis();
+  if (typeof value === 'number') return value;
+  return null;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -80,10 +93,13 @@ async function upsertUserDoc(fbUser: FirebaseUser): Promise<AppUser> {
       points: fresh.points,
       athleteId: fresh.athleteId,
       unlockedTools: fresh.unlockedTools,
+      // serverTimestamp() returns null on the writing client until the
+      // round-trip resolves; the next sign-in will surface a concrete value.
+      createdAt: null,
     };
   }
 
-  const data = snap.data() as Partial<AppUser> & { role?: UserRole };
+  const data = snap.data() as Partial<AppUser> & { role?: UserRole; createdAt?: unknown };
   await updateDoc(ref, {
     lastLoginAt: serverTimestamp(),
     displayName,
@@ -98,6 +114,7 @@ async function upsertUserDoc(fbUser: FirebaseUser): Promise<AppUser> {
     points: typeof data.points === 'number' ? data.points : 0,
     athleteId: data.athleteId ?? null,
     unlockedTools: Array.isArray(data.unlockedTools) ? data.unlockedTools : [],
+    createdAt: tsToMs(data.createdAt),
   };
 }
 
@@ -133,6 +150,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             points: 0,
             athleteId: null,
             unlockedTools: [],
+            createdAt: null,
           });
         }
       } finally {
@@ -154,9 +172,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   }, []);
 
+  // Persists a partial profile patch (currently just displayName) and
+  // mirrors it into local state so consumers (Navbar, Profile) update
+  // without waiting for a re-fetch.
+  const updateProfile = useCallback(async (patch: { displayName?: string }) => {
+    const current = auth.currentUser;
+    if (!current) throw new Error('Not signed in');
+    const trimmed = patch.displayName?.trim();
+    const next: Record<string, unknown> = {};
+    if (trimmed !== undefined) next.displayName = trimmed;
+    if (Object.keys(next).length === 0) return;
+    await updateDoc(doc(db, 'users', current.uid), next);
+    setUser(prev => (prev ? { ...prev, ...(trimmed !== undefined ? { displayName: trimmed } : {}) } : prev));
+  }, []);
+
   const value = useMemo<AuthContextValue>(
-    () => ({ user, loading, signInWithGoogle, signOut }),
-    [user, loading, signInWithGoogle, signOut],
+    () => ({ user, loading, signInWithGoogle, signOut, updateProfile }),
+    [user, loading, signInWithGoogle, signOut, updateProfile],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
