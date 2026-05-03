@@ -1,14 +1,20 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
+
+// Lazy — keeps the section page bundle small and matches how /admin/competitions
+// and /admin/club mount their tab bodies.
+const UsersTab = dynamic(() => import('@/components/admin/UsersTab'), { ssr: false });
 
 export default function AdminUsersPage() {
   return (
     <div style={{
       maxWidth: 1380, margin: '0 auto',
       padding: '1.5rem 1rem',
+      display: 'flex', flexDirection: 'column', gap: '1rem',
     }}>
-      <div style={{ marginBottom: '0.85rem' }}>
+      <div>
         <Link
           href="/admin/dashboard"
           style={{
@@ -24,21 +30,11 @@ export default function AdminUsersPage() {
         </Link>
       </div>
 
-      <div style={{
-        background: 'var(--card)',
-        border: '1px solid rgba(255,255,255,0.07)',
-        borderRadius: 16,
-        padding: '3rem 1.5rem',
-        textAlign: 'center',
-        color: 'var(--muted)',
-        fontSize: '0.95rem',
-      }}>
-        <div style={{ fontSize: '2.4rem', marginBottom: '0.6rem' }} aria-hidden="true">🧑</div>
-        <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text)', marginBottom: '0.35rem' }}>
-          Хэрэглэгчид удирдах хэсэг
-        </div>
-        <div>удахгүй...</div>
-      </div>
+      <h1 style={{ fontSize: '1.35rem', fontWeight: 800, letterSpacing: '0.01em', margin: 0 }}>
+        Хэрэглэгчид удирдах
+      </h1>
+
+      <UsersTab />
     </div>
   );
 }

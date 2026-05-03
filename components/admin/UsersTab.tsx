@@ -38,10 +38,11 @@ interface UserRow {
 
 const ROLE_BADGE: Record<UserRole, { label: string; fg: string; bg: string; border: string }> = {
   member:  { label: 'Гишүүн',   fg: '#a78bfa', bg: 'rgba(167,139,250,0.15)', border: 'rgba(167,139,250,0.45)' },
-  athlete: { label: 'Тамирчин', fg: '#34d399', bg: 'rgba(52,211,153,0.15)',  border: 'rgba(52,211,153,0.45)' },
-  admin:   { label: 'Админ',    fg: '#fbbf24', bg: 'rgba(251,191,36,0.15)',  border: 'rgba(251,191,36,0.45)' },
+  athlete: { label: 'Тамирчин', fg: '#fbbf24', bg: 'rgba(251,191,36,0.15)',  border: 'rgba(251,191,36,0.45)' },
+  admin:   { label: 'Админ',    fg: '#ef4444', bg: 'rgba(239,68,68,0.15)',   border: 'rgba(239,68,68,0.45)'  },
 };
 const ALL_ROLES: UserRole[] = ['member', 'athlete', 'admin'];
+type RoleFilter = 'all' | UserRole;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 function tsToMs(value: unknown): number | null {
@@ -79,6 +80,7 @@ export default function UsersTab() {
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ msg: string; tone: 'ok' | 'err' } | null>(null);
   const toastTimer = useRef<number | null>(null);
@@ -144,14 +146,20 @@ export default function UsersTab() {
   }, [athletes]);
 
   // ── Derived: filtered + stats ─────────────────────────────────────────
+  // Role chip narrows the list first; search runs over what's left. Stats
+  // count the unfiltered list so the totals don't bounce while the admin
+  // is exploring filters.
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return users;
-    return users.filter(u =>
-      u.displayName.toLowerCase().includes(q) ||
-      u.email.toLowerCase().includes(q),
-    );
-  }, [users, search]);
+    return users.filter(u => {
+      if (roleFilter !== 'all' && u.role !== roleFilter) return false;
+      if (!q) return true;
+      return (
+        u.displayName.toLowerCase().includes(q) ||
+        u.email.toLowerCase().includes(q)
+      );
+    });
+  }, [users, search, roleFilter]);
 
   const stats = useMemo(() => {
     const counts = { total: users.length, member: 0, athlete: 0, admin: 0 };
@@ -163,7 +171,7 @@ export default function UsersTab() {
   const onChangeRole = async (uid: string, newRole: UserRole) => {
     try {
       await updateDoc(doc(db, 'users', uid), { role: newRole });
-      showToast(`Эрх "${ROLE_BADGE[newRole].label}" болж шинэчлэгдлээ`);
+      showToast('Role амжилттай шинэчлэгдлээ');
       setModal(null);
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), 'err');
@@ -180,8 +188,7 @@ export default function UsersTab() {
       // The reason is logged for the audit-log step (later); we don't write
       // it to Firestore yet because the audit collection doesn't exist.
       await updateDoc(doc(db, 'users', uid), { points: increment(delta) });
-      const sign = delta > 0 ? '+' : '';
-      showToast(`Point олголоо: ${sign}${delta}`);
+      showToast(delta > 0 ? `Point олголоо: +${delta}` : `Point хаслаа: ${delta}`);
       setModal(null);
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), 'err');
@@ -231,14 +238,35 @@ export default function UsersTab() {
     );
   }
 
-  return (
-    <div onClick={() => openMenuId && setOpenMenuId(null)}>
-      {/* Search + stats */}
-      <div className="card">
-        <div className="card-title"><span className="title-accent" />Хэрэглэгчид</div>
+  // Single dispatcher used by both the table row and the mobile card so the
+  // action wiring lives in one place.
+  const handleAction = (u: UserRow, action: 'role' | 'add' | 'sub' | 'link' | 'unlink' | 'view') => {
+    setOpenMenuId(null);
+    if (action === 'role')        setModal({ kind: 'role', user: u });
+    else if (action === 'add')    setModal({ kind: 'points-add', user: u });
+    else if (action === 'sub')    setModal({ kind: 'points-sub', user: u });
+    else if (action === 'link')   setModal({ kind: 'link', user: u });
+    else if (action === 'unlink') setModal({ kind: 'unlink', user: u });
+    else if (action === 'view')   window.open(`/profile?uid=${encodeURIComponent(u.id)}`, '_blank', 'noopener');
+  };
 
-        <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', marginBottom: '0.85rem', flexWrap: 'wrap' }}>
-          <div style={{ position: 'relative', flex: '1 1 260px', minWidth: 0 }}>
+  return (
+    <div
+      onClick={() => openMenuId && setOpenMenuId(null)}
+      style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}
+    >
+      {/* Stats — standalone grid above everything else (4-col / 2-col mobile) */}
+      <div className="users-stats">
+        <StatCard label="Нийт хэрэглэгч" value={stats.total} fg="var(--text)" />
+        <StatCard label="Гишүүн"          value={stats.member}  fg={ROLE_BADGE.member.fg} />
+        <StatCard label="Тамирчин"        value={stats.athlete} fg={ROLE_BADGE.athlete.fg} />
+        <StatCard label="Админ"           value={stats.admin}   fg={ROLE_BADGE.admin.fg} />
+      </div>
+
+      {/* Search + role chips */}
+      <div className="card">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.7rem' }}>
+          <div style={{ position: 'relative' }}>
             <SearchIcon />
             <input
               value={search}
@@ -254,17 +282,17 @@ export default function UsersTab() {
               }}
             />
           </div>
-        </div>
 
-        <div className="users-stats">
-          <StatCard label="Нийт" value={stats.total} fg="var(--text)" />
-          <StatCard label="Гишүүн" value={stats.member} fg={ROLE_BADGE.member.fg} />
-          <StatCard label="Тамирчин" value={stats.athlete} fg={ROLE_BADGE.athlete.fg} />
-          <StatCard label="Админ" value={stats.admin} fg={ROLE_BADGE.admin.fg} />
+          <div role="tablist" aria-label="Эрхээр шүүх" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+            <FilterChip label="Бүгд"     active={roleFilter === 'all'}     onClick={() => setRoleFilter('all')} />
+            <FilterChip label="Гишүүн"   active={roleFilter === 'member'}  onClick={() => setRoleFilter('member')} />
+            <FilterChip label="Тамирчин" active={roleFilter === 'athlete'} onClick={() => setRoleFilter('athlete')} />
+            <FilterChip label="Админ"    active={roleFilter === 'admin'}   onClick={() => setRoleFilter('admin')} />
+          </div>
         </div>
       </div>
 
-      {/* Table */}
+      {/* List — table on desktop, cards on mobile (CSS-driven so no hydration flash) */}
       <div className="card">
         <div className="card-title"><span className="title-accent" />Бүх хэрэглэгч</div>
 
@@ -275,45 +303,54 @@ export default function UsersTab() {
             {users.length === 0 ? 'Хэрэглэгч байхгүй байна.' : 'Хайлтад тохирох хэрэглэгч олдсонгүй.'}
           </div>
         ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th style={{ width: 40 }}></th>
-                  <th>Нэр</th>
-                  <th>Email</th>
-                  <th>Эрх</th>
-                  <th style={{ textAlign: 'right' }}>Point</th>
-                  <th>Тамирчин</th>
-                  <th>Бүртгүүлсэн</th>
-                  <th style={{ textAlign: 'right' }}>Үйлдэл</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(u => (
-                  <UserRowView
-                    key={u.id}
-                    u={u}
-                    athleteName={u.athleteId ? athleteNameOf(athleteById.get(u.athleteId)) : null}
-                    menuOpen={openMenuId === u.id}
-                    onToggleMenu={(e) => {
-                      e.stopPropagation();
-                      setOpenMenuId(prev => (prev === u.id ? null : u.id));
-                    }}
-                    onAction={(action) => {
-                      setOpenMenuId(null);
-                      if (action === 'role')        setModal({ kind: 'role', user: u });
-                      else if (action === 'add')    setModal({ kind: 'points-add', user: u });
-                      else if (action === 'sub')    setModal({ kind: 'points-sub', user: u });
-                      else if (action === 'link')   setModal({ kind: 'link', user: u });
-                      else if (action === 'unlink') setModal({ kind: 'unlink', user: u });
-                      else if (action === 'view')   window.open(`/profile?uid=${encodeURIComponent(u.id)}`, '_blank', 'noopener');
-                    }}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <div className="users-table-wrap table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th style={{ width: 40 }}></th>
+                    <th>Нэр / Email</th>
+                    <th>Эрх</th>
+                    <th style={{ textAlign: 'right' }}>Point</th>
+                    <th>Тамирчин</th>
+                    <th>Бүртгүүлсэн</th>
+                    <th style={{ textAlign: 'right' }}>Үйлдэл</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(u => (
+                    <UserRowView
+                      key={u.id}
+                      u={u}
+                      athleteName={u.athleteId ? athleteNameOf(athleteById.get(u.athleteId)) : null}
+                      menuOpen={openMenuId === u.id}
+                      onToggleMenu={(e) => {
+                        e.stopPropagation();
+                        setOpenMenuId(prev => (prev === u.id ? null : u.id));
+                      }}
+                      onAction={(action) => handleAction(u, action)}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="users-card-list" style={{ display: 'none', flexDirection: 'column', gap: '0.6rem' }}>
+              {filtered.map(u => (
+                <UserCardView
+                  key={u.id}
+                  u={u}
+                  athleteName={u.athleteId ? athleteNameOf(athleteById.get(u.athleteId)) : null}
+                  menuOpen={openMenuId === u.id}
+                  onToggleMenu={(e) => {
+                    e.stopPropagation();
+                    setOpenMenuId(prev => (prev === u.id ? null : u.id));
+                  }}
+                  onAction={(action) => handleAction(u, action)}
+                />
+              ))}
+            </div>
+          </>
         )}
       </div>
 
@@ -352,7 +389,7 @@ export default function UsersTab() {
       {modal?.kind === 'unlink' && modal.user.athleteId && (
         <ConfirmModal
           title="Холбоо тасалах"
-          body={`${modal.user.displayName}-г тамирчны бүртгэлээс салгах уу?`}
+          body="Холбоог таслах уу?"
           confirmLabel="Тасалах"
           danger
           onCancel={() => setModal(null)}
@@ -392,6 +429,11 @@ export default function UsersTab() {
         }
         @media (max-width: 640px) {
           .users-stats { grid-template-columns: repeat(2, 1fr); }
+          /* Swap table → card list at this breakpoint. The table doesn't
+             collapse gracefully (8 columns), so we render both markups and
+             toggle visibility — works without a JS isMobile check. */
+          .users-table-wrap { display: none !important; }
+          .users-card-list  { display: flex !important; }
         }
         @keyframes users-tab-toast-in {
           from { opacity: 0; transform: translate(-50%, -6px); }
@@ -422,8 +464,12 @@ function UserRowView({
   return (
     <tr>
       <td><Avatar name={u.displayName} url={u.photoURL} size={32} /></td>
-      <td style={{ fontWeight: 600 }}>{u.displayName}</td>
-      <td className="td-muted" style={{ fontFamily: 'monospace', fontSize: '0.84rem' }}>{u.email}</td>
+      <td>
+        <div style={{ fontWeight: 600, color: 'var(--text)' }}>{u.displayName}</div>
+        <div className="td-muted" style={{ fontFamily: 'monospace', fontSize: '0.78rem', marginTop: '0.1rem' }}>
+          {u.email}
+        </div>
+      </td>
       <td>
         <span style={{
           display: 'inline-block', padding: '0.15rem 0.55rem', borderRadius: 999,
@@ -472,11 +518,145 @@ function UserRowView({
             <MenuItem onClick={() => onAction('link')}>Тамирчинтай холбох</MenuItem>
             {u.athleteId && <MenuItem onClick={() => onAction('unlink')} danger>Холбоо тасалах</MenuItem>}
             <div style={{ height: 1, background: 'rgba(255,255,255,0.08)', margin: '3px 6px' }} />
-            <MenuItem onClick={() => onAction('view')}>Profile-г харах</MenuItem>
+            <MenuItem onClick={() => onAction('view')}>Профайл харах</MenuItem>
           </div>
         )}
       </td>
     </tr>
+  );
+}
+
+function FilterChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      style={{
+        padding: '0.35rem 0.85rem',
+        borderRadius: 999,
+        background: active ? 'rgba(167,139,250,0.18)' : 'rgba(255,255,255,0.04)',
+        border: `1px solid ${active ? 'rgba(167,139,250,0.55)' : 'rgba(255,255,255,0.08)'}`,
+        color: active ? '#a78bfa' : 'var(--muted)',
+        fontSize: '0.78rem', fontWeight: 700, letterSpacing: '0.02em',
+        fontFamily: 'inherit', cursor: 'pointer',
+        transition: 'background 0.15s, border-color 0.15s, color 0.15s',
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+// Mobile card variant of UserRowView. Same data, same menu, vertical layout.
+function UserCardView({
+  u, athleteName, menuOpen, onToggleMenu, onAction,
+}: {
+  u: UserRow;
+  athleteName: string | null;
+  menuOpen: boolean;
+  onToggleMenu: (e: React.MouseEvent) => void;
+  onAction: (action: 'role' | 'add' | 'sub' | 'link' | 'unlink' | 'view') => void;
+}) {
+  const badge = ROLE_BADGE[u.role];
+  return (
+    <div style={{
+      position: 'relative',
+      padding: '0.85rem',
+      background: 'rgba(255,255,255,0.03)',
+      border: '1px solid rgba(255,255,255,0.06)',
+      borderRadius: 12,
+      display: 'flex', flexDirection: 'column', gap: '0.65rem',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.7rem' }}>
+        <Avatar name={u.displayName} url={u.photoURL} size={40} />
+        <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+          <div style={{ fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {u.displayName}
+          </div>
+          <div style={{ fontSize: '0.78rem', color: 'var(--muted)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {u.email}
+          </div>
+        </div>
+        <button
+          onClick={onToggleMenu}
+          aria-label="Үйлдэл"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          className="users-row-actions"
+          style={{
+            width: 30, height: 30, borderRadius: 8,
+            background: menuOpen ? 'rgba(255,255,255,0.06)' : 'transparent',
+            border: '1px solid rgba(255,255,255,0.08)',
+            color: 'var(--muted)', cursor: 'pointer', flexShrink: 0,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <DotsIcon />
+        </button>
+      </div>
+
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))',
+        gap: '0.45rem 0.85rem',
+        fontSize: '0.78rem',
+      }}>
+        <CardField label="Эрх">
+          <span style={{
+            display: 'inline-block', padding: '0.1rem 0.5rem', borderRadius: 999,
+            fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.04em',
+            background: badge.bg, color: badge.fg, border: `1px solid ${badge.border}`,
+          }}>{badge.label}</span>
+        </CardField>
+        <CardField label="Point">
+          <span style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>{u.points}</span>
+        </CardField>
+        <CardField label="Тамирчин">
+          <span style={{ color: athleteName ? 'var(--text)' : 'var(--muted)' }}>
+            {athleteName ?? 'Холбогдоогүй'}
+          </span>
+        </CardField>
+        <CardField label="Бүртгүүлсэн">
+          <span style={{ color: 'var(--muted)' }}>{formatDate(u.createdAt)}</span>
+        </CardField>
+      </div>
+
+      {menuOpen && (
+        <div
+          role="menu"
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: 'absolute', top: 50, right: 12,
+            minWidth: 220, zIndex: 100,
+            background: 'var(--card)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: 12, padding: 5,
+            boxShadow: '0 18px 44px rgba(0,0,0,0.5)',
+            display: 'flex', flexDirection: 'column', gap: 2,
+            textAlign: 'left',
+          }}
+        >
+          <MenuItem onClick={() => onAction('role')}>Role өөрчлөх</MenuItem>
+          <MenuItem onClick={() => onAction('add')}>Point олгох</MenuItem>
+          <MenuItem onClick={() => onAction('sub')}>Point хасах</MenuItem>
+          <MenuItem onClick={() => onAction('link')}>Тамирчинтай холбох</MenuItem>
+          {u.athleteId && <MenuItem onClick={() => onAction('unlink')} danger>Холбоо тасалах</MenuItem>}
+          <div style={{ height: 1, background: 'rgba(255,255,255,0.08)', margin: '3px 6px' }} />
+          <MenuItem onClick={() => onAction('view')}>Профайл харах</MenuItem>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CardField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div style={{ fontSize: '0.62rem', color: 'var(--muted)', letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '0.15rem' }}>
+        {label}
+      </div>
+      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{children}</div>
+    </div>
   );
 }
 
@@ -666,12 +846,12 @@ function RoleModal({
       {role === 'admin' && user.role !== 'admin' && (
         <div style={{
           marginTop: '0.85rem', padding: '0.65rem 0.8rem',
-          background: 'rgba(251,191,36,0.1)',
-          border: '1px solid rgba(251,191,36,0.4)',
-          borderRadius: 9, color: '#fbbf24',
-          fontSize: '0.82rem', lineHeight: 1.5,
+          background: 'rgba(239,68,68,0.1)',
+          border: '1px solid rgba(239,68,68,0.45)',
+          borderRadius: 9, color: '#ef4444',
+          fontSize: '0.82rem', lineHeight: 1.5, fontWeight: 600,
         }}>
-          ⚠️ Админ эрх олгох уу? Тэр хүн бүх зүйлд хандах боломжтой болно.
+          Анхаар! Админ эрх олгосноор тэр хүн бүх системд хандах болно.
         </div>
       )}
       <ModalActions
@@ -723,7 +903,7 @@ function PointsModal({
         </div>
         <div>
           <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--muted)', fontWeight: 600, marginBottom: '0.3rem' }}>
-            Тайлбар (заавал биш)
+            Шалтгаан (заавал биш)
           </label>
           <input
             type="text"
@@ -762,9 +942,13 @@ function AthleteLinkModal({
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<string | null>(user.athleteId);
 
-  const sorted = useMemo(() => {
+  // Filter all athletes, then cap to 10 results so the dropdown stays
+  // scannable. The full list is still searchable — admins narrow with the
+  // input rather than scrolling.
+  const RESULT_LIMIT = 10;
+  const matched = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return athletes
+    const list = athletes
       .slice()
       .sort((a, b) => a.name.localeCompare(b.name))
       .filter(a => {
@@ -772,6 +956,7 @@ function AthleteLinkModal({
         const name = `${a.name} ${a.lastName ?? ''}`.toLowerCase();
         return name.includes(q) || (a.wcaId ?? '').toLowerCase().includes(q);
       });
+    return { list: list.slice(0, RESULT_LIMIT), totalMatched: list.length };
   }, [athletes, search]);
 
   return (
@@ -788,16 +973,16 @@ function AthleteLinkModal({
       />
       <div style={{
         marginTop: '0.6rem',
-        maxHeight: 320, overflow: 'auto',
+        maxHeight: 360, overflow: 'auto',
         border: '1px solid rgba(255,255,255,0.08)',
         borderRadius: 10,
       }}>
-        {sorted.length === 0 ? (
+        {matched.list.length === 0 ? (
           <div style={{ padding: '1.2rem', textAlign: 'center', color: 'var(--muted)', fontSize: '0.86rem' }}>
             Тамирчин олдсонгүй.
           </div>
         ) : (
-          sorted.map(a => {
+          matched.list.map(a => {
             const isSelected = selected === a.id;
             const fullName = `${a.name}${a.lastName ? ' ' + a.lastName : ''}`;
             return (
@@ -807,19 +992,13 @@ function AthleteLinkModal({
                 style={{
                   width: '100%', textAlign: 'left',
                   display: 'flex', alignItems: 'center', gap: '0.6rem',
-                  padding: '0.6rem 0.75rem',
+                  padding: '0.55rem 0.75rem',
                   background: isSelected ? 'rgba(124,58,237,0.15)' : 'transparent',
                   border: 'none', borderBottom: '1px solid rgba(255,255,255,0.05)',
                   color: 'var(--text)', cursor: 'pointer', fontFamily: 'inherit',
                 }}
               >
-                <span style={{
-                  width: 28, height: 28, borderRadius: '50%',
-                  background: 'linear-gradient(135deg, var(--accent), var(--accent2))',
-                  color: '#fff', fontSize: '0.78rem', fontWeight: 800,
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  flexShrink: 0,
-                }}>{initialOf(a.name)}</span>
+                <AthleteThumb name={a.name} url={a.imageUrl ?? null} size={32} />
                 <span style={{ flex: '1 1 auto', fontWeight: 600 }}>{fullName}</span>
                 {a.wcaId && (
                   <span style={{ fontFamily: 'monospace', fontSize: '0.74rem', color: 'var(--muted)' }}>
@@ -831,6 +1010,11 @@ function AthleteLinkModal({
           })
         )}
       </div>
+      {matched.totalMatched > RESULT_LIMIT && (
+        <div style={{ marginTop: '0.45rem', fontSize: '0.74rem', color: 'var(--muted)' }}>
+          {matched.list.length} / {matched.totalMatched} харуулж байна — нэрээ оруулж нарийсгана уу.
+        </div>
+      )}
       <ModalActions
         confirmLabel="Хадгалах"
         confirmDisabled={!selected || selected === user.athleteId}
@@ -838,6 +1022,33 @@ function AthleteLinkModal({
         onConfirm={() => selected && onConfirm(selected)}
       />
     </ModalShell>
+  );
+}
+
+// Athlete-list thumbnail. Uses the same broken-image fallback as Avatar but
+// keyed off the URL so swapping athletes resets the broken flag cleanly.
+function AthleteThumb({ name, url, size }: { name: string; url: string | null; size: number }) {
+  const [broken, setBroken] = useState(false);
+  useEffect(() => { setBroken(false); }, [url]);
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      width: size, height: size, borderRadius: '50%', overflow: 'hidden',
+      background: 'linear-gradient(135deg, var(--accent), var(--accent2))',
+      color: '#fff', fontSize: size * 0.42, fontWeight: 800, lineHeight: 1,
+      flexShrink: 0,
+    }}>
+      {url && !broken ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={url}
+          alt=""
+          referrerPolicy="no-referrer"
+          onError={() => setBroken(true)}
+          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+        />
+      ) : initialOf(name)}
+    </span>
   );
 }
 
