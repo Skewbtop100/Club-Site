@@ -51,6 +51,9 @@ export default function ProfilePage() {
   const { user, loading, signOut, updateProfile } = useAuth();
 
   // ── Guards ──────────────────────────────────────────────────────────────
+  // Only signed-out users are bounced — admins explicitly stay here so
+  // they can view their own profile. The dropdown's separate "Админ хэсэг"
+  // entry is the only path to /admin/dashboard. Don't add a role check.
   useEffect(() => {
     if (!loading && !user) router.replace('/login');
   }, [loading, user, router]);

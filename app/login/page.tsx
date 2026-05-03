@@ -19,7 +19,7 @@ export default function LoginPage() {
 function LoginPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, signInWithGoogle } = useAuth();
+  const { signInWithGoogle } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -35,16 +35,20 @@ function LoginPageInner() {
       ? redirectParam
       : null;
 
-  // Auto-redirect once a Firebase user resolves (covers both fresh sign-ins
-  // and existing sessions restored on mount).
-  useEffect(() => {
-    if (!user) return;
-    if (user.role === 'admin') {
-      router.replace(safeRedirect || '/admin/dashboard');
-    } else {
-      router.replace(safeRedirect || '/profile');
-    }
-  }, [user, router, safeRedirect]);
+  // NOTE: We intentionally do NOT auto-redirect already-signed-in users
+  // away from /login on mount. Earlier this effect bounced any signed-in
+  // admin to /admin/dashboard, which caused this bug:
+  //   1. Admin clicks "Профайл" in the timer dropdown.
+  //   2. Anything that briefly routed through /login (back-button, deep
+  //      link, redirect chain) re-fired this effect.
+  //   3. Effect saw role === 'admin' and replaced /profile with
+  //      /admin/dashboard.
+  // The actual sign-in flows handle their own post-success redirect:
+  // `doGoogleSignIn` below (admin → /admin/dashboard, others → /profile)
+  // and `doLogin` for the legacy username/password form. So removing this
+  // mount-time auto-redirect is safe — the only behavior we lose is
+  // automatically bouncing an already-signed-in user who lands here, which
+  // is fine: they just see the form and can sign in again or navigate away.
 
   // Legacy localStorage-based auto-login (admin/athlete) — preserved.
   useEffect(() => {
