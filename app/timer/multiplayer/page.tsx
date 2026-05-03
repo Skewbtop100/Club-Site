@@ -492,6 +492,37 @@ async function migrateHostIfOrphaned(roomCode: string): Promise<void> {
   }
 }
 
+// ── Leave-confirmation kind ───────────────────────────────────────────────
+// Picks the right confirmation copy based on the user's role + room state.
+// Priority: last > host > active > immediate. The most consequential
+// outcome wins (closing the room beats migrating it; migrating beats DNF).
+type LeaveKind = 'immediate' | 'active' | 'host' | 'last';
+
+function decideLeaveKind(room: RoomData | null, userId: string): LeaveKind {
+  if (!room || !userId) return 'immediate';
+  const memberCount = Object.keys(room.members || {}).length;
+  if (memberCount <= 1) return 'last';
+  const isHost = room.host === userId;
+  if (isHost) return 'host';
+  if (room.status === 'racing') return 'active';
+  return 'immediate';
+}
+
+// Mirror of migrateHostIfOrphaned's tie-break: earliest joinedAt wins,
+// excluding the leaving user. Used purely to preview the next host's name
+// in the confirmation modal — actual assignment happens in the transaction.
+function previewNextHostName(room: RoomData | null, leavingUserId: string): string {
+  if (!room) return '';
+  const others = Object.entries(room.members || {}).filter(([uid]) => uid !== leavingUserId);
+  if (others.length === 0) return '';
+  others.sort((a, b) => {
+    const aJ = a[1].joinedAt ?? Number.MAX_SAFE_INTEGER;
+    const bJ = b[1].joinedAt ?? Number.MAX_SAFE_INTEGER;
+    return aJ - bJ;
+  });
+  return others[0][1].name || 'Дараагийн тоглогч';
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────
 export default function MultiplayerPage() {
   // Suspense boundary required for useSearchParams in Next 16.
@@ -533,7 +564,13 @@ function MultiplayerPageInner() {
   // Settings + Pause modal state.
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pauseOpen, setPauseOpen] = useState(false);
-  const [exitConfirmOpen, setExitConfirmOpen] = useState(false);
+  // Smart leave-confirmation kind. null = no modal; otherwise the kind
+  // dictates the title/body/confirm-label shown in MpLeaveConfirmModal.
+  // 'immediate' is excluded because it bypasses the modal entirely.
+  const [leaveModalKind, setLeaveModalKind] = useState<Exclude<LeaveKind, 'immediate'> | null>(null);
+  // Fade-out gate. Flipped true right before we router.push('/timer') after
+  // a confirmed leave so the room view dissolves instead of cutting away.
+  const [isLeaving, setIsLeaving] = useState(false);
 
   // Responsive: ≤1024px gets the mobile/tablet single-column layout (so iPads
   // and other tablets share the bottom-tab racing UI). Desktop above 1024px
@@ -568,6 +605,23 @@ function MultiplayerPageInner() {
   // timer state) so a player waiting on opponents at solve N+1 doesn't lose
   // the screen either. Released on lobby/waiting/results and on unmount.
   useWakeLock(view === 'room' && room?.status === 'racing');
+
+  // Prompt on browser close / refresh / hard navigation, but ONLY during an
+  // active round. Waiting room and results screen don't risk DNFs from a
+  // sudden exit, so we skip the prompt there to keep navigation snappy.
+  // Modern browsers ignore the custom message and show their own generic
+  // "Leave site?" dialog — assigning returnValue is what triggers the prompt.
+  useEffect(() => {
+    if (!(view === 'room' && room?.status === 'racing')) return;
+    const msg = 'Round дуусаагүй байна. Гарах уу?';
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = msg;
+      return msg;
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [view, room?.status]);
 
   // Initial mount: pull user id + saved name
   useEffect(() => {
@@ -770,10 +824,11 @@ function MultiplayerPageInner() {
     prevStatusRef.current = cur;
   }, [now, room?.members, userId, pushNotif]);
 
-  // Removal-due-to-disconnect detection: track the previous snapshot of
-  // members. When a uid is gone and their *last seen* status was
-  // 'disconnected', we attribute the removal to a kick and toast the room.
-  // Voluntary leaves (status was 'online' at removal time) are silent.
+  // Member-removal detection: track the previous snapshot of members. When
+  // a uid is gone we toast the rest of the room — distinguishing a kick
+  // (last-seen status was 'disconnected') from a voluntary leave (online or
+  // idle at removal time) so the wording matches what the rest of the room
+  // actually saw happen.
   const prevMembersRef = useRef<Record<string, { name: string; status: ConnectionStatus }>>({});
   useEffect(() => {
     if (!room?.members) {
@@ -787,6 +842,8 @@ function MultiplayerPageInner() {
       if (uid === userId) continue;
       if (prev[uid].status === 'disconnected') {
         pushNotif(`${prev[uid].name} was removed (disconnected)`, 'warn');
+      } else {
+        pushNotif(`${prev[uid].name} left the room`, 'info');
       }
     }
     const next: typeof prev = {};
@@ -1006,15 +1063,15 @@ function MultiplayerPageInner() {
     router.push('/timer');
   }, [roomCode, userId, router]);
 
-  // Exit permanently — remove our slot. If the host exits and they're the
-  // last person, the room is deleted; otherwise we just remove the member
-  // entry and let remaining clients run the migration transaction.
+  // Exit permanently — remove our slot. If we're the last person in the
+  // room (regardless of host status) the room is deleted; otherwise we just
+  // remove the member entry and let remaining clients run the migration
+  // transaction (which also picks the next host when needed).
   const exitPermanently = useCallback(async () => {
     if (!roomCode || !userId) return;
-    const isHost = room?.host === userId;
     const memberCount = Object.keys(room?.members || {}).length;
     try {
-      if (isHost && memberCount <= 1) {
+      if (memberCount <= 1) {
         await remove(ref(rtdb, `rooms/${roomCode}`));
       } else {
         await remove(ref(rtdb, `rooms/${roomCode}/members/${userId}`));
@@ -1028,8 +1085,35 @@ function MultiplayerPageInner() {
     setView('lobby');
     setPendingRejoin('');
     setPauseOpen(false);
-    setExitConfirmOpen(false);
-  }, [roomCode, userId, room?.host]);
+    setLeaveModalKind(null);
+  }, [roomCode, userId, room?.members]);
+
+  // Single entry point for the user-initiated leave flow. Picks the right
+  // confirmation copy based on context (waiting/active/host/last). For the
+  // 'immediate' case (waiting room, non-host, others remain) we skip the
+  // modal entirely — same friction as the old plain Leave button.
+  const requestLeave = useCallback(() => {
+    const kind = decideLeaveKind(room, userId);
+    if (kind === 'immediate') {
+      setPauseOpen(false);
+      leaveRoom();
+      return;
+    }
+    setLeaveModalKind(kind);
+  }, [room, userId, leaveRoom]);
+
+  // Confirmed-leave path (any modal kind). Plays a short fade-out, performs
+  // the RTDB write (delete room if last, else remove member), then redirects
+  // out of /timer/multiplayer entirely. Other clients see "[name] left the
+  // room" via the prevMembers detector below.
+  const confirmedLeave = useCallback(async () => {
+    setLeaveModalKind(null);
+    setPauseOpen(false);
+    setIsLeaving(true);
+    await new Promise(r => window.setTimeout(r, 240));
+    await exitPermanently();
+    router.push('/timer');
+  }, [exitPermanently, router]);
 
   // Rejoin a previously-active room. Re-adds our member entry (which was
   // removed by onDisconnect when we last left) and switches to the room view.
@@ -1364,6 +1448,9 @@ function MultiplayerPageInner() {
       background: C.bg, color: C.text,
       fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
       display: 'flex', flexDirection: 'column',
+      opacity: isLeaving ? 0 : 1,
+      transition: 'opacity 0.24s ease-out',
+      pointerEvents: isLeaving ? 'none' : undefined,
     }}>
       {/* The racing screen renders its own header (settings + pause icons)
           on every breakpoint, so we suppress the global TopBar there. */}
@@ -1371,7 +1458,7 @@ function MultiplayerPageInner() {
         <TopBar
           roomCode={view === 'room' ? roomCode : ''}
           onBack={() => {
-            if (view === 'room') leaveRoom();
+            if (view === 'room') requestLeave();
             else if (view === 'lobby') router.push('/timer');
             else { setView('lobby'); setErrorMsg(''); }
           }}
@@ -1456,7 +1543,7 @@ function MultiplayerPageInner() {
             onReadyForNext={readyForNext}
             onNextRound={nextRound}
             onPlayAgain={playAgain}
-            onLeave={leaveRoom}
+            onLeave={requestLeave}
           />
         )}
       </main>
@@ -1485,14 +1572,16 @@ function MultiplayerPageInner() {
           isMobile={isMobile}
           onResume={() => setPauseOpen(false)}
           onLeaveTemporarily={() => { setPauseOpen(false); leaveTemporarily(); }}
-          onExit={() => { setExitConfirmOpen(true); }}
+          onExit={requestLeave}
         />
       )}
-      {exitConfirmOpen && (
-        <MpExitConfirmModal
+      {leaveModalKind && (
+        <MpLeaveConfirmModal
           isMobile={isMobile}
-          onCancel={() => setExitConfirmOpen(false)}
-          onConfirm={() => { setExitConfirmOpen(false); exitPermanently(); }}
+          kind={leaveModalKind}
+          nextHostName={previewNextHostName(room, userId)}
+          onCancel={() => setLeaveModalKind(null)}
+          onConfirm={confirmedLeave}
         />
       )}
     </div>
@@ -3244,56 +3333,72 @@ function MpPauseModal({
   );
 }
 
-function MpExitConfirmModal({
-  isMobile, onCancel, onConfirm,
+// Context-aware leave confirmation. Same shell, different copy/colours per
+// kind — pulled from one place so wording stays consistent across TopBar,
+// Pause modal, and the Results-screen Leave button.
+function MpLeaveConfirmModal({
+  isMobile, kind, nextHostName, onCancel, onConfirm,
 }: {
   isMobile: boolean;
+  kind: Exclude<LeaveKind, 'immediate'>;
+  nextHostName: string;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const [text, setText] = useState('');
-  const ok = text.trim().toUpperCase() === 'LEAVE';
+  const config = (() => {
+    switch (kind) {
+      case 'active':
+        return {
+          title: 'Гарах уу?',
+          body: 'Round дуусаагүй байна. Гарвал үлдсэн solve-ууд DNF болно.',
+          confirmLabel: 'Гарах',
+          danger: true,
+        };
+      case 'host':
+        return {
+          title: 'Host эрх шилжүүлэх',
+          body: `Гарвал host эрх ${nextHostName || 'дараагийн тоглогч'}-д шилжинэ.`,
+          confirmLabel: 'Гарах',
+          danger: false,
+        };
+      case 'last':
+        return {
+          title: 'Room хаах',
+          body: 'Та сүүлчийн хүн байна. Гарвал room устгагдана.',
+          confirmLabel: 'Room хаах',
+          danger: true,
+        };
+    }
+  })();
+
   return (
-    <ModalShell isMobile={isMobile} title="Exit Race" onClose={onCancel} maxWidth={420}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-        <div style={{ fontSize: '0.92rem', color: C.text, lineHeight: 1.5 }}>
-          This permanently removes you from the race. To confirm, type <strong style={{ color: C.danger }}>LEAVE</strong> below.
+    <ModalShell isMobile={isMobile} title={config.title} onClose={onCancel} maxWidth={360}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <div style={{ fontSize: '0.92rem', color: C.text, lineHeight: 1.55 }}>
+          {config.body}
         </div>
-        <input
-          autoFocus
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Type LEAVE"
-          onKeyDown={(e) => { if (e.key === 'Enter' && ok) onConfirm(); }}
-          style={{
-            background: C.cardAlt, color: C.text,
-            border: `1px solid ${ok ? C.danger : C.border}`, borderRadius: 10,
-            padding: '0.7rem 0.85rem', fontSize: '1rem',
-            fontFamily: 'JetBrains Mono, monospace', outline: 'none',
-            letterSpacing: '0.15em', textAlign: 'center', textTransform: 'uppercase',
-          }}
-        />
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
           <button
             onClick={onCancel}
+            autoFocus
             style={{
               background: 'transparent', color: C.text,
               border: `1px solid ${C.border}`, borderRadius: 10,
-              padding: '0.7rem 0.85rem', fontSize: '0.92rem',
+              padding: '0.75rem 0.85rem', fontSize: '0.95rem',
               fontFamily: 'inherit', cursor: 'pointer', fontWeight: 700,
             }}
-          >Cancel</button>
+          >Үргэлжлүүлэх</button>
           <button
             onClick={onConfirm}
-            disabled={!ok}
             style={{
-              background: ok ? C.danger : C.cardAlt,
-              color: ok ? '#fff' : C.mutedDim,
-              border: `1px solid ${ok ? C.danger : C.border}`, borderRadius: 10,
-              padding: '0.7rem 0.85rem', fontSize: '0.92rem',
-              fontFamily: 'inherit', cursor: ok ? 'pointer' : 'not-allowed', fontWeight: 800,
+              background: config.danger ? C.danger : 'transparent',
+              color: config.danger ? '#fff' : C.text,
+              border: `1px solid ${config.danger ? C.danger : C.border}`,
+              borderRadius: 10,
+              padding: '0.75rem 0.85rem', fontSize: '0.95rem',
+              fontFamily: 'inherit', cursor: 'pointer', fontWeight: 800,
             }}
-          >Exit Race</button>
+          >{config.confirmLabel}</button>
         </div>
       </div>
     </ModalShell>
