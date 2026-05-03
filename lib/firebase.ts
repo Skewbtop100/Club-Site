@@ -1,6 +1,7 @@
 import { initializeApp, getApps } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
 import { getDatabase } from 'firebase/database';
+import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 
 const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
 const databaseURL =
@@ -28,3 +29,11 @@ if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 export const db = getFirestore(app);
 export const rtdb = getDatabase(app);
+
+// IMPORTANT: Google sign-in must be enabled in Firebase Console
+// (Authentication → Sign-in method → Google → Enable). The
+// authDomain in env vars must also be added to Firebase Auth's
+// authorised domains list, or popup sign-in will fail with
+// auth/unauthorized-domain.
+export const auth = getAuth(app);
+export const googleProvider = new GoogleAuthProvider();

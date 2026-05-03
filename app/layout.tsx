@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { LangProvider } from '@/lib/i18n';
+import { AuthProvider } from '@/lib/auth-context';
 import ConditionalNavbar from '@/components/layout/ConditionalNavbar';
 import ThemeProvider from '@/components/layout/ThemeProvider';
 
@@ -23,10 +24,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         <ThemeProvider />
-        <LangProvider>
-          <ConditionalNavbar />
-          <main>{children}</main>
-        </LangProvider>
+        <AuthProvider>
+          <LangProvider>
+            <ConditionalNavbar />
+            <main>{children}</main>
+          </LangProvider>
+        </AuthProvider>
       </body>
     </html>
   );

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useLang } from '@/lib/i18n';
+import { useAuth } from '@/lib/auth-context';
 import ThemeToggle from './ThemeToggle';
 import LangToggle from './LangToggle';
 
@@ -22,20 +23,33 @@ function getSessionRole(): SessionRole {
   return null;
 }
 
+function initialOf(name: string | null | undefined): string {
+  const trimmed = (name ?? '').trim();
+  if (!trimmed) return '?';
+  const cp = trimmed.codePointAt(0);
+  return cp ? String.fromCodePoint(cp).toUpperCase() : '?';
+}
+
 export default function Navbar() {
   const [open, setOpen] = useState(false);
   const [role, setRole] = useState<SessionRole>(null);
+  const [avatarBroken, setAvatarBroken] = useState(false);
   const router = useRouter();
   const { t } = useLang();
+  const { user, signOut: firebaseSignOut } = useAuth();
 
   useEffect(() => {
     setRole(getSessionRole());
-  }, []);
+  }, [user]);
 
-  function signOut() {
+  // Reset broken-avatar fallback when the user (or their photoURL) changes.
+  useEffect(() => { setAvatarBroken(false); }, [user?.photoURL]);
+
+  async function signOut() {
     localStorage.removeItem('isAdmin');
     localStorage.removeItem('cubeAthleteUser');
     localStorage.removeItem('currentUser');
+    try { await firebaseSignOut(); } catch (err) { console.error('[nav] signOut', err); }
     setRole(null);
     setOpen(false);
     router.push('/');
@@ -82,9 +96,11 @@ export default function Navbar() {
         <div style={{ position: 'relative' }}>
           <button
             onClick={() => setOpen((v) => !v)}
+            aria-label={user ? user.displayName : t('nav.sign-in')}
             style={{
               display: 'flex', alignItems: 'center', gap: '0.45rem',
-              padding: '0.38rem 0.75rem 0.38rem 0.6rem', borderRadius: '10px',
+              padding: user ? '0.22rem 0.55rem 0.22rem 0.28rem' : '0.38rem 0.75rem 0.38rem 0.6rem',
+              borderRadius: user ? '999px' : '10px',
               border: '1px solid rgba(255,255,255,0.1)',
               background: open ? 'rgba(124,58,237,0.12)' : 'rgba(255,255,255,0.05)',
               borderColor: open ? 'rgba(124,58,237,0.45)' : 'rgba(255,255,255,0.1)',
@@ -93,13 +109,37 @@ export default function Navbar() {
               transition: 'background 0.2s, border-color 0.2s',
             }}
           >
-            <span>
-              {role === 'admin'
-                ? t('nav.admin')
-                : role === 'athlete' || role === 'results_entry'
-                ? t('nav.my-profile-short')
-                : t('nav.sign-in')}
-            </span>
+            {user ? (
+              <span style={{
+                width: 32, height: 32, borderRadius: '50%',
+                overflow: 'hidden', flexShrink: 0,
+                background: 'linear-gradient(135deg, var(--accent), var(--accent2))',
+                color: '#fff', fontSize: '0.95rem', fontWeight: 700,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                lineHeight: 1, letterSpacing: 0,
+              }}>
+                {user.photoURL && !avatarBroken ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={user.photoURL}
+                    alt=""
+                    referrerPolicy="no-referrer"
+                    onError={() => setAvatarBroken(true)}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
+                ) : (
+                  initialOf(user.displayName)
+                )}
+              </span>
+            ) : (
+              <span>
+                {role === 'admin'
+                  ? t('nav.admin')
+                  : role === 'athlete' || role === 'results_entry'
+                  ? t('nav.my-profile-short')
+                  : t('nav.sign-in')}
+              </span>
+            )}
             <svg
               viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}
               style={{ width: 13, height: 13, opacity: 0.5, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.22s' }}
@@ -123,7 +163,77 @@ export default function Navbar() {
                 animation: 'ndFadeIn 0.14s cubic-bezier(.4,0,.2,1)',
               }}>
 
-                {role === null && (
+                {user && (
+                  <>
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: '0.55rem',
+                      padding: '0.5rem 0.65rem 0.6rem',
+                    }}>
+                      <span style={{
+                        width: 32, height: 32, borderRadius: '50%',
+                        overflow: 'hidden', flexShrink: 0,
+                        background: 'linear-gradient(135deg, var(--accent), var(--accent2))',
+                        color: '#fff', fontSize: '0.95rem', fontWeight: 700,
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        {user.photoURL && !avatarBroken ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={user.photoURL}
+                            alt=""
+                            referrerPolicy="no-referrer"
+                            onError={() => setAvatarBroken(true)}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+                        ) : (
+                          initialOf(user.displayName)
+                        )}
+                      </span>
+                      <div style={{ minWidth: 0, flex: '1 1 auto' }}>
+                        <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {user.displayName}
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {user.email}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ height: '1px', background: 'rgba(255,255,255,0.07)', margin: '3px 6px' }} />
+                    <a
+                      href="/profile"
+                      className="nd-link"
+                      style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.58rem 0.65rem', borderRadius: '9px', fontSize: '0.86rem', fontWeight: 600, color: 'var(--text)', textDecoration: 'none' }}
+                      onClick={() => setOpen(false)}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
+                        <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/>
+                      </svg>
+                      Profile
+                    </a>
+                    {user.role === 'admin' && (
+                      <a
+                        href="/admin/dashboard"
+                        className="nd-link"
+                        style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.58rem 0.65rem', borderRadius: '9px', fontSize: '0.86rem', fontWeight: 600, color: 'var(--text)', textDecoration: 'none' }}
+                        onClick={() => setOpen(false)}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
+                          <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+                        </svg>
+                        {t('nav.admin-short')}
+                      </a>
+                    )}
+                    <div style={{ height: '1px', background: 'rgba(255,255,255,0.07)', margin: '3px 6px' }} />
+                    <button onClick={signOut} className="nd-link" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.58rem 0.65rem', borderRadius: '9px', fontSize: '0.86rem', fontWeight: 600, color: '#f87171', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', width: '100%', textAlign: 'left' }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>
+                      </svg>
+                      Logout
+                    </button>
+                  </>
+                )}
+
+                {!user && role === null && (
                   <button
                     onClick={() => { setOpen(false); router.push('/login'); }}
                     className="nd-link"
@@ -138,11 +248,11 @@ export default function Navbar() {
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
                       <path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3" />
                     </svg>
-                    {t('nav.sign-in')}
+                    Login
                   </button>
                 )}
 
-                {role === 'admin' && (
+                {!user && role === 'admin' && (
                   <>
                     <a
                       href="/admin/dashboard"
@@ -165,7 +275,7 @@ export default function Navbar() {
                   </>
                 )}
 
-                {(role === 'athlete' || role === 'results_entry') && (
+                {!user && (role === 'athlete' || role === 'results_entry') && (
                   <>
                     <a
                       href="/dashboard"

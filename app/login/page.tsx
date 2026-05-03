@@ -1,19 +1,52 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { findUserByUsername } from '@/lib/firebase/services/users';
+import { useAuth } from '@/lib/auth-context';
 import ThemeToggle from '@/components/layout/ThemeToggle';
 import LangToggle from '@/components/layout/LangToggle';
 
 export default function LoginPage() {
+  // Next 16 requires useSearchParams to live inside a Suspense boundary.
+  return (
+    <Suspense fallback={<div style={{ minHeight: '100vh', background: 'var(--bg)' }} />}>
+      <LoginPageInner />
+    </Suspense>
+  );
+}
+
+function LoginPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const { user, signInWithGoogle } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
-  // Auto-login check
+  // ?redirect=/foo lets other pages bounce here and come back. We sanitise
+  // to relative paths only so a crafted ?redirect=https://evil can't open-
+  // redirect us off-site.
+  const redirectParam = searchParams.get('redirect');
+  const safeRedirect =
+    redirectParam && redirectParam.startsWith('/') && !redirectParam.startsWith('//')
+      ? redirectParam
+      : null;
+
+  // Auto-redirect once a Firebase user resolves (covers both fresh sign-ins
+  // and existing sessions restored on mount).
+  useEffect(() => {
+    if (!user) return;
+    if (user.role === 'admin') {
+      router.replace(safeRedirect || '/admin/dashboard');
+    } else {
+      router.replace(safeRedirect || '/profile');
+    }
+  }, [user, router, safeRedirect]);
+
+  // Legacy localStorage-based auto-login (admin/athlete) — preserved.
   useEffect(() => {
     try {
       const session = JSON.parse(localStorage.getItem('cubeAthleteUser') || 'null');
@@ -26,6 +59,32 @@ export default function LoginPage() {
       localStorage.removeItem('cubeAthleteUser');
     }
   }, [router]);
+
+  async function doGoogleSignIn() {
+    setError('');
+    setGoogleLoading(true);
+    try {
+      const result = await signInWithGoogle();
+      if (!result) return;
+      // Mirror admin status into the legacy localStorage flag so
+      // /admin/dashboard's existing gate still passes for Google admins
+      // without changing the dashboard internals.
+      if (result.role === 'admin') {
+        try { localStorage.setItem('isAdmin', 'true'); } catch {}
+        router.replace(safeRedirect || '/admin/dashboard');
+      } else {
+        router.replace(safeRedirect || '/profile');
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // Popup-closed-by-user is benign — don't scare the user.
+      if (!/popup-closed-by-user|cancelled-popup-request/i.test(msg)) {
+        setError('Google sign-in failed: ' + msg);
+      }
+    } finally {
+      setGoogleLoading(false);
+    }
+  }
 
   async function doLogin() {
     setError('');
@@ -88,6 +147,46 @@ export default function LoginPage() {
               WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
             }}>CUBE MN</div>
             <div style={{ fontSize: '0.82rem', color: 'var(--muted)', marginTop: '0.3rem' }}>Athlete Portal</div>
+          </div>
+
+          {/* Google sign-in (primary path for members) */}
+          <button
+            onClick={doGoogleSignIn}
+            disabled={googleLoading}
+            style={{
+              width: '100%', padding: '0.75rem 1rem',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.6rem',
+              background: '#fff', color: '#1f1f1f',
+              border: '1px solid #dadce0', borderRadius: '9px',
+              fontSize: '0.95rem', fontWeight: 600, fontFamily: 'inherit',
+              cursor: googleLoading ? 'not-allowed' : 'pointer',
+              opacity: googleLoading ? 0.65 : 1,
+              boxShadow: '0 1px 2px rgba(0,0,0,0.08)',
+              transition: 'opacity 0.15s, box-shadow 0.15s',
+            }}
+            onMouseEnter={e => { if (!googleLoading) e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.16)'; }}
+            onMouseLeave={e => { e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.08)'; }}
+          >
+            {/* Google "G" — official 4-colour mark */}
+            <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+              <path fill="#4285F4" d="M45.12 24.5c0-1.56-.14-3.06-.4-4.5H24v8.51h11.84c-.51 2.75-2.06 5.08-4.39 6.64v5.52h7.11c4.16-3.83 6.56-9.47 6.56-16.17z"/>
+              <path fill="#34A853" d="M24 46c5.94 0 10.92-1.97 14.56-5.33l-7.11-5.52c-1.97 1.32-4.49 2.1-7.45 2.1-5.73 0-10.58-3.87-12.31-9.07H4.34v5.7C7.96 41.07 15.4 46 24 46z"/>
+              <path fill="#FBBC05" d="M11.69 28.18c-.44-1.32-.69-2.73-.69-4.18s.25-2.86.69-4.18v-5.7H4.34C2.85 17.09 2 20.45 2 24s.85 6.91 2.34 9.88l7.35-5.7z"/>
+              <path fill="#EA4335" d="M24 9.75c3.23 0 6.13 1.11 8.41 3.29l6.31-6.31C34.91 3.18 29.93 1 24 1 15.4 1 7.96 5.93 4.34 13.12l7.35 5.7C13.42 13.62 18.27 9.75 24 9.75z"/>
+            </svg>
+            <span>{googleLoading ? 'Signing in…' : 'Sign in with Google'}</span>
+          </button>
+
+          {/* Divider */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '0.7rem',
+            margin: '1.4rem 0 1rem',
+            color: 'var(--muted)', fontSize: '0.72rem',
+            letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
+          }}>
+            <span style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.08)' }} />
+            <span>or admin login</span>
+            <span style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.08)' }} />
           </div>
 
           {/* Username */}
