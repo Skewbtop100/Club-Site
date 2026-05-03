@@ -29,10 +29,15 @@ export interface EarnRule {
   dailyLimit?: number;
 }
 
+// Lifetime solves the user must have committed before Ao5-PB awards
+// activate. Prevents low-effort farming (a fresh account would otherwise
+// hit a string of trivial Ao5 PBs in their first session).
+export const AO5_PB_THRESHOLD = 100;
+
 const EARN_RULES: EarnRule[] = [
   { reason: 'daily_login',    amount:   5, description: 'Өдөр тутмын бонус' },
   { reason: 'solve',          amount:   1, description: 'Solve хийсний шагнал', dailyLimit: 50 },
-  { reason: 'pb_set',         amount:  20, description: 'Шинэ хувийн рекорд (PB)' },
+  { reason: 'ao5_pb_set',     amount:  20, description: 'Ao5 хувийн рекорд (100+ solve хийсний дараа)' },
   { reason: 'mp_played',      amount:  10, description: 'Multiplayer тоглолт' },
   { reason: 'mp_won',         amount:  25, description: 'Multiplayer хожсон' },
   { reason: 'achievement',    amount:  50, description: 'Амжилт нээсэн' },
@@ -234,11 +239,20 @@ export async function awardDailyLoginIfNew(uid: string): Promise<IdempotentResul
 }
 
 /**
- * Per-solve point — capped at `dailyLimit` per local calendar day. Counter
- * lives at users/{uid}.solvesToday + lastSolveDate. If the date has
- * rolled over, the counter resets to 1.
+ * Per-solve bookkeeping. Every call increments `users/{uid}.totalSolves`
+ * by 1 (regardless of whether a point was actually awarded — the lifetime
+ * counter must never stall on the daily cap, since downstream gates like
+ * the Ao5-PB threshold depend on it).
+ *
+ * Points are awarded only when the daily cap (default 50) hasn't been
+ * hit. Counter lives at users/{uid}.solvesToday + lastSolveDate; rolls
+ * over when the local calendar day changes.
  */
-export async function awardSolvePointIfUnderLimit(uid: string): Promise<IdempotentResult> {
+export interface SolvePointResult extends IdempotentResult {
+  totalSolves: number;
+}
+
+export async function awardSolvePointIfUnderLimit(uid: string): Promise<SolvePointResult> {
   if (!uid) throw new Error('awardSolvePointIfUnderLimit: uid is required');
   const rule = getEarnRule('solve')!;
   const limit = rule.dailyLimit ?? 50;
@@ -246,13 +260,19 @@ export async function awardSolvePointIfUnderLimit(uid: string): Promise<Idempote
   return runTransaction(db, async t => {
     const userRef = doc(db, 'users', uid);
     const snap = await t.get(userRef);
-    if (!snap.exists()) return { awarded: false, balance: 0 };
+    if (!snap.exists()) return { awarded: false, balance: 0, totalSolves: 0 };
     const data = snap.data();
     const lastDate = tsValueToDate(data.lastSolveDate);
     const sameDay = lastDate ? ymd(lastDate) === today : false;
     const todaySoFar = sameDay ? (typeof data.solvesToday === 'number' ? data.solvesToday : 0) : 0;
+    const currentTotalSolves = typeof data.totalSolves === 'number' ? data.totalSolves : 0;
+    const newTotalSolves = currentTotalSolves + 1;
     if (todaySoFar >= limit) {
-      return { awarded: false, balance: data.points ?? 0 };
+      // Cap hit — no point award and no `solvesToday` bump (we're already
+      // past the cap), but we still bump the lifetime counter so the
+      // Ao5-PB threshold keeps progressing on heavy-grind days.
+      t.update(userRef, { totalSolves: newTotalSolves });
+      return { awarded: false, balance: data.points ?? 0, totalSolves: newTotalSolves };
     }
     const current = typeof data.points === 'number' ? data.points : 0;
     const newBalance = current + rule.amount;
@@ -260,6 +280,7 @@ export async function awardSolvePointIfUnderLimit(uid: string): Promise<Idempote
       points: newBalance,
       solvesToday: todaySoFar + 1,
       lastSolveDate: serverTimestamp(),
+      totalSolves: newTotalSolves,
     });
     const txRef = doc(collection(db, 'pointTransactions'));
     t.set(txRef, {
@@ -271,24 +292,105 @@ export async function awardSolvePointIfUnderLimit(uid: string): Promise<Idempote
       balanceAfter: newBalance,
       metadata: {},
     });
-    return { awarded: true, balance: newBalance };
+    return { awarded: true, balance: newBalance, totalSolves: newTotalSolves };
   });
 }
 
 /**
- * PB award — caller is responsible for actually detecting the PB. This
- * helper just wraps awardPoints with the canonical reason/amount and
- * captures `event`, `ms`, and `previousBest` in metadata.
+ * Ao5-PB award — gated on two checks evaluated inside a single
+ * transaction:
+ *   1. users/{uid}.totalSolves >= AO5_PB_THRESHOLD (100); else
+ *      `awarded: false, reason: 'below_threshold'`.
+ *   2. The provided `ms` is strictly faster than the previously persisted
+ *      `bestAo5ByEvent[event]` (or there is no record yet for this event);
+ *      else `awarded: false, reason: 'not_better'`.
+ *
+ * The persisted per-event best lives at `users/{uid}.bestAo5ByEvent` and
+ * doubles as the source of truth for "is this an Ao5 PB" — checking it
+ * inside the transaction prevents farming via repeated session resets.
  */
-export async function awardPbPoints(
+export type Ao5PbReason = 'below_threshold' | 'not_better' | 'awarded';
+
+export interface Ao5PbResult {
+  awarded: boolean;
+  reason: Ao5PbReason;
+  balance: number;
+  totalSolves: number;
+  threshold: number;
+  previousBest: number | null;
+}
+
+export async function awardAo5PbIfEligible(
   uid: string,
   event: string,
   ms: number,
-  previousBest: number | null,
-): Promise<AwardResult> {
-  const rule = getEarnRule('pb_set')!;
-  return awardPoints(uid, rule.amount, 'pb_set', rule.description, {
-    event, ms, previousBest,
+): Promise<Ao5PbResult> {
+  if (!uid) throw new Error('awardAo5PbIfEligible: uid is required');
+  if (!event) throw new Error('awardAo5PbIfEligible: event is required');
+  if (!Number.isFinite(ms) || ms <= 0) {
+    throw new Error('awardAo5PbIfEligible: ms must be a positive number');
+  }
+  const rule = getEarnRule('ao5_pb_set')!;
+  return runTransaction(db, async t => {
+    const userRef = doc(db, 'users', uid);
+    const snap = await t.get(userRef);
+    if (!snap.exists()) {
+      return {
+        awarded: false, reason: 'below_threshold' as Ao5PbReason,
+        balance: 0, totalSolves: 0, threshold: AO5_PB_THRESHOLD, previousBest: null,
+      };
+    }
+    const data = snap.data();
+    const totalSolves = typeof data.totalSolves === 'number' ? data.totalSolves : 0;
+    const bestByEvent = (data.bestAo5ByEvent && typeof data.bestAo5ByEvent === 'object')
+      ? data.bestAo5ByEvent as Record<string, number>
+      : {};
+    const previousBest = typeof bestByEvent[event] === 'number' ? bestByEvent[event] : null;
+    if (totalSolves < AO5_PB_THRESHOLD) {
+      // Still record the best Ao5 so that once the user crosses the
+      // threshold, only genuinely-better Ao5s award. Without this, every
+      // pre-threshold Ao5 (no matter how slow) would be "eligible" the
+      // moment totalSolves hits 100, since bestAo5ByEvent would still be
+      // unset.
+      if (previousBest === null || ms < previousBest) {
+        t.update(userRef, {
+          bestAo5ByEvent: { ...bestByEvent, [event]: ms },
+        });
+      }
+      return {
+        awarded: false, reason: 'below_threshold',
+        balance: typeof data.points === 'number' ? data.points : 0,
+        totalSolves, threshold: AO5_PB_THRESHOLD, previousBest,
+      };
+    }
+    if (previousBest !== null && ms >= previousBest) {
+      return {
+        awarded: false, reason: 'not_better',
+        balance: typeof data.points === 'number' ? data.points : 0,
+        totalSolves, threshold: AO5_PB_THRESHOLD, previousBest,
+      };
+    }
+    const current = typeof data.points === 'number' ? data.points : 0;
+    const newBalance = current + rule.amount;
+    t.update(userRef, {
+      points: newBalance,
+      bestAo5ByEvent: { ...bestByEvent, [event]: ms },
+    });
+    const txRef = doc(collection(db, 'pointTransactions'));
+    t.set(txRef, {
+      uid,
+      amount: rule.amount,
+      reason: 'ao5_pb_set',
+      description: rule.description,
+      timestamp: serverTimestamp(),
+      balanceAfter: newBalance,
+      metadata: { event, ms, previousBest },
+    });
+    return {
+      awarded: true, reason: 'awarded',
+      balance: newBalance, totalSolves,
+      threshold: AO5_PB_THRESHOLD, previousBest,
+    };
   });
 }
 

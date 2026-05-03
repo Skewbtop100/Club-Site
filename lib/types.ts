@@ -76,10 +76,13 @@ export interface MatchHistory {
 // can be reconstructed without scanning the whole table. `reason` is the
 // machine-readable kind (must match a key in points.getEarnRules), while
 // `description` is the human-readable string shown in the UI.
+// Legacy 'pb_set' rows may exist in pointTransactions from before the
+// Ao5-PB migration. The string union is open-ended so historical rows
+// can still be read; new awards must use 'ao5_pb_set'.
 export type PointReason =
   | 'daily_login'
   | 'solve'
-  | 'pb_set'
+  | 'ao5_pb_set'
   | 'mp_played'
   | 'mp_won'
   | 'achievement'

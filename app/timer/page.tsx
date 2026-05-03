@@ -11,7 +11,7 @@ import { useGanTimer } from './useGanTimer';
 import { useQiyiTimer, type QiyiPacket } from './useQiyiTimer';
 import { useWakeLock } from './useWakeLock';
 import { useAuth } from '@/lib/auth-context';
-import { awardSolvePointIfUnderLimit, awardPbPoints } from '@/lib/points';
+import { awardSolvePointIfUnderLimit, awardAo5PbIfEligible } from '@/lib/points';
 import { showToast } from '@/lib/toast';
 
 type TimerBrand = 'gan' | 'qiyi';
@@ -606,22 +606,16 @@ export default function TimerPage() {
   // sync when switching events/sessions changed `solves.length` without a
   // new solve actually being added.
   //
-  // Also awards points for logged-in users: 1 pt per solve (capped at 50/day)
-  // and 20 pt for a new PB on the active session+event. Both are best-effort
-  // — Firestore failures are logged but never throw upwards.
+  // Awards (logged-in users only, all best-effort):
+  //   * 1 pt per solve, capped at 50/day. Lifetime totalSolves still
+  //     increments past the cap.
+  //   * 20 pt for a new Ao5 PB — but only after the user has accumulated
+  //     ≥100 lifetime solves. Single-solve PBs no longer award (UI still
+  //     highlights them; this is just about the points).
   const onSolveCommit = useCallback((ms: number, dnf: boolean) => {
-    let prevBestForEvent: number | null = null;
+    let candidateAo5: number | null = null;
     setSolves(prev => {
-      // PB detection: previous best (lowest finalMs, non-DNF) for the same
-      // event in the CURRENT session. Computed before the new solve is
-      // appended so a tied-or-faster time becomes the new PB.
-      for (const s of prev) {
-        if (s.event !== eventId) continue;
-        if (isDnf(s)) continue;
-        const v = finalMs(s);
-        if (prevBestForEvent === null || v < prevBestForEvent) prevBestForEvent = v;
-      }
-      return [
+      const next: Solve[] = [
         ...prev,
         {
           id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -629,24 +623,55 @@ export default function TimerPage() {
           scramble, event: eventId, ts: Date.now(),
         },
       ];
+      // Ao5-PB candidate detection. Walk every rolling 5-solve window
+      // ending at `next[i]` for the current event; the candidate is the
+      // window's Ao5 ONLY if it ties or beats every prior window's Ao5.
+      // (Ties don't actually award — `awardAo5PbIfEligible` requires
+      // strictly less than the persisted per-event best — but they're
+      // cheap to surface here so we don't false-negative.)
+      const eventSolves = next.filter(s => s.event === eventId);
+      if (eventSolves.length >= 5) {
+        let bestPriorAo5: number | null = null;
+        for (let i = 4; i < eventSolves.length; i++) {
+          const window = eventSolves.slice(i - 4, i + 1);
+          const ao = avgOfN(window, 5);
+          if (ao === null) continue;
+          if (i < eventSolves.length - 1) {
+            if (bestPriorAo5 === null || ao < bestPriorAo5) bestPriorAo5 = ao;
+          } else {
+            // Latest window — same one that includes the just-committed
+            // solve. Surface as a candidate iff it's at least as good as
+            // every prior (the service will reject if not strictly
+            // better than the persisted best).
+            if (bestPriorAo5 === null || ao <= bestPriorAo5) candidateAo5 = ao;
+          }
+        }
+      }
+      return next;
     });
     setScramble(generateScramble(eventId));
 
-    // Points awards — only for signed-in users; failures are swallowed so
-    // a flaky network never disrupts the actual solve flow.
     const uid = user?.uid;
-    if (uid) {
-      // Solve point. No toast (would be spammy at 50/day).
-      awardSolvePointIfUnderLimit(uid).catch(err =>
-        console.warn('[points] solve award failed', err),
-      );
-      // PB award — non-DNF, strictly faster than the previous best (or
-      // first non-DNF in this session+event).
-      if (!dnf && (prevBestForEvent === null || ms < prevBestForEvent)) {
-        awardPbPoints(uid, eventId, ms, prevBestForEvent)
-          .then(() => showToast({ msg: 'Шинэ PB! +20 💎', tone: 'success' }))
-          .catch(err => console.warn('[points] PB award failed', err));
-      }
+    if (!uid) return;
+    // Solve point + lifetime counter. No toast (would be spammy at 50/day).
+    awardSolvePointIfUnderLimit(uid).catch(err =>
+      console.warn('[points] solve award failed', err),
+    );
+    // Ao5-PB award — service is responsible for the threshold + global
+    // per-event best comparison. We pass the candidate ms; the
+    // transaction either awards, returns 'below_threshold' (silent), or
+    // returns 'not_better' (silent).
+    if (candidateAo5 !== null) {
+      awardAo5PbIfEligible(uid, eventId, candidateAo5)
+        .then(r => {
+          if (r.awarded) showToast({ msg: 'Ao5 PB! +20 💎', tone: 'success' });
+          else if (r.reason === 'below_threshold') {
+            console.log(
+              `[points] Ao5 PB candidate (${eventId}, ${candidateAo5}ms) — below threshold (${r.totalSolves}/${r.threshold} solves)`,
+            );
+          }
+        })
+        .catch(err => console.warn('[points] Ao5 PB award failed', err));
     }
   }, [scramble, eventId, user?.uid]);
 

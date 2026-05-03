@@ -296,10 +296,14 @@ export default function ProfilePage() {
           )}
         </div>
 
-        {/* ── Stats card ────────────────────────────────────────────────── */}
-        <div style={cardStyle}>
-          <div className="profile-stats">
-            <Stat icon="💎" label="Point" value={String(user.points)} />
+        {/* ── Points hero + secondary stats ───────────────────────────── */}
+        <div className="profile-stats-row">
+          <PointsCard
+            uid={user.uid}
+            points={user.points}
+            totalSolves={user.totalSolves}
+          />
+          <div className="profile-stats-side">
             <Stat
               icon="🏆"
               label="Тамирчин"
@@ -432,13 +436,19 @@ export default function ProfilePage() {
       )}
 
       <style>{`
-        .profile-stats {
+        .profile-stats-row {
           display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
           gap: 0.7rem;
+          grid-template-columns: 1fr;
         }
-        @media (max-width: 560px) {
-          .profile-stats { grid-template-columns: 1fr; }
+        .profile-stats-side {
+          display: grid;
+          gap: 0.55rem;
+          grid-template-columns: 1fr 1fr;
+        }
+        @media (min-width: 720px) {
+          .profile-stats-row { grid-template-columns: 1fr 1fr; }
+          .profile-stats-side { grid-template-columns: 1fr; }
         }
         @media (min-width: 720px) {
           .profile-page { padding: 2.5rem 1.5rem; }
@@ -449,6 +459,10 @@ export default function ProfilePage() {
         @keyframes profile-toast-in {
           from { opacity: 0; transform: translate(-50%, -6px); }
           to   { opacity: 1; transform: translate(-50%, 0); }
+        }
+        @keyframes points-card-shimmer {
+          0%   { background-position: 0% 50%; }
+          100% { background-position: 200% 50%; }
         }
       `}</style>
     </div>
@@ -484,6 +498,164 @@ function Stat({ icon, label, value, dim }: {
         {value}
       </div>
     </div>
+  );
+}
+
+// ── Points hero card ────────────────────────────────────────────────────
+//
+// Headlines the current points balance with a gradient + animated-glow
+// border, the week's earnings (sum of positive transactions in the last
+// 7 days), and the Ao5-PB activation status (gated on totalSolves≥100).
+// Click anywhere on the card → opens the full transactions modal.
+
+const AO5_PB_THRESHOLD = 100;
+
+function PointsCard({
+  uid, points, totalSolves,
+}: { uid: string; points: number; totalSolves: number }) {
+  const [txs, setTxs] = useState<PointTransaction[]>([]);
+  const [modalOpen, setModalOpen] = useState(false);
+
+  useEffect(() => {
+    if (!uid) return;
+    const unsub = subscribeRecentTransactions(uid, rows => setTxs(rows), {
+      limit: 100,
+      onError: err => console.warn('[profile] PointsCard subscription', err),
+    });
+    return () => unsub();
+  }, [uid]);
+
+  // Sum positive amounts within the last 7 days. Limited to the 100 most
+  // recent transactions; for typical award rates (1–25 pt/event) this
+  // covers far more than a week of activity.
+  const weeklyEarned = useMemo(() => {
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    let sum = 0;
+    for (const t of txs) {
+      const ts = txTsToMs(t.timestamp);
+      if (ts === null || ts < cutoff) continue;
+      if (t.amount > 0) sum += t.amount;
+    }
+    return sum;
+  }, [txs]);
+
+  const ao5Activated = totalSolves >= AO5_PB_THRESHOLD;
+  const ao5Progress = Math.min(totalSolves, AO5_PB_THRESHOLD);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setModalOpen(true)}
+        aria-label="Point гүйлгээ харах"
+        className="points-card"
+        style={{
+          position: 'relative',
+          textAlign: 'left',
+          width: '100%',
+          background: 'linear-gradient(135deg, rgba(167,139,250,0.22), rgba(52,211,153,0.18))',
+          border: '1px solid transparent',
+          borderRadius: 16,
+          padding: '1.1rem 1.2rem',
+          color: 'var(--text)',
+          fontFamily: 'inherit',
+          cursor: 'pointer',
+          display: 'flex', flexDirection: 'column', gap: '0.65rem',
+          overflow: 'hidden',
+          boxShadow: '0 10px 30px rgba(0,0,0,0.28)',
+          transition: 'transform 0.15s ease-out',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; }}
+        onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; }}
+      >
+        {/* Animated gradient border, painted via a pseudo-element so the
+            inner content stays crisp on dark themes. */}
+        <span aria-hidden="true" style={{
+          position: 'absolute', inset: 0, borderRadius: 16,
+          padding: 1,
+          background: 'linear-gradient(120deg, rgba(167,139,250,0.7), rgba(52,211,153,0.7), rgba(167,139,250,0.7))',
+          backgroundSize: '200% 100%',
+          animation: 'points-card-shimmer 6s linear infinite',
+          WebkitMask: 'linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)',
+          WebkitMaskComposite: 'xor',
+          maskComposite: 'exclude',
+          pointerEvents: 'none',
+        }} />
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+          <span style={{
+            width: 56, height: 56, borderRadius: 14,
+            background: 'rgba(0,0,0,0.25)',
+            border: '1px solid rgba(255,255,255,0.09)',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 32, lineHeight: 1, flexShrink: 0,
+            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
+          }}>💎</span>
+          <div style={{ minWidth: 0, flex: '1 1 auto' }}>
+            <div style={{
+              fontSize: '0.66rem', fontWeight: 700, color: 'var(--muted)',
+              letterSpacing: '0.14em', textTransform: 'uppercase',
+            }}>Point</div>
+            <div style={{
+              fontFamily: 'JetBrains Mono, monospace',
+              fontSize: '2rem', fontWeight: 800, lineHeight: 1.05,
+              color: 'var(--text)',
+            }}>
+              {points.toLocaleString()}
+            </div>
+            <div style={{
+              fontSize: '0.78rem', color: '#a7f3d0', fontWeight: 700,
+              marginTop: '0.18rem',
+            }}>
+              Энэ долоо хоногт {weeklyEarned > 0 ? `+${weeklyEarned}` : '0'}
+            </div>
+          </div>
+        </div>
+
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '0.55rem',
+          fontSize: '0.74rem', fontWeight: 600,
+          color: ao5Activated ? '#a7f3d0' : 'var(--muted)',
+          marginTop: '0.1rem',
+        }}>
+          {ao5Activated ? (
+            <>
+              <span aria-hidden="true">✓</span>
+              <span>Ao5 PB point идэвхжсэн</span>
+            </>
+          ) : (
+            <>
+              <span style={{ flexShrink: 0 }}>
+                Ao5 PB point идэвхжих хүртэл: <span style={{
+                  fontFamily: 'JetBrains Mono, monospace', color: 'var(--text)',
+                }}>{ao5Progress}</span> / {AO5_PB_THRESHOLD} solve
+              </span>
+            </>
+          )}
+        </div>
+        {!ao5Activated && (
+          <div style={{
+            height: 4, borderRadius: 999,
+            background: 'rgba(255,255,255,0.07)',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              width: `${(ao5Progress / AO5_PB_THRESHOLD) * 100}%`,
+              height: '100%',
+              background: 'linear-gradient(90deg, #a78bfa, #34d399)',
+              transition: 'width 0.3s ease-out',
+            }} />
+          </div>
+        )}
+      </button>
+
+      {modalOpen && (
+        <PointTransactionsModal
+          txs={txs}
+          onClose={() => setModalOpen(false)}
+        />
+      )}
+    </>
   );
 }
 
@@ -1465,6 +1637,9 @@ function PlayerRow({ player, isMe }: { player: MatchPlayerSummary; isMe: boolean
 const REASON_ICONS: Record<string, string> = {
   daily_login:    '🌅',
   solve:          '⏱',
+  ao5_pb_set:     '🚀',
+  // Legacy: pre-migration rows still use 'pb_set'. Map to the same icon
+  // so the ledger renders historical rows consistently.
   pb_set:         '🚀',
   mp_played:      '🎮',
   mp_won:         '🏆',

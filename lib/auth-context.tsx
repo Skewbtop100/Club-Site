@@ -18,6 +18,7 @@ import {
 import {
   doc,
   getDoc,
+  onSnapshot,
   serverTimestamp,
   setDoc,
   Timestamp,
@@ -38,6 +39,10 @@ export interface AppUser {
   points: number;
   athleteId: string | null;
   unlockedTools: string[];
+  // Lifetime count of committed solves across all events/sessions.
+  // Drives the Ao5-PB award threshold (only awards once user has ≥100
+  // total solves) and any future "experience"-style features.
+  totalSolves: number;
   // Epoch ms; null if the field is missing or hasn't been written yet
   // (serverTimestamp() resolves to null for the writing client until the
   // server round-trip completes).
@@ -95,6 +100,7 @@ async function upsertUserDoc(fbUser: FirebaseUser): Promise<AppUser> {
       points: fresh.points,
       athleteId: fresh.athleteId,
       unlockedTools: fresh.unlockedTools,
+      totalSolves: 0,
       // serverTimestamp() returns null on the writing client until the
       // round-trip resolves; the next sign-in will surface a concrete value.
       createdAt: null,
@@ -116,20 +122,22 @@ async function upsertUserDoc(fbUser: FirebaseUser): Promise<AppUser> {
     points: typeof data.points === 'number' ? data.points : 0,
     athleteId: data.athleteId ?? null,
     unlockedTools: Array.isArray(data.unlockedTools) ? data.unlockedTools : [],
+    totalSolves: typeof (data as { totalSolves?: unknown }).totalSolves === 'number'
+      ? (data as { totalSolves: number }).totalSolves
+      : 0,
     createdAt: tsToMs(data.createdAt),
   };
 }
 
 // Best-effort awards/toasts that run AFTER the user doc is upserted.
-// Returns the latest balance (if any award fired) so AuthProvider can
-// keep its in-memory `user.points` in sync without an extra read.
-async function runPostLoginAwards(uid: string): Promise<{ newBalance: number | null }> {
-  let newBalance: number | null = null;
+// AuthProvider's live user-doc snapshot picks up any resulting balance
+// change automatically, so this helper only needs to fire side effects
+// (the award + the celebratory toast) — no return value plumbing.
+async function runPostLoginAwards(uid: string): Promise<void> {
   // 1. Daily login bonus — idempotent on local calendar day.
   try {
     const r = await awardDailyLoginIfNew(uid);
     if (r.awarded) {
-      newBalance = r.balance;
       showToast({ msg: 'Өдөр тутмын бонус +5 💎', tone: 'success' });
     }
   } catch (err) {
@@ -146,7 +154,6 @@ async function runPostLoginAwards(uid: string): Promise<{ newBalance: number | n
   } catch (err) {
     console.warn('[auth] athlete-linked toast check failed', err);
   }
-  return { newBalance };
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -157,7 +164,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const inFlightRef = useRef<string | null>(null);
 
   useEffect(() => {
+    // Live user-doc subscription tracker. We want every points / role /
+    // totalSolves update to flow into in-memory state without requiring
+    // a page reload, so a single onSnapshot is set up alongside each
+    // sign-in and torn down on sign-out (or before re-subscribing for a
+    // different uid).
+    let userDocUnsub: (() => void) | null = null;
+    const cleanupUserDoc = () => {
+      if (userDocUnsub) {
+        userDocUnsub();
+        userDocUnsub = null;
+      }
+    };
     const unsub = onAuthStateChanged(auth, async (fbUser) => {
+      cleanupUserDoc();
       if (!fbUser) {
         inFlightRef.current = null;
         setUser(null);
@@ -168,17 +188,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const appUser = await upsertUserDoc(fbUser);
         if (inFlightRef.current === fbUser.uid) setUser(appUser);
-        // Side effects after the user is in state. Both are best-effort
-        // and isolated from the auth flow itself — a points failure must
-        // not block sign-in.
-        runPostLoginAwards(fbUser.uid).then(extra => {
-          if (inFlightRef.current !== fbUser.uid) return;
-          if (extra.newBalance !== null) {
-            setUser(prev => prev && prev.uid === fbUser.uid
-              ? { ...prev, points: extra.newBalance as number }
-              : prev);
-          }
-        }).catch(err => console.warn('[auth] post-login awards failed', err));
+        // Live mirror — points/role/athleteId/totalSolves stay current
+        // even when other parts of the app increment them (timer solves,
+        // multiplayer match end, achievements, admin grants).
+        userDocUnsub = onSnapshot(
+          doc(db, 'users', fbUser.uid),
+          (snap) => {
+            if (inFlightRef.current !== fbUser.uid) return;
+            if (!snap.exists()) return;
+            const data = snap.data() as Record<string, unknown>;
+            setUser(prev => prev && prev.uid === fbUser.uid ? {
+              ...prev,
+              points: typeof data.points === 'number' ? data.points : prev.points,
+              role: typeof data.role === 'string' ? (data.role as UserRole) : prev.role,
+              athleteId: typeof data.athleteId === 'string' ? (data.athleteId as string)
+                : data.athleteId === null ? null
+                : prev.athleteId,
+              unlockedTools: Array.isArray(data.unlockedTools)
+                ? (data.unlockedTools as string[])
+                : prev.unlockedTools,
+              totalSolves: typeof data.totalSolves === 'number'
+                ? data.totalSolves
+                : prev.totalSolves,
+            } : prev);
+          },
+          (err) => console.warn('[auth] user-doc subscription error', err),
+        );
+        // Best-effort post-login awards — daily bonus + athlete-linked
+        // toast consumption. The live snapshot above will pick up the
+        // resulting balance change automatically, so we don't need to
+        // mirror the new balance manually.
+        runPostLoginAwards(fbUser.uid).catch(err =>
+          console.warn('[auth] post-login awards failed', err),
+        );
       } catch (err) {
         console.error('[auth] upsertUserDoc failed', err);
         if (inFlightRef.current === fbUser.uid) {
@@ -192,6 +234,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             points: 0,
             athleteId: null,
             unlockedTools: [],
+            totalSolves: 0,
             createdAt: null,
           });
         }
@@ -199,7 +242,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (inFlightRef.current === fbUser.uid) setLoading(false);
       }
     });
-    return () => unsub();
+    return () => {
+      cleanupUserDoc();
+      unsub();
+    };
   }, []);
 
   const signInWithGoogle = useCallback(async () => {
