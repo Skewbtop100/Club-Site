@@ -876,7 +876,10 @@ export default function TimerPage() {
     return fmtMs(timer.displayMs, false, precision);
   })();
 
-  // Color of the big timer
+  // Color of the big timer. Red → green progression while arming gives
+  // the user a clear "not yet / now" cue; white during running keeps the
+  // counting digits readable; a 300ms green pulse on stop confirms the
+  // commit (PB stays green afterwards via lastSolveIsPB).
   const timerColor = (() => {
     if (timer.state === 'inspecting') {
       const s = timer.inspectionMs / 1000;
@@ -886,16 +889,31 @@ export default function TimerPage() {
       if (s <= 7)  return C.warn;
       return C.text;
     }
-    if (timer.state === 'armed')   return C.success;
-    // GAN cue: pads pressed / armed / running on the device → green.
-    // 'stopped' falls through so the final time renders in the normal
-    // text color (still green if it's a personal best).
-    if (ganConnected && (gan.liveState === 'handsOn' || gan.liveState === 'getSet' || gan.liveState === 'running')) {
-      return C.success;
+    if (timer.state === 'armed') {
+      return timer.armedReady ? C.success : C.danger;
     }
-    if (timer.state === 'stopped' && lastSolveIsPB) return C.success;
+    // BT live-state cue: only fires when the device is the input source.
+    // 'handsOn' (pads just pressed, GAN) → red, 'getSet' (held long
+    // enough on either GAN or QiYi) → green. 'running' falls through to
+    // the default white. We deliberately ignore QiYi 'inspection' here
+    // — the local timer state machine owns the inspection color path.
+    if (ganConnected) {
+      if (gan.liveState === 'handsOn') return C.danger;
+      if (gan.liveState === 'getSet')  return C.success;
+    }
+    if (timer.state === 'stopped') {
+      if (timer.stopFlashing) return C.success;
+      if (lastSolveIsPB) return C.success;
+    }
     return C.text;
   })();
+
+  // Whether to paint the green glow behind the digits — same conditions
+  // as a green color above (armed-ready, stop-flash, BT get-set, PB).
+  const timerGlow =
+    (timer.state === 'armed' && timer.armedReady) ||
+    (timer.state === 'stopped' && (timer.stopFlashing || lastSolveIsPB)) ||
+    (ganConnected && gan.liveState === 'getSet');
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
@@ -1292,7 +1310,12 @@ export default function TimerPage() {
             onTouchEnd={onTimerTouchEnd}
             style={{
               flex: '1 1 auto', minHeight: 0,
-              background: C.card, border: `1px solid ${timer.state === 'armed' ? C.success : C.border}`,
+              background: C.card,
+              border: `1px solid ${
+                timer.state === 'armed'
+                  ? (timer.armedReady ? C.success : C.danger)
+                  : C.border
+              }`,
               borderRadius: 16, padding: '2rem 1.5rem',
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
               userSelect: 'none', cursor: 'pointer', textAlign: 'center',
@@ -1319,15 +1342,24 @@ export default function TimerPage() {
               fontWeight: 700, lineHeight: 0.95,
               fontVariantNumeric: 'tabular-nums',
               color: timerColor,
-              transition: 'color 0.12s, font-size 0.12s',
-              textShadow: timer.state === 'armed' ? `0 0 30px ${C.success}55` : 'none',
+              // Slower color fade after a stop so the green→white flash
+              // reads as a confirmation pulse rather than an instant
+              // snap. Otherwise 0.12s keeps the red↔green arming flip
+              // feeling responsive.
+              transition: `color ${timer.state === 'stopped' ? 0.3 : 0.12}s, font-size 0.12s`,
+              textShadow: timerGlow ? `0 0 30px ${C.success}55` : 'none',
             }}>
               {timerDisplay}
             </div>
             <div style={{ fontSize: '0.78rem', color: C.muted, marginTop: '1.5rem', letterSpacing: '0.06em', minHeight: '1.2rem' }}>
               {ganConnected && timer.state !== 'running' && timer.state !== 'inspecting' && timer.state !== 'armed' && 'Use the GAN timer pads'}
               {timer.state === 'inspecting' && 'Hold SPACE to arm, release to start'}
-              {timer.state === 'armed' && (<span style={{ color: C.success, fontWeight: 700 }}>RELEASE TO START</span>)}
+              {timer.state === 'armed' && !timer.armedReady && (
+                <span style={{ color: C.danger, fontWeight: 700 }}>HOLD…</span>
+              )}
+              {timer.state === 'armed' && timer.armedReady && (
+                <span style={{ color: C.success, fontWeight: 700 }}>RELEASE TO START</span>
+              )}
               {!ganConnected && timer.state === 'running' && 'Press SPACE / tap to stop'}
             </div>
 
@@ -1695,7 +1727,7 @@ export default function TimerPage() {
                     userSelect: 'none', cursor: 'pointer', textAlign: 'center',
                     touchAction: 'manipulation',
                     margin: '0 0.7rem',
-                    background: timer.state === 'armed' ? `${C.success}10` : 'transparent',
+                    background: timer.state === 'armed' && timer.armedReady ? `${C.success}10` : 'transparent',
                     transition: 'background 0.12s',
                   }}
                 >
@@ -1719,15 +1751,20 @@ export default function TimerPage() {
                     fontWeight: 700, lineHeight: 0.95,
                     fontVariantNumeric: 'tabular-nums',
                     color: timerColor,
-                    transition: 'color 0.12s, font-size 0.12s',
-                    textShadow: timer.state === 'armed' ? `0 0 30px ${C.success}55` : 'none',
+                    transition: `color ${timer.state === 'stopped' ? 0.3 : 0.12}s, font-size 0.12s`,
+                    textShadow: timerGlow ? `0 0 30px ${C.success}55` : 'none',
                   }}>
                     {timerDisplay}
                   </div>
                   <div style={{ fontSize: '0.7rem', color: C.muted, marginTop: '0.7rem', letterSpacing: '0.06em', minHeight: '1rem' }}>
                     {ganConnected && timer.state !== 'running' && timer.state !== 'inspecting' && timer.state !== 'armed' && 'Use the GAN timer pads'}
                     {timer.state === 'inspecting' && 'Hold to arm, release to start'}
-                    {timer.state === 'armed' && (<span style={{ color: C.success, fontWeight: 700 }}>RELEASE TO START</span>)}
+                    {timer.state === 'armed' && !timer.armedReady && (
+                      <span style={{ color: C.danger, fontWeight: 700 }}>HOLD…</span>
+                    )}
+                    {timer.state === 'armed' && timer.armedReady && (
+                      <span style={{ color: C.success, fontWeight: 700 }}>RELEASE TO START</span>
+                    )}
                     {!ganConnected && timer.state === 'running' && 'TAP TO STOP'}
                   </div>
                 </section>

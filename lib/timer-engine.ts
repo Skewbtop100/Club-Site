@@ -156,6 +156,16 @@ export interface UseTimerReturn {
   state: TimerState;
   displayMs: number;
   inspectionMs: number;
+  /** True once the user has held past `holdTimeMs` while in 'armed' state.
+   *  Consumers paint the timer RED while armed-not-ready and GREEN once
+   *  this flips true; releasing before this flips bounces fireRunning()
+   *  back to inspecting/idle. Always false outside the 'armed' state. */
+  armedReady: boolean;
+  /** True for ~300 ms after stop() / finishExternal() fires. Consumers
+   *  use it to flash the final time green before settling back to white
+   *  (or staying green permanently if the result is a PB — that decision
+   *  is owned by the consumer, not this hook). */
+  stopFlashing: boolean;
   beginInspection: () => void;
   startArming: () => void;
   startRunning: () => void;
@@ -166,6 +176,11 @@ export interface UseTimerReturn {
    *  (e.g. authoritative ms from a Bluetooth smart timer). */
   finishExternal: (finalMs: number) => void;
 }
+
+/** How long the green "stopped" flash lasts before reverting to the
+ *  default text color. Tuned to read as a confirmation pulse without
+ *  lingering long enough to be confused with a permanent PB highlight. */
+export const STOP_FLASH_MS = 300;
 
 // onSolveCommit is fired by stop() and finishExternal() with the final
 // ms and a boolean indicating whether inspection ran out (DNF).
@@ -179,11 +194,28 @@ export function useTimer(
   const [state, setState] = useState<TimerState>('idle');
   const [displayMs, setDisplayMs] = useState(0);
   const [inspectionMs, setInspectionMs] = useState(INSPECTION_MS);
+  // Color cues. armedReady gates the red→green flip while the user is
+  // holding. stopFlashing fires for ~300 ms after a stop() / external
+  // finish so consumers can paint a confirmation pulse.
+  const [armedReady, setArmedReady] = useState(false);
+  const [stopFlashing, setStopFlashing] = useState(false);
 
   const runStartRef = useRef(0);
   const inspStartRef = useRef(0);
   const armStartRef = useRef(0);
   const rafRef = useRef(0);
+  const stopFlashTimeoutRef = useRef<number | null>(null);
+
+  const triggerStopFlash = useCallback(() => {
+    setStopFlashing(true);
+    if (stopFlashTimeoutRef.current != null) {
+      window.clearTimeout(stopFlashTimeoutRef.current);
+    }
+    stopFlashTimeoutRef.current = window.setTimeout(() => {
+      setStopFlashing(false);
+      stopFlashTimeoutRef.current = null;
+    }, STOP_FLASH_MS);
+  }, []);
 
   const stop = useCallback(() => {
     if (state === 'running') {
@@ -196,9 +228,10 @@ export function useTimer(
       const dnf = inspectionMs <= -2000;
       inspStartRef.current = 0;
       setInspectionMs(INSPECTION_MS);
+      triggerStopFlash();
       onSolveCommit(final, dnf);
     }
-  }, [state, inspectionMs, onSolveCommit]);
+  }, [state, inspectionMs, onSolveCommit, triggerStopFlash]);
 
   // Tick loop — rAF while running for smooth display, setInterval at 50ms
   // for inspection countdown (1Hz visual is enough; we only display whole
@@ -220,6 +253,31 @@ export function useTimer(
       return () => clearInterval(id);
     }
   }, [state]);
+
+  // Arm-ready watcher — flips armedReady to true once the user has held
+  // past holdTimeMs while in 'armed', and back to false on any state
+  // change. Single setTimeout (no 50 ms tick) keeps the work cheap.
+  useEffect(() => {
+    if (state !== 'armed') {
+      if (armedReady) setArmedReady(false);
+      return;
+    }
+    setArmedReady(false);
+    const id = window.setTimeout(() => setArmedReady(true), holdTimeMs);
+    return () => window.clearTimeout(id);
+    // armedReady is intentionally excluded — including it would re-arm
+    // the timer the moment we set armedReady=true, dropping the flag back
+    // to false immediately and producing a flicker.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, holdTimeMs]);
+
+  // Cleanup the stop-flash timer on unmount so it doesn't fire after the
+  // component is gone.
+  useEffect(() => () => {
+    if (stopFlashTimeoutRef.current != null) {
+      window.clearTimeout(stopFlashTimeoutRef.current);
+    }
+  }, []);
 
   const beginInspection = useCallback(() => {
     inspStartRef.current = Date.now();
@@ -273,11 +331,13 @@ export function useTimer(
     setState('stopped');
     inspStartRef.current = 0;
     setInspectionMs(INSPECTION_MS);
+    triggerStopFlash();
     onSolveCommit(finalMsArg, false);
-  }, [onSolveCommit]);
+  }, [onSolveCommit, triggerStopFlash]);
 
   return {
     state, displayMs, inspectionMs,
+    armedReady, stopFlashing,
     beginInspection, startArming, startRunning, fireRunning, stop, reset, finishExternal,
   };
 }

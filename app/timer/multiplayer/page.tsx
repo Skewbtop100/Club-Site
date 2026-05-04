@@ -1838,6 +1838,7 @@ function MultiplayerPageInner() {
             onPlayAgain={playAgain}
             onLeave={requestLeave}
             btState={bt.state}
+            btLiveState={bt.state === 'connected' ? bt.liveState : null}
             btDeviceLabel={btDeviceLabel}
             onBtConnect={bt.connect}
             onBtDisconnect={guardedBtDisconnect}
@@ -2253,8 +2254,12 @@ interface RoomViewProps {
   onLeave: () => void;
   // Bluetooth smart-timer integration. The page-level hooks own the
   // connection lifecycle; RacingScreen subscribes via btSolveCallbacksRef
-  // to drive its local timer state machine while connected.
+  // to drive its local timer state machine while connected. btLiveState
+  // surfaces the device's physical phase ('handsOn', 'getSet', etc.) so
+  // we can paint the same red→green arming progression as the keyboard
+  // path.
   btState: 'unsupported' | 'idle' | 'connecting' | 'connected' | 'error';
+  btLiveState: string | null;
   btDeviceLabel: string | null;
   onBtConnect: () => void;
   onBtDisconnect: () => void;
@@ -2437,7 +2442,7 @@ function WaitingRoom({
 // ── Racing screen ─────────────────────────────────────────────────────────
 function RacingScreen({
   isMobile, room, userId, prefs, now, onSubmitSolve, onOpenSettings, onPause,
-  btState, btDeviceLabel, onBtConnect, onBtDisconnect, btSolveCallbacksRef,
+  btState, btLiveState, btDeviceLabel, onBtConnect, onBtDisconnect, btSolveCallbacksRef,
 }: RoomViewProps & { isHost: boolean }) {
   // Behaviour driven by user prefs (Settings modal). The shared timer
   // engine takes the commit callback and the user-configured hold-to-arm
@@ -2617,16 +2622,33 @@ function RacingScreen({
     : timer.state === 'armed' ? armedZero
     : fmtMs(timer.displayMs, false, p);
 
+  // Color of the big timer. Mirrors solo timer's red→green arming
+  // progression: red while held but not yet past holdTimeMs, green once
+  // ready to release, white while running, then a 300ms green pulse on
+  // stop. Pending OK/+2/DNF confirmation paints amber (unique to mp).
+  const btConnectedForColor = btState === 'connected';
   const timerColor =
     pending ? C.warn
-    : timer.state === 'armed' ? C.success
-    : timer.state === 'running' ? C.accent
-    : timer.state === 'inspecting' ? (timer.inspectionMs <= 0 ? C.danger : timer.inspectionMs <= 3000 ? C.warn : C.text)
+    : timer.state === 'armed'
+        ? (timer.armedReady ? C.success : C.danger)
+    : timer.state === 'inspecting'
+        ? (timer.inspectionMs <= 0 ? C.danger
+           : timer.inspectionMs <= 3000 ? C.warn
+           : C.text)
+    : btConnectedForColor && btLiveState === 'handsOn' ? C.danger
+    : btConnectedForColor && btLiveState === 'getSet'  ? C.success
+    : timer.state === 'stopped' && timer.stopFlashing ? C.success
     : C.text;
+
+  const timerGlow =
+    (timer.state === 'armed' && timer.armedReady) ||
+    (timer.state === 'stopped' && timer.stopFlashing) ||
+    (btConnectedForColor && btLiveState === 'getSet');
 
   const borderColor =
     pending ? C.warn
-    : timer.state === 'armed' ? C.success
+    : timer.state === 'armed'
+        ? (timer.armedReady ? C.success : C.danger)
     : timer.state === 'running' ? C.accent
     : C.border;
 
@@ -2649,6 +2671,7 @@ function RacingScreen({
         pending={pending}
         displayValue={displayValue}
         timerColor={timerColor}
+        timerGlow={timerGlow}
         borderColor={borderColor}
         interactionLocked={interactionLocked}
         confirmSolve={confirmSolve}
@@ -2747,7 +2770,7 @@ function RacingScreen({
             onTimerTouchEnd();
           }}
           style={{
-            background: timer.state === 'armed' ? `${C.success}10` : C.card,
+            background: timer.state === 'armed' && timer.armedReady ? `${C.success}10` : C.card,
             border: `1px solid ${borderColor}`,
             borderRadius: 16, padding: '1rem',
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
@@ -2767,8 +2790,8 @@ function RacingScreen({
             fontWeight: 800, lineHeight: 0.95,
             fontVariantNumeric: 'tabular-nums',
             color: timerColor,
-            textShadow: timer.state === 'armed' ? `0 0 30px ${C.success}55` : 'none',
-            transition: 'color 0.12s, font-size 0.12s',
+            textShadow: timerGlow ? `0 0 30px ${C.success}55` : 'none',
+            transition: `color ${timer.state === 'stopped' ? 0.3 : 0.12}s, font-size 0.12s`,
           }}>{displayValue}</div>
           <div style={{ fontSize: '0.78rem', color: C.muted, marginTop: '0.85rem', letterSpacing: '0.04em', minHeight: '1.1rem' }}>
             {pending && 'Confirm your time'}
@@ -2777,7 +2800,12 @@ function RacingScreen({
             {!pending && !isRoundDone && !isWaitingForOpponents && !scrambleShown && 'Reveal the scramble first'}
             {!pending && !isRoundDone && !isWaitingForOpponents && scrambleShown && timer.state === 'idle' && 'Hold SPACE / press to arm'}
             {!pending && timer.state === 'inspecting' && 'Hold to arm, release to start'}
-            {!pending && timer.state === 'armed' && (<span style={{ color: C.success, fontWeight: 700 }}>RELEASE TO START</span>)}
+            {!pending && timer.state === 'armed' && !timer.armedReady && (
+              <span style={{ color: C.danger, fontWeight: 700 }}>HOLD…</span>
+            )}
+            {!pending && timer.state === 'armed' && timer.armedReady && (
+              <span style={{ color: C.success, fontWeight: 700 }}>RELEASE TO START</span>
+            )}
             {!pending && timer.state === 'running' && 'Tap or press SPACE to stop'}
           </div>
 
@@ -2818,7 +2846,7 @@ function RacingScreen({
 function MobileRacingLayout({
   room, userId, prefs, now, myCurrent, mySolves, isRoundDone, isWaitingForOpponents,
   currentScramble, scrambleShown, onRevealScramble,
-  timer, pending, displayValue, timerColor, borderColor,
+  timer, pending, displayValue, timerColor, timerGlow, borderColor,
   interactionLocked, confirmSolve, onTimerTouchStart, onTimerTouchEnd,
   onOpenSettings, onPause,
   btState, btDeviceLabel, onBtConnect, onBtDisconnect,
@@ -2838,6 +2866,7 @@ function MobileRacingLayout({
   pending: { ms: number; defaultDnf: boolean } | null;
   displayValue: string;
   timerColor: string;
+  timerGlow: boolean;
   borderColor: string;
   interactionLocked: boolean;
   confirmSolve: (p: Penalty) => void;
@@ -2935,7 +2964,7 @@ function MobileRacingLayout({
               style={{
                 flex: '1 1 0%', minHeight: 0,
                 margin: '0.4rem 0.55rem',
-                background: timer.state === 'armed' ? `${C.success}10` : 'transparent',
+                background: timer.state === 'armed' && timer.armedReady ? `${C.success}10` : 'transparent',
                 border: `1px solid ${borderColor}`,
                 borderRadius: 14, padding: '0.4rem',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
@@ -2961,8 +2990,8 @@ function MobileRacingLayout({
                 fontWeight: 800, lineHeight: 0.95,
                 fontVariantNumeric: 'tabular-nums',
                 color: timerColor,
-                textShadow: timer.state === 'armed' ? `0 0 30px ${C.success}55` : 'none',
-                transition: 'color 0.12s, font-size 0.12s',
+                textShadow: timerGlow ? `0 0 30px ${C.success}55` : 'none',
+                transition: `color ${timer.state === 'stopped' ? 0.3 : 0.12}s, font-size 0.12s`,
               }}>{displayValue}</div>
               <div style={{
                 fontSize: '0.7rem', color: C.muted,
@@ -2974,7 +3003,12 @@ function MobileRacingLayout({
                 {!pending && !isRoundDone && !isWaitingForOpponents && !scrambleShown && 'Reveal the scramble first'}
                 {!pending && !isRoundDone && !isWaitingForOpponents && scrambleShown && timer.state === 'idle' && 'Hold to arm, release to start'}
                 {!pending && timer.state === 'inspecting' && 'Hold to arm, release to start'}
-                {!pending && timer.state === 'armed' && (<span style={{ color: C.success, fontWeight: 700 }}>RELEASE TO START</span>)}
+                {!pending && timer.state === 'armed' && !timer.armedReady && (
+                  <span style={{ color: C.danger, fontWeight: 700 }}>HOLD…</span>
+                )}
+                {!pending && timer.state === 'armed' && timer.armedReady && (
+                  <span style={{ color: C.success, fontWeight: 700 }}>RELEASE TO START</span>
+                )}
                 {!pending && timer.state === 'running' && 'Tap to stop'}
               </div>
 
