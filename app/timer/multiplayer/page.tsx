@@ -384,6 +384,59 @@ interface ExtraEntry {
   originalPenalty?: Penalty;
 }
 
+// ── Voting (restart-round / pause / resume) ────────────────────────────────
+// All three votes share the same shape. Eligible voters are the room's
+// online, non-queued members at tally time. Initiator is auto-counted as
+// 'yes' so they don't have to vote on their own request. Tallying is
+// host-driven (see voteTallier effect) — clients only WRITE responses and
+// READ outcomes via toasts/state.
+type VoteType = 'restartRound' | 'pause' | 'resume';
+type VoteResponse = 'yes' | 'no';
+
+interface VoteData {
+  type: VoteType;
+  initiator: string;       // uid
+  initiatorName: string;
+  startedAt: number;
+  expiresAt: number;       // ms epoch
+  /** Pause-vote only: optional human-readable reason shown in the banner. */
+  reason?: string;
+  /** uid → response. Missing key = not yet voted. */
+  responses?: Record<string, VoteResponse>;
+  /** Set by the tallier when a vote settles. Lingers for ~2s before
+   *  cleanup so every client has time to render the outcome toast. */
+  result?: 'approved' | 'rejected';
+}
+
+// 30s window for both restart and pause votes.
+const VOTE_DURATION_MS = 30_000;
+// Auto-prompt resume after a pause stretches past this. Implemented as
+// the expiresAt on the pause meta — once we cross it the host kicks off
+// a resume vote.
+const PAUSE_AUTO_RESUME_MS = 5 * 60_000;
+
+interface RoomMeta {
+  paused?: boolean;
+  pausedBy?: string;
+  pausedByName?: string;
+  pausedAt?: number;
+  /** Optional reason text shown in the banner. */
+  pauseReason?: string;
+  /** Set when paused — host kicks off a resume vote once we cross this. */
+  pauseAutoResumeAt?: number;
+  /** Push key into pauseHistory for the open pause entry, used so resume
+   *  can patch resumedAt onto the matching record. */
+  pauseHistoryKey?: string;
+}
+
+interface PauseHistoryEntry {
+  uid: string;
+  name: string;
+  pausedAt: number;
+  resumedAt?: number;
+  reason?: string;
+}
+
 interface RoomData {
   host: string;
   event: string;
@@ -404,6 +457,14 @@ interface RoomData {
    *  Append-only via Firebase push() so each entry gets a stable key
    *  without coordination. Persists across rounds. */
   extras?: Record<string, ExtraEntry>;
+  /** Active votes keyed by type. At most one of each can be live at a
+   *  time — `requestVote` short-circuits if a same-type vote already
+   *  exists. */
+  votes?: Partial<Record<VoteType, VoteData>>;
+  /** Pause state (set/cleared atomically with vote completion). */
+  meta?: RoomMeta;
+  /** Append-only pause audit, keyed by Firebase push() id. */
+  pauseHistory?: Record<string, PauseHistoryEntry>;
   members: Record<string, MemberData>;
   solves?: Record<string, Record<string, SolveData>>;       // {uid: {0: {...}}}
 }
@@ -595,6 +656,13 @@ function MultiplayerPageInner() {
   // Fade-out gate. Flipped true right before we router.push('/timer') after
   // a confirmed leave so the room view dissolves instead of cutting away.
   const [isLeaving, setIsLeaving] = useState(false);
+
+  // Vote-related modal toggles. The confirm modals are shown on the
+  // initiator side BEFORE the vote starts; the prompt modal (rendered
+  // separately from `room.votes`) is what other players see while a vote
+  // is in flight.
+  const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
+  const [pauseConfirmOpen, setPauseConfirmOpen] = useState(false);
 
   // ── Bluetooth smart-timer integration ─────────────────────────────────
   //
@@ -1661,6 +1729,56 @@ function MultiplayerPageInner() {
     await update(ref(rtdb, `rooms/${roomCode}`), updates);
   }, [roomCode, userId, room]);
 
+  // ── Voting (restart round / pause / resume) ─────────────────────────────
+  //
+  // Lifecycle:
+  //   requestVote → writes votes/{type} with the initiator pre-counted as
+  //     'yes'. Pre-empts if a vote of the same type already exists.
+  //   castVote    → writes votes/{type}/responses/{uid}.
+  //   tally       → host-only effect (voteTallier below) reads each open
+  //     vote, decides outcome (all-yes vs any-no/expired), and applies
+  //     side effects (restart, pause, resume) atomically with the
+  //     deletion of the vote.
+
+  const requestVote = useCallback(async (
+    type: VoteType,
+    options?: { reason?: string },
+  ): Promise<boolean> => {
+    if (!roomCode || !room || !userId) return false;
+    if (room.votes?.[type]) return false; // already in flight
+    const me = room.members?.[userId];
+    if (!me) return false;
+    const startedAt = Date.now();
+    const data: VoteData = {
+      type,
+      initiator: userId,
+      initiatorName: me.name,
+      startedAt,
+      expiresAt: startedAt + VOTE_DURATION_MS,
+      responses: { [userId]: 'yes' },
+      ...(options?.reason ? { reason: options.reason } : {}),
+    };
+    await update(ref(rtdb, `rooms/${roomCode}`), {
+      [`votes/${type}`]: data,
+    });
+    return true;
+  }, [roomCode, room, userId]);
+
+  const castVote = useCallback(async (type: VoteType, response: VoteResponse) => {
+    if (!roomCode || !userId) return;
+    await update(ref(rtdb, `rooms/${roomCode}/votes/${type}/responses`), {
+      [userId]: response,
+    });
+  }, [roomCode, userId]);
+
+  // Initiator-only — abort their own vote before tally fires. We don't
+  // restrict it strictly to host so a player who clicked by mistake can
+  // back out, but the UI will only surface the cancel button to them.
+  const cancelVote = useCallback(async (type: VoteType) => {
+    if (!roomCode) return;
+    await update(ref(rtdb, `rooms/${roomCode}`), { [`votes/${type}`]: null });
+  }, [roomCode]);
+
   // Member: mark "ready for next round" on the results screen.
   const readyForNext = useCallback(async () => {
     if (!roomCode || !userId || !room) return;
@@ -1828,6 +1946,199 @@ function MultiplayerPageInner() {
 
     update(ref(rtdb, `rooms/${roomCode}`), updates);
   }, [room?.status, room?.members, room?.host, room?.solves, room?.scrambles, roomCode, userId, now]);
+
+  // ── Vote tallier (host-driven) ───────────────────────────────────────────
+  //
+  // Mirrors the round-end trigger pattern above: the host normally tallies,
+  // and we fall back to the earliest-joined non-disconnected member when
+  // the host is offline so a vote can't deadlock waiting for a missing host.
+  // Outcome is encoded by writing `result: 'approved' | 'rejected'` onto the
+  // vote (atomic with side effects). Clients watch for that and toast.
+  // The tallier client schedules a deferred cleanup that wipes the vote
+  // a couple seconds later so all viewers have time to see it.
+  const cleanupTimersRef = useRef<Map<VoteType, number>>(new Map());
+  useEffect(() => {
+    if (!room || !roomCode || !userId) return;
+    const votes = room.votes;
+    if (!votes) return;
+
+    // Same fallback as the round-end trigger: earliest-joined non-
+    // disconnected member becomes the tallier when the host is gone.
+    const memberEntries = Object.entries(room.members || {});
+    const onlineEntries = memberEntries.filter(([, m]) =>
+      getConnectionStatus(m, now) !== 'disconnected' && !m.queued
+    );
+    if (onlineEntries.length === 0) return;
+    const hostStillHere = !!(room.host && room.members?.[room.host]
+      && getConnectionStatus(room.members[room.host], now) !== 'disconnected');
+    let triggerUid: string;
+    if (hostStillHere) {
+      triggerUid = room.host;
+    } else {
+      // earliest joinedAt wins, ties broken by uid for determinism
+      onlineEntries.sort(([aUid, a], [bUid, b]) => {
+        const da = a.joinedAt - b.joinedAt;
+        return da !== 0 ? da : aUid.localeCompare(bUid);
+      });
+      triggerUid = onlineEntries[0][0];
+    }
+    if (triggerUid !== userId) return;
+
+    for (const type of ['restartRound', 'pause', 'resume'] as VoteType[]) {
+      const vote = votes[type];
+      if (!vote) continue;
+      // Already settled — schedule cleanup so the vote disappears once
+      // every viewer has had a moment to react. Keep a single timer per
+      // type so a re-render doesn't queue duplicates.
+      if (vote.result) {
+        if (!cleanupTimersRef.current.has(type)) {
+          const id = window.setTimeout(() => {
+            cleanupTimersRef.current.delete(type);
+            update(ref(rtdb, `rooms/${roomCode}`), { [`votes/${type}`]: null }).catch(() => {});
+          }, 2200);
+          cleanupTimersRef.current.set(type, id);
+        }
+        continue;
+      }
+
+      const eligible = onlineEntries.map(([uid]) => uid);
+      const responses = vote.responses || {};
+      const anyNo = eligible.some(uid => responses[uid] === 'no');
+      const allYes = eligible.length > 0 && eligible.every(uid => responses[uid] === 'yes');
+      const expired = Date.now() > vote.expiresAt;
+
+      if (!anyNo && !allYes && !expired) continue; // still in progress
+
+      const updates: Record<string, unknown> = {};
+      if (anyNo || expired) {
+        updates[`votes/${type}/result`] = 'rejected';
+      } else if (allYes) {
+        updates[`votes/${type}/result`] = 'approved';
+        if (type === 'restartRound') {
+          updates['scrambles'] = generateScrambles(room.event);
+          updates['solves'] = null;
+          updates['playerScrambles'] = null;
+          for (const [uid] of memberEntries) {
+            updates[`members/${uid}/currentSolve`] = 0;
+            updates[`members/${uid}/roundAverage`] = null;
+            updates[`members/${uid}/extrasThisRound`] = 0;
+          }
+        } else if (type === 'pause') {
+          const now2 = Date.now();
+          // Audit entry under push key so resume can later patch in
+          // resumedAt against the same record.
+          const pauseRef = push(ref(rtdb, `rooms/${roomCode}/pauseHistory`));
+          if (pauseRef.key) {
+            updates[`pauseHistory/${pauseRef.key}`] = {
+              uid: vote.initiator,
+              name: vote.initiatorName,
+              pausedAt: now2,
+              ...(vote.reason ? { reason: vote.reason } : {}),
+            } satisfies PauseHistoryEntry;
+            updates['meta/paused'] = true;
+            updates['meta/pausedBy'] = vote.initiator;
+            updates['meta/pausedByName'] = vote.initiatorName;
+            updates['meta/pausedAt'] = now2;
+            updates['meta/pauseAutoResumeAt'] = now2 + PAUSE_AUTO_RESUME_MS;
+            if (vote.reason) updates['meta/pauseReason'] = vote.reason;
+            updates['meta/pauseHistoryKey'] = pauseRef.key;
+          }
+        } else if (type === 'resume') {
+          updates['meta/paused'] = null;
+          updates['meta/pausedBy'] = null;
+          updates['meta/pausedByName'] = null;
+          updates['meta/pausedAt'] = null;
+          updates['meta/pauseReason'] = null;
+          updates['meta/pauseAutoResumeAt'] = null;
+          // Patch the open pauseHistory entry's resumedAt for the audit.
+          const key = (room.meta as RoomMeta & { pauseHistoryKey?: string } | undefined)?.pauseHistoryKey;
+          if (key) {
+            updates[`pauseHistory/${key}/resumedAt`] = Date.now();
+            updates['meta/pauseHistoryKey'] = null;
+          }
+        }
+      }
+      if (Object.keys(updates).length) {
+        update(ref(rtdb, `rooms/${roomCode}`), updates).catch(() => {});
+      }
+    }
+  }, [room, roomCode, userId, now]);
+
+  // Cleanup on unmount: clear any pending vote-cleanup timers we own.
+  useEffect(() => () => {
+    for (const id of cleanupTimersRef.current.values()) {
+      window.clearTimeout(id);
+    }
+    cleanupTimersRef.current.clear();
+  }, []);
+
+  // Auto-trigger a resume vote once a pause has stretched past
+  // PAUSE_AUTO_RESUME_MS. Same trigger-uid rule so only one client kicks
+  // it off. The host will be the trigger by default; we just ensure it
+  // also works when the host is gone.
+  useEffect(() => {
+    if (!room || !roomCode || !userId) return;
+    if (!room.meta?.paused) return;
+    if (room.votes?.resume) return; // already in flight
+    const autoResumeAt = room.meta.pauseAutoResumeAt;
+    if (!autoResumeAt || now < autoResumeAt) return;
+
+    const memberEntries = Object.entries(room.members || {});
+    const onlineEntries = memberEntries.filter(([, m]) =>
+      getConnectionStatus(m, now) !== 'disconnected' && !m.queued
+    );
+    if (onlineEntries.length === 0) return;
+    const hostStillHere = !!(room.host && room.members?.[room.host]
+      && getConnectionStatus(room.members[room.host], now) !== 'disconnected');
+    let triggerUid: string;
+    if (hostStillHere) {
+      triggerUid = room.host;
+    } else {
+      onlineEntries.sort(([aUid, a], [bUid, b]) => {
+        const da = a.joinedAt - b.joinedAt;
+        return da !== 0 ? da : aUid.localeCompare(bUid);
+      });
+      triggerUid = onlineEntries[0][0];
+    }
+    if (triggerUid !== userId) return;
+
+    const me = room.members?.[userId];
+    if (!me) return;
+    const startedAt = Date.now();
+    const data: VoteData = {
+      type: 'resume',
+      initiator: userId,
+      initiatorName: me.name,
+      startedAt,
+      expiresAt: startedAt + VOTE_DURATION_MS,
+      responses: { [userId]: 'yes' },
+    };
+    update(ref(rtdb, `rooms/${roomCode}`), { [`votes/resume`]: data }).catch(() => {});
+  }, [room, roomCode, userId, now]);
+
+  // Outcome toasts — fired locally by every client when a vote flips to
+  // a settled `result`. Tracked by type so we only toast once per vote.
+  const lastVoteOutcomeRef = useRef<Map<VoteType, number>>(new Map());
+  useEffect(() => {
+    if (!room?.votes) {
+      lastVoteOutcomeRef.current = new Map();
+      return;
+    }
+    for (const type of ['restartRound', 'pause', 'resume'] as VoteType[]) {
+      const v = room.votes[type];
+      if (!v?.result) continue;
+      const seenAt = lastVoteOutcomeRef.current.get(type);
+      if (seenAt === v.startedAt) continue;
+      lastVoteOutcomeRef.current.set(type, v.startedAt);
+      if (v.result === 'rejected') {
+        pushNotif('Санал хүчингүй', 'warn');
+      } else {
+        if (type === 'restartRound') pushNotif('Round шинэчлэгдлээ', 'success');
+        else if (type === 'pause')   pushNotif('Тоглолт зогссон', 'info');
+        else if (type === 'resume')  pushNotif('Тоглолт үргэлжилж байна', 'success');
+      }
+    }
+  }, [room?.votes, pushNotif]);
 
   // Toast: when status flips racing → results, announce any member who was
   // disconnected at the moment the round ended. The detection runs on every
@@ -2025,6 +2336,79 @@ function MultiplayerPageInner() {
           onResume={() => setPauseOpen(false)}
           onLeaveTemporarily={() => { setPauseOpen(false); leaveTemporarily(); }}
           onExit={requestLeave}
+          canRestartRound={!!room && room.status === 'racing'}
+          canPauseMatch={!!room && room.status !== 'racing' && !room.meta?.paused}
+          restartVoteInFlight={!!room?.votes?.restartRound}
+          pauseVoteInFlight={!!room?.votes?.pause}
+          onRestartRound={() => {
+            setPauseOpen(false);
+            setRestartConfirmOpen(true);
+          }}
+          onPauseMatch={() => {
+            setPauseOpen(false);
+            setPauseConfirmOpen(true);
+          }}
+        />
+      )}
+      {restartConfirmOpen && (
+        <RestartRoundConfirmModal
+          isMobile={isMobile}
+          onCancel={() => setRestartConfirmOpen(false)}
+          onConfirm={async () => {
+            setRestartConfirmOpen(false);
+            try { await requestVote('restartRound'); }
+            catch (err) { console.error('[mp] restart vote', err); }
+          }}
+        />
+      )}
+      {pauseConfirmOpen && (
+        <PauseConfirmModal
+          isMobile={isMobile}
+          onCancel={() => setPauseConfirmOpen(false)}
+          onConfirm={async (reason) => {
+            setPauseConfirmOpen(false);
+            try { await requestVote('pause', { reason }); }
+            catch (err) { console.error('[mp] pause vote', err); }
+          }}
+        />
+      )}
+      {/* Other-player prompt — only renders when a vote is in flight,
+          we're not the initiator, and we haven't responded yet. The
+          tallier sets `result` on settle, which suppresses this modal
+          for the brief 2s it lingers before cleanup. */}
+      {(() => {
+        if (!room?.votes || view !== 'room' || !userId) return null;
+        for (const t of ['restartRound', 'pause', 'resume'] as VoteType[]) {
+          const v = room.votes[t];
+          if (!v) continue;
+          if (v.result) continue;
+          if (v.initiator === userId) continue;
+          if (v.responses?.[userId]) continue;
+          return (
+            <VotePromptModal
+              key={`${t}:${v.startedAt}`}
+              isMobile={isMobile}
+              vote={v}
+              onApprove={() => { castVote(t, 'yes'); }}
+              onReject={() => { castVote(t, 'no'); }}
+            />
+          );
+        }
+        return null;
+      })()}
+      {/* Paused banner — shown for everyone (including initiator) so the
+          state is unmistakeable. Anyone can click Үргэлжлүүлэх to kick
+          off a resume vote. */}
+      {room?.meta?.paused && view === 'room' && (
+        <PausedBanner
+          isMobile={isMobile}
+          meta={room.meta}
+          resumeVoteInFlight={!!room.votes?.resume}
+          isInitiator={room.votes?.resume?.initiator === userId}
+          onRequestResume={() => {
+            if (room.votes?.resume) return;
+            requestVote('resume').catch(err => console.error('[mp] resume vote', err));
+          }}
         />
       )}
       {leaveModalKind && (
@@ -2644,7 +3028,16 @@ function RacingScreen({
   const timer = useTimer(onSolveCommit, holdTimeMs);
 
   // Timer can't fire until the player has revealed the scramble.
-  const interactionLocked = isWaitingForOpponents || isRoundDone || !!pending || !scrambleShown;
+  // Pause / vote interaction lock. While the room is paused or a vote
+  // (any type) is mid-flight, freeze the timer + scramble reveal so the
+  // player can't sneak a solve in. The vote-prompt modal already steals
+  // focus for non-initiators; this gate covers the initiator's view too.
+  const isPaused = !!room.meta?.paused;
+  const voteInFlight = !!(room.votes && (
+    room.votes.restartRound || room.votes.pause || room.votes.resume
+  ));
+  const interactionLocked = isWaitingForOpponents || isRoundDone || !!pending
+    || !scrambleShown || isPaused || voteInFlight;
 
   // Reset local + timer state at solve / round boundary.
   useEffect(() => {
@@ -2829,7 +3222,7 @@ function RacingScreen({
           isWaitingForOpponents={isWaitingForOpponents}
           currentScramble={currentScramble}
           scrambleShown={scrambleShown}
-          onRevealScramble={() => setScrambleShown(true)}
+          onRevealScramble={() => { if (!isPaused && !voteInFlight) setScrambleShown(true); }}
           timer={timer}
           pending={pending}
           displayValue={displayValue}
@@ -2922,7 +3315,7 @@ function RacingScreen({
         isMobile={false}
         scramble={currentScramble}
         shown={scrambleShown}
-        onReveal={() => setScrambleShown(true)}
+        onReveal={() => { if (!isPaused && !voteInFlight) setScrambleShown(true); }}
         hidden={isRoundDone || isWaitingForOpponents}
         fontSizeDesktop={SCRAMBLE_FONT_PX[prefs.scrambleFontSize].desktop}
       />
@@ -3794,6 +4187,338 @@ function ExtraScrambleConfirmModal({
   );
 }
 
+// ── Vote modals ────────────────────────────────────────────────────────────
+//
+// Three surfaces share the same overlay shell:
+//   - RestartRoundConfirmModal: initiator confirmation (with "Санал асуух")
+//   - PauseConfirmModal:        initiator confirmation w/ optional reason
+//   - VotePromptModal:          everybody else (with 30s countdown)
+
+// Generic dialog shell so the three modals stay visually identical.
+function VoteOverlay({
+  isMobile, children,
+  onClose,
+}: {
+  isMobile: boolean;
+  children: React.ReactNode;
+  onClose?: () => void;
+}) {
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1700,
+        background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '1rem',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: isMobile ? '100%' : 460,
+          background: C.card, border: `1px solid ${C.border}`,
+          borderRadius: 16,
+          boxShadow: '0 24px 60px rgba(0,0,0,0.7)',
+          display: 'flex', flexDirection: 'column',
+          maxHeight: 'calc(100dvh - 2rem)', overflow: 'hidden',
+        }}
+      >{children}</div>
+    </div>
+  );
+}
+
+function VoteHeader({ icon, title }: { icon: string; title: string }) {
+  return (
+    <header style={{
+      padding: '0.95rem 1rem',
+      borderBottom: `1px solid ${C.border}`,
+      fontSize: '0.95rem', fontWeight: 800, color: C.text,
+      display: 'flex', alignItems: 'center', gap: '0.45rem',
+    }}>
+      <span aria-hidden="true">{icon}</span>
+      <span>{title}</span>
+    </header>
+  );
+}
+
+function RestartRoundConfirmModal({
+  isMobile, onCancel, onConfirm,
+}: {
+  isMobile: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <VoteOverlay isMobile={isMobile} onClose={onCancel}>
+      <VoteHeader icon="🔄" title="Round дахин эхлүүлэх үү?" />
+      <div style={{
+        padding: '1rem', fontSize: '0.86rem', color: C.text, lineHeight: 1.5,
+      }}>
+        Бүх тоглогч санал нэгтэй бол энэ round-ыг шинэчилнэ. Одоогийн бүх solve алга болно.
+      </div>
+      <div style={{
+        padding: '0 1rem 1rem',
+        display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem',
+      }}>
+        <button
+          type="button" onClick={onCancel}
+          style={voteSecondaryBtn}
+        >Болих</button>
+        <button
+          type="button" onClick={onConfirm}
+          style={votePrimaryBtn}
+        >Санал асуух</button>
+      </div>
+    </VoteOverlay>
+  );
+}
+
+function PauseConfirmModal({
+  isMobile, onCancel, onConfirm,
+}: {
+  isMobile: boolean;
+  onCancel: () => void;
+  onConfirm: (reason: string) => void;
+}) {
+  const [reason, setReason] = useState('');
+  return (
+    <VoteOverlay isMobile={isMobile} onClose={onCancel}>
+      <VoteHeader icon="⏸" title="Тоглолт түр зогсоох" />
+      <div style={{
+        padding: '1rem',
+        display: 'flex', flexDirection: 'column', gap: '0.85rem',
+      }}>
+        <div style={{ fontSize: '0.86rem', color: C.text, lineHeight: 1.5 }}>
+          Бүх тоглогч санал нэгтэй бол тоглолт түр зогсоно. Хүссэн үедээ үргэлжлүүлж болно.
+        </div>
+        <div>
+          <label
+            htmlFor="mp-pause-reason"
+            style={{
+              display: 'block', fontSize: '0.7rem', fontWeight: 700,
+              color: C.muted, letterSpacing: '0.06em',
+              textTransform: 'uppercase', marginBottom: '0.35rem',
+            }}
+          >Шалтгаан (заавал биш)</label>
+          <input
+            id="mp-pause-reason"
+            value={reason}
+            onChange={e => setReason(e.target.value.slice(0, 120))}
+            placeholder="Жишээ: усны завсарлага"
+            style={{
+              width: '100%', boxSizing: 'border-box',
+              background: C.cardAlt, color: C.text,
+              border: `1px solid ${C.border}`, borderRadius: 10,
+              padding: '0.65rem 0.85rem', fontSize: '0.9rem',
+              fontFamily: 'inherit', outline: 'none',
+            }}
+          />
+        </div>
+        <div style={{
+          display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem',
+          marginTop: '0.1rem',
+        }}>
+          <button
+            type="button" onClick={onCancel}
+            style={voteSecondaryBtn}
+          >Болих</button>
+          <button
+            type="button" onClick={() => onConfirm(reason.trim())}
+            style={votePrimaryBtn}
+          >Санал асуух</button>
+        </div>
+      </div>
+    </VoteOverlay>
+  );
+}
+
+// Modal shown to non-initiator players while a vote is in flight. The
+// initiator never sees this — their "yes" was set when they kicked the
+// vote off, and they can cancel it via the existing pause menu surface.
+function VotePromptModal({
+  isMobile, vote, onApprove, onReject,
+}: {
+  isMobile: boolean;
+  vote: VoteData;
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 250);
+    return () => window.clearInterval(id);
+  }, []);
+  const remainingMs = Math.max(0, vote.expiresAt - now);
+  const remainingSec = Math.ceil(remainingMs / 1000);
+  const pct = Math.max(0, Math.min(100, (remainingMs / VOTE_DURATION_MS) * 100));
+
+  const titleByType: Record<VoteType, string> = {
+    restartRound: 'Round дахин эхлүүлэх санал',
+    pause: 'Тоглолт түр зогсоох санал',
+    resume: 'Тоглолт үргэлжлүүлэх санал',
+  };
+  const iconByType: Record<VoteType, string> = {
+    restartRound: '🔄',
+    pause: '⏸',
+    resume: '▶️',
+  };
+  const bodyByType: Record<VoteType, string> = {
+    restartRound: `${vote.initiatorName} энэ round-ыг шинэчлэхийг хүсэж байна. Зөвшөөрөх үү?`,
+    pause: `${vote.initiatorName} тоглолтыг түр зогсоохыг хүсэж байна.${vote.reason ? ` Шалтгаан: ${vote.reason}` : ''} Зөвшөөрөх үү?`,
+    resume: `${vote.initiatorName} тоглолтыг үргэлжлүүлэхийг хүсэж байна. Зөвшөөрөх үү?`,
+  };
+
+  return (
+    <VoteOverlay isMobile={isMobile}>
+      <VoteHeader icon={iconByType[vote.type]} title={titleByType[vote.type]} />
+      <div style={{
+        padding: '1rem',
+        display: 'flex', flexDirection: 'column', gap: '0.85rem',
+      }}>
+        <div style={{ fontSize: '0.86rem', color: C.text, lineHeight: 1.5 }}>
+          {bodyByType[vote.type]}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+          <div style={{
+            display: 'flex', justifyContent: 'space-between',
+            fontSize: '0.7rem', color: C.muted, fontWeight: 700,
+            letterSpacing: '0.06em', textTransform: 'uppercase',
+          }}>
+            <span>Үлдсэн хугацаа</span>
+            <span style={{
+              fontFamily: 'JetBrains Mono, monospace',
+              color: remainingSec <= 5 ? C.danger : C.text,
+            }}>{remainingSec}s</span>
+          </div>
+          <div style={{
+            height: 4, background: C.cardAlt, borderRadius: 999,
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              width: `${pct}%`, height: '100%',
+              background: remainingSec <= 5 ? C.danger : C.accent,
+              transition: 'width 0.25s linear, background 0.25s',
+            }} />
+          </div>
+        </div>
+        <div style={{
+          display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem',
+        }}>
+          <button
+            type="button" onClick={onReject}
+            style={{
+              background: C.dangerDim, color: C.danger,
+              border: `1px solid ${C.danger}`, borderRadius: 12,
+              padding: '0.85rem 1rem', fontSize: '0.92rem', fontWeight: 800,
+              fontFamily: 'inherit', cursor: 'pointer',
+              letterSpacing: '0.02em',
+            }}
+          >Татгалзах</button>
+          <button
+            type="button" onClick={onApprove}
+            style={{
+              background: C.success, color: '#0a0a0a',
+              border: `1px solid ${C.success}`, borderRadius: 12,
+              padding: '0.85rem 1rem', fontSize: '0.92rem', fontWeight: 800,
+              fontFamily: 'inherit', cursor: 'pointer',
+              letterSpacing: '0.02em',
+            }}
+          >Зөвшөөрөх</button>
+        </div>
+      </div>
+    </VoteOverlay>
+  );
+}
+
+const voteSecondaryBtn: React.CSSProperties = {
+  background: C.cardAlt, color: C.text,
+  border: `1px solid ${C.border}`, borderRadius: 12,
+  padding: '0.8rem 1rem', fontSize: '0.92rem', fontWeight: 800,
+  fontFamily: 'inherit', cursor: 'pointer',
+  letterSpacing: '0.02em',
+};
+const votePrimaryBtn: React.CSSProperties = {
+  background: C.accent, color: '#0a0a0a',
+  border: `1px solid ${C.accent}`, borderRadius: 12,
+  padding: '0.8rem 1rem', fontSize: '0.92rem', fontWeight: 800,
+  fontFamily: 'inherit', cursor: 'pointer',
+  letterSpacing: '0.02em',
+};
+
+// Big banner across the screen while the room is paused. Resume is just
+// a vote — anyone can kick it off; the tallier auto-fires another resume
+// vote once we cross meta.pauseAutoResumeAt.
+function PausedBanner({
+  isMobile, meta, onRequestResume, resumeVoteInFlight, isInitiator,
+}: {
+  isMobile: boolean;
+  meta: RoomMeta;
+  onRequestResume: () => void;
+  resumeVoteInFlight: boolean;
+  isInitiator: boolean;
+}) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        position: 'fixed',
+        left: '50%', transform: 'translateX(-50%)',
+        bottom: isMobile ? '5rem' : '1.25rem',
+        zIndex: 1500,
+        width: 'min(640px, calc(100vw - 1.5rem))',
+        background: 'rgba(20,20,20,0.95)',
+        backdropFilter: 'blur(10px) saturate(150%)',
+        WebkitBackdropFilter: 'blur(10px) saturate(150%)',
+        border: `1px solid ${C.borderHi}`,
+        borderRadius: 14,
+        boxShadow: '0 12px 40px rgba(0,0,0,0.55)',
+        padding: '0.85rem 1rem',
+        display: 'flex', flexDirection: 'column', gap: '0.55rem',
+      }}
+    >
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: '0.55rem',
+        fontSize: '0.92rem', fontWeight: 800, color: C.text,
+      }}>
+        <span aria-hidden="true">⏸</span>
+        <span>Тоглолт зогссон</span>
+        <span style={{ marginLeft: 'auto', fontSize: '0.72rem', color: C.muted, fontWeight: 600 }}>
+          {meta.pausedByName}
+        </span>
+      </div>
+      {meta.pauseReason && (
+        <div style={{ fontSize: '0.78rem', color: C.muted, lineHeight: 1.4 }}>
+          {meta.pauseReason}
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={onRequestResume}
+        disabled={resumeVoteInFlight && !isInitiator}
+        style={{
+          background: resumeVoteInFlight ? C.cardAlt : C.success,
+          color: resumeVoteInFlight ? C.muted : '#0a0a0a',
+          border: `1px solid ${resumeVoteInFlight ? C.border : C.success}`,
+          borderRadius: 10, padding: '0.6rem 0.85rem',
+          fontSize: '0.88rem', fontWeight: 800,
+          fontFamily: 'inherit',
+          cursor: resumeVoteInFlight && !isInitiator ? 'not-allowed' : 'pointer',
+          letterSpacing: '0.02em',
+        }}
+      >
+        {resumeVoteInFlight ? 'Санал явж байна…' : 'Үргэлжлүүлэх'}
+      </button>
+    </div>
+  );
+}
+
 // ── OpponentsPanel ───────────────────────────────────────────────────────
 function OpponentsPanel({
   room, userId, now, onClose,
@@ -4274,11 +4999,22 @@ function MpSettingsModal({
 
 function MpPauseModal({
   isMobile, onResume, onLeaveTemporarily, onExit,
+  canRestartRound, canPauseMatch,
+  restartVoteInFlight, pauseVoteInFlight,
+  onRestartRound, onPauseMatch,
 }: {
   isMobile: boolean;
   onResume: () => void;
   onLeaveTemporarily: () => void;
   onExit: () => void;
+  /** False when the room is not racing (no round to restart). */
+  canRestartRound: boolean;
+  /** False when racing — pause is only allowed waiting/results. */
+  canPauseMatch: boolean;
+  restartVoteInFlight: boolean;
+  pauseVoteInFlight: boolean;
+  onRestartRound: () => void;
+  onPauseMatch: () => void;
 }) {
   return (
     <ModalShell isMobile={isMobile} title="Race Paused" onClose={onResume} maxWidth={420}>
@@ -4292,6 +5028,51 @@ function MpPauseModal({
             fontFamily: 'inherit', cursor: 'pointer', letterSpacing: '0.02em',
           }}
         >Resume Race</button>
+
+        {/* Vote-driven actions. Disabled state explains why so the user
+            doesn't wonder where the button went between rounds. */}
+        <button
+          onClick={() => { if (canRestartRound && !restartVoteInFlight) onRestartRound(); }}
+          disabled={!canRestartRound || restartVoteInFlight}
+          style={{
+            background: 'transparent',
+            color: (!canRestartRound || restartVoteInFlight) ? C.mutedDim : C.text,
+            border: `1px solid ${C.border}`, borderRadius: 12,
+            padding: '0.85rem 1rem', fontSize: '0.95rem', fontWeight: 700,
+            fontFamily: 'inherit',
+            cursor: (!canRestartRound || restartVoteInFlight) ? 'not-allowed' : 'pointer',
+            letterSpacing: '0.02em',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem',
+          }}
+        >
+          <span aria-hidden="true">🔄</span>
+          <span>{restartVoteInFlight ? 'Санал явж байна…' : 'Round дахин эхлүүлэх'}</span>
+        </button>
+        <button
+          onClick={() => { if (canPauseMatch && !pauseVoteInFlight) onPauseMatch(); }}
+          disabled={!canPauseMatch || pauseVoteInFlight}
+          style={{
+            background: 'transparent',
+            color: (!canPauseMatch || pauseVoteInFlight) ? C.mutedDim : C.text,
+            border: `1px solid ${C.border}`, borderRadius: 12,
+            padding: '0.85rem 1rem', fontSize: '0.95rem', fontWeight: 700,
+            fontFamily: 'inherit',
+            cursor: (!canPauseMatch || pauseVoteInFlight) ? 'not-allowed' : 'pointer',
+            letterSpacing: '0.02em',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.15rem',
+          }}
+        >
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+            <span aria-hidden="true">⏸</span>
+            <span>{pauseVoteInFlight ? 'Санал явж байна…' : 'Тоглолт түр зогсоох'}</span>
+          </span>
+          {!canPauseMatch && !pauseVoteInFlight && (
+            <span style={{ fontSize: '0.68rem', color: C.muted, fontWeight: 500 }}>
+              Round-ын дунд боломжгүй
+            </span>
+          )}
+        </button>
+
         <button
           onClick={onLeaveTemporarily}
           style={{
