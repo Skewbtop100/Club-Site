@@ -371,7 +371,7 @@ interface MemberData {
   queued?: boolean;
   /** Number of extra-scramble requests this member has used in the
    *  current round. Reset to 0 (cleared) on startRace / nextRound /
-   *  playAgain. Capped client-side by EXTRA_SCRAMBLES_PER_ROUND. */
+   *  rematch. Capped client-side by EXTRA_SCRAMBLES_PER_ROUND. */
   extrasThisRound?: number;
 }
 
@@ -397,7 +397,7 @@ interface ExtraEntry {
 // 'yes' so they don't have to vote on their own request. Tallying is
 // host-driven (see voteTallier effect) — clients only WRITE responses and
 // READ outcomes via toasts/state.
-type VoteType = 'restartRound' | 'pause' | 'resume' | 'retrySolve';
+type VoteType = 'restartRound' | 'pause' | 'resume' | 'retrySolve' | 'rematch';
 type VoteResponse = 'yes' | 'no';
 
 interface VoteData {
@@ -420,6 +420,9 @@ interface VoteData {
 
 // 30s window for both restart and pause votes.
 const VOTE_DURATION_MS = 30_000;
+// 3s "Шинэ match эхэлж байна…" countdown after a rematch vote passes,
+// before the room flips to status='racing' on round 1.
+const REMATCH_COUNTDOWN_MS = 3_000;
 // Auto-prompt resume after a pause stretches past this. Implemented as
 // the expiresAt on the pause meta — once we cross it the host kicks off
 // a resume vote.
@@ -437,6 +440,11 @@ interface RoomMeta {
   /** Push key into pauseHistory for the open pause entry, used so resume
    *  can patch resumedAt onto the matching record. */
   pauseHistoryKey?: string;
+  /** ms epoch the rematch transition flips status='waiting' → 'racing'.
+   *  Set by the rematch tally; cleared once the trigger client flips
+   *  status. While set, every client renders a 3-2-1 countdown overlay
+   *  in place of the WaitingRoom UI. */
+  rematchStartAt?: number;
 }
 
 interface PauseHistoryEntry {
@@ -699,6 +707,7 @@ function MultiplayerPageInner() {
   // is in flight.
   const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
   const [pauseConfirmOpen, setPauseConfirmOpen] = useState(false);
+  const [rematchConfirmOpen, setRematchConfirmOpen] = useState(false);
 
   // Idle-warning system. Fires "are you still here?" 3 min after the
   // last user activity, then leaves the room automatically 30 seconds
@@ -1501,6 +1510,13 @@ function MultiplayerPageInner() {
       // skip the queue prompt entirely — they were already part of the
       // round before any disconnect/refresh.
       const existingMember = data.members?.[uid];
+      // Rematch transition is a brief 'waiting' window with a 3s
+      // countdown — refuse new joins so the upcoming match has a stable
+      // roster. The user can retry once the racing status flips.
+      if (!existingMember && data.meta?.rematchStartAt && data.meta.rematchStartAt > Date.now()) {
+        setErrorMsg('Match эхэлж байна, түр хүлээгээд дахин оролдоно уу.');
+        return;
+      }
       if (data.status === 'racing' && !existingMember) {
         setPendingMidRoundJoin({ code, name, uid });
         return;
@@ -2011,40 +2027,13 @@ function MultiplayerPageInner() {
     await update(ref(rtdb, `rooms/${roomCode}`), updates);
   }, [roomCode, room, userId, now]);
 
-  // Host: reset everything for another full match. Clears totalPoints. Same
-  // deferred-kick rule applies: disconnected members are removed here.
-  const playAgain = useCallback(async () => {
-    if (!roomCode || !room || room.host !== userId) return;
-    const updates: Record<string, unknown> = {
-      status: 'waiting',
-      round: 1,
-      roundName: getRoundName(1, room.maxRounds),
-      scrambles: null,
-      solves: null,
-      playerScrambles: null,
-    };
-    for (const [uid, m] of Object.entries(room.members || {})) {
-      if (getConnectionStatus(m, now) === 'disconnected') {
-        updates[`members/${uid}`] = null;
-        continue;
-      }
-      updates[`members/${uid}/currentSolve`] = 0;
-      updates[`members/${uid}/roundAverage`] = null;
-      updates[`members/${uid}/totalPoints`] = 0;
-      updates[`members/${uid}/ready`] = false;
-      updates[`members/${uid}/extrasThisRound`] = 0;
-      if (m.queued) updates[`members/${uid}/queued`] = null;
-    }
-    await update(ref(rtdb, `rooms/${roomCode}`), updates);
-  }, [roomCode, room, userId, now]);
-
   // ── Status transitions (host-driven, with disconnected-host fallback) ───
   // Round-end logic: racing → results when every non-disconnected member has
   // confirmed all 5 solves. Disconnected players don't block the round and
   // are NOT kicked here — they're given DNF for any incomplete solves so the
   // results screen still ranks them, and they keep their slot in the room so
   // they have a window to reconnect. Kicks happen at the start of the next
-  // round (in `nextRound` / `playAgain`) only if they're still disconnected.
+  // round (in `nextRound`) only if they're still disconnected.
   //
   // Trigger source: the host normally runs this. If the host is disconnected
   // we fall back to the earliest-joined non-disconnected member so the round
@@ -2172,7 +2161,7 @@ function MultiplayerPageInner() {
     }
     if (triggerUid !== userId) return;
 
-    for (const type of ['restartRound', 'pause', 'resume', 'retrySolve'] as VoteType[]) {
+    for (const type of ['restartRound', 'pause', 'resume', 'retrySolve', 'rematch'] as VoteType[]) {
       const vote = votes[type];
       if (!vote) continue;
       // Already settled — schedule cleanup so the vote disappears once
@@ -2243,6 +2232,41 @@ function MultiplayerPageInner() {
           if (key) {
             updates[`pauseHistory/${key}/resumedAt`] = Date.now();
             updates['meta/pauseHistoryKey'] = null;
+          }
+        } else if (type === 'rematch') {
+          // Rematch approval: keep the same members (sans disconnected),
+          // event, totalRounds, hostId. Reset everything else and gate
+          // the status='waiting' → 'racing' flip behind a 3 s countdown
+          // that every client renders via meta.rematchStartAt. Pre-
+          // generate scrambles now so they're already on the wire when
+          // the racing transition fires.
+          //
+          // createdAt is bumped to "now" so the next match has a fresh
+          // matchId for matchHistory + points-award idempotency. The
+          // page-level matchHistory effect treats *→waiting as a new-
+          // match boundary and resets its accumulator refs.
+          const now2 = Date.now();
+          updates['status'] = 'waiting';
+          updates['round'] = 1;
+          updates['roundName'] = getRoundName(1, room.maxRounds);
+          updates['createdAt'] = now2;
+          updates['scrambles'] = generateScrambles(room.event);
+          updates['solves'] = null;
+          updates['playerScrambles'] = null;
+          updates['extras'] = null;
+          updates['retries'] = null;
+          updates['meta/rematchStartAt'] = now2 + REMATCH_COUNTDOWN_MS;
+          for (const [uid, m] of memberEntries) {
+            if (getConnectionStatus(m, now) === 'disconnected') {
+              updates[`members/${uid}`] = null;
+              continue;
+            }
+            updates[`members/${uid}/currentSolve`] = 0;
+            updates[`members/${uid}/roundAverage`] = null;
+            updates[`members/${uid}/totalPoints`] = 0;
+            updates[`members/${uid}/ready`] = false;
+            updates[`members/${uid}/extrasThisRound`] = 0;
+            if (m.queued) updates[`members/${uid}/queued`] = null;
           }
         } else if (type === 'retrySolve') {
           // Retry-solve approval: same effect as instantUndoSolve, but
@@ -2344,6 +2368,72 @@ function MultiplayerPageInner() {
     update(ref(rtdb, `rooms/${roomCode}`), { [`votes/resume`]: data }).catch(() => {});
   }, [room, roomCode, userId, now]);
 
+  // ── Rematch countdown advance ────────────────────────────────────────────
+  // The rematch tally writes status='waiting' + meta.rematchStartAt =
+  // now+REMATCH_COUNTDOWN_MS. Once the countdown elapses, the trigger
+  // client (host with fallback) flips to status='racing' on round 1.
+  // The fast-path setTimeout below covers the host's own countdown so it
+  // doesn't have to wait for the next page-level `now` tick (every 2 s);
+  // the polling-on-now branch is the fallback if the host disconnects
+  // mid-countdown.
+  const rematchAdvanceTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!room || !roomCode || !userId) return;
+    const rematchAt = room.meta?.rematchStartAt;
+    if (!rematchAt) {
+      if (rematchAdvanceTimerRef.current != null) {
+        window.clearTimeout(rematchAdvanceTimerRef.current);
+        rematchAdvanceTimerRef.current = null;
+      }
+      return;
+    }
+    if (room.status === 'racing') return; // already advanced
+
+    const memberEntries = Object.entries(room.members || {});
+    const onlineEntries = memberEntries.filter(([, m]) =>
+      getConnectionStatus(m, now) !== 'disconnected' && !m.queued
+    );
+    if (onlineEntries.length === 0) return;
+    const hostStillHere = !!(room.host && room.members?.[room.host]
+      && getConnectionStatus(room.members[room.host], now) !== 'disconnected');
+    let triggerUid: string;
+    if (hostStillHere) {
+      triggerUid = room.host;
+    } else {
+      onlineEntries.sort(([aUid, a], [bUid, b]) => {
+        const da = a.joinedAt - b.joinedAt;
+        return da !== 0 ? da : aUid.localeCompare(bUid);
+      });
+      triggerUid = onlineEntries[0][0];
+    }
+    if (triggerUid !== userId) return;
+
+    const flip = () => {
+      rematchAdvanceTimerRef.current = null;
+      update(ref(rtdb, `rooms/${roomCode}`), {
+        status: 'racing',
+        round: 1,
+        roundName: getRoundName(1, room.maxRounds),
+        'meta/rematchStartAt': null,
+      }).catch(err => console.error('[mp] rematch advance', err));
+    };
+
+    if (Date.now() >= rematchAt) {
+      flip();
+      return;
+    }
+    if (rematchAdvanceTimerRef.current != null) return; // already scheduled
+    rematchAdvanceTimerRef.current = window.setTimeout(flip, Math.max(0, rematchAt - Date.now()));
+  }, [room, roomCode, userId, now]);
+
+  // Cleanup rematch advance timer on unmount.
+  useEffect(() => () => {
+    if (rematchAdvanceTimerRef.current != null) {
+      window.clearTimeout(rematchAdvanceTimerRef.current);
+      rematchAdvanceTimerRef.current = null;
+    }
+  }, []);
+
   // Outcome toasts — fired locally by every client when a vote flips to
   // a settled `result`. Tracked by type so we only toast once per vote.
   const lastVoteOutcomeRef = useRef<Map<VoteType, number>>(new Map());
@@ -2352,7 +2442,7 @@ function MultiplayerPageInner() {
       lastVoteOutcomeRef.current = new Map();
       return;
     }
-    for (const type of ['restartRound', 'pause', 'resume', 'retrySolve'] as VoteType[]) {
+    for (const type of ['restartRound', 'pause', 'resume', 'retrySolve', 'rematch'] as VoteType[]) {
       const v = room.votes[type];
       if (!v?.result) continue;
       const seenAt = lastVoteOutcomeRef.current.get(type);
@@ -2376,6 +2466,7 @@ function MultiplayerPageInner() {
             );
           }
         }
+        else if (type === 'rematch') pushNotif('Шинэ match эхэлж байна…', 'success', { icon: IconRefresh });
       }
     }
   }, [room?.votes, userId, pushNotif]);
@@ -2448,7 +2539,7 @@ function MultiplayerPageInner() {
     settingsOpen || pauseOpen
     || leaveModalKind != null
     || pendingMidRoundJoin != null
-    || restartConfirmOpen || pauseConfirmOpen
+    || restartConfirmOpen || pauseConfirmOpen || rematchConfirmOpen
     || retryConfirmIdx != null;
   useEffect(() => {
     if (view !== 'room') return;
@@ -2619,7 +2710,8 @@ function MultiplayerPageInner() {
             onInstantUndo={instantUndoSolve}
             onReadyForNext={readyForNext}
             onNextRound={nextRound}
-            onPlayAgain={playAgain}
+            onRematch={() => setRematchConfirmOpen(true)}
+            rematchVoteInFlight={!!room?.votes?.rematch}
             onLeave={requestLeave}
             btState={bt.state}
             btLiveState={bt.state === 'connected' ? bt.liveState : null}
@@ -2723,6 +2815,17 @@ function MultiplayerPageInner() {
           }}
         />
       )}
+      {rematchConfirmOpen && (
+        <RematchConfirmModal
+          isMobile={isMobile}
+          onCancel={() => setRematchConfirmOpen(false)}
+          onConfirm={async () => {
+            setRematchConfirmOpen(false);
+            try { await requestVote('rematch'); }
+            catch (err) { console.error('[mp] rematch vote', err); }
+          }}
+        />
+      )}
       {pauseConfirmOpen && (
         <PauseConfirmModal
           isMobile={isMobile}
@@ -2761,7 +2864,7 @@ function MultiplayerPageInner() {
           for the brief 2s it lingers before cleanup. */}
       {(() => {
         if (!room?.votes || view !== 'room' || !userId) return null;
-        for (const t of ['restartRound', 'pause', 'resume', 'retrySolve'] as VoteType[]) {
+        for (const t of ['restartRound', 'pause', 'resume', 'retrySolve', 'rematch'] as VoteType[]) {
           const v = room.votes[t];
           if (!v) continue;
           if (v.result) continue;
@@ -2773,7 +2876,15 @@ function MultiplayerPageInner() {
               isMobile={isMobile}
               vote={v}
               onApprove={() => { castVote(t, 'yes'); }}
-              onReject={() => { castVote(t, 'no'); }}
+              onReject={() => {
+                castVote(t, 'no');
+                // Per the rematch spec, declining is also "I'm done" —
+                // gracefully auto-leave so the remaining players can
+                // re-initiate the rematch with the smaller roster.
+                if (t === 'rematch') {
+                  leaveRoom().catch(err => console.error('[mp] auto-leave on rematch reject', err));
+                }
+              }}
             />
           );
         }
@@ -3172,7 +3283,12 @@ interface RoomViewProps {
   onInstantUndo: (index: number) => Promise<void> | void;
   onReadyForNext: () => void;
   onNextRound: () => void;
-  onPlayAgain: () => void;
+  /** Host-initiated rematch confirmation. Opens the confirm modal which,
+   *  on accept, kicks off a 'rematch' vote. */
+  onRematch: () => void;
+  /** True while a rematch vote is in flight (or in its 2 s post-result
+   *  cleanup window). The Match Finished button reflects this. */
+  rematchVoteInFlight: boolean;
   onLeave: () => void;
   // Bluetooth smart-timer integration. The page-level hooks own the
   // connection lifecycle; RacingScreen subscribes via btSolveCallbacksRef
@@ -3202,6 +3318,15 @@ function RoomView(props: RoomViewProps) {
   const isHost = room.host === userId;
   const me = room.members?.[userId];
 
+  // Rematch countdown overlay — runs from the moment the rematch tally
+  // sets meta.rematchStartAt until the trigger client flips status back
+  // to 'racing'. Status is briefly 'waiting' here, but rendering the
+  // WaitingRoom would be confusing during the 3 s transition, so we
+  // intercept at the router layer.
+  if (room.meta?.rematchStartAt) {
+    return <RematchCountdownScreen {...props} />;
+  }
+
   // Mid-round joiner: while the round we joined into is still racing,
   // we render a static waiting screen instead of the active timer UI.
   // The host's `nextRound` clears `queued`, so when status flips back to
@@ -3214,6 +3339,87 @@ function RoomView(props: RoomViewProps) {
   if (room.status === 'waiting') return <WaitingRoom {...props} isHost={isHost} />;
   if (room.status === 'racing')  return <RacingScreen {...props} isHost={isHost} />;
   return <ResultsScreen {...props} isHost={isHost} />;
+}
+
+// 3-second "Шинэ match эхэлж байна…" overlay shown to every client
+// during the rematch transition. Self-clocked at 100 ms so the digit
+// rolls smoothly even though the page-level `now` only ticks every 2 s.
+// The actual flip to status='racing' is owned by the trigger client
+// (host with fallback) — see the rematch advance effect.
+function RematchCountdownScreen({ isMobile, room }: RoomViewProps) {
+  const startAt = room.meta?.rematchStartAt ?? 0;
+  const [tick, setTick] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setTick(Date.now()), 100);
+    return () => window.clearInterval(id);
+  }, []);
+  const remainingMs = Math.max(0, startAt - tick);
+  const seconds = Math.max(1, Math.ceil(remainingMs / 1000));
+  const playerNames = Object.values(room.members || {})
+    .filter(m => !m.queued)
+    .map(m => m.name);
+
+  return (
+    <div style={{
+      flex: '1 1 auto',
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      gap: '1.4rem',
+      padding: isMobile ? '1.5rem 1rem' : '2.5rem 2rem',
+      textAlign: 'center',
+    }}>
+      <div style={{
+        display: 'inline-flex', alignItems: 'center', gap: '0.45rem',
+        padding: '0.35rem 0.95rem',
+        background: C.accentDim, color: C.accent,
+        border: `1px solid ${C.borderHi}`,
+        borderRadius: 999,
+        fontSize: '0.7rem', fontWeight: 700,
+        letterSpacing: '0.15em', textTransform: 'uppercase',
+      }}>
+        <IconRefresh size={13} aria-hidden="true" />
+        <span>Шинэ match эхэлж байна…</span>
+      </div>
+      <div
+        key={seconds}
+        style={{
+          fontSize: 'clamp(5rem, 22vw, 10rem)',
+          fontWeight: 900,
+          color: C.accent,
+          fontFamily: 'JetBrains Mono, monospace',
+          lineHeight: 1,
+          animation: 'mp-rematch-pop 0.4s cubic-bezier(0.2, 0.8, 0.3, 1) both',
+          textShadow: `0 0 30px ${C.accentDim}`,
+        }}
+        aria-live="polite"
+      >
+        {seconds}
+      </div>
+      {playerNames.length > 0 && (
+        <div style={{
+          fontSize: '0.88rem', color: C.muted,
+          maxWidth: 420, lineHeight: 1.55,
+        }}>
+          <span style={{
+            display: 'block',
+            fontSize: '0.66rem', fontWeight: 700, color: C.mutedDim,
+            letterSpacing: '0.12em', textTransform: 'uppercase',
+            marginBottom: '0.3rem',
+          }}>
+            Тоглогчид
+          </span>
+          {playerNames.join(', ')}
+        </div>
+      )}
+      <style jsx>{`
+        @keyframes mp-rematch-pop {
+          0%   { transform: scale(0.6); opacity: 0; }
+          60%  { transform: scale(1.08); opacity: 1; }
+          100% { transform: scale(1); opacity: 1; }
+        }
+      `}</style>
+    </div>
+  );
 }
 
 // Spectator screen for users who joined while a race was already in
@@ -4741,6 +4947,38 @@ function RestartRoundConfirmModal({
   );
 }
 
+function RematchConfirmModal({
+  isMobile, onCancel, onConfirm,
+}: {
+  isMobile: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <VoteOverlay isMobile={isMobile} onClose={onCancel}>
+      <VoteHeader icon={<IconRefresh size={18} color={C.accent} />} title="Дахин тоглох" />
+      <div style={{
+        padding: '1rem', fontSize: '0.86rem', color: C.text, lineHeight: 1.5,
+      }}>
+        Ижил тоглогчид, ижил тохиргоотойгоор шинэ match эхлүүлэх үү?
+      </div>
+      <div style={{
+        padding: '0 1rem 1rem',
+        display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem',
+      }}>
+        <button
+          type="button" onClick={onCancel}
+          style={voteSecondaryBtn}
+        >Болих</button>
+        <button
+          type="button" onClick={onConfirm}
+          style={votePrimaryBtn}
+        >Санал асуух</button>
+      </div>
+    </VoteOverlay>
+  );
+}
+
 function PauseConfirmModal({
   isMobile, onCancel, onConfirm,
 }: {
@@ -4947,12 +5185,14 @@ function VotePromptModal({
     pause: 'Тоглолт түр зогсоох санал',
     resume: 'Тоглолт үргэлжлүүлэх санал',
     retrySolve: 'Solve дахин хийх санал',
+    rematch: 'Дахин тоглох санал',
   };
   const iconByType: Record<VoteType, React.ReactNode> = {
     restartRound: <IconRefresh size={18} color={C.accent} />,
     pause: <IconPause size={18} color={C.accent} />,
     resume: <IconPlay size={18} color={C.success} />,
     retrySolve: <IconUndo size={18} color={C.accent} />,
+    rematch: <IconRefresh size={18} color={C.accent} />,
   };
   const solveLabel = typeof vote.solveIdx === 'number' ? vote.solveIdx + 1 : '?';
   const bodyByType: Record<VoteType, string> = {
@@ -4960,6 +5200,7 @@ function VotePromptModal({
     pause: `${vote.initiatorName} тоглолтыг түр зогсоохыг хүсэж байна.${vote.reason ? ` Шалтгаан: ${vote.reason}` : ''} Зөвшөөрөх үү?`,
     resume: `${vote.initiatorName} тоглолтыг үргэлжлүүлэхийг хүсэж байна. Зөвшөөрөх үү?`,
     retrySolve: `${vote.initiatorName} solve ${solveLabel}-г дахин хийхийг хүсэж байна.${vote.reason ? ` Шалтгаан: ${vote.reason}` : ''} Зөвшөөрөх үү?`,
+    rematch: `${vote.initiatorName} ижил тохиргоотойгоор шинэ match эхлүүлэхийг хүсэж байна. Зөвшөөрөх үү?`,
   };
 
   return (
@@ -5898,7 +6139,7 @@ function MpLeaveConfirmModal({
 // ── Results ───────────────────────────────────────────────────────────────
 function ResultsScreen({
   isMobile, room, userId, now, isHost,
-  onReadyForNext, onNextRound, onPlayAgain, onLeave,
+  onReadyForNext, onNextRound, onRematch, rematchVoteInFlight, onLeave,
 }: RoomViewProps & { isHost: boolean }) {
   const ranked = useMemo(() => rankByRoundAverageWithSolves(room.members, room.solves), [room.members, room.solves]);
   const cumulative = useMemo(() => {
@@ -6004,14 +6245,59 @@ function ResultsScreen({
             </tbody>
           </table>
         </Card>
-        <div className="mp-action-grid" style={{
-          display: 'grid',
-          gridTemplateColumns: isMobile ? '1fr' : (isHost ? '1fr 1fr' : '1fr'),
-          gap: '0.6rem',
-        }}>
-          {isHost && <BigButton accent onClick={onPlayAgain}>Play Again</BigButton>}
-          <BigButton onClick={onLeave}>Leave</BigButton>
-        </div>
+        {(() => {
+          // Active = currently connected + non-spectating. Disconnected
+          // members aren't carried into the rematch (the tally kicks them
+          // alongside playAgain's old behaviour), and queued mid-round
+          // joiners never reach Match Finished anyway.
+          const activeCount = Object.values(room.members || {}).filter(m =>
+            getConnectionStatus(m, now) !== 'disconnected' && !m.queued
+          ).length;
+          const enoughPlayers = activeCount >= 2;
+          const rematchDisabled = rematchVoteInFlight || !enoughPlayers;
+          return (
+            <div className="mp-action-grid" style={{
+              display: 'flex', flexDirection: 'column',
+              gap: '0.6rem',
+            }}>
+              {isHost ? (
+                <>
+                  <BigButton
+                    accent
+                    disabled={rematchDisabled}
+                    onClick={() => { if (!rematchDisabled) onRematch(); }}
+                  >
+                    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                      <IconRefresh size={16} aria-hidden="true" />
+                      <span>{rematchVoteInFlight ? 'Санал явж байна…' : 'Дахин тоглох'}</span>
+                    </span>
+                  </BigButton>
+                  {!enoughPlayers && (
+                    <div style={{
+                      fontSize: '0.78rem', color: C.muted, textAlign: 'center',
+                      lineHeight: 1.45,
+                    }}>
+                      Дахин тоглохын тулд 2 ба түүнээс дээш тоглогч хэрэгтэй
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div style={{
+                  background: C.cardAlt, border: `1px solid ${C.border}`,
+                  borderRadius: 12, padding: '0.85rem 1rem',
+                  fontSize: '0.92rem', color: C.muted, fontWeight: 600,
+                  textAlign: 'center',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  gap: '0.5rem',
+                }}>
+                  <IconHourglass size={16} aria-hidden="true" />
+                  <span>{rematchVoteInFlight ? 'Санал явж байна…' : 'Host-ыг хүлээж байна…'}</span>
+                </div>
+              )}
+              <BigButton onClick={onLeave}>Гарах</BigButton>
+            </div>
+          );
+        })()}
       </div>
     );
   }
