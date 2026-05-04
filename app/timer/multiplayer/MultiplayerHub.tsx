@@ -665,10 +665,15 @@ function StatTile({
 
 type LivePanel = 'rooms' | 'online' | 'racing' | null;
 
-function LiveActivityCard() {
+function LiveActivityCard({ onJoinRoom }: { onJoinRoom?: (code: string) => void }) {
   const live = useLiveActivity();
   const [panel, setPanel] = useState<LivePanel>(null);
   const [openRoom, setOpenRoom] = useState<ActiveRoom | null>(null);
+  // Per-row "Нэгдэх" target — opens the code-entry modal pre-scoped
+  // to that specific room. Cleared when the modal closes or join
+  // succeeds. We keep it separate from openRoom so the detail modal
+  // and join modal don't fight over the same slot.
+  const [joinTarget, setJoinTarget] = useState<ActiveRoom | null>(null);
 
   // Keep `openRoom` in sync with the live snapshot so the modal updates
   // its content as the underlying room mutates (members joining/leaving,
@@ -683,6 +688,15 @@ function LiveActivityCard() {
     }
     if (fresh !== openRoom) setOpenRoom(fresh);
   }, [live.rooms, openRoom]);
+
+  // Same freshness sync for the join-target room — if it disappears
+  // (host closed it, all members went stale) we close the join modal.
+  useEffect(() => {
+    if (!joinTarget) return;
+    const fresh = live.rooms.find(r => r.code === joinTarget.code);
+    if (!fresh) { setJoinTarget(null); return; }
+    if (fresh !== joinTarget) setJoinTarget(fresh);
+  }, [live.rooms, joinTarget]);
 
   const togglePanel = (next: LivePanel) => {
     setPanel(curr => (curr === next ? null : next));
@@ -734,7 +748,11 @@ function LiveActivityCard() {
       </div>
 
       {panel === 'rooms' && (
-        <ActiveRoomsPanel rooms={live.rooms} onOpen={setOpenRoom} />
+        <ActiveRoomsPanel
+          rooms={live.rooms}
+          onOpen={setOpenRoom}
+          onJoin={onJoinRoom ? setJoinTarget : undefined}
+        />
       )}
       {panel === 'online' && (
         <OnlineUsersPanel rooms={live.rooms} mode="online" />
@@ -745,6 +763,17 @@ function LiveActivityCard() {
 
       {openRoom && (
         <RoomDetailModal room={openRoom} onClose={() => setOpenRoom(null)} />
+      )}
+
+      {joinTarget && onJoinRoom && (
+        <JoinByCodeModal
+          room={joinTarget}
+          onClose={() => setJoinTarget(null)}
+          onJoin={(code) => {
+            setJoinTarget(null);
+            onJoinRoom(code);
+          }}
+        />
       )}
 
       <style>{`
@@ -865,8 +894,12 @@ function panelStyle(): React.CSSProperties {
 
 // ── Active rooms panel ────────────────────────────────────────────────────
 function ActiveRoomsPanel({
-  rooms, onOpen,
-}: { rooms: ActiveRoom[]; onOpen: (r: ActiveRoom) => void }) {
+  rooms, onOpen, onJoin,
+}: {
+  rooms: ActiveRoom[];
+  onOpen: (r: ActiveRoom) => void;
+  onJoin?: (r: ActiveRoom) => void;
+}) {
   if (rooms.length === 0) {
     return (
       <div style={panelStyle()}>
@@ -879,7 +912,12 @@ function ActiveRoomsPanel({
   return (
     <div style={panelStyle()}>
       {rooms.map(r => (
-        <ActiveRoomRow key={r.code} room={r} onOpen={() => onOpen(r)} />
+        <ActiveRoomRow
+          key={r.code}
+          room={r}
+          onOpen={() => onOpen(r)}
+          onJoin={onJoin ? () => onJoin(r) : undefined}
+        />
       ))}
       <style>{`
         @keyframes mphFade {
@@ -891,7 +929,11 @@ function ActiveRoomsPanel({
   );
 }
 
-function ActiveRoomRow({ room, onOpen }: { room: ActiveRoom; onOpen: () => void }) {
+function ActiveRoomRow({ room, onOpen, onJoin }: {
+  room: ActiveRoom;
+  onOpen: () => void;
+  onJoin?: () => void;
+}) {
   const playerNames = room.members.slice(0, 3).map(m => m.name).join(', ');
   const extra = Math.max(0, room.members.length - 3);
   const hostName = room.hostName || '—';
@@ -942,7 +984,10 @@ function ActiveRoomRow({ room, onOpen }: { room: ActiveRoom; onOpen: () => void 
         </div>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      <div style={{
+        display: 'flex', justifyContent: 'flex-end',
+        gap: '0.4rem', flexWrap: 'wrap',
+      }}>
         <button
           type="button"
           onClick={onOpen}
@@ -955,6 +1000,21 @@ function ActiveRoomRow({ room, onOpen }: { room: ActiveRoom; onOpen: () => void 
             letterSpacing: '0.02em',
           }}
         >Дэлгэрэнгүй</button>
+        {onJoin && (
+          <button
+            type="button"
+            onClick={onJoin}
+            style={{
+              background: C.accent, color: '#0a0a0a',
+              border: `1px solid ${C.accent}`,
+              borderRadius: 8, padding: '0.32rem 0.75rem',
+              fontSize: '0.74rem', fontWeight: 800,
+              fontFamily: 'inherit', cursor: 'pointer',
+              letterSpacing: '0.02em',
+              display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+            }}
+          >Нэгдэх <span aria-hidden="true">→</span></button>
+        )}
       </div>
     </div>
   );
@@ -1222,6 +1282,194 @@ function RoomDetailModal({
               </div>
             </section>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Join-by-code modal (per active-room row) ──────────────────────────────
+// The active rooms list shows everyone what's happening, but the codes
+// stay private — joining still requires the code from the host. This
+// modal is the gate: it pre-scopes to one room's context, the user
+// types the code, and we compare locally before delegating to the
+// existing join flow (which still handles mid-round queueing, etc.).
+function JoinByCodeModal({
+  room, onClose, onJoin,
+}: {
+  room: ActiveRoom;
+  onClose: () => void;
+  onJoin: (code: string) => void;
+}) {
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
+  const [code, setCode] = useState('');
+  const [error, setError] = useState('');
+
+  const onChange = (raw: string) => {
+    const cleaned = raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+    setCode(cleaned);
+    if (error) setError('');
+  };
+
+  const submit = () => {
+    if (code.length !== 6) return;
+    if (code !== room.code.toUpperCase()) {
+      setError('Код буруу байна');
+      return;
+    }
+    onJoin(code);
+  };
+
+  const canSubmit = code.length === 6;
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1600,
+        background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '1rem',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: 440,
+          background: C.card, border: `1px solid ${C.border}`,
+          borderRadius: 16,
+          boxShadow: '0 24px 60px rgba(0,0,0,0.7)',
+          display: 'flex', flexDirection: 'column',
+          maxHeight: 'calc(100dvh - 2rem)', overflow: 'hidden',
+        }}
+      >
+        <header style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0.95rem 1rem',
+          borderBottom: `1px solid ${C.border}`,
+          gap: '0.6rem',
+        }}>
+          <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.18rem' }}>
+            <div style={{ fontSize: '0.95rem', fontWeight: 800, color: C.text }}>
+              Өрөөнд нэгдэх
+            </div>
+            <div style={{
+              fontSize: '0.76rem', color: C.muted,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>
+              <span aria-hidden="true">{statusIcon(room.status)}</span>{' '}
+              {eventLabel(room.event)} · Host: {room.hostName || '—'}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Хаах"
+            style={{
+              width: 30, height: 30, borderRadius: 8,
+              background: 'transparent', border: `1px solid ${C.border}`,
+              color: C.muted, cursor: 'pointer', fontFamily: 'inherit',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >×</button>
+        </header>
+
+        <div style={{
+          padding: '1rem',
+          display: 'flex', flexDirection: 'column', gap: '0.85rem',
+        }}>
+          <div>
+            <div style={{
+              display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+              marginBottom: '0.35rem',
+            }}>
+              <label
+                htmlFor="mph-join-code"
+                style={{
+                  fontSize: '0.7rem', fontWeight: 700, color: C.muted,
+                  letterSpacing: '0.06em', textTransform: 'uppercase',
+                }}
+              >Өрөөний код</label>
+              <span style={{
+                fontFamily: 'JetBrains Mono, monospace',
+                fontSize: '0.72rem', color: C.muted, fontWeight: 700,
+              }}>{code.length} / 6</span>
+            </div>
+            <input
+              id="mph-join-code"
+              autoFocus
+              value={code}
+              onChange={e => onChange(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') submit(); }}
+              placeholder="ABC123"
+              maxLength={6}
+              inputMode="text"
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
+              style={{
+                width: '100%', boxSizing: 'border-box',
+                background: C.cardAlt, color: C.text,
+                border: `1px solid ${error ? C.danger : C.border}`,
+                borderRadius: 12, padding: '0.85rem 1rem',
+                fontFamily: 'JetBrains Mono, monospace',
+                fontSize: '1.4rem', fontWeight: 800,
+                letterSpacing: '0.25em', textAlign: 'center',
+                outline: 'none',
+              }}
+            />
+            <div style={{
+              fontSize: '0.74rem', color: error ? C.danger : C.muted,
+              marginTop: '0.4rem',
+            }}>
+              {error || 'Өрөөний эзэмшигчээс кодыг авна уу'}
+            </div>
+          </div>
+
+          <div style={{
+            background: 'rgba(255,255,255,0.03)',
+            border: `1px solid ${C.border}`,
+            borderRadius: 10, padding: '0.6rem 0.75rem',
+            fontSize: '0.74rem', color: C.muted, lineHeight: 1.45,
+          }}>
+            <span aria-hidden="true">🔒</span> Өрөө хувийн (private). Кодыг өрөөнд нэгдсэн хүнээс л авах боломжтой.
+          </div>
+
+          <div style={{
+            display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem',
+            marginTop: '0.2rem',
+          }}>
+            <button
+              type="button"
+              onClick={onClose}
+              style={{
+                background: C.cardAlt, color: C.text,
+                border: `1px solid ${C.border}`, borderRadius: 12,
+                padding: '0.8rem 1rem', fontSize: '0.92rem', fontWeight: 800,
+                fontFamily: 'inherit', cursor: 'pointer',
+                letterSpacing: '0.02em',
+              }}
+            >Болих</button>
+            <button
+              type="button"
+              onClick={submit}
+              disabled={!canSubmit}
+              style={{
+                background: canSubmit ? C.accent : 'rgba(167,139,250,0.25)',
+                color: canSubmit ? '#0a0a0a' : C.muted,
+                border: 'none', borderRadius: 12,
+                padding: '0.8rem 1rem', fontSize: '0.92rem', fontWeight: 800,
+                fontFamily: 'inherit',
+                cursor: canSubmit ? 'pointer' : 'not-allowed',
+                letterSpacing: '0.02em',
+              }}
+            >Нэгдэх</button>
+          </div>
         </div>
       </div>
     </div>
@@ -2172,7 +2420,7 @@ function QuickActions({
 
 // ── Main hub component ────────────────────────────────────────────────────
 export default function MultiplayerHub({
-  isMobile, pendingRejoin, onRejoin, onDismissRejoin, onCreate, onJoin,
+  isMobile, pendingRejoin, onRejoin, onDismissRejoin, onCreate, onJoin, onJoinRoom,
 }: {
   isMobile: boolean;
   pendingRejoin?: string;
@@ -2180,6 +2428,7 @@ export default function MultiplayerHub({
   onDismissRejoin?: () => void;
   onCreate: () => void;
   onJoin: () => void;
+  onJoinRoom?: (code: string) => void;
 }) {
   const { user } = useAuth();
   const uid = user?.uid ?? '';
@@ -2311,7 +2560,7 @@ export default function MultiplayerHub({
       </Section>
 
       {/* Section 2: Live activity */}
-      <LiveActivityCard />
+      <LiveActivityCard onJoinRoom={onJoinRoom} />
 
       {/* Section 3 + 4: stats + recent (two-col on desktop) */}
       <div style={{

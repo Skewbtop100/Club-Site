@@ -1112,9 +1112,9 @@ function MultiplayerPageInner() {
     setView('room');
   }, []);
 
-  const joinRoom = useCallback(async () => {
+  const joinRoom = useCallback(async (overrideCode?: string) => {
     setErrorMsg('');
-    const code = joinCode.trim().toUpperCase();
+    const code = (overrideCode ?? joinCode).trim().toUpperCase();
     const name = joinName.trim();
     if (!code) { setErrorMsg('Enter a room code.'); return; }
     if (!name) { setErrorMsg('Enter a display name.'); return; }
@@ -1698,6 +1698,20 @@ function MultiplayerPageInner() {
             }}
             onCreate={() => { setErrorMsg(''); setView('create'); }}
             onJoin={() => { setErrorMsg(''); setView('join'); }}
+            onJoinRoom={(code) => {
+              setErrorMsg('');
+              setJoinCode(code);
+              const savedName = (
+                joinName ||
+                displayName ||
+                (typeof window !== 'undefined'
+                  ? (localStorage.getItem('mp_display_name') ?? '')
+                  : '')
+              ).trim();
+              if (!savedName) { setView('join'); return; }
+              if (!joinName.trim()) setJoinName(savedName);
+              joinRoom(code);
+            }}
           />
         )}
 
