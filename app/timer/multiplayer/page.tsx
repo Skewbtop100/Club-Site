@@ -25,6 +25,7 @@ import { saveMatchHistory, type RoundSnapshotInput } from '@/lib/firebase/servic
 import TimerProfileMenu from '@/components/timer/TimerProfileMenu';
 import MultiplayerHub from './MultiplayerHub';
 import { useAuth } from '@/lib/auth-context';
+import { useLang } from '@/lib/i18n';
 import { awardMpMatchIfNew } from '@/lib/points';
 import { showToast } from '@/lib/toast';
 import {
@@ -3347,6 +3348,7 @@ function RoomView(props: RoomViewProps) {
 // The actual flip to status='racing' is owned by the trigger client
 // (host with fallback) — see the rematch advance effect.
 function RematchCountdownScreen({ isMobile, room }: RoomViewProps) {
+  const { t } = useLang();
   const startAt = room.meta?.rematchStartAt ?? 0;
   const [tick, setTick] = useState(() => Date.now());
   useEffect(() => {
@@ -3378,7 +3380,7 @@ function RematchCountdownScreen({ isMobile, room }: RoomViewProps) {
         letterSpacing: '0.15em', textTransform: 'uppercase',
       }}>
         <IconRefresh size={13} aria-hidden="true" />
-        <span>Шинэ match эхэлж байна…</span>
+        <span>{t('mp.rematch.startingMatch')}</span>
       </div>
       <div
         key={seconds}
@@ -3406,7 +3408,7 @@ function RematchCountdownScreen({ isMobile, room }: RoomViewProps) {
             letterSpacing: '0.12em', textTransform: 'uppercase',
             marginBottom: '0.3rem',
           }}>
-            Тоглогчид
+            {t('mp.rematch.players')}
           </span>
           {playerNames.join(', ')}
         </div>
@@ -3469,6 +3471,7 @@ function WaitingRoom({
   isMobile, roomCode, room, userId, now, isHost,
   onToggleReady, onSetEvent, onSetMaxRounds, onStartRace,
 }: RoomViewProps & { isHost: boolean }) {
+  const { t } = useLang();
   const members = Object.entries(room.members || {});
   const allReady = members.length > 0 && members.every(([, m]) => m.ready);
   const me = room.members?.[userId];
@@ -3486,7 +3489,7 @@ function WaitingRoom({
 
       <Card>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
-          <SectionLabel>Players ({members.length})</SectionLabel>
+          <SectionLabel>{t('mp.players')} ({members.length})</SectionLabel>
           <div style={{ fontSize: '0.7rem', color: C.muted }}>
             {getRoundName(room.round, room.maxRounds)} • {room.round} / {room.maxRounds}
           </div>
@@ -3532,7 +3535,7 @@ function WaitingRoom({
           onClick={onToggleReady}
           style={isMobile ? { width: '100%' } : undefined}
         >
-          {me?.ready ? 'Cancel Ready' : 'Ready'}
+          {me?.ready ? t('mp.cancelReady') : t('mp.ready')}
         </BigButton>
         {isHost && (
           <BigButton
@@ -3541,7 +3544,7 @@ function WaitingRoom({
             onClick={onStartRace}
             style={isMobile ? { width: '100%' } : undefined}
           >
-            Start Race
+            {t('mp.startRace')}
           </BigButton>
         )}
       </div>
@@ -6141,6 +6144,7 @@ function ResultsScreen({
   isMobile, room, userId, now, isHost,
   onReadyForNext, onNextRound, onRematch, rematchVoteInFlight, onLeave,
 }: RoomViewProps & { isHost: boolean }) {
+  const { t } = useLang();
   const ranked = useMemo(() => rankByRoundAverageWithSolves(room.members, room.solves), [room.members, room.solves]);
   const cumulative = useMemo(() => {
     return Object.entries(room.members || {})
@@ -6180,7 +6184,7 @@ function ResultsScreen({
               color: C.muted, fontWeight: 700,
             }}>
               <IconTrophy size={14} color={MEDAL_GOLD} aria-hidden="true" />
-              <span>Champion</span>
+              <span>{t('mp.champion')}</span>
             </div>
             <div className="mp-champion-name" style={{
               fontSize: 'clamp(1.6rem, 5vw, 2.4rem)', fontWeight: 800,
@@ -6269,7 +6273,7 @@ function ResultsScreen({
                   >
                     <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
                       <IconRefresh size={16} aria-hidden="true" />
-                      <span>{rematchVoteInFlight ? 'Санал явж байна…' : 'Дахин тоглох'}</span>
+                      <span>{rematchVoteInFlight ? t('mp.rematch.voteInFlight') : t('mp.rematch')}</span>
                     </span>
                   </BigButton>
                   {!enoughPlayers && (
@@ -6277,7 +6281,7 @@ function ResultsScreen({
                       fontSize: '0.78rem', color: C.muted, textAlign: 'center',
                       lineHeight: 1.45,
                     }}>
-                      Дахин тоглохын тулд 2 ба түүнээс дээш тоглогч хэрэгтэй
+                      {t('mp.rematch.needPlayers')}
                     </div>
                   )}
                 </>
@@ -6291,10 +6295,10 @@ function ResultsScreen({
                   gap: '0.5rem',
                 }}>
                   <IconHourglass size={16} aria-hidden="true" />
-                  <span>{rematchVoteInFlight ? 'Санал явж байна…' : 'Host-ыг хүлээж байна…'}</span>
+                  <span>{rematchVoteInFlight ? t('mp.rematch.voteInFlight') : t('mp.rematch.waitForHost')}</span>
                 </div>
               )}
-              <BigButton onClick={onLeave}>Гарах</BigButton>
+              <BigButton onClick={onLeave}>{t('mp.leave')}</BigButton>
             </div>
           );
         })()}

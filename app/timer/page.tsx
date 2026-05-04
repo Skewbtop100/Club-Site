@@ -11,6 +11,7 @@ import { useGanTimer } from './useGanTimer';
 import { useQiyiTimer, type QiyiPacket } from './useQiyiTimer';
 import { useWakeLock } from './useWakeLock';
 import { useAuth } from '@/lib/auth-context';
+import { useLang, type Lang } from '@/lib/i18n';
 import { awardSolvePointIfUnderLimit, awardAo5PbIfEligible } from '@/lib/points';
 import { showToast } from '@/lib/toast';
 import {
@@ -3247,15 +3248,18 @@ interface SettingsPanelProps {
   setQiyiDebugMode: (v: boolean) => void;
 }
 
-const SETTINGS_SECTIONS: { id: SettingsSectionId; label: string; icon: React.ReactNode }[] = [
-  { id: 'timer',     label: 'Timer',     icon: <IconStopwatch size={16} /> },
-  { id: 'bluetooth', label: 'Bluetooth', icon: <IconBluetooth size={16} /> },
-  { id: 'shortcuts', label: 'Shortcuts', icon: <IconKeyboard  size={16} /> },
-  { id: 'display',   label: 'Display',   icon: <IconPalette   size={16} /> },
+// Static section ordering / icons. Labels themselves come from i18n at
+// render time (see SettingsPanel) so the toggle takes effect immediately.
+const SETTINGS_SECTIONS: { id: SettingsSectionId; labelKey: 'timer.section.timer' | 'timer.section.bluetooth' | 'timer.section.shortcuts' | 'timer.section.display'; icon: React.ReactNode }[] = [
+  { id: 'timer',     labelKey: 'timer.section.timer',     icon: <IconStopwatch size={16} /> },
+  { id: 'bluetooth', labelKey: 'timer.section.bluetooth', icon: <IconBluetooth size={16} /> },
+  { id: 'shortcuts', labelKey: 'timer.section.shortcuts', icon: <IconKeyboard  size={16} /> },
+  { id: 'display',   labelKey: 'timer.section.display',   icon: <IconPalette   size={16} /> },
 ];
 
 function SettingsPanel(props: SettingsPanelProps) {
   const { isMobile, C: c, onClose, onExit } = props;
+  const { t, lang, setLang } = useLang();
 
   // ESC closes — captured to win over any other listeners.
   useEffect(() => {
@@ -3269,8 +3273,8 @@ function SettingsPanel(props: SettingsPanelProps) {
   // ── Section bodies (shared between desktop + mobile) ──────────────────────
   const renderTimer = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-      <ToggleRow label="Inspection time" value={props.inspectionEnabled} onChange={props.setInspectionEnabled} />
-      <ToggleRow label="Hold to start"   value={props.holdToStart}        onChange={props.setHoldToStart} />
+      <ToggleRow label={t('timer.inspectionTime')} value={props.inspectionEnabled} onChange={props.setInspectionEnabled} />
+      <ToggleRow label={t('timer.holdToStart')}    value={props.holdToStart}        onChange={props.setHoldToStart} />
       {props.holdToStart && (
         <HoldTimeSlider
           value={props.holdTimeMs}
@@ -3279,12 +3283,12 @@ function SettingsPanel(props: SettingsPanelProps) {
         />
       )}
       <SegmentedRow
-        label="Timer precision"
+        label={t('timer.precision')}
         value={props.precision}
         onChange={props.setPrecision}
         options={[
-          { value: 'cs', label: 'Centiseconds (0.00)',  title: 'Truncated to 1/100s' },
-          { value: 'ms', label: 'Milliseconds (0.000)', title: 'Truncated to 1/1000s' },
+          { value: 'cs', label: t('timer.precision.cs'), title: t('timer.precision.cs.title') },
+          { value: 'ms', label: t('timer.precision.ms'), title: t('timer.precision.ms.title') },
         ]}
         c={c}
       />
@@ -3311,7 +3315,7 @@ function SettingsPanel(props: SettingsPanelProps) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
         <SegmentedRow
-          label="Timer brand"
+          label={t('timer.bt.brand')}
           value={timerBrand}
           onChange={(b: TimerBrand) => {
             // Switching brand mid-connection drops the active connection
@@ -3338,7 +3342,7 @@ function SettingsPanel(props: SettingsPanelProps) {
                 background: connected ? c.success : c.mutedDim,
                 flexShrink: 0,
               }} />
-              {connected ? `Connected (${brandLabel})` : connecting ? 'Connecting…' : unsupported ? 'Not supported' : `Disconnected — ${brandLabel}`}
+              {connected ? `${t('timer.bt.connected')} (${brandLabel})` : connecting ? t('timer.bt.connecting') : unsupported ? t('timer.bt.unsupported') : `${t('timer.bt.disconnected')} — ${brandLabel}`}
             </span>
             {connected && gan.deviceName && (
               <span style={{ fontSize: '0.74rem', color: c.muted, fontFamily: '"JetBrains Mono", monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -3347,7 +3351,7 @@ function SettingsPanel(props: SettingsPanelProps) {
             )}
             {!connected && !connecting && !unsupported && (
               <span style={{ fontSize: '0.74rem', color: c.muted }}>
-                Tap Connect to pair your {brandLabel} timer.
+                {t('timer.bt.tap-to-pair')} {brandLabel} {t('timer.bt.tap-to-pair.suffix')}
               </span>
             )}
           </div>
@@ -3370,7 +3374,7 @@ function SettingsPanel(props: SettingsPanelProps) {
               whiteSpace: 'nowrap', flexShrink: 0,
             }}
           >
-            {connected ? 'Disconnect' : connecting ? 'Connecting…' : 'Connect'}
+            {connected ? t('timer.bt.disconnect') : connecting ? t('timer.bt.connecting') : t('timer.bt.connect')}
           </button>
         </div>
 
@@ -3483,14 +3487,24 @@ function SettingsPanel(props: SettingsPanelProps) {
 
   const renderDisplay = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+      <SegmentedRow<Lang>
+        label={t('timer.language')}
+        value={lang}
+        onChange={setLang}
+        options={[
+          { value: 'mn', label: t('timer.language.mn') },
+          { value: 'en', label: t('timer.language.en') },
+        ]}
+        c={c}
+      />
       <SegmentedRow
-        label="Scramble font size"
+        label={t('timer.scrambleFontSize')}
         value={props.scrambleFontSize}
         onChange={props.setScrambleFontSize}
         options={[
-          { value: 'sm', label: 'Small'  },
-          { value: 'md', label: 'Medium' },
-          { value: 'lg', label: 'Large'  },
+          { value: 'sm', label: t('timer.scrambleFontSize.sm') },
+          { value: 'md', label: t('timer.scrambleFontSize.md') },
+          { value: 'lg', label: t('timer.scrambleFontSize.lg') },
         ]}
         c={c}
       />
@@ -3499,8 +3513,8 @@ function SettingsPanel(props: SettingsPanelProps) {
         borderRadius: 10, padding: '0.7rem 0.85rem',
         fontSize: '0.78rem', color: c.muted, lineHeight: 1.55,
       }}>
-        <div style={{ color: c.text, fontWeight: 700, marginBottom: '0.2rem' }}>Theme</div>
-        Lavender on midnight. Additional themes coming soon.
+        <div style={{ color: c.text, fontWeight: 700, marginBottom: '0.2rem' }}>{t('timer.theme')}</div>
+        {t('timer.theme.description')}
       </div>
     </div>
   );
@@ -3525,7 +3539,7 @@ function SettingsPanel(props: SettingsPanelProps) {
         }}
         onMouseEnter={e => (e.currentTarget.style.color = c.muted)}
         onMouseLeave={e => (e.currentTarget.style.color = c.mutedDim)}
-      >← Exit</button>
+      >{t('timer.exit')}</button>
       <button
         onClick={onClose}
         aria-label="Close"
@@ -3568,7 +3582,7 @@ function SettingsPanel(props: SettingsPanelProps) {
             padding: '0.85rem 0.95rem',
             borderBottom: `1px solid ${c.border}`,
           }}>
-            <div style={{ fontSize: '1.05rem', fontWeight: 700, color: c.text }}>Settings</div>
+            <div style={{ fontSize: '1.05rem', fontWeight: 700, color: c.text }}>{t('timer.settings')}</div>
             {headerActions}
           </div>
           {/* Scroll area with accordion */}
@@ -3595,7 +3609,7 @@ function SettingsPanel(props: SettingsPanelProps) {
                   >
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.55rem' }}>
                       <span style={{ color: open ? c.accent : c.muted, display: 'inline-flex' }}>{s.icon}</span>
-                      <span style={{ fontSize: '0.92rem', fontWeight: 700 }}>{s.label}</span>
+                      <span style={{ fontSize: '0.92rem', fontWeight: 700 }}>{t(s.labelKey)}</span>
                     </span>
                     <span style={{
                       color: c.muted, fontSize: '0.72rem',
@@ -3679,7 +3693,7 @@ function SettingsPanel(props: SettingsPanelProps) {
                   onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent'; }}
                 >
                   <span style={{ display: 'inline-flex' }}>{s.icon}</span>
-                  {s.label}
+                  {t(s.labelKey)}
                 </button>
               );
             })}
@@ -3694,7 +3708,10 @@ function SettingsPanel(props: SettingsPanelProps) {
               textTransform: 'uppercase', color: c.muted, fontWeight: 700,
               marginBottom: '0.85rem',
             }}>
-              {SETTINGS_SECTIONS.find(s => s.id === props.section)?.label}
+              {(() => {
+                const s = SETTINGS_SECTIONS.find(s => s.id === props.section);
+                return s ? t(s.labelKey) : '';
+              })()}
             </div>
             {renderSection(props.section)}
           </div>
