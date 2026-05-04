@@ -4250,13 +4250,26 @@ function SolveActionRow({
   const plus2Active = solve.penalty === '+2';
   const hasComment = !!(solve.comment && solve.comment.trim());
   const size = isMobile ? 40 : 32;
+  // The action row sits INSIDE the timer's tap-to-arm <section>, which
+  // has its own onTouchStart/onTouchEnd that begin a new solve. Without
+  // this guard, every tap on a button would also start the timer. Stop
+  // propagation at the row's wrapper as a defense-in-depth net so even
+  // taps on the gap area between buttons are absorbed.
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
   return (
-    <div style={{
-      display: 'flex', justifyContent: 'center',
-      gap: isMobile ? '0.7rem' : '0.55rem',
-      marginTop: '1.1rem',
-      animation: 'pv-actionrow-fade 0.32s cubic-bezier(0.2, 0.8, 0.3, 1) both',
-    }}>
+    <div
+      onTouchStart={stop}
+      onTouchEnd={stop}
+      onPointerDown={stop}
+      onClick={stop}
+      style={{
+        display: 'flex', justifyContent: 'center',
+        gap: isMobile ? '0.7rem' : '0.55rem',
+        marginTop: '1.1rem',
+        animation: 'pv-actionrow-fade 0.32s cubic-bezier(0.2, 0.8, 0.3, 1) both',
+        pointerEvents: 'auto',
+      }}
+    >
       <ActionIconBtn
         size={size}
         title="Solve устгах (X)"
@@ -4313,10 +4326,33 @@ function ActionIconBtn({
   return (
     <button
       type="button"
-      onClick={onClick}
       title={title}
       aria-label={ariaLabel}
       aria-pressed={active}
+      // The button is rendered inside the timer's tap-to-arm section,
+      // so every native touch/click event MUST stop propagating or it
+      // bubbles up and starts a new solve. We block at three layers
+      // (touch, pointer, click) because mobile browsers fire mixed
+      // sequences depending on platform, and the cost of an extra
+      // stopPropagation is nil.
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      onTouchStart={(e) => {
+        e.stopPropagation();
+        e.currentTarget.style.transform = 'scale(0.94)';
+      }}
+      onTouchEnd={(e) => {
+        e.stopPropagation();
+        e.currentTarget.style.transform = 'scale(1)';
+      }}
+      onTouchCancel={(e) => {
+        e.stopPropagation();
+        e.currentTarget.style.transform = 'scale(1)';
+      }}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        e.currentTarget.style.transform = 'scale(0.94)';
+      }}
+      onPointerUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
       style={{
         width: size, height: size, padding: 0,
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -4326,6 +4362,10 @@ function ActionIconBtn({
         color: active ? tint : C.muted,
         fontFamily: 'inherit', cursor: 'pointer',
         transition: 'background 0.15s, color 0.15s, border-color 0.15s, transform 0.08s',
+        // Suppress iOS Safari's grey tap-flash so our own scale/colour
+        // feedback is the only thing the user sees on press.
+        WebkitTapHighlightColor: 'transparent',
+        touchAction: 'manipulation',
       }}
       onMouseEnter={e => {
         if (active) return;
@@ -4336,9 +4376,8 @@ function ActionIconBtn({
         if (active) return;
         e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
         e.currentTarget.style.color = C.muted;
+        e.currentTarget.style.transform = 'scale(1)';
       }}
-      onMouseDown={e => (e.currentTarget.style.transform = 'scale(0.94)')}
-      onMouseUp={e => (e.currentTarget.style.transform = 'scale(1)')}
     >
       {icon}
     </button>
