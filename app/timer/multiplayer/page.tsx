@@ -26,6 +26,14 @@ import MultiplayerHub from './MultiplayerHub';
 import { useAuth } from '@/lib/auth-context';
 import { awardMpMatchIfNew } from '@/lib/points';
 import { showToast } from '@/lib/toast';
+import {
+  useTimer,
+  fmtMs as fmtMsShared,
+  clampHoldTimeMs,
+  DEFAULT_HOLD_TIME_MS,
+  type Precision,
+  type UseTimerReturn,
+} from '@/lib/timer-engine';
 
 // Solo-timer prefs key — multiplayer reads only the smart-timer brand
 // from here so the user's choice syncs across both pages. Other prefs
@@ -216,14 +224,12 @@ function getUserId(): string {
   return uid;
 }
 
+// Thin adapter over the shared engine's fmtMs. Multiplayer historically
+// stored precision as `2 | 3` (digits after the decimal) in MP_PREFS_KEY;
+// converting to the shared 'cs'/'ms' surface here keeps that on-disk
+// format intact while sharing the formatter implementation.
 function fmtMs(ms: number | null, dnf?: boolean, precision: 2 | 3 = 2): string {
-  if (dnf) return 'DNF';
-  if (ms == null) return '—';
-  const totalSec = ms / 1000;
-  const m = Math.floor(totalSec / 60);
-  const s = totalSec - m * 60;
-  if (m > 0) return `${m}:${s.toFixed(precision).padStart(precision + 3, '0')}`;
-  return s.toFixed(precision);
+  return fmtMsShared(ms, dnf ?? false, precision === 3 ? 'ms' : 'cs');
 }
 
 // Length-based font scaling for the racing-screen big timer. Matches the
@@ -251,6 +257,12 @@ const MP_PREFS_KEY = 'pv.timer.mp.prefs.v1';
 interface MpPrefs {
   inspectionEnabled: boolean;
   holdToStart: boolean;
+  // ms the player must hold SPACE / touch before the timer arms.
+  // Default DEFAULT_HOLD_TIME_MS (550) — same WCA Stackmat default as solo.
+  // Persisted in MP_PREFS_KEY but on first load we fall back to solo's
+  // SOLO_PREFS_KEY value so a user who already configured it on /timer
+  // doesn't have to set it again here.
+  holdTimeMs: number;
   precision: 2 | 3;                 // 2 = centiseconds, 3 = milliseconds
   scrambleFontSize: 'sm' | 'md' | 'lg';
 }
@@ -258,6 +270,7 @@ interface MpPrefs {
 const DEFAULT_MP_PREFS: MpPrefs = {
   inspectionEnabled: false,
   holdToStart: true,
+  holdTimeMs: DEFAULT_HOLD_TIME_MS,
   precision: 2,
   scrambleFontSize: 'md',
 };
@@ -266,17 +279,39 @@ function useMpPrefs(): [MpPrefs, (patch: Partial<MpPrefs>) => void] {
   const [prefs, setPrefs] = useState<MpPrefs>(DEFAULT_MP_PREFS);
 
   useEffect(() => {
+    let stored: Partial<MpPrefs> = {};
     try {
       const raw = localStorage.getItem(MP_PREFS_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<MpPrefs>;
-      setPrefs(prev => ({ ...prev, ...parsed }));
+      if (raw) stored = JSON.parse(raw) as Partial<MpPrefs>;
     } catch {}
+    // Cross-page hold-time inheritance: if we don't yet have an MP value
+    // for holdTimeMs (first visit to multiplayer), pick up whatever the
+    // solo timer is using. Avoids forcing the user to reconfigure.
+    let holdTimeMs = stored.holdTimeMs;
+    if (typeof holdTimeMs !== 'number' || !Number.isFinite(holdTimeMs)) {
+      try {
+        const soloRaw = localStorage.getItem(SOLO_PREFS_KEY);
+        if (soloRaw) {
+          const soloParsed = JSON.parse(soloRaw) as { holdTimeMs?: unknown };
+          if (typeof soloParsed.holdTimeMs === 'number' && Number.isFinite(soloParsed.holdTimeMs)) {
+            holdTimeMs = soloParsed.holdTimeMs;
+          }
+        }
+      } catch {}
+    }
+    setPrefs(prev => ({
+      ...prev,
+      ...stored,
+      ...(typeof holdTimeMs === 'number' ? { holdTimeMs: clampHoldTimeMs(holdTimeMs) } : {}),
+    }));
   }, []);
 
   const update = useCallback((patch: Partial<MpPrefs>) => {
     setPrefs(prev => {
       const next = { ...prev, ...patch };
+      if (typeof patch.holdTimeMs === 'number') {
+        next.holdTimeMs = clampHoldTimeMs(patch.holdTimeMs);
+      }
       try { localStorage.setItem(MP_PREFS_KEY, JSON.stringify(next)); } catch {}
       return next;
     });
@@ -291,126 +326,10 @@ const SCRAMBLE_FONT_PX: Record<MpPrefs['scrambleFontSize'], { mobile: string; de
   lg: { mobile: '1.05rem', desktop: '1.35rem' },
 };
 
-// ── Timer state machine ─────────────────────────────────────────────────────
-// Ported verbatim from app/timer/page.tsx so multiplayer feels identical:
-// hold-to-arm (≥350ms), green-when-armed, inspection countdown if enabled,
-// and a state-based touch/space flow that doesn't fire on incidental taps.
-type MpTimerState = 'idle' | 'inspecting' | 'armed' | 'running' | 'stopped';
-
-function useMpTimer(
-  inspectionEnabled: boolean,
-  onSolveCommit: (ms: number, dnf: boolean) => void,
-) {
-  const [state, setState] = useState<MpTimerState>('idle');
-  const [displayMs, setDisplayMs] = useState(0);
-  const [inspectionMs, setInspectionMs] = useState(15000);
-
-  const runStartRef = useRef(0);
-  const inspStartRef = useRef(0);
-  const armStartRef = useRef(0);
-  const rafRef = useRef(0);
-
-  const stop = useCallback(() => {
-    if (state === 'running') {
-      const final = Date.now() - runStartRef.current;
-      cancelAnimationFrame(rafRef.current);
-      setDisplayMs(final);
-      setState('stopped');
-      const dnf = inspectionMs <= -2000;
-      inspStartRef.current = 0;
-      setInspectionMs(15000);
-      onSolveCommit(final, dnf);
-    }
-  }, [state, inspectionMs, onSolveCommit]);
-
-  // Bluetooth-driven start: the smart timer detected pads-off, so we
-  // jump straight to 'running' without going through inspect/arm. The
-  // local rAF tick still drives the on-screen timer for visual feedback;
-  // the authoritative final ms comes from the device on stopExternal.
-  const startExternal = useCallback(() => {
-    runStartRef.current = Date.now();
-    setDisplayMs(0);
-    setState('running');
-  }, []);
-
-  // Bluetooth-driven stop: device reports the final ms. We commit that
-  // exact value (not our local elapsed) to the round.
-  const stopExternal = useCallback((finalMs: number) => {
-    cancelAnimationFrame(rafRef.current);
-    setDisplayMs(finalMs);
-    setState('stopped');
-    const dnf = inspectionMs <= -2000;
-    inspStartRef.current = 0;
-    setInspectionMs(15000);
-    onSolveCommit(finalMs, dnf);
-  }, [inspectionMs, onSolveCommit]);
-
-  // Tick loop
-  useEffect(() => {
-    if (state === 'running') {
-      const tick = () => {
-        setDisplayMs(Date.now() - runStartRef.current);
-        rafRef.current = requestAnimationFrame(tick);
-      };
-      rafRef.current = requestAnimationFrame(tick);
-      return () => cancelAnimationFrame(rafRef.current);
-    }
-    if (state === 'inspecting') {
-      const id = setInterval(() => {
-        const elapsed = Date.now() - inspStartRef.current;
-        setInspectionMs(15000 - elapsed);
-      }, 50);
-      return () => clearInterval(id);
-    }
-  }, [state]);
-
-  const beginInspection = useCallback(() => {
-    inspStartRef.current = Date.now();
-    setInspectionMs(15000);
-    setState('inspecting');
-  }, []);
-
-  const startArming = useCallback(() => {
-    armStartRef.current = Date.now();
-    setState('armed');
-  }, []);
-
-  const startRunning = useCallback(() => {
-    runStartRef.current = Date.now();
-    setDisplayMs(0);
-    setState('running');
-  }, []);
-
-  const fireRunning = useCallback(() => {
-    const heldFor = Date.now() - armStartRef.current;
-    if (heldFor < 350) {
-      // Released too early — return to inspecting (or idle).
-      setState(prev => prev === 'armed'
-        ? (inspectionMs > -2000 && inspStartRef.current > 0 ? 'inspecting' : 'idle')
-        : prev);
-      return;
-    }
-    runStartRef.current = Date.now();
-    setDisplayMs(0);
-    setState('running');
-  }, [inspectionMs]);
-
-  const reset = useCallback(() => {
-    cancelAnimationFrame(rafRef.current);
-    setState('idle');
-    setDisplayMs(0);
-    setInspectionMs(15000);
-    inspStartRef.current = 0;
-  }, []);
-
-  void inspectionEnabled; // prefs flag is consumed by the caller, not this hook
-
-  return {
-    state, displayMs, inspectionMs,
-    beginInspection, startArming, startRunning, fireRunning, stop, reset,
-    startExternal, stopExternal,
-  };
-}
+// Timer state machine + fmtMs + helpers all live in @/lib/timer-engine.
+// Multiplayer used to have its own useMpTimer with a hard-coded 350ms hold
+// threshold; that code now lives in the shared module and reads holdTimeMs
+// from prefs so solo and multiplayer feel identical (550ms WCA default).
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type Penalty = 'ok' | '+2' | 'dnf';
@@ -2520,10 +2439,13 @@ function RacingScreen({
   isMobile, room, userId, prefs, now, onSubmitSolve, onOpenSettings, onPause,
   btState, btDeviceLabel, onBtConnect, onBtDisconnect, btSolveCallbacksRef,
 }: RoomViewProps & { isHost: boolean }) {
-  // Behaviour now driven by user prefs (Settings modal). The hook signature
-  // unchanged: useMpTimer takes inspectionEnabled and the commit callback.
+  // Behaviour driven by user prefs (Settings modal). The shared timer
+  // engine takes the commit callback and the user-configured hold-to-arm
+  // threshold; inspection on/off and hold-to-start gating live in the
+  // touch/space dispatch below, not the hook itself.
   const holdToStart = prefs.holdToStart;
   const inspectionEnabled = prefs.inspectionEnabled;
+  const holdTimeMs = prefs.holdTimeMs;
   const me = room.members?.[userId];
   const myCurrent = me?.currentSolve ?? 0;
   const mySolves = useMemo(() => {
@@ -2570,7 +2492,7 @@ function RacingScreen({
     setPending({ ms, defaultDnf: dnf });
   }, []);
 
-  const timer = useMpTimer(inspectionEnabled, onSolveCommit);
+  const timer = useTimer(onSolveCommit, holdTimeMs);
 
   // Timer can't fire until the player has revealed the scramble.
   const interactionLocked = isWaitingForOpponents || isRoundDone || !!pending || !scrambleShown;
@@ -2596,7 +2518,7 @@ function RacingScreen({
       onSolveStart: () => {
         if (interactionLocked) return;
         if (timer.state !== 'idle' && timer.state !== 'stopped') return;
-        timer.startExternal();
+        timer.startRunning();
       },
       onSolveStop: (ms) => {
         // Accept stop only if we believe the timer is running; otherwise
@@ -2604,7 +2526,7 @@ function RacingScreen({
         // we already committed). Ignoring keeps onSolveCommit from
         // double-firing.
         if (timer.state !== 'running') return;
-        timer.stopExternal(ms);
+        timer.finishExternal(ms);
       },
       onIdle: () => {
         // Device reset — only matters if we haven't yet committed.
@@ -2767,6 +2689,7 @@ function RacingScreen({
             onDisconnect={onBtDisconnect}
             size={34}
           />
+          {btDeviceLabel && <BtConnectedBadge label={btDeviceLabel} />}
         </div>
         <div style={{
           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.15rem',
@@ -2783,8 +2706,6 @@ function RacingScreen({
           <PauseIcon />
         </IconButton>
       </div>
-
-      {btDeviceLabel && <BtConnectedIndicator label={btDeviceLabel} />}
 
       {isWaitingForOpponents && (
         <div style={{
@@ -2913,7 +2834,7 @@ function MobileRacingLayout({
   currentScramble: string;
   scrambleShown: boolean;
   onRevealScramble: () => void;
-  timer: ReturnType<typeof useMpTimer>;
+  timer: UseTimerReturn;
   pending: { ms: number; defaultDnf: boolean } | null;
   displayValue: string;
   timerColor: string;
@@ -2952,7 +2873,7 @@ function MobileRacingLayout({
         borderBottom: `1px solid ${C.border}`,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       }}>
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', minWidth: 0 }}>
           <IconButton aria-label="Settings" title="Settings" onClick={onOpenSettings}>
             <SettingsIcon />
           </IconButton>
@@ -2962,12 +2883,12 @@ function MobileRacingLayout({
             onDisconnect={onBtDisconnect}
             size={34}
           />
+          {btDeviceLabel && <BtConnectedBadge label={btDeviceLabel} compact />}
         </div>
         <IconButton aria-label="Pause race" title="Pause" onClick={onPause}>
           <PauseIcon />
         </IconButton>
       </header>
-      {btDeviceLabel && <BtConnectedIndicator label={btDeviceLabel} mobile />}
 
       {/* Tab content area — flex: 1 so the timer fills all available space.
           overflow:hidden keeps any over-tall children clipped instead of
@@ -3268,35 +3189,32 @@ function MpGanButton({
   );
 }
 
-// "🔵 GAN Timer" / "🔵 QiYi Timer" pill that appears just below the
-// header when a smart timer is connected. Mobile variant is denser to
-// fit between the header and the scramble area without pushing the
-// timer column down.
-function BtConnectedIndicator({ label, mobile }: { label: string; mobile?: boolean }) {
+// Compact pill rendered next to MpGanButton in the racing header.
+// Strips "Timer" off the device label so it stays narrow on phones —
+// "GAN Timer" → "GAN", "QiYi Timer" → "QiYi". Lavender accent so the
+// pulse green dot stays the connection cue and the pill itself doesn't
+// fight the existing solve-progress text in the header.
+function BtConnectedBadge({ label, compact }: { label: string; compact?: boolean }) {
+  const short = label.replace(/\s*Timer\s*$/i, '');
   return (
-    <div style={{
-      flexShrink: 0,
-      padding: mobile ? '0.25rem 0.55rem 0' : '0',
-      marginTop: mobile ? 0 : '-0.2rem',
-      display: 'flex', justifyContent: 'center',
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+      padding: compact ? '0.18rem 0.45rem' : '0.22rem 0.55rem',
+      borderRadius: 999,
+      background: C.accentDim,
+      border: `1px solid ${C.borderHi}`,
+      fontSize: compact ? '0.62rem' : '0.66rem',
+      fontWeight: 700, color: C.accent, letterSpacing: '0.04em',
+      whiteSpace: 'nowrap',
     }}>
-      <div style={{
-        display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
-        padding: '0.25rem 0.6rem', borderRadius: 999,
-        background: 'rgba(52,211,153,0.12)',
-        border: '1px solid rgba(52,211,153,0.4)',
-        fontSize: mobile ? '0.66rem' : '0.7rem',
-        fontWeight: 700, color: C.success, letterSpacing: '0.04em',
-      }}>
-        <span style={{
-          width: 7, height: 7, borderRadius: '50%',
-          background: C.success,
-          animation: 'mp-bt-dot-pulse 1.4s ease-in-out infinite',
-        }} />
-        <IconBluetooth size={11} />
-        <span>{label}</span>
-      </div>
-    </div>
+      <span style={{
+        width: 6, height: 6, borderRadius: '50%',
+        background: C.success,
+        animation: 'mp-bt-dot-pulse 1.4s ease-in-out infinite',
+        flexShrink: 0,
+      }} />
+      <span>{short}</span>
+    </span>
   );
 }
 
@@ -3847,9 +3765,28 @@ function MpSettingsModal({
       />
       <MpSettingsRow
         label="Hold to start"
-        hint="Hold space / press for 0.35s to arm the timer (green) before release."
+        hint="Hold space / press to arm the timer; release after the hold time to start. WCA Stackmat default is 0.55s."
         control={<MpToggle checked={prefs.holdToStart} onChange={(v) => onChange({ holdToStart: v })} />}
       />
+      {prefs.holdToStart && (
+        <MpSettingsRow
+          label="Hold time"
+          hint={`${(prefs.holdTimeMs / 1000).toFixed(2)}s — how long you must hold before the timer arms. Shared with /timer.`}
+          control={
+            <MpSelect<number>
+              value={prefs.holdTimeMs}
+              options={[
+                { value: 300, label: '0.30s' },
+                { value: 400, label: '0.40s' },
+                { value: 550, label: '0.55s (WCA)' },
+                { value: 700, label: '0.70s' },
+                { value: 1000, label: '1.00s' },
+              ]}
+              onChange={(v) => onChange({ holdTimeMs: v })}
+            />
+          }
+        />
+      )}
       <MpSettingsRow
         label="Precision"
         control={

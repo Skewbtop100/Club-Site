@@ -13,6 +13,22 @@ import { useWakeLock } from './useWakeLock';
 import { useAuth } from '@/lib/auth-context';
 import { awardSolvePointIfUnderLimit, awardAo5PbIfEligible } from '@/lib/points';
 import { showToast } from '@/lib/toast';
+import {
+  useTimer,
+  fmtMs,
+  isDnf,
+  finalMs,
+  avgOfN,
+  calcStats,
+  PENALTY_ADD,
+  clampHoldTimeMs,
+  DEFAULT_HOLD_TIME_MS,
+  type Penalty,
+  type Solve,
+  type Precision,
+  type Stats,
+  type TimerState,
+} from '@/lib/timer-engine';
 
 type TimerBrand = 'gan' | 'qiyi';
 
@@ -113,45 +129,10 @@ function generateScramble(eventId: string): string {
   }
 }
 
-// ── Solve types + stats ─────────────────────────────────────────────────────
-type Penalty = 'none' | '+2' | 'dnf';
-interface Solve {
-  id: string;
-  ms: number;          // raw timer ms (excluding +2)
-  penalty: Penalty;
-  scramble: string;
-  event: string;
-  ts: number;          // unix ms
-}
-
-const PENALTY_ADD: Record<Penalty, number> = { none: 0, '+2': 2000, dnf: 0 };
-const isDnf = (s: Solve) => s.penalty === 'dnf';
-const finalMs = (s: Solve) => s.ms + PENALTY_ADD[s.penalty];
-
-// Format a millisecond duration. ALWAYS truncates (Math.floor) so we never
-// show a time that's faster than what was actually achieved — never round.
-//   precision='cs' → "0.54"  (centiseconds, 547ms → 0.54)
-//   precision='ms' → "0.547" (milliseconds, 547ms → 0.547)
-type Precision = 'cs' | 'ms';
-function fmtMs(ms: number | null | undefined, dnf = false, precision: Precision = 'cs'): string {
-  if (dnf) return 'DNF';
-  if (ms == null) return '—';
-  const safe = Math.max(0, Math.floor(ms));
-  const totalSec = Math.floor(safe / 1000);
-  const m = Math.floor(totalSec / 60);
-  const s = totalSec % 60;
-  if (precision === 'ms') {
-    const sub = safe % 1000;                       // 0..999
-    const subStr = String(sub).padStart(3, '0');
-    if (m === 0) return `${s}.${subStr}`;
-    return `${m}:${String(s).padStart(2, '0')}.${subStr}`;
-  }
-  // centiseconds (truncate, never round)
-  const cs = Math.floor((safe % 1000) / 10);       // 0..99
-  const csStr = String(cs).padStart(2, '0');
-  if (m === 0) return `${s}.${csStr}`;
-  return `${m}:${String(s).padStart(2, '0')}.${csStr}`;
-}
+// Solve types, fmtMs, isDnf, finalMs, avgOfN, calcStats, useTimer, and the
+// Penalty / Precision / Stats / TimerState types all live in
+// @/lib/timer-engine — see that module's header for the rationale and the
+// list of consumers (solo + multiplayer).
 
 // Scale the big timer display down based on text length so multi-minute
 // times ("11:23.456" — 9 chars) don't overflow on narrow viewports. The
@@ -175,155 +156,7 @@ function getTimerFontSize(text: string, isMobile: boolean): string {
   return 'clamp(2.2rem, 8vw, 6rem)';
 }
 
-/** Mean of the middle of last n solves (drop best+worst). DNF in middle = DNF. */
-function avgOfN(solves: Solve[], n: number): number | null {
-  if (solves.length < n) return null;
-  const last = solves.slice(-n);
-  // Sort by finalMs but treat DNF as +Infinity
-  const sorted = [...last].sort((a, b) => {
-    const aV = isDnf(a) ? Infinity : finalMs(a);
-    const bV = isDnf(b) ? Infinity : finalMs(b);
-    return aV - bV;
-  });
-  const middle = sorted.slice(1, -1);
-  if (middle.some(isDnf)) return null;  // DNF in the middle → no average
-  const sum = middle.reduce((acc, s) => acc + finalMs(s), 0);
-  return Math.round(sum / middle.length);
-}
-
-interface Stats {
-  best: number | null;
-  worst: number | null;
-  mean: number | null;
-  ao5: number | null;
-  ao12: number | null;
-  ao100: number | null;
-  pbMs: number | null;
-  stdDev: number | null;
-}
-
-function calcStats(solves: Solve[]): Stats {
-  const valid = solves.filter(s => !isDnf(s)).map(finalMs);
-  const best = valid.length ? Math.min(...valid) : null;
-  const worst = valid.length ? Math.max(...valid) : null;
-  const mean = valid.length ? Math.round(valid.reduce((a, b) => a + b, 0) / valid.length) : null;
-  const ao5 = avgOfN(solves, 5);
-  const ao12 = avgOfN(solves, 12);
-  const ao100 = avgOfN(solves, 100);
-  const pbMs = best;
-  let stdDev: number | null = null;
-  if (valid.length >= 5 && mean != null) {
-    const variance = valid.reduce((acc, v) => acc + (v - mean) ** 2, 0) / valid.length;
-    stdDev = Math.sqrt(variance);
-  }
-  return { best, worst, mean, ao5, ao12, ao100, pbMs, stdDev };
-}
-
-// ── Custom hook: timer state machine ────────────────────────────────────────
-type TimerState = 'idle' | 'inspecting' | 'armed' | 'running' | 'stopped';
-
-function useTimer(onSolveCommit: (ms: number, dnf: boolean) => void, holdTimeMs: number) {
-  const [state, setState] = useState<TimerState>('idle');
-  const [displayMs, setDisplayMs] = useState(0);
-  const [inspectionMs, setInspectionMs] = useState(15000);
-
-  const runStartRef = useRef(0);
-  const inspStartRef = useRef(0);
-  const armStartRef = useRef(0);
-  const rafRef = useRef(0);
-
-  const stop = useCallback(() => {
-    if (state === 'running') {
-      const final = Date.now() - runStartRef.current;
-      cancelAnimationFrame(rafRef.current);
-      // Keep the final time on display so the user sees their result.
-      // The next start press resets to 0 and begins inspection.
-      setDisplayMs(final);
-      setState('stopped');
-      const dnf = inspectionMs <= -2000;
-      inspStartRef.current = 0;
-      setInspectionMs(15000);
-      onSolveCommit(final, dnf);
-    }
-  }, [state, inspectionMs, onSolveCommit]);
-
-  // Tick loop
-  useEffect(() => {
-    if (state === 'running') {
-      const tick = () => {
-        setDisplayMs(Date.now() - runStartRef.current);
-        rafRef.current = requestAnimationFrame(tick);
-      };
-      rafRef.current = requestAnimationFrame(tick);
-      return () => cancelAnimationFrame(rafRef.current);
-    }
-    if (state === 'inspecting') {
-      const id = setInterval(() => {
-        const elapsed = Date.now() - inspStartRef.current;
-        setInspectionMs(15000 - elapsed);
-      }, 50);
-      return () => clearInterval(id);
-    }
-  }, [state]);
-
-  // Public actions
-  const beginInspection = useCallback(() => {
-    inspStartRef.current = Date.now();
-    setInspectionMs(15000);
-    setState('inspecting');
-  }, []);
-
-  const startArming = useCallback(() => {
-    armStartRef.current = Date.now();
-    setState('armed');
-  }, []);
-
-  // Skip arming entirely (used when "hold to start" preference is off)
-  const startRunning = useCallback(() => {
-    runStartRef.current = Date.now();
-    setDisplayMs(0);
-    setState('running');
-  }, []);
-
-  const fireRunning = useCallback(() => {
-    // Only commits if held long enough. The threshold is user-configurable
-    // via Settings → Timer → "Hold time"; default 550 ms matches the WCA
-    // Stackmat standard. Releasing early bounces back to inspecting/idle.
-    const heldFor = Date.now() - armStartRef.current;
-    if (heldFor < holdTimeMs) {
-      setState(prev => prev === 'armed' ? (inspectionMs > -2000 && inspStartRef.current > 0 ? 'inspecting' : 'idle') : prev);
-      return;
-    }
-    runStartRef.current = Date.now();
-    setDisplayMs(0);
-    setState('running');
-  }, [inspectionMs, holdTimeMs]);
-
-  const reset = useCallback(() => {
-    cancelAnimationFrame(rafRef.current);
-    setState('idle');
-    setDisplayMs(0);
-    setInspectionMs(15000);
-    inspStartRef.current = 0;
-  }, []);
-
-  // Drive the timer to "stopped" with an externally-measured time
-  // (e.g. authoritative time from a GAN bluetooth timer). Bypasses the
-  // local Date.now() math so we record the device's exact ms value.
-  const finishExternal = useCallback((finalMs: number) => {
-    cancelAnimationFrame(rafRef.current);
-    setDisplayMs(finalMs);
-    setState('stopped');
-    inspStartRef.current = 0;
-    setInspectionMs(15000);
-    onSolveCommit(finalMs, false);
-  }, [onSolveCommit]);
-
-  return {
-    state, displayMs, inspectionMs,
-    beginInspection, startArming, startRunning, fireRunning, stop, reset, finishExternal,
-  };
-}
+// avgOfN, calcStats, useTimer — all imported from @/lib/timer-engine.
 
 // ── Main page ───────────────────────────────────────────────────────────────
 
@@ -381,8 +214,9 @@ export default function TimerPage() {
   const [precision, setPrecision] = useState<Precision>('cs');
   const [holdToStart, setHoldToStart] = useState(true); // long-press arming
   // How long the user must hold SPACE / touch before the timer arms (ms).
-  // Default 550 = WCA Stackmat standard. Configurable in Settings → Timer.
-  const [holdTimeMs, setHoldTimeMs] = useState(550);
+  // Default DEFAULT_HOLD_TIME_MS (550) = WCA Stackmat standard.
+  // Configurable in Settings → Timer.
+  const [holdTimeMs, setHoldTimeMs] = useState(DEFAULT_HOLD_TIME_MS);
   const [scrambleFontSize, setScrambleFontSize] = useState<'sm' | 'md' | 'lg'>('md');
   const [timerBrand, setTimerBrand] = useState<TimerBrand>('gan');
   // QiYi diagnostic mode — when on, surfaces the last 10 raw BLE packets
@@ -574,7 +408,7 @@ export default function TimerPage() {
         if (typeof parsed.holdTimeMs === 'number' && Number.isFinite(parsed.holdTimeMs)) {
           // Clamp to slider range (200–1000 ms) so old / corrupted values
           // can't push the timer into a useless state.
-          setHoldTimeMs(Math.max(200, Math.min(1000, Math.round(parsed.holdTimeMs))));
+          setHoldTimeMs(clampHoldTimeMs(parsed.holdTimeMs));
         }
         if (parsed.scrambleFontSize === 'sm' || parsed.scrambleFontSize === 'md' || parsed.scrambleFontSize === 'lg') {
           setScrambleFontSize(parsed.scrambleFontSize);
