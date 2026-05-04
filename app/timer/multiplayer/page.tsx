@@ -18,12 +18,38 @@ import {
 } from 'firebase/database';
 import { rtdb } from '@/lib/firebase';
 import { useWakeLock } from '../useWakeLock';
+import { useGanTimer } from '../useGanTimer';
+import { useQiyiTimer } from '../useQiyiTimer';
 import { saveMatchHistory, type RoundSnapshotInput } from '@/lib/firebase/services/matchHistory';
 import TimerProfileMenu from '@/components/timer/TimerProfileMenu';
 import MultiplayerHub from './MultiplayerHub';
 import { useAuth } from '@/lib/auth-context';
 import { awardMpMatchIfNew } from '@/lib/points';
 import { showToast } from '@/lib/toast';
+
+// Solo-timer prefs key — multiplayer reads only the smart-timer brand
+// from here so the user's choice syncs across both pages. Other prefs
+// (precision, hold-to-start, etc.) stay separate via MP_PREFS_KEY.
+type TimerBrand = 'gan' | 'qiyi';
+const SOLO_PREFS_KEY = 'pv.timer.prefs.v1';
+function readSoloTimerBrand(): TimerBrand {
+  if (typeof window === 'undefined') return 'gan';
+  try {
+    const raw = localStorage.getItem(SOLO_PREFS_KEY);
+    if (!raw) return 'gan';
+    const parsed = JSON.parse(raw) as { timerBrand?: unknown };
+    return parsed.timerBrand === 'qiyi' ? 'qiyi' : 'gan';
+  } catch { return 'gan'; }
+}
+function writeSoloTimerBrand(brand: TimerBrand): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const raw = localStorage.getItem(SOLO_PREFS_KEY);
+    const parsed = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    parsed.timerBrand = brand;
+    localStorage.setItem(SOLO_PREFS_KEY, JSON.stringify(parsed));
+  } catch { /* localStorage unavailable */ }
+}
 
 // ── Theme ──────────────────────────────────────────────────────────────────
 const C = {
@@ -297,6 +323,28 @@ function useMpTimer(
     }
   }, [state, inspectionMs, onSolveCommit]);
 
+  // Bluetooth-driven start: the smart timer detected pads-off, so we
+  // jump straight to 'running' without going through inspect/arm. The
+  // local rAF tick still drives the on-screen timer for visual feedback;
+  // the authoritative final ms comes from the device on stopExternal.
+  const startExternal = useCallback(() => {
+    runStartRef.current = Date.now();
+    setDisplayMs(0);
+    setState('running');
+  }, []);
+
+  // Bluetooth-driven stop: device reports the final ms. We commit that
+  // exact value (not our local elapsed) to the round.
+  const stopExternal = useCallback((finalMs: number) => {
+    cancelAnimationFrame(rafRef.current);
+    setDisplayMs(finalMs);
+    setState('stopped');
+    const dnf = inspectionMs <= -2000;
+    inspStartRef.current = 0;
+    setInspectionMs(15000);
+    onSolveCommit(finalMs, dnf);
+  }, [inspectionMs, onSolveCommit]);
+
   // Tick loop
   useEffect(() => {
     if (state === 'running') {
@@ -360,6 +408,7 @@ function useMpTimer(
   return {
     state, displayMs, inspectionMs,
     beginInspection, startArming, startRunning, fireRunning, stop, reset,
+    startExternal, stopExternal,
   };
 }
 
@@ -592,6 +641,102 @@ function MultiplayerPageInner() {
   // Fade-out gate. Flipped true right before we router.push('/timer') after
   // a confirmed leave so the room view dissolves instead of cutting away.
   const [isLeaving, setIsLeaving] = useState(false);
+
+  // ── Bluetooth smart-timer integration ─────────────────────────────────
+  //
+  // Hooks live at page level (not inside RacingScreen) so the connection
+  // persists across waiting/racing/results transitions and round boundaries.
+  // The brand is shared with the solo timer via SOLO_PREFS_KEY.
+  //
+  // RacingScreen subscribes to events through `btSolveCallbacksRef`: it
+  // sets handlers on mount that drive its local timer state machine. When
+  // not racing, the ref's handlers are null and BT events are no-ops.
+  const [timerBrand, setTimerBrand] = useState<TimerBrand>('gan');
+  useEffect(() => { setTimerBrand(readSoloTimerBrand()); }, []);
+  const btSolveCallbacksRef = useRef<{
+    onSolveStart?: () => void;
+    onSolveStop?: (ms: number) => void;
+    onIdle?: () => void;
+  }>({});
+
+  const ganHook = useGanTimer({
+    onSolveStart: () => btSolveCallbacksRef.current.onSolveStart?.(),
+    onSolveStop:  (ms) => btSolveCallbacksRef.current.onSolveStop?.(ms),
+    onIdle:       () => btSolveCallbacksRef.current.onIdle?.(),
+  });
+  const qiyiHook = useQiyiTimer({
+    onSolveStart: () => btSolveCallbacksRef.current.onSolveStart?.(),
+    onSolveStop:  (ms) => btSolveCallbacksRef.current.onSolveStop?.(ms),
+    onIdle:       () => btSolveCallbacksRef.current.onIdle?.(),
+  });
+  const bt = timerBrand === 'qiyi' ? qiyiHook : ganHook;
+  const btConnected = bt.state === 'connected';
+  const btDeviceLabel: string | null =
+    ganHook.state === 'connected' ? 'GAN Timer'
+    : qiyiHook.state === 'connected' ? 'QiYi Timer'
+    : null;
+
+  // Drop the inactive brand's connection when the user switches.
+  useEffect(() => {
+    if (timerBrand === 'qiyi' && ganHook.state === 'connected') ganHook.disconnect();
+    if (timerBrand === 'gan'  && qiyiHook.state === 'connected') qiyiHook.disconnect();
+    // disconnect() functions are stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timerBrand]);
+
+  // Connection-failure toast — fires on the idle→error→idle dance from
+  // gan-web-bluetooth when the user dismisses the picker or pairing
+  // fails. We watch for the 'error' transition specifically (not idle,
+  // which is also the resting state).
+  const ganPrevState = useRef(ganHook.state);
+  const qiyiPrevState = useRef(qiyiHook.state);
+  useEffect(() => {
+    if (ganHook.state === 'error' && ganPrevState.current !== 'error') {
+      showToast({ msg: 'Холболт амжилтгүй', tone: 'error' });
+    }
+    ganPrevState.current = ganHook.state;
+  }, [ganHook.state]);
+  useEffect(() => {
+    if (qiyiHook.state === 'error' && qiyiPrevState.current !== 'error') {
+      showToast({ msg: 'Холболт амжилтгүй', tone: 'error' });
+    }
+    qiyiPrevState.current = qiyiHook.state;
+  }, [qiyiHook.state]);
+
+  // Mid-race disconnect toast — connected → idle while we're inside a
+  // room (view === 'room') means the device dropped, not a deliberate
+  // disconnect from the user. We can't perfectly distinguish those
+  // server-side, but the surface still works because user-initiated
+  // disconnect from settings is silent (no toast wanted there) when
+  // we're in lobby/create/join. Keeping it scoped to view === 'room'
+  // reduces false positives.
+  const wasBtConnectedRef = useRef(false);
+  useEffect(() => {
+    const nowConnected = ganHook.state === 'connected' || qiyiHook.state === 'connected';
+    if (wasBtConnectedRef.current && !nowConnected && view === 'room') {
+      showToast({ msg: 'Цаг таслагдсан, дахин холбоно уу', tone: 'error' });
+    }
+    wasBtConnectedRef.current = nowConnected;
+  }, [ganHook.state, qiyiHook.state, view]);
+
+  const setTimerBrandPersist = useCallback((brand: TimerBrand) => {
+    setTimerBrand(brand);
+    writeSoloTimerBrand(brand);
+  }, []);
+
+  // Wrap the active hook's disconnect so an in-flight solve doesn't get
+  // silently orphaned. liveState === 'running' means the device is mid-
+  // solve (HANDS_OFF received, no STOPPED yet); we ask for confirmation
+  // rather than block outright since the user might be trying to recover
+  // from a stuck state.
+  const guardedBtDisconnect = useCallback(() => {
+    if (bt.liveState === 'running') {
+      // eslint-disable-next-line no-alert
+      const ok = window.confirm('Та одоогоор уралдаж байна. Цаг салгахад тухайн round тасарна. Үргэлжлүүлэх үү?');
+      if (!ok) return;
+    }
+    bt.disconnect();
+  }, [bt]);
 
   // Responsive: ≤1024px gets the mobile/tablet single-column layout (so iPads
   // and other tablets share the bottom-tab racing UI). Desktop above 1024px
@@ -1197,11 +1342,13 @@ function MultiplayerPageInner() {
       console.error('[mp] leaveRoom error', err);
     }
     try { localStorage.removeItem(LAST_ROOM_KEY); } catch {}
+    if (ganHook.state === 'connected') ganHook.disconnect();
+    if (qiyiHook.state === 'connected') qiyiHook.disconnect();
     setRoom(null);
     setRoomCode('');
     setView('lobby');
     setPendingRejoin('');
-  }, [roomCode, userId]);
+  }, [roomCode, userId, ganHook, qiyiHook]);
 
   // After being kicked, the user can re-add themselves. They come back as a
   // brand new member: fresh ready/solve state, no inherited round results,
@@ -1254,9 +1401,12 @@ function MultiplayerPageInner() {
     } catch (err) {
       console.error('[mp] leaveTemporarily cancel onDisconnect', err);
     }
+    // Drop BT before nav so the solo timer page can re-pair cleanly.
+    if (ganHook.state === 'connected') ganHook.disconnect();
+    if (qiyiHook.state === 'connected') qiyiHook.disconnect();
     // LAST_ROOM_KEY stays set; member entry stays in Firebase.
     router.push('/timer');
-  }, [roomCode, userId, router]);
+  }, [roomCode, userId, router, ganHook, qiyiHook]);
 
   // Exit permanently — remove our slot. If we're the last person in the
   // room (regardless of host status) the room is deleted; otherwise we just
@@ -1275,13 +1425,15 @@ function MultiplayerPageInner() {
       console.error('[mp] exitPermanently error', err);
     }
     try { localStorage.removeItem(LAST_ROOM_KEY); } catch {}
+    if (ganHook.state === 'connected') ganHook.disconnect();
+    if (qiyiHook.state === 'connected') qiyiHook.disconnect();
     setRoom(null);
     setRoomCode('');
     setView('lobby');
     setPendingRejoin('');
     setPauseOpen(false);
     setLeaveModalKind(null);
-  }, [roomCode, userId, room?.members]);
+  }, [roomCode, userId, room?.members, ganHook, qiyiHook]);
 
   // Single entry point for the user-initiated leave flow. Picks the right
   // confirmation copy based on context (waiting/active/host/last). For the
@@ -1766,6 +1918,11 @@ function MultiplayerPageInner() {
             onNextRound={nextRound}
             onPlayAgain={playAgain}
             onLeave={requestLeave}
+            btState={bt.state}
+            btDeviceLabel={btDeviceLabel}
+            onBtConnect={bt.connect}
+            onBtDisconnect={guardedBtDisconnect}
+            btSolveCallbacksRef={btSolveCallbacksRef}
           />
         )}
       </main>
@@ -1787,6 +1944,12 @@ function MultiplayerPageInner() {
           prefs={prefs}
           onChange={updatePrefs}
           onClose={() => setSettingsOpen(false)}
+          timerBrand={timerBrand}
+          onTimerBrandChange={setTimerBrandPersist}
+          btState={bt.state}
+          btDeviceLabel={btDeviceLabel}
+          onBtConnect={bt.connect}
+          onBtDisconnect={guardedBtDisconnect}
         />
       )}
       {pauseOpen && (
@@ -2169,6 +2332,18 @@ interface RoomViewProps {
   onNextRound: () => void;
   onPlayAgain: () => void;
   onLeave: () => void;
+  // Bluetooth smart-timer integration. The page-level hooks own the
+  // connection lifecycle; RacingScreen subscribes via btSolveCallbacksRef
+  // to drive its local timer state machine while connected.
+  btState: 'unsupported' | 'idle' | 'connecting' | 'connected' | 'error';
+  btDeviceLabel: string | null;
+  onBtConnect: () => void;
+  onBtDisconnect: () => void;
+  btSolveCallbacksRef: React.MutableRefObject<{
+    onSolveStart?: () => void;
+    onSolveStop?: (ms: number) => void;
+    onIdle?: () => void;
+  }>;
 }
 
 function RoomView(props: RoomViewProps) {
@@ -2343,6 +2518,7 @@ function WaitingRoom({
 // ── Racing screen ─────────────────────────────────────────────────────────
 function RacingScreen({
   isMobile, room, userId, prefs, now, onSubmitSolve, onOpenSettings, onPause,
+  btState, btDeviceLabel, onBtConnect, onBtDisconnect, btSolveCallbacksRef,
 }: RoomViewProps & { isHost: boolean }) {
   // Behaviour now driven by user prefs (Settings modal). The hook signature
   // unchanged: useMpTimer takes inspectionEnabled and the commit callback.
@@ -2407,6 +2583,37 @@ function RacingScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myCurrent, room.round]);
 
+  // Bluetooth-driven solve flow — the page-level useGanTimer / useQiyiTimer
+  // hooks own the connection; we expose handlers via btSolveCallbacksRef
+  // that drive our local timer state machine. The smart timer reports
+  // pads-off (start) and a final ms (stop); we ignore events fired while
+  // the player is still locked out (waiting for opponents, round done,
+  // pending confirmation, or scramble not yet revealed) so the device's
+  // physical state can't bypass the UI gate.
+  const btConnected = btState === 'connected';
+  useEffect(() => {
+    btSolveCallbacksRef.current = {
+      onSolveStart: () => {
+        if (interactionLocked) return;
+        if (timer.state !== 'idle' && timer.state !== 'stopped') return;
+        timer.startExternal();
+      },
+      onSolveStop: (ms) => {
+        // Accept stop only if we believe the timer is running; otherwise
+        // the device is reporting a stale event (e.g. ghost touch after
+        // we already committed). Ignoring keeps onSolveCommit from
+        // double-firing.
+        if (timer.state !== 'running') return;
+        timer.stopExternal(ms);
+      },
+      onIdle: () => {
+        // Device reset — only matters if we haven't yet committed.
+        if (timer.state === 'running') timer.reset();
+      },
+    };
+    return () => { btSolveCallbacksRef.current = {}; };
+  }, [btSolveCallbacksRef, interactionLocked, timer]);
+
   const confirmSolve = useCallback((penalty: Penalty) => {
     console.log('[mp] Penalty clicked', penalty, 'solveIndex:', myCurrent);
     if (!pending) {
@@ -2419,6 +2626,9 @@ function RacingScreen({
   }, [pending, myCurrent, currentScramble, onSubmitSolve]);
 
   const onTimerTouchStart = useCallback(() => {
+    // BT timer owns the start/stop transitions when connected — we
+    // ignore touch so the player can't accidentally double-trigger.
+    if (btConnected) return;
     if (interactionLocked) return;
     if (timer.state === 'running') { timer.stop(); return; }
     if (timer.state === 'idle' || timer.state === 'stopped') {
@@ -2431,17 +2641,20 @@ function RacingScreen({
       if (holdToStart) timer.startArming();
       else timer.startRunning();
     }
-  }, [interactionLocked, timer, inspectionEnabled, holdToStart]);
+  }, [btConnected, interactionLocked, timer, inspectionEnabled, holdToStart]);
 
   const onTimerTouchEnd = useCallback(() => {
+    if (btConnected) return;
     if (timer.state === 'armed') timer.fireRunning();
-  }, [timer]);
+  }, [btConnected, timer]);
 
   // Keyboard — mirrors main timer. Auto-repeat guard via spaceHeldRef so
   // holding space doesn't repeatedly fire keydown on platforms that don't
-  // expose the standalone repeat flag.
+  // expose the standalone repeat flag. When the BT timer is connected,
+  // space is fully disabled so the device is the only input source.
   const spaceHeldRef = useRef(false);
   useEffect(() => {
+    if (btConnected) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code !== 'Space') return;
       e.preventDefault();
@@ -2472,7 +2685,7 @@ function RacingScreen({
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [interactionLocked, timer, inspectionEnabled, holdToStart]);
+  }, [btConnected, interactionLocked, timer, inspectionEnabled, holdToStart]);
 
   // Display values — precision pulled from prefs (2=cs, 3=ms).
   const p = prefs.precision;
@@ -2521,6 +2734,10 @@ function RacingScreen({
         onTimerTouchEnd={onTimerTouchEnd}
         onOpenSettings={onOpenSettings}
         onPause={onPause}
+        btState={btState}
+        btDeviceLabel={btDeviceLabel}
+        onBtConnect={onBtConnect}
+        onBtDisconnect={onBtDisconnect}
       />
     );
   }
@@ -2533,16 +2750,24 @@ function RacingScreen({
       display: 'flex', flexDirection: 'column', gap: '0.85rem',
       padding: '0.5rem 1rem 1rem',
     }}>
-      {/* Unified header: ⚙ left, round info center, ⏸ right. Same icons as mobile. */}
+      {/* Unified header: ⚙ ⌭ left, round info center, ⏸ right. Same icons as mobile. */}
       <div style={{
         background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
         padding: '0.55rem 0.7rem',
         display: 'grid', gridTemplateColumns: 'auto 1fr auto',
         alignItems: 'center', gap: '0.7rem',
       }}>
-        <IconButton aria-label="Settings" title="Settings" onClick={onOpenSettings}>
-          <SettingsIcon />
-        </IconButton>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+          <IconButton aria-label="Settings" title="Settings" onClick={onOpenSettings}>
+            <SettingsIcon />
+          </IconButton>
+          <MpGanButton
+            state={btState}
+            onConnect={onBtConnect}
+            onDisconnect={onBtDisconnect}
+            size={34}
+          />
+        </div>
         <div style={{
           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.15rem',
           minWidth: 0,
@@ -2558,6 +2783,8 @@ function RacingScreen({
           <PauseIcon />
         </IconButton>
       </div>
+
+      {btDeviceLabel && <BtConnectedIndicator label={btDeviceLabel} />}
 
       {isWaitingForOpponents && (
         <div style={{
@@ -2673,6 +2900,7 @@ function MobileRacingLayout({
   timer, pending, displayValue, timerColor, borderColor,
   interactionLocked, confirmSolve, onTimerTouchStart, onTimerTouchEnd,
   onOpenSettings, onPause,
+  btState, btDeviceLabel, onBtConnect, onBtDisconnect,
 }: {
   room: RoomData;
   userId: string;
@@ -2696,6 +2924,10 @@ function MobileRacingLayout({
   onTimerTouchEnd: () => void;
   onOpenSettings: () => void;
   onPause: () => void;
+  btState: 'unsupported' | 'idle' | 'connecting' | 'connected' | 'error';
+  btDeviceLabel: string | null;
+  onBtConnect: () => void;
+  onBtDisconnect: () => void;
 }) {
   const [tab, setTab] = useState<'timer' | 'opponents'>('timer');
   const roundLabel = room.roundName || getRoundName(room.round, room.maxRounds);
@@ -2712,7 +2944,7 @@ function MobileRacingLayout({
       background: C.bg,
       overflow: 'hidden',
     }}>
-      {/* Header: ⚙ left, ⏸ right. Subtle, low-contrast — doesn't distract. */}
+      {/* Header: ⚙ ⌭ left, ⏸ right. Subtle, low-contrast — doesn't distract. */}
       <header style={{
         flexShrink: 0,
         padding: '0.3rem 0.55rem',
@@ -2720,13 +2952,22 @@ function MobileRacingLayout({
         borderBottom: `1px solid ${C.border}`,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       }}>
-        <IconButton aria-label="Settings" title="Settings" onClick={onOpenSettings}>
-          <SettingsIcon />
-        </IconButton>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+          <IconButton aria-label="Settings" title="Settings" onClick={onOpenSettings}>
+            <SettingsIcon />
+          </IconButton>
+          <MpGanButton
+            state={btState}
+            onConnect={onBtConnect}
+            onDisconnect={onBtDisconnect}
+            size={34}
+          />
+        </div>
         <IconButton aria-label="Pause race" title="Pause" onClick={onPause}>
           <PauseIcon />
         </IconButton>
       </header>
+      {btDeviceLabel && <BtConnectedIndicator label={btDeviceLabel} mobile />}
 
       {/* Tab content area — flex: 1 so the timer fills all available space.
           overflow:hidden keeps any over-tall children clipped instead of
@@ -2876,6 +3117,14 @@ function MobileRacingLayout({
           50%        { opacity: 0.7; box-shadow: 0 0 14px 0 rgba(167, 139, 250, 0.55); }
         }
         .mp-solve-current { animation: mp-pulse 1.2s ease-in-out infinite; }
+        @keyframes mp-ble-pulse {
+          0%, 100% { opacity: 1; }
+          50%      { opacity: 0.45; }
+        }
+        @keyframes mp-bt-dot-pulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(52,211,153,0.55); }
+          50%      { box-shadow: 0 0 0 5px rgba(52,211,153,0); }
+        }
       `}</style>
     </div>
   );
@@ -2947,6 +3196,107 @@ function IconButton({
       }}
       {...rest}
     >{children}</button>
+  );
+}
+
+function IconBluetooth({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M7 7l10 10-5 5V2l5 5L7 17" />
+    </svg>
+  );
+}
+
+// Mirrors the solo-timer GanButton (app/timer/page.tsx). Duplicated rather
+// than imported because the solo page doesn't export it and we'd rather
+// not refactor the solo timer for this. States: idle / connecting /
+// connected / error / unsupported. Click toggles connect/disconnect; on
+// unsupported we show the iOS / browser message via window.alert.
+function MpGanButton({
+  state, onConnect, onDisconnect, size = 34, iconSize = 16,
+}: {
+  state: 'unsupported' | 'idle' | 'connecting' | 'connected' | 'error';
+  onConnect: () => void;
+  onDisconnect: () => void;
+  size?: number;
+  iconSize?: number;
+}) {
+  const isConnected = state === 'connected';
+  const isConnecting = state === 'connecting';
+  const isUnsupported = state === 'unsupported';
+  const color = isConnected ? C.success
+    : isConnecting ? C.accent
+    : isUnsupported ? C.mutedDim
+    : C.muted;
+  const title = isUnsupported ? 'Web Bluetooth not supported in this browser'
+    : isConnecting ? 'Connecting…'
+    : isConnected ? 'Smart timer connected — tap to disconnect'
+    : 'Connect smart timer';
+  return (
+    <button
+      onClick={() => {
+        if (isUnsupported) {
+          const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent);
+          // eslint-disable-next-line no-alert
+          alert(isIOS
+            ? "iOS browsers don't support Web Bluetooth. Install Bluefy from the App Store and open this site in Bluefy to use a smart timer."
+            : 'Web Bluetooth is required for smart-timer support. Use Chrome or Edge over HTTPS / localhost.');
+          return;
+        }
+        if (isConnected) onDisconnect();
+        else if (!isConnecting) onConnect();
+      }}
+      aria-label={title}
+      title={title}
+      style={{
+        width: size, height: size, borderRadius: 8,
+        background: isConnected ? 'rgba(52,211,153,0.12)'
+          : isConnecting ? C.accentDim
+          : 'transparent',
+        border: `1px solid ${
+          isConnected ? 'rgba(52,211,153,0.4)'
+          : isConnecting ? C.borderHi
+          : C.border
+        }`,
+        color, cursor: isUnsupported ? 'help' : 'pointer',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        animation: isConnecting ? 'mp-ble-pulse 1.1s ease-in-out infinite' : undefined,
+        transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+        fontFamily: 'inherit', flexShrink: 0,
+      }}
+    ><IconBluetooth size={iconSize} /></button>
+  );
+}
+
+// "🔵 GAN Timer" / "🔵 QiYi Timer" pill that appears just below the
+// header when a smart timer is connected. Mobile variant is denser to
+// fit between the header and the scramble area without pushing the
+// timer column down.
+function BtConnectedIndicator({ label, mobile }: { label: string; mobile?: boolean }) {
+  return (
+    <div style={{
+      flexShrink: 0,
+      padding: mobile ? '0.25rem 0.55rem 0' : '0',
+      marginTop: mobile ? 0 : '-0.2rem',
+      display: 'flex', justifyContent: 'center',
+    }}>
+      <div style={{
+        display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
+        padding: '0.25rem 0.6rem', borderRadius: 999,
+        background: 'rgba(52,211,153,0.12)',
+        border: '1px solid rgba(52,211,153,0.4)',
+        fontSize: mobile ? '0.66rem' : '0.7rem',
+        fontWeight: 700, color: C.success, letterSpacing: '0.04em',
+      }}>
+        <span style={{
+          width: 7, height: 7, borderRadius: '50%',
+          background: C.success,
+          animation: 'mp-bt-dot-pulse 1.4s ease-in-out infinite',
+        }} />
+        <IconBluetooth size={11} />
+        <span>{label}</span>
+      </div>
+    </div>
   );
 }
 
@@ -3136,13 +3486,24 @@ function SolveAndCubeRow({
         </div>
       )}
       {/* Inline keyframes — pill-shape current chip pulses with a purple glow.
-          Same animation also referenced from MobileRacingLayout's <style>. */}
+          Same animation also referenced from MobileRacingLayout's <style>.
+          mp-ble-pulse / mp-bt-dot-pulse drive the smart-timer button and
+          connection indicator; defined here so they're available on both
+          mobile and desktop layouts. */}
       <style>{`
         @keyframes mp-pulse {
           0%, 100% { box-shadow: 0 0 0 0 rgba(167, 139, 250, 0); }
           50%      { box-shadow: 0 0 14px 0 rgba(167, 139, 250, 0.55); }
         }
         .mp-solve-current { animation: mp-pulse 1.2s ease-in-out infinite; }
+        @keyframes mp-ble-pulse {
+          0%, 100% { opacity: 1; }
+          50%      { opacity: 0.45; }
+        }
+        @keyframes mp-bt-dot-pulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(52,211,153,0.55); }
+          50%      { box-shadow: 0 0 0 5px rgba(52,211,153,0); }
+        }
       `}</style>
     </div>
   );
@@ -3454,12 +3815,23 @@ function MpSelect<T extends string | number>({
 
 function MpSettingsModal({
   isMobile, prefs, onChange, onClose,
+  timerBrand, onTimerBrandChange,
+  btState, btDeviceLabel, onBtConnect, onBtDisconnect,
 }: {
   isMobile: boolean;
   prefs: MpPrefs;
   onChange: (patch: Partial<MpPrefs>) => void;
   onClose: () => void;
+  timerBrand: TimerBrand;
+  onTimerBrandChange: (b: TimerBrand) => void;
+  btState: 'unsupported' | 'idle' | 'connecting' | 'connected' | 'error';
+  btDeviceLabel: string | null;
+  onBtConnect: () => void;
+  onBtDisconnect: () => void;
 }) {
+  const isConnected = btState === 'connected';
+  const isConnecting = btState === 'connecting';
+  const isUnsupported = btState === 'unsupported';
   return (
     <ModalShell isMobile={isMobile} title="Settings" onClose={onClose}>
       <div style={{
@@ -3510,28 +3882,107 @@ function MpSettingsModal({
         fontSize: '0.66rem', letterSpacing: '0.12em',
         textTransform: 'uppercase', color: C.muted, fontWeight: 700,
         margin: '1.1rem 0 0.5rem',
-      }}>Bluetooth</div>
+      }}>Цахим цаг (Smart timer)</div>
       <div style={{
         background: C.cardAlt, border: `1px solid ${C.border}`,
-        borderRadius: 10, padding: '0.7rem 0.85rem',
-        display: 'flex', flexDirection: 'column', gap: '0.5rem',
+        borderRadius: 10, padding: '0.75rem 0.85rem',
+        display: 'flex', flexDirection: 'column', gap: '0.7rem',
       }}>
-        <div style={{ fontSize: '0.78rem', color: C.muted, lineHeight: 1.5 }}>
-          GAN and QiYi smart-cube support is coming to multiplayer races. For now, race solves are timed via touch / space on the on-screen timer.
+        {/* Brand toggle — disabled while a connection is live so we can't
+            silently drop the user's active device behind their back. They
+            must disconnect first to switch brands. */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: '1fr 1fr',
+          gap: '0.4rem', padding: '0.2rem',
+          background: C.card, border: `1px solid ${C.border}`,
+          borderRadius: 10,
+        }}>
+          {(['gan', 'qiyi'] as const).map(b => {
+            const active = timerBrand === b;
+            const label = b === 'gan' ? 'GAN' : 'QiYi';
+            return (
+              <button
+                key={b}
+                type="button"
+                disabled={isConnected || isConnecting}
+                onClick={() => onTimerBrandChange(b)}
+                style={{
+                  background: active ? C.accent : 'transparent',
+                  color: active ? '#0a0a0a' : (isConnected || isConnecting) ? C.mutedDim : C.text,
+                  border: 'none', borderRadius: 8,
+                  padding: '0.5rem 0.4rem', fontSize: '0.85rem',
+                  fontFamily: 'inherit', fontWeight: 700,
+                  cursor: (isConnected || isConnecting) ? 'not-allowed' : 'pointer',
+                  letterSpacing: '0.02em',
+                }}
+              >{label}</button>
+            );
+          })}
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.45rem' }}>
-          <button disabled style={{
-            background: 'transparent', color: C.mutedDim,
-            border: `1px solid ${C.border}`, borderRadius: 8,
-            padding: '0.5rem 0.6rem', fontSize: '0.8rem', fontFamily: 'inherit',
-            cursor: 'not-allowed', fontWeight: 700,
-          }}>Connect GAN</button>
-          <button disabled style={{
-            background: 'transparent', color: C.mutedDim,
-            border: `1px solid ${C.border}`, borderRadius: 8,
-            padding: '0.5rem 0.6rem', fontSize: '0.8rem', fontFamily: 'inherit',
-            cursor: 'not-allowed', fontWeight: 700,
-          }}>Connect QiYi</button>
+
+        {/* Status line — green pill when connected, muted otherwise. */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '0.45rem',
+          fontSize: '0.78rem', color: isConnected ? C.success : C.muted,
+        }}>
+          <span style={{
+            width: 8, height: 8, borderRadius: '50%',
+            background: isConnected ? C.success
+              : isConnecting ? C.accent
+              : C.mutedDim,
+          }} />
+          <span style={{ fontWeight: 700 }}>
+            {isConnected ? (btDeviceLabel ?? 'Холбогдсон')
+              : isConnecting ? 'Холбогдож байна…'
+              : isUnsupported ? 'Web Bluetooth дэмжихгүй'
+              : 'Холболт идэвхгүй'}
+          </span>
+        </div>
+
+        {/* Connect / Disconnect — single button that flips role based
+            on state. iOS/unsupported case routes to the Bluefy hint via
+            the same alert MpGanButton uses. */}
+        <button
+          type="button"
+          onClick={() => {
+            if (isUnsupported) {
+              const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent);
+              // eslint-disable-next-line no-alert
+              alert(isIOS
+                ? "iOS browsers don't support Web Bluetooth. Install Bluefy from the App Store and open this site in Bluefy to use a smart timer."
+                : 'Web Bluetooth is required for smart-timer support. Use Chrome or Edge over HTTPS / localhost.');
+              return;
+            }
+            if (isConnected) onBtDisconnect();
+            else if (!isConnecting) onBtConnect();
+          }}
+          disabled={isConnecting}
+          style={{
+            background: isConnected ? 'rgba(239,68,68,0.12)'
+              : isUnsupported ? 'transparent'
+              : C.accent,
+            color: isConnected ? C.danger
+              : isUnsupported ? C.mutedDim
+              : '#0a0a0a',
+            border: `1px solid ${
+              isConnected ? 'rgba(239,68,68,0.35)'
+              : isUnsupported ? C.border
+              : C.accent
+            }`,
+            borderRadius: 10, padding: '0.65rem 0.8rem',
+            fontSize: '0.88rem', fontWeight: 800,
+            fontFamily: 'inherit',
+            cursor: isConnecting ? 'wait' : isUnsupported ? 'help' : 'pointer',
+            letterSpacing: '0.02em',
+          }}
+        >
+          {isConnecting ? 'Холбогдож байна…'
+            : isConnected ? 'Холболт салгах'
+            : `Холбох (${timerBrand === 'gan' ? 'GAN' : 'QiYi'})`}
+        </button>
+
+        <div style={{ fontSize: '0.7rem', color: C.muted, lineHeight: 1.45 }}>
+          Холбогдсон үед цаг таны smart timer-аас автоматаар тоологдоно. Space болон touch түр идэвхгүй болно.
         </div>
       </div>
     </ModalShell>
