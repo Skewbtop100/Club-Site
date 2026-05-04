@@ -189,6 +189,29 @@ interface Session {
 type SessionStore = Record<string /* eventId */, { sessions: Session[]; currentId: string }>;
 
 const newSessionId = () => `sess_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+// Smart digit-only parser: last 2 digits = centiseconds, next 2 = seconds,
+// remaining = minutes. Examples:
+//   "1221"   → 12.21s   (12s 21cs)
+//   "122"    → 1.22s    (1s 22cs)
+//   "12211"  → 1:22.11
+//   "122111" → 12:21.11
+// Module-level so the inline manual-entry input (a top-level component)
+// can call it without prop-drilling.
+function parseManualTime(raw: string): number | null {
+  const d = (raw || '').replace(/\D/g, '');
+  if (!d) return null;
+  let s = d;
+  const csStr  = s.length >= 2 ? s.slice(-2) : s.padStart(2, '0');
+  s = s.length >= 2 ? s.slice(0, -2) : '';
+  const secStr = s.length >= 2 ? s.slice(-2) : s;
+  s = s.length >= 2 ? s.slice(0, -2) : '';
+  const minStr = s;
+  const cs  = parseInt(csStr, 10) || 0;
+  const sec = parseInt(secStr || '0', 10) || 0;
+  const min = parseInt(minStr || '0', 10) || 0;
+  return (min * 60 + sec) * 1000 + cs * 10;
+}
+
 function makeDefaultSession(solves: Solve[] = []): Session {
   return { id: newSessionId(), name: 'Default', createdAt: Date.now(), solves };
 }
@@ -227,6 +250,13 @@ export default function TimerPage() {
   // Configurable in Settings → Timer.
   const [holdTimeMs, setHoldTimeMs] = useState(DEFAULT_HOLD_TIME_MS);
   const [scrambleFontSize, setScrambleFontSize] = useState<'sm' | 'md' | 'lg'>('md');
+  // Where the next solve's time comes from. 'default' = keyboard/touch
+  // arming; 'manual' = type digits straight into the timer area;
+  // 'bluetooth' = the connected smart timer drives the value (same
+  // runtime path as 'default' — the distinction is informational so the
+  // user knows what to expect). Persisted via PREFS_KEY.
+  type TimeEntryMode = 'default' | 'manual' | 'bluetooth';
+  const [timeEntryMode, setTimeEntryMode] = useState<TimeEntryMode>('default');
   const [timerBrand, setTimerBrand] = useState<TimerBrand>('gan');
   // QiYi diagnostic mode — when on, surfaces the last 10 raw BLE packets
   // received from the timer in a fixed overlay so the user can confirm
@@ -248,8 +278,23 @@ export default function TimerPage() {
   // Mobile tab navigation + entry modals
   const [mobileTab, setMobileTab] = useState<'timer' | 'solves' | 'stats' | 'tools'>('timer');
   const [mobileSearch, setMobileSearch] = useState('');
-  const [manualEntryOpen, setManualEntryOpen] = useState(false);
-  const [manualEntryValue, setManualEntryValue] = useState('');
+  // Inline manual-entry input value — only used when timeEntryMode==='manual'.
+  // The legacy modal that prompted for a time has been removed; users
+  // who want to type a time directly do so via the timer area itself
+  // after picking "Гараар" in Settings.
+  const [manualInline, setManualInline] = useState('');
+  // First-visit hint pointing the user at the swipe gesture on the
+  // scramble row. Persisted under its own localStorage key so once the
+  // user dismisses (or swipes once), they never see it again.
+  const SWIPE_HINT_KEY = 'pv.timer.swipeHint.dismissed';
+  const [swipeHintDismissed, setSwipeHintDismissed] = useState<boolean>(true);
+  useEffect(() => {
+    try { setSwipeHintDismissed(localStorage.getItem(SWIPE_HINT_KEY) === '1'); } catch { /* ignore */ }
+  }, []);
+  const dismissSwipeHint = useCallback(() => {
+    setSwipeHintDismissed(true);
+    try { localStorage.setItem(SWIPE_HINT_KEY, '1'); } catch { /* ignore */ }
+  }, []);
   const [sessionPanelOpen, setSessionPanelOpen] = useState(false);
   const [newSessionName, setNewSessionName] = useState('');
   const [cubeFullscreenOpen, setCubeFullscreenOpen] = useState(false);
@@ -405,6 +450,7 @@ export default function TimerPage() {
           scrambleFontSize?: 'sm' | 'md' | 'lg';
           timerBrand?: TimerBrand;
           qiyiDebugMode?: boolean;
+          timeEntryMode?: TimeEntryMode;
         };
         if (typeof parsed.inspectionEnabled === 'boolean') setInspectionEnabled(parsed.inspectionEnabled);
         if (parsed.precision === 'cs' || parsed.precision === 'ms') {
@@ -426,6 +472,9 @@ export default function TimerPage() {
           setTimerBrand(parsed.timerBrand);
         }
         if (typeof parsed.qiyiDebugMode === 'boolean') setQiyiDebugMode(parsed.qiyiDebugMode);
+        if (parsed.timeEntryMode === 'default' || parsed.timeEntryMode === 'manual' || parsed.timeEntryMode === 'bluetooth') {
+          setTimeEntryMode(parsed.timeEntryMode);
+        }
       }
     } catch { /* ignore */ }
     prefsLoadedRef.current = true;
@@ -435,9 +484,9 @@ export default function TimerPage() {
   useEffect(() => {
     if (!prefsLoadedRef.current) return;
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify({ inspectionEnabled, precision, holdToStart, holdTimeMs, scrambleFontSize, timerBrand, qiyiDebugMode }));
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ inspectionEnabled, precision, holdToStart, holdTimeMs, scrambleFontSize, timerBrand, qiyiDebugMode, timeEntryMode }));
     } catch { /* ignore */ }
-  }, [inspectionEnabled, precision, holdToStart, holdTimeMs, scrambleFontSize, timerBrand, qiyiDebugMode]);
+  }, [inspectionEnabled, precision, holdToStart, holdTimeMs, scrambleFontSize, timerBrand, qiyiDebugMode, timeEntryMode]);
 
   // Stats — recomputed on every solves change
   const stats = useMemo(() => calcStats(solves), [solves]);
@@ -609,13 +658,59 @@ export default function TimerPage() {
     return () => stopGanInterval();
   }, [ganConnected, stopGanInterval]);
 
-  const newScramble = useCallback(() => {
-    setScramble(generateScramble(eventId));
-  }, [eventId]);
+  // Scramble history — last 10 scrambles for the active event, newest
+  // first. Swipe (mobile) or ← → arrow keys (desktop) move through it.
+  // Reset whenever the event changes since cross-event history would
+  // confuse the "previous" semantic.
+  const [scrambleHistory, setScrambleHistory] = useState<string[]>([]);
+  // Index into scrambleHistory representing what's currently displayed.
+  // 0 = newest (also `scramble`); -1 = uninitialised / first generate.
+  const [historyIdx, setHistoryIdx] = useState<number>(-1);
+  const SCRAMBLE_HISTORY_MAX = 10;
 
-  // When event changes (dropdown, Alt+key, etc.), regenerate scramble.
+  const newScramble = useCallback(() => {
+    const next = generateScramble(eventId);
+    setScramble(next);
+    setScrambleHistory(prev => {
+      const dedup = prev[0] === next ? prev : [next, ...prev];
+      return dedup.slice(0, SCRAMBLE_HISTORY_MAX);
+    });
+    setHistoryIdx(0);
+  }, [eventId]);
+  // Swipe-right / ← arrow: walk back through history. Caps at the
+  // oldest entry (no auto-generate of a "back" scramble — that would be
+  // meaningless, you'd just be peeking at a fresh random instead).
+  const goPrevScramble = useCallback(() => {
+    setHistoryIdx(idx => {
+      const next = Math.min(idx + 1, scrambleHistory.length - 1);
+      if (next === idx) return idx;
+      const target = scrambleHistory[next];
+      if (target) setScramble(target);
+      return next;
+    });
+  }, [scrambleHistory]);
+  // Swipe-left / → arrow: forward. If we're at the newest entry already
+  // (idx === 0), generate a fresh one. Otherwise walk towards 0.
+  const goNextScramble = useCallback(() => {
+    if (historyIdx <= 0) {
+      newScramble();
+      return;
+    }
+    setHistoryIdx(idx => {
+      const next = Math.max(0, idx - 1);
+      const target = scrambleHistory[next];
+      if (target) setScramble(target);
+      return next;
+    });
+  }, [historyIdx, scrambleHistory, newScramble]);
+
+  // When event changes (dropdown, Alt+key, etc.), regenerate scramble
+  // and reset history — cross-event history would mix puzzle types.
   useEffect(() => {
-    setScramble(generateScramble(eventId));
+    const fresh = generateScramble(eventId);
+    setScramble(fresh);
+    setScrambleHistory([fresh]);
+    setHistoryIdx(0);
   }, [eventId]);
 
   // ── Solve action handlers ────────────────────────────────────────────────
@@ -653,8 +748,9 @@ export default function TimerPage() {
   const setPenaltyOnLast = useCallback((p: '+2' | 'dnf') => {
     if (!lastSolve) return;
     setSolvePenalty(lastSolve.id, p);
-    if (p === 'dnf') showToast({ msg: 'DNF тохирууллаа', tone: 'success' });
-    else showToast({ msg: '+2 нэмлээ', tone: 'success' });
+    // No toast — the big-timer display already swaps to "DNF" / "<time>+"
+    // and the action row collapses to just an undo arrow. The visual
+    // change IS the feedback.
   }, [lastSolve, setSolvePenalty]);
   const undoPenaltyOnLast = useCallback(() => {
     if (!lastSolve) return;
@@ -664,15 +760,16 @@ export default function TimerPage() {
     if (!lastSolve) return;
     const next: Penalty = lastSolve.penalty === p ? 'none' : p;
     setSolvePenalty(lastSolve.id, next);
-    if (next === 'dnf') showToast({ msg: 'DNF тохирууллаа', tone: 'success' });
-    else if (next === '+2') showToast({ msg: '+2 нэмлээ', tone: 'success' });
+    // No toast — display swap is the feedback (same rationale as
+    // setPenaltyOnLast).
   }, [lastSolve, setSolvePenalty]);
   const confirmDeleteLastSolve = useCallback(() => {
     if (!lastSolve) return;
     deleteSolve(lastSolve.id);
     timer.reset();
     setDeleteConfirmOpen(false);
-    showToast({ msg: 'Solve устгагдлаа', tone: 'info' });
+    // No toast — closing the dialog + the timer flipping back to idle
+    // makes the deletion unambiguous.
   }, [lastSolve, deleteSolve, timer]);
   // Public delete trigger used by the X keyboard shortcut — opens the
   // confirmation dialog rather than deleting straight away. Kept under
@@ -695,6 +792,12 @@ export default function TimerPage() {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.code === 'Space') {
+        // In manual-entry mode SPACE is reserved for the numeric input
+        // (and shouldn't arm anything). If the user happens to be in
+        // an input/textarea, also let SPACE through for normal typing.
+        if (timeEntryMode === 'manual') return;
+        const tgt = e.target as HTMLElement | null;
+        if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable)) return;
         e.preventDefault();
         if (spaceHeldRef.current) return;
         spaceHeldRef.current = true;
@@ -729,7 +832,7 @@ export default function TimerPage() {
         && timer.state === 'stopped'
         && solves.length > 0
         && !settingsOpen && !detailSolveId && commentSolveId == null
-        && !manualEntryOpen && !sessionPanelOpen && !cubeFullscreenOpen
+        && !sessionPanelOpen && !cubeFullscreenOpen
       ) {
         const target = e.target as HTMLElement | null;
         const inEditable = !!target && (
@@ -757,6 +860,39 @@ export default function TimerPage() {
             e.preventDefault();
             const last = solves[solves.length - 1];
             if (last) setCommentSolveId(last.id);
+            return;
+          }
+        }
+      }
+
+      // Scramble navigation: ← previous, → next/new, N = new.
+      // Only when timer isn't actively armed/running, no modifier keys,
+      // and not focused on an editable element. Mirrors the mobile
+      // swipe gesture so desktop users have parity.
+      if (
+        !e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey
+        && (timer.state === 'idle' || timer.state === 'stopped')
+        && !settingsOpen && !detailSolveId && commentSolveId == null
+        && !sessionPanelOpen && !cubeFullscreenOpen
+      ) {
+        const tgt = e.target as HTMLElement | null;
+        const inEditable = !!tgt && (
+          tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable
+        );
+        if (!inEditable) {
+          if (e.code === 'ArrowLeft') {
+            e.preventDefault();
+            goPrevScramble();
+            return;
+          }
+          if (e.code === 'ArrowRight') {
+            e.preventDefault();
+            goNextScramble();
+            return;
+          }
+          if (e.code === 'KeyN') {
+            e.preventDefault();
+            newScramble();
             return;
           }
         }
@@ -817,7 +953,9 @@ export default function TimerPage() {
     // last-solve / modal state so D/X/2/C hit the right target.
     solves, togglePenaltyOnLast, deleteLastSolve,
     settingsOpen, detailSolveId, commentSolveId,
-    manualEntryOpen, sessionPanelOpen, cubeFullscreenOpen,
+    sessionPanelOpen, cubeFullscreenOpen,
+    timeEntryMode,
+    goPrevScramble, goNextScramble, newScramble,
   ]);
 
   // Clear any pending Alt+D timeout on unmount.
@@ -831,7 +969,10 @@ export default function TimerPage() {
   }, []);
 
   // Mobile: tap timer area. Disabled while a GAN timer is connected.
+  // Also disabled in 'manual' mode — the timer area is an input field
+  // there, and the user's tap goes into the input, not into arming.
   const onTimerTouchStart = useCallback(() => {
+    if (timeEntryMode === 'manual') return;
     if (ganConnected) return;
     if (timer.state === 'running') { timer.stop(); return; }
     if (timer.state === 'idle' || timer.state === 'stopped') {
@@ -848,11 +989,23 @@ export default function TimerPage() {
       if (holdToStart) timer.startArming();
       else timer.startRunning();
     }
-  }, [timer, inspectionEnabled, holdToStart, ganConnected]);
+  }, [timer, inspectionEnabled, holdToStart, ganConnected, timeEntryMode]);
 
   const onTimerTouchEnd = useCallback(() => {
+    if (timeEntryMode === 'manual') return;
     if (timer.state === 'armed') timer.fireRunning();
-  }, [timer]);
+  }, [timer, timeEntryMode]);
+
+  // Inline-manual-entry commit. Same parser + same `finishExternal`
+  // path as the legacy modal — `onSolveCommit` runs as if a real solve
+  // finished, which appends the solve and rolls a fresh scramble. The
+  // input clears so the user can type the next time straight away.
+  const commitManualInline = useCallback(() => {
+    const ms = parseManualTime(manualInline);
+    if (ms == null) return;
+    timer.finishExternal(ms);
+    setManualInline('');
+  }, [manualInline, timer]);
 
   // ── Mobile multi-select (Solves tab) ─────────────────────────────────────
   const exitSelectMode = useCallback(() => {
@@ -943,35 +1096,6 @@ export default function TimerPage() {
   //   "1221"   → 12.21s   (12s 21cs)
   //   "122"    → 1.22s    (1s 22cs)
   //   "12211"  → 1:22.11
-  //   "122111" → 12:21.11
-  function parseManualTime(raw: string): number | null {
-    const d = (raw || '').replace(/\D/g, '');
-    if (!d) return null;
-    let s = d;
-    const csStr  = s.length >= 2 ? s.slice(-2) : s.padStart(2, '0');
-    s = s.length >= 2 ? s.slice(0, -2) : '';
-    const secStr = s.length >= 2 ? s.slice(-2) : s;
-    s = s.length >= 2 ? s.slice(0, -2) : '';
-    const minStr = s;
-    const cs  = parseInt(csStr, 10) || 0;
-    const sec = parseInt(secStr || '0', 10) || 0;
-    const min = parseInt(minStr || '0', 10) || 0;
-    return (min * 60 + sec) * 1000 + cs * 10;
-  }
-
-  function commitManualEntry() {
-    const ms = parseManualTime(manualEntryValue);
-    if (ms == null) return;
-    // Route manual entry through the same path the GAN/QiYi bluetooth
-    // hooks take for externally-measured times: finishExternal sets
-    // state='stopped', writes the entered ms onto the big-timer display,
-    // and calls onSolveCommit — which both appends the solve AND rolls a
-    // fresh scramble. So manual entry now ends up exactly as if the user
-    // had finished a normal solve at that time.
-    timer.finishExternal(ms);
-    setManualEntryOpen(false);
-    setManualEntryValue('');
-  }
 
 
   // ── PB detection (for the most recent solve) ─────────────────────────────
@@ -996,7 +1120,7 @@ export default function TimerPage() {
     if (timer.state === 'armed') return precision === 'ms' ? '0.000' : '0.00';
     if (timer.state === 'stopped' && lastSolve) {
       if (lastSolve.penalty === 'dnf') return 'DNF';
-      if (lastSolve.penalty === '+2') return `${fmtMs(lastSolve.ms + 2000, false, precision)} +`;
+      if (lastSolve.penalty === '+2') return `${fmtMs(lastSolve.ms + 2000, false, precision)}+`;
     }
     // When the GAN timer is the source of truth, show its independent
     // counter so the display keeps ticking even if the rAF loop didn't.
@@ -1479,21 +1603,31 @@ export default function TimerPage() {
                 Inspection
               </div>
             )}
-            <div style={{
-              fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
-              fontSize: getTimerFontSize(timerDisplay, false),
-              fontWeight: 700, lineHeight: 0.95,
-              fontVariantNumeric: 'tabular-nums',
-              color: timerColor,
-              // Slower color fade after a stop so the green→white flash
-              // reads as a confirmation pulse rather than an instant
-              // snap. Otherwise 0.12s keeps the red↔green arming flip
-              // feeling responsive.
-              transition: `color ${timer.state === 'stopped' ? 0.3 : 0.12}s, font-size 0.12s`,
-              textShadow: timerGlow ? `0 0 30px ${C.success}55` : 'none',
-            }}>
-              {timerDisplay}
-            </div>
+            {timeEntryMode === 'manual' ? (
+              <ManualInlineInput
+                value={manualInline}
+                onChange={setManualInline}
+                onCommit={commitManualInline}
+                fontSize={getTimerFontSize(timerDisplay, false)}
+                isMobile={false}
+              />
+            ) : (
+              <div style={{
+                fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
+                fontSize: getTimerFontSize(timerDisplay, false),
+                fontWeight: 700, lineHeight: 0.95,
+                fontVariantNumeric: 'tabular-nums',
+                color: timerColor,
+                // Slower color fade after a stop so the green→white flash
+                // reads as a confirmation pulse rather than an instant
+                // snap. Otherwise 0.12s keeps the red↔green arming flip
+                // feeling responsive.
+                transition: `color ${timer.state === 'stopped' ? 0.3 : 0.12}s, font-size 0.12s`,
+                textShadow: timerGlow ? `0 0 30px ${C.success}55` : 'none',
+              }}>
+                {timerDisplay}
+              </div>
+            )}
             {timer.state === 'stopped' && lastSolve && lastSolve.penalty === 'none' && (
               <SolveActionRow
                 solve={lastSolve}
@@ -1739,26 +1873,26 @@ export default function TimerPage() {
                 <div style={{
                   margin: '0.7rem 0.7rem 0.5rem',
                   background: C.card, border: `1px solid ${C.border}`,
-                  borderRadius: 999, padding: '0.35rem 0.45rem',
-                  display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: '0.4rem',
+                  borderRadius: 999, padding: '0.45rem 0.55rem',
+                  display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: '0.45rem',
                 }}>
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
                     <button
                       onClick={() => setSettingsOpen(true)}
                       aria-label="Settings"
                       style={{
-                        width: 32, height: 32, borderRadius: 999,
+                        width: 36, height: 36, borderRadius: 999,
                         background: 'transparent', border: 'none',
                         color: C.muted, cursor: 'pointer',
                         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                       }}
-                    ><IconSettings size={18} /></button>
+                    ><IconSettings size={20} /></button>
                     <GanButton
                       state={gan.state}
                       onConnect={gan.connect}
                       onDisconnect={gan.disconnect}
-                      size={32}
-                      iconSize={16}
+                      size={36}
+                      iconSize={18}
                     />
                   </div>
                   <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -1801,7 +1935,7 @@ export default function TimerPage() {
                       aria-label="Шинэ session"
                       title="Шинэ session"
                       style={{
-                        width: 32, height: 32, borderRadius: '50%',
+                        width: 36, height: 36, borderRadius: '50%',
                         background: 'transparent', border: `1px solid ${C.border}`,
                         color: C.muted, cursor: 'pointer',
                         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -1809,67 +1943,27 @@ export default function TimerPage() {
                       }}
                       onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; e.currentTarget.style.borderColor = C.borderHi; }}
                       onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.muted; e.currentTarget.style.borderColor = C.border; }}
-                    ><IconPlus size={16} /></button>
+                    ><IconPlus size={18} /></button>
                     <TimerProfileMenu
-                      size={32}
+                      size={36}
                       redirectAfterLogin="/timer"
                       align="right"
                     />
                   </div>
                 </div>
 
-                {/* Scramble row + refresh */}
-                <div style={{
-                  margin: '0 0.7rem 0.5rem',
-                  display: 'flex', justifyContent: 'center',
-                }}>
-                  <div style={{
-                    fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
-                    fontSize: scrambleFontSize === 'sm' ? 14 : scrambleFontSize === 'lg' ? 22 : 18,
-                    lineHeight: 1.45,
-                    color: C.text,
-                    whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                    textAlign: 'center',
-                    maxWidth: '100%',
-                  }}>
-                    {scramble}
-                  </div>
-                </div>
-
-                {/* Action row: refresh (purple) + add time */}
-                <div style={{
-                  margin: '0 0.7rem 0.4rem',
-                  display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem',
-                }}>
-                  <button
-                    onClick={newScramble}
-                    aria-label="New scramble"
-                    style={{
-                      height: 40, borderRadius: 10,
-                      background: C.accentDim, color: C.accent,
-                      border: `1px solid ${C.borderHi}`, cursor: 'pointer',
-                      fontFamily: 'inherit', fontWeight: 600,
-                      letterSpacing: '0.04em', fontSize: '0.78rem',
-                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem',
-                    }}
-                  >
-                    <IconRefresh size={16} /> New scramble
-                  </button>
-                  <button
-                    onClick={() => { setManualEntryValue(''); setManualEntryOpen(true); }}
-                    aria-label="Add time"
-                    style={{
-                      height: 40, borderRadius: 10,
-                      background: C.card, color: C.text,
-                      border: `1px solid ${C.border}`, cursor: 'pointer',
-                      fontFamily: 'inherit', fontWeight: 600,
-                      letterSpacing: '0.04em', fontSize: '0.78rem',
-                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem',
-                    }}
-                  >
-                    <IconPlus size={16} /> Add time
-                  </button>
-                </div>
+                {/* Scramble row — swipe LEFT for next, RIGHT for previous.
+                    The history-navigation button is intentionally gone;
+                    the gesture replaces both the "New scramble" tap and
+                    the (mostly hidden) keyboard 'N' shortcut. */}
+                <SwipeScrambleRow
+                  scramble={scramble}
+                  scrambleFontSize={scrambleFontSize}
+                  onNext={goNextScramble}
+                  onPrev={goPrevScramble}
+                  showHint={!swipeHintDismissed}
+                  onDismissHint={dismissSwipeHint}
+                />
 
                 {/* Big timer area */}
                 <section
@@ -1900,17 +1994,27 @@ export default function TimerPage() {
                       Inspection
                     </div>
                   )}
-                  <div style={{
-                    fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
-                    fontSize: getTimerFontSize(timerDisplay, true),
-                    fontWeight: 700, lineHeight: 0.95,
-                    fontVariantNumeric: 'tabular-nums',
-                    color: timerColor,
-                    transition: `color ${timer.state === 'stopped' ? 0.3 : 0.12}s, font-size 0.12s`,
-                    textShadow: timerGlow ? `0 0 30px ${C.success}55` : 'none',
-                  }}>
-                    {timerDisplay}
-                  </div>
+                  {timeEntryMode === 'manual' ? (
+                    <ManualInlineInput
+                      value={manualInline}
+                      onChange={setManualInline}
+                      onCommit={commitManualInline}
+                      fontSize={getTimerFontSize(timerDisplay, true)}
+                      isMobile
+                    />
+                  ) : (
+                    <div style={{
+                      fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
+                      fontSize: getTimerFontSize(timerDisplay, true),
+                      fontWeight: 700, lineHeight: 0.95,
+                      fontVariantNumeric: 'tabular-nums',
+                      color: timerColor,
+                      transition: `color ${timer.state === 'stopped' ? 0.3 : 0.12}s, font-size 0.12s`,
+                      textShadow: timerGlow ? `0 0 30px ${C.success}55` : 'none',
+                    }}>
+                      {timerDisplay}
+                    </div>
+                  )}
                   {timer.state === 'stopped' && lastSolve && lastSolve.penalty === 'none' && (
                     <SolveActionRow
                       solve={lastSolve}
@@ -2475,87 +2579,6 @@ export default function TimerPage() {
         );
       })()}
 
-      {/* Manual time entry modal (mobile Add Time button) */}
-      {manualEntryOpen && (() => {
-        const parsedMs = parseManualTime(manualEntryValue);
-        const previewStr = parsedMs == null ? '0.00' : fmtMs(parsedMs);
-        return (
-        <ModalShell title="Add Time" onClose={() => setManualEntryOpen(false)}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-            <div style={{ fontSize: '0.78rem', color: C.muted, lineHeight: 1.5 }}>
-              Type digits — last 2 are centiseconds.
-              <br />
-              <span style={{ fontFamily: '"JetBrains Mono", monospace', color: C.text }}>1221</span>
-              <span> → 12.21s · </span>
-              <span style={{ fontFamily: '"JetBrains Mono", monospace', color: C.text }}>12211</span>
-              <span> → 1:22.11</span>
-            </div>
-            <input
-              autoFocus
-              value={manualEntryValue}
-              onChange={e => setManualEntryValue(e.target.value.replace(/\D/g, ''))}
-              onKeyDown={e => {
-                if (e.key === 'Enter') { e.preventDefault(); commitManualEntry(); }
-              }}
-              placeholder="1221"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              style={{
-                background: C.cardAlt, color: C.text,
-                border: `1px solid ${C.border}`, borderRadius: 8,
-                padding: '0.6rem 0.75rem',
-                fontSize: '1.2rem', fontFamily: '"JetBrains Mono", monospace',
-                fontVariantNumeric: 'tabular-nums', outline: 'none',
-                letterSpacing: '0.05em',
-              }}
-            />
-            {/* Live preview */}
-            <div style={{
-              display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
-              padding: '0.6rem 0.85rem',
-              background: C.cardAlt, border: `1px solid ${C.border}`, borderRadius: 8,
-            }}>
-              <span style={{ fontSize: '0.65rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, fontWeight: 600 }}>
-                Preview
-              </span>
-              <span style={{
-                fontFamily: '"JetBrains Mono", monospace',
-                fontSize: '1.4rem', fontWeight: 700,
-                color: parsedMs == null ? C.mutedDim : C.success,
-                fontVariantNumeric: 'tabular-nums',
-              }}>
-                {previewStr}
-              </span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-              <button
-                onClick={() => setManualEntryOpen(false)}
-                style={{
-                  padding: '0.5rem 0.9rem', borderRadius: 8,
-                  fontSize: '0.82rem', fontWeight: 600, fontFamily: 'inherit',
-                  background: 'transparent', color: C.muted,
-                  border: `1px solid ${C.border}`, cursor: 'pointer',
-                }}
-              >Cancel</button>
-              <button
-                onClick={commitManualEntry}
-                disabled={parseManualTime(manualEntryValue) == null}
-                style={{
-                  padding: '0.5rem 0.9rem', borderRadius: 8,
-                  fontSize: '0.82rem', fontWeight: 700, fontFamily: 'inherit',
-                  background: parseManualTime(manualEntryValue) == null ? 'rgba(167,139,250,0.08)' : C.accentDim,
-                  color: C.accent,
-                  border: `1px solid ${C.borderHi}`,
-                  cursor: parseManualTime(manualEntryValue) == null ? 'not-allowed' : 'pointer',
-                  opacity: parseManualTime(manualEntryValue) == null ? 0.5 : 1,
-                }}
-              >Add</button>
-            </div>
-          </div>
-        </ModalShell>
-        );
-      })()}
-
       {/* Settings: desktop sidebar modal + mobile bottom-sheet accordion */}
       {settingsOpen && (
         <SettingsPanel
@@ -2572,6 +2595,7 @@ export default function TimerPage() {
           holdToStart={holdToStart} setHoldToStart={setHoldToStart}
           holdTimeMs={holdTimeMs} setHoldTimeMs={setHoldTimeMs}
           precision={precision} setPrecision={setPrecision}
+          timeEntryMode={timeEntryMode} setTimeEntryMode={setTimeEntryMode}
           // Bluetooth
           gan={gan}
           timerBrand={timerBrand}
@@ -2758,6 +2782,10 @@ export default function TimerPage() {
         @keyframes pv-dialog-pop {
           0%   { opacity: 0; transform: scale(0.94); }
           100% { opacity: 1; transform: scale(1); }
+        }
+        @keyframes pv-scramble-fade {
+          0%   { opacity: 0.35; }
+          100% { opacity: 1; }
         }
       `}</style>
     </div>
@@ -3490,6 +3518,8 @@ interface SettingsPanelProps {
   setHoldTimeMs: (n: number) => void;
   precision: Precision;
   setPrecision: (p: Precision) => void;
+  timeEntryMode: 'default' | 'manual' | 'bluetooth';
+  setTimeEntryMode: (m: 'default' | 'manual' | 'bluetooth') => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   gan: any;
   timerBrand: TimerBrand;
@@ -3525,6 +3555,17 @@ function SettingsPanel(props: SettingsPanelProps) {
   // ── Section bodies (shared between desktop + mobile) ──────────────────────
   const renderTimer = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+      <SegmentedRow<'default' | 'manual' | 'bluetooth'>
+        label="Цаг оруулах горим"
+        value={props.timeEntryMode}
+        onChange={props.setTimeEntryMode}
+        options={[
+          { value: 'default',   label: 'Үндсэн',    title: 'Хүрэх / SPACE дарж эхлүүлнэ' },
+          { value: 'manual',    label: 'Гараар',    title: 'Цагийг шууд бичнэ' },
+          { value: 'bluetooth', label: 'Bluetooth', title: 'Smart timer-аас уншина' },
+        ]}
+        c={c}
+      />
       <ToggleRow label={t('timer.inspectionTime')} value={props.inspectionEnabled} onChange={props.setInspectionEnabled} />
       <ToggleRow label={t('timer.holdToStart')}    value={props.holdToStart}        onChange={props.setHoldToStart} />
       {props.holdToStart && (
@@ -4438,6 +4479,171 @@ function ActionIconBtn({
     >
       {icon}
     </button>
+  );
+}
+
+// Swipeable scramble row used on mobile. Left swipe → next scramble
+// (history's index 0 → fresh random), right swipe → previous scramble
+// (older history). Threshold is intentionally generous (>50 px) so the
+// solver's vertical scrolls don't accidentally rotate the scramble.
+function SwipeScrambleRow({
+  scramble, scrambleFontSize, onNext, onPrev, showHint, onDismissHint,
+}: {
+  scramble: string;
+  scrambleFontSize: 'sm' | 'md' | 'lg';
+  onNext: () => void;
+  onPrev: () => void;
+  showHint: boolean;
+  onDismissHint: () => void;
+}) {
+  const SWIPE_THRESHOLD = 50;
+  const startRef = useRef<{ x: number; y: number } | null>(null);
+  // Soft fade during the swipe motion so the change of scramble feels
+  // intentional, not jarring. Animation key changes with the scramble
+  // string so the keyframe reruns each time.
+  const [fadeKey, setFadeKey] = useState(0);
+  const triggerFade = () => setFadeKey(k => k + 1);
+  const onTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    if (!t) return;
+    startRef.current = { x: t.clientX, y: t.clientY };
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    const start = startRef.current;
+    startRef.current = null;
+    if (!start) return;
+    const t = e.changedTouches[0];
+    if (!t) return;
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (Math.abs(dx) < SWIPE_THRESHOLD) return;
+    if (Math.abs(dx) < Math.abs(dy)) return; // mostly vertical — let it scroll
+    if (dx < 0) onNext(); else onPrev();
+    triggerFade();
+    if (showHint) onDismissHint();
+  };
+  return (
+    <div
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
+      style={{
+        margin: '0 0.7rem 0.5rem',
+        padding: '0.45rem 0.6rem',
+        borderRadius: 12,
+        // touchAction:pan-y lets vertical scrolls through but reserves
+        // horizontal pans for our swipe handler.
+        touchAction: 'pan-y',
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
+      }}
+    >
+      <div
+        key={fadeKey}
+        style={{
+          fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
+          fontSize: scrambleFontSize === 'sm' ? 16 : scrambleFontSize === 'lg' ? 24 : 20,
+          lineHeight: 1.45,
+          color: C.text,
+          whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+          textAlign: 'center',
+          maxWidth: '100%',
+          animation: 'pv-scramble-fade 0.25s ease-out both',
+        }}
+      >
+        {scramble}
+      </div>
+      {showHint && (
+        <div style={{
+          marginTop: '0.45rem',
+          fontSize: '0.66rem', color: C.mutedDim,
+          textAlign: 'center', letterSpacing: '0.04em',
+          fontStyle: 'italic',
+        }}>
+          ← Хуруугаараа татна уу →
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Inline manual-entry input — sits where the big timer number would
+// otherwise be when timeEntryMode === 'manual'. Uses inputMode='numeric'
+// so the mobile keyboard is digits-only, and Enter / "✓" commits via
+// the parent's onCommit (which runs the same parser + finishExternal
+// path the legacy modal used).
+function ManualInlineInput({
+  value, onChange, onCommit, fontSize, isMobile,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onCommit: () => void;
+  fontSize: string;
+  isMobile: boolean;
+}) {
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  const ref = useRef<HTMLInputElement | null>(null);
+  // Live preview matching the entered digits — same parser semantics
+  // as the legacy "Add Time" modal (last 2 digits = cs).
+  const previewMs = parseManualTime(value);
+  const placeholder = isMobile ? '12.34' : '0.00';
+  return (
+    <div
+      onTouchStart={stop}
+      onTouchEnd={stop}
+      onPointerDown={stop}
+      onClick={stop}
+      style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        gap: '0.6rem', width: '100%',
+        pointerEvents: 'auto',
+      }}
+    >
+      <input
+        ref={ref}
+        type="text"
+        value={previewMs == null ? value : fmtMs(previewMs)}
+        onChange={e => onChange(e.target.value.replace(/\D/g, '').slice(0, 8))}
+        onKeyDown={e => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            onCommit();
+          }
+        }}
+        inputMode="numeric"
+        pattern="[0-9]*"
+        placeholder={placeholder}
+        aria-label="Цаг бичих"
+        style={{
+          width: '100%',
+          background: 'transparent',
+          color: previewMs == null ? C.mutedDim : C.text,
+          border: 'none', outline: 'none',
+          fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
+          fontSize, fontWeight: 700, lineHeight: 0.95,
+          fontVariantNumeric: 'tabular-nums',
+          textAlign: 'center', padding: 0,
+          letterSpacing: '0.01em',
+          caretColor: C.accent,
+        }}
+      />
+      <button
+        type="button"
+        onClick={onCommit}
+        disabled={previewMs == null}
+        style={{
+          padding: '0.5rem 1.1rem', borderRadius: 999,
+          fontSize: '0.82rem', fontWeight: 700, fontFamily: 'inherit',
+          background: previewMs == null ? C.cardAlt : C.accentDim,
+          color: previewMs == null ? C.mutedDim : C.accent,
+          border: `1px solid ${previewMs == null ? C.border : C.borderHi}`,
+          cursor: previewMs == null ? 'not-allowed' : 'pointer',
+          letterSpacing: '0.04em',
+          display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
+        }}
+      >
+        ✓ Хадгалах
+      </button>
+    </div>
   );
 }
 
