@@ -276,6 +276,67 @@ export function IconUndo(p: IconProps) {
   );
 }
 
+// ── Connectivity ──────────────────────────────────────────────────────────
+
+export function IconWifi(p: IconProps) {
+  return (
+    <IconBase {...p}>
+      <path d="M2 9a16 16 0 0 1 20 0" />
+      <path d="M5 13a11 11 0 0 1 14 0" />
+      <path d="M8.5 16.5a6 6 0 0 1 7 0" />
+      <circle cx={12} cy={20} r={1.2} fill="currentColor" stroke="none" />
+    </IconBase>
+  );
+}
+
+export function IconWifiOff(p: IconProps) {
+  return (
+    <IconBase {...p}>
+      <path d="M3 3l18 18" />
+      <path d="M9 17a4 4 0 0 1 6 0" />
+      <path d="M5 13a11 11 0 0 1 4-2.6" />
+      <path d="M2 9a16 16 0 0 1 6.4-3.7" />
+      <path d="M22 9a16 16 0 0 0-6-3.4" />
+      <circle cx={12} cy={20} r={1.2} fill="currentColor" stroke="none" />
+    </IconBase>
+  );
+}
+
+// ── People (with action) ──────────────────────────────────────────────────
+
+export function IconUserPlus(p: IconProps) {
+  return (
+    <IconBase {...p}>
+      <circle cx={9} cy={7} r={4} />
+      <path d="M2 21v-1a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v1" />
+      <path d="M19 8v6" />
+      <path d="M16 11h6" />
+    </IconBase>
+  );
+}
+
+export function IconUserMinus(p: IconProps) {
+  return (
+    <IconBase {...p}>
+      <circle cx={9} cy={7} r={4} />
+      <path d="M2 21v-1a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v1" />
+      <path d="M16 11h6" />
+    </IconBase>
+  );
+}
+
+// ── Status / alerts ───────────────────────────────────────────────────────
+
+export function IconAlertCircle(p: IconProps) {
+  return (
+    <IconBase {...p}>
+      <circle cx={12} cy={12} r={9} />
+      <line x1={12} y1={8} x2={12} y2={13} />
+      <line x1={12} y1={16.5} x2={12} y2={16.5} strokeWidth={2.4} strokeLinecap="round" />
+    </IconBase>
+  );
+}
+
 // ── Misc reused ───────────────────────────────────────────────────────────
 
 export function IconChart(p: IconProps) {

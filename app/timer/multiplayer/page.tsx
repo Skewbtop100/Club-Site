@@ -37,8 +37,11 @@ import {
 } from '@/lib/timer-engine';
 import {
   IconRefresh, IconPause, IconPlay, IconUndo, IconHourglass, IconTrophy,
+  IconCrown, IconFlag, IconCheck, IconAlertCircle, IconUserPlus,
+  IconUserMinus, IconWifi, IconWifiOff, IconClose, IconSettings as IconSettingsLib,
   MEDAL_GOLD,
 } from '@/lib/icons';
+import type { IconProps as LibIconProps } from '@/lib/icons';
 
 // Solo-timer prefs key — multiplayer reads only the smart-timer brand
 // from here so the user's choice syncs across both pages. Other prefs
@@ -1082,28 +1085,9 @@ function MultiplayerPageInner() {
     migrateHostIfOrphaned(roomCode);
   }, [roomCode, room?.host, room?.members]);
 
-  // Toast: "Host transferred to {Name}" when room.host changes between
-  // snapshots. We seed prevHostUidRef on the first non-empty snapshot so the
-  // initial render doesn't fire a phantom transfer.
-  const [hostTransferName, setHostTransferName] = useState<string>('');
+  // Host-transfer ref is seeded here (so it survives re-renders) but the
+  // detector effect runs further down where `pushNotif` is in scope.
   const prevHostUidRef = useRef<string>('');
-  useEffect(() => {
-    if (!room?.host) return;
-    if (!prevHostUidRef.current) {
-      prevHostUidRef.current = room.host;
-      return;
-    }
-    if (room.host !== prevHostUidRef.current) {
-      prevHostUidRef.current = room.host;
-      const name = room.members?.[room.host]?.name ?? 'New host';
-      setHostTransferName(name);
-    }
-  }, [room?.host, room?.members]);
-  useEffect(() => {
-    if (!hostTransferName) return;
-    const t = window.setTimeout(() => setHostTransferName(''), 3000);
-    return () => window.clearTimeout(t);
-  }, [hostTransferName]);
 
   // ── Heartbeat ────────────────────────────────────────────────────────────
   // Every player writes a server-side timestamp every HEARTBEAT_INTERVAL_MS.
@@ -1137,18 +1121,65 @@ function MultiplayerPageInner() {
   }, []);
 
   // ── Notifications (toast queue) ──────────────────────────────────────────
-  // Used for "X reconnected" and "X was removed (disconnected)" messages.
-  // Each notification auto-dismisses after 4s. The host-transfer banner is
-  // its own thing (kept separate so it stands out from chatter).
-  type Notif = { id: string; text: string; tone: 'info' | 'success' | 'warn' };
+  // Lightweight toast queue for room events: joins/leaves, host transfer,
+  // round transitions, vote outcomes, etc. Each notification auto-dismisses
+  // after 4s and can be tap-dismissed early. Renders at most three at a
+  // time (older ones drop off the top while newer ones appear at the
+  // bottom of the stack — the visual order matches the UI position).
+  const MAX_VISIBLE_NOTIFS = 3;
+  const NOTIF_TTL_MS = 4000;
+  type NotifTone = 'info' | 'success' | 'warn' | 'error';
+  type NotifIcon = (p: LibIconProps) => React.ReactElement;
+  type Notif = {
+    id: string;
+    text: string;
+    tone: NotifTone;
+    icon?: NotifIcon;
+    /** Optional accent override (defaults derived from tone). */
+    accent?: string;
+  };
   const [notifs, setNotifs] = useState<Notif[]>([]);
-  const pushNotif = useCallback((text: string, tone: Notif['tone']) => {
+  const pushNotif = useCallback((
+    text: string,
+    tone: NotifTone,
+    options?: { icon?: NotifIcon; accent?: string },
+  ) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    setNotifs(prev => [...prev, { id, text, tone }]);
+    setNotifs(prev => {
+      const next = [...prev, { id, text, tone, icon: options?.icon, accent: options?.accent }];
+      // Keep at most MAX_VISIBLE_NOTIFS — drop the oldest. Auto-dismiss
+      // for the dropped one is harmless; the timeout below just becomes
+      // a no-op once it can't find the id.
+      return next.length > MAX_VISIBLE_NOTIFS
+        ? next.slice(next.length - MAX_VISIBLE_NOTIFS)
+        : next;
+    });
     window.setTimeout(() => {
       setNotifs(prev => prev.filter(n => n.id !== id));
-    }, 4000);
+    }, NOTIF_TTL_MS);
   }, []);
+  const dismissNotif = useCallback((id: string) => {
+    setNotifs(prev => prev.filter(n => n.id !== id));
+  }, []);
+
+  // Host-transfer detection. Seeded on the first non-empty snapshot so
+  // the initial render doesn't fire a phantom transfer. Uses the unified
+  // notification stack (gold-accent IconCrown).
+  useEffect(() => {
+    if (!room?.host) return;
+    if (!prevHostUidRef.current) {
+      prevHostUidRef.current = room.host;
+      return;
+    }
+    if (room.host !== prevHostUidRef.current) {
+      prevHostUidRef.current = room.host;
+      const name = room.members?.[room.host]?.name ?? 'New host';
+      pushNotif(`Host эрх ${name}-д шилжлээ`, 'info', {
+        icon: IconCrown,
+        accent: MEDAL_GOLD,
+      });
+    }
+  }, [room?.host, room?.members, pushNotif]);
 
   // Reconnect detection: when a member's status flips from 'disconnected' →
   // 'online' between status ticks, fire a toast for everyone except the
@@ -1165,39 +1196,55 @@ function MultiplayerPageInner() {
       if (uid === userId) continue;
       if (prev[uid] === 'disconnected' && cur[uid] === 'online') {
         const name = room.members[uid]?.name ?? 'A player';
-        pushNotif(`${name} reconnected`, 'success');
+        pushNotif(`${name} буцаж орлоо`, 'success', { icon: IconWifi });
       }
     }
     prevStatusRef.current = cur;
   }, [now, room?.members, userId, pushNotif]);
 
-  // Member-removal detection: track the previous snapshot of members. When
-  // a uid is gone we toast the rest of the room — distinguishing a kick
-  // (last-seen status was 'disconnected') from a voluntary leave (online or
-  // idle at removal time) so the wording matches what the rest of the room
-  // actually saw happen.
-  const prevMembersRef = useRef<Record<string, { name: string; status: ConnectionStatus }>>({});
+  // Member-membership detection — fires three different toast variants:
+  //   • new uid in cur (not in prev, prev was loaded once already) → JOIN
+  //   • uid in prev, gone from cur, prev status was 'disconnected'   → KICK
+  //   • uid in prev, gone from cur, prev status was online/idle      → LEAVE
+  // The `loaded` ref-flag suppresses join-spam when we first load the
+  // room snapshot (every existing member would otherwise re-announce
+  // their presence to us on mount).
+  const prevMembersRef = useRef<{
+    map: Record<string, { name: string; status: ConnectionStatus }>;
+    loaded: boolean;
+  }>({ map: {}, loaded: false });
   useEffect(() => {
     if (!room?.members) {
-      prevMembersRef.current = {};
+      prevMembersRef.current = { map: {}, loaded: false };
       return;
     }
-    const prev = prevMembersRef.current;
+    const prev = prevMembersRef.current.map;
+    const wasLoaded = prevMembersRef.current.loaded;
     const cur = room.members;
-    for (const uid of Object.keys(prev)) {
-      if (cur[uid]) continue;
-      if (uid === userId) continue;
-      if (prev[uid].status === 'disconnected') {
-        pushNotif(`${prev[uid].name} was removed (disconnected)`, 'warn');
-      } else {
-        pushNotif(`${prev[uid].name} left the room`, 'info');
+    if (wasLoaded) {
+      for (const uid of Object.keys(prev)) {
+        if (cur[uid]) continue;
+        if (uid === userId) continue;
+        if (prev[uid].status === 'disconnected') {
+          pushNotif(`${prev[uid].name} холболт тасарсан`, 'warn', { icon: IconWifiOff });
+        } else {
+          pushNotif(`${prev[uid].name} гарлаа`, 'info', { icon: IconUserMinus });
+        }
+      }
+      for (const [uid, m] of Object.entries(cur)) {
+        if (prev[uid]) continue;
+        if (uid === userId) continue;
+        // Mid-round joiners enter as `queued: true`; show the same
+        // join toast either way — the "queued" state is conveyed by the
+        // opponent panel, not this notification.
+        pushNotif(`${m.name} орлоо`, 'info', { icon: IconUserPlus });
       }
     }
     const next: typeof prev = {};
     for (const [uid, m] of Object.entries(cur)) {
       next[uid] = { name: m.name, status: getConnectionStatus(m, now) };
     }
-    prevMembersRef.current = next;
+    prevMembersRef.current = { map: next, loaded: true };
   }, [now, room?.members, userId, pushNotif]);
 
   // Settings-change toast — only fires when the host edits event/maxRounds
@@ -1216,9 +1263,9 @@ function MultiplayerPageInner() {
     if (prev.loaded && room.status === 'waiting' && room.host !== userId) {
       if (prev.event !== undefined && prev.event !== room.event) {
         const evName = EVENTS.find(e => e.id === room.event)?.name ?? room.event;
-        pushNotif(`Тохиргоо өөрчлөгдлөө: ${evName}`, 'info');
+        pushNotif(`Тохиргоо өөрчлөгдлөө: ${evName}`, 'info', { icon: IconSettingsLib });
       } else if (prev.maxRounds !== undefined && prev.maxRounds !== room.maxRounds) {
-        pushNotif(`Тохиргоо өөрчлөгдлөө: ${room.maxRounds} round`, 'info');
+        pushNotif(`Тохиргоо өөрчлөгдлөө: ${room.maxRounds} round`, 'info', { icon: IconSettingsLib });
       }
     }
     prevSettingsRef.current = { event: room.event, maxRounds: room.maxRounds, loaded: true };
@@ -1249,7 +1296,7 @@ function MultiplayerPageInner() {
       if (!e || typeof e !== 'object') continue;
       if (e.uid === userId) continue;            // requester — no self-toast
       if (e.round !== room.round) continue;      // stale, not from this round
-      pushNotif(`${e.name} нэмэлт scramble хүслээ (solve ${e.solveIdx + 1})`, 'info');
+      pushNotif(`${e.name} нэмэлт scramble хүслээ (solve ${e.solveIdx + 1})`, 'info', { icon: IconRefresh });
     }
   }, [room, userId, pushNotif]);
 
@@ -2264,41 +2311,74 @@ function MultiplayerPageInner() {
       if (seenAt === v.startedAt) continue;
       lastVoteOutcomeRef.current.set(type, v.startedAt);
       if (v.result === 'rejected') {
-        pushNotif('Санал хүчингүй', 'warn');
+        pushNotif('Санал хүчингүй боллоо', 'warn', { icon: IconAlertCircle });
       } else {
-        if (type === 'restartRound') pushNotif('Round шинэчлэгдлээ', 'success');
-        else if (type === 'pause')   pushNotif('Тоглолт зогссон', 'info');
-        else if (type === 'resume')  pushNotif('Тоглолт үргэлжилж байна', 'success');
+        if (type === 'restartRound') pushNotif('Round шинэчлэгдлээ', 'success', { icon: IconRefresh });
+        else if (type === 'pause')   pushNotif('Тоглолт зогссон', 'warn', { icon: IconPause });
+        else if (type === 'resume')  pushNotif('Тоглолт үргэлжилж байна', 'success', { icon: IconPlay });
         else if (type === 'retrySolve') {
           // Self-toast for the initiator, third-person for everyone else.
           if (v.initiator === userId) {
-            pushNotif('Solve буцаагдлаа', 'success');
+            pushNotif('Solve буцаагдлаа', 'success', { icon: IconUndo });
           } else if (v.solveIdx != null) {
-            pushNotif(`${v.initiatorName} solve ${v.solveIdx + 1}-г дахин хийж байна`, 'info');
+            pushNotif(
+              `${v.initiatorName} solve ${v.solveIdx + 1}-г дахин хийж байна`,
+              'info',
+              { icon: IconUndo },
+            );
           }
         }
       }
     }
   }, [room?.votes, userId, pushNotif]);
 
-  // Toast: when status flips racing → results, announce any member who was
-  // disconnected at the moment the round ended. The detection runs on every
-  // client (so all online players see the toast), gated by a ref-tracked
-  // status transition to fire exactly once per round.
+  // Round-status transitions — one effect handles three notif variants:
+  //   • Any → 'racing'     → "Round N эхэллээ"  + final-round flag
+  //   • 'racing' → 'results' → "Round N дууслаа" + per-disconnect notice
+  // A separate prevRoundNumRef avoids re-firing if the snapshot replays
+  // the same status with the same round (e.g. unrelated field changes).
   const prevRoundStatusRef = useRef<RoomStatus | null>(null);
+  const prevRoundNumRef = useRef<number | null>(null);
   useEffect(() => {
     if (!room?.status) return;
-    const prev = prevRoundStatusRef.current;
+    const prevStatus = prevRoundStatusRef.current;
+    const prevRound  = prevRoundNumRef.current;
+    const curRound = room.round;
     prevRoundStatusRef.current = room.status;
-    if (prev === 'racing' && room.status === 'results') {
+    prevRoundNumRef.current = curRound;
+
+    // Skip the very first snapshot — joining a room mid-flight shouldn't
+    // replay round-start / round-end events that already happened.
+    if (prevStatus === null) return;
+
+    const startedRacing = prevStatus !== 'racing' && room.status === 'racing';
+    const endedRacing   = prevStatus === 'racing' && room.status === 'results';
+
+    if (startedRacing) {
+      pushNotif(`Round ${curRound} эхэллээ`, 'info', { icon: IconFlag });
+      // Final-round nudge — only when there's at least one earlier round
+      // (otherwise "round 1 of 1" reads as redundant alarmism).
+      if (curRound >= room.maxRounds && room.maxRounds > 1) {
+        pushNotif('Сүүлийн round!', 'warn', { icon: IconAlertCircle });
+      }
+    }
+
+    if (endedRacing) {
+      // Use prevRound so the toast labels the round that JUST ended,
+      // not the one we're about to start. Falls back to room.round if
+      // the round counter didn't change between snapshots (the common
+      // case — `nextRound` bumps it later when host advances).
+      const endedRoundN = prevRound ?? curRound;
+      pushNotif(`Round ${endedRoundN} дууслаа`, 'info', { icon: IconCheck });
+
       for (const [uid, m] of Object.entries(room.members || {})) {
         if (uid === userId) continue;
         if (getConnectionStatus(m, now) === 'disconnected') {
-          pushNotif(`${m.name} was disconnected during round`, 'warn');
+          pushNotif(`${m.name} холболт тасарсан (round-ын дунд)`, 'warn', { icon: IconWifiOff });
         }
       }
     }
-  }, [room?.status, room?.members, userId, now, pushNotif]);
+  }, [room?.status, room?.round, room?.maxRounds, room?.members, userId, now, pushNotif]);
 
   // ── Render ──────────────────────────────────────────────────────────────
   // While racing the page is locked to the visible viewport — height: 100dvh
@@ -2447,14 +2527,15 @@ function MultiplayerPageInner() {
         )}
       </main>
 
-      {/* Host-transfer toast — auto-dismisses after 3s (set in effect). */}
-      {hostTransferName && view === 'room' && (
-        <HostTransferToast name={hostTransferName} />
-      )}
-
-      {/* Connection toasts (reconnects, kicks). Stacked under host toast. */}
+      {/* Unified room notification stack — joins, leaves, host transfer,
+          round transitions, vote outcomes, etc. Auto-dismisses (4s) and
+          tap-to-dismiss; capped at MAX_VISIBLE_NOTIFS. */}
       {view === 'room' && notifs.length > 0 && (
-        <NotificationStack notifs={notifs} hostToastVisible={!!hostTransferName} />
+        <NotificationStack
+          isMobile={isMobile}
+          notifs={notifs}
+          onDismiss={dismissNotif}
+        />
       )}
 
       {/* Settings + Pause modals — overlay on top of everything. */}
@@ -6547,69 +6628,110 @@ function StatusDot({ status, size = 8 }: { status: ConnectionStatus; size?: numb
   );
 }
 
-// Stacked toast queue for connection events. Sits below the host-transfer
-// toast (when present) so the two systems don't fight for the same screen
-// real estate. Each notification is keyed and dismisses itself via the
-// page's pushNotif setTimeout — this component is purely presentational.
+// Stacked toast queue for room events: joins/leaves, host transfer,
+// round transitions, vote outcomes, etc. Position: top-center on mobile,
+// top-right on desktop. Tap or click the X to dismiss; tap on the body
+// also dismisses (per spec). The page owns the queue lifecycle (push +
+// auto-expire); this component just renders + forwards dismiss clicks.
+type NotifItem = {
+  id: string;
+  text: string;
+  tone: 'info' | 'success' | 'warn' | 'error';
+  icon?: (p: LibIconProps) => React.ReactElement;
+  accent?: string;
+};
 function NotificationStack({
-  notifs,
-  hostToastVisible,
+  isMobile, notifs, onDismiss,
 }: {
-  notifs: { id: string; text: string; tone: 'info' | 'success' | 'warn' }[];
-  hostToastVisible: boolean;
+  isMobile: boolean;
+  notifs: NotifItem[];
+  onDismiss: (id: string) => void;
 }) {
+  // Tone → palette. Lavender info, mint success, amber warn, red error.
+  // The accent override (set per-notif by callers like host-transfer
+  // gold) replaces the border color only — bg + text track the tone so
+  // contrast stays sane.
+  const paletteFor = (tone: NotifItem['tone'], accentOverride?: string) => {
+    const base = tone === 'success'
+      ? { fg: C.success, border: C.success, bg: C.successDim }
+      : tone === 'warn'
+      ? { fg: C.warn,    border: C.warn,    bg: 'rgba(251,191,36,0.12)' }
+      : tone === 'error'
+      ? { fg: C.danger,  border: C.danger,  bg: C.dangerDim }
+      : { fg: C.accent,  border: C.borderHi, bg: C.accentDim };
+    return accentOverride ? { ...base, border: accentOverride } : base;
+  };
+
   return (
     <div
       style={{
         position: 'fixed',
-        top: hostToastVisible
-          ? 'calc(env(safe-area-inset-top) + 3.5rem)'
-          : 'calc(env(safe-area-inset-top) + 0.75rem)',
-        left: '50%',
-        transform: 'translateX(-50%)',
+        top: 'calc(env(safe-area-inset-top) + 0.75rem)',
+        ...(isMobile
+          ? { left: '50%', transform: 'translateX(-50%)' }
+          : { right: '1rem' }),
         zIndex: 999,
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.4rem',
-        alignItems: 'center',
+        gap: '0.45rem',
+        alignItems: isMobile ? 'center' : 'flex-end',
         pointerEvents: 'none',
-        maxWidth: 'calc(100vw - 2rem)',
+        maxWidth: isMobile ? 'calc(100vw - 1.5rem)' : '420px',
       }}
     >
       {notifs.map(n => {
-        const palette = n.tone === 'success'
-          ? { fg: C.success, border: C.success, bg: C.successDim }
-          : n.tone === 'warn'
-          ? { fg: C.warn, border: C.warn, bg: 'rgba(251,191,36,0.12)' }
-          : { fg: C.text, border: C.border, bg: C.card };
+        const palette = paletteFor(n.tone, n.accent);
+        const Icon = n.icon;
         return (
-          <div
+          <button
             key={n.id}
+            type="button"
             role="status"
             aria-live="polite"
+            onClick={() => onDismiss(n.id)}
+            title="Dismiss"
             style={{
               background: palette.bg,
               border: `1px solid ${palette.border}`,
               color: palette.fg,
-              borderRadius: 999,
-              padding: '0.5rem 0.95rem',
+              borderRadius: 12,
+              padding: '0.55rem 0.7rem 0.55rem 0.85rem',
               fontSize: '0.82rem',
-              fontWeight: 700,
-              boxShadow: '0 6px 20px rgba(0,0,0,0.4)',
+              fontWeight: 700, fontFamily: 'inherit',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.42)',
               animation: 'mp-notif-in 0.22s ease-out',
               pointerEvents: 'auto',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
+              cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: '0.55rem',
+              maxWidth: '100%',
+              textAlign: 'left',
             }}
           >
-            {n.text}
-          </div>
+            {Icon && (
+              <span aria-hidden="true" style={{
+                display: 'inline-flex', alignItems: 'center',
+                color: palette.fg, flexShrink: 0,
+              }}>
+                <Icon size={16} />
+              </span>
+            )}
+            <span style={{
+              flex: '1 1 auto', minWidth: 0,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>{n.text}</span>
+            <span aria-hidden="true" style={{
+              display: 'inline-flex', alignItems: 'center',
+              color: palette.fg, opacity: 0.55, flexShrink: 0,
+              marginLeft: '0.15rem',
+            }}>
+              <IconClose size={13} />
+            </span>
+          </button>
         );
       })}
       <style>{`
         @keyframes mp-notif-in {
-          from { opacity: 0; transform: translateY(-6px); }
+          from { opacity: 0; transform: translateY(-8px); }
           to   { opacity: 1; transform: translateY(0); }
         }
       `}</style>
@@ -6677,50 +6799,6 @@ function KickedScreen({
         <BigButton onClick={onLeave}>Leave</BigButton>
         <BigButton accent onClick={onRejoin}>Rejoin</BigButton>
       </div>
-    </div>
-  );
-}
-
-function HostTransferToast({ name }: { name: string }) {
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      style={{
-        position: 'fixed',
-        top: 'calc(env(safe-area-inset-top) + 0.75rem)',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        zIndex: 1000,
-        background: C.card,
-        border: `1px solid ${C.warn}`,
-        color: C.text,
-        borderRadius: 999,
-        padding: '0.55rem 1rem',
-        fontSize: '0.85rem',
-        fontWeight: 700,
-        letterSpacing: '0.01em',
-        boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: '0.45rem',
-        animation: 'mp-host-toast-in 0.22s ease-out',
-        maxWidth: 'calc(100vw - 2rem)',
-        whiteSpace: 'nowrap',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-      }}
-    >
-      <span style={{ color: C.warn, display: 'inline-flex', alignItems: 'center' }}>
-        <CrownIcon />
-      </span>
-      <span>Host transferred to {name}</span>
-      <style>{`
-        @keyframes mp-host-toast-in {
-          from { opacity: 0; transform: translate(-50%, -8px); }
-          to   { opacity: 1; transform: translate(-50%, 0); }
-        }
-      `}</style>
     </div>
   );
 }
