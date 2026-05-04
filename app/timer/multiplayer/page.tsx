@@ -390,7 +390,7 @@ interface ExtraEntry {
 // 'yes' so they don't have to vote on their own request. Tallying is
 // host-driven (see voteTallier effect) — clients only WRITE responses and
 // READ outcomes via toasts/state.
-type VoteType = 'restartRound' | 'pause' | 'resume';
+type VoteType = 'restartRound' | 'pause' | 'resume' | 'retrySolve';
 type VoteResponse = 'yes' | 'no';
 
 interface VoteData {
@@ -399,8 +399,11 @@ interface VoteData {
   initiatorName: string;
   startedAt: number;
   expiresAt: number;       // ms epoch
-  /** Pause-vote only: optional human-readable reason shown in the banner. */
+  /** Pause-vote and retrySolve-vote: optional human-readable reason. */
   reason?: string;
+  /** retrySolve-vote only: which solve index (0..4) the initiator wants
+   *  to redo. Undefined for non-retry votes. */
+  solveIdx?: number;
   /** uid → response. Missing key = not yet voted. */
   responses?: Record<string, VoteResponse>;
   /** Set by the tallier when a vote settles. Lingers for ~2s before
@@ -437,6 +440,29 @@ interface PauseHistoryEntry {
   reason?: string;
 }
 
+// Audit entry for a single retry — covers both the instant-undo path
+// (within INSTANT_UNDO_WINDOW_MS) and the vote-driven path. `previousMs`
+// / `previousPenalty` capture the discarded result so a future "what
+// did they originally have?" query has the data on hand.
+interface RetryEntry {
+  uid: string;
+  name: string;
+  round: number;
+  solveIdx: number;
+  type: 'instant' | 'voted';
+  previousMs?: number;
+  previousPenalty?: Penalty;
+  requestedAt: number;
+  completedAt: number;
+  reason?: string;
+}
+
+// Window after a confirmation in which the player can undo without a
+// vote. Keep this short — the whole point is "I just clicked DNF by
+// accident, give me a second to back out". Longer windows would let
+// players game it after seeing where they rank.
+const INSTANT_UNDO_WINDOW_MS = 5_000;
+
 interface RoomData {
   host: string;
   event: string;
@@ -465,6 +491,9 @@ interface RoomData {
   meta?: RoomMeta;
   /** Append-only pause audit, keyed by Firebase push() id. */
   pauseHistory?: Record<string, PauseHistoryEntry>;
+  /** Append-only retry audit (instant + voted). Keyed by Firebase
+   *  push() id. Persists across rounds. */
+  retries?: Record<string, RetryEntry>;
   members: Record<string, MemberData>;
   solves?: Record<string, Record<string, SolveData>>;       // {uid: {0: {...}}}
 }
@@ -663,6 +692,9 @@ function MultiplayerPageInner() {
   // is in flight.
   const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
   const [pauseConfirmOpen, setPauseConfirmOpen] = useState(false);
+  // For the retry confirm modal we also need to know WHICH solve is
+  // being retried (the most-recent confirmed one in the current round).
+  const [retryConfirmIdx, setRetryConfirmIdx] = useState<number | null>(null);
 
   // ── Bluetooth smart-timer integration ─────────────────────────────────
   //
@@ -1729,7 +1761,59 @@ function MultiplayerPageInner() {
     await update(ref(rtdb, `rooms/${roomCode}`), updates);
   }, [roomCode, userId, room]);
 
-  // ── Voting (restart round / pause / resume) ─────────────────────────────
+  // Member: instant-undo a CONFIRMED solve at `index` (within the
+  // INSTANT_UNDO_WINDOW_MS grace period). No vote required. The solve
+  // is wiped, currentSolve rolls back by one, a new player-scoped
+  // scramble is generated for that index, and the per-round budget
+  // (shared with extra-scramble) ticks up. The caller is responsible
+  // for gating on the time window — we re-check member quota here
+  // to prevent double-spends from a fast double-tap.
+  const instantUndoSolve = useCallback(async (index: number) => {
+    if (!roomCode || !userId || !room) return;
+    if (room.status !== 'racing') return;
+    const me = room.members?.[userId];
+    if (!me) return;
+    const solve = room.solves?.[userId]?.[String(index)];
+    if (!solve) return; // nothing committed to undo
+    const used = me.extrasThisRound ?? 0;
+    if (used >= EXTRA_SCRAMBLES_PER_ROUND) return;
+    // Hard gate on the time window — UI hides the pill after 5s but
+    // a stale React event could still fire late.
+    if (Date.now() - solve.confirmedAt > INSTANT_UNDO_WINDOW_MS) return;
+
+    const newScramble = generateScramble(room.event);
+    const retriesRef = ref(rtdb, `rooms/${roomCode}/retries`);
+    const retryKey = push(retriesRef).key;
+    if (!retryKey) return;
+
+    const now2 = Date.now();
+    const entry: RetryEntry = {
+      uid: userId,
+      name: me.name,
+      round: room.round,
+      solveIdx: index,
+      type: 'instant',
+      previousMs: solve.time,
+      previousPenalty: solve.penalty,
+      requestedAt: now2,
+      completedAt: now2,
+    };
+
+    const updates: Record<string, unknown> = {
+      [`solves/${userId}/${index}`]: null,
+      // currentSolve rolls back so the player re-does this index. We
+      // also clear roundAverage in case this was solve 5 — the Ao5
+      // would have been written then; recomputed once they re-finish.
+      [`members/${userId}/currentSolve`]: index,
+      [`members/${userId}/roundAverage`]: null,
+      [`members/${userId}/extrasThisRound`]: used + 1,
+      [`playerScrambles/${userId}/${index}`]: newScramble,
+      [`retries/${retryKey}`]: entry,
+    };
+    await update(ref(rtdb, `rooms/${roomCode}`), updates);
+  }, [roomCode, userId, room]);
+
+  // ── Voting (restart round / pause / resume / retrySolve) ────────────────
   //
   // Lifecycle:
   //   requestVote → writes votes/{type} with the initiator pre-counted as
@@ -1742,10 +1826,14 @@ function MultiplayerPageInner() {
 
   const requestVote = useCallback(async (
     type: VoteType,
-    options?: { reason?: string },
+    options?: { reason?: string; solveIdx?: number },
   ): Promise<boolean> => {
     if (!roomCode || !room || !userId) return false;
     if (room.votes?.[type]) return false; // already in flight
+    // No two votes overlap — the spec says "Cannot retry while another
+    // vote is in progress", and the same makes sense for any cross-type
+    // mix (e.g. a pause vote during a retry vote). One slot at a time.
+    if (room.votes && Object.values(room.votes).some(Boolean)) return false;
     const me = room.members?.[userId];
     if (!me) return false;
     const startedAt = Date.now();
@@ -1757,6 +1845,7 @@ function MultiplayerPageInner() {
       expiresAt: startedAt + VOTE_DURATION_MS,
       responses: { [userId]: 'yes' },
       ...(options?.reason ? { reason: options.reason } : {}),
+      ...(typeof options?.solveIdx === 'number' ? { solveIdx: options.solveIdx } : {}),
     };
     await update(ref(rtdb, `rooms/${roomCode}`), {
       [`votes/${type}`]: data,
@@ -1984,7 +2073,7 @@ function MultiplayerPageInner() {
     }
     if (triggerUid !== userId) return;
 
-    for (const type of ['restartRound', 'pause', 'resume'] as VoteType[]) {
+    for (const type of ['restartRound', 'pause', 'resume', 'retrySolve'] as VoteType[]) {
       const vote = votes[type];
       if (!vote) continue;
       // Already settled — schedule cleanup so the vote disappears once
@@ -2056,6 +2145,46 @@ function MultiplayerPageInner() {
             updates[`pauseHistory/${key}/resumedAt`] = Date.now();
             updates['meta/pauseHistoryKey'] = null;
           }
+        } else if (type === 'retrySolve') {
+          // Retry-solve approval: same effect as instantUndoSolve, but
+          // logged with type='voted' for the audit. The initiator's
+          // member entry (extrasThisRound) is bumped here, not on the
+          // initiator's client, since multiple clients race to apply
+          // and we want the side-effect single-sourced.
+          const idx = vote.solveIdx;
+          const initiatorUid = vote.initiator;
+          const initiator = idx != null ? memberEntries.find(([uid]) => uid === initiatorUid) : undefined;
+          const prevSolve = idx != null ? room.solves?.[initiatorUid]?.[String(idx)] : undefined;
+          if (idx != null && initiator && prevSolve) {
+            const used = initiator[1].extrasThisRound ?? 0;
+            // Re-check the cap inside the tallier — initiator might
+            // have spent the budget on an instant-undo or extra-
+            // scramble after the vote opened.
+            if (used < EXTRA_SCRAMBLES_PER_ROUND) {
+              const now2 = Date.now();
+              const retryKey = push(ref(rtdb, `rooms/${roomCode}/retries`)).key;
+              if (retryKey) {
+                const entry: RetryEntry = {
+                  uid: initiatorUid,
+                  name: vote.initiatorName,
+                  round: room.round,
+                  solveIdx: idx,
+                  type: 'voted',
+                  previousMs: prevSolve.time,
+                  previousPenalty: prevSolve.penalty,
+                  requestedAt: vote.startedAt,
+                  completedAt: now2,
+                  ...(vote.reason ? { reason: vote.reason } : {}),
+                };
+                updates[`retries/${retryKey}`] = entry;
+              }
+              updates[`solves/${initiatorUid}/${idx}`] = null;
+              updates[`members/${initiatorUid}/currentSolve`] = idx;
+              updates[`members/${initiatorUid}/roundAverage`] = null;
+              updates[`members/${initiatorUid}/extrasThisRound`] = used + 1;
+              updates[`playerScrambles/${initiatorUid}/${idx}`] = generateScramble(room.event);
+            }
+          }
         }
       }
       if (Object.keys(updates).length) {
@@ -2124,7 +2253,7 @@ function MultiplayerPageInner() {
       lastVoteOutcomeRef.current = new Map();
       return;
     }
-    for (const type of ['restartRound', 'pause', 'resume'] as VoteType[]) {
+    for (const type of ['restartRound', 'pause', 'resume', 'retrySolve'] as VoteType[]) {
       const v = room.votes[type];
       if (!v?.result) continue;
       const seenAt = lastVoteOutcomeRef.current.get(type);
@@ -2136,9 +2265,17 @@ function MultiplayerPageInner() {
         if (type === 'restartRound') pushNotif('Round шинэчлэгдлээ', 'success');
         else if (type === 'pause')   pushNotif('Тоглолт зогссон', 'info');
         else if (type === 'resume')  pushNotif('Тоглолт үргэлжилж байна', 'success');
+        else if (type === 'retrySolve') {
+          // Self-toast for the initiator, third-person for everyone else.
+          if (v.initiator === userId) {
+            pushNotif('Solve буцаагдлаа', 'success');
+          } else if (v.solveIdx != null) {
+            pushNotif(`${v.initiatorName} solve ${v.solveIdx + 1}-г дахин хийж байна`, 'info');
+          }
+        }
       }
     }
-  }, [room?.votes, pushNotif]);
+  }, [room?.votes, userId, pushNotif]);
 
   // Toast: when status flips racing → results, announce any member who was
   // disconnected at the moment the round ended. The detection runs on every
@@ -2291,6 +2428,7 @@ function MultiplayerPageInner() {
             onStartRace={startRace}
             onSubmitSolve={submitSolve}
             onRequestExtra={requestExtraScramble}
+            onInstantUndo={instantUndoSolve}
             onReadyForNext={readyForNext}
             onNextRound={nextRound}
             onPlayAgain={playAgain}
@@ -2330,26 +2468,59 @@ function MultiplayerPageInner() {
           onBtDisconnect={guardedBtDisconnect}
         />
       )}
-      {pauseOpen && (
-        <MpPauseModal
-          isMobile={isMobile}
-          onResume={() => setPauseOpen(false)}
-          onLeaveTemporarily={() => { setPauseOpen(false); leaveTemporarily(); }}
-          onExit={requestLeave}
-          canRestartRound={!!room && room.status === 'racing'}
-          canPauseMatch={!!room && room.status !== 'racing' && !room.meta?.paused}
-          restartVoteInFlight={!!room?.votes?.restartRound}
-          pauseVoteInFlight={!!room?.votes?.pause}
-          onRestartRound={() => {
-            setPauseOpen(false);
-            setRestartConfirmOpen(true);
-          }}
-          onPauseMatch={() => {
-            setPauseOpen(false);
-            setPauseConfirmOpen(true);
-          }}
-        />
-      )}
+      {pauseOpen && (() => {
+        // Most-recent confirmed solve in the current round, used to
+        // surface the "Solve N-г дахин хийх хүсэлт" pause-menu entry.
+        // confirmedAt drives the LAST-confirmed selection — important
+        // when a player retried solve 2 and is back on solve 2 again
+        // (they probably want THAT one, not solve 3).
+        let retryIdx: number | null = null;
+        if (room && room.status === 'racing' && userId) {
+          const mySolves = room.solves?.[userId] || {};
+          let bestAt = -1;
+          for (const [k, s] of Object.entries(mySolves)) {
+            const n = parseInt(k, 10);
+            if (!Number.isFinite(n) || !s) continue;
+            const t = s.confirmedAt ?? 0;
+            if (t > bestAt) { bestAt = t; retryIdx = n; }
+          }
+        }
+        const me = room?.members?.[userId];
+        const used = me?.extrasThisRound ?? 0;
+        const quotaSpent = used >= EXTRA_SCRAMBLES_PER_ROUND;
+        const otherVoteInFlight = !!(room?.votes && Object.entries(room.votes)
+          .some(([t, v]) => t !== 'retrySolve' && !!v));
+        const retryAvailable = retryIdx != null && !!room && room.status === 'racing'
+          && !room.meta?.paused && !otherVoteInFlight;
+        return (
+          <MpPauseModal
+            isMobile={isMobile}
+            onResume={() => setPauseOpen(false)}
+            onLeaveTemporarily={() => { setPauseOpen(false); leaveTemporarily(); }}
+            onExit={requestLeave}
+            canRestartRound={!!room && room.status === 'racing'}
+            canPauseMatch={!!room && room.status !== 'racing' && !room.meta?.paused}
+            restartVoteInFlight={!!room?.votes?.restartRound}
+            pauseVoteInFlight={!!room?.votes?.pause}
+            onRestartRound={() => {
+              setPauseOpen(false);
+              setRestartConfirmOpen(true);
+            }}
+            onPauseMatch={() => {
+              setPauseOpen(false);
+              setPauseConfirmOpen(true);
+            }}
+            retryAvailable={retryAvailable}
+            retrySolveLabel={retryIdx != null ? `Solve ${retryIdx + 1}` : 'Solve'}
+            retryVoteInFlight={!!room?.votes?.retrySolve}
+            retryQuotaSpent={quotaSpent}
+            onRetrySolve={() => {
+              setPauseOpen(false);
+              if (retryIdx != null) setRetryConfirmIdx(retryIdx);
+            }}
+          />
+        );
+      })()}
       {restartConfirmOpen && (
         <RestartRoundConfirmModal
           isMobile={isMobile}
@@ -2372,13 +2543,26 @@ function MultiplayerPageInner() {
           }}
         />
       )}
+      {retryConfirmIdx != null && (
+        <RetrySolveConfirmModal
+          isMobile={isMobile}
+          solveIdx={retryConfirmIdx}
+          onCancel={() => setRetryConfirmIdx(null)}
+          onConfirm={async (reason) => {
+            const idx = retryConfirmIdx;
+            setRetryConfirmIdx(null);
+            try { await requestVote('retrySolve', { reason, solveIdx: idx }); }
+            catch (err) { console.error('[mp] retry vote', err); }
+          }}
+        />
+      )}
       {/* Other-player prompt — only renders when a vote is in flight,
           we're not the initiator, and we haven't responded yet. The
           tallier sets `result` on settle, which suppresses this modal
           for the brief 2s it lingers before cleanup. */}
       {(() => {
         if (!room?.votes || view !== 'room' || !userId) return null;
-        for (const t of ['restartRound', 'pause', 'resume'] as VoteType[]) {
+        for (const t of ['restartRound', 'pause', 'resume', 'retrySolve'] as VoteType[]) {
           const v = room.votes[t];
           if (!v) continue;
           if (v.result) continue;
@@ -2783,6 +2967,10 @@ interface RoomViewProps {
    *  audit entry appended, per-player override written. The pending
    *  local solve is discarded by the caller (RacingScreen) on success. */
   onRequestExtra: (index: number, originalTime: number, originalPenalty: Penalty) => Promise<void> | void;
+  /** Within INSTANT_UNDO_WINDOW_MS of confirming, the player can wipe
+   *  the just-confirmed solve at `index` without a vote. Bumps the
+   *  shared retry/extra-scramble quota. */
+  onInstantUndo: (index: number) => Promise<void> | void;
   onReadyForNext: () => void;
   onNextRound: () => void;
   onPlayAgain: () => void;
@@ -2951,7 +3139,8 @@ function WaitingRoom({
 
 // ── Racing screen ─────────────────────────────────────────────────────────
 function RacingScreen({
-  isMobile, room, userId, prefs, now, onSubmitSolve, onRequestExtra, onOpenSettings, onPause,
+  isMobile, room, userId, prefs, now, onSubmitSolve, onRequestExtra, onInstantUndo,
+  onOpenSettings, onPause,
   btState, btLiveState, btDeviceLabel, onBtConnect, onBtDisconnect, btSolveCallbacksRef,
 }: RoomViewProps & { isHost: boolean }) {
   // Behaviour driven by user prefs (Settings modal). The shared timer
@@ -3004,9 +3193,43 @@ function RacingScreen({
     : '';
 
   // How many extras the player has used this round, for gating the UI
-  // button. Hard-capped client-side and re-enforced in the action.
+  // button. Hard-capped client-side and re-enforced in the action. The
+  // pool is shared with the retry/instant-undo flow.
   const extrasUsed = room.members?.[userId]?.extrasThisRound ?? 0;
   const extrasRemaining = Math.max(0, EXTRA_SCRAMBLES_PER_ROUND - extrasUsed);
+
+  // Most-recent confirmed solve in the current round, for the floating
+  // "Буцаах" pill. We pick by confirmedAt (not just highest index) so
+  // that a player who already retried solve 2 and is back on solve 2
+  // sees the pill referring to their LATEST commit, not solve 3.
+  const lastConfirmedSolve = useMemo(() => {
+    if (room.status !== 'racing') return null;
+    const mySolves = room.solves?.[userId];
+    if (!mySolves) return null;
+    let bestIdx = -1;
+    let bestAt = -1;
+    for (const [k, s] of Object.entries(mySolves)) {
+      const idx = parseInt(k, 10);
+      if (!Number.isFinite(idx) || !s) continue;
+      const at = s.confirmedAt ?? 0;
+      if (at > bestAt) { bestAt = at; bestIdx = idx; }
+    }
+    if (bestIdx < 0) return null;
+    return { idx: bestIdx, confirmedAt: bestAt };
+  }, [room.status, room.solves, userId]);
+
+  // Show the pill only inside the 5s grace window AND if budget is left
+  // AND no other vote/pause is locking the round. The component itself
+  // also self-fades when it reaches deadline so a stale render won't
+  // leak a clickable button.
+  const undoEligible = lastConfirmedSolve != null
+    && extrasRemaining > 0
+    && !room.meta?.paused
+    && !(room.votes && Object.values(room.votes).some(Boolean))
+    && Date.now() - lastConfirmedSolve.confirmedAt < INSTANT_UNDO_WINDOW_MS;
+  const undoDeadlineMs = lastConfirmedSolve
+    ? lastConfirmedSolve.confirmedAt + INSTANT_UNDO_WINDOW_MS
+    : 0;
 
   // Pending = awaiting OK / +2 / DNF confirmation.
   const [pending, setPending] = useState<{ ms: number; defaultDnf: boolean } | null>(null);
@@ -3249,6 +3472,13 @@ function RacingScreen({
             onConfirm={confirmExtraScramble}
           />
         )}
+        {undoEligible && lastConfirmedSolve && (
+          <InstantUndoPill
+            isMobile
+            deadlineMs={undoDeadlineMs}
+            onUndo={() => { onInstantUndo(lastConfirmedSolve.idx); }}
+          />
+        )}
       </>
     );
   }
@@ -3418,6 +3648,13 @@ function RacingScreen({
           isMobile={false}
           onCancel={() => setExtraConfirmOpen(false)}
           onConfirm={confirmExtraScramble}
+        />
+      )}
+      {undoEligible && lastConfirmedSolve && (
+        <InstantUndoPill
+          isMobile={false}
+          deadlineMs={undoDeadlineMs}
+          onUndo={() => { onInstantUndo(lastConfirmedSolve.idx); }}
         />
       )}
     </div>
@@ -4338,6 +4575,128 @@ function PauseConfirmModal({
   );
 }
 
+// Initiator confirmation for "Дахин хийх хүсэлт". Body lays out the
+// stakes (solve will be discarded, others will be asked to vote) plus
+// an optional reason input that propagates into the vote prompt other
+// players see.
+function RetrySolveConfirmModal({
+  isMobile, solveIdx, onCancel, onConfirm,
+}: {
+  isMobile: boolean;
+  solveIdx: number;
+  onCancel: () => void;
+  onConfirm: (reason: string) => void;
+}) {
+  const [reason, setReason] = useState('');
+  return (
+    <VoteOverlay isMobile={isMobile} onClose={onCancel}>
+      <VoteHeader icon="↩️" title={`Solve ${solveIdx + 1}-г дахин хийх`} />
+      <div style={{
+        padding: '1rem',
+        display: 'flex', flexDirection: 'column', gap: '0.85rem',
+      }}>
+        <div style={{ fontSize: '0.86rem', color: C.text, lineHeight: 1.5 }}>
+          Бусад тоглогчийн зөвшөөрлийг хүсэх үү? Бүгд зөвшөөрвөл уг solve хүчингүй болж шинэ scramble-аар дахин хийнэ.
+        </div>
+        <div>
+          <label
+            htmlFor="mp-retry-reason"
+            style={{
+              display: 'block', fontSize: '0.7rem', fontWeight: 700,
+              color: C.muted, letterSpacing: '0.06em',
+              textTransform: 'uppercase', marginBottom: '0.35rem',
+            }}
+          >Шалтгаан (заавал биш)</label>
+          <input
+            id="mp-retry-reason"
+            value={reason}
+            onChange={e => setReason(e.target.value.slice(0, 120))}
+            placeholder="Жишээ: цаг алдсан"
+            style={{
+              width: '100%', boxSizing: 'border-box',
+              background: C.cardAlt, color: C.text,
+              border: `1px solid ${C.border}`, borderRadius: 10,
+              padding: '0.65rem 0.85rem', fontSize: '0.9rem',
+              fontFamily: 'inherit', outline: 'none',
+            }}
+          />
+        </div>
+        <div style={{
+          display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem',
+          marginTop: '0.1rem',
+        }}>
+          <button type="button" onClick={onCancel} style={voteSecondaryBtn}>Болих</button>
+          <button
+            type="button" onClick={() => onConfirm(reason.trim())}
+            style={votePrimaryBtn}
+          >Санал асуух</button>
+        </div>
+      </div>
+    </VoteOverlay>
+  );
+}
+
+// Floating "Буцаах" pill — shown for INSTANT_UNDO_WINDOW_MS after a
+// confirmation. Self-driven countdown (no parent re-render needed).
+// Mobile: floats above the bottom nav. Desktop: top-right of the
+// racing area. Tapping fires an instant undo (no vote).
+function InstantUndoPill({
+  isMobile, deadlineMs, onUndo,
+}: {
+  isMobile: boolean;
+  /** Wall-clock ms when the pill should auto-disappear. */
+  deadlineMs: number;
+  onUndo: () => void;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 100);
+    return () => window.clearInterval(id);
+  }, []);
+  const remainingMs = Math.max(0, deadlineMs - now);
+  const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
+  if (remainingMs <= 0) return null;
+
+  // Fade out over the last 600ms so the pill doesn't snap away.
+  const opacity = remainingMs < 600 ? remainingMs / 600 : 1;
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        zIndex: 1480,
+        ...(isMobile
+          ? { left: '50%', transform: 'translateX(-50%)', bottom: '4.6rem' }
+          : { right: '1.5rem', top: '5rem' }),
+        opacity,
+        transition: 'opacity 0.2s',
+      }}
+    >
+      <button
+        type="button"
+        onClick={onUndo}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
+          padding: '0.55rem 0.95rem', borderRadius: 999,
+          background: C.accentDim, color: C.accent,
+          border: `1px solid ${C.borderHi}`,
+          fontSize: '0.85rem', fontWeight: 700,
+          fontFamily: 'inherit', cursor: 'pointer',
+          letterSpacing: '0.02em',
+          boxShadow: '0 6px 18px rgba(0,0,0,0.4)',
+        }}
+      >
+        <span aria-hidden="true">↩️</span>
+        <span>Буцаах</span>
+        <span style={{
+          fontFamily: 'JetBrains Mono, monospace',
+          color: C.muted, fontWeight: 600,
+        }}>{remainingSec}с</span>
+      </button>
+    </div>
+  );
+}
+
 // Modal shown to non-initiator players while a vote is in flight. The
 // initiator never sees this — their "yes" was set when they kicked the
 // vote off, and they can cancel it via the existing pause menu surface.
@@ -4362,16 +4721,20 @@ function VotePromptModal({
     restartRound: 'Round дахин эхлүүлэх санал',
     pause: 'Тоглолт түр зогсоох санал',
     resume: 'Тоглолт үргэлжлүүлэх санал',
+    retrySolve: 'Solve дахин хийх санал',
   };
   const iconByType: Record<VoteType, string> = {
     restartRound: '🔄',
     pause: '⏸',
     resume: '▶️',
+    retrySolve: '↩️',
   };
+  const solveLabel = typeof vote.solveIdx === 'number' ? vote.solveIdx + 1 : '?';
   const bodyByType: Record<VoteType, string> = {
     restartRound: `${vote.initiatorName} энэ round-ыг шинэчлэхийг хүсэж байна. Зөвшөөрөх үү?`,
     pause: `${vote.initiatorName} тоглолтыг түр зогсоохыг хүсэж байна.${vote.reason ? ` Шалтгаан: ${vote.reason}` : ''} Зөвшөөрөх үү?`,
     resume: `${vote.initiatorName} тоглолтыг үргэлжлүүлэхийг хүсэж байна. Зөвшөөрөх үү?`,
+    retrySolve: `${vote.initiatorName} solve ${solveLabel}-г дахин хийхийг хүсэж байна.${vote.reason ? ` Шалтгаан: ${vote.reason}` : ''} Зөвшөөрөх үү?`,
   };
 
   return (
@@ -5002,6 +5365,8 @@ function MpPauseModal({
   canRestartRound, canPauseMatch,
   restartVoteInFlight, pauseVoteInFlight,
   onRestartRound, onPauseMatch,
+  retryAvailable, retrySolveLabel, retryVoteInFlight, retryQuotaSpent,
+  onRetrySolve,
 }: {
   isMobile: boolean;
   onResume: () => void;
@@ -5015,6 +5380,17 @@ function MpPauseModal({
   pauseVoteInFlight: boolean;
   onRestartRound: () => void;
   onPauseMatch: () => void;
+  /** True when the player has at least one confirmed solve in the
+   *  current round, the round is still active, and no other vote is in
+   *  flight. False hides the row entirely. */
+  retryAvailable: boolean;
+  /** "Solve N" label for the most-recent confirmed solve — used as the
+   *  button copy so it's clear which one will be retried. */
+  retrySolveLabel: string;
+  retryVoteInFlight: boolean;
+  /** True if the redo budget (shared with extra-scramble) is spent. */
+  retryQuotaSpent: boolean;
+  onRetrySolve: () => void;
 }) {
   return (
     <ModalShell isMobile={isMobile} title="Race Paused" onClose={onResume} maxWidth={420}>
@@ -5072,6 +5448,35 @@ function MpPauseModal({
             </span>
           )}
         </button>
+
+        {/* Vote-driven retry — only surfaces when the player has at
+            least one confirmed solve in the current round. The 0–5s
+            instant-undo path lives elsewhere (floating pill on the
+            racing screen). The label substitutes the specific solve
+            number ("Solve 3 дахин хийх") so it's explicit. */}
+        {retryAvailable && (
+          <button
+            onClick={() => { if (!retryVoteInFlight && !retryQuotaSpent) onRetrySolve(); }}
+            disabled={retryVoteInFlight || retryQuotaSpent}
+            style={{
+              background: 'transparent',
+              color: (retryVoteInFlight || retryQuotaSpent) ? C.mutedDim : C.text,
+              border: `1px solid ${C.border}`, borderRadius: 12,
+              padding: '0.85rem 1rem', fontSize: '0.95rem', fontWeight: 700,
+              fontFamily: 'inherit',
+              cursor: (retryVoteInFlight || retryQuotaSpent) ? 'not-allowed' : 'pointer',
+              letterSpacing: '0.02em',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem',
+            }}
+          >
+            <span aria-hidden="true">↩️</span>
+            <span>
+              {retryVoteInFlight ? 'Санал явж байна…'
+                : retryQuotaSpent ? 'Энэ round-д хэрэглэсэн'
+                : `${retrySolveLabel} дахин хийх хүсэлт`}
+            </span>
+          </button>
+        )}
 
         <button
           onClick={onLeaveTemporarily}
