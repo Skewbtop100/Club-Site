@@ -22,6 +22,12 @@ import type {
 import { useAuth } from '@/lib/auth-context';
 import { awardAchievementIfNew } from '@/lib/points';
 import { showToast } from '@/lib/toast';
+import {
+  IconUsers, IconCrown, IconTrophy, IconMedalGold, IconMedalSilver,
+  IconMedalBronze, IconStar, IconDiamond, IconTarget, IconFire,
+  IconRocket, IconDot, IconHourglass, IconFlag, IconGameController,
+  IconBolt, IconChart, IconLock, MEDAL_GOLD,
+} from '@/lib/icons';
 
 // ── Theme ─────────────────────────────────────────────────────────────────
 const C = {
@@ -69,11 +75,11 @@ function fmtMs(ms: number | null): string {
   return `${s}.${String(cs).padStart(2, '0')}`;
 }
 
-function rankIcon(rank: number): string {
-  if (rank === 1) return '🥇';
-  if (rank === 2) return '🥈';
-  if (rank === 3) return '🥉';
-  return '';
+function rankIcon(rank: number, size = 14): React.ReactNode {
+  if (rank === 1) return <IconMedalGold size={size} />;
+  if (rank === 2) return <IconMedalSilver size={size} />;
+  if (rank === 3) return <IconMedalBronze size={size} />;
+  return null;
 }
 
 function fmtSolveCell(s: MatchSolve): { text: string; isDNF: boolean; isPlus2: boolean } {
@@ -201,30 +207,53 @@ function deriveEventAverages(matches: MatchHistory[], uid: string): EventAverage
 }
 
 // ── Achievements ──────────────────────────────────────────────────────────
+// `iconKey` is a token rather than a node so the achievement list stays
+// JSON-friendly (it's also serialized into toasts on unlock). The
+// renderer maps the key to an SVG component at display time.
+type AchievementIconKey = 'first_win' | 'streak' | 'rocket' | 'star' | 'diamond' | 'trophy';
+
 interface Achievement {
   id: string;
   name: string;
-  icon: string;
+  iconKey: AchievementIconKey;
   description: string;
   unlocked: boolean;
 }
 
 function deriveAchievements(s: PersonalStats): Achievement[] {
   return [
-    { id: 'first_win',     name: 'Эхний хожил',        icon: '🎖',
+    { id: 'first_win',     name: 'Эхний хожил',        iconKey: 'first_win',
       description: 'Multiplayer-т эхний удаа хожих',  unlocked: s.wins >= 1 },
-    { id: 'win_streak_5',  name: '5 дараалсан хожил',  icon: '🔥',
+    { id: 'win_streak_5',  name: '5 дараалсан хожил',  iconKey: 'streak',
       description: '5 удаа дараалан хожих',           unlocked: s.maxStreak >= 5 },
-    { id: 'sub_15_mp',     name: 'Sub-15 in MP',       icon: '🚀',
+    { id: 'sub_15_mp',     name: 'Sub-15 in MP',       iconKey: 'rocket',
       description: 'Multiplayer-т Ao5 < 15сек хийх',
       unlocked: s.bestAo5 !== null && s.bestAo5 < 15000 },
-    { id: 'matches_10',    name: 'Туршлагатай',        icon: '⭐',
+    { id: 'matches_10',    name: 'Туршлагатай',        iconKey: 'star',
       description: '10 тоглолт хийх',                  unlocked: s.total >= 10 },
-    { id: 'matches_50',    name: 'Үнэнч тоглогч',      icon: '💎',
+    { id: 'matches_50',    name: 'Үнэнч тоглогч',      iconKey: 'diamond',
       description: '50 тоглолт хийх',                  unlocked: s.total >= 50 },
-    { id: 'matches_100',   name: 'Чанарын тоглогч',    icon: '🏆',
+    { id: 'matches_100',   name: 'Чанарын тоглогч',    iconKey: 'trophy',
       description: '100 тоглолт хийх',                 unlocked: s.total >= 100 },
   ];
+}
+
+function renderAchievementIcon(
+  key: AchievementIconKey,
+  size: number,
+  unlocked: boolean,
+): React.ReactNode {
+  // Color: gold-ish for unlocked, muted for locked. Diamond keeps its
+  // own filled lavender look since it's the points tile.
+  const color = unlocked ? MEDAL_GOLD : C.mutedDim;
+  switch (key) {
+    case 'first_win': return <IconMedalGold size={size} color={unlocked ? MEDAL_GOLD : C.mutedDim} />;
+    case 'streak':    return <IconFire size={size} color={unlocked ? '#f97316' : C.mutedDim} />;
+    case 'rocket':    return <IconRocket size={size} color={unlocked ? C.accent : C.mutedDim} />;
+    case 'star':      return <IconStar size={size} color={color} />;
+    case 'diamond':   return <IconDiamond size={size} color={unlocked ? C.accent : C.mutedDim} />;
+    case 'trophy':    return <IconTrophy size={size} color={color} />;
+  }
 }
 
 // ── Leaderboard ───────────────────────────────────────────────────────────
@@ -588,7 +617,7 @@ function Thumb({ name, url, size }: { name: string; url: string | null; size: nu
 function Section({
   icon, title, action, children,
 }: {
-  icon: string;
+  icon: React.ReactNode;
   title: string;
   action?: React.ReactNode;
   children: React.ReactNode;
@@ -609,7 +638,10 @@ function Section({
           fontSize: '0.85rem', fontWeight: 800, letterSpacing: '0.01em',
           color: C.text,
         }}>
-          <span style={{ fontSize: '1.05rem', lineHeight: 1 }}>{icon}</span>
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            color: C.accent,
+          }}>{icon}</span>
           <span>{title}</span>
         </div>
         {action}
@@ -704,7 +736,7 @@ function LiveActivityCard({ onJoinRoom }: { onJoinRoom?: (code: string) => void 
 
   return (
     <Section
-      icon="🟢"
+      icon={<IconDot size={12} color={C.success} />}
       title="Шууд тоглолт"
       action={
         <span style={{
@@ -862,8 +894,10 @@ function memberConnectionDot(m: ActiveMember, now: number): {
 function statusLabel(status: 'waiting' | 'racing'): string {
   return status === 'racing' ? 'Уралдаж байна' : 'Хүлээж байна';
 }
-function statusIcon(status: 'waiting' | 'racing'): string {
-  return status === 'racing' ? '🏁' : '⏳';
+function StatusIcon({ status, size = 14 }: { status: 'waiting' | 'racing'; size?: number }) {
+  return status === 'racing'
+    ? <IconFlag size={size} color={C.warn} />
+    : <IconHourglass size={size} color={C.muted} />;
 }
 
 // "5 мин өмнө эхэлсэн" / "10 мин өмнө үүссэн" — distinguishes racing
@@ -949,8 +983,8 @@ function ActiveRoomRow({ room, onOpen, onJoin }: {
         display: 'flex', alignItems: 'center', gap: '0.55rem',
         flexWrap: 'wrap',
       }}>
-        <span style={{ fontSize: '1rem', lineHeight: 1 }} aria-hidden="true">
-          {statusIcon(room.status)}
+        <span style={{ display: 'inline-flex', alignItems: 'center' }} aria-hidden="true">
+          <StatusIcon status={room.status} size={14} />
         </span>
         <span style={{
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -973,8 +1007,12 @@ function ActiveRoomRow({ room, onOpen, onJoin }: {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.18rem' }}>
-        <div style={{ fontSize: '0.78rem', color: C.text, fontWeight: 600 }}>
-          <span aria-hidden="true">👑</span> {hostName}
+        <div style={{
+          display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
+          fontSize: '0.78rem', color: C.text, fontWeight: 600,
+        }}>
+          <IconCrown size={13} color={MEDAL_GOLD} aria-hidden="true" />
+          <span>{hostName}</span>
         </div>
         <div style={{
           fontSize: '0.74rem', color: C.muted,
@@ -1112,7 +1150,13 @@ function OnlineUserRow({
             </>
           ) : (
             <>
-              {room.status === 'racing' ? '🏁 Уралдаж байна' : '⏳ Хүлээж байна'}
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+                verticalAlign: 'middle',
+              }}>
+                <StatusIcon status={room.status} size={11} />
+                {statusLabel(room.status)}
+              </span>
               {' · '}{eventLabel(room.event)} өрөөнд
               {member.queued && <span style={{ color: C.warn }}>{' · '}queued</span>}
             </>
@@ -1184,7 +1228,9 @@ function RoomDetailModal({
               display: 'inline-flex', alignItems: 'center', gap: '0.45rem',
               fontSize: '0.95rem', fontWeight: 800,
             }}>
-              <span aria-hidden="true">{statusIcon(room.status)}</span>
+              <span aria-hidden="true" style={{ display: 'inline-flex' }}>
+                <StatusIcon status={room.status} size={16} />
+              </span>
               <span>{statusLabel(room.status)}</span>
             </div>
             <div style={{ fontSize: '0.76rem', color: C.muted }}>
@@ -1362,7 +1408,11 @@ function JoinByCodeModal({
               fontSize: '0.76rem', color: C.muted,
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             }}>
-              <span aria-hidden="true">{statusIcon(room.status)}</span>{' '}
+              <span aria-hidden="true" style={{
+                display: 'inline-flex', verticalAlign: 'middle', marginRight: '0.3rem',
+              }}>
+                <StatusIcon status={room.status} size={12} />
+              </span>
               {eventLabel(room.event)} · Host: {room.hostName || '—'}
             </div>
           </div>
@@ -1437,7 +1487,12 @@ function JoinByCodeModal({
             borderRadius: 10, padding: '0.6rem 0.75rem',
             fontSize: '0.74rem', color: C.muted, lineHeight: 1.45,
           }}>
-            <span aria-hidden="true">🔒</span> Өрөө хувийн (private). Кодыг өрөөнд нэгдсэн хүнээс л авах боломжтой.
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
+              verticalAlign: 'middle',
+            }} aria-hidden="true">
+              <IconLock size={12} />
+            </span>{' '}Өрөө хувийн (private). Кодыг өрөөнд нэгдсэн хүнээс л авах боломжтой.
           </div>
 
           <div style={{
@@ -1507,7 +1562,7 @@ function RoomDetailMemberRow({
           <span style={{
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>{member.name}</span>
-          {isHost && <span aria-hidden="true">👑</span>}
+          {isHost && <IconCrown size={12} color={MEDAL_GOLD} aria-hidden="true" />}
         </div>
         <div style={{
           fontSize: '0.72rem', color: C.muted, marginTop: '0.1rem',
@@ -1556,7 +1611,7 @@ function PersonalStatsCard({
 }) {
   const stats = useMemo(() => derivePersonalStats(matches, uid), [matches, uid]);
   return (
-    <Section icon="📊" title="Миний статистик">
+    <Section icon={<IconChart size={18} />} title="Миний статистик">
       {!signedIn ? (
         <div style={{ color: C.muted, fontSize: '0.88rem', padding: '0.4rem 0' }}>
           Нэвтэрч статистик харах
@@ -1781,7 +1836,7 @@ function LeaderboardCard({ uid }: { uid: string }) {
   ];
 
   return (
-    <Section icon="🏆" title="Шилдэг тоглогчид">
+    <Section icon={<IconTrophy size={18} color={MEDAL_GOLD} />} title="Шилдэг тоглогчид">
       <div style={{
         display: 'inline-flex', gap: '0.3rem',
         background: C.cardAlt, border: `1px solid ${C.border}`,
@@ -1854,7 +1909,7 @@ function LeaderboardCard({ uid }: { uid: string }) {
 function LeaderboardRow({
   entry, rank, isMe,
 }: { entry: LeaderboardEntry; rank: number; isMe: boolean }) {
-  const medal = rankIcon(rank);
+  const medal = rankIcon(rank, 16);
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: '0.6rem',
@@ -1871,10 +1926,10 @@ function LeaderboardRow({
                   : rank === 3 ? 'rgba(217,119,6,0.18)'
                   : 'rgba(255,255,255,0.05)',
         border: `1px solid ${C.border}`,
-        fontSize: medal ? '1rem' : '0.78rem',
+        fontSize: '0.78rem',
         fontWeight: 800, color: C.text, flexShrink: 0,
       }}>
-        {medal || rank}
+        {medal ?? rank}
       </span>
       <Thumb name={entry.name} url={entry.photoURL} size={30} />
       <div style={{ minWidth: 0, flex: '1 1 auto' }}>
@@ -1888,7 +1943,11 @@ function LeaderboardRow({
           <span style={{
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>{entry.name}</span>
-          {entry.athleteId && <span title="Тамирчин" style={{ fontSize: '0.85rem' }}>👑</span>}
+          {entry.athleteId && (
+            <span title="Тамирчин" style={{ display: 'inline-flex' }}>
+              <IconCrown size={13} color={MEDAL_GOLD} />
+            </span>
+          )}
         </div>
         <div style={{ fontSize: '0.72rem', color: C.muted, marginTop: '0.1rem' }}>
           {entry.total} тоглолт, {entry.wins} хожсон
@@ -1911,7 +1970,7 @@ function EventAveragesCard({
 }) {
   const avgs = useMemo(() => deriveEventAverages(matches, uid), [matches, uid]);
   return (
-    <Section icon="🎯" title="Event дундаж">
+    <Section icon={<IconTarget size={18} />} title="Event дундаж">
       {!signedIn ? (
         <div style={{ color: C.muted, fontSize: '0.88rem', padding: '0.4rem 0' }}>
           Нэвтэрч дунджаа харах
@@ -2041,8 +2100,11 @@ function AchievementsCard({
               aria-label={a.name}
               title={a.description}
             >
-              <span style={{ fontSize: '1.5rem', lineHeight: 1 }}>
-                {a.unlocked ? a.icon : '🔒'}
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: 32, height: 32,
+              }} aria-hidden="true">
+                {renderAchievementIcon(a.iconKey, 28, a.unlocked)}
               </span>
               <span style={{
                 fontSize: '0.7rem', fontWeight: 700, textAlign: 'center',
@@ -2100,7 +2162,11 @@ function HowToPlayCard() {
           display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
           fontSize: '0.85rem', fontWeight: 800,
         }}>
-          <span style={{ fontSize: '1.05rem', lineHeight: 1 }}>🎮</span>
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', color: C.accent,
+          }} aria-hidden="true">
+            <IconGameController size={18} />
+          </span>
           <span>Хэрхэн тоглох вэ?</span>
         </span>
         <span style={{
@@ -2322,7 +2388,10 @@ function PlayerRow({ player, isMe }: { player: MatchPlayerSummary; isMe: boolean
         color: isMe ? '#c4b5fd' : C.text,
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
       }}>
-        {player.name}{rankIcon(player.finalRank) && ` ${rankIcon(player.finalRank)}`}
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{player.name}</span>
+          {rankIcon(player.finalRank, 14)}
+        </span>
       </span>
       <span style={{ fontSize: '0.78rem', color: C.muted, whiteSpace: 'nowrap' }}>
         <span style={{
@@ -2508,7 +2577,7 @@ export default function MultiplayerHub({
           const r = await awardAchievementIfNew(uid, a.id, a.name);
           if (r.awarded && !cancelled) {
             showToast({
-              msg: `Амжилт нээгдлээ: ${a.name} +50 💎`,
+              msg: `Амжилт нээгдлээ: ${a.name} +50 оноо`,
               tone: 'success',
             });
           }
@@ -2548,7 +2617,7 @@ export default function MultiplayerHub({
       </div>
 
       {/* Section 1: Quick actions */}
-      <Section icon="⚡" title="Хурдан үйлдлүүд">
+      <Section icon={<IconBolt size={18} color={C.accent} />} title="Хурдан үйлдлүүд">
         <QuickActions
           isMobile={isMobile}
           pendingRejoin={pendingRejoin}

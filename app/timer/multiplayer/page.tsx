@@ -35,6 +35,10 @@ import {
   type Precision,
   type UseTimerReturn,
 } from '@/lib/timer-engine';
+import {
+  IconRefresh, IconPause, IconPlay, IconUndo, IconHourglass, IconTrophy,
+  MEDAL_GOLD,
+} from '@/lib/icons';
 
 // Solo-timer prefs key — multiplayer reads only the smart-timer brand
 // from here so the user's choice syncs across both pages. Other prefs
@@ -954,8 +958,8 @@ function MultiplayerPageInner() {
         if (!result.awarded) return;
         showToast({
           msg: result.won
-            ? `Multiplayer хожсон! +${result.amount} 💎`
-            : `Multiplayer тоглолт +${result.amount} 💎`,
+            ? `Multiplayer хожсон! +${result.amount} оноо`
+            : `Multiplayer тоглолт +${result.amount} оноо`,
           tone: 'success',
         });
       })
@@ -3029,8 +3033,10 @@ function QueuedWaitScreen({ isMobile, room, onLeave }: RoomViewProps) {
         width: 64, height: 64, borderRadius: 16,
         background: C.accentDim, border: `1px solid ${C.borderHi}`,
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 30,
-      }}>⏳</div>
+        color: C.accent,
+      }}>
+        <IconHourglass size={32} />
+      </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxWidth: 360 }}>
         <div style={{ fontSize: '1.1rem', fontWeight: 800, color: C.text }}>
           Дараагийн round-ыг хүлээж байна…
@@ -3312,7 +3318,7 @@ function RacingScreen({
     // The myCurrent-change effect resets timer to idle.
   }, [pending, myCurrent, currentScramble, onSubmitSolve]);
 
-  // Confirm-step for "🔄 Нэмэлт scramble". The pending solve is local
+  // Confirm-step for "Нэмэлт scramble". The pending solve is local
   // (never written to RTDB), so we don't need to clear anything in
   // `solves` — just discard `pending`, reset the timer, and re-hide the
   // scramble so the user has to tap to reveal the fresh one.
@@ -3491,7 +3497,7 @@ function RacingScreen({
       display: 'flex', flexDirection: 'column', gap: '0.85rem',
       padding: '0.5rem 1rem 1rem',
     }}>
-      {/* Unified header: ⚙ ⌭ left, round info center, ⏸ right. Same icons as mobile. */}
+      {/* Unified header: settings + BT left, round info center, pause right. */}
       <div style={{
         background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
         padding: '0.55rem 0.7rem',
@@ -3716,7 +3722,7 @@ function MobileRacingLayout({
       background: C.bg,
       overflow: 'hidden',
     }}>
-      {/* Header: ⚙ ⌭ left, ⏸ right. Subtle, low-contrast — doesn't distract. */}
+      {/* Header: settings + BT left, pause right. Subtle, low-contrast — doesn't distract. */}
       <header style={{
         flexShrink: 0,
         padding: '0.3rem 0.55rem',
@@ -4310,7 +4316,7 @@ function ConfirmButton({
   );
 }
 
-// "🔄 Нэмэлт scramble" — placed BELOW the OK/+2/DNF row so the player
+// "Нэмэлт scramble" — placed BELOW the OK/+2/DNF row so the player
 // reads it as a separate-intent action. Disabled (greyed out, distinct
 // label) once the per-round budget is spent.
 function ExtraScrambleButton({
@@ -4334,7 +4340,7 @@ function ExtraScrambleButton({
         gap: '0.4rem',
       }}
     >
-      <span aria-hidden="true">🔄</span>
+      <IconRefresh size={15} aria-hidden="true" />
       <span>{enabled ? 'Нэмэлт scramble' : 'Энэ round-д хэрэглэсэн'}</span>
     </button>
   );
@@ -4382,7 +4388,7 @@ function ExtraScrambleConfirmModal({
           fontSize: '0.95rem', fontWeight: 800, color: C.text,
           display: 'flex', alignItems: 'center', gap: '0.45rem',
         }}>
-          <span aria-hidden="true">🔄</span>
+          <IconRefresh size={18} color={C.accent} aria-hidden="true" />
           <span>Нэмэлт scramble хүсэх</span>
         </header>
         <div style={{
@@ -4470,7 +4476,7 @@ function VoteOverlay({
   );
 }
 
-function VoteHeader({ icon, title }: { icon: string; title: string }) {
+function VoteHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
   return (
     <header style={{
       padding: '0.95rem 1rem',
@@ -4478,7 +4484,7 @@ function VoteHeader({ icon, title }: { icon: string; title: string }) {
       fontSize: '0.95rem', fontWeight: 800, color: C.text,
       display: 'flex', alignItems: 'center', gap: '0.45rem',
     }}>
-      <span aria-hidden="true">{icon}</span>
+      <span aria-hidden="true" style={{ display: 'inline-flex' }}>{icon}</span>
       <span>{title}</span>
     </header>
   );
@@ -4493,7 +4499,7 @@ function RestartRoundConfirmModal({
 }) {
   return (
     <VoteOverlay isMobile={isMobile} onClose={onCancel}>
-      <VoteHeader icon="🔄" title="Round дахин эхлүүлэх үү?" />
+      <VoteHeader icon={<IconRefresh size={18} color={C.accent} />} title="Round дахин эхлүүлэх үү?" />
       <div style={{
         padding: '1rem', fontSize: '0.86rem', color: C.text, lineHeight: 1.5,
       }}>
@@ -4526,7 +4532,7 @@ function PauseConfirmModal({
   const [reason, setReason] = useState('');
   return (
     <VoteOverlay isMobile={isMobile} onClose={onCancel}>
-      <VoteHeader icon="⏸" title="Тоглолт түр зогсоох" />
+      <VoteHeader icon={<IconPause size={18} color={C.accent} />} title="Тоглолт түр зогсоох" />
       <div style={{
         padding: '1rem',
         display: 'flex', flexDirection: 'column', gap: '0.85rem',
@@ -4590,7 +4596,7 @@ function RetrySolveConfirmModal({
   const [reason, setReason] = useState('');
   return (
     <VoteOverlay isMobile={isMobile} onClose={onCancel}>
-      <VoteHeader icon="↩️" title={`Solve ${solveIdx + 1}-г дахин хийх`} />
+      <VoteHeader icon={<IconUndo size={18} color={C.accent} />} title={`Solve ${solveIdx + 1}-г дахин хийх`} />
       <div style={{
         padding: '1rem',
         display: 'flex', flexDirection: 'column', gap: '0.85rem',
@@ -4686,7 +4692,7 @@ function InstantUndoPill({
           boxShadow: '0 6px 18px rgba(0,0,0,0.4)',
         }}
       >
-        <span aria-hidden="true">↩️</span>
+        <IconUndo size={15} aria-hidden="true" />
         <span>Буцаах</span>
         <span style={{
           fontFamily: 'JetBrains Mono, monospace',
@@ -4723,11 +4729,11 @@ function VotePromptModal({
     resume: 'Тоглолт үргэлжлүүлэх санал',
     retrySolve: 'Solve дахин хийх санал',
   };
-  const iconByType: Record<VoteType, string> = {
-    restartRound: '🔄',
-    pause: '⏸',
-    resume: '▶️',
-    retrySolve: '↩️',
+  const iconByType: Record<VoteType, React.ReactNode> = {
+    restartRound: <IconRefresh size={18} color={C.accent} />,
+    pause: <IconPause size={18} color={C.accent} />,
+    resume: <IconPlay size={18} color={C.success} />,
+    retrySolve: <IconUndo size={18} color={C.accent} />,
   };
   const solveLabel = typeof vote.solveIdx === 'number' ? vote.solveIdx + 1 : '?';
   const bodyByType: Record<VoteType, string> = {
@@ -4850,7 +4856,7 @@ function PausedBanner({
         display: 'flex', alignItems: 'center', gap: '0.55rem',
         fontSize: '0.92rem', fontWeight: 800, color: C.text,
       }}>
-        <span aria-hidden="true">⏸</span>
+        <IconPause size={16} color={C.accent} aria-hidden="true" />
         <span>Тоглолт зогссон</span>
         <span style={{ marginLeft: 'auto', fontSize: '0.72rem', color: C.muted, fontWeight: 600 }}>
           {meta.pausedByName}
@@ -5421,7 +5427,7 @@ function MpPauseModal({
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem',
           }}
         >
-          <span aria-hidden="true">🔄</span>
+          <IconRefresh size={16} aria-hidden="true" />
           <span>{restartVoteInFlight ? 'Санал явж байна…' : 'Round дахин эхлүүлэх'}</span>
         </button>
         <button
@@ -5439,7 +5445,7 @@ function MpPauseModal({
           }}
         >
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
-            <span aria-hidden="true">⏸</span>
+            <IconPause size={16} aria-hidden="true" />
             <span>{pauseVoteInFlight ? 'Санал явж байна…' : 'Тоглолт түр зогсоох'}</span>
           </span>
           {!canPauseMatch && !pauseVoteInFlight && (
@@ -5469,7 +5475,7 @@ function MpPauseModal({
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem',
             }}
           >
-            <span aria-hidden="true">↩️</span>
+            <IconUndo size={16} aria-hidden="true" />
             <span>
               {retryVoteInFlight ? 'Санал явж байна…'
                 : retryQuotaSpent ? 'Энэ round-д хэрэглэсэн'
@@ -5618,8 +5624,14 @@ function ResultsScreen({
             padding: '1rem', textAlign: 'center',
             display: 'flex', flexDirection: 'column', gap: '0.4rem',
           }}>
-            <div style={{ fontSize: '0.7rem', letterSpacing: '0.18em', textTransform: 'uppercase', color: C.muted, fontWeight: 700 }}>
-              🏆 Champion
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              gap: '0.4rem',
+              fontSize: '0.7rem', letterSpacing: '0.18em', textTransform: 'uppercase',
+              color: C.muted, fontWeight: 700,
+            }}>
+              <IconTrophy size={14} color={MEDAL_GOLD} aria-hidden="true" />
+              <span>Champion</span>
             </div>
             <div className="mp-champion-name" style={{
               fontSize: 'clamp(1.6rem, 5vw, 2.4rem)', fontWeight: 800,
@@ -6313,9 +6325,9 @@ function SettingsPanel({
           gap: '0.6rem',
         }}
       >
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', color: C.muted }}>
+          <SettingsIcon size={14} />
           <SectionLabel>Тохиргоо</SectionLabel>
-          <span aria-hidden="true" style={{ fontSize: '0.85rem' }}>⚙</span>
         </span>
         <span style={{
           display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
@@ -6507,7 +6519,7 @@ function HostBadge({ size = 14 }: { size?: number }) {
   );
 }
 
-// Coloured presence dot. The dot is the `🟢🟡🔴` from the spec, expressed
+// Coloured presence dot. The dot conveys online/idle/disconnected, expressed
 // as an SVG circle so it stays consistent across platforms (no emoji-font
 // drift). Tooltip is the human-readable status label.
 function StatusDot({ status, size = 8 }: { status: ConnectionStatus; size?: number }) {

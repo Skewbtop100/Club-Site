@@ -28,6 +28,7 @@ import type {
   MatchSolve,
   PointTransaction,
 } from '@/lib/types';
+import { IconMedalGold, IconMedalSilver, IconMedalBronze } from '@/lib/icons';
 
 const ROLE_BADGE: Record<UserRole, { label: string; fg: string; bg: string; border: string }> = {
   member:  { label: 'Гишүүн',   fg: '#a78bfa', bg: 'rgba(167,139,250,0.15)', border: 'rgba(167,139,250,0.45)' },
@@ -1191,11 +1192,11 @@ function eventLabel(id: string): string {
   return EVENT_LABEL[id] ?? id.toUpperCase();
 }
 
-function rankIcon(rank: number): string {
-  if (rank === 1) return '🥇';
-  if (rank === 2) return '🥈';
-  if (rank === 3) return '🥉';
-  return '';
+function rankIcon(rank: number, size = 14): React.ReactNode {
+  if (rank === 1) return <IconMedalGold size={size} />;
+  if (rank === 2) return <IconMedalSilver size={size} />;
+  if (rank === 3) return <IconMedalBronze size={size} />;
+  return null;
 }
 
 function fmtMs(ms: number | null): string {
@@ -1436,7 +1437,8 @@ function MatchCard({ match, uid, onOpen }: { match: MatchHistory; uid: string; o
             color: rank === 1 ? '#34d399' : 'var(--text)',
             fontSize: '0.78rem', fontWeight: 800, whiteSpace: 'nowrap',
           }}>
-            {rankIcon(rank)} {rank}-р байр
+            {rankIcon(rank, 14)}
+            <span>{rank}-р байр</span>
           </div>
         )}
       </div>
@@ -1622,8 +1624,13 @@ function PlayerRow({ player, isMe }: { player: MatchPlayerSummary; isMe: boolean
         fontSize: '0.78rem', fontWeight: 800, flexShrink: 0,
       }}>{player.finalRank}</span>
       <AthleteThumb name={player.name} url={player.photoURL} size={28} />
-      <span style={{ flex: '1 1 auto', minWidth: 0, fontWeight: isMe ? 800 : 600, color: isMe ? '#c4b5fd' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {player.name}{rankIcon(player.finalRank) && ` ${rankIcon(player.finalRank)}`}
+      <span style={{
+        flex: '1 1 auto', minWidth: 0, fontWeight: isMe ? 800 : 600,
+        color: isMe ? '#c4b5fd' : 'var(--text)',
+        display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
+      }}>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{player.name}</span>
+        {rankIcon(player.finalRank, 14)}
       </span>
       <span style={{ fontSize: '0.78rem', color: 'var(--muted)', whiteSpace: 'nowrap' }}>
         <span style={{ fontFamily: 'JetBrains Mono, monospace', color: 'var(--text)', fontWeight: 700 }}>{player.totalPoints}</span>{' '}оноо
