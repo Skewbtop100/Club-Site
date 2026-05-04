@@ -32,6 +32,10 @@ export interface Solve {
   scramble: string;
   event: string;
   ts: number;          // unix ms
+  /** Optional user-authored note about this solve (e.g. "great cross,
+   *  bad LL"). Trimmed string when present; absent for solves created
+   *  before the field was added. */
+  comment?: string;
 }
 
 export const PENALTY_ADD: Record<Penalty, number> = { none: 0, '+2': 2000, dnf: 0 };

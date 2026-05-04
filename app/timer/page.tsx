@@ -210,6 +210,10 @@ export default function TimerPage() {
   const [, forceTick] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [detailSolveId, setDetailSolveId] = useState<string | null>(null);
+  // Comment-edit modal — when set, the inline comment editor is open
+  // for that solve id. The action-row's 💬 button and the keyboard 'C'
+  // shortcut both target the most-recent solve through this state.
+  const [commentSolveId, setCommentSolveId] = useState<string | null>(null);
   // Timer preferences
   const [inspectionEnabled, setInspectionEnabled] = useState(true);
   const [precision, setPrecision] = useState<Precision>('cs');
@@ -610,10 +614,56 @@ export default function TimerPage() {
     setScramble(generateScramble(eventId));
   }, [eventId]);
 
+  // ── Solve action handlers ────────────────────────────────────────────────
+  // (Declared before the keyboard useEffect so the D/X/2/C shortcuts
+  //  can call togglePenaltyOnLast / deleteLastSolve without a TDZ
+  //  binding violation.)
+  const deleteSolve = useCallback((id: string) => {
+    setSolves(prev => prev.filter(s => s.id !== id));
+  }, [setSolves]);
+  const setSolvePenalty = useCallback((id: string, p: Penalty) => {
+    setSolves(prev => prev.map(s => s.id === id ? { ...s, penalty: p } : s));
+  }, [setSolves]);
+  // Comment is stored as `undefined` when cleared so the field doesn't
+  // serialize as an empty string in JSON snapshots / exports. Trimmed
+  // before save to keep accidental whitespace out of the data.
+  const setSolveComment = useCallback((id: string, comment: string) => {
+    const trimmed = comment.trim();
+    setSolves(prev => prev.map(s => {
+      if (s.id !== id) return s;
+      const next: Solve = { ...s };
+      if (trimmed) next.comment = trimmed;
+      else delete next.comment;
+      return next;
+    }));
+  }, [setSolves]);
+
+  // Inline action-row helpers — operate on the most-recent solve, which
+  // is what the buttons under the timer display target. The DNF / +2
+  // toggles flip the penalty back to 'none' when the same penalty is
+  // already active (so a second tap undoes), per spec.
+  const lastSolve: Solve | undefined = solves[solves.length - 1];
+  const togglePenaltyOnLast = useCallback((p: '+2' | 'dnf') => {
+    if (!lastSolve) return;
+    const next: Penalty = lastSolve.penalty === p ? 'none' : p;
+    setSolvePenalty(lastSolve.id, next);
+    if (next === 'dnf') showToast({ msg: 'DNF тохирууллаа', tone: 'success' });
+    else if (next === '+2') showToast({ msg: '+2 нэмлээ', tone: 'success' });
+  }, [lastSolve, setSolvePenalty]);
+  const deleteLastSolve = useCallback(() => {
+    if (!lastSolve) return;
+    deleteSolve(lastSolve.id);
+    timer.reset();
+    showToast({ msg: 'Solve устгагдлаа', tone: 'info' });
+  }, [lastSolve, deleteSolve, timer]);
+
   // ── Keyboard handlers ────────────────────────────────────────────────────
   // SPACE: state machine driver
   // ESC: cancel/reset current attempt
-  // D:   delete last solve
+  // D:   toggle DNF on last solve (when stopped)
+  // X:   delete last solve (when stopped)
+  // 2:   toggle +2 on last solve (when stopped)
+  // C:   open comment editor for last solve (when stopped)
   // N:   new scramble (when idle)
   const spaceHeldRef = useRef(false);
   useEffect(() => {
@@ -644,6 +694,48 @@ export default function TimerPage() {
           return;
         }
       }
+      // Quick-action shortcuts that mirror the buttons under the timer
+      // display. Only fire when a solve has just finished (state ===
+      // 'stopped'), no modifiers are pressed, no other modal owns
+      // focus, and the user isn't typing in an input.
+      if (
+        !e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey
+        && timer.state === 'stopped'
+        && solves.length > 0
+        && !settingsOpen && !detailSolveId && commentSolveId == null
+        && !manualEntryOpen && !sessionPanelOpen && !cubeFullscreenOpen
+      ) {
+        const target = e.target as HTMLElement | null;
+        const inEditable = !!target && (
+          target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
+        );
+        if (!inEditable) {
+          if (e.code === 'KeyD') {
+            e.preventDefault();
+            togglePenaltyOnLast('dnf');
+            return;
+          }
+          if (e.code === 'KeyX') {
+            e.preventDefault();
+            deleteLastSolve();
+            return;
+          }
+          // '2' on the top number row OR numpad — both produce e.code
+          // 'Digit2' / 'Numpad2'.
+          if (e.code === 'Digit2' || e.code === 'Numpad2') {
+            e.preventDefault();
+            togglePenaltyOnLast('+2');
+            return;
+          }
+          if (e.code === 'KeyC') {
+            e.preventDefault();
+            const last = solves[solves.length - 1];
+            if (last) setCommentSolveId(last.id);
+            return;
+          }
+        }
+      }
+
       // Alt+key combinations: event switching + session clear.
       // Only handle when timer isn't running to avoid disrupting an active solve.
       if (e.altKey && !e.metaKey && !e.ctrlKey && (timer.state === 'idle' || timer.state === 'stopped')) {
@@ -693,7 +785,14 @@ export default function TimerPage() {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [timer, inspectionEnabled, holdToStart, clearPending, setSolves, ganConnected]);
+  }, [
+    timer, inspectionEnabled, holdToStart, clearPending, setSolves, ganConnected,
+    // Quick-action shortcut deps — keep handler current with the latest
+    // last-solve / modal state so D/X/2/C hit the right target.
+    solves, togglePenaltyOnLast, deleteLastSolve,
+    settingsOpen, detailSolveId, commentSolveId,
+    manualEntryOpen, sessionPanelOpen, cubeFullscreenOpen,
+  ]);
 
   // Clear any pending Alt+D timeout on unmount.
   useEffect(() => {
@@ -728,11 +827,6 @@ export default function TimerPage() {
   const onTimerTouchEnd = useCallback(() => {
     if (timer.state === 'armed') timer.fireRunning();
   }, [timer]);
-
-  // ── Solve action handlers ────────────────────────────────────────────────
-  const deleteSolve = (id: string) => setSolves(prev => prev.filter(s => s.id !== id));
-  const setSolvePenalty = (id: string, p: Penalty) =>
-    setSolves(prev => prev.map(s => s.id === id ? { ...s, penalty: p } : s));
 
   // ── Mobile multi-select (Solves tab) ─────────────────────────────────────
   const exitSelectMode = useCallback(() => {
@@ -1185,7 +1279,7 @@ export default function TimerPage() {
                       }}>
                         {fmtMs(finalMs(s), dnf, precision)}
                       </div>
-                      <div style={{ display: 'flex', gap: '0.25rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                         {isPB && !dnf && (
                           <span style={{
                             fontSize: '0.55rem', fontWeight: 700, padding: '0.1rem 0.35rem', borderRadius: 4,
@@ -1197,6 +1291,18 @@ export default function TimerPage() {
                             fontSize: '0.55rem', fontWeight: 700, padding: '0.1rem 0.35rem', borderRadius: 4,
                             background: 'rgba(251,191,36,0.15)', color: C.warn, letterSpacing: '0.04em',
                           }}>+2</span>
+                        )}
+                        {s.comment && s.comment.trim() && (
+                          <span
+                            title={s.comment}
+                            aria-label="Has comment"
+                            style={{
+                              display: 'inline-flex', alignItems: 'center',
+                              color: C.muted, padding: '0 0.15rem',
+                            }}
+                          >
+                            <IconComment size={11} />
+                          </span>
                         )}
                       </div>
                       <button
@@ -1352,6 +1458,15 @@ export default function TimerPage() {
             }}>
               {timerDisplay}
             </div>
+            {timer.state === 'stopped' && lastSolve && (
+              <SolveActionRow
+                solve={lastSolve}
+                isMobile={isMobile}
+                onDelete={deleteLastSolve}
+                onTogglePenalty={togglePenaltyOnLast}
+                onOpenComment={() => setCommentSolveId(lastSolve.id)}
+              />
+            )}
             <div style={{ fontSize: '0.78rem', color: C.muted, marginTop: '1.5rem', letterSpacing: '0.06em', minHeight: '1.2rem' }}>
               {ganConnected && timer.state !== 'running' && timer.state !== 'inspecting' && timer.state !== 'armed' && 'Use the GAN timer pads'}
               {timer.state === 'inspecting' && 'Hold SPACE to arm, release to start'}
@@ -1757,6 +1872,15 @@ export default function TimerPage() {
                   }}>
                     {timerDisplay}
                   </div>
+                  {timer.state === 'stopped' && lastSolve && (
+                    <SolveActionRow
+                      solve={lastSolve}
+                      isMobile={isMobile}
+                      onDelete={deleteLastSolve}
+                      onTogglePenalty={togglePenaltyOnLast}
+                      onOpenComment={() => setCommentSolveId(lastSolve.id)}
+                    />
+                  )}
                   <div style={{ fontSize: '0.7rem', color: C.muted, marginTop: '0.7rem', letterSpacing: '0.06em', minHeight: '1rem' }}>
                     {ganConnected && timer.state !== 'running' && timer.state !== 'inspecting' && timer.state !== 'armed' && 'Use the GAN timer pads'}
                     {timer.state === 'inspecting' && 'Hold to arm, release to start'}
@@ -1949,6 +2073,18 @@ export default function TimerPage() {
                                 fontSize: '0.5rem', fontWeight: 700, color: C.warn,
                                 letterSpacing: '0.05em',
                               }}>+2</div>
+                            )}
+                            {s.comment && s.comment.trim() && (
+                              <span
+                                aria-label="Has comment"
+                                style={{
+                                  display: 'inline-flex',
+                                  color: C.mutedDim,
+                                  marginTop: '0.15rem',
+                                }}
+                              >
+                                <IconComment size={10} />
+                              </span>
                             )}
                           </button>
                         );
@@ -2465,6 +2601,40 @@ export default function TimerPage() {
                 </div>
               </div>
 
+              <div>
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  marginBottom: '0.4rem',
+                }}>
+                  <div style={{ fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, fontWeight: 600 }}>
+                    Тайлбар
+                  </div>
+                  <button
+                    onClick={() => setCommentSolveId(s.id)}
+                    style={{
+                      background: 'transparent', border: 'none', cursor: 'pointer',
+                      color: C.accent, fontSize: '0.74rem', fontWeight: 600,
+                      fontFamily: 'inherit', padding: '0.1rem 0.25rem',
+                    }}
+                  >{s.comment ? 'Засах' : 'Тайлбар оруулах'}</button>
+                </div>
+                {s.comment && s.comment.trim() ? (
+                  <div style={{
+                    fontSize: '0.88rem', color: C.text, lineHeight: 1.55,
+                    fontStyle: 'italic',
+                    background: C.cardAlt, border: `1px solid ${C.border}`,
+                    borderRadius: 8, padding: '0.6rem 0.8rem',
+                    whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  }}>
+                    {s.comment}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: '0.78rem', color: C.mutedDim, fontStyle: 'italic' }}>
+                    —
+                  </div>
+                )}
+              </div>
+
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
                 <button
                   onClick={() => { deleteSolve(s.id); setDetailSolveId(null); }}
@@ -2494,6 +2664,24 @@ export default function TimerPage() {
         );
       })()}
 
+      {/* Comment editor — opens from the inline action row under the
+          timer (or the Solve Detail modal). Saves to the targeted solve's
+          `comment` field. */}
+      {commentSolveId && (() => {
+        const s = solves.find(x => x.id === commentSolveId);
+        if (!s) return null;
+        return (
+          <CommentModal
+            initialComment={s.comment ?? ''}
+            onCancel={() => setCommentSolveId(null)}
+            onSave={(text) => {
+              setSolveComment(s.id, text);
+              setCommentSolveId(null);
+            }}
+          />
+        );
+      })()}
+
       <style>{`
         .pv-grid > main > section { box-sizing: border-box; }
         @media (max-width: 1100px) {
@@ -2506,6 +2694,10 @@ export default function TimerPage() {
         @keyframes pv-ble-pulse {
           0%, 100% { opacity: 1; }
           50%      { opacity: 0.45; }
+        }
+        @keyframes pv-actionrow-fade {
+          0%   { opacity: 0; transform: translateY(4px); }
+          100% { opacity: 1; transform: translateY(0); }
         }
       `}</style>
     </div>
@@ -4041,6 +4233,184 @@ function PenaltyRow({ penalty, onSet }: { penalty: Penalty; onSet: (p: Penalty) 
   );
 }
 
+// Quick-action icon row that appears under the big timer display the
+// moment a solve completes (timer.state === 'stopped'). Targets the
+// most-recent solve via the parent's helper callbacks. DNF / +2 are
+// toggles — clicking the active penalty clears it back to 'none'.
+function SolveActionRow({
+  solve, isMobile, onDelete, onTogglePenalty, onOpenComment,
+}: {
+  solve: Solve;
+  isMobile: boolean;
+  onDelete: () => void;
+  onTogglePenalty: (p: '+2' | 'dnf') => void;
+  onOpenComment: () => void;
+}) {
+  const dnfActive = solve.penalty === 'dnf';
+  const plus2Active = solve.penalty === '+2';
+  const hasComment = !!(solve.comment && solve.comment.trim());
+  const size = isMobile ? 40 : 32;
+  return (
+    <div style={{
+      display: 'flex', justifyContent: 'center',
+      gap: isMobile ? '0.7rem' : '0.55rem',
+      marginTop: '1.1rem',
+      animation: 'pv-actionrow-fade 0.32s cubic-bezier(0.2, 0.8, 0.3, 1) both',
+    }}>
+      <ActionIconBtn
+        size={size}
+        title="Solve устгах (X)"
+        ariaLabel="Delete solve"
+        icon={<IconClose size={isMobile ? 18 : 15} />}
+        onClick={onDelete}
+      />
+      <ActionIconBtn
+        size={size}
+        title="DNF (D)"
+        ariaLabel="Toggle DNF"
+        active={dnfActive}
+        activeColor={C.danger}
+        icon={<IconBan size={isMobile ? 18 : 15} />}
+        onClick={() => onTogglePenalty('dnf')}
+      />
+      <ActionIconBtn
+        size={size}
+        title="+2 (2)"
+        ariaLabel="Toggle +2"
+        active={plus2Active}
+        activeColor={C.warn}
+        icon={<IconFlag size={isMobile ? 18 : 15} />}
+        onClick={() => onTogglePenalty('+2')}
+      />
+      <ActionIconBtn
+        size={size}
+        title="Тайлбар (C)"
+        ariaLabel="Comment"
+        active={hasComment}
+        activeColor={C.accent}
+        icon={<IconComment size={isMobile ? 18 : 15} />}
+        onClick={onOpenComment}
+      />
+    </div>
+  );
+}
+
+function ActionIconBtn({
+  size, icon, title, ariaLabel, onClick, active, activeColor,
+}: {
+  size: number;
+  icon: React.ReactNode;
+  title: string;
+  ariaLabel: string;
+  onClick: () => void;
+  active?: boolean;
+  /** Tint used for the filled/active background and ring. Defaults to
+   *  the lavender accent so the Delete button (no semantic colour) and
+   *  Comment-on-hover land on the same hue. */
+  activeColor?: string;
+}) {
+  const tint = activeColor ?? C.accent;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-label={ariaLabel}
+      aria-pressed={active}
+      style={{
+        width: size, height: size, padding: 0,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        borderRadius: 8,
+        background: active ? `${tint}26` : 'rgba(255,255,255,0.03)',
+        border: `1px solid ${active ? tint : 'rgba(255,255,255,0.10)'}`,
+        color: active ? tint : C.muted,
+        fontFamily: 'inherit', cursor: 'pointer',
+        transition: 'background 0.15s, color 0.15s, border-color 0.15s, transform 0.08s',
+      }}
+      onMouseEnter={e => {
+        if (active) return;
+        e.currentTarget.style.background = 'rgba(255,255,255,0.07)';
+        e.currentTarget.style.color = C.text;
+      }}
+      onMouseLeave={e => {
+        if (active) return;
+        e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
+        e.currentTarget.style.color = C.muted;
+      }}
+      onMouseDown={e => (e.currentTarget.style.transform = 'scale(0.94)')}
+      onMouseUp={e => (e.currentTarget.style.transform = 'scale(1)')}
+    >
+      {icon}
+    </button>
+  );
+}
+
+// Compact in-place comment editor. Pre-filled with the existing comment
+// (so opening it on a solve that already has a note feels like editing,
+// not appending). Empty save = remove the comment.
+function CommentModal({
+  initialComment, onCancel, onSave,
+}: {
+  initialComment: string;
+  onCancel: () => void;
+  onSave: (text: string) => void;
+}) {
+  const [text, setText] = useState<string>(initialComment);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+  return (
+    <ModalShell title="Тайлбар оруулах" onClose={onCancel}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+        <textarea
+          ref={inputRef}
+          value={text}
+          onChange={e => setText(e.target.value.slice(0, 280))}
+          placeholder="Тайлбар..."
+          rows={3}
+          onKeyDown={e => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              onSave(text);
+            }
+          }}
+          style={{
+            width: '100%', boxSizing: 'border-box',
+            background: C.cardAlt, color: C.text,
+            border: `1px solid ${C.border}`, borderRadius: 8,
+            padding: '0.65rem 0.8rem',
+            fontSize: '0.92rem', fontFamily: 'inherit',
+            outline: 'none', resize: 'vertical',
+            lineHeight: 1.5,
+          }}
+        />
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+          <button
+            onClick={onCancel}
+            style={{
+              padding: '0.5rem 0.9rem', borderRadius: 8,
+              fontSize: '0.82rem', fontWeight: 600, fontFamily: 'inherit',
+              background: 'transparent', color: C.muted,
+              border: `1px solid ${C.border}`, cursor: 'pointer',
+            }}
+          >Болих</button>
+          <button
+            onClick={() => onSave(text)}
+            style={{
+              padding: '0.5rem 0.9rem', borderRadius: 8,
+              fontSize: '0.82rem', fontWeight: 700, fontFamily: 'inherit',
+              background: C.accent, color: '#0a0a0a',
+              border: `1px solid ${C.accent}`, cursor: 'pointer',
+            }}
+          >Хадгалах</button>
+        </div>
+      </div>
+    </ModalShell>
+  );
+}
+
 function Row({ label, kbd }: { label: string; kbd: string }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -4176,3 +4546,6 @@ function IconArrowRight(p: IconProps) { return <IconBase {...p}><path d="M5 12h1
 function IconLock(p: IconProps)       { return <IconBase {...p}><rect x={4} y={11} width={16} height={10} rx={2}/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></IconBase>; }
 function IconKeyboard(p: IconProps)   { return <IconBase {...p}><rect x={2}  y={6}  width={20} height={12} rx={2}/><path d="M6 10h0M10 10h0M14 10h0M18 10h0M6 14h0M10 14h4M18 14h0"/></IconBase>; }
 function IconPalette(p: IconProps)    { return <IconBase {...p}><path d="M12 3a9 9 0 1 0 0 18c1.1 0 2-.9 2-2 0-.5-.2-1-.5-1.4-.3-.4-.5-.9-.5-1.4 0-1.1.9-2 2-2H17a4 4 0 0 0 4-4 8 8 0 0 0-9-7.2"/><circle cx={7.5}  cy={11} r={1}/><circle cx={9.5}  cy={7}  r={1}/><circle cx={14.5} cy={7}  r={1}/><circle cx={17.5} cy={11} r={1}/></IconBase>; }
+function IconBan(p: IconProps)        { return <IconBase {...p}><circle cx={12} cy={12} r={9}/><path d="M5.6 5.6l12.8 12.8"/></IconBase>; }
+function IconFlag(p: IconProps)       { return <IconBase {...p}><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></IconBase>; }
+function IconComment(p: IconProps)    { return <IconBase {...p}><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></IconBase>; }
