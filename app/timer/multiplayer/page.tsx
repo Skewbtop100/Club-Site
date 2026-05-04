@@ -13,6 +13,7 @@ import {
   remove,
   onDisconnect,
   get,
+  push,
   runTransaction,
   serverTimestamp,
 } from 'firebase/database';
@@ -361,6 +362,26 @@ interface MemberData {
    * top of the next round (`nextRound` clears this flag).
    */
   queued?: boolean;
+  /** Number of extra-scramble requests this member has used in the
+   *  current round. Reset to 0 (cleared) on startRace / nextRound /
+   *  playAgain. Capped client-side by EXTRA_SCRAMBLES_PER_ROUND. */
+  extrasThisRound?: number;
+}
+
+// Audit entry for a single extra-scramble request. Persisted across
+// rounds so the host (and later, future admin tooling) can review who
+// re-rolled which solve and what they were sitting on at the time.
+interface ExtraEntry {
+  uid: string;
+  name: string;
+  round: number;
+  solveIdx: number;
+  requestedAt: number;
+  /** Time the player had on the timer when they requested the redo,
+   *  before clicking the extra-scramble button. */
+  originalTime?: number;
+  /** Penalty they would have committed had they not requested the redo. */
+  originalPenalty?: Penalty;
 }
 
 interface RoomData {
@@ -373,9 +394,23 @@ interface RoomData {
   createdAt: number;
   expiresAt?: number;
   scrambles?: Record<string, string>;                       // {"0": "...", ...}
+  /** Per-player scramble overrides for the current round. Sparse:
+   *  only populated for solve indexes where the player redirected to a
+   *  fresh scramble via Нэмэлт scramble. Lookups should fall back to
+   *  the shared `scrambles` map when no override exists. Cleared each
+   *  round at the same boundary as `scrambles`. */
+  playerScrambles?: Record<string, Record<string, string>>; // {uid: {idx: "..."}}
+  /** Audit log of all extra-scramble requests in this room's lifetime.
+   *  Append-only via Firebase push() so each entry gets a stable key
+   *  without coordination. Persists across rounds. */
+  extras?: Record<string, ExtraEntry>;
   members: Record<string, MemberData>;
   solves?: Record<string, Record<string, SolveData>>;       // {uid: {0: {...}}}
 }
+
+// Cap per-player extras at 1 per round. Hard-coded for now — the spec
+// notes future admin tooling could surface this as a room setting.
+const EXTRA_SCRAMBLES_PER_ROUND = 1;
 
 // ── Round / scoring helpers ──────────────────────────────────────────────
 function getRoundName(round: number, maxRounds: number): string {
@@ -1061,6 +1096,59 @@ function MultiplayerPageInner() {
     prevMembersRef.current = next;
   }, [now, room?.members, userId, pushNotif]);
 
+  // Settings-change toast — only fires when the host edits event/maxRounds
+  // mid-waiting-room. Skipped on first snapshot (so opening a room doesn't
+  // show a phantom "changed" notice) and skipped for the host themselves
+  // (they made the change). Settings are immutable while racing/results
+  // anyway, so the gate on status === 'waiting' just suppresses transient
+  // notifications during the start-race transition.
+  const prevSettingsRef = useRef<{ event?: string; maxRounds?: number; loaded: boolean }>({ loaded: false });
+  useEffect(() => {
+    if (!room) {
+      prevSettingsRef.current = { loaded: false };
+      return;
+    }
+    const prev = prevSettingsRef.current;
+    if (prev.loaded && room.status === 'waiting' && room.host !== userId) {
+      if (prev.event !== undefined && prev.event !== room.event) {
+        const evName = EVENTS.find(e => e.id === room.event)?.name ?? room.event;
+        pushNotif(`Тохиргоо өөрчлөгдлөө: ${evName}`, 'info');
+      } else if (prev.maxRounds !== undefined && prev.maxRounds !== room.maxRounds) {
+        pushNotif(`Тохиргоо өөрчлөгдлөө: ${room.maxRounds} round`, 'info');
+      }
+    }
+    prevSettingsRef.current = { event: room.event, maxRounds: room.maxRounds, loaded: true };
+  }, [room, userId, pushNotif]);
+
+  // Extra-scramble notification — when a new entry appears in
+  // `room.extras` for somebody other than us, surface a toast.
+  // Tracked by entry KEY so we can reliably tell "new" from "rebuild
+  // of the same map after another field changed". Skipped on the
+  // first snapshot so we don't replay history when joining a room
+  // that already had extras requested earlier.
+  const seenExtraKeysRef = useRef<{ keys: Set<string>; loaded: boolean }>({ keys: new Set(), loaded: false });
+  useEffect(() => {
+    if (!room) {
+      seenExtraKeysRef.current = { keys: new Set(), loaded: false };
+      return;
+    }
+    const cur = room.extras || {};
+    const seen = seenExtraKeysRef.current;
+    if (!seen.loaded) {
+      seenExtraKeysRef.current = { keys: new Set(Object.keys(cur)), loaded: true };
+      return;
+    }
+    for (const key of Object.keys(cur)) {
+      if (seen.keys.has(key)) continue;
+      seen.keys.add(key);
+      const e = cur[key];
+      if (!e || typeof e !== 'object') continue;
+      if (e.uid === userId) continue;            // requester — no self-toast
+      if (e.round !== room.round) continue;      // stale, not from this round
+      pushNotif(`${e.name} нэмэлт scramble хүслээ (solve ${e.solveIdx + 1})`, 'info');
+    }
+  }, [room, userId, pushNotif]);
+
   // ── Kicked detection ─────────────────────────────────────────────────────
   // If we used to be in members and the latest snapshot says we're not, we
   // were kicked (host removed us at round end after disconnect). Show a
@@ -1482,13 +1570,17 @@ function MultiplayerPageInner() {
       status: 'racing',
       roundName: getRoundName(room.round, room.maxRounds),
       scrambles: generateScrambles(room.event),
-      // Wipe any leftover round solves
+      // Wipe any leftover round solves + per-player overrides from a
+      // previous match. We deliberately keep `extras` (audit log) intact
+      // since it spans the room's lifetime, not the round's.
       solves: null,
+      playerScrambles: null,
     };
     for (const [uid] of members) {
       updates[`members/${uid}/currentSolve`] = 0;
       updates[`members/${uid}/roundAverage`] = null;
       updates[`members/${uid}/ready`] = false;
+      updates[`members/${uid}/extrasThisRound`] = 0;
     }
     await update(ref(rtdb, `rooms/${roomCode}`), updates);
   }, [roomCode, room, userId]);
@@ -1526,6 +1618,49 @@ function MultiplayerPageInner() {
     await update(ref(rtdb, `rooms/${roomCode}`), updates);
   }, [roomCode, userId, room]);
 
+  // Member: discard the pending solve at `index` and re-roll just THIS
+  // player's scramble for that index. Writes a per-player override so
+  // others continue to see the shared scramble. Bumps the per-round
+  // counter (gated by EXTRA_SCRAMBLES_PER_ROUND on the call site) and
+  // appends an audit entry to `extras`. The pending solve was never
+  // committed to RTDB, so there's nothing to clear in `solves`.
+  const requestExtraScramble = useCallback(async (
+    index: number,
+    originalTime: number,
+    originalPenalty: Penalty,
+  ) => {
+    if (!roomCode || !userId || !room) return;
+    if (room.status !== 'racing') return;
+    const me = room.members?.[userId];
+    if (!me) return;
+    const used = me.extrasThisRound ?? 0;
+    if (used >= EXTRA_SCRAMBLES_PER_ROUND) return;
+
+    const newScramble = generateScramble(room.event);
+    // Push() under extras to get a stable RTDB-generated key. Doing it
+    // before the multi-path update so the auto-key is known.
+    const extrasRef = ref(rtdb, `rooms/${roomCode}/extras`);
+    const newExtraKey = push(extrasRef).key;
+    if (!newExtraKey) return;
+
+    const entry: ExtraEntry = {
+      uid: userId,
+      name: me.name,
+      round: room.round,
+      solveIdx: index,
+      requestedAt: Date.now(),
+      originalTime,
+      originalPenalty,
+    };
+
+    const updates: Record<string, unknown> = {
+      [`playerScrambles/${userId}/${index}`]: newScramble,
+      [`members/${userId}/extrasThisRound`]: used + 1,
+      [`extras/${newExtraKey}`]: entry,
+    };
+    await update(ref(rtdb, `rooms/${roomCode}`), updates);
+  }, [roomCode, userId, room]);
+
   // Member: mark "ready for next round" on the results screen.
   const readyForNext = useCallback(async () => {
     if (!roomCode || !userId || !room) return;
@@ -1550,6 +1685,8 @@ function MultiplayerPageInner() {
       roundName: getRoundName(newRound, room.maxRounds),
       scrambles: generateScrambles(room.event),
       solves: null,
+      // Per-player overrides reset per round (audit log persists).
+      playerScrambles: null,
     };
     for (const [uid, m] of Object.entries(room.members || {})) {
       if (getConnectionStatus(m, now) === 'disconnected') {
@@ -1559,6 +1696,7 @@ function MultiplayerPageInner() {
       updates[`members/${uid}/currentSolve`] = 0;
       updates[`members/${uid}/roundAverage`] = null;
       updates[`members/${uid}/ready`] = false;
+      updates[`members/${uid}/extrasThisRound`] = 0;
       // Promote anyone who joined mid-round during the previous round —
       // they participate normally from this round forward. Setting to
       // null removes the field entirely, keeping the doc tidy.
@@ -1577,6 +1715,7 @@ function MultiplayerPageInner() {
       roundName: getRoundName(1, room.maxRounds),
       scrambles: null,
       solves: null,
+      playerScrambles: null,
     };
     for (const [uid, m] of Object.entries(room.members || {})) {
       if (getConnectionStatus(m, now) === 'disconnected') {
@@ -1587,6 +1726,7 @@ function MultiplayerPageInner() {
       updates[`members/${uid}/roundAverage`] = null;
       updates[`members/${uid}/totalPoints`] = 0;
       updates[`members/${uid}/ready`] = false;
+      updates[`members/${uid}/extrasThisRound`] = 0;
       if (m.queued) updates[`members/${uid}/queued`] = null;
     }
     await update(ref(rtdb, `rooms/${roomCode}`), updates);
@@ -1839,6 +1979,7 @@ function MultiplayerPageInner() {
             onSetMaxRounds={setMaxRounds}
             onStartRace={startRace}
             onSubmitSolve={submitSolve}
+            onRequestExtra={requestExtraScramble}
             onReadyForNext={readyForNext}
             onNextRound={nextRound}
             onPlayAgain={playAgain}
@@ -2254,6 +2395,10 @@ interface RoomViewProps {
   onSetMaxRounds: (n: number) => void;
   onStartRace: () => void;
   onSubmitSolve: (index: number, time: number, penalty: Penalty, scramble: string) => void;
+  /** Player asked to redo `index` with a fresh scramble. Counter +1,
+   *  audit entry appended, per-player override written. The pending
+   *  local solve is discarded by the caller (RacingScreen) on success. */
+  onRequestExtra: (index: number, originalTime: number, originalPenalty: Penalty) => Promise<void> | void;
   onReadyForNext: () => void;
   onNextRound: () => void;
   onPlayAgain: () => void;
@@ -2384,38 +2529,13 @@ function WaitingRoom({
         </div>
       </Card>
 
-      {isHost && (
-        <Card>
-          <SectionLabel>Race settings</SectionLabel>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.7rem', marginTop: '0.5rem' }}>
-            <Field label="Event">
-              <select
-                value={room.event}
-                onChange={e => onSetEvent(e.target.value)}
-                style={inputStyle}
-              >
-                {EVENTS.map(ev => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
-              </select>
-            </Field>
-            <Field label="Rounds (1–4)">
-              <select
-                value={room.maxRounds}
-                onChange={e => onSetMaxRounds(parseInt(e.target.value, 10))}
-                style={inputStyle}
-              >
-                {[1, 2, 3, 4].map(n => (
-                  <option key={n} value={n}>
-                    {n} — {Array.from({ length: n }, (_, i) => getRoundName(i + 1, n)).join(' → ')}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          </div>
-          <div style={{ marginTop: '0.6rem', fontSize: '0.72rem', color: C.muted, lineHeight: 1.45 }}>
-            Each round is 5 solves, ranked by Average of 5 (drop best + worst, WCA style).
-          </div>
-        </Card>
-      )}
+      <SettingsPanel
+        isHost={isHost}
+        event={room.event}
+        maxRounds={room.maxRounds}
+        onSetEvent={onSetEvent}
+        onSetMaxRounds={onSetMaxRounds}
+      />
 
       <div className="mp-action-grid" style={{
         display: 'grid',
@@ -2447,7 +2567,7 @@ function WaitingRoom({
 
 // ── Racing screen ─────────────────────────────────────────────────────────
 function RacingScreen({
-  isMobile, room, userId, prefs, now, onSubmitSolve, onOpenSettings, onPause,
+  isMobile, room, userId, prefs, now, onSubmitSolve, onRequestExtra, onOpenSettings, onPause,
   btState, btLiveState, btDeviceLabel, onBtConnect, onBtDisconnect, btSolveCallbacksRef,
 }: RoomViewProps & { isHost: boolean }) {
   // Behaviour driven by user prefs (Settings modal). The shared timer
@@ -2490,10 +2610,28 @@ function RacingScreen({
   const isWaitingForOpponents = otherCurrents.length > 0 && (myCurrent - minOthers) >= 2 && myCurrent < SOLVES_PER_ROUND;
 
   const isRoundDone = myCurrent >= SOLVES_PER_ROUND;
-  const currentScramble = !isRoundDone ? (room.scrambles?.[String(myCurrent)] ?? '') : '';
+  // Per-player override (Нэмэлт scramble) wins over the shared scramble.
+  // Only this player sees it; opponents continue to see the shared text
+  // — fairness is enforced by the audit log + the per-round counter.
+  const currentScramble = !isRoundDone
+    ? (room.playerScrambles?.[userId]?.[String(myCurrent)]
+       ?? room.scrambles?.[String(myCurrent)]
+       ?? '')
+    : '';
+
+  // How many extras the player has used this round, for gating the UI
+  // button. Hard-capped client-side and re-enforced in the action.
+  const extrasUsed = room.members?.[userId]?.extrasThisRound ?? 0;
+  const extrasRemaining = Math.max(0, EXTRA_SCRAMBLES_PER_ROUND - extrasUsed);
 
   // Pending = awaiting OK / +2 / DNF confirmation.
   const [pending, setPending] = useState<{ ms: number; defaultDnf: boolean } | null>(null);
+
+  // Extra-scramble confirmation modal. We hold the would-be commit args
+  // here so the modal can show what's being discarded; on confirm we
+  // forward to the page-level onRequestExtra and reset the local pending
+  // / scramble-shown state to mimic a fresh attempt.
+  const [extraConfirmOpen, setExtraConfirmOpen] = useState(false);
 
   // Scramble reveal — hidden until the user taps "Tap to reveal scramble".
   // Re-hides on every solve boundary so each solve starts fresh.
@@ -2557,6 +2695,24 @@ function RacingScreen({
     setPending(null);
     // The myCurrent-change effect resets timer to idle.
   }, [pending, myCurrent, currentScramble, onSubmitSolve]);
+
+  // Confirm-step for "🔄 Нэмэлт scramble". The pending solve is local
+  // (never written to RTDB), so we don't need to clear anything in
+  // `solves` — just discard `pending`, reset the timer, and re-hide the
+  // scramble so the user has to tap to reveal the fresh one.
+  const confirmExtraScramble = useCallback(async () => {
+    if (!pending) return;
+    const defaultPenalty: Penalty = pending.defaultDnf ? 'dnf' : 'ok';
+    setExtraConfirmOpen(false);
+    try {
+      await onRequestExtra(myCurrent, pending.ms, defaultPenalty);
+    } catch (err) {
+      console.error('[mp] requestExtraScramble failed', err);
+    }
+    setPending(null);
+    setScrambleShown(false);
+    timer.reset();
+  }, [pending, myCurrent, onRequestExtra, timer]);
 
   const onTimerTouchStart = useCallback(() => {
     // BT timer owns the start/stop transitions when connected — we
@@ -2661,35 +2817,46 @@ function RacingScreen({
   // ── Mobile / tablet layout: header + tabs + S1..S5 strip + bottom nav ─
   if (isMobile) {
     return (
-      <MobileRacingLayout
-        room={room}
-        userId={userId}
-        prefs={prefs}
-        now={now}
-        myCurrent={myCurrent}
-        mySolves={mySolves}
-        isRoundDone={isRoundDone}
-        isWaitingForOpponents={isWaitingForOpponents}
-        currentScramble={currentScramble}
-        scrambleShown={scrambleShown}
-        onRevealScramble={() => setScrambleShown(true)}
-        timer={timer}
-        pending={pending}
-        displayValue={displayValue}
-        timerColor={timerColor}
-        timerGlow={timerGlow}
-        borderColor={borderColor}
-        interactionLocked={interactionLocked}
-        confirmSolve={confirmSolve}
-        onTimerTouchStart={onTimerTouchStart}
-        onTimerTouchEnd={onTimerTouchEnd}
-        onOpenSettings={onOpenSettings}
-        onPause={onPause}
-        btState={btState}
-        btDeviceLabel={btDeviceLabel}
-        onBtConnect={onBtConnect}
-        onBtDisconnect={onBtDisconnect}
-      />
+      <>
+        <MobileRacingLayout
+          room={room}
+          userId={userId}
+          prefs={prefs}
+          now={now}
+          myCurrent={myCurrent}
+          mySolves={mySolves}
+          isRoundDone={isRoundDone}
+          isWaitingForOpponents={isWaitingForOpponents}
+          currentScramble={currentScramble}
+          scrambleShown={scrambleShown}
+          onRevealScramble={() => setScrambleShown(true)}
+          timer={timer}
+          pending={pending}
+          displayValue={displayValue}
+          timerColor={timerColor}
+          timerGlow={timerGlow}
+          borderColor={borderColor}
+          interactionLocked={interactionLocked}
+          confirmSolve={confirmSolve}
+          onTimerTouchStart={onTimerTouchStart}
+          onTimerTouchEnd={onTimerTouchEnd}
+          onOpenSettings={onOpenSettings}
+          onPause={onPause}
+          extrasRemaining={extrasRemaining}
+          onOpenExtraConfirm={() => setExtraConfirmOpen(true)}
+          btState={btState}
+          btDeviceLabel={btDeviceLabel}
+          onBtConnect={onBtConnect}
+          onBtDisconnect={onBtDisconnect}
+        />
+        {extraConfirmOpen && (
+          <ExtraScrambleConfirmModal
+            isMobile
+            onCancel={() => setExtraConfirmOpen(false)}
+            onConfirm={confirmExtraScramble}
+          />
+        )}
+      </>
     );
   }
 
@@ -2821,13 +2988,21 @@ function RacingScreen({
               onTouchEnd={(e) => e.stopPropagation()}
               style={{
                 marginTop: '1.2rem',
-                display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem',
+                display: 'flex', flexDirection: 'column', gap: '0.55rem',
                 width: '100%', maxWidth: 360,
               }}
             >
-              <ConfirmButton color={C.success} onClick={(e) => { e.stopPropagation(); confirmSolve('ok'); }}>OK</ConfirmButton>
-              <ConfirmButton color={C.warn}    onClick={(e) => { e.stopPropagation(); confirmSolve('+2'); }}>+2</ConfirmButton>
-              <ConfirmButton color={C.danger}  onClick={(e) => { e.stopPropagation(); confirmSolve('dnf'); }}>DNF</ConfirmButton>
+              <div style={{
+                display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem',
+              }}>
+                <ConfirmButton color={C.success} onClick={(e) => { e.stopPropagation(); confirmSolve('ok'); }}>OK</ConfirmButton>
+                <ConfirmButton color={C.warn}    onClick={(e) => { e.stopPropagation(); confirmSolve('+2'); }}>+2</ConfirmButton>
+                <ConfirmButton color={C.danger}  onClick={(e) => { e.stopPropagation(); confirmSolve('dnf'); }}>DNF</ConfirmButton>
+              </div>
+              <ExtraScrambleButton
+                onClick={() => setExtraConfirmOpen(true)}
+                remaining={extrasRemaining}
+              />
             </div>
           )}
         </div>
@@ -2844,6 +3019,14 @@ function RacingScreen({
         scramble={currentScramble}
         scrambleShown={scrambleShown}
       />
+
+      {extraConfirmOpen && (
+        <ExtraScrambleConfirmModal
+          isMobile={false}
+          onCancel={() => setExtraConfirmOpen(false)}
+          onConfirm={confirmExtraScramble}
+        />
+      )}
     </div>
   );
 }
@@ -2855,6 +3038,7 @@ function MobileRacingLayout({
   timer, pending, displayValue, timerColor, timerGlow, borderColor,
   interactionLocked, confirmSolve, onTimerTouchStart, onTimerTouchEnd,
   onOpenSettings, onPause,
+  extrasRemaining, onOpenExtraConfirm,
   btState, btDeviceLabel, onBtConnect, onBtDisconnect,
 }: {
   room: RoomData;
@@ -2880,6 +3064,8 @@ function MobileRacingLayout({
   onTimerTouchEnd: () => void;
   onOpenSettings: () => void;
   onPause: () => void;
+  extrasRemaining: number;
+  onOpenExtraConfirm: () => void;
   btState: 'unsupported' | 'idle' | 'connecting' | 'connected' | 'error';
   btDeviceLabel: string | null;
   onBtConnect: () => void;
@@ -3024,14 +3210,20 @@ function MobileRacingLayout({
                   onTouchEnd={(e) => e.stopPropagation()}
                   style={{
                     marginTop: '1rem',
-                    display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem',
+                    display: 'flex', flexDirection: 'column', gap: '0.55rem',
                     width: '100%', maxWidth: 360,
                     position: 'relative', zIndex: 2,
                   }}
                 >
-                  <ConfirmButton color={C.success} onClick={(e) => { e.stopPropagation(); console.log('[mp] OK clicked'); confirmSolve('ok'); }}>OK</ConfirmButton>
-                  <ConfirmButton color={C.warn}    onClick={(e) => { e.stopPropagation(); console.log('[mp] +2 clicked'); confirmSolve('+2'); }}>+2</ConfirmButton>
-                  <ConfirmButton color={C.danger}  onClick={(e) => { e.stopPropagation(); console.log('[mp] DNF clicked'); confirmSolve('dnf'); }}>DNF</ConfirmButton>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+                    <ConfirmButton color={C.success} onClick={(e) => { e.stopPropagation(); console.log('[mp] OK clicked'); confirmSolve('ok'); }}>OK</ConfirmButton>
+                    <ConfirmButton color={C.warn}    onClick={(e) => { e.stopPropagation(); console.log('[mp] +2 clicked'); confirmSolve('+2'); }}>+2</ConfirmButton>
+                    <ConfirmButton color={C.danger}  onClick={(e) => { e.stopPropagation(); console.log('[mp] DNF clicked'); confirmSolve('dnf'); }}>DNF</ConfirmButton>
+                  </div>
+                  <ExtraScrambleButton
+                    onClick={onOpenExtraConfirm}
+                    remaining={extrasRemaining}
+                  />
                 </div>
               )}
             </div>
@@ -3485,6 +3677,120 @@ function ConfirmButton({
         letterSpacing: '0.02em',
       }}
     >{children}</button>
+  );
+}
+
+// "🔄 Нэмэлт scramble" — placed BELOW the OK/+2/DNF row so the player
+// reads it as a separate-intent action. Disabled (greyed out, distinct
+// label) once the per-round budget is spent.
+function ExtraScrambleButton({
+  onClick, remaining,
+}: { onClick: () => void; remaining: number }) {
+  const enabled = remaining > 0;
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); if (enabled) onClick(); }}
+      disabled={!enabled}
+      style={{
+        background: enabled ? C.dangerDim : 'transparent',
+        color: enabled ? C.danger : C.mutedDim,
+        border: `1px solid ${enabled ? C.danger : C.border}`,
+        borderRadius: 12, padding: '0.55rem 0.85rem',
+        fontSize: '0.85rem', fontWeight: 700, fontFamily: 'inherit',
+        cursor: enabled ? 'pointer' : 'not-allowed',
+        letterSpacing: '0.02em',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        gap: '0.4rem',
+      }}
+    >
+      <span aria-hidden="true">🔄</span>
+      <span>{enabled ? 'Нэмэлт scramble' : 'Энэ round-д хэрэглэсэн'}</span>
+    </button>
+  );
+}
+
+// Confirmation step before re-rolling. The body explains both the
+// consequence (this attempt is discarded) and the visibility (other
+// players are notified) so there's no surprise. Cancel / Confirm only.
+function ExtraScrambleConfirmModal({
+  isMobile, onCancel, onConfirm,
+}: {
+  isMobile: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+  return (
+    <div
+      onClick={onCancel}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1700,
+        background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '1rem',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: isMobile ? '100%' : 440,
+          background: C.card, border: `1px solid ${C.border}`,
+          borderRadius: 16,
+          boxShadow: '0 24px 60px rgba(0,0,0,0.7)',
+          display: 'flex', flexDirection: 'column',
+          maxHeight: 'calc(100dvh - 2rem)', overflow: 'hidden',
+        }}
+      >
+        <header style={{
+          padding: '0.95rem 1rem',
+          borderBottom: `1px solid ${C.border}`,
+          fontSize: '0.95rem', fontWeight: 800, color: C.text,
+          display: 'flex', alignItems: 'center', gap: '0.45rem',
+        }}>
+          <span aria-hidden="true">🔄</span>
+          <span>Нэмэлт scramble хүсэх</span>
+        </header>
+        <div style={{
+          padding: '1rem',
+          fontSize: '0.86rem', color: C.text, lineHeight: 1.5,
+        }}>
+          Энэ solve-ыг хүчингүй болгож, шинэ scramble-аар дахин хийх үү?
+          Шударга байдлын үүднээс энэ үйлдэл бусад тоглогчдод мэдэгдэнэ.
+        </div>
+        <div style={{
+          padding: '0 1rem 1rem',
+          display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem',
+        }}>
+          <button
+            type="button"
+            onClick={onCancel}
+            style={{
+              background: C.cardAlt, color: C.text,
+              border: `1px solid ${C.border}`, borderRadius: 12,
+              padding: '0.8rem 1rem', fontSize: '0.92rem', fontWeight: 800,
+              fontFamily: 'inherit', cursor: 'pointer',
+              letterSpacing: '0.02em',
+            }}
+          >Болих</button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            style={{
+              background: C.danger, color: '#0a0a0a',
+              border: `1px solid ${C.danger}`, borderRadius: 12,
+              padding: '0.8rem 1rem', fontSize: '0.92rem', fontWeight: 800,
+              fontFamily: 'inherit', cursor: 'pointer',
+              letterSpacing: '0.02em',
+            }}
+          >Хүсэх</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -4790,6 +5096,112 @@ function BigButton({
       onMouseUp={e => (e.currentTarget.style.transform = 'scale(1)')}
       onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
     >{children}</button>
+  );
+}
+
+// Collapsible "Тохиргоо" panel shown in the waiting room. Hosts see edit
+// controls (event + rounds); other players see the same values read-only
+// so everyone can confirm what they're about to race. Default-collapsed
+// so it doesn't dominate the layout — most rooms keep defaults.
+function SettingsPanel({
+  isHost, event, maxRounds, onSetEvent, onSetMaxRounds,
+}: {
+  isHost: boolean;
+  event: string;
+  maxRounds: number;
+  onSetEvent: (id: string) => void;
+  onSetMaxRounds: (n: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const eventName = EVENTS.find(e => e.id === event)?.name ?? event;
+  return (
+    <Card>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        style={{
+          width: '100%', background: 'transparent', border: 'none',
+          padding: 0, cursor: 'pointer', fontFamily: 'inherit',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: '0.6rem',
+        }}
+      >
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+          <SectionLabel>Тохиргоо</SectionLabel>
+          <span aria-hidden="true" style={{ fontSize: '0.85rem' }}>⚙</span>
+        </span>
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
+          fontSize: '0.78rem', color: C.muted, fontWeight: 600,
+        }}>
+          <span>{eventName} · {maxRounds} round{maxRounds === 1 ? '' : 's'}</span>
+          <span aria-hidden="true" style={{
+            display: 'inline-block',
+            transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+            transition: 'transform 0.15s',
+            color: C.mutedDim,
+          }}>▾</span>
+        </span>
+      </button>
+
+      {open && (
+        <div style={{ marginTop: '0.7rem' }}>
+          {isHost ? (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.7rem' }}>
+                <Field label="Event">
+                  <select
+                    value={event}
+                    onChange={e => onSetEvent(e.target.value)}
+                    style={inputStyle}
+                  >
+                    {EVENTS.map(ev => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
+                  </select>
+                </Field>
+                <Field label="Rounds (1–4)">
+                  <select
+                    value={maxRounds}
+                    onChange={e => onSetMaxRounds(parseInt(e.target.value, 10))}
+                    style={inputStyle}
+                  >
+                    {[1, 2, 3, 4].map(n => (
+                      <option key={n} value={n}>
+                        {n} — {Array.from({ length: n }, (_, i) => getRoundName(i + 1, n)).join(' → ')}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+              <div style={{ marginTop: '0.6rem', fontSize: '0.72rem', color: C.muted, lineHeight: 1.45 }}>
+                Each round is 5 solves, ranked by Average of 5 (drop best + worst, WCA style). Changes save instantly and broadcast to all players.
+              </div>
+            </>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.7rem' }}>
+              <ReadOnlyField label="Event" value={eventName} />
+              <ReadOnlyField label="Rounds" value={String(maxRounds)} />
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function ReadOnlyField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div style={{
+        fontSize: '0.66rem', letterSpacing: '0.1em', textTransform: 'uppercase',
+        color: C.muted, fontWeight: 700, marginBottom: '0.3rem',
+      }}>{label}</div>
+      <div style={{
+        background: C.cardAlt, border: `1px solid ${C.border}`, borderRadius: 8,
+        padding: '0.55rem 0.7rem', fontSize: '0.85rem', color: C.text,
+        fontWeight: 600,
+      }}>{value}</div>
+    </div>
   );
 }
 
