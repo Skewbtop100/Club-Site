@@ -214,6 +214,10 @@ export default function TimerPage() {
   // for that solve id. The action-row's 💬 button and the keyboard 'C'
   // shortcut both target the most-recent solve through this state.
   const [commentSolveId, setCommentSolveId] = useState<string | null>(null);
+  // Delete-confirm dialog — Material-style compact confirmation that
+  // appears when the user clicks ✕ or presses X. The actual deletion
+  // only fires after they tap "УСТГАХ".
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   // Timer preferences
   const [inspectionEnabled, setInspectionEnabled] = useState(true);
   const [precision, setPrecision] = useState<Precision>('cs');
@@ -640,9 +644,22 @@ export default function TimerPage() {
 
   // Inline action-row helpers — operate on the most-recent solve, which
   // is what the buttons under the timer display target. The DNF / +2
-  // toggles flip the penalty back to 'none' when the same penalty is
-  // already active (so a second tap undoes), per spec.
+  // buttons SET the penalty (the action row only renders when penalty
+  // is 'none', so there's no toggle path through the buttons). Reverting
+  // happens via the dedicated undo arrow (`undoPenaltyOnLast`). The
+  // keyboard-shortcut path uses togglePenaltyOnLast so D/2 keep their
+  // press-twice-to-cancel behavior.
   const lastSolve: Solve | undefined = solves[solves.length - 1];
+  const setPenaltyOnLast = useCallback((p: '+2' | 'dnf') => {
+    if (!lastSolve) return;
+    setSolvePenalty(lastSolve.id, p);
+    if (p === 'dnf') showToast({ msg: 'DNF тохирууллаа', tone: 'success' });
+    else showToast({ msg: '+2 нэмлээ', tone: 'success' });
+  }, [lastSolve, setSolvePenalty]);
+  const undoPenaltyOnLast = useCallback(() => {
+    if (!lastSolve) return;
+    setSolvePenalty(lastSolve.id, 'none');
+  }, [lastSolve, setSolvePenalty]);
   const togglePenaltyOnLast = useCallback((p: '+2' | 'dnf') => {
     if (!lastSolve) return;
     const next: Penalty = lastSolve.penalty === p ? 'none' : p;
@@ -650,12 +667,21 @@ export default function TimerPage() {
     if (next === 'dnf') showToast({ msg: 'DNF тохирууллаа', tone: 'success' });
     else if (next === '+2') showToast({ msg: '+2 нэмлээ', tone: 'success' });
   }, [lastSolve, setSolvePenalty]);
-  const deleteLastSolve = useCallback(() => {
+  const confirmDeleteLastSolve = useCallback(() => {
     if (!lastSolve) return;
     deleteSolve(lastSolve.id);
     timer.reset();
+    setDeleteConfirmOpen(false);
     showToast({ msg: 'Solve устгагдлаа', tone: 'info' });
   }, [lastSolve, deleteSolve, timer]);
+  // Public delete trigger used by the X keyboard shortcut — opens the
+  // confirmation dialog rather than deleting straight away. Kept under
+  // the same name as before so the keydown handler doesn't have to
+  // change shape.
+  const deleteLastSolve = useCallback(() => {
+    if (!lastSolve) return;
+    setDeleteConfirmOpen(true);
+  }, [lastSolve]);
 
   // ── Keyboard handlers ────────────────────────────────────────────────────
   // SPACE: state machine driver
@@ -957,7 +983,10 @@ export default function TimerPage() {
     return finalMs(last) < prevBest;
   }, [solves]);
 
-  // Display string for the big timer
+  // Display string for the big timer. After a solve finishes the
+  // display reflects the most-recent solve's penalty state so DNF and
+  // +2 toggles produce immediate, full-screen feedback (no need to
+  // navigate to the Solves tab to verify the change took).
   const timerDisplay = (() => {
     if (timer.state === 'inspecting') {
       const sec = Math.max(-2, timer.inspectionMs / 1000);
@@ -965,6 +994,10 @@ export default function TimerPage() {
       return sec <= -2 ? 'DNF' : '+2';
     }
     if (timer.state === 'armed') return precision === 'ms' ? '0.000' : '0.00';
+    if (timer.state === 'stopped' && lastSolve) {
+      if (lastSolve.penalty === 'dnf') return 'DNF';
+      if (lastSolve.penalty === '+2') return `${fmtMs(lastSolve.ms + 2000, false, precision)} +`;
+    }
     // When the GAN timer is the source of truth, show its independent
     // counter so the display keeps ticking even if the rAF loop didn't.
     if (ganConnected) return fmtMs(ganDisplayMs, false, precision);
@@ -997,6 +1030,9 @@ export default function TimerPage() {
       if (gan.liveState === 'getSet')  return C.success;
     }
     if (timer.state === 'stopped') {
+      // Highlight DNF in red so the post-solve display reads as a
+      // failed solve, not a regular result that happens to say "DNF".
+      if (lastSolve?.penalty === 'dnf') return C.danger;
       if (timer.stopFlashing) return C.success;
       if (lastSolveIsPB) return C.success;
     }
@@ -1458,14 +1494,17 @@ export default function TimerPage() {
             }}>
               {timerDisplay}
             </div>
-            {timer.state === 'stopped' && lastSolve && (
+            {timer.state === 'stopped' && lastSolve && lastSolve.penalty === 'none' && (
               <SolveActionRow
                 solve={lastSolve}
                 isMobile={isMobile}
-                onDelete={deleteLastSolve}
-                onTogglePenalty={togglePenaltyOnLast}
+                onDelete={() => setDeleteConfirmOpen(true)}
+                onSetPenalty={setPenaltyOnLast}
                 onOpenComment={() => setCommentSolveId(lastSolve.id)}
               />
+            )}
+            {timer.state === 'stopped' && lastSolve && lastSolve.penalty !== 'none' && (
+              <UndoActionRow isMobile={isMobile} onUndo={undoPenaltyOnLast} />
             )}
             <div style={{ fontSize: '0.78rem', color: C.muted, marginTop: '1.5rem', letterSpacing: '0.06em', minHeight: '1.2rem' }}>
               {ganConnected && timer.state !== 'running' && timer.state !== 'inspecting' && timer.state !== 'armed' && 'Use the GAN timer pads'}
@@ -1872,14 +1911,17 @@ export default function TimerPage() {
                   }}>
                     {timerDisplay}
                   </div>
-                  {timer.state === 'stopped' && lastSolve && (
+                  {timer.state === 'stopped' && lastSolve && lastSolve.penalty === 'none' && (
                     <SolveActionRow
                       solve={lastSolve}
                       isMobile={isMobile}
-                      onDelete={deleteLastSolve}
-                      onTogglePenalty={togglePenaltyOnLast}
+                      onDelete={() => setDeleteConfirmOpen(true)}
+                      onSetPenalty={setPenaltyOnLast}
                       onOpenComment={() => setCommentSolveId(lastSolve.id)}
                     />
+                  )}
+                  {timer.state === 'stopped' && lastSolve && lastSolve.penalty !== 'none' && (
+                    <UndoActionRow isMobile={isMobile} onUndo={undoPenaltyOnLast} />
                   )}
                   <div style={{ fontSize: '0.7rem', color: C.muted, marginTop: '0.7rem', letterSpacing: '0.06em', minHeight: '1rem' }}>
                     {ganConnected && timer.state !== 'running' && timer.state !== 'inspecting' && timer.state !== 'armed' && 'Use the GAN timer pads'}
@@ -2682,6 +2724,16 @@ export default function TimerPage() {
         );
       })()}
 
+      {/* Delete confirmation — Material-style compact dialog. The X
+          button under the timer (and the X keyboard shortcut) routes
+          through this so accidental taps don't lose data. */}
+      {deleteConfirmOpen && lastSolve && (
+        <DeleteConfirmDialog
+          onCancel={() => setDeleteConfirmOpen(false)}
+          onConfirm={confirmDeleteLastSolve}
+        />
+      )}
+
       <style>{`
         .pv-grid > main > section { box-sizing: border-box; }
         @media (max-width: 1100px) {
@@ -2698,6 +2750,14 @@ export default function TimerPage() {
         @keyframes pv-actionrow-fade {
           0%   { opacity: 0; transform: translateY(4px); }
           100% { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes pv-dialog-fade {
+          0%   { opacity: 0; }
+          100% { opacity: 1; }
+        }
+        @keyframes pv-dialog-pop {
+          0%   { opacity: 0; transform: scale(0.94); }
+          100% { opacity: 1; transform: scale(1); }
         }
       `}</style>
     </div>
@@ -4234,20 +4294,19 @@ function PenaltyRow({ penalty, onSet }: { penalty: Penalty; onSet: (p: Penalty) 
 }
 
 // Quick-action icon row that appears under the big timer display the
-// moment a solve completes (timer.state === 'stopped'). Targets the
-// most-recent solve via the parent's helper callbacks. DNF / +2 are
-// toggles — clicking the active penalty clears it back to 'none'.
+// moment a solve completes — but only while the most-recent solve is
+// still 'none'. Once DNF or +2 is applied, the parent swaps this row
+// for `UndoActionRow` so the user has a single, prominent way to back
+// out. Delete opens a confirm dialog (parent handles).
 function SolveActionRow({
-  solve, isMobile, onDelete, onTogglePenalty, onOpenComment,
+  solve, isMobile, onDelete, onSetPenalty, onOpenComment,
 }: {
   solve: Solve;
   isMobile: boolean;
   onDelete: () => void;
-  onTogglePenalty: (p: '+2' | 'dnf') => void;
+  onSetPenalty: (p: '+2' | 'dnf') => void;
   onOpenComment: () => void;
 }) {
-  const dnfActive = solve.penalty === 'dnf';
-  const plus2Active = solve.penalty === '+2';
   const hasComment = !!(solve.comment && solve.comment.trim());
   const size = isMobile ? 40 : 32;
   // The action row sits INSIDE the timer's tap-to-arm <section>, which
@@ -4280,20 +4339,18 @@ function SolveActionRow({
       <ActionIconBtn
         size={size}
         title="DNF (D)"
-        ariaLabel="Toggle DNF"
-        active={dnfActive}
+        ariaLabel="Mark DNF"
         activeColor={C.danger}
         icon={<IconBan size={isMobile ? 18 : 15} />}
-        onClick={() => onTogglePenalty('dnf')}
+        onClick={() => onSetPenalty('dnf')}
       />
       <ActionIconBtn
         size={size}
         title="+2 (2)"
-        ariaLabel="Toggle +2"
-        active={plus2Active}
+        ariaLabel="Apply +2 penalty"
         activeColor={C.warn}
         icon={<IconFlag size={isMobile ? 18 : 15} />}
-        onClick={() => onTogglePenalty('+2')}
+        onClick={() => onSetPenalty('+2')}
       />
       <ActionIconBtn
         size={size}
@@ -4384,9 +4441,151 @@ function ActionIconBtn({
   );
 }
 
-// Compact in-place comment editor. Pre-filled with the existing comment
-// (so opening it on a solve that already has a note feels like editing,
-// not appending). Empty save = remove the comment.
+// Single-undo row that replaces the action buttons whenever the
+// most-recent solve has a non-'none' penalty. Visually quieter than the
+// full action row so the big "DNF" / "+2" timer text stays the focal
+// point; the user just needs an obvious way back to neutral.
+function UndoActionRow({ isMobile, onUndo }: { isMobile: boolean; onUndo: () => void }) {
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  const size = isMobile ? 40 : 32;
+  return (
+    <div
+      onTouchStart={stop}
+      onTouchEnd={stop}
+      onPointerDown={stop}
+      onClick={stop}
+      style={{
+        display: 'flex', justifyContent: 'center',
+        marginTop: '1.1rem',
+        animation: 'pv-actionrow-fade 0.32s cubic-bezier(0.2, 0.8, 0.3, 1) both',
+        pointerEvents: 'auto',
+      }}
+    >
+      <ActionIconBtn
+        size={size}
+        title="Буцаах"
+        ariaLabel="Undo"
+        icon={<IconUndoArrow size={isMobile ? 18 : 15} />}
+        onClick={onUndo}
+      />
+    </div>
+  );
+}
+
+// Material-style modal shell: centered light card on a darker dimmed
+// backdrop, tap-outside-to-cancel, no header bar — the title sits
+// inside the card body alongside the buttons. Used for the delete
+// confirmation and the comment editor so both feel like the screenshot
+// reference rather than the rest of the dark-themed app chrome.
+function MaterialDialog({
+  width = 320, onCancel, children,
+}: {
+  width?: number;
+  onCancel: () => void;
+  children: React.ReactNode;
+}) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') { e.stopPropagation(); onCancel(); }
+    }
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onCancel]);
+  return (
+    <div
+      onClick={onCancel}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 9500,
+        background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(3px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '1rem',
+        animation: 'pv-dialog-fade 0.18s ease-out both',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        style={{
+          width: '100%', maxWidth: width,
+          background: '#ffffff',
+          color: '#222',
+          borderRadius: 8,
+          boxShadow: '0 24px 48px rgba(0,0,0,0.55), 0 8px 16px rgba(0,0,0,0.35)',
+          padding: '1.4rem 1.5rem 0.6rem',
+          fontFamily: 'inherit',
+          animation: 'pv-dialog-pop 0.18s cubic-bezier(0.2, 0.8, 0.3, 1) both',
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function MaterialTextBtn({
+  label, tone = 'neutral', autoFocus, onClick,
+}: {
+  label: string;
+  /** neutral = grey, primary = lavender accent, danger = red. */
+  tone?: 'neutral' | 'primary' | 'danger';
+  autoFocus?: boolean;
+  onClick: () => void;
+}) {
+  const color =
+    tone === 'danger'  ? '#d32f2f' :
+    tone === 'primary' ? '#5a4cd8' :
+    '#666';
+  return (
+    <button
+      type="button"
+      autoFocus={autoFocus}
+      onClick={onClick}
+      style={{
+        background: 'transparent', border: 'none', cursor: 'pointer',
+        color, fontFamily: 'inherit', fontWeight: 700,
+        letterSpacing: '0.06em', fontSize: '0.82rem',
+        padding: '0.55rem 0.7rem', borderRadius: 4,
+        textTransform: 'uppercase',
+        transition: 'background 0.12s',
+        WebkitTapHighlightColor: 'transparent',
+      }}
+      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,0,0,0.04)')}
+      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+    >{label}</button>
+  );
+}
+
+// Delete confirmation — Material-style "Solve устгах уу?" with a red
+// destructive primary button. The button bar sits inside the same card
+// (no separate footer) so the dialog stays compact.
+function DeleteConfirmDialog({
+  onCancel, onConfirm,
+}: {
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <MaterialDialog onCancel={onCancel} width={300}>
+      <div style={{
+        fontSize: '1rem', fontWeight: 600, color: '#222',
+        marginBottom: '1rem', lineHeight: 1.4,
+      }}>
+        Solve устгах уу?
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.25rem', marginRight: '-0.7rem' }}>
+        <MaterialTextBtn label="Болих" onClick={onCancel} />
+        <MaterialTextBtn label="Устгах" tone="danger" onClick={onConfirm} autoFocus />
+      </div>
+    </MaterialDialog>
+  );
+}
+
+// Comment editor — Material-style dialog with the canonical underline
+// text input (filled while focused, faint when blurred). Pre-filled
+// with the existing comment so opening it on a solve that already has
+// a note feels like editing, not appending. Empty save removes the
+// comment via the parent's setSolveComment helper.
 function CommentModal({
   initialComment, onCancel, onSave,
 }: {
@@ -4395,58 +4594,52 @@ function CommentModal({
   onSave: (text: string) => void;
 }) {
   const [text, setText] = useState<string>(initialComment);
-  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const [focused, setFocused] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
     inputRef.current?.focus();
     inputRef.current?.select();
   }, []);
+  const isEditing = !!initialComment.trim();
   return (
-    <ModalShell title="Тайлбар оруулах" onClose={onCancel}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-        <textarea
-          ref={inputRef}
-          value={text}
-          onChange={e => setText(e.target.value.slice(0, 280))}
-          placeholder="Тайлбар..."
-          rows={3}
-          onKeyDown={e => {
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              onSave(text);
-            }
-          }}
-          style={{
-            width: '100%', boxSizing: 'border-box',
-            background: C.cardAlt, color: C.text,
-            border: `1px solid ${C.border}`, borderRadius: 8,
-            padding: '0.65rem 0.8rem',
-            fontSize: '0.92rem', fontFamily: 'inherit',
-            outline: 'none', resize: 'vertical',
-            lineHeight: 1.5,
-          }}
-        />
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-          <button
-            onClick={onCancel}
-            style={{
-              padding: '0.5rem 0.9rem', borderRadius: 8,
-              fontSize: '0.82rem', fontWeight: 600, fontFamily: 'inherit',
-              background: 'transparent', color: C.muted,
-              border: `1px solid ${C.border}`, cursor: 'pointer',
-            }}
-          >Болих</button>
-          <button
-            onClick={() => onSave(text)}
-            style={{
-              padding: '0.5rem 0.9rem', borderRadius: 8,
-              fontSize: '0.82rem', fontWeight: 700, fontFamily: 'inherit',
-              background: C.accent, color: '#0a0a0a',
-              border: `1px solid ${C.accent}`, cursor: 'pointer',
-            }}
-          >Хадгалах</button>
-        </div>
+    <MaterialDialog onCancel={onCancel} width={320}>
+      <div style={{
+        fontSize: '1rem', fontWeight: 600, color: '#222',
+        marginBottom: '0.85rem', lineHeight: 1.4,
+      }}>
+        {isEditing ? 'Тайлбар засах' : 'Тайлбар нэмэх'}
       </div>
-    </ModalShell>
+      <input
+        ref={inputRef}
+        type="text"
+        value={text}
+        onChange={e => setText(e.target.value.slice(0, 280))}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        placeholder="Тайлбар"
+        onKeyDown={e => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            onSave(text);
+          }
+        }}
+        style={{
+          width: '100%', boxSizing: 'border-box',
+          background: 'transparent', color: '#222',
+          border: 'none',
+          borderBottom: `${focused ? '2px' : '1px'} solid ${focused ? '#5a4cd8' : 'rgba(0,0,0,0.42)'}`,
+          padding: '0.4rem 0',
+          fontSize: '1rem', fontFamily: 'inherit',
+          outline: 'none',
+          marginBottom: '0.6rem',
+          transition: 'border-color 0.15s',
+        }}
+      />
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.25rem', marginRight: '-0.7rem' }}>
+        <MaterialTextBtn label="Болих" onClick={onCancel} />
+        <MaterialTextBtn label="Хадгалах" tone="primary" onClick={() => onSave(text)} autoFocus />
+      </div>
+    </MaterialDialog>
   );
 }
 
@@ -4588,3 +4781,4 @@ function IconPalette(p: IconProps)    { return <IconBase {...p}><path d="M12 3a9
 function IconBan(p: IconProps)        { return <IconBase {...p}><circle cx={12} cy={12} r={9}/><path d="M5.6 5.6l12.8 12.8"/></IconBase>; }
 function IconFlag(p: IconProps)       { return <IconBase {...p}><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></IconBase>; }
 function IconComment(p: IconProps)    { return <IconBase {...p}><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></IconBase>; }
+function IconUndoArrow(p: IconProps)  { return <IconBase {...p}><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 5 5v0a5 5 0 0 1-5 5H10"/></IconBase>; }
