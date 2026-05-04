@@ -699,6 +699,24 @@ function MultiplayerPageInner() {
   // is in flight.
   const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
   const [pauseConfirmOpen, setPauseConfirmOpen] = useState(false);
+
+  // Idle-warning system. Fires "are you still here?" 3 min after the
+  // last user activity, then leaves the room automatically 30 seconds
+  // later if there's no response. Only runs while status === 'racing'
+  // and the user is NOT actively solving — see the gates in the check
+  // effect below for the full list of suppressors.
+  const IDLE_WARNING_MS = 3 * 60 * 1000;       // 3 min before warning
+  const IDLE_RESPONSE_MS = 30 * 1000;          // 30 s response window
+  const lastActivityAtRef = useRef<number>(Date.now());
+  /** Set true by RacingScreen whenever its local timer is in a state
+   *  the player can't be interrupted out of (inspecting / armed /
+   *  running). Resets to false on idle / stopped. The idle check
+   *  short-circuits while this is true. */
+  const isActivelySolvingRef = useRef<boolean>(false);
+  // Modal state for the idle warning. `idleWarningStartedAt` drives the
+  // 30s countdown shown in the modal, and triggers the auto-leave when
+  // it crosses IDLE_RESPONSE_MS.
+  const [idleWarningStartedAt, setIdleWarningStartedAt] = useState<number | null>(null);
   // For the retry confirm modal we also need to know WHICH solve is
   // being retried (the most-recent confirmed one in the current round).
   const [retryConfirmIdx, setRetryConfirmIdx] = useState<number | null>(null);
@@ -1160,6 +1178,36 @@ function MultiplayerPageInner() {
   }, []);
   const dismissNotif = useCallback((id: string) => {
     setNotifs(prev => prev.filter(n => n.id !== id));
+  }, []);
+
+  // Bump the idle clock back to zero. Called on any user-initiated
+  // input (keydown, pointerdown, touchstart) and on RTDB-write actions
+  // like solve confirms / vote casts where the page already knows the
+  // user did something.
+  const bumpActivity = useCallback(() => {
+    lastActivityAtRef.current = Date.now();
+    setIdleWarningStartedAt(null);
+  }, []);
+
+  // Window-level activity listeners. We deliberately use capturing
+  // pointerdown / touchstart / keydown — every interactive surface
+  // bubbles through these, so we don't have to thread a callback into
+  // every button. Passive listeners so we never block scroll etc.
+  // Also dismisses an open idle-warning modal so any input ANYWHERE
+  // counts as "I'm here".
+  useEffect(() => {
+    const onAny = () => {
+      lastActivityAtRef.current = Date.now();
+      setIdleWarningStartedAt(prev => (prev == null ? prev : null));
+    };
+    window.addEventListener('pointerdown', onAny, { passive: true });
+    window.addEventListener('touchstart', onAny, { passive: true });
+    window.addEventListener('keydown', onAny, { passive: true });
+    return () => {
+      window.removeEventListener('pointerdown', onAny);
+      window.removeEventListener('touchstart', onAny);
+      window.removeEventListener('keydown', onAny);
+    };
   }, []);
 
   // Host-transfer detection. Seeded on the first non-empty snapshot so
@@ -2380,6 +2428,62 @@ function MultiplayerPageInner() {
     }
   }, [room?.status, room?.round, room?.maxRounds, room?.members, userId, now, pushNotif]);
 
+  // ── Idle-warning loop ────────────────────────────────────────────────────
+  //
+  // Skipped entirely outside of 'racing' (waiting-room idleness is fine —
+  // people chat) and while the user is in any state where a modal /
+  // active solve / vote prompt steals focus. The only path to a kick is:
+  //   1. status === 'racing'
+  //   2. NOT actively solving (timer.state ∉ inspecting/armed/running)
+  //   3. NO solve-confirm pending     (RacingScreen owns this state)
+  //   4. NO vote / pause / settings / leave / queue modal open
+  //   5. 3 minutes since last activity → show warning
+  //   6. 30 more seconds without activity → leaveRoom()
+  //
+  // Active-solve detection comes from `isActivelySolvingRef`, which
+  // RacingScreen flips on every transition of its local timer state.
+  // Solve-confirm pending bubbles up via `racingPendingRef` (same idea).
+  const racingPendingRef = useRef<boolean>(false);
+  const anyRoomModalOpen =
+    settingsOpen || pauseOpen
+    || leaveModalKind != null
+    || pendingMidRoundJoin != null
+    || restartConfirmOpen || pauseConfirmOpen
+    || retryConfirmIdx != null;
+  useEffect(() => {
+    if (view !== 'room') return;
+    if (room?.status !== 'racing') return;
+    if (room?.meta?.paused) return;
+
+    const id = window.setInterval(() => {
+      // Hard gates that suppress the whole check.
+      if (isActivelySolvingRef.current) return;
+      if (racingPendingRef.current) return;
+      if (anyRoomModalOpen) return;
+      // Vote prompt steals focus already; don't add a competing modal.
+      if (room?.votes && Object.values(room.votes).some(v => !!v && !v.result)) return;
+
+      const now2 = Date.now();
+      const idleFor = now2 - lastActivityAtRef.current;
+      if (idleWarningStartedAt == null) {
+        if (idleFor >= IDLE_WARNING_MS) {
+          // Reset response clock so the modal countdown starts fresh.
+          setIdleWarningStartedAt(now2);
+        }
+      } else {
+        const responseFor = now2 - idleWarningStartedAt;
+        if (responseFor >= IDLE_RESPONSE_MS) {
+          // Auto-leave. Clear modal first so it disappears on the way
+          // back to the lobby and doesn't hang as a ghost banner.
+          setIdleWarningStartedAt(null);
+          lastActivityAtRef.current = now2;
+          leaveRoom();
+        }
+      }
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [view, room?.status, room?.meta?.paused, room?.votes, anyRoomModalOpen, idleWarningStartedAt, IDLE_WARNING_MS, IDLE_RESPONSE_MS, leaveRoom]);
+
   // ── Render ──────────────────────────────────────────────────────────────
   // While racing the page is locked to the visible viewport — height: 100dvh
   // (dynamic viewport so iOS Safari URL-bar dynamics don't cause overflow),
@@ -2523,6 +2627,8 @@ function MultiplayerPageInner() {
             onBtConnect={bt.connect}
             onBtDisconnect={guardedBtDisconnect}
             btSolveCallbacksRef={btSolveCallbacksRef}
+            isActivelySolvingRef={isActivelySolvingRef}
+            racingPendingRef={racingPendingRef}
           />
         )}
       </main>
@@ -2639,6 +2745,14 @@ function MultiplayerPageInner() {
             try { await requestVote('retrySolve', { reason, solveIdx: idx }); }
             catch (err) { console.error('[mp] retry vote', err); }
           }}
+        />
+      )}
+      {idleWarningStartedAt != null && view === 'room' && room?.status === 'racing' && (
+        <IdleWarningModal
+          isMobile={isMobile}
+          startedAt={idleWarningStartedAt}
+          totalMs={IDLE_RESPONSE_MS}
+          onStillHere={bumpActivity}
         />
       )}
       {/* Other-player prompt — only renders when a vote is in flight,
@@ -3076,6 +3190,11 @@ interface RoomViewProps {
     onSolveStop?: (ms: number) => void;
     onIdle?: () => void;
   }>;
+  /** Page-level mutable refs the RacingScreen flips so the idle-warning
+   *  loop can tell the difference between "user reading the screen" and
+   *  "user is mid-solve / mid-confirmation". Both default false. */
+  isActivelySolvingRef: React.MutableRefObject<boolean>;
+  racingPendingRef: React.MutableRefObject<boolean>;
 }
 
 function RoomView(props: RoomViewProps) {
@@ -3229,6 +3348,7 @@ function RacingScreen({
   isMobile, room, userId, prefs, now, onSubmitSolve, onRequestExtra, onInstantUndo,
   onOpenSettings, onPause,
   btState, btLiveState, btDeviceLabel, onBtConnect, onBtDisconnect, btSolveCallbacksRef,
+  isActivelySolvingRef, racingPendingRef,
 }: RoomViewProps & { isHost: boolean }) {
   // Behaviour driven by user prefs (Settings modal). The shared timer
   // engine takes the commit callback and the user-configured hold-to-arm
@@ -3348,6 +3468,24 @@ function RacingScreen({
   ));
   const interactionLocked = isWaitingForOpponents || isRoundDone || !!pending
     || !scrambleShown || isPaused || voteInFlight;
+
+  // Mirror our local timer / pending state into the page-level refs so
+  // the idle-warning loop can suppress its check during inspection,
+  // arming, running, or while we're choosing OK/+2/DNF. Refs (not
+  // state) so the loop sees fresh values without re-rendering on every
+  // tick. Cleared on unmount so the idle check can resume normally
+  // when this screen is no longer mounted (e.g. results screen).
+  useEffect(() => {
+    isActivelySolvingRef.current =
+      timer.state === 'inspecting'
+      || timer.state === 'armed'
+      || timer.state === 'running';
+    return () => { isActivelySolvingRef.current = false; };
+  }, [timer.state, isActivelySolvingRef]);
+  useEffect(() => {
+    racingPendingRef.current = !!pending;
+    return () => { racingPendingRef.current = false; };
+  }, [pending, racingPendingRef]);
 
   // Reset local + timer state at solve / round boundary.
   useEffect(() => {
@@ -4900,6 +5038,95 @@ const votePrimaryBtn: React.CSSProperties = {
   fontFamily: 'inherit', cursor: 'pointer',
   letterSpacing: '0.02em',
 };
+
+// Idle "are you still here?" warning. 30s countdown drives an auto-leave
+// at 0. Tapping the big button (or anywhere outside the box, since
+// a window pointerdown also bumps activity) closes the modal and
+// resets the idle clock. Self-driven countdown via setInterval so the
+// parent doesn't have to re-render every tick.
+function IdleWarningModal({
+  isMobile, startedAt, totalMs, onStillHere,
+}: {
+  isMobile: boolean;
+  /** Wall-clock ms when the response window opened. */
+  startedAt: number;
+  /** Length of the response window (ms) — kicks at 0. */
+  totalMs: number;
+  onStillHere: () => void;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 200);
+    return () => window.clearInterval(id);
+  }, []);
+  const remainingMs = Math.max(0, startedAt + totalMs - now);
+  const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
+  const mm = Math.floor(remainingSec / 60);
+  const ss = remainingSec % 60;
+  const countdown = `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+  const pct = Math.max(0, Math.min(100, (remainingMs / totalMs) * 100));
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Enter' || e.code === 'Space') {
+        e.preventDefault();
+        onStillHere();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onStillHere]);
+
+  return (
+    <VoteOverlay isMobile={isMobile} onClose={onStillHere}>
+      <header style={{
+        padding: '0.95rem 1rem',
+        borderBottom: `1px solid ${C.border}`,
+        fontSize: '0.95rem', fontWeight: 800, color: C.text,
+        display: 'flex', alignItems: 'center', gap: '0.45rem',
+      }}>
+        <IconAlertCircle size={18} color={C.warn} aria-hidden="true" />
+        <span>Та энд байна уу?</span>
+      </header>
+      <div style={{
+        padding: '1rem',
+        display: 'flex', flexDirection: 'column', gap: '0.85rem',
+      }}>
+        <div style={{ fontSize: '0.86rem', color: C.text, lineHeight: 1.5 }}>
+          Та удаан хугацаанд идэвхгүй байна. 30 секундын дотор хариулахгүй бол өрөөнөөс хасагдана.
+        </div>
+        <div style={{
+          fontFamily: 'JetBrains Mono, monospace',
+          fontSize: 'clamp(2.2rem, 8vw, 3.2rem)',
+          fontWeight: 800, color: remainingSec <= 10 ? C.danger : C.warn,
+          textAlign: 'center', letterSpacing: '0.04em',
+          fontVariantNumeric: 'tabular-nums',
+        }}>{countdown}</div>
+        <div style={{
+          height: 4, background: C.cardAlt, borderRadius: 999,
+          overflow: 'hidden',
+        }}>
+          <div style={{
+            width: `${pct}%`, height: '100%',
+            background: remainingSec <= 10 ? C.danger : C.warn,
+            transition: 'width 0.2s linear, background 0.2s',
+          }} />
+        </div>
+        <button
+          type="button"
+          onClick={onStillHere}
+          style={{
+            background: C.success, color: '#0a0a0a',
+            border: `1px solid ${C.success}`, borderRadius: 12,
+            padding: '0.95rem 1rem', fontSize: '1rem', fontWeight: 800,
+            fontFamily: 'inherit', cursor: 'pointer',
+            letterSpacing: '0.02em',
+          }}
+        >Тийм, энд байна</button>
+      </div>
+    </VoteOverlay>
+  );
+}
 
 // Big banner across the screen while the room is paused. Resume is just
 // a vote — anyone can kick it off; the tallier auto-fires another resume
