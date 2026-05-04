@@ -1178,8 +1178,14 @@ function MultiplayerPageInner() {
 
   const joinRoom = useCallback(async (overrideCode?: string) => {
     setErrorMsg('');
-    const code = (overrideCode ?? joinCode).trim().toUpperCase();
-    const name = joinName.trim();
+    // joinRoom is wired both as JoinForm's onSubmit (click/keydown handler,
+    // so React passes a SyntheticEvent here) AND as a programmatic call
+    // from the active-rooms join modal (passes a real string). Only treat
+    // the arg as a code when it actually IS a string — otherwise fall
+    // back to the form-controlled joinCode state.
+    const rawCode = typeof overrideCode === 'string' ? overrideCode : joinCode;
+    const code = String(rawCode ?? '').trim().toUpperCase();
+    const name = String(joinName ?? '').trim();
     if (!code) { setErrorMsg('Enter a room code.'); return; }
     if (!name) { setErrorMsg('Enter a display name.'); return; }
     let uid = userId;
