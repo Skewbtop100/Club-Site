@@ -297,7 +297,7 @@ export default function TimerPage() {
   const [newSessionName, setNewSessionName] = useState('');
   const [cubeFullscreenOpen, setCubeFullscreenOpen] = useState(false);
   const [sessionDropdownOpen, setSessionDropdownOpen] = useState(false);
-  type SettingsSection = 'timer' | 'bluetooth' | 'shortcuts' | 'display';
+  type SettingsSection = 'timer' | 'shortcuts' | 'display';
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('timer');
   // Mobile accordion: which section bodies are open. Defaults to Timer.
   const [mobileExpanded, setMobileExpanded] = useState<Set<SettingsSection>>(() => new Set(['timer']));
@@ -3478,7 +3478,7 @@ function MobileLineChart({
 }
 
 // ── SettingsPanel: large multi-section modal (desktop) / bottom sheet (mobile)
-type SettingsSectionId = 'timer' | 'bluetooth' | 'shortcuts' | 'display';
+type SettingsSectionId = 'timer' | 'shortcuts' | 'display';
 interface SettingsPanelProps {
   isMobile: boolean;
   C: typeof C;
@@ -3510,9 +3510,11 @@ interface SettingsPanelProps {
 
 // Static section ordering / icons. Labels themselves come from i18n at
 // render time (see SettingsPanel) so the toggle takes effect immediately.
-const SETTINGS_SECTIONS: { id: SettingsSectionId; labelKey: 'timer.section.timer' | 'timer.section.bluetooth' | 'timer.section.shortcuts' | 'timer.section.display'; icon: React.ReactNode }[] = [
+// Standalone "Bluetooth" entry was removed when BT controls collapsed
+// into the Timer section's "Цаг оруулах горим" segmented row — they
+// only render when the user picks the 'bluetooth' option there.
+const SETTINGS_SECTIONS: { id: SettingsSectionId; labelKey: 'timer.section.timer' | 'timer.section.shortcuts' | 'timer.section.display'; icon: React.ReactNode }[] = [
   { id: 'timer',     labelKey: 'timer.section.timer',     icon: <IconStopwatch size={16} /> },
-  { id: 'bluetooth', labelKey: 'timer.section.bluetooth', icon: <IconBluetooth size={16} /> },
   { id: 'shortcuts', labelKey: 'timer.section.shortcuts', icon: <IconKeyboard  size={16} /> },
   { id: 'display',   labelKey: 'timer.section.display',   icon: <IconPalette   size={16} /> },
 ];
@@ -3544,6 +3546,11 @@ function SettingsPanel(props: SettingsPanelProps) {
         ]}
         c={c}
       />
+      {/* Bluetooth controls fold inline when the user picks the BT mode.
+          Used to be its own Settings sidebar entry; the segmented row
+          above is now the single discoverability point for choosing
+          how a time gets into the timer. */}
+      {props.timeEntryMode === 'bluetooth' && renderBluetooth()}
       <ToggleRow label={t('timer.inspectionTime')} value={props.inspectionEnabled} onChange={props.setInspectionEnabled} />
       <ToggleRow label={t('timer.holdToStart')}    value={props.holdToStart}        onChange={props.setHoldToStart} />
       {props.holdToStart && (
@@ -3784,7 +3791,6 @@ function SettingsPanel(props: SettingsPanelProps) {
 
   const renderSection = (id: SettingsSectionId) => {
     if (id === 'timer')     return renderTimer();
-    if (id === 'bluetooth') return renderBluetooth();
     if (id === 'shortcuts') return renderShortcuts();
     return renderDisplay();
   };
