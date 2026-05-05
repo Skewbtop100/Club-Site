@@ -165,6 +165,33 @@ function getTimerFontSize(text: string, isMobile: boolean): string {
   return 'clamp(2.2rem, 8vw, 6rem)';
 }
 
+// Mobile scramble font sizing. The static sm/md/lg buckets we expose in
+// Settings overflow on Megaminx (~250 chars) and look stranded on 2x2
+// (~15 chars), so the user preference is now a *multiplier* on top of an
+// auto-fit base derived from scramble length. Buckets tuned against a
+// 380px viewport (iPhone SE width) so 6x6 / 7x7 / Megaminx wrap without
+// pushing the timer below the fold.
+function getScrambleFontSize(
+  scramble: string,
+  userPref: 'sm' | 'md' | 'lg',
+): number {
+  const len = scramble.length;
+  let basePx: number;
+  if (len < 30)        basePx = 24;  // 2x2, Skewb, Pyraminx
+  else if (len < 60)   basePx = 22;  // 3x3, Clock
+  else if (len < 100)  basePx = 19;  // 4x4, Sq-1
+  else if (len < 160)  basePx = 17;  // 5x5
+  else if (len < 240)  basePx = 15;  // 6x6, 7x7
+  else                 basePx = 13;  // Megaminx, MBF
+  const multiplier = userPref === 'sm' ? 0.85
+                   : userPref === 'lg' ? 1.15
+                   : 1.0;
+  // Round to the nearest 0.5px — keeps multi-event sessions from jittering
+  // by sub-pixel deltas as the user swipes between scrambles of similar
+  // lengths.
+  return Math.round(basePx * multiplier * 2) / 2;
+}
+
 // avgOfN, calcStats, useTimer — all imported from @/lib/timer-engine.
 
 // ── Main page ───────────────────────────────────────────────────────────────
@@ -2019,7 +2046,7 @@ export default function TimerPage() {
                     the (mostly hidden) keyboard 'N' shortcut. */}
                 <SwipeScrambleRow
                   scramble={scramble}
-                  scrambleFontSize={scrambleFontSize}
+                  scrambleFontPx={getScrambleFontSize(scramble, scrambleFontSize)}
                   onNext={goNextScramble}
                   onPrev={goPrevScramble}
                   showHint={!swipeHintDismissed}
@@ -4578,10 +4605,12 @@ function ActionIconBtn({
 // (older history). Threshold is intentionally generous (>50 px) so the
 // solver's vertical scrolls don't accidentally rotate the scramble.
 function SwipeScrambleRow({
-  scramble, scrambleFontSize, onNext, onPrev, showHint, onDismissHint,
+  scramble, scrambleFontPx, onNext, onPrev, showHint, onDismissHint,
 }: {
   scramble: string;
-  scrambleFontSize: 'sm' | 'md' | 'lg';
+  // Final px value — already accounts for both the scramble's character
+  // count and the user's sm/md/lg preference (see getScrambleFontSize).
+  scrambleFontPx: number;
   onNext: () => void;
   onPrev: () => void;
   showHint: boolean;
@@ -4633,7 +4662,7 @@ function SwipeScrambleRow({
         key={fadeKey}
         style={{
           fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
-          fontSize: scrambleFontSize === 'sm' ? 16 : scrambleFontSize === 'lg' ? 24 : 20,
+          fontSize: scrambleFontPx,
           lineHeight: 1.45,
           color: C.text,
           whiteSpace: 'pre-wrap', wordBreak: 'break-word',
