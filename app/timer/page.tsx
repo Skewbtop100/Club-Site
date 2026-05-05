@@ -2253,12 +2253,49 @@ export default function TimerPage() {
                       display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
                       gap: '0.5rem',
                     }}>
-                      {solvesFiltered.map(s => {
+                      {solvesFiltered.map((s, idx) => {
                         const dnf = isDnf(s);
                         const isBest  = !dnf && s.id === bestId  && validSolves.length > 1;
                         const isWorst = !dnf && s.id === worstId && validSolves.length > 1;
-                        const dateStr = new Date(s.ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                        // solvesFiltered is newest-first; idx 0 is the most-
+                        // recent solve. Suppress the "latest" highlight while
+                        // searching so the top match doesn't masquerade as
+                        // the freshest solve.
+                        const isLatest = idx === 0 && !mobileSearch;
                         const selected = selectedSolveIds.has(s.id);
+                        const hasComment = !!(s.comment && s.comment.trim());
+
+                        // Tier the card visuals — selection wins, then PB,
+                        // then worst, then DNF, then "latest", else neutral.
+                        // Each tier has its own bg, border, and (optionally)
+                        // a 3px left rail and a soft outer glow.
+                        let cardBg: string;
+                        let cardBorder: string;
+                        let leftAccent: string | null = null;
+                        let glowColor: string | null = null;
+                        if (selected) {
+                          cardBg = C.accentDim;
+                          cardBorder = C.borderHi;
+                          leftAccent = C.accent;
+                        } else if (isBest && !dnf) {
+                          cardBg = 'linear-gradient(135deg, rgba(52,211,153,0.18) 0%, rgba(52,211,153,0.04) 100%)';
+                          cardBorder = 'rgba(52,211,153,0.4)';
+                          leftAccent = C.success;
+                          glowColor = 'rgba(52,211,153,0.25)';
+                        } else if (isWorst && !dnf) {
+                          cardBg = 'linear-gradient(135deg, rgba(239,68,68,0.08) 0%, rgba(239,68,68,0.02) 100%)';
+                          cardBorder = 'rgba(239,68,68,0.25)';
+                        } else if (dnf) {
+                          cardBg = 'linear-gradient(135deg, rgba(239,68,68,0.06) 0%, rgba(239,68,68,0) 100%)';
+                          cardBorder = 'rgba(239,68,68,0.2)';
+                        } else if (isLatest) {
+                          cardBg = 'linear-gradient(135deg, rgba(167,139,250,0.12) 0%, rgba(167,139,250,0.02) 100%)';
+                          cardBorder = 'rgba(167,139,250,0.3)';
+                        } else {
+                          cardBg = C.card;
+                          cardBorder = C.border;
+                        }
+
                         return (
                           <button
                             key={s.id}
@@ -2270,22 +2307,15 @@ export default function TimerPage() {
                             style={{
                               position: 'relative',
                               textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit',
-                              background: selected
-                                ? C.accentDim
-                                : isWorst ? 'rgba(239,68,68,0.08)' : C.card,
-                              border: `1px solid ${
-                                selected ? C.borderHi
-                                : isWorst ? 'rgba(239,68,68,0.25)'
-                                : C.border
-                              }`,
-                              borderLeft: selected
-                                ? `3px solid ${C.accent}`
-                                : isBest ? `3px solid ${C.success}`
-                                : `1px solid ${isWorst ? 'rgba(239,68,68,0.25)' : C.border}`,
-                              borderRadius: 10, padding: '0.5rem 0.55rem',
+                              background: cardBg,
+                              border: `1px solid ${cardBorder}`,
+                              borderLeft: leftAccent ? `3px solid ${leftAccent}` : `1px solid ${cardBorder}`,
+                              borderRadius: 12,
+                              padding: '0.6rem 0.55rem 0.55rem',
                               display: 'flex', flexDirection: 'column', gap: '0.3rem',
-                              minHeight: 64,
-                              transition: 'background 0.12s, border-color 0.12s',
+                              minHeight: 76,
+                              boxShadow: glowColor ? `0 0 16px ${glowColor}` : 'none',
+                              transition: 'transform 0.12s, border-color 0.12s, box-shadow 0.2s',
                             }}
                           >
                             {selectMode && (
@@ -2300,37 +2330,71 @@ export default function TimerPage() {
                                 {selected && <IconCheck size={12} />}
                               </span>
                             )}
+
+                            {/* Top row — depth-from-latest index + comment dot.
+                                Index numbering is 1 = most recent, N = oldest,
+                                so the badge reads as "how recent is this". */}
                             <div style={{
-                              fontSize: '0.6rem', color: C.mutedDim, fontWeight: 600,
-                              letterSpacing: '0.04em',
+                              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                              gap: '0.3rem',
                             }}>
-                              {dateStr}
+                              <span style={{
+                                fontSize: '0.62rem', fontWeight: 800,
+                                color: isBest && !dnf ? C.success
+                                     : isWorst && !dnf ? '#f87171'
+                                     : isLatest ? C.accent
+                                     : C.mutedDim,
+                                letterSpacing: '0.04em',
+                                fontFamily: '"JetBrains Mono", monospace',
+                              }}>
+                                #{solves.length - solves.findIndex(x => x.id === s.id)}
+                              </span>
+                              {hasComment && (
+                                <span aria-label="Has comment" style={{
+                                  display: 'inline-flex', color: C.mutedDim,
+                                }}>
+                                  <IconComment size={10} />
+                                </span>
+                              )}
                             </div>
+
                             <div style={{
                               fontFamily: '"JetBrains Mono", monospace',
-                              fontSize: '0.95rem', fontWeight: 700,
-                              color: dnf ? C.danger : isBest ? C.success : C.text,
+                              fontSize: '1.05rem', fontWeight: 800,
+                              color: dnf ? C.danger
+                                   : isBest ? C.success
+                                   : isWorst ? '#fca5a5'
+                                   : isLatest ? C.accent
+                                   : C.text,
                               fontVariantNumeric: 'tabular-nums',
+                              letterSpacing: '-0.01em',
+                              lineHeight: 1.1,
                             }}>
                               {fmtMs(finalMs(s), dnf, precision)}
                             </div>
-                            {s.penalty === '+2' && !dnf && (
+
+                            {((isBest && !dnf) || (s.penalty === '+2' && !dnf)) && (
                               <div style={{
-                                fontSize: '0.5rem', fontWeight: 700, color: C.warn,
-                                letterSpacing: '0.05em',
-                              }}>+2</div>
-                            )}
-                            {s.comment && s.comment.trim() && (
-                              <span
-                                aria-label="Has comment"
-                                style={{
-                                  display: 'inline-flex',
-                                  color: C.mutedDim,
-                                  marginTop: '0.15rem',
-                                }}
-                              >
-                                <IconComment size={10} />
-                              </span>
+                                display: 'flex', alignItems: 'center', gap: '0.25rem',
+                                marginTop: '0.1rem', flexWrap: 'wrap',
+                              }}>
+                                {isBest && !dnf && (
+                                  <span style={{
+                                    fontSize: '0.52rem', fontWeight: 800,
+                                    padding: '0.12rem 0.35rem', borderRadius: 4,
+                                    background: 'rgba(52,211,153,0.2)', color: C.success,
+                                    letterSpacing: '0.06em',
+                                  }}>PB</span>
+                                )}
+                                {s.penalty === '+2' && !dnf && (
+                                  <span style={{
+                                    fontSize: '0.52rem', fontWeight: 800,
+                                    padding: '0.12rem 0.35rem', borderRadius: 4,
+                                    background: 'rgba(251,191,36,0.2)', color: C.warn,
+                                    letterSpacing: '0.06em',
+                                  }}>+2</span>
+                                )}
+                              </div>
                             )}
                           </button>
                         );
