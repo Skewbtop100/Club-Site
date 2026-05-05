@@ -53,6 +53,14 @@ const C = {
 
 // ── Events ──────────────────────────────────────────────────────────────────
 interface EventDef { id: string; name: string; short: string }
+
+// Event IDs that get tucked away inside the picker's collapsible
+// "special events" accordion — blindfolded variants, multi-blind, and
+// fewest-moves. The remaining IDs render in the always-visible primary
+// grid. Single source of truth; both TimerPage and EventPickerSheet
+// reference this.
+const SPECIAL_EVENT_IDS = ['333bld', '444bld', '555bld', '333mbf', '333fm'];
+
 const EVENTS: EventDef[] = [
   { id: '333',     name: '3x3x3 Cube',       short: '3x3'   },
   { id: '222',     name: '2x2x2 Cube',       short: '2x2'   },
@@ -232,6 +240,7 @@ export default function TimerPage() {
   const [hoveredSolveId, setHoveredSolveId] = useState<string | null>(null);
   const [, forceTick] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [eventPickerOpen, setEventPickerOpen] = useState(false);
   const [detailSolveId, setDetailSolveId] = useState<string | null>(null);
   // Comment-edit modal — when set, the inline comment editor is open
   // for that solve id. The action-row's 💬 button and the keyboard 'C'
@@ -1948,26 +1957,26 @@ export default function TimerPage() {
                     />
                   </div>
                   <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    <select
-                      value={eventId}
-                      onChange={e => setEventId(e.target.value)}
-                      aria-label="Puzzle event"
+                    <button
+                      onClick={() => setEventPickerOpen(true)}
+                      aria-label="Төрөл сонгох"
                       style={{
-                        width: '100%', appearance: 'none', WebkitAppearance: 'none',
+                        width: '100%', appearance: 'none',
                         background: 'transparent', color: C.text,
                         border: 'none', borderRadius: 999,
-                        // Symmetric horizontal padding now that the dropdown
-                        // chevron is gone — the event name centres cleanly
-                        // above the session label.
+                        // Symmetric horizontal padding to keep the label
+                        // centred above the session row, matching the
+                        // pre-button native-select layout.
                         padding: '0.15rem 0.7rem 0 0.7rem',
                         fontSize: '0.92rem', fontWeight: 600, fontFamily: 'inherit',
-                        outline: 'none', textAlign: 'center', textAlignLast: 'center',
+                        cursor: 'pointer', textAlign: 'center',
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        gap: '0.45rem',
                       }}
                     >
-                      {EVENTS.map(ev => (
-                        <option key={ev.id} value={ev.id}>{ev.name}</option>
-                      ))}
-                    </select>
+                      <WcaEventIcon eventId={eventId} size={18} />
+                      <span>{sessionEvent.name}</span>
+                    </button>
                     <div style={{
                       fontSize: '0.6rem', color: C.mutedDim,
                       letterSpacing: '0.05em', fontWeight: 600,
@@ -2647,6 +2656,17 @@ export default function TimerPage() {
           </ModalShell>
         );
       })()}
+
+      {/* Mobile event picker — bottom sheet replacing the native <select>.
+          Desktop keeps its inline <select>; this only mounts when the
+          mobile button at line ~1951 sets eventPickerOpen=true. */}
+      {eventPickerOpen && (
+        <EventPickerSheet
+          currentEventId={eventId}
+          onSelect={setEventId}
+          onClose={() => setEventPickerOpen(false)}
+        />
+      )}
 
       {/* Settings: desktop sidebar modal + mobile bottom-sheet accordion */}
       {settingsOpen && (
@@ -5062,3 +5082,183 @@ function IconBan(p: IconProps)        { return <IconBase {...p}><circle cx={12} 
 function IconFlag(p: IconProps)       { return <IconBase {...p}><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></IconBase>; }
 function IconComment(p: IconProps)    { return <IconBase {...p}><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></IconBase>; }
 function IconUndoArrow(p: IconProps)  { return <IconBase {...p}><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 5 5v0a5 5 0 0 1-5 5H10"/></IconBase>; }
+
+// ── Event picker (mobile) ───────────────────────────────────────────────────
+// Bottom sheet that replaces the mobile <select>. Two groups: a primary
+// 3-col grid of the everyday events, and a collapsible "special events"
+// accordion for BLD / MBF / FMC. Tile-tap commits the choice and closes
+// the sheet; backdrop / Escape close without committing.
+
+function EventTile({
+  event, active, onClick,
+}: {
+  event: EventDef;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        padding: '0.85rem 0.5rem',
+        background: active ? C.accentDim : C.cardAlt,
+        border: `1px solid ${active ? C.borderHi : C.border}`,
+        borderRadius: 12,
+        display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+        gap: '0.4rem',
+        cursor: 'pointer', fontFamily: 'inherit',
+        color: active ? C.accent : C.text,
+        transition: 'background 0.12s, border-color 0.12s',
+        minHeight: 80,
+      }}
+    >
+      <WcaEventIcon eventId={event.id} size={28} />
+      <span style={{
+        fontSize: '0.72rem', fontWeight: 600,
+        letterSpacing: '0.02em',
+      }}>
+        {event.short}
+      </span>
+    </button>
+  );
+}
+
+function EventPickerSheet({
+  currentEventId, onSelect, onClose,
+}: {
+  currentEventId: string;
+  onSelect: (id: string) => void;
+  onClose: () => void;
+}) {
+  // Auto-expand the special-events accordion if the user is currently on
+  // one of those events, so they can see and re-confirm their selection
+  // without a second tap to expand.
+  const [specialOpen, setSpecialOpen] = useState(
+    SPECIAL_EVENT_IDS.includes(currentEventId),
+  );
+  const primaryEvents = EVENTS.filter(e => !SPECIAL_EVENT_IDS.includes(e.id));
+  const specialEvents = EVENTS.filter(e => SPECIAL_EVENT_IDS.includes(e.id));
+
+  // Capture-phase Escape so the sheet's close beats any other listener
+  // wired to the same key (e.g. the hardware-keyboard cube handlers).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') { e.stopPropagation(); onClose(); }
+    }
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 9000,
+        background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: 'flex-end', justifyContent: 'stretch',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: '100%', maxHeight: '85vh',
+          background: C.card, borderTop: `1px solid ${C.border}`,
+          borderTopLeftRadius: 16, borderTopRightRadius: 16,
+          paddingBottom: 'env(safe-area-inset-bottom)',
+          display: 'flex', flexDirection: 'column',
+          boxShadow: '0 -16px 40px rgba(0,0,0,0.55)',
+        }}
+      >
+        {/* Sticky header */}
+        <div style={{
+          flexShrink: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0.85rem 0.95rem',
+          borderBottom: `1px solid ${C.border}`,
+        }}>
+          <div style={{ fontSize: '1rem', fontWeight: 700, color: C.text }}>
+            Төрөл сонгох
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Хаах"
+            style={{
+              width: 30, height: 30, borderRadius: 8,
+              background: 'transparent', border: `1px solid ${C.border}`,
+              color: C.muted, cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          ><IconClose size={14} /></button>
+        </div>
+
+        {/* Scrollable body — primary grid + collapsible special events */}
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+          <div style={{
+            padding: '0.85rem',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: '0.6rem',
+          }}>
+            {primaryEvents.map(ev => (
+              <EventTile
+                key={ev.id}
+                event={ev}
+                active={ev.id === currentEventId}
+                onClick={() => { onSelect(ev.id); onClose(); }}
+              />
+            ))}
+          </div>
+
+          <div style={{
+            borderTop: `1px solid ${C.border}`,
+            padding: '0 0.85rem 0.85rem',
+          }}>
+            <button
+              onClick={() => setSpecialOpen(o => !o)}
+              aria-expanded={specialOpen}
+              style={{
+                width: '100%',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '0.85rem 0.2rem',
+                background: 'transparent', border: 'none', cursor: 'pointer',
+                color: C.text, fontFamily: 'inherit',
+              }}
+            >
+              <span style={{
+                fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.06em',
+                color: specialOpen ? C.accent : C.muted,
+                textTransform: 'uppercase',
+              }}>
+                Тусгай төрлүүд (BLD / FMC)
+              </span>
+              <span style={{
+                color: specialOpen ? C.accent : C.muted,
+                fontSize: '0.72rem',
+                transform: specialOpen ? 'rotate(180deg)' : 'none',
+                transition: 'transform 0.18s',
+              }}>▾</span>
+            </button>
+            {specialOpen && (
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: '0.6rem',
+                paddingTop: '0.2rem',
+              }}>
+                {specialEvents.map(ev => (
+                  <EventTile
+                    key={ev.id}
+                    event={ev}
+                    active={ev.id === currentEventId}
+                    onClick={() => { onSelect(ev.id); onClose(); }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
