@@ -1610,6 +1610,11 @@ export default function TimerPage() {
               WebkitUserSelect: 'none',
               WebkitTouchCallout: 'none',
               touchAction: 'manipulation',
+              // Android Chrome flashes a cyan tap-highlight on any
+              // element with cursor:pointer + a touch handler. The
+              // section is the timer-arming target, so the highlight
+              // reads as "the whole panel turned blue" — kill it.
+              WebkitTapHighlightColor: 'transparent',
               cursor: 'pointer', textAlign: 'center',
             }}
           >
@@ -1991,13 +1996,15 @@ export default function TimerPage() {
 
                 {/* Inline cube preview — only on tablets (700–1023 px,
                     which captures iPad portrait). Phones (<700) keep
-                    the 92 px preview that already lives in the Stats
-                    footer; desktop (≥1024) keeps the full sidebar one
-                    so the tablet branch never overlaps with either.
-                    overflow:hidden clips anything the TwistyPlayer's
-                    fallback might spill (some iOS Safari builds render
-                    the alg as text when WebGL bails) so it can never
-                    masquerade as a duplicate of the scramble row. */}
+                    the 92 px preview in the Stats footer; desktop
+                    (≥1024) keeps the full sidebar one. Wrapper shape
+                    mirrors the working desktop sidebar (line ~1760):
+                    a column-flex outer with an inner flex row that
+                    holds CubeViewer at flex:1. Earlier this branch
+                    used a single-level button + overflow:hidden, and
+                    the CubeViewer's flex:'1 1 auto' was collapsing to
+                    zero before TwistyPlayer's WebGL canvas could mount,
+                    leaving an empty grey box on iPad. */}
                 {isTablet && (
                   <div style={{
                     display: 'flex', justifyContent: 'center',
@@ -2010,15 +2017,16 @@ export default function TimerPage() {
                         width: 140, height: 140, padding: 6,
                         background: C.cardAlt,
                         border: `1px solid ${C.border}`, borderRadius: 12,
-                        display: 'flex', cursor: 'pointer',
+                        display: 'flex', flexDirection: 'column',
+                        cursor: 'pointer',
                         fontFamily: 'inherit',
-                        position: 'relative',
-                        overflow: 'hidden',
-                        WebkitTapHighlightColor: 'transparent',
                         flexShrink: 0,
+                        WebkitTapHighlightColor: 'transparent',
                       }}
                     >
-                      <CubeViewer eventId={eventId} scramble={scramble} />
+                      <div style={{ flex: 1, minHeight: 0, width: '100%', display: 'flex' }}>
+                        <CubeViewer eventId={eventId} scramble={scramble} />
+                      </div>
                     </button>
                   </div>
                 )}
@@ -2040,6 +2048,11 @@ export default function TimerPage() {
                     WebkitTouchCallout: 'none',
                     cursor: 'pointer', textAlign: 'center',
                     touchAction: 'manipulation',
+                    // Android Chrome's default cyan tap-highlight on
+                    // any cursor:pointer element with a touch handler
+                    // shows up as "the whole panel turned blue" during
+                    // arming — suppress it.
+                    WebkitTapHighlightColor: 'transparent',
                     margin: '0 0.7rem',
                     background: 'transparent',
                   }}
