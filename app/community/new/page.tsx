@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { createPost, type PostCategory } from '@/lib/firebase/services/posts';
 
@@ -17,11 +17,36 @@ const CATEGORIES: { id: PostCategory; label: string; emoji: string; adminOnly?: 
   { id: 'general',      label: 'Ерөнхий', emoji: '💬' },
 ];
 
+const VALID_CATEGORIES = new Set<PostCategory>(CATEGORIES.map(c => c.id));
+
+function readChannelParam(value: string | null | undefined): PostCategory {
+  if (value && VALID_CATEGORIES.has(value as PostCategory)) {
+    return value as PostCategory;
+  }
+  return 'general';
+}
+
 export default function NewPostPage() {
+  return (
+    <Suspense fallback={
+      <main style={{ minHeight: '100vh', padding: '6rem 1.25rem 4rem', maxWidth: 720, margin: '0 auto' }}>
+        <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--muted)' }}>
+          Уншиж байна...
+        </div>
+      </main>
+    }>
+      <NewPostInner />
+    </Suspense>
+  );
+}
+
+function NewPostInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
 
-  const [category, setCategory] = useState<PostCategory>('general');
+  const initialChannel = readChannelParam(searchParams?.get('channel'));
+  const [category, setCategory] = useState<PostCategory>(initialChannel);
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -29,9 +54,17 @@ export default function NewPostPage() {
 
   useEffect(() => {
     if (!authLoading && !user) {
-      router.replace('/login?redirect=/community/new');
+      const target = `/community/new?channel=${initialChannel}`;
+      router.replace(`/login?redirect=${encodeURIComponent(target)}`);
     }
-  }, [authLoading, user, router]);
+  }, [authLoading, user, router, initialChannel]);
+
+  // If a non-admin lands on ?channel=announcement, silently fall back to general.
+  useEffect(() => {
+    if (user && category === 'announcement' && user.role !== 'admin') {
+      setCategory('general');
+    }
+  }, [user, category]);
 
   if (authLoading || !user) {
     return (
@@ -201,7 +234,7 @@ export default function NewPostPage() {
           display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
           gap: '0.75rem', marginTop: '0.5rem',
         }}>
-          <Link href="/community" style={{
+          <Link href={`/community?channel=${category}`} style={{
             padding: '0.7rem 1.2rem', borderRadius: 10,
             fontSize: '0.9rem', fontWeight: 600,
             color: 'var(--muted)', textDecoration: 'none',
