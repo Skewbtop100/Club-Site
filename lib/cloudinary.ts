@@ -42,9 +42,11 @@ export const COMMUNITY_ALLOWED_MIME = new Set([
 
 export const COMMUNITY_VIDEO_MAX_BYTES = 100 * 1024 * 1024; // 100 MB
 
-// Eager transformation applied at upload time (async). Cloudinary caches
-// the derivative so the first delivery request hits a pre-baked asset.
-const COMMUNITY_VIDEO_EAGER = 'vc_h264,c_limit,h_720,q_auto:good,f_mp4';
+// Delivery-side transformation. Cloudinary forbids `eager`/`eager_async`
+// for unsigned uploads, so the eager pipeline is configured on the
+// `community_unsigned` preset itself in the Cloudinary console. This
+// constant is only used by cldVideo() to build the optimized delivery URL.
+const COMMUNITY_VIDEO_DELIVERY = 'vc_h264,c_limit,h_720,q_auto:good,f_mp4';
 
 /** Unsigned XHR upload to Cloudinary. Reports progress 0-100. */
 export function uploadCommunityImage(
@@ -122,10 +124,11 @@ export interface CloudinaryVideoUploadResult {
   height: number;
 }
 
-/** Unsigned video upload. Tells Cloudinary to eagerly transcode to a
- * 720p-capped H.264 MP4 in the background; the secure_url returned is
- * the original asset. Use cldVideo() to build a delivery URL pointing
- * to the optimized derivative. */
+/** Unsigned video upload. The 720p H.264 MP4 transcode is configured
+ * on the `community_unsigned` preset in the Cloudinary console (eager
+ * params are forbidden on unsigned uploads). The secure_url returned is
+ * the original asset; use cldVideo() to build a delivery URL pointing to
+ * the optimized derivative. */
 export function uploadCommunityVideo(
   file: File,
   onProgress?: (pct: number) => void,
@@ -171,8 +174,6 @@ export function uploadCommunityVideo(
     fd.append('file', file);
     fd.append('upload_preset', COMMUNITY_PRESET);
     fd.append('folder', 'community');
-    fd.append('eager', COMMUNITY_VIDEO_EAGER);
-    fd.append('eager_async', 'true');
     xhr.send(fd);
   });
 }
@@ -193,7 +194,7 @@ export function cldVideo(url: string): string {
   if (!url.includes('/video/upload/')) return url;
   const transformed = url.replace(
     '/video/upload/',
-    `/video/upload/${COMMUNITY_VIDEO_EAGER}/`,
+    `/video/upload/${COMMUNITY_VIDEO_DELIVERY}/`,
   );
   return transformed.replace(/\.[a-z0-9]+$/i, '.mp4');
 }
