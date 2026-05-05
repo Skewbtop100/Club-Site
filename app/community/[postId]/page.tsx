@@ -10,6 +10,7 @@ import {
   type Post, type Comment, type PostCategory,
 } from '@/lib/firebase/services/posts';
 import ImageGrid from '@/components/community/ImageGrid';
+import VideoPlayer from '@/components/community/VideoPlayer';
 
 const CATEGORIES: Record<PostCategory, { label: string; emoji: string }> = {
   announcement: { label: 'Зар',     emoji: '📢' },
@@ -213,11 +214,19 @@ export default function PostDetailPage() {
           {post.body}
         </div>
 
-        {post.imageUrls && post.imageUrls.length > 0 && (
+        {post.videoUrl && post.videoType ? (
+          <div style={{ marginBottom: '1.4rem' }}>
+            <VideoPlayer
+              videoUrl={post.videoUrl}
+              videoType={post.videoType}
+              videoThumbnail={post.videoThumbnail}
+            />
+          </div>
+        ) : post.imageUrls && post.imageUrls.length > 0 ? (
           <div style={{ marginBottom: '1.4rem' }}>
             <ImageGrid imageUrls={post.imageUrls} />
           </div>
-        )}
+        ) : null}
 
         {/* Footer: counts + delete */}
         <div style={{

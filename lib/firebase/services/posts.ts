@@ -17,6 +17,9 @@ export interface Post {
   body: string;
   category: PostCategory;
   imageUrls?: string[];
+  videoUrl?: string;
+  videoType?: 'cloudinary' | 'youtube' | 'vimeo';
+  videoThumbnail?: string;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
   likeCount: number;
@@ -58,6 +61,9 @@ export interface CreatePostInput {
   authorPhoto?: string;
   authorRole?: 'member' | 'athlete' | 'admin';
   imageUrls?: string[];
+  videoUrl?: string;
+  videoType?: 'cloudinary' | 'youtube' | 'vimeo';
+  videoThumbnail?: string;
 }
 
 export async function createPost(input: CreatePostInput): Promise<string> {

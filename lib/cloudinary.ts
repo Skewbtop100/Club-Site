@@ -40,6 +40,12 @@ export const COMMUNITY_ALLOWED_MIME = new Set([
   'image/gif',
 ]);
 
+export const COMMUNITY_VIDEO_MAX_BYTES = 100 * 1024 * 1024; // 100 MB
+
+// Eager transformation applied at upload time (async). Cloudinary caches
+// the derivative so the first delivery request hits a pre-baked asset.
+const COMMUNITY_VIDEO_EAGER = 'vc_h264,c_limit,h_720,q_auto:good,f_mp4';
+
 /** Unsigned XHR upload to Cloudinary. Reports progress 0-100. */
 export function uploadCommunityImage(
   file: File,
@@ -106,3 +112,88 @@ export const cldGrid = (url: string, w = 800) =>
 /** Full-size delivery for the lightbox. */
 export const cldFull = (url: string, w = 1600) =>
   cldTransform(url, `q_auto:good,f_auto,w_${w}`);
+
+export interface CloudinaryVideoUploadResult {
+  publicId: string;
+  url: string;        // secure_url (original)
+  thumbnail: string;  // derived poster URL
+  duration: number;
+  width: number;
+  height: number;
+}
+
+/** Unsigned video upload. Tells Cloudinary to eagerly transcode to a
+ * 720p-capped H.264 MP4 in the background; the secure_url returned is
+ * the original asset. Use cldVideo() to build a delivery URL pointing
+ * to the optimized derivative. */
+export function uploadCommunityVideo(
+  file: File,
+  onProgress?: (pct: number) => void,
+): Promise<CloudinaryVideoUploadResult> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(
+      'POST',
+      `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/video/upload`,
+    );
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) {
+        onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const json = JSON.parse(xhr.responseText);
+          resolve({
+            publicId: json.public_id,
+            url: json.secure_url,
+            thumbnail: deriveCloudinaryVideoThumbnail(json.secure_url),
+            duration: json.duration ?? 0,
+            width: json.width ?? 0,
+            height: json.height ?? 0,
+          });
+        } catch (e) {
+          reject(e);
+        }
+      } else {
+        let msg = `Cloudinary upload failed (${xhr.status})`;
+        try {
+          const j = JSON.parse(xhr.responseText);
+          if (j?.error?.message) msg = j.error.message;
+        } catch { /* ignore parse error */ }
+        reject(new Error(msg));
+      }
+    };
+    xhr.onerror = () => reject(new Error('Network error during upload'));
+
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('upload_preset', COMMUNITY_PRESET);
+    fd.append('folder', 'community');
+    fd.append('eager', COMMUNITY_VIDEO_EAGER);
+    fd.append('eager_async', 'true');
+    xhr.send(fd);
+  });
+}
+
+/** Derive a still-frame poster URL from a Cloudinary video URL. Uses
+ * the second frame (so_2) since most clips have a frame-0 splash. */
+export function deriveCloudinaryVideoThumbnail(url: string): string {
+  if (!url.includes('/video/upload/')) return '';
+  const transformed = url.replace(
+    '/video/upload/',
+    '/video/upload/so_2,w_640,q_auto:good/',
+  );
+  return transformed.replace(/\.[a-z0-9]+$/i, '.jpg');
+}
+
+/** Build the optimized delivery URL (mp4, 720p cap). */
+export function cldVideo(url: string): string {
+  if (!url.includes('/video/upload/')) return url;
+  const transformed = url.replace(
+    '/video/upload/',
+    `/video/upload/${COMMUNITY_VIDEO_EAGER}/`,
+  );
+  return transformed.replace(/\.[a-z0-9]+$/i, '.mp4');
+}

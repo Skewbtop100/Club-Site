@@ -17,6 +17,8 @@ import ImageUploader, {
   uploadedUrls,
 } from '@/components/community/ImageUploader';
 import ImageGrid from '@/components/community/ImageGrid';
+import VideoUploader, { type VideoData } from '@/components/community/VideoUploader';
+import VideoPlayer from '@/components/community/VideoPlayer';
 
 type ChannelId = PostCategory | 'feed';
 
@@ -521,6 +523,8 @@ function CommunityInner() {
           background: rgba(127,127,127,0.12);
           color: var(--accent);
         }
+        .tc-icon-disabled { opacity: 0.45; cursor: not-allowed; }
+        .tc-icon-disabled:hover { background: transparent; color: var(--muted); }
         .tc-buttons { display: flex; gap: 0.5rem; align-items: center; }
         .tc-cancel {
           padding: 0.45rem 0.9rem;
@@ -734,11 +738,31 @@ function TopCompose({
   const [body, setBody] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // TODO(cleanup): if user uploads images then cancels, the assets stay
-  // orphaned in Cloudinary. Acceptable for now (25 GB free); add a sweep
-  // job (cron + Admin API) once we approach the storage limit.
+  // TODO(cleanup): if user uploads images/video then cancels, the assets
+  // stay orphaned in Cloudinary. Acceptable for now (25 GB free); add a
+  // sweep job (cron + Admin API) once we approach the storage limit.
   const [images, setImages] = useState<UploadItem[]>([]);
+  const [video, setVideo] = useState<VideoData | null>(null);
+  const [videoUploading, setVideoUploading] = useState(false);
+  const [videoPopoverOpen, setVideoPopoverOpen] = useState(false);
   const uploaderInputId = 'tc-img-input';
+
+  function openVideoPopover() {
+    if (video) return; // X on preview is the way to remove
+    if (images.length > 0) {
+      if (!confirm('Зураг устах болно. Үргэлжлүүлэх үү?')) return;
+      setImages([]);
+    }
+    setVideoPopoverOpen(true);
+  }
+
+  function openImagePicker() {
+    if (video) {
+      if (!confirm('Бичлэг устах болно. Үргэлжлүүлэх үү?')) return;
+      setVideo(null);
+    }
+    document.getElementById(uploaderInputId)?.click();
+  }
 
   // The category the post will be created in. Defaults to the active
   // channel (or 'general' when on Feed). Resets when the user navigates
@@ -803,12 +827,14 @@ function TopCompose({
     setBody('');
     setError(null);
     setImages([]);
+    setVideo(null);
+    setVideoPopoverOpen(false);
   }
 
   async function submit() {
     const trimmed = body.trim();
     if (!trimmed || submitting || !user) return;
-    if (isUploading(images)) return;
+    if (isUploading(images) || videoUploading) return;
     if (postCategory === 'announcement' && user.role !== 'admin') {
       setError('Зар нь зөвхөн админ нийтлэх боломжтой.');
       return;
@@ -817,6 +843,17 @@ function TopCompose({
     setSubmitting(true);
     try {
       const urls = uploadedUrls(images);
+      // Video wins over images if both somehow set (mutual-exclusion UI
+      // should prevent this, but defend against state desync).
+      const mediaFields = video
+        ? {
+            videoUrl: video.videoUrl,
+            videoType: video.videoType,
+            videoThumbnail: video.videoThumbnail,
+          }
+        : urls.length > 0
+          ? { imageUrls: urls }
+          : {};
       await createPost({
         title: trimmed.slice(0, 60).trim(),
         body: trimmed,
@@ -825,7 +862,7 @@ function TopCompose({
         authorName: user.displayName,
         ...(user.photoURL ? { authorPhoto: user.photoURL } : {}),
         authorRole: user.role,
-        ...(urls.length > 0 ? { imageUrls: urls } : {}),
+        ...mediaFields,
       });
       collapse();
       onPosted();
@@ -864,7 +901,7 @@ function TopCompose({
     );
   }
 
-  const uploading = isUploading(images);
+  const uploading = isUploading(images) || videoUploading;
   const canSend = body.trim().length > 0 && !submitting && !uploading;
   const isAdmin = user.role === 'admin';
 
@@ -892,6 +929,13 @@ function TopCompose({
           onChange={setImages}
           inputId={uploaderInputId}
         />
+        <VideoUploader
+          value={video}
+          onChange={setVideo}
+          popoverOpen={videoPopoverOpen}
+          onPopoverChange={setVideoPopoverOpen}
+          onUploadingChange={setVideoUploading}
+        />
 
         <textarea
           ref={taRef}
@@ -915,15 +959,25 @@ function TopCompose({
 
         <div className="tc-actions">
           <div className="tc-icons">
-            <label
-              htmlFor={uploaderInputId}
+            <button
+              type="button"
               className="tc-icon tc-icon-active"
               title="Зураг нэмэх"
               aria-label="Зураг нэмэх"
+              onClick={openImagePicker}
             >
               📷
-            </label>
-            <button type="button" className="tc-icon" disabled title="Удахгүй" aria-label="Видео">🎥</button>
+            </button>
+            <button
+              type="button"
+              className={`tc-icon tc-icon-active${video ? ' tc-icon-disabled' : ''}`}
+              title={video ? 'Бичлэг хэдийн нэмсэн' : 'Бичлэг нэмэх'}
+              aria-label="Бичлэг нэмэх"
+              onClick={openVideoPopover}
+              disabled={!!video}
+            >
+              🎥
+            </button>
             <button type="button" className="tc-icon" disabled title="Удахгүй" aria-label="Эможи">😀</button>
           </div>
           <div className="tc-buttons">
@@ -1015,11 +1069,19 @@ function PostCard({ post, canManage }: { post: Post; canManage: boolean }) {
         <p className="pc-text">{post.body}</p>
       </Link>
 
-      {post.imageUrls && post.imageUrls.length > 0 && (
+      {post.videoUrl && post.videoType ? (
+        <div className="pc-images">
+          <VideoPlayer
+            videoUrl={post.videoUrl}
+            videoType={post.videoType}
+            videoThumbnail={post.videoThumbnail}
+          />
+        </div>
+      ) : post.imageUrls && post.imageUrls.length > 0 ? (
         <div className="pc-images">
           <ImageGrid imageUrls={post.imageUrls} />
         </div>
-      )}
+      ) : null}
 
       <div className="pc-stats">
         <span>❤️ {post.likeCount} likes</span>

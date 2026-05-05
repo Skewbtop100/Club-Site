@@ -10,6 +10,7 @@ import ImageUploader, {
   isUploading,
   uploadedUrls,
 } from '@/components/community/ImageUploader';
+import VideoUploader, { type VideoData } from '@/components/community/VideoUploader';
 
 const TITLE_MAX = 120;
 const BODY_MAX = 5000;
@@ -67,6 +68,9 @@ function NewPostInner() {
   // TODO(cleanup): orphan Cloudinary assets if user cancels with uploads
   // pending. Acceptable until storage pressure — sweep via Admin API.
   const [images, setImages] = useState<UploadItem[]>([]);
+  const [video, setVideo] = useState<VideoData | null>(null);
+  const [videoUploading, setVideoUploading] = useState(false);
+  const [videoPopoverOpen, setVideoPopoverOpen] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -97,12 +101,29 @@ function NewPostInner() {
   const isAdmin = user.role === 'admin';
   const titleTrim = title.trim();
   const bodyTrim = body.trim();
-  const uploading = isUploading(images);
+  const uploading = isUploading(images) || videoUploading;
   const canSubmit =
     !submitting && !uploading &&
     titleTrim.length > 0 && titleTrim.length <= TITLE_MAX &&
     bodyTrim.length > 0 && bodyTrim.length <= BODY_MAX &&
     (category !== 'announcement' || isAdmin);
+
+  function openImagePicker() {
+    if (video) {
+      if (!confirm('Бичлэг устах болно. Үргэлжлүүлэх үү?')) return;
+      setVideo(null);
+    }
+    document.getElementById('np-img-input')?.click();
+  }
+
+  function openVideoPopover() {
+    if (video) return;
+    if (images.length > 0) {
+      if (!confirm('Зураг устах болно. Үргэлжлүүлэх үү?')) return;
+      setImages([]);
+    }
+    setVideoPopoverOpen(true);
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -111,6 +132,15 @@ function NewPostInner() {
     setSubmitting(true);
     try {
       const urls = uploadedUrls(images);
+      const mediaFields = video
+        ? {
+            videoUrl: video.videoUrl,
+            videoType: video.videoType,
+            videoThumbnail: video.videoThumbnail,
+          }
+        : urls.length > 0
+          ? { imageUrls: urls }
+          : {};
       const id = await createPost({
         title: titleTrim,
         body: bodyTrim,
@@ -119,7 +149,7 @@ function NewPostInner() {
         authorName: user.displayName,
         ...(user.photoURL ? { authorPhoto: user.photoURL } : {}),
         authorRole: user.role,
-        ...(urls.length > 0 ? { imageUrls: urls } : {}),
+        ...mediaFields,
       });
       router.push(`/community/${id}`);
     } catch (err) {
@@ -203,9 +233,34 @@ function NewPostInner() {
               onChange={setImages}
               inputId="np-img-input"
             />
-            <label htmlFor="np-img-input" className="np-image-trigger">
+            <button
+              type="button"
+              className="np-image-trigger"
+              onClick={openImagePicker}
+            >
               📷 Зураг нэмэх
-            </label>
+            </button>
+          </div>
+
+          {/* Video */}
+          <div>
+            <label className="np-label">Бичлэг (нэг л байж болно)</label>
+            <VideoUploader
+              value={video}
+              onChange={setVideo}
+              popoverOpen={videoPopoverOpen}
+              onPopoverChange={setVideoPopoverOpen}
+              onUploadingChange={setVideoUploading}
+            />
+            <button
+              type="button"
+              className="np-image-trigger"
+              onClick={openVideoPopover}
+              disabled={!!video}
+              style={video ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}
+            >
+              🎥 Бичлэг нэмэх
+            </button>
           </div>
 
           {/* Actions */}
@@ -218,7 +273,13 @@ function NewPostInner() {
               disabled={!canSubmit}
               className="np-submit"
             >
-              {submitting ? 'Илгээж байна...' : uploading ? 'Зураг ачаалж байна...' : 'Нийтлэх'}
+              {submitting
+                ? 'Илгээж байна...'
+                : videoUploading
+                  ? 'Бичлэг ачаалж байна...'
+                  : isUploading(images)
+                    ? 'Зураг ачаалж байна...'
+                    : 'Нийтлэх'}
             </button>
           </div>
         </form>
