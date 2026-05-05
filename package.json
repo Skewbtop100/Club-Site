@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@cubing/icons": "^3.0.5",
     "@types/aes-js": "^3.1.4",
     "aes-js": "^3.1.2",
     "cubing": "^0.63.3",

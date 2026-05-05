@@ -14,6 +14,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useLang, type Lang } from '@/lib/i18n';
 import { awardSolvePointIfUnderLimit, awardAo5PbIfEligible } from '@/lib/points';
 import { showToast } from '@/lib/toast';
+import { WcaEventIcon } from '@/lib/wca-event-icon';
 import {
   useTimer,
   fmtMs,
@@ -1527,10 +1528,12 @@ export default function TimerPage() {
           }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem', gap: '0.75rem', flexWrap: 'wrap' }}>
               <div style={{
+                display: 'flex', alignItems: 'center', gap: '0.5rem',
                 fontSize: '0.72rem', letterSpacing: '0.12em',
                 textTransform: 'uppercase', color: C.muted, fontWeight: 600,
               }}>
-                {sessionEvent.short.toUpperCase()} Competition Scramble
+                <WcaEventIcon eventId={eventId} size={20} />
+                <span>{sessionEvent.short.toUpperCase()} Competition Scramble</span>
               </div>
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                 <select

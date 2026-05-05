@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import '@cubing/icons/css';
 import { LangProvider } from '@/lib/i18n';
 import { AuthProvider } from '@/lib/auth-context';
 import { ToastHost } from '@/lib/toast';
