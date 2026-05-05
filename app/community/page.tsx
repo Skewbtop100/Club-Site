@@ -11,6 +11,12 @@ import {
   type Post, type PostCategory,
 } from '@/lib/firebase/services/posts';
 import type { AppUser } from '@/lib/auth-context';
+import ImageUploader, {
+  type UploadItem,
+  isUploading,
+  uploadedUrls,
+} from '@/components/community/ImageUploader';
+import ImageGrid from '@/components/community/ImageGrid';
 
 type ChannelId = PostCategory | 'feed';
 
@@ -507,6 +513,14 @@ function CommunityInner() {
           cursor: not-allowed; opacity: 0.55;
           display: inline-flex; align-items: center; justify-content: center;
         }
+        .tc-icon-active {
+          cursor: pointer; opacity: 1;
+          color: var(--text);
+        }
+        .tc-icon-active:hover {
+          background: rgba(127,127,127,0.12);
+          color: var(--accent);
+        }
         .tc-buttons { display: flex; gap: 0.5rem; align-items: center; }
         .tc-cancel {
           padding: 0.45rem 0.9rem;
@@ -636,6 +650,9 @@ function CommunityInner() {
           margin: 0;
         }
 
+        .pc-images {
+          padding: 0 0.875rem 0.875rem;
+        }
         .pc-stats {
           padding: 0.7rem 0.875rem;
           border-top: 1px solid rgba(127,127,127,0.14);
@@ -717,6 +734,11 @@ function TopCompose({
   const [body, setBody] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // TODO(cleanup): if user uploads images then cancels, the assets stay
+  // orphaned in Cloudinary. Acceptable for now (25 GB free); add a sweep
+  // job (cron + Admin API) once we approach the storage limit.
+  const [images, setImages] = useState<UploadItem[]>([]);
+  const uploaderInputId = 'tc-img-input';
 
   // The category the post will be created in. Defaults to the active
   // channel (or 'general' when on Feed). Resets when the user navigates
@@ -780,11 +802,13 @@ function TopCompose({
     setExpanded(false);
     setBody('');
     setError(null);
+    setImages([]);
   }
 
   async function submit() {
     const trimmed = body.trim();
     if (!trimmed || submitting || !user) return;
+    if (isUploading(images)) return;
     if (postCategory === 'announcement' && user.role !== 'admin') {
       setError('Зар нь зөвхөн админ нийтлэх боломжтой.');
       return;
@@ -792,6 +816,7 @@ function TopCompose({
     setError(null);
     setSubmitting(true);
     try {
+      const urls = uploadedUrls(images);
       await createPost({
         title: trimmed.slice(0, 60).trim(),
         body: trimmed,
@@ -800,6 +825,7 @@ function TopCompose({
         authorName: user.displayName,
         ...(user.photoURL ? { authorPhoto: user.photoURL } : {}),
         authorRole: user.role,
+        ...(urls.length > 0 ? { imageUrls: urls } : {}),
       });
       collapse();
       onPosted();
@@ -838,7 +864,8 @@ function TopCompose({
     );
   }
 
-  const canSend = body.trim().length > 0 && !submitting;
+  const uploading = isUploading(images);
+  const canSend = body.trim().length > 0 && !submitting && !uploading;
   const isAdmin = user.role === 'admin';
 
   return (
@@ -859,6 +886,12 @@ function TopCompose({
             );
           })}
         </div>
+
+        <ImageUploader
+          items={images}
+          onChange={setImages}
+          inputId={uploaderInputId}
+        />
 
         <textarea
           ref={taRef}
@@ -882,7 +915,14 @@ function TopCompose({
 
         <div className="tc-actions">
           <div className="tc-icons">
-            <button type="button" className="tc-icon" disabled title="Удахгүй" aria-label="Зураг">📷</button>
+            <label
+              htmlFor={uploaderInputId}
+              className="tc-icon tc-icon-active"
+              title="Зураг нэмэх"
+              aria-label="Зураг нэмэх"
+            >
+              📷
+            </label>
             <button type="button" className="tc-icon" disabled title="Удахгүй" aria-label="Видео">🎥</button>
             <button type="button" className="tc-icon" disabled title="Удахгүй" aria-label="Эможи">😀</button>
           </div>
@@ -974,6 +1014,12 @@ function PostCard({ post, canManage }: { post: Post; canManage: boolean }) {
         {post.title && <h3 className="pc-title">{post.title}</h3>}
         <p className="pc-text">{post.body}</p>
       </Link>
+
+      {post.imageUrls && post.imageUrls.length > 0 && (
+        <div className="pc-images">
+          <ImageGrid imageUrls={post.imageUrls} />
+        </div>
+      )}
 
       <div className="pc-stats">
         <span>❤️ {post.likeCount} likes</span>

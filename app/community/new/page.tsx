@@ -5,6 +5,11 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { createPost, type PostCategory } from '@/lib/firebase/services/posts';
+import ImageUploader, {
+  type UploadItem,
+  isUploading,
+  uploadedUrls,
+} from '@/components/community/ImageUploader';
 
 const TITLE_MAX = 120;
 const BODY_MAX = 5000;
@@ -59,6 +64,9 @@ function NewPostInner() {
   const [body, setBody] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // TODO(cleanup): orphan Cloudinary assets if user cancels with uploads
+  // pending. Acceptable until storage pressure — sweep via Admin API.
+  const [images, setImages] = useState<UploadItem[]>([]);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -89,8 +97,9 @@ function NewPostInner() {
   const isAdmin = user.role === 'admin';
   const titleTrim = title.trim();
   const bodyTrim = body.trim();
+  const uploading = isUploading(images);
   const canSubmit =
-    !submitting &&
+    !submitting && !uploading &&
     titleTrim.length > 0 && titleTrim.length <= TITLE_MAX &&
     bodyTrim.length > 0 && bodyTrim.length <= BODY_MAX &&
     (category !== 'announcement' || isAdmin);
@@ -101,6 +110,7 @@ function NewPostInner() {
     setError(null);
     setSubmitting(true);
     try {
+      const urls = uploadedUrls(images);
       const id = await createPost({
         title: titleTrim,
         body: bodyTrim,
@@ -109,6 +119,7 @@ function NewPostInner() {
         authorName: user.displayName,
         ...(user.photoURL ? { authorPhoto: user.photoURL } : {}),
         authorRole: user.role,
+        ...(urls.length > 0 ? { imageUrls: urls } : {}),
       });
       router.push(`/community/${id}`);
     } catch (err) {
@@ -184,6 +195,19 @@ function NewPostInner() {
             <div className="np-counter">{body.length}/{BODY_MAX}</div>
           </div>
 
+          {/* Images */}
+          <div>
+            <label className="np-label">Зураг (хамгийн ихдээ 5)</label>
+            <ImageUploader
+              items={images}
+              onChange={setImages}
+              inputId="np-img-input"
+            />
+            <label htmlFor="np-img-input" className="np-image-trigger">
+              📷 Зураг нэмэх
+            </label>
+          </div>
+
           {/* Actions */}
           <div className="np-actions">
             <Link href={`/community?channel=${category}`} className="np-cancel">
@@ -194,7 +218,7 @@ function NewPostInner() {
               disabled={!canSubmit}
               className="np-submit"
             >
-              {submitting ? 'Илгээж байна...' : 'Нийтлэх'}
+              {submitting ? 'Илгээж байна...' : uploading ? 'Зураг ачаалж байна...' : 'Нийтлэх'}
             </button>
           </div>
         </form>
@@ -317,6 +341,22 @@ function NewPostInner() {
           font-size: 0.7rem;
           color: rgba(255,255,255,0.4);
           text-align: right;
+        }
+        .np-image-trigger {
+          display: inline-flex; align-items: center; gap: 0.4rem;
+          padding: 0.55rem 0.95rem;
+          background: #34353c;
+          border: 1px dashed rgba(255,255,255,0.2);
+          border-radius: 10px;
+          color: rgba(255,255,255,0.78);
+          font-size: 0.85rem; font-weight: 600;
+          cursor: pointer;
+          transition: background 0.12s, border-color 0.12s, color 0.12s;
+        }
+        .np-image-trigger:hover {
+          background: #3c3d44;
+          color: #fff;
+          border-color: rgba(167,139,250,0.5);
         }
         .np-actions {
           display: flex;

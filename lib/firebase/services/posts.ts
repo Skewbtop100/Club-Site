@@ -57,6 +57,7 @@ export interface CreatePostInput {
   authorName: string;
   authorPhoto?: string;
   authorRole?: 'member' | 'athlete' | 'admin';
+  imageUrls?: string[];
 }
 
 export async function createPost(input: CreatePostInput): Promise<string> {
