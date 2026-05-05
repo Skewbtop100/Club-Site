@@ -48,3 +48,24 @@ export async function getPost(id: string): Promise<Post | null> {
   if (!snap.exists()) return null;
   return { id: snap.id, ...snap.data() } as Post;
 }
+
+export interface CreatePostInput {
+  title: string;
+  body: string;
+  category: PostCategory;
+  authorId: string;
+  authorName: string;
+  authorPhoto?: string;
+  authorRole?: 'member' | 'athlete' | 'admin';
+}
+
+export async function createPost(input: CreatePostInput): Promise<string> {
+  const ref = await addDoc(postsCol(), {
+    ...input,
+    likeCount: 0,
+    commentCount: 0,
+    pinned: false,
+    createdAt: serverTimestamp(),
+  });
+  return ref.id;
+}
