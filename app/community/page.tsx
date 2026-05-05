@@ -5,20 +5,30 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { formatRelativeTime } from '@/lib/relative-time';
+import { showToast } from '@/lib/toast';
 import {
   subscribePosts, createPost, deletePost,
   type Post, type PostCategory,
 } from '@/lib/firebase/services/posts';
 import type { AppUser } from '@/lib/auth-context';
 
+type ChannelId = PostCategory | 'feed';
+
 interface Channel {
-  id: PostCategory;
+  id: ChannelId;
   name: string;
   emoji: string;
   adminOnly?: boolean;
+  isAll?: boolean;
 }
 
-const CHANNELS: { section: string; items: Channel[] }[] = [
+const CHANNELS: { section: string | null; items: Channel[] }[] = [
+  {
+    section: null,
+    items: [
+      { id: 'feed', name: 'Feed', emoji: '🏠', isAll: true },
+    ],
+  },
   {
     section: 'МЭДЭЭ',
     items: [
@@ -41,7 +51,8 @@ const CHANNELS: { section: string; items: Channel[] }[] = [
   },
 ];
 
-const CHANNEL_DESCRIPTIONS: Record<PostCategory, string> = {
+const CHANNEL_DESCRIPTIONS: Record<ChannelId, string> = {
+  feed:         'Бүх ангиллын постууд',
   announcement: 'Тэмцээний зар, мэдээ',
   general:      'Ерөнхий яриа, чат',
   question:     'Шооны асуулт, зөвлөгөө',
@@ -49,13 +60,30 @@ const CHANNEL_DESCRIPTIONS: Record<PostCategory, string> = {
   video:        'Шооны видео хуваалцах',
 };
 
-const ROLE_BADGE: Record<NonNullable<Post['authorRole']>, { label: string; color: string }> = {
-  admin:   { label: 'ADMIN',   color: 'var(--accent)' },
-  athlete: { label: 'ATHLETE', color: '#34d399' },
-  member:  { label: 'MEMBER',  color: 'rgba(255,255,255,0.4)' },
+const ROLE_BADGE: Record<NonNullable<Post['authorRole']>, { label: string; color: string; bg: string }> = {
+  admin:   { label: 'ADMIN',   color: 'var(--accent)', bg: 'rgba(167,139,250,0.14)' },
+  athlete: { label: 'ATHLETE', color: '#10b981',       bg: 'rgba(16,185,129,0.12)' },
+  member:  { label: 'MEMBER',  color: 'var(--muted)',  bg: 'rgba(127,127,127,0.12)' },
 };
 
-const DEFAULT_CHANNEL: Channel = CHANNELS[1].items[0]; // general
+// All post categories (excludes 'feed') — the targets users can post to.
+const POST_CATEGORIES: { id: PostCategory; name: string; emoji: string; adminOnly?: boolean }[] = [
+  { id: 'general',      name: 'ерөнхий',  emoji: '💬' },
+  { id: 'question',     name: 'асуулт',   emoji: '❓' },
+  { id: 'achievement',  name: 'амжилт',   emoji: '🏆' },
+  { id: 'video',        name: 'видео',    emoji: '🎥' },
+  { id: 'announcement', name: 'зар',      emoji: '📢', adminOnly: true },
+];
+
+const CATEGORY_META: Record<PostCategory, { name: string; emoji: string }> = {
+  announcement: { name: 'зар',      emoji: '📢' },
+  general:      { name: 'ерөнхий',  emoji: '💬' },
+  question:     { name: 'асуулт',   emoji: '❓' },
+  achievement:  { name: 'амжилт',   emoji: '🏆' },
+  video:        { name: 'видео',    emoji: '🎥' },
+};
+
+const DEFAULT_CHANNEL: Channel = CHANNELS[0].items[0]; // feed
 
 function findChannel(id: string | null | undefined): Channel {
   if (!id) return DEFAULT_CHANNEL;
@@ -74,7 +102,7 @@ function initialOf(name: string | null | undefined): string {
   return cp ? String.fromCodePoint(cp).toUpperCase() : '?';
 }
 
-function Avatar({ name, photo, size = 40 }: { name: string; photo?: string | null; size?: number }) {
+function Avatar({ name, photo, size = 44 }: { name: string; photo?: string | null; size?: number }) {
   const [broken, setBroken] = useState(false);
   return (
     <span style={{
@@ -105,8 +133,9 @@ export default function CommunityPage() {
   return (
     <Suspense fallback={
       <div style={{
-        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-        background: '#2a2b32', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        position: 'fixed', inset: 0,
+        background: 'var(--bg)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
         color: 'var(--muted)',
       }}>Уншиж байна...</div>
     }>
@@ -130,12 +159,13 @@ function CommunityInner() {
 
   useEffect(() => {
     setLoading(true);
-    const unsub = subscribePosts(
-      (items) => { setPosts(items); setLoading(false); },
-      { category: activeChannel.id },
-    );
+    const opts = activeChannel.isAll ? {} : { category: activeChannel.id as PostCategory };
+    const unsub = subscribePosts((items) => {
+      setPosts(items);
+      setLoading(false);
+    }, opts);
     return () => unsub();
-  }, [activeChannel.id]);
+  }, [activeChannel.id, activeChannel.isAll]);
 
   // Tick every 30s so relative timestamps refresh.
   useEffect(() => {
@@ -149,18 +179,6 @@ function CommunityInner() {
     setSidebarOpen(false);
   }
 
-  function openCompose() {
-    const target = `/community/new?channel=${activeChannel.id}`;
-    if (!user) {
-      router.push(`/login?redirect=${encodeURIComponent(target)}`);
-      return;
-    }
-    if (activeChannel.adminOnly && user.role !== 'admin') return;
-    router.push(target);
-  }
-
-  const composeBlocked = activeChannel.adminOnly && user?.role !== 'admin';
-
   return (
     <>
       <main className="comm-shell">
@@ -172,9 +190,11 @@ function CommunityInner() {
             <span className="comm-server-name">Mongolian Speedcubers</span>
           </header>
           <nav className="comm-nav">
-            {CHANNELS.map((section) => (
-              <div key={section.section} style={{ marginBottom: '0.65rem' }}>
-                <div className="comm-section-label">{section.section}</div>
+            {CHANNELS.map((section, sIdx) => (
+              <div key={section.section ?? `_top_${sIdx}`} style={{ marginBottom: '0.65rem' }}>
+                {section.section && (
+                  <div className="comm-section-label">{section.section}</div>
+                )}
                 {section.items.map((ch) => {
                   const locked = !!ch.adminOnly && user?.role !== 'admin';
                   const active = ch.id === activeChannel.id;
@@ -187,7 +207,7 @@ function CommunityInner() {
                       title={locked ? 'Зөвхөн админ' : undefined}
                     >
                       <span className="comm-channel-emoji">{ch.emoji}</span>
-                      <span className="comm-channel-hash">#</span>
+                      {!ch.isAll && <span className="comm-channel-hash">#</span>}
                       <span className="comm-channel-name">{ch.name}</span>
                       {locked && <span className="comm-channel-lock">🔒</span>}
                     </button>
@@ -210,9 +230,7 @@ function CommunityInner() {
         {/* Main column */}
         <section className="comm-main">
           <header className="comm-header">
-            <Link href="/" className="comm-back-mobile" aria-label="Буцах">
-              ←
-            </Link>
+            <Link href="/" className="comm-back-mobile" aria-label="Буцах">←</Link>
             <button
               className="comm-hamburger"
               onClick={() => setSidebarOpen(true)}
@@ -226,48 +244,43 @@ function CommunityInner() {
             </button>
             <div className="comm-header-title">
               <span style={{ fontSize: '1.05rem' }}>{activeChannel.emoji}</span>
-              <span style={{ color: 'rgba(255,255,255,0.4)', fontWeight: 600 }}>#</span>
-              <span style={{ fontWeight: 800, color: '#fff' }}>{activeChannel.name}</span>
+              {!activeChannel.isAll && (
+                <span style={{ color: 'var(--muted)', fontWeight: 600 }}>#</span>
+              )}
+              <span style={{ fontWeight: 800 }}>{activeChannel.name}</span>
               <span className="comm-header-divider" />
-              <span className="comm-header-desc">
-                {CHANNEL_DESCRIPTIONS[activeChannel.id]}
-              </span>
+              <span className="comm-header-desc">{CHANNEL_DESCRIPTIONS[activeChannel.id]}</span>
             </div>
-            <button
-              className="comm-newpost"
-              onClick={openCompose}
-              disabled={composeBlocked}
-              title={composeBlocked ? 'Зөвхөн админ нийтлэх боломжтой' : undefined}
-            >
-              + Шинэ post
-            </button>
           </header>
 
           <div className="comm-posts" ref={postsScrollRef}>
-            {loading ? (
-              <div style={{ textAlign: 'center', padding: '4rem 1rem', color: 'rgba(255,255,255,0.4)' }}>
-                Уншиж байна...
-              </div>
-            ) : posts.length === 0 ? (
-              <div style={{
-                textAlign: 'center', padding: '5rem 1.5rem',
-                color: 'rgba(255,255,255,0.5)', fontSize: '0.95rem',
-              }}>
-                <div style={{ fontSize: '2.4rem', marginBottom: '0.6rem' }}>🌱</div>
-                #{activeChannel.name} -д ямар ч post алга. Анхных нь та байж магадгүй!
-              </div>
-            ) : (
-              posts.map((p) => (
-                <MessagePostItem key={p.id} post={p} canManage={!!user && (user.uid === p.authorId || user.role === 'admin')} />
-              ))
-            )}
-          </div>
+            <div className="feed-col">
+              <TopCompose
+                activeChannel={activeChannel}
+                user={user}
+                onPosted={() => postsScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
+              />
 
-          <InlineCompose
-            channel={activeChannel}
-            user={user}
-            postsScrollRef={postsScrollRef}
-          />
+              {loading ? (
+                <div className="feed-status">Уншиж байна...</div>
+              ) : posts.length === 0 ? (
+                <div className="feed-empty">
+                  <div style={{ fontSize: '2.4rem', marginBottom: '0.6rem' }}>🌱</div>
+                  {activeChannel.isAll
+                    ? 'Анхны post гарах гэж байна. Та эхлэх үү?'
+                    : `#${activeChannel.name} -д ямар ч post алга. Анхных нь та байж магадгүй!`}
+                </div>
+              ) : (
+                posts.map((p) => (
+                  <PostCard
+                    key={p.id}
+                    post={p}
+                    canManage={!!user && (user.uid === p.authorId || user.role === 'admin')}
+                  />
+                ))
+              )}
+            </div>
+          </div>
         </section>
       </main>
 
@@ -276,12 +289,13 @@ function CommunityInner() {
           position: fixed;
           top: 0; left: 0; right: 0; bottom: 0;
           display: flex;
-          background: #2a2b32;
-          color: #fff;
+          background: var(--bg);
+          color: var(--text);
         }
         .comm-sidebar {
           width: 260px;
           background: #1e1f26;
+          color: #fff;
           display: flex;
           flex-direction: column;
           border-right: 1px solid rgba(0,0,0,0.3);
@@ -299,387 +313,368 @@ function CommunityInner() {
           text-transform: uppercase;
           transition: color 0.12s, background 0.12s;
         }
-        .comm-back-sidebar:hover {
-          color: #fff;
-          background: rgba(255,255,255,0.04);
-        }
+        .comm-back-sidebar:hover { color: #fff; background: rgba(255,255,255,0.04); }
         .comm-server {
-          display: flex;
-          align-items: center;
-          gap: 0.55rem;
+          display: flex; align-items: center; gap: 0.55rem;
           padding: 0.95rem 1rem;
           border-bottom: 1px solid rgba(0,0,0,0.3);
           box-shadow: 0 1px 0 rgba(255,255,255,0.04);
-          font-weight: 800;
-          font-size: 0.92rem;
-          color: #fff;
-          letter-spacing: 0.01em;
+          font-weight: 800; font-size: 0.92rem;
+          color: #fff; letter-spacing: 0.01em;
         }
         .comm-server-emoji { font-size: 1.15rem; }
         .comm-nav { padding: 0.85rem 0.55rem; }
         .comm-section-label {
           padding: 0 0.55rem 0.35rem;
-          font-size: 0.66rem;
-          font-weight: 800;
-          letter-spacing: 0.08em;
-          color: rgba(255,255,255,0.42);
-          text-transform: uppercase;
+          font-size: 0.66rem; font-weight: 800; letter-spacing: 0.08em;
+          color: rgba(255,255,255,0.42); text-transform: uppercase;
         }
         .comm-channel {
-          display: flex;
-          align-items: center;
-          gap: 0.4rem;
-          width: 100%;
-          padding: 0.42rem 0.6rem;
-          margin-bottom: 1px;
-          border-radius: 6px;
-          background: transparent;
-          border: none;
+          display: flex; align-items: center; gap: 0.4rem;
+          width: 100%; padding: 0.42rem 0.6rem; margin-bottom: 1px;
+          border-radius: 6px; background: transparent; border: none;
           color: rgba(255,255,255,0.62);
-          font-family: inherit;
-          font-size: 0.88rem;
-          font-weight: 600;
-          text-align: left;
-          cursor: pointer;
+          font-family: inherit; font-size: 0.88rem; font-weight: 600;
+          text-align: left; cursor: pointer;
           transition: background 0.12s, color 0.12s;
         }
         .comm-channel:hover:not(:disabled):not(.active) {
-          background: #2f3138;
-          color: rgba(255,255,255,0.88);
+          background: #2f3138; color: rgba(255,255,255,0.88);
         }
         .comm-channel.active {
           background: rgba(167,139,250,0.18);
-          color: var(--accent);
-          font-weight: 700;
+          color: var(--accent); font-weight: 700;
         }
-        .comm-channel.locked {
-          opacity: 0.45;
-          cursor: not-allowed;
-        }
+        .comm-channel.locked { opacity: 0.45; cursor: not-allowed; }
         .comm-channel-emoji { font-size: 0.92rem; flex-shrink: 0; }
-        .comm-channel-hash {
-          color: rgba(255,255,255,0.35);
-          font-weight: 500;
-        }
-        .comm-channel.active .comm-channel-hash {
-          color: var(--accent);
-        }
+        .comm-channel-hash { color: rgba(255,255,255,0.35); font-weight: 500; }
+        .comm-channel.active .comm-channel-hash { color: var(--accent); }
         .comm-channel-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
         .comm-channel-lock { font-size: 0.72rem; opacity: 0.7; }
 
         .comm-main {
-          flex: 1;
-          min-width: 0;
-          display: flex;
-          flex-direction: column;
-          background: #2a2b32;
+          flex: 1; min-width: 0;
+          display: flex; flex-direction: column;
+          background: var(--bg);
+          color: var(--text);
         }
         .comm-header {
-          display: flex;
-          align-items: center;
-          gap: 0.7rem;
-          padding: 0 1rem;
-          height: 50px;
-          flex-shrink: 0;
-          background: #2a2b32;
-          border-bottom: 1px solid rgba(0,0,0,0.3);
-          box-shadow: 0 1px 0 rgba(255,255,255,0.03);
+          display: flex; align-items: center; gap: 0.7rem;
+          padding: 0 1rem; height: 50px; flex-shrink: 0;
+          background: var(--card);
+          border-bottom: 1px solid rgba(127,127,127,0.18);
         }
         .comm-hamburger {
           display: none;
-          background: transparent;
-          border: none;
-          color: rgba(255,255,255,0.7);
-          cursor: pointer;
-          padding: 0.3rem;
-          border-radius: 6px;
+          background: transparent; border: none;
+          color: var(--muted); cursor: pointer;
+          padding: 0.3rem; border-radius: 6px;
         }
-        .comm-hamburger:hover { background: rgba(255,255,255,0.06); color: #fff; }
+        .comm-hamburger:hover { background: rgba(127,127,127,0.1); color: var(--text); }
         .comm-back-mobile {
           display: none;
-          align-items: center;
-          justify-content: center;
-          width: 32px;
-          height: 32px;
-          border-radius: 6px;
-          color: rgba(255,255,255,0.7);
-          font-size: 1.15rem;
-          font-weight: 700;
-          text-decoration: none;
-          flex-shrink: 0;
+          align-items: center; justify-content: center;
+          width: 32px; height: 32px; border-radius: 6px;
+          color: var(--muted); font-size: 1.15rem; font-weight: 700;
+          text-decoration: none; flex-shrink: 0;
         }
-        .comm-back-mobile:hover { background: rgba(255,255,255,0.06); color: #fff; }
+        .comm-back-mobile:hover { background: rgba(127,127,127,0.1); color: var(--text); }
         .comm-header-title {
-          display: flex;
-          align-items: center;
-          gap: 0.45rem;
-          flex: 1;
-          min-width: 0;
-          overflow: hidden;
+          display: flex; align-items: center; gap: 0.45rem;
+          flex: 1; min-width: 0; overflow: hidden;
         }
         .comm-header-divider {
-          width: 1px;
-          height: 22px;
-          background: rgba(255,255,255,0.12);
-          margin: 0 0.5rem;
-          flex-shrink: 0;
+          width: 1px; height: 22px;
+          background: rgba(127,127,127,0.25);
+          margin: 0 0.5rem; flex-shrink: 0;
         }
         .comm-header-desc {
-          font-size: 0.82rem;
-          color: rgba(255,255,255,0.5);
-          font-weight: 500;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
+          font-size: 0.82rem; color: var(--muted); font-weight: 500;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
           min-width: 0;
         }
-        .comm-newpost {
-          padding: 0.45rem 0.95rem;
-          border-radius: 7px;
-          border: none;
-          background: linear-gradient(135deg, var(--accent), var(--accent2));
-          color: #fff;
-          font-family: inherit;
-          font-size: 0.82rem;
-          font-weight: 700;
-          cursor: pointer;
-          flex-shrink: 0;
-          transition: opacity 0.15s, transform 0.1s;
-        }
-        .comm-newpost:hover:not(:disabled) { transform: translateY(-1px); }
-        .comm-newpost:disabled { opacity: 0.4; cursor: not-allowed; }
 
         .comm-posts {
-          flex: 1;
-          overflow-y: auto;
-          padding: 1rem 0 1.5rem;
+          flex: 1; overflow-y: auto;
         }
+        .feed-col {
+          max-width: 680px; margin: 0 auto;
+          padding: 1.5rem 1rem 2.5rem;
+          display: flex; flex-direction: column; gap: 1rem;
+        }
+        .feed-status, .feed-empty {
+          text-align: center; padding: 3rem 1rem;
+          color: var(--muted); font-size: 0.95rem;
+        }
+        .feed-empty { padding: 4rem 1.5rem; }
 
-        .post-row {
-          position: relative;
-          padding: 0.7rem 1.2rem 0.7rem 1.2rem;
-          transition: background 0.1s;
-        }
-        .post-row::before {
-          content: '';
-          position: absolute;
-          left: 0; top: 0; bottom: 0;
-          width: 3px;
-          background: var(--accent);
-          opacity: 0;
-          transition: opacity 0.12s;
-        }
-        .post-row:hover {
-          background: rgba(255,255,255,0.03);
-        }
-        .post-row:hover::before { opacity: 1; }
-        .post-row:hover .post-action { opacity: 1; }
-
-        .post-link {
-          display: flex;
-          gap: 0.85rem;
-          text-decoration: none;
-          color: inherit;
-        }
-        .post-content { min-width: 0; flex: 1; }
-        .post-meta {
-          display: flex;
-          align-items: baseline;
-          gap: 0.5rem;
-          margin-bottom: 0.15rem;
-          flex-wrap: wrap;
-        }
-        .post-author {
-          font-size: 0.95rem;
-          font-weight: 700;
-          color: #fff;
-        }
-        .post-role {
-          font-size: 0.6rem;
-          font-weight: 800;
-          letter-spacing: 0.05em;
-          padding: 0.08rem 0.32rem;
-          border-radius: 3px;
-          background: rgba(255,255,255,0.06);
-        }
-        .post-time {
-          font-size: 0.72rem;
-          color: rgba(255,255,255,0.4);
-          font-weight: 500;
-        }
-        .post-pinned {
-          font-size: 0.7rem;
-          color: var(--accent);
-          font-weight: 700;
-        }
-        .post-title {
-          font-size: 1.05rem;
-          font-weight: 800;
-          color: #fff;
-          margin: 0.15rem 0 0.35rem;
-          line-height: 1.3;
-        }
-        .post-text {
-          font-size: 0.92rem;
-          line-height: 1.55;
-          color: rgba(255,255,255,0.78);
-          white-space: pre-wrap;
-          word-break: break-word;
-          margin: 0 0 0.5rem;
-        }
-        .post-counts {
-          font-size: 0.78rem;
-          color: rgba(255,255,255,0.45);
-        }
-        .post-action {
-          position: absolute;
-          top: 0.55rem;
-          right: 0.85rem;
-          background: #34353c;
-          border: 1px solid rgba(255,255,255,0.08);
-          color: rgba(255,255,255,0.7);
-          width: 32px;
-          height: 32px;
-          border-radius: 7px;
-          font-size: 0.95rem;
-          cursor: pointer;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          opacity: 0;
-          transition: opacity 0.12s, background 0.12s, color 0.12s;
-        }
-        .post-action:hover {
-          background: rgba(248,113,113,0.15);
-          color: #fca5a5;
-          border-color: rgba(248,113,113,0.3);
-        }
-
-        .comm-compose {
-          padding: 0.75rem 1rem;
-          padding-bottom: max(0.85rem, env(safe-area-inset-bottom));
-          background: #2a2b32;
-          flex-shrink: 0;
-        }
-        .ic-shell {
-          background: #34353c;
-          border: 1px solid rgba(255,255,255,0.05);
-          border-radius: 10px;
-          padding: 0.55rem 0.75rem 0.55rem;
-          display: flex;
-          flex-direction: column;
-          gap: 0.4rem;
+        /* ── Compose ── */
+        .tc-card {
+          background: var(--card);
+          border: 1px solid rgba(127,127,127,0.16);
+          border-radius: 14px;
+          padding: 0.85rem;
           transition: border-color 0.15s;
         }
-        .ic-shell:focus-within {
-          border-color: rgba(167,139,250,0.35);
+        .tc-collapsed {
+          display: flex; align-items: center; gap: 0.7rem;
         }
-        .ic-textarea {
+        .tc-collapsed-input {
+          flex: 1;
+          height: 42px;
+          padding: 0 1rem;
+          background: rgba(127,127,127,0.08);
+          border: none; border-radius: 999px;
+          color: var(--muted);
+          font-family: inherit; font-size: 0.92rem;
+          text-align: left; cursor: pointer;
+          transition: background 0.12s;
+        }
+        .tc-collapsed-input:hover:not(:disabled) {
+          background: rgba(127,127,127,0.14);
+        }
+        .tc-collapsed-input:disabled {
+          cursor: not-allowed; opacity: 0.6;
+        }
+        .tc-signin {
+          flex: 1;
+          height: 42px; padding: 0 1rem;
+          display: inline-flex; align-items: center;
+          background: rgba(127,127,127,0.08);
+          border-radius: 999px;
+          color: var(--muted); font-size: 0.92rem; font-weight: 600;
+          text-decoration: none;
+        }
+        .tc-signin:hover { background: rgba(127,127,127,0.14); color: var(--text); }
+        .tc-blocked {
+          flex: 1;
+          height: 42px; padding: 0 1rem;
+          display: inline-flex; align-items: center;
+          background: rgba(127,127,127,0.05);
+          border-radius: 999px;
+          color: var(--muted); font-size: 0.9rem; opacity: 0.7;
+        }
+        .tc-expanded {
+          display: flex; flex-direction: column; gap: 0.7rem;
+        }
+        .tc-pills { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+        .tc-pill {
+          padding: 0.35rem 0.8rem;
+          border-radius: 999px;
+          background: rgba(127,127,127,0.08);
+          border: 1px solid transparent;
+          color: var(--text);
+          font-family: inherit; font-size: 0.8rem; font-weight: 600;
+          cursor: pointer;
+          display: inline-flex; align-items: center; gap: 0.3rem;
+          transition: all 0.12s;
+        }
+        .tc-pill:hover:not(.active):not(.disabled) {
+          background: rgba(127,127,127,0.14);
+        }
+        .tc-pill.active {
+          background: rgba(167,139,250,0.16);
+          border-color: rgba(167,139,250,0.4);
+          color: var(--accent);
+        }
+        .tc-pill.disabled { opacity: 0.4; cursor: not-allowed; }
+        .tc-textarea {
           width: 100%;
-          min-height: 24px;
-          max-height: 150px;
-          background: transparent;
-          border: none;
-          outline: none;
-          resize: none;
-          color: #fff;
-          font-family: inherit;
-          font-size: 0.95rem;
-          line-height: 1.5;
-          padding: 0.25rem 0;
-          overflow-y: auto;
+          min-height: 96px; max-height: 240px;
+          background: transparent; border: none; outline: none;
+          color: var(--text); resize: none;
+          font-family: inherit; font-size: 0.95rem; line-height: 1.55;
+          padding: 0.4rem 0.1rem;
         }
-        .ic-textarea::placeholder { color: rgba(255,255,255,0.35); }
-        .ic-textarea:disabled { opacity: 0.6; }
-        .ic-actions {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 0.5rem;
-        }
-        .ic-icons { display: flex; gap: 0.15rem; }
-        .ic-icon {
-          width: 30px;
-          height: 30px;
-          background: transparent;
-          border: none;
-          border-radius: 6px;
-          color: rgba(255,255,255,0.55);
-          font-size: 1rem;
-          cursor: not-allowed;
-          opacity: 0.55;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-        }
-        .ic-send-row { display: flex; align-items: center; gap: 0.5rem; }
-        .ic-expand {
-          padding: 0.4rem 0.8rem;
-          background: transparent;
-          border: 1px solid rgba(255,255,255,0.12);
-          border-radius: 7px;
-          color: rgba(255,255,255,0.7);
-          font-family: inherit;
-          font-size: 0.78rem;
-          font-weight: 600;
-          cursor: pointer;
-          transition: background 0.15s, color 0.15s, border-color 0.15s;
-        }
-        .ic-expand:hover {
-          background: rgba(255,255,255,0.05);
-          color: #fff;
-          border-color: rgba(255,255,255,0.2);
-        }
-        .ic-send {
-          width: 36px;
-          height: 36px;
-          border: none;
-          border-radius: 8px;
-          background: linear-gradient(135deg, var(--accent), var(--accent2));
-          color: #fff;
-          font-size: 1.05rem;
-          font-weight: 800;
-          font-family: inherit;
-          cursor: pointer;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          transition: opacity 0.15s, transform 0.1s;
-        }
-        .ic-send:hover:not(:disabled) { transform: translateY(-1px); }
-        .ic-send:disabled { opacity: 0.4; cursor: not-allowed; }
-        .ic-spin { animation: icSpin 0.7s linear infinite; }
-        @keyframes icSpin { to { transform: rotate(360deg); } }
-        .ic-error {
+        .tc-textarea::placeholder { color: var(--muted); }
+        .tc-error {
           padding: 0.5rem 0.75rem;
-          margin-bottom: 0.55rem;
           background: rgba(248,113,113,0.1);
           border: 1px solid rgba(248,113,113,0.3);
           border-radius: 8px;
-          color: #fca5a5;
-          font-size: 0.82rem;
+          color: #fca5a5; font-size: 0.82rem;
         }
-        .ic-signin, .ic-blocked {
-          display: block;
-          text-align: center;
-          padding: 0.85rem 1rem;
-          border-radius: 10px;
-          background: #34353c;
-          border: 1px solid rgba(255,255,255,0.05);
-          color: rgba(255,255,255,0.65);
-          font-size: 0.9rem;
-          font-weight: 600;
+        .tc-actions {
+          display: flex; align-items: center; justify-content: space-between;
+          gap: 0.5rem; padding-top: 0.4rem;
+          border-top: 1px solid rgba(127,127,127,0.14);
+        }
+        .tc-icons { display: flex; gap: 0.15rem; }
+        .tc-icon {
+          width: 32px; height: 32px;
+          background: transparent; border: none; border-radius: 6px;
+          color: var(--muted); font-size: 1rem;
+          cursor: not-allowed; opacity: 0.55;
+          display: inline-flex; align-items: center; justify-content: center;
+        }
+        .tc-buttons { display: flex; gap: 0.5rem; align-items: center; }
+        .tc-cancel {
+          padding: 0.45rem 0.9rem;
+          background: transparent; border: 1px solid rgba(127,127,127,0.25);
+          border-radius: 8px;
+          color: var(--muted);
+          font-family: inherit; font-size: 0.82rem; font-weight: 600;
+          cursor: pointer;
+          transition: all 0.12s;
+        }
+        .tc-cancel:hover { color: var(--text); border-color: rgba(127,127,127,0.4); }
+        .tc-submit {
+          padding: 0.5rem 1.1rem;
+          background: linear-gradient(135deg, var(--accent), var(--accent2));
+          border: none; border-radius: 8px;
+          color: #fff;
+          font-family: inherit; font-size: 0.85rem; font-weight: 700;
+          cursor: pointer;
+          display: inline-flex; align-items: center; gap: 0.35rem;
+          transition: opacity 0.15s, transform 0.1s;
+        }
+        .tc-submit:hover:not(:disabled) { transform: translateY(-1px); }
+        .tc-submit:disabled { opacity: 0.4; cursor: not-allowed; }
+        .tc-spin { animation: tcSpin 0.7s linear infinite; }
+        @keyframes tcSpin { to { transform: rotate(360deg); } }
+        .tc-expanded-link {
+          display: inline-block;
+          font-size: 0.78rem; color: var(--muted);
           text-decoration: none;
+          padding: 0.2rem 0;
         }
-        .ic-signin:hover { background: #3c3d44; color: #fff; }
-        .ic-blocked { opacity: 0.55; cursor: not-allowed; }
+        .tc-expanded-link:hover { color: var(--accent); text-decoration: underline; }
+
+        /* ── Post card ── */
+        .pc-card {
+          background: var(--card);
+          border: 1px solid rgba(127,127,127,0.16);
+          border-radius: 14px;
+          overflow: hidden;
+          transition: box-shadow 0.15s, border-color 0.15s;
+        }
+        .pc-card:hover {
+          box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+        .pc-header {
+          display: flex; align-items: flex-start; gap: 0.7rem;
+          padding: 0.875rem;
+        }
+        .pc-author-block { flex: 1; min-width: 0; }
+        .pc-author-row {
+          display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap;
+        }
+        .pc-author-name {
+          font-size: 0.95rem; font-weight: 700; color: var(--text);
+        }
+        .pc-meta-row {
+          display: flex; align-items: center; gap: 0.5rem;
+          margin-top: 0.2rem; flex-wrap: wrap;
+        }
+        .pc-role {
+          font-size: 0.6rem; font-weight: 800;
+          letter-spacing: 0.05em;
+          padding: 0.1rem 0.36rem;
+          border-radius: 4px;
+        }
+        .pc-time {
+          font-size: 0.75rem; color: var(--muted); font-weight: 500;
+        }
+        .pc-channel-pill {
+          font-size: 0.7rem; font-weight: 600;
+          padding: 0.12rem 0.45rem;
+          border-radius: 999px;
+          background: rgba(167,139,250,0.12);
+          color: var(--accent);
+          text-decoration: none;
+          display: inline-flex; align-items: center; gap: 0.2rem;
+        }
+        .pc-channel-pill:hover { background: rgba(167,139,250,0.2); }
+        .pc-pinned {
+          font-size: 0.7rem; color: var(--accent); font-weight: 700;
+        }
+
+        .pc-menu-wrap { position: relative; flex-shrink: 0; }
+        .pc-menu-btn {
+          width: 32px; height: 32px;
+          background: transparent; border: none; border-radius: 6px;
+          color: var(--muted); font-size: 1.1rem; font-weight: 700;
+          cursor: pointer; line-height: 1;
+          display: inline-flex; align-items: center; justify-content: center;
+        }
+        .pc-menu-btn:hover { background: rgba(127,127,127,0.12); color: var(--text); }
+        .pc-menu {
+          position: absolute; top: calc(100% + 4px); right: 0;
+          min-width: 160px;
+          background: var(--card);
+          border: 1px solid rgba(127,127,127,0.2);
+          border-radius: 10px;
+          box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+          padding: 4px;
+          z-index: 10;
+          animation: pcFade 0.12s ease;
+        }
+        .pc-menu-item {
+          display: flex; align-items: center; gap: 0.5rem;
+          width: 100%;
+          padding: 0.5rem 0.6rem; border-radius: 7px;
+          background: transparent; border: none;
+          color: var(--text);
+          font-family: inherit; font-size: 0.85rem; font-weight: 600;
+          text-align: left; cursor: pointer;
+        }
+        .pc-menu-item.danger { color: #f87171; }
+        .pc-menu-item:hover { background: rgba(127,127,127,0.1); }
+        .pc-menu-item.danger:hover { background: rgba(248,113,113,0.1); }
+
+        .pc-body-link {
+          display: block; padding: 0 0.875rem 0.875rem;
+          color: inherit; text-decoration: none;
+        }
+        .pc-title {
+          font-size: 1.1rem; font-weight: 800; color: var(--text);
+          margin: 0 0 0.4rem; line-height: 1.3;
+        }
+        .pc-text {
+          font-size: 0.95rem; line-height: 1.55; color: var(--text);
+          white-space: pre-wrap; word-break: break-word;
+          margin: 0;
+        }
+
+        .pc-stats {
+          padding: 0.7rem 0.875rem;
+          border-top: 1px solid rgba(127,127,127,0.14);
+          font-size: 0.78rem; color: var(--muted);
+          display: flex; gap: 0.6rem;
+        }
+        .pc-actions {
+          display: flex;
+          padding: 0.4rem;
+          border-top: 1px solid rgba(127,127,127,0.14);
+          gap: 0.2rem;
+        }
+        .pc-action {
+          flex: 1;
+          display: inline-flex; align-items: center; justify-content: center;
+          gap: 0.4rem;
+          padding: 0.55rem 0.5rem;
+          background: transparent; border: none; border-radius: 8px;
+          color: var(--muted);
+          font-family: inherit; font-size: 0.85rem; font-weight: 600;
+          cursor: pointer; text-decoration: none;
+          transition: background 0.12s, color 0.12s;
+        }
+        .pc-action:hover {
+          background: rgba(127,127,127,0.08);
+          color: var(--text);
+        }
+        .pc-action.like:hover { color: #f87171; }
+
+        @keyframes pcFade {
+          from { opacity: 0; transform: translateY(-4px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
 
         .comm-backdrop { display: none; }
 
         @media (max-width: 900px) {
           .comm-sidebar {
-            position: fixed;
-            top: 0; left: 0; bottom: 0;
+            position: fixed; top: 0; left: 0; bottom: 0;
             z-index: 999;
             transform: translateX(-100%);
             transition: transform 0.22s cubic-bezier(.4,0,.2,1);
@@ -688,8 +683,7 @@ function CommunityInner() {
           .comm-sidebar.open { transform: translateX(0); }
           .comm-backdrop {
             display: block;
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
             background: rgba(0,0,0,0.5);
             z-index: 998;
             animation: commFade 0.18s ease;
@@ -697,8 +691,10 @@ function CommunityInner() {
           .comm-hamburger { display: inline-flex; }
           .comm-back-mobile { display: inline-flex; }
           .comm-header-divider, .comm-header-desc { display: none; }
-          .post-row { padding-left: 1rem; padding-right: 1rem; }
-          .comm-newpost { display: none; }
+        }
+        @media (max-width: 600px) {
+          .feed-col { padding: 1rem 0.75rem 2rem; gap: 0.75rem; }
+          .tc-card { padding: 0.7rem; }
         }
         @keyframes commFade {
           from { opacity: 0; }
@@ -709,123 +705,104 @@ function CommunityInner() {
   );
 }
 
-function MessagePostItem({ post, canManage }: { post: Post; canManage: boolean }) {
-  const date = post.createdAt?.toDate ? post.createdAt.toDate() : new Date();
-  const role = post.authorRole;
-  const badge = role ? ROLE_BADGE[role] : null;
-
-  async function onDelete(e: React.MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!confirm('Энэ post-ыг устгах уу?')) return;
-    try {
-      await deletePost(post.id);
-    } catch (err) {
-      console.error('[community] deletePost', err);
-      alert('Устгахад алдаа гарлаа.');
-    }
-  }
-
-  return (
-    <div className="post-row">
-      <Link href={`/community/${post.id}`} className="post-link">
-        <Avatar name={post.authorName} photo={post.authorPhoto} size={40} />
-        <div className="post-content">
-          <div className="post-meta">
-            <span className="post-author">{post.authorName}</span>
-            {badge && (
-              <span className="post-role" style={{ color: badge.color }}>
-                {badge.label}
-              </span>
-            )}
-            <span className="post-time" title={date.toLocaleString('mn-MN')}>
-              {formatRelativeTime(date)}
-            </span>
-            {post.pinned && <span className="post-pinned">📌 Бэхэлсэн</span>}
-          </div>
-          <h3 className="post-title">{post.title}</h3>
-          <p className="post-text">{post.body}</p>
-          <div className="post-counts">
-            💬 {post.commentCount} · ❤️ {post.likeCount}
-          </div>
-        </div>
-      </Link>
-      {canManage && (
-        <button
-          className="post-action"
-          onClick={onDelete}
-          title="Устгах"
-          aria-label="Устгах"
-        >
-          🗑️
-        </button>
-      )}
-    </div>
-  );
-}
-
-function InlineCompose({
-  channel, user, postsScrollRef,
+function TopCompose({
+  activeChannel, user, onPosted,
 }: {
-  channel: Channel;
+  activeChannel: Channel;
   user: AppUser | null;
-  postsScrollRef: React.RefObject<HTMLDivElement | null>;
+  onPosted: () => void;
 }) {
-  const router = useRouter();
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const [expanded, setExpanded] = useState(false);
   const [body, setBody] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const blocked = !!channel.adminOnly && user?.role !== 'admin';
-
-  // Auto-grow on every value change.
+  // The category the post will be created in. Defaults to the active
+  // channel (or 'general' when on Feed). Resets when the user navigates
+  // to a different channel.
+  const defaultPostCategory: PostCategory =
+    activeChannel.isAll ? 'general' : (activeChannel.id as PostCategory);
+  const [postCategory, setPostCategory] = useState<PostCategory>(defaultPostCategory);
   useEffect(() => {
+    setPostCategory(defaultPostCategory);
+  }, [defaultPostCategory]);
+
+  // Auto-grow textarea.
+  useEffect(() => {
+    if (!expanded) return;
     const ta = taRef.current;
     if (!ta) return;
     ta.style.height = 'auto';
-    ta.style.height = Math.min(ta.scrollHeight, 150) + 'px';
-  }, [body]);
+    ta.style.height = Math.min(ta.scrollHeight, 240) + 'px';
+  }, [body, expanded]);
 
+  // Focus textarea when expanding.
+  useEffect(() => {
+    if (expanded) taRef.current?.focus();
+  }, [expanded]);
+
+  // Sign-out state — user must sign in to compose at all.
   if (!user) {
-    const target = `/community?channel=${channel.id}`;
+    const target = `/community?channel=${activeChannel.id}`;
     return (
-      <div className="comm-compose">
-        <Link
-          href={`/login?redirect=${encodeURIComponent(target)}`}
-          className="ic-signin"
-        >
-          Нэвтэрч байж бичнэ
-        </Link>
+      <div className="tc-card">
+        <div className="tc-collapsed">
+          <Avatar name="?" size={36} />
+          <Link
+            href={`/login?redirect=${encodeURIComponent(target)}`}
+            className="tc-signin"
+          >
+            Нэвтэрч пост бичих...
+          </Link>
+        </div>
       </div>
     );
   }
 
-  if (blocked) {
+  // Channel-level admin gate (for announcement when on that channel
+  // specifically — Feed always allows compose since user can pick another channel).
+  const channelBlocked =
+    !activeChannel.isAll && activeChannel.adminOnly && user.role !== 'admin';
+
+  if (channelBlocked) {
     return (
-      <div className="comm-compose">
-        <div className="ic-blocked">Зөвхөн админ бичнэ</div>
+      <div className="tc-card">
+        <div className="tc-collapsed">
+          <Avatar name={user.displayName} photo={user.photoURL} size={36} />
+          <span className="tc-blocked">Зөвхөн админ #{activeChannel.name} -д нийтэлнэ</span>
+        </div>
       </div>
     );
+  }
+
+  function collapse() {
+    setExpanded(false);
+    setBody('');
+    setError(null);
   }
 
   async function submit() {
     const trimmed = body.trim();
     if (!trimmed || submitting || !user) return;
+    if (postCategory === 'announcement' && user.role !== 'admin') {
+      setError('Зар нь зөвхөн админ нийтлэх боломжтой.');
+      return;
+    }
     setError(null);
     setSubmitting(true);
     try {
       await createPost({
         title: trimmed.slice(0, 60).trim(),
         body: trimmed,
-        category: channel.id,
+        category: postCategory,
         authorId: user.uid,
         authorName: user.displayName,
         ...(user.photoURL ? { authorPhoto: user.photoURL } : {}),
         authorRole: user.role,
       });
-      setBody('');
-      postsScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+      collapse();
+      onPosted();
     } catch (err) {
       console.error('[community] inline createPost', err);
       setError(err instanceof Error ? err.message : 'Илгээхэд алдаа гарлаа.');
@@ -838,60 +815,236 @@ function InlineCompose({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       submit();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      collapse();
     }
   }
 
-  function openExpanded() {
-    router.push(`/community/new?channel=${channel.id}`);
+  if (!expanded) {
+    return (
+      <div className="tc-card">
+        <div className="tc-collapsed">
+          <Avatar name={user.displayName} photo={user.photoURL} size={36} />
+          <button
+            type="button"
+            className="tc-collapsed-input"
+            onClick={() => setExpanded(true)}
+          >
+            Юу шинэ зүйл байна?
+          </button>
+        </div>
+      </div>
+    );
   }
 
   const canSend = body.trim().length > 0 && !submitting;
+  const isAdmin = user.role === 'admin';
 
   return (
-    <div className="comm-compose">
-      {error && <div className="ic-error">{error}</div>}
-      <div className="ic-shell">
+    <div className="tc-card">
+      <div className="tc-expanded">
+        <div className="tc-pills" aria-label="Channel">
+          {POST_CATEGORIES.filter(c => !c.adminOnly || isAdmin).map((c) => {
+            const active = postCategory === c.id;
+            return (
+              <button
+                type="button"
+                key={c.id}
+                className={`tc-pill${active ? ' active' : ''}`}
+                onClick={() => setPostCategory(c.id)}
+              >
+                <span>{c.emoji}</span>#{c.name}
+              </button>
+            );
+          })}
+        </div>
+
         <textarea
           ref={taRef}
-          rows={1}
+          rows={4}
           value={body}
           onChange={(e) => setBody(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder={`#${channel.name} -д бичих...`}
+          placeholder="Юу шинэ зүйл байна?"
           disabled={submitting}
-          className="ic-textarea"
+          className="tc-textarea"
         />
-        <div className="ic-actions">
-          <div className="ic-icons">
-            <button type="button" className="ic-icon" disabled title="Удахгүй" aria-label="Хавсралт">📎</button>
-            <button type="button" className="ic-icon" disabled title="Удахгүй" aria-label="Эможи">😀</button>
-            <button type="button" className="ic-icon" disabled title="Удахгүй" aria-label="Видео">🎥</button>
+
+        {error && <div className="tc-error">{error}</div>}
+
+        <Link
+          href={`/community/new?channel=${postCategory}`}
+          className="tc-expanded-link"
+        >
+          Дэлгэрэнгүй бичих →
+        </Link>
+
+        <div className="tc-actions">
+          <div className="tc-icons">
+            <button type="button" className="tc-icon" disabled title="Удахгүй" aria-label="Зураг">📷</button>
+            <button type="button" className="tc-icon" disabled title="Удахгүй" aria-label="Видео">🎥</button>
+            <button type="button" className="tc-icon" disabled title="Удахгүй" aria-label="Эможи">😀</button>
           </div>
-          <div className="ic-send-row">
+          <div className="tc-buttons">
             <button
               type="button"
-              className="ic-expand"
-              onClick={openExpanded}
+              className="tc-cancel"
+              onClick={collapse}
               disabled={submitting}
             >
-              Дэлгэрэнгүй
+              Болих
             </button>
             <button
               type="button"
-              className="ic-send"
+              className="tc-submit"
               onClick={submit}
               disabled={!canSend}
-              aria-label="Илгээх"
             >
               {submitting ? (
-                <svg width="16" height="16" viewBox="0 0 24 24" className="ic-spin" aria-hidden>
-                  <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="3" strokeDasharray="40 60" strokeLinecap="round"/>
-                </svg>
-              ) : '→'}
+                <>
+                  <svg width="14" height="14" viewBox="0 0 24 24" className="tc-spin" aria-hidden>
+                    <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="3" strokeDasharray="40 60" strokeLinecap="round"/>
+                  </svg>
+                  Илгээж байна
+                </>
+              ) : (
+                <>Илгээх →</>
+              )}
             </button>
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function PostCard({ post, canManage }: { post: Post; canManage: boolean }) {
+  const date = post.createdAt?.toDate ? post.createdAt.toDate() : new Date();
+  const role = post.authorRole;
+  const badge = role ? ROLE_BADGE[role] : null;
+  const cat = CATEGORY_META[post.category];
+
+  async function onShare(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      const url = `${window.location.origin}/community/${post.id}`;
+      await navigator.clipboard.writeText(url);
+      showToast({ msg: 'Хуулагдлаа!', tone: 'success' });
+    } catch {
+      showToast({ msg: 'Хуулж чадсангүй', tone: 'error' });
+    }
+  }
+
+  return (
+    <article className="pc-card">
+      <header className="pc-header">
+        <Avatar name={post.authorName} photo={post.authorPhoto} size={44} />
+        <div className="pc-author-block">
+          <div className="pc-author-row">
+            <span className="pc-author-name">{post.authorName}</span>
+            {badge && (
+              <span
+                className="pc-role"
+                style={{ color: badge.color, background: badge.bg }}
+              >
+                {badge.label}
+              </span>
+            )}
+          </div>
+          <div className="pc-meta-row">
+            <Link
+              href={`/community?channel=${post.category}`}
+              className="pc-channel-pill"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <span>{cat.emoji}</span>#{cat.name}
+            </Link>
+            <span className="pc-time" title={date.toLocaleString('mn-MN')}>
+              {formatRelativeTime(date)}
+            </span>
+            {post.pinned && <span className="pc-pinned">📌 Бэхэлсэн</span>}
+          </div>
+        </div>
+        {canManage && <PostMenu postId={post.id} />}
+      </header>
+
+      <Link href={`/community/${post.id}`} className="pc-body-link">
+        {post.title && <h3 className="pc-title">{post.title}</h3>}
+        <p className="pc-text">{post.body}</p>
+      </Link>
+
+      <div className="pc-stats">
+        <span>❤️ {post.likeCount} likes</span>
+        <span>·</span>
+        <span>💬 {post.commentCount} comments</span>
+      </div>
+
+      <div className="pc-actions">
+        <button type="button" className="pc-action like" aria-label="Like">
+          <span>❤️</span> Like
+        </button>
+        <Link href={`/community/${post.id}`} className="pc-action">
+          <span>💬</span> Comment
+        </Link>
+        <button type="button" className="pc-action" onClick={onShare} aria-label="Share">
+          <span>↗</span> Share
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function PostMenu({ postId }: { postId: string }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [open]);
+
+  async function onDelete() {
+    setOpen(false);
+    if (!confirm('Энэ post-ыг устгах уу?')) return;
+    try {
+      await deletePost(postId);
+      showToast({ msg: 'Устгагдлаа', tone: 'success' });
+    } catch (err) {
+      console.error('[community] deletePost', err);
+      showToast({ msg: 'Устгахад алдаа гарлаа', tone: 'error' });
+    }
+  }
+
+  return (
+    <div className="pc-menu-wrap" ref={wrapRef}>
+      <button
+        type="button"
+        className="pc-menu-btn"
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Илүү"
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        ⋯
+      </button>
+      {open && (
+        <div className="pc-menu" role="menu">
+          <button
+            type="button"
+            className="pc-menu-item danger"
+            onClick={onDelete}
+            role="menuitem"
+          >
+            🗑️ Устгах
+          </button>
+        </div>
+      )}
     </div>
   );
 }
