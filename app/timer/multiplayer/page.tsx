@@ -19,8 +19,7 @@ import {
 } from 'firebase/database';
 import { rtdb } from '@/lib/firebase';
 import { useWakeLock } from '../useWakeLock';
-import { useGanTimer } from '../useGanTimer';
-import { useQiyiTimer } from '../useQiyiTimer';
+import { useSmartTimer } from '../useSmartTimer';
 import { saveMatchHistory, type RoundSnapshotInput } from '@/lib/firebase/services/matchHistory';
 import TimerProfileMenu from '@/components/timer/TimerProfileMenu';
 import MultiplayerHub from './MultiplayerHub';
@@ -44,29 +43,11 @@ import {
 } from '@/lib/icons';
 import type { IconProps as LibIconProps } from '@/lib/icons';
 
-// Solo-timer prefs key — multiplayer reads only the smart-timer brand
-// from here so the user's choice syncs across both pages. Other prefs
-// (precision, hold-to-start, etc.) stay separate via MP_PREFS_KEY.
-type TimerBrand = 'gan' | 'qiyi';
+// Solo-timer prefs key — multiplayer reads `holdTimeMs` from here on
+// first visit so a user who already configured it on /timer doesn't
+// have to set it again. Brand selection is no longer part of this
+// (auto-detected by useSmartTimer instead).
 const SOLO_PREFS_KEY = 'pv.timer.prefs.v1';
-function readSoloTimerBrand(): TimerBrand {
-  if (typeof window === 'undefined') return 'gan';
-  try {
-    const raw = localStorage.getItem(SOLO_PREFS_KEY);
-    if (!raw) return 'gan';
-    const parsed = JSON.parse(raw) as { timerBrand?: unknown };
-    return parsed.timerBrand === 'qiyi' ? 'qiyi' : 'gan';
-  } catch { return 'gan'; }
-}
-function writeSoloTimerBrand(brand: TimerBrand): void {
-  if (typeof window === 'undefined') return;
-  try {
-    const raw = localStorage.getItem(SOLO_PREFS_KEY);
-    const parsed = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
-    parsed.timerBrand = brand;
-    localStorage.setItem(SOLO_PREFS_KEY, JSON.stringify(parsed));
-  } catch { /* localStorage unavailable */ }
-}
 
 // ── Theme ──────────────────────────────────────────────────────────────────
 const C = {
@@ -740,57 +721,35 @@ function MultiplayerPageInner() {
   // RacingScreen subscribes to events through `btSolveCallbacksRef`: it
   // sets handlers on mount that drive its local timer state machine. When
   // not racing, the ref's handlers are null and BT events are no-ops.
-  const [timerBrand, setTimerBrand] = useState<TimerBrand>('gan');
-  useEffect(() => { setTimerBrand(readSoloTimerBrand()); }, []);
   const btSolveCallbacksRef = useRef<{
     onSolveStart?: () => void;
     onSolveStop?: (ms: number) => void;
     onIdle?: () => void;
   }>({});
 
-  const ganHook = useGanTimer({
+  // Single Bluetooth facade — auto-detects GAN vs QiYi from the
+  // device-name prefix the user picks. Replaces the previous
+  // brand-toggle + per-brand hook setup that required the user to
+  // pre-select GAN/QiYi in the Solo prefs.
+  const bt = useSmartTimer({
     onSolveStart: () => btSolveCallbacksRef.current.onSolveStart?.(),
     onSolveStop:  (ms) => btSolveCallbacksRef.current.onSolveStop?.(ms),
     onIdle:       () => btSolveCallbacksRef.current.onIdle?.(),
   });
-  const qiyiHook = useQiyiTimer({
-    onSolveStart: () => btSolveCallbacksRef.current.onSolveStart?.(),
-    onSolveStop:  (ms) => btSolveCallbacksRef.current.onSolveStop?.(ms),
-    onIdle:       () => btSolveCallbacksRef.current.onIdle?.(),
-  });
-  const bt = timerBrand === 'qiyi' ? qiyiHook : ganHook;
   const btConnected = bt.state === 'connected';
-  const btDeviceLabel: string | null =
-    ganHook.state === 'connected' ? 'GAN Timer'
-    : qiyiHook.state === 'connected' ? 'QiYi Timer'
+  const btDeviceLabel: string | null = btConnected
+    ? `${bt.brand === 'qiyi' ? 'QiYi' : 'GAN'} Timer`
     : null;
 
-  // Drop the inactive brand's connection when the user switches.
+  // Connection-failure toast — fires on the idle→error→idle dance the
+  // hook exposes when the user dismisses the picker or pairing fails.
+  const btPrevState = useRef(bt.state);
   useEffect(() => {
-    if (timerBrand === 'qiyi' && ganHook.state === 'connected') ganHook.disconnect();
-    if (timerBrand === 'gan'  && qiyiHook.state === 'connected') qiyiHook.disconnect();
-    // disconnect() functions are stable.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timerBrand]);
-
-  // Connection-failure toast — fires on the idle→error→idle dance from
-  // gan-web-bluetooth when the user dismisses the picker or pairing
-  // fails. We watch for the 'error' transition specifically (not idle,
-  // which is also the resting state).
-  const ganPrevState = useRef(ganHook.state);
-  const qiyiPrevState = useRef(qiyiHook.state);
-  useEffect(() => {
-    if (ganHook.state === 'error' && ganPrevState.current !== 'error') {
+    if (bt.state === 'error' && btPrevState.current !== 'error') {
       showToast({ msg: 'Холболт амжилтгүй', tone: 'error' });
     }
-    ganPrevState.current = ganHook.state;
-  }, [ganHook.state]);
-  useEffect(() => {
-    if (qiyiHook.state === 'error' && qiyiPrevState.current !== 'error') {
-      showToast({ msg: 'Холболт амжилтгүй', tone: 'error' });
-    }
-    qiyiPrevState.current = qiyiHook.state;
-  }, [qiyiHook.state]);
+    btPrevState.current = bt.state;
+  }, [bt.state]);
 
   // Mid-race disconnect toast — connected → idle while we're inside a
   // room (view === 'room') means the device dropped, not a deliberate
@@ -801,17 +760,12 @@ function MultiplayerPageInner() {
   // reduces false positives.
   const wasBtConnectedRef = useRef(false);
   useEffect(() => {
-    const nowConnected = ganHook.state === 'connected' || qiyiHook.state === 'connected';
+    const nowConnected = bt.state === 'connected';
     if (wasBtConnectedRef.current && !nowConnected && view === 'room') {
       showToast({ msg: 'Цаг таслагдсан, дахин холбоно уу', tone: 'error' });
     }
     wasBtConnectedRef.current = nowConnected;
-  }, [ganHook.state, qiyiHook.state, view]);
-
-  const setTimerBrandPersist = useCallback((brand: TimerBrand) => {
-    setTimerBrand(brand);
-    writeSoloTimerBrand(brand);
-  }, []);
+  }, [bt.state, view]);
 
   // Wrap the active hook's disconnect so an in-flight solve doesn't get
   // silently orphaned. liveState === 'running' means the device is mid-
@@ -1571,13 +1525,12 @@ function MultiplayerPageInner() {
       console.error('[mp] leaveRoom error', err);
     }
     try { localStorage.removeItem(LAST_ROOM_KEY); } catch {}
-    if (ganHook.state === 'connected') ganHook.disconnect();
-    if (qiyiHook.state === 'connected') qiyiHook.disconnect();
+    if (bt.state === 'connected') bt.disconnect();
     setRoom(null);
     setRoomCode('');
     setView('lobby');
     setPendingRejoin('');
-  }, [roomCode, userId, ganHook, qiyiHook]);
+  }, [roomCode, userId, bt]);
 
   // After being kicked, the user can re-add themselves. They come back as a
   // brand new member: fresh ready/solve state, no inherited round results,
@@ -1631,11 +1584,10 @@ function MultiplayerPageInner() {
       console.error('[mp] leaveTemporarily cancel onDisconnect', err);
     }
     // Drop BT before nav so the solo timer page can re-pair cleanly.
-    if (ganHook.state === 'connected') ganHook.disconnect();
-    if (qiyiHook.state === 'connected') qiyiHook.disconnect();
+    if (bt.state === 'connected') bt.disconnect();
     // LAST_ROOM_KEY stays set; member entry stays in Firebase.
     router.push('/timer');
-  }, [roomCode, userId, router, ganHook, qiyiHook]);
+  }, [roomCode, userId, router, bt]);
 
   // Exit permanently — remove our slot. If we're the last person in the
   // room (regardless of host status) the room is deleted; otherwise we just
@@ -1654,15 +1606,14 @@ function MultiplayerPageInner() {
       console.error('[mp] exitPermanently error', err);
     }
     try { localStorage.removeItem(LAST_ROOM_KEY); } catch {}
-    if (ganHook.state === 'connected') ganHook.disconnect();
-    if (qiyiHook.state === 'connected') qiyiHook.disconnect();
+    if (bt.state === 'connected') bt.disconnect();
     setRoom(null);
     setRoomCode('');
     setView('lobby');
     setPendingRejoin('');
     setPauseOpen(false);
     setLeaveModalKind(null);
-  }, [roomCode, userId, room?.members, ganHook, qiyiHook]);
+  }, [roomCode, userId, room?.members, bt]);
 
   // Single entry point for the user-initiated leave flow. Picks the right
   // confirmation copy based on context (waiting/active/host/last). For the
@@ -2744,8 +2695,6 @@ function MultiplayerPageInner() {
           prefs={prefs}
           onChange={updatePrefs}
           onClose={() => setSettingsOpen(false)}
-          timerBrand={timerBrand}
-          onTimerBrandChange={setTimerBrandPersist}
           btState={bt.state}
           btDeviceLabel={btDeviceLabel}
           onBtConnect={bt.connect}
@@ -5725,15 +5674,12 @@ function MpSelect<T extends string | number>({
 
 function MpSettingsModal({
   isMobile, prefs, onChange, onClose,
-  timerBrand, onTimerBrandChange,
   btState, btDeviceLabel, onBtConnect, onBtDisconnect,
 }: {
   isMobile: boolean;
   prefs: MpPrefs;
   onChange: (patch: Partial<MpPrefs>) => void;
   onClose: () => void;
-  timerBrand: TimerBrand;
-  onTimerBrandChange: (b: TimerBrand) => void;
   btState: 'unsupported' | 'idle' | 'connecting' | 'connected' | 'error';
   btDeviceLabel: string | null;
   onBtConnect: () => void;
@@ -5817,39 +5763,9 @@ function MpSettingsModal({
         borderRadius: 10, padding: '0.75rem 0.85rem',
         display: 'flex', flexDirection: 'column', gap: '0.7rem',
       }}>
-        {/* Brand toggle — disabled while a connection is live so we can't
-            silently drop the user's active device behind their back. They
-            must disconnect first to switch brands. */}
-        <div style={{
-          display: 'grid', gridTemplateColumns: '1fr 1fr',
-          gap: '0.4rem', padding: '0.2rem',
-          background: C.card, border: `1px solid ${C.border}`,
-          borderRadius: 10,
-        }}>
-          {(['gan', 'qiyi'] as const).map(b => {
-            const active = timerBrand === b;
-            const label = b === 'gan' ? 'GAN' : 'QiYi';
-            return (
-              <button
-                key={b}
-                type="button"
-                disabled={isConnected || isConnecting}
-                onClick={() => onTimerBrandChange(b)}
-                style={{
-                  background: active ? C.accent : 'transparent',
-                  color: active ? '#0a0a0a' : (isConnected || isConnecting) ? C.mutedDim : C.text,
-                  border: 'none', borderRadius: 8,
-                  padding: '0.5rem 0.4rem', fontSize: '0.85rem',
-                  fontFamily: 'inherit', fontWeight: 700,
-                  cursor: (isConnected || isConnecting) ? 'not-allowed' : 'pointer',
-                  letterSpacing: '0.02em',
-                }}
-              >{label}</button>
-            );
-          })}
-        </div>
-
-        {/* Status line — green pill when connected, muted otherwise. */}
+        {/* Status line — green pill when connected, muted otherwise.
+            Brand badge ("GAN" / "QiYi") is appended to the device label
+            by the parent so we don't need to know which protocol matched. */}
         <div style={{
           display: 'flex', alignItems: 'center', gap: '0.45rem',
           fontSize: '0.78rem', color: isConnected ? C.success : C.muted,
@@ -5864,7 +5780,7 @@ function MpSettingsModal({
             {isConnected ? (btDeviceLabel ?? 'Холбогдсон')
               : isConnecting ? 'Холбогдож байна…'
               : isUnsupported ? 'Web Bluetooth дэмжихгүй'
-              : 'Холболт идэвхгүй'}
+              : 'Цаг холбоогүй'}
           </span>
         </div>
 
@@ -5906,12 +5822,12 @@ function MpSettingsModal({
           }}
         >
           {isConnecting ? 'Холбогдож байна…'
-            : isConnected ? 'Холболт салгах'
-            : `Холбох (${timerBrand === 'gan' ? 'GAN' : 'QiYi'})`}
+            : isConnected ? 'Таслах'
+            : 'Холбох'}
         </button>
 
         <div style={{ fontSize: '0.7rem', color: C.muted, lineHeight: 1.45 }}>
-          Холбогдсон үед цаг таны smart timer-аас автоматаар тоологдоно. Space болон touch түр идэвхгүй болно.
+          GAN, QiYi гэх мэт smart timer-уудыг дэмждэг. Холбогдсон үед цаг таны цагнаас автоматаар тоологдоно.
         </div>
       </div>
     </ModalShell>

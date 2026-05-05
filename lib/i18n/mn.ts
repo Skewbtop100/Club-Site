@@ -156,13 +156,16 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'timer.theme.description': 'Lavender on midnight. Нэмэлт theme-үүд удахгүй.',
   'timer.bt.brand': 'Цагийн брэнд',
   'timer.bt.connect': 'Холбох',
-  'timer.bt.disconnect': 'Салгах',
+  'timer.bt.disconnect': 'Таслах',
   'timer.bt.connecting': 'Холбож байна…',
   'timer.bt.connected': 'Холбогдсон',
   'timer.bt.disconnected': 'Салгагдсан',
+  'timer.bt.idle': 'Цаг холбоогүй',
   'timer.bt.unsupported': 'Дэмжигдээгүй',
   'timer.bt.tap-to-pair': 'Холбохын тулд та өөрийн',
   'timer.bt.tap-to-pair.suffix': 'цагийг хослуулна уу.',
+  'timer.bt.support-blurb': 'GAN, QiYi гэх мэт smart timer-уудыг дэмждэг.',
+  'timer.bt.help': 'GAN, QiYi гэх мэт smart timer-уудыг дэмждэг. Холбохын тулд цагаа асаагаад "Холбох" дээр дарна уу.',
 
   // TIMER — MAIN UI
   'timer.solves': 'Solve-ууд',

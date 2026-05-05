@@ -7,8 +7,8 @@ import { Scrambow } from 'scrambow';
 // Type-only import; runtime is dynamic-imported below to avoid HTMLElement
 // access during Next.js server rendering.
 import type { TwistyPlayer as TwistyPlayerType } from 'cubing/twisty';
-import { useGanTimer } from './useGanTimer';
-import { useQiyiTimer, type QiyiPacket } from './useQiyiTimer';
+import { useSmartTimer } from './useSmartTimer';
+import { type QiyiPacket } from './useQiyiTimer';
 import { useWakeLock } from './useWakeLock';
 import { useAuth } from '@/lib/auth-context';
 import { useLang, type Lang } from '@/lib/i18n';
@@ -31,7 +31,6 @@ import {
   type TimerState,
 } from '@/lib/timer-engine';
 
-type TimerBrand = 'gan' | 'qiyi';
 
 // ── Theme constants (lavender + mint, matches the screenshot) ───────────────
 const C = {
@@ -257,7 +256,6 @@ export default function TimerPage() {
   // user knows what to expect). Persisted via PREFS_KEY.
   type TimeEntryMode = 'default' | 'manual' | 'bluetooth';
   const [timeEntryMode, setTimeEntryMode] = useState<TimeEntryMode>('default');
-  const [timerBrand, setTimerBrand] = useState<TimerBrand>('gan');
   // QiYi diagnostic mode — when on, surfaces the last 10 raw BLE packets
   // received from the timer in a fixed overlay so the user can confirm
   // data is arriving even when the parser silently drops it. Only useful
@@ -448,7 +446,6 @@ export default function TimerPage() {
           holdToStart?: boolean;
           holdTimeMs?: number;
           scrambleFontSize?: 'sm' | 'md' | 'lg';
-          timerBrand?: TimerBrand;
           qiyiDebugMode?: boolean;
           timeEntryMode?: TimeEntryMode;
         };
@@ -468,9 +465,6 @@ export default function TimerPage() {
         if (parsed.scrambleFontSize === 'sm' || parsed.scrambleFontSize === 'md' || parsed.scrambleFontSize === 'lg') {
           setScrambleFontSize(parsed.scrambleFontSize);
         }
-        if (parsed.timerBrand === 'gan' || parsed.timerBrand === 'qiyi') {
-          setTimerBrand(parsed.timerBrand);
-        }
         if (typeof parsed.qiyiDebugMode === 'boolean') setQiyiDebugMode(parsed.qiyiDebugMode);
         if (parsed.timeEntryMode === 'default' || parsed.timeEntryMode === 'manual' || parsed.timeEntryMode === 'bluetooth') {
           setTimeEntryMode(parsed.timeEntryMode);
@@ -484,9 +478,9 @@ export default function TimerPage() {
   useEffect(() => {
     if (!prefsLoadedRef.current) return;
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify({ inspectionEnabled, precision, holdToStart, holdTimeMs, scrambleFontSize, timerBrand, qiyiDebugMode, timeEntryMode }));
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ inspectionEnabled, precision, holdToStart, holdTimeMs, scrambleFontSize, qiyiDebugMode, timeEntryMode }));
     } catch { /* ignore */ }
-  }, [inspectionEnabled, precision, holdToStart, holdTimeMs, scrambleFontSize, timerBrand, qiyiDebugMode, timeEntryMode]);
+  }, [inspectionEnabled, precision, holdToStart, holdTimeMs, scrambleFontSize, qiyiDebugMode, timeEntryMode]);
 
   // Stats — recomputed on every solves change
   const stats = useMemo(() => calcStats(solves), [solves]);
@@ -619,38 +613,23 @@ export default function TimerPage() {
     ganTimerRef.current.reset();
   }, [stopGanInterval]);
 
-  const ganHook = useGanTimer({
+  // Single Bluetooth timer facade — opens one combined picker, detects
+  // brand from the chosen device's name, and routes to the right
+  // protocol underneath. Replaces the previous setup where the user
+  // had to manually pick GAN vs QiYi before connecting. `gan` keeps
+  // its name purely for downstream-call-site continuity.
+  const gan = useSmartTimer({
     onSolveStart: handleBtSolveStart,
     onSolveStop: handleBtSolveStop,
     onIdle: handleBtIdle,
   });
-  const qiyiHook = useQiyiTimer({
-    onSolveStart: handleBtSolveStart,
-    onSolveStop: handleBtSolveStop,
-    onIdle: handleBtIdle,
-  });
-
-  // The "active" hook is whichever the user selected. Downstream code uses
-  // `gan` as the unified surface (state / connect / disconnect / liveState
-  // / deviceName), regardless of brand.
-  const gan = timerBrand === 'qiyi' ? qiyiHook : ganHook;
   const ganConnected = gan.state === 'connected';
-  // Human-readable label for whichever brand is currently connected. We
-  // check each hook directly so the label is correct even mid-transition
-  // when one hook has fully connected and the other hasn't dropped yet.
-  const connectedTimerName: string | null =
-    ganHook.state === 'connected' ? 'GAN Timer'
-      : qiyiHook.state === 'connected' ? 'QiYi Timer'
-      : null;
-
-  // When the user switches brand, drop any lingering connection on the now-
-  // inactive hook so we never have two BT timers active at once.
-  useEffect(() => {
-    if (timerBrand === 'qiyi' && ganHook.state === 'connected') ganHook.disconnect();
-    if (timerBrand === 'gan'  && qiyiHook.state === 'connected') qiyiHook.disconnect();
-    // Disconnect functions are stable; depending only on the brand is fine.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timerBrand]);
+  // Human-readable label for whichever brand is currently connected.
+  // Falls back to the persisted last-connected brand so the
+  // "Last: GAN HALO-…" hint reads correctly between sessions.
+  const connectedTimerName: string | null = ganConnected
+    ? `${gan.brand === 'qiyi' ? 'QiYi' : 'GAN'} Timer`
+    : null;
 
   // Safety net: clear the interval on unmount or if the connection drops.
   useEffect(() => {
@@ -2598,8 +2577,6 @@ export default function TimerPage() {
           timeEntryMode={timeEntryMode} setTimeEntryMode={setTimeEntryMode}
           // Bluetooth
           gan={gan}
-          timerBrand={timerBrand}
-          setTimerBrand={setTimerBrand}
           qiyiDebugMode={qiyiDebugMode}
           setQiyiDebugMode={setQiyiDebugMode}
           // Display
@@ -2607,12 +2584,13 @@ export default function TimerPage() {
         />
       )}
 
-      {/* QiYi DEBUG MODE overlay — last 10 raw BLE packets. Visible only
-          when the QiYi brand is selected AND the user has flipped the
-          toggle in Settings → Bluetooth. Lets the user verify data is
-          actually arriving from unfamiliar firmware (e.g. V2-3650). */}
-      {timerBrand === 'qiyi' && qiyiDebugMode && (
-        <QiyiDebugOverlay packets={qiyiHook.recentPackets} C={C} />
+      {/* QiYi DEBUG MODE overlay — last 10 raw BLE packets. Visible
+          only when QiYi was the auto-detected brand AND the user has
+          flipped the toggle in Settings → Bluetooth. Lets the user
+          verify data is actually arriving from unfamiliar firmware
+          (e.g. V2-3650). */}
+      {gan.brand === 'qiyi' && qiyiDebugMode && (
+        <QiyiDebugOverlay packets={gan.recentPackets} C={C} />
       )}
 
       {/* Solve detail modal — shows time, full scramble, and penalty editor */}
@@ -3520,10 +3498,10 @@ interface SettingsPanelProps {
   setPrecision: (p: Precision) => void;
   timeEntryMode: 'default' | 'manual' | 'bluetooth';
   setTimeEntryMode: (m: 'default' | 'manual' | 'bluetooth') => void;
+  // The unified smart-timer surface. Typed loosely on purpose — this
+  // panel only reads { state, brand, deviceName, connect, disconnect }.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   gan: any;
-  timerBrand: TimerBrand;
-  setTimerBrand: (b: TimerBrand) => void;
   scrambleFontSize: 'sm' | 'md' | 'lg';
   setScrambleFontSize: (s: 'sm' | 'md' | 'lg') => void;
   qiyiDebugMode: boolean;
@@ -3589,14 +3567,15 @@ function SettingsPanel(props: SettingsPanelProps) {
   );
 
   const renderBluetooth = () => {
-    const { gan, timerBrand, setTimerBrand } = props;
+    const { gan } = props;
     const connected = gan.state === 'connected';
     const connecting = gan.state === 'connecting';
     const unsupported = gan.state === 'unsupported';
-    const brandLabel = timerBrand === 'qiyi' ? 'QiYi' : 'GAN';
-    const brandHint = timerBrand === 'qiyi'
-      ? 'Compatible with QiYi Smart Timer (QY-Timer). The device must be powered on and within range. Pairing uses Web Bluetooth — no QiYi app needed.'
-      : 'Compatible with the GAN Halo Smart Timer over Bluetooth. The physical pads control inspection and the timer while connected.';
+    // gan.brand is set live during a connection and falls back to the
+    // last-connected brand from localStorage. Used purely for the
+    // small "(GAN)" / "(QiYi)" badge so the user knows which protocol
+    // matched their device.
+    const brandBadge = gan.brand === 'qiyi' ? 'QiYi' : gan.brand === 'gan' ? 'GAN' : null;
     // iOS doesn't expose Web Bluetooth in any system browser (Apple
     // restriction — Safari, iOS Chrome, iOS Edge are all WebKit and all
     // missing the API), so the generic "use Chrome or Edge" advice is
@@ -3607,22 +3586,6 @@ function SettingsPanel(props: SettingsPanelProps) {
     const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent);
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-        <SegmentedRow
-          label={t('timer.bt.brand')}
-          value={timerBrand}
-          onChange={(b: TimerBrand) => {
-            // Switching brand mid-connection drops the active connection
-            // (handled by the page's effect). Don't allow during connecting.
-            if (connecting) return;
-            setTimerBrand(b);
-          }}
-          options={[
-            { value: 'gan',  label: 'GAN',  title: 'GAN Halo Smart Timer' },
-            { value: 'qiyi', label: 'QiYi', title: 'QiYi Smart Timer (QY-Timer)' },
-          ]}
-          c={c}
-        />
-
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           gap: '0.75rem', padding: '0.75rem', borderRadius: 10,
@@ -3635,7 +3598,21 @@ function SettingsPanel(props: SettingsPanelProps) {
                 background: connected ? c.success : c.mutedDim,
                 flexShrink: 0,
               }} />
-              {connected ? `${t('timer.bt.connected')} (${brandLabel})` : connecting ? t('timer.bt.connecting') : unsupported ? t('timer.bt.unsupported') : `${t('timer.bt.disconnected')} — ${brandLabel}`}
+              {connected ? (
+                <>
+                  {t('timer.bt.connected')}
+                  {brandBadge && (
+                    <span style={{
+                      fontSize: '0.7rem', fontWeight: 700, color: c.muted,
+                      background: 'rgba(255,255,255,0.06)',
+                      padding: '0.1rem 0.4rem', borderRadius: 999,
+                      letterSpacing: '0.04em',
+                    }}>{brandBadge}</span>
+                  )}
+                </>
+              ) : connecting ? t('timer.bt.connecting')
+                : unsupported ? t('timer.bt.unsupported')
+                : t('timer.bt.idle')}
             </span>
             {connected && gan.deviceName && (
               <span style={{ fontSize: '0.74rem', color: c.muted, fontFamily: '"JetBrains Mono", monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -3644,7 +3621,7 @@ function SettingsPanel(props: SettingsPanelProps) {
             )}
             {!connected && !connecting && !unsupported && (
               <span style={{ fontSize: '0.74rem', color: c.muted }}>
-                {t('timer.bt.tap-to-pair')} {brandLabel} {t('timer.bt.tap-to-pair.suffix')}
+                {t('timer.bt.support-blurb')}
               </span>
             )}
           </div>
@@ -3722,17 +3699,10 @@ function SettingsPanel(props: SettingsPanelProps) {
           </div>
         ) : (
           <div style={{ fontSize: '0.78rem', color: c.muted, lineHeight: 1.55 }}>
-            {brandHint}
+            {t('timer.bt.help')}
           </div>
         )}
-        {timerBrand === 'qiyi' && !unsupported && (
-          <div style={{ fontSize: '0.7rem', color: c.mutedDim, lineHeight: 1.55 }}>
-            QiYi support uses a community-reverse-engineered protocol. If your
-            specific firmware revision rejects the handshake, please report
-            which device model you tested.
-          </div>
-        )}
-        {timerBrand === 'qiyi' && (
+        {(connected && gan.brand === 'qiyi') && (
           <div style={{
             marginTop: '0.25rem',
             paddingTop: '0.7rem',

@@ -454,9 +454,12 @@ const en = {
   'timer.bt.connecting': 'Connecting…',
   'timer.bt.connected': 'Connected',
   'timer.bt.disconnected': 'Disconnected',
+  'timer.bt.idle': 'No timer connected',
   'timer.bt.unsupported': 'Not supported',
   'timer.bt.tap-to-pair': 'Tap Connect to pair your',
   'timer.bt.tap-to-pair.suffix': 'timer.',
+  'timer.bt.support-blurb': 'Supports GAN, QiYi and other smart timers.',
+  'timer.bt.help': 'Supports GAN, QiYi and other smart timers. Power on the timer and tap "Connect" to pair.',
 
   // TIMER — MAIN UI (solo + multiplayer shared bits)
   'timer.solves': 'Solves',
