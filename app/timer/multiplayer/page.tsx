@@ -3806,12 +3806,12 @@ function RacingScreen({
     (timer.state === 'stopped' && timer.stopFlashing) ||
     (btConnectedForColor && btLiveState === 'getSet');
 
-  const borderColor =
-    pending ? C.warn
-    : timer.state === 'armed'
-        ? (timer.armedReady ? C.success : C.danger)
-    : timer.state === 'running' ? C.accent
-    : C.border;
+  // Border colour stays constant across the arming/running cycle —
+  // arming feedback lives on the digit colour (timerColor) and the
+  // glow (timerGlow). The amber border for `pending` is the one
+  // exception: it's a multiplayer-only "you still need to confirm
+  // OK/+2/DNF" cue, not a timer-state transition, so it stays.
+  const borderColor = pending ? C.warn : C.border;
 
   // ── Mobile / tablet layout: header + tabs + S1..S5 strip + bottom nav ─
   if (isMobile) {
@@ -3949,13 +3949,16 @@ function RacingScreen({
             onTimerTouchEnd();
           }}
           style={{
-            background: timer.state === 'armed' && timer.armedReady ? `${C.success}10` : C.card,
+            background: C.card,
             border: `1px solid ${borderColor}`,
             borderRadius: 16, padding: '1rem',
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             userSelect: 'none', cursor: interactionLocked ? 'default' : 'pointer',
             textAlign: 'center', touchAction: 'manipulation',
-            transition: 'border-color 0.12s, background 0.12s',
+            // Only the `pending` amber border still animates; the armed
+            // background flash was removed because it read as "the
+            // whole panel is changing" on tablets.
+            transition: 'border-color 0.12s',
           }}
         >
           {timer.state === 'inspecting' && (
@@ -4169,13 +4172,15 @@ function MobileRacingLayout({
               style={{
                 flex: '1 1 0%', minHeight: 0,
                 margin: '0.4rem 0.55rem',
-                background: timer.state === 'armed' && timer.armedReady ? `${C.success}10` : 'transparent',
+                background: 'transparent',
                 border: `1px solid ${borderColor}`,
                 borderRadius: 14, padding: '0.4rem',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                 userSelect: 'none', cursor: interactionLocked ? 'default' : 'pointer',
                 textAlign: 'center', touchAction: 'manipulation',
-                transition: 'border-color 0.12s, background 0.12s',
+                // pending-amber border is the only transition left; the
+                // armed background flash was removed in the iPad pass.
+                transition: 'border-color 0.12s',
                 overflow: 'hidden',
               }}
             >

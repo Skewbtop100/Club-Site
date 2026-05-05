@@ -1579,18 +1579,19 @@ export default function TimerPage() {
             </div>
           </section>
 
-          {/* Main timer */}
+          {/* Main timer. Border + background are constant across every
+              timer state — the only colour cue tied to arming lives on
+              the digits themselves (red → green → white via timerColor).
+              Earlier versions tinted the border/background and that
+              read as "the whole panel flashes" on tablets, which was
+              noisy. */}
           <section
             onTouchStart={onTimerTouchStart}
             onTouchEnd={onTimerTouchEnd}
             style={{
               flex: '1 1 auto', minHeight: 0,
               background: C.card,
-              border: `1px solid ${
-                timer.state === 'armed'
-                  ? (timer.armedReady ? C.success : C.danger)
-                  : C.border
-              }`,
+              border: `1px solid ${C.border}`,
               borderRadius: 16, padding: '2rem 1.5rem',
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
               // iOS / iPad: kill text selection, long-press callout
@@ -1602,7 +1603,6 @@ export default function TimerPage() {
               WebkitTouchCallout: 'none',
               touchAction: 'manipulation',
               cursor: 'pointer', textAlign: 'center',
-              transition: 'border-color 0.15s',
             }}
           >
             {connectedTimerName && (
@@ -1981,10 +1981,15 @@ export default function TimerPage() {
                   onDismissHint={dismissSwipeHint}
                 />
 
-                {/* Inline cube preview — only on tablets. Phones already
-                    have the 92 px preview in the Stats footer; desktop
-                    has the full sidebar one. Tap to enlarge to the
-                    existing fullscreen modal. */}
+                {/* Inline cube preview — only on tablets (700–1023 px,
+                    which captures iPad portrait). Phones (<700) keep
+                    the 92 px preview that already lives in the Stats
+                    footer; desktop (≥1024) keeps the full sidebar one
+                    so the tablet branch never overlaps with either.
+                    overflow:hidden clips anything the TwistyPlayer's
+                    fallback might spill (some iOS Safari builds render
+                    the alg as text when WebGL bails) so it can never
+                    masquerade as a duplicate of the scramble row. */}
                 {isTablet && (
                   <div style={{
                     display: 'flex', justifyContent: 'center',
@@ -1992,14 +1997,17 @@ export default function TimerPage() {
                   }}>
                     <button
                       onClick={() => setCubeFullscreenOpen(true)}
-                      aria-label="Enlarge cube"
+                      aria-label="Cube preview — tap to enlarge"
                       style={{
                         width: 140, height: 140, padding: 6,
                         background: C.cardAlt,
                         border: `1px solid ${C.border}`, borderRadius: 12,
                         display: 'flex', cursor: 'pointer',
                         fontFamily: 'inherit',
+                        position: 'relative',
+                        overflow: 'hidden',
                         WebkitTapHighlightColor: 'transparent',
+                        flexShrink: 0,
                       }}
                     >
                       <CubeViewer eventId={eventId} scramble={scramble} />
