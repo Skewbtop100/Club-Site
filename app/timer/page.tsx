@@ -261,15 +261,22 @@ export default function TimerPage() {
   // data is arriving even when the parser silently drops it. Only useful
   // for unknown firmware variants (e.g. QY-Timer-V2-3650).
   const [qiyiDebugMode, setQiyiDebugMode] = useState(false);
-  // Default false to match SSR; updated after mount. Brief flash possible on
-  // mobile pageload but no hydration mismatch. 900px breakpoint puts iPad
-  // portrait (768) on mobile layout and iPad landscape (1024) on desktop.
+  // Default false to match SSR; updated after mount. 900px breakpoint
+  // puts iPad portrait (768) on mobile layout and iPad landscape
+  // (1024) on desktop.
   const [isMobile, setIsMobile] = useState(false);
   // True for the iPad-portrait / large-Android slice (≥700 px AND on
   // the mobile layout). Used to opt these tablets into a small inline
   // cube preview between the scramble and the timer — phones stay
   // clean and desktop already has the full sidebar preview.
   const [isTablet, setIsTablet] = useState(false);
+  // Set true once the `check()` below has run so layout-dependent JSX
+  // (desktop vs mobile vs tablet-with-cube) waits for breakpoint
+  // detection. Without this gate the SSR/first-paint isMobile=false
+  // briefly renders the desktop tree on iPad before the effect flips
+  // it to mobile — visible as a "duplicate scramble" / missing cube
+  // flash during hydration.
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     const check = () => {
@@ -278,6 +285,7 @@ export default function TimerPage() {
       setIsTablet(w >= 700 && w < 1024);
     };
     check();
+    setMounted(true);
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
   }, []);
@@ -1186,7 +1194,7 @@ export default function TimerPage() {
         backgroundSize: '3px 3px', opacity: 0.7,
       }} />
 
-      {!isMobile && (
+      {mounted && !isMobile && (
       <div className="pv-grid" style={{
         position: 'relative', zIndex: 1,
         display: 'flex',
@@ -1778,7 +1786,7 @@ export default function TimerPage() {
       </div>
       )}
 
-      {isMobile && (() => {
+      {mounted && isMobile && (() => {
         // Solves sorted newest-first (used by Solves and Stats tabs)
         const solvesNewest = [...solves].slice().reverse();
 
