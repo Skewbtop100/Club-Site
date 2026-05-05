@@ -3,7 +3,7 @@
 import { usePathname } from 'next/navigation';
 import Navbar from './Navbar';
 
-const PORTAL_PATHS = ['/login', '/dashboard', '/admin', '/timer'];
+const PORTAL_PATHS = ['/login', '/dashboard', '/admin', '/timer', '/community'];
 
 export default function ConditionalNavbar() {
   const pathname = usePathname();

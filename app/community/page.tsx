@@ -104,7 +104,7 @@ export default function CommunityPage() {
   return (
     <Suspense fallback={
       <div style={{
-        position: 'fixed', top: 60, left: 0, right: 0, bottom: 0,
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
         background: '#2a2b32', display: 'flex', alignItems: 'center', justifyContent: 'center',
         color: 'var(--muted)',
       }}>Уншиж байна...</div>
@@ -164,6 +164,7 @@ function CommunityInner() {
       <main className="comm-shell">
         {/* Sidebar */}
         <aside className={`comm-sidebar${sidebarOpen ? ' open' : ''}`}>
+          <Link href="/" className="comm-back-sidebar">← Буцах</Link>
           <header className="comm-server">
             <span className="comm-server-emoji">🧊</span>
             <span className="comm-server-name">Mongolian Speedcubers</span>
@@ -207,6 +208,9 @@ function CommunityInner() {
         {/* Main column */}
         <section className="comm-main">
           <header className="comm-header">
+            <Link href="/" className="comm-back-mobile" aria-label="Буцах">
+              ←
+            </Link>
             <button
               className="comm-hamburger"
               onClick={() => setSidebarOpen(true)}
@@ -274,7 +278,7 @@ function CommunityInner() {
       <style>{`
         .comm-shell {
           position: fixed;
-          top: 60px; left: 0; right: 0; bottom: 0;
+          top: 0; left: 0; right: 0; bottom: 0;
           display: flex;
           background: #2a2b32;
           color: #fff;
@@ -287,6 +291,21 @@ function CommunityInner() {
           border-right: 1px solid rgba(0,0,0,0.3);
           flex-shrink: 0;
           overflow-y: auto;
+        }
+        .comm-back-sidebar {
+          display: block;
+          padding: 0.55rem 1rem 0.4rem;
+          font-size: 0.74rem;
+          font-weight: 700;
+          letter-spacing: 0.04em;
+          color: rgba(255,255,255,0.45);
+          text-decoration: none;
+          text-transform: uppercase;
+          transition: color 0.12s, background 0.12s;
+        }
+        .comm-back-sidebar:hover {
+          color: #fff;
+          background: rgba(255,255,255,0.04);
         }
         .comm-server {
           display: flex;
@@ -380,6 +399,20 @@ function CommunityInner() {
           border-radius: 6px;
         }
         .comm-hamburger:hover { background: rgba(255,255,255,0.06); color: #fff; }
+        .comm-back-mobile {
+          display: none;
+          align-items: center;
+          justify-content: center;
+          width: 32px;
+          height: 32px;
+          border-radius: 6px;
+          color: rgba(255,255,255,0.7);
+          font-size: 1.15rem;
+          font-weight: 700;
+          text-decoration: none;
+          flex-shrink: 0;
+        }
+        .comm-back-mobile:hover { background: rgba(255,255,255,0.06); color: #fff; }
         .comm-header-title {
           display: flex;
           align-items: center;
@@ -556,7 +589,7 @@ function CommunityInner() {
         @media (max-width: 900px) {
           .comm-sidebar {
             position: fixed;
-            top: 60px; left: 0; bottom: 0;
+            top: 0; left: 0; bottom: 0;
             z-index: 999;
             transform: translateX(-100%);
             transition: transform 0.22s cubic-bezier(.4,0,.2,1);
@@ -566,12 +599,13 @@ function CommunityInner() {
           .comm-backdrop {
             display: block;
             position: fixed;
-            top: 60px; left: 0; right: 0; bottom: 0;
+            top: 0; left: 0; right: 0; bottom: 0;
             background: rgba(0,0,0,0.5);
             z-index: 998;
             animation: commFade 0.18s ease;
           }
           .comm-hamburger { display: inline-flex; }
+          .comm-back-mobile { display: inline-flex; }
           .comm-header-divider, .comm-header-desc { display: none; }
           .post-row { padding-left: 1rem; padding-right: 1rem; }
           .comm-newpost { display: none; }
