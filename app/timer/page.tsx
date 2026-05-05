@@ -603,6 +603,25 @@ export default function TimerPage() {
     return () => { document.body.style.overflow = prev; };
   }, [timer.state]);
 
+  // Cooldown after a solve completes. The action row (✕ / ⊘ / +2 / 💬)
+  // appears the instant timer.state flips to 'stopped' — but the touch
+  // that stopped the timer is still mid-flight, and if the user's finger
+  // lifts on top of a freshly rendered button it triggers an unwanted
+  // action (DNF / +2 / Delete). Render the buttons immediately but keep
+  // them visually-dim and pointerEvents:'none' for a brief window so the
+  // lift-off can't fire on them; flip to armed=true once the touch is
+  // safely over.
+  const [actionsArmed, setActionsArmed] = useState(false);
+  useEffect(() => {
+    if (timer.state !== 'stopped') {
+      setActionsArmed(false);
+      return;
+    }
+    setActionsArmed(false);
+    const id = window.setTimeout(() => setActionsArmed(true), 700);
+    return () => window.clearTimeout(id);
+  }, [timer.state]);
+
   // ── Bluetooth timer (GAN + QiYi) ────────────────────────────────────────
   // Both brands feed the same set of callbacks, so the rest of the page
   // doesn't care which protocol is driving the solve. The active brand is
@@ -1661,13 +1680,14 @@ export default function TimerPage() {
               <SolveActionRow
                 solve={lastSolve}
                 isMobile={isMobile}
+                disabled={!actionsArmed}
                 onDelete={() => setDeleteConfirmOpen(true)}
                 onSetPenalty={setPenaltyOnLast}
                 onOpenComment={() => setCommentSolveId(lastSolve.id)}
               />
             )}
             {timer.state === 'stopped' && lastSolve && lastSolve.penalty !== 'none' && (
-              <UndoActionRow isMobile={isMobile} onUndo={undoPenaltyOnLast} />
+              <UndoActionRow isMobile={isMobile} disabled={!actionsArmed} onUndo={undoPenaltyOnLast} />
             )}
             <div style={{ fontSize: '0.78rem', color: C.muted, marginTop: '1.5rem', letterSpacing: '0.06em', minHeight: '1.2rem' }}>
               {ganConnected && timer.state !== 'running' && timer.state !== 'inspecting' && timer.state !== 'armed' && 'Use the GAN timer pads'}
@@ -2059,13 +2079,14 @@ export default function TimerPage() {
                     <SolveActionRow
                       solve={lastSolve}
                       isMobile={isMobile}
+                      disabled={!actionsArmed}
                       onDelete={() => setDeleteConfirmOpen(true)}
                       onSetPenalty={setPenaltyOnLast}
                       onOpenComment={() => setCommentSolveId(lastSolve.id)}
                     />
                   )}
                   {timer.state === 'stopped' && lastSolve && lastSolve.penalty !== 'none' && (
-                    <UndoActionRow isMobile={isMobile} onUndo={undoPenaltyOnLast} />
+                    <UndoActionRow isMobile={isMobile} disabled={!actionsArmed} onUndo={undoPenaltyOnLast} />
                   )}
                   <div style={{ fontSize: '0.7rem', color: C.muted, marginTop: '0.7rem', letterSpacing: '0.06em', minHeight: '1rem' }}>
                     {ganConnected && timer.state !== 'running' && timer.state !== 'inspecting' && timer.state !== 'armed' && 'Use the GAN timer pads'}
@@ -4382,10 +4403,13 @@ function PenaltyRow({ penalty, onSet }: { penalty: Penalty; onSet: (p: Penalty) 
 // for `UndoActionRow` so the user has a single, prominent way to back
 // out. Delete opens a confirm dialog (parent handles).
 function SolveActionRow({
-  solve, isMobile, onDelete, onSetPenalty, onOpenComment,
+  solve, isMobile, disabled, onDelete, onSetPenalty, onOpenComment,
 }: {
   solve: Solve;
   isMobile: boolean;
+  // True during the brief post-stop cooldown — the row is rendered for
+  // continuity with the fade-in but absorbs no input until armed.
+  disabled: boolean;
   onDelete: () => void;
   onSetPenalty: (p: '+2' | 'dnf') => void;
   onOpenComment: () => void;
@@ -4409,7 +4433,9 @@ function SolveActionRow({
         gap: isMobile ? '0.7rem' : '0.55rem',
         marginTop: '1.1rem',
         animation: 'pv-actionrow-fade 0.32s cubic-bezier(0.2, 0.8, 0.3, 1) both',
-        pointerEvents: 'auto',
+        pointerEvents: disabled ? 'none' : 'auto',
+        opacity: disabled ? 0.3 : 1,
+        transition: 'opacity 0.22s ease-out',
       }}
     >
       <ActionIconBtn
@@ -4694,7 +4720,7 @@ function ManualInlineInput({
 // most-recent solve has a non-'none' penalty. Visually quieter than the
 // full action row so the big "DNF" / "+2" timer text stays the focal
 // point; the user just needs an obvious way back to neutral.
-function UndoActionRow({ isMobile, onUndo }: { isMobile: boolean; onUndo: () => void }) {
+function UndoActionRow({ isMobile, disabled, onUndo }: { isMobile: boolean; disabled: boolean; onUndo: () => void }) {
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
   const size = isMobile ? 40 : 32;
   return (
@@ -4707,7 +4733,9 @@ function UndoActionRow({ isMobile, onUndo }: { isMobile: boolean; onUndo: () => 
         display: 'flex', justifyContent: 'center',
         marginTop: '1.1rem',
         animation: 'pv-actionrow-fade 0.32s cubic-bezier(0.2, 0.8, 0.3, 1) both',
-        pointerEvents: 'auto',
+        pointerEvents: disabled ? 'none' : 'auto',
+        opacity: disabled ? 0.3 : 1,
+        transition: 'opacity 0.22s ease-out',
       }}
     >
       <ActionIconBtn
