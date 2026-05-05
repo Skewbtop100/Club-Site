@@ -17,6 +17,14 @@ const CATEGORIES: { id: PostCategory; label: string; emoji: string; adminOnly?: 
   { id: 'general',      label: 'Ерөнхий', emoji: '💬' },
 ];
 
+const CHANNEL_NAMES: Record<PostCategory, string> = {
+  announcement: 'зар',
+  general:      'ерөнхий',
+  question:     'асуулт',
+  achievement:  'амжилт',
+  video:        'видео',
+};
+
 const VALID_CATEGORIES = new Set<PostCategory>(CATEGORIES.map(c => c.id));
 
 function readChannelParam(value: string | null | undefined): PostCategory {
@@ -29,11 +37,11 @@ function readChannelParam(value: string | null | undefined): PostCategory {
 export default function NewPostPage() {
   return (
     <Suspense fallback={
-      <main style={{ minHeight: '100vh', padding: '6rem 1.25rem 4rem', maxWidth: 720, margin: '0 auto' }}>
-        <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--muted)' }}>
-          Уншиж байна...
-        </div>
-      </main>
+      <div style={{
+        position: 'fixed', inset: 0, background: '#2a2b32',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: 'rgba(255,255,255,0.5)',
+      }}>Уншиж байна...</div>
     }>
       <NewPostInner />
     </Suspense>
@@ -68,11 +76,13 @@ function NewPostInner() {
 
   if (authLoading || !user) {
     return (
-      <main style={{ minHeight: '100vh', padding: '6rem 1.25rem 4rem', maxWidth: 720, margin: '0 auto' }}>
-        <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--muted)' }}>
-          Уншиж байна...
-        </div>
-      </main>
+      <div style={{
+        position: 'fixed', inset: 0, background: '#2a2b32',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: 'rgba(255,255,255,0.5)',
+      }}>
+        Уншиж байна...
+      </div>
     );
   }
 
@@ -109,157 +119,240 @@ function NewPostInner() {
   }
 
   return (
-    <main style={{ minHeight: '100vh', padding: '6rem 1.25rem 4rem', maxWidth: 720, margin: '0 auto' }}>
-      {/* Header */}
-      <div style={{ marginBottom: '2rem' }}>
-        <h1 style={{
-          fontSize: 'clamp(1.6rem, 4.5vw, 2.2rem)', fontWeight: 900, marginBottom: '0.3rem',
-          background: 'linear-gradient(135deg, var(--accent), var(--accent2))',
-          WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
-        }}>
-          Шинэ post
-        </h1>
+    <div className="np-shell">
+      <div className="np-container">
+        <Link href={`/community?channel=${category}`} className="np-breadcrumb">
+          ← #{CHANNEL_NAMES[category]}-руу буцах
+        </Link>
+
+        <header className="np-header">
+          <h1 className="np-title">Дэлгэрэнгүй post бичих</h1>
+          <p className="np-subtitle">Гарчиг + урт текст бүхий пост</p>
+        </header>
+
+        {error && <div className="np-error">{error}</div>}
+
+        <form onSubmit={onSubmit} className="np-form">
+          {/* Category */}
+          <div>
+            <label className="np-label">Ангилал</label>
+            <div className="np-pills">
+              {CATEGORIES.map(c => {
+                const disabled = c.adminOnly && !isAdmin;
+                const active = category === c.id;
+                return (
+                  <button
+                    type="button"
+                    key={c.id}
+                    disabled={disabled}
+                    onClick={() => setCategory(c.id)}
+                    title={disabled ? 'Зөвхөн админ' : undefined}
+                    className={`np-pill${active ? ' active' : ''}${disabled ? ' disabled' : ''}`}
+                  >
+                    <span>{c.emoji}</span>{c.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Title */}
+          <div>
+            <input
+              type="text"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              maxLength={TITLE_MAX}
+              placeholder="Гарчиг..."
+              required
+              className="np-input"
+            />
+            <div className="np-counter">{title.length}/{TITLE_MAX}</div>
+          </div>
+
+          {/* Body */}
+          <div>
+            <textarea
+              value={body}
+              onChange={e => setBody(e.target.value)}
+              maxLength={BODY_MAX}
+              placeholder="Та юу бичмээр байна?"
+              required
+              rows={10}
+              className="np-textarea"
+            />
+            <div className="np-counter">{body.length}/{BODY_MAX}</div>
+          </div>
+
+          {/* Actions */}
+          <div className="np-actions">
+            <Link href={`/community?channel=${category}`} className="np-cancel">
+              Болих
+            </Link>
+            <button
+              type="submit"
+              disabled={!canSubmit}
+              className="np-submit"
+            >
+              {submitting ? 'Илгээж байна...' : 'Нийтлэх'}
+            </button>
+          </div>
+        </form>
       </div>
 
-      {error && (
-        <div style={{
-          padding: '0.8rem 1rem', marginBottom: '1.2rem',
-          background: 'rgba(248,113,113,0.1)',
-          border: '1px solid rgba(248,113,113,0.3)',
-          borderRadius: 10,
-          color: '#fca5a5', fontSize: '0.88rem',
-        }}>
-          {error}
-        </div>
-      )}
-
-      <form onSubmit={onSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-        {/* Category */}
-        <div>
-          <label style={{
-            display: 'block', marginBottom: '0.5rem',
-            fontSize: '0.82rem', fontWeight: 700, color: 'var(--text)',
-          }}>
-            Ангилал
-          </label>
-          <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
-            {CATEGORIES.map(c => {
-              const disabled = c.adminOnly && !isAdmin;
-              const active = category === c.id;
-              return (
-                <button
-                  type="button"
-                  key={c.id}
-                  disabled={disabled}
-                  onClick={() => setCategory(c.id)}
-                  title={disabled ? 'Зөвхөн админ' : undefined}
-                  style={{
-                    padding: '0.5rem 1rem', borderRadius: 999, whiteSpace: 'nowrap',
-                    background: active ? 'rgba(167,139,250,0.18)' : 'var(--card)',
-                    border: `1px solid ${active ? 'rgba(167,139,250,0.4)' : 'rgba(255,255,255,0.08)'}`,
-                    color: active ? 'var(--accent)' : 'var(--text)',
-                    fontSize: '0.85rem', fontWeight: 600, fontFamily: 'inherit',
-                    cursor: disabled ? 'not-allowed' : 'pointer',
-                    opacity: disabled ? 0.4 : 1,
-                    display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
-                    transition: 'all 0.15s',
-                  }}
-                >
-                  <span>{c.emoji}</span>{c.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Title */}
-        <div>
-          <input
-            type="text"
-            value={title}
-            onChange={e => setTitle(e.target.value)}
-            maxLength={TITLE_MAX}
-            placeholder="Гарчиг..."
-            required
-            style={{
-              width: '100%',
-              padding: '0.85rem 1rem',
-              background: 'var(--card)',
-              border: '1px solid rgba(255,255,255,0.08)',
-              borderRadius: 12,
-              color: 'var(--text)', fontSize: '1rem', fontWeight: 600,
-              fontFamily: 'inherit', outline: 'none',
-              transition: 'border-color 0.15s',
-            }}
-          />
-          <div style={{
-            marginTop: '0.3rem', fontSize: '0.72rem', color: 'var(--muted)',
-            textAlign: 'right',
-          }}>
-            {title.length}/{TITLE_MAX}
-          </div>
-        </div>
-
-        {/* Body */}
-        <div>
-          <textarea
-            value={body}
-            onChange={e => setBody(e.target.value)}
-            maxLength={BODY_MAX}
-            placeholder="Та юу бичмээр байна?"
-            required
-            rows={10}
-            style={{
-              width: '100%',
-              padding: '0.85rem 1rem',
-              background: 'var(--card)',
-              border: '1px solid rgba(255,255,255,0.08)',
-              borderRadius: 12,
-              color: 'var(--text)', fontSize: '0.95rem', lineHeight: 1.55,
-              fontFamily: 'inherit', outline: 'none',
-              resize: 'vertical', minHeight: 200,
-              transition: 'border-color 0.15s',
-            }}
-          />
-          <div style={{
-            marginTop: '0.3rem', fontSize: '0.72rem', color: 'var(--muted)',
-            textAlign: 'right',
-          }}>
-            {body.length}/{BODY_MAX}
-          </div>
-        </div>
-
-        {/* Actions */}
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-          gap: '0.75rem', marginTop: '0.5rem',
-        }}>
-          <Link href={`/community?channel=${category}`} style={{
-            padding: '0.7rem 1.2rem', borderRadius: 10,
-            fontSize: '0.9rem', fontWeight: 600,
-            color: 'var(--muted)', textDecoration: 'none',
-          }}>
-            Болих
-          </Link>
-          <button
-            type="submit"
-            disabled={!canSubmit}
-            style={{
-              padding: '0.75rem 1.6rem', borderRadius: 10, border: 'none',
-              fontSize: '0.92rem', fontWeight: 700, fontFamily: 'inherit',
-              background: canSubmit
-                ? 'linear-gradient(135deg, var(--accent), var(--accent2))'
-                : 'rgba(167,139,250,0.25)',
-              color: '#fff',
-              cursor: canSubmit ? 'pointer' : 'not-allowed',
-              opacity: canSubmit ? 1 : 0.7,
-              transition: 'opacity 0.15s, transform 0.1s',
-            }}
-          >
-            {submitting ? 'Илгээж байна...' : 'Нийтлэх'}
-          </button>
-        </div>
-      </form>
-    </main>
+      <style>{`
+        .np-shell {
+          position: fixed;
+          inset: 0;
+          background: #2a2b32;
+          color: #fff;
+          overflow-y: auto;
+        }
+        .np-container {
+          max-width: 720px;
+          margin: 0 auto;
+          padding: 1.4rem 1.25rem 4rem;
+        }
+        .np-breadcrumb {
+          display: inline-block;
+          color: rgba(255,255,255,0.55);
+          font-size: 0.85rem;
+          font-weight: 600;
+          text-decoration: none;
+          padding: 0.4rem 0.6rem;
+          margin: 0 0 1.2rem -0.6rem;
+          border-radius: 7px;
+          transition: background 0.12s, color 0.12s;
+        }
+        .np-breadcrumb:hover { background: rgba(255,255,255,0.05); color: #fff; }
+        .np-header { margin-bottom: 1.6rem; }
+        .np-title {
+          font-size: clamp(1.6rem, 4.5vw, 2.1rem);
+          font-weight: 900;
+          line-height: 1.2;
+          margin-bottom: 0.35rem;
+          background: linear-gradient(135deg, var(--accent), var(--accent2));
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
+        }
+        .np-subtitle {
+          font-size: 0.92rem;
+          color: rgba(255,255,255,0.55);
+        }
+        .np-error {
+          padding: 0.8rem 1rem;
+          margin-bottom: 1.2rem;
+          background: rgba(248,113,113,0.1);
+          border: 1px solid rgba(248,113,113,0.3);
+          border-radius: 10px;
+          color: #fca5a5;
+          font-size: 0.88rem;
+        }
+        .np-form { display: flex; flex-direction: column; gap: 1.25rem; }
+        .np-label {
+          display: block;
+          margin-bottom: 0.5rem;
+          font-size: 0.78rem;
+          font-weight: 800;
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
+          color: rgba(255,255,255,0.6);
+        }
+        .np-pills { display: flex; gap: 0.45rem; flex-wrap: wrap; }
+        .np-pill {
+          padding: 0.5rem 1rem;
+          border-radius: 999px;
+          white-space: nowrap;
+          background: #34353c;
+          border: 1px solid rgba(255,255,255,0.06);
+          color: rgba(255,255,255,0.78);
+          font-size: 0.85rem;
+          font-weight: 600;
+          font-family: inherit;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          gap: 0.35rem;
+          transition: all 0.15s;
+        }
+        .np-pill:hover:not(.active):not(.disabled) {
+          background: #3c3d44;
+          color: #fff;
+        }
+        .np-pill.active {
+          background: rgba(167,139,250,0.18);
+          border-color: rgba(167,139,250,0.4);
+          color: var(--accent);
+        }
+        .np-pill.disabled { opacity: 0.4; cursor: not-allowed; }
+        .np-input, .np-textarea {
+          width: 100%;
+          background: #34353c;
+          border: 1px solid rgba(255,255,255,0.05);
+          border-radius: 10px;
+          color: #fff;
+          font-family: inherit;
+          outline: none;
+          transition: border-color 0.15s;
+        }
+        .np-input:focus, .np-textarea:focus { border-color: rgba(167,139,250,0.4); }
+        .np-input {
+          padding: 0.85rem 1rem;
+          font-size: 1rem;
+          font-weight: 600;
+        }
+        .np-input::placeholder, .np-textarea::placeholder {
+          color: rgba(255,255,255,0.35);
+        }
+        .np-textarea {
+          padding: 0.85rem 1rem;
+          font-size: 0.95rem;
+          line-height: 1.55;
+          resize: vertical;
+          min-height: 200px;
+        }
+        .np-counter {
+          margin-top: 0.3rem;
+          font-size: 0.7rem;
+          color: rgba(255,255,255,0.4);
+          text-align: right;
+        }
+        .np-actions {
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 0.75rem;
+          margin-top: 0.5rem;
+        }
+        .np-cancel {
+          padding: 0.7rem 1.2rem;
+          border-radius: 10px;
+          font-size: 0.9rem;
+          font-weight: 600;
+          color: rgba(255,255,255,0.6);
+          text-decoration: none;
+        }
+        .np-cancel:hover { color: #fff; }
+        .np-submit {
+          padding: 0.75rem 1.6rem;
+          border-radius: 10px;
+          border: none;
+          font-size: 0.92rem;
+          font-weight: 700;
+          font-family: inherit;
+          background: linear-gradient(135deg, var(--accent), var(--accent2));
+          color: #fff;
+          cursor: pointer;
+          transition: opacity 0.15s, transform 0.1s;
+        }
+        .np-submit:hover:not(:disabled) { transform: translateY(-1px); }
+        .np-submit:disabled {
+          opacity: 0.4;
+          cursor: not-allowed;
+          background: rgba(167,139,250,0.25);
+        }
+      `}</style>
+    </div>
   );
 }

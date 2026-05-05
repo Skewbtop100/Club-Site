@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { formatRelativeTime } from '@/lib/relative-time';
 import {
-  subscribePosts, deletePost,
+  subscribePosts, createPost, deletePost,
   type Post, type PostCategory,
 } from '@/lib/firebase/services/posts';
+import type { AppUser } from '@/lib/auth-context';
 
 interface Channel {
   id: PostCategory;
@@ -125,6 +126,7 @@ function CommunityInner() {
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [, setNowTick] = useState(0);
+  const postsScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -241,7 +243,7 @@ function CommunityInner() {
             </button>
           </header>
 
-          <div className="comm-posts">
+          <div className="comm-posts" ref={postsScrollRef}>
             {loading ? (
               <div style={{ textAlign: 'center', padding: '4rem 1rem', color: 'rgba(255,255,255,0.4)' }}>
                 Уншиж байна...
@@ -261,17 +263,11 @@ function CommunityInner() {
             )}
           </div>
 
-          <div className="comm-compose">
-            <button
-              className="comm-compose-input"
-              onClick={openCompose}
-              disabled={composeBlocked}
-            >
-              {composeBlocked
-                ? `#${activeChannel.name} -д зөвхөн админ нийтлэх боломжтой`
-                : `#${activeChannel.name} -д бичих...`}
-            </button>
-          </div>
+          <InlineCompose
+            channel={activeChannel}
+            user={user}
+            postsScrollRef={postsScrollRef}
+          />
         </section>
       </main>
 
@@ -560,29 +556,123 @@ function CommunityInner() {
         }
 
         .comm-compose {
-          padding: 0.7rem 1rem 1rem;
+          padding: 0.75rem 1rem;
+          padding-bottom: max(0.85rem, env(safe-area-inset-bottom));
           background: #2a2b32;
           flex-shrink: 0;
         }
-        .comm-compose-input {
-          width: 100%;
-          height: 48px;
-          padding: 0 1.1rem;
+        .ic-shell {
           background: #34353c;
           border: 1px solid rgba(255,255,255,0.05);
           border-radius: 10px;
-          color: rgba(255,255,255,0.55);
+          padding: 0.55rem 0.75rem 0.55rem;
+          display: flex;
+          flex-direction: column;
+          gap: 0.4rem;
+          transition: border-color 0.15s;
+        }
+        .ic-shell:focus-within {
+          border-color: rgba(167,139,250,0.35);
+        }
+        .ic-textarea {
+          width: 100%;
+          min-height: 24px;
+          max-height: 150px;
+          background: transparent;
+          border: none;
+          outline: none;
+          resize: none;
+          color: #fff;
           font-family: inherit;
-          font-size: 0.92rem;
-          text-align: left;
+          font-size: 0.95rem;
+          line-height: 1.5;
+          padding: 0.25rem 0;
+          overflow-y: auto;
+        }
+        .ic-textarea::placeholder { color: rgba(255,255,255,0.35); }
+        .ic-textarea:disabled { opacity: 0.6; }
+        .ic-actions {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 0.5rem;
+        }
+        .ic-icons { display: flex; gap: 0.15rem; }
+        .ic-icon {
+          width: 30px;
+          height: 30px;
+          background: transparent;
+          border: none;
+          border-radius: 6px;
+          color: rgba(255,255,255,0.55);
+          font-size: 1rem;
+          cursor: not-allowed;
+          opacity: 0.55;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .ic-send-row { display: flex; align-items: center; gap: 0.5rem; }
+        .ic-expand {
+          padding: 0.4rem 0.8rem;
+          background: transparent;
+          border: 1px solid rgba(255,255,255,0.12);
+          border-radius: 7px;
+          color: rgba(255,255,255,0.7);
+          font-family: inherit;
+          font-size: 0.78rem;
+          font-weight: 600;
           cursor: pointer;
-          transition: background 0.15s, color 0.15s;
+          transition: background 0.15s, color 0.15s, border-color 0.15s;
         }
-        .comm-compose-input:hover:not(:disabled) {
-          background: #3c3d44;
-          color: rgba(255,255,255,0.75);
+        .ic-expand:hover {
+          background: rgba(255,255,255,0.05);
+          color: #fff;
+          border-color: rgba(255,255,255,0.2);
         }
-        .comm-compose-input:disabled { opacity: 0.5; cursor: not-allowed; }
+        .ic-send {
+          width: 36px;
+          height: 36px;
+          border: none;
+          border-radius: 8px;
+          background: linear-gradient(135deg, var(--accent), var(--accent2));
+          color: #fff;
+          font-size: 1.05rem;
+          font-weight: 800;
+          font-family: inherit;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          transition: opacity 0.15s, transform 0.1s;
+        }
+        .ic-send:hover:not(:disabled) { transform: translateY(-1px); }
+        .ic-send:disabled { opacity: 0.4; cursor: not-allowed; }
+        .ic-spin { animation: icSpin 0.7s linear infinite; }
+        @keyframes icSpin { to { transform: rotate(360deg); } }
+        .ic-error {
+          padding: 0.5rem 0.75rem;
+          margin-bottom: 0.55rem;
+          background: rgba(248,113,113,0.1);
+          border: 1px solid rgba(248,113,113,0.3);
+          border-radius: 8px;
+          color: #fca5a5;
+          font-size: 0.82rem;
+        }
+        .ic-signin, .ic-blocked {
+          display: block;
+          text-align: center;
+          padding: 0.85rem 1rem;
+          border-radius: 10px;
+          background: #34353c;
+          border: 1px solid rgba(255,255,255,0.05);
+          color: rgba(255,255,255,0.65);
+          font-size: 0.9rem;
+          font-weight: 600;
+          text-decoration: none;
+        }
+        .ic-signin:hover { background: #3c3d44; color: #fff; }
+        .ic-blocked { opacity: 0.55; cursor: not-allowed; }
 
         .comm-backdrop { display: none; }
 
@@ -670,6 +760,138 @@ function MessagePostItem({ post, canManage }: { post: Post; canManage: boolean }
           🗑️
         </button>
       )}
+    </div>
+  );
+}
+
+function InlineCompose({
+  channel, user, postsScrollRef,
+}: {
+  channel: Channel;
+  user: AppUser | null;
+  postsScrollRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const router = useRouter();
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  const [body, setBody] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const blocked = !!channel.adminOnly && user?.role !== 'admin';
+
+  // Auto-grow on every value change.
+  useEffect(() => {
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 150) + 'px';
+  }, [body]);
+
+  if (!user) {
+    const target = `/community?channel=${channel.id}`;
+    return (
+      <div className="comm-compose">
+        <Link
+          href={`/login?redirect=${encodeURIComponent(target)}`}
+          className="ic-signin"
+        >
+          Нэвтэрч байж бичнэ
+        </Link>
+      </div>
+    );
+  }
+
+  if (blocked) {
+    return (
+      <div className="comm-compose">
+        <div className="ic-blocked">Зөвхөн админ бичнэ</div>
+      </div>
+    );
+  }
+
+  async function submit() {
+    const trimmed = body.trim();
+    if (!trimmed || submitting || !user) return;
+    setError(null);
+    setSubmitting(true);
+    try {
+      await createPost({
+        title: trimmed.slice(0, 60).trim(),
+        body: trimmed,
+        category: channel.id,
+        authorId: user.uid,
+        authorName: user.displayName,
+        ...(user.photoURL ? { authorPhoto: user.photoURL } : {}),
+        authorRole: user.role,
+      });
+      setBody('');
+      postsScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err) {
+      console.error('[community] inline createPost', err);
+      setError(err instanceof Error ? err.message : 'Илгээхэд алдаа гарлаа.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      submit();
+    }
+  }
+
+  function openExpanded() {
+    router.push(`/community/new?channel=${channel.id}`);
+  }
+
+  const canSend = body.trim().length > 0 && !submitting;
+
+  return (
+    <div className="comm-compose">
+      {error && <div className="ic-error">{error}</div>}
+      <div className="ic-shell">
+        <textarea
+          ref={taRef}
+          rows={1}
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder={`#${channel.name} -д бичих...`}
+          disabled={submitting}
+          className="ic-textarea"
+        />
+        <div className="ic-actions">
+          <div className="ic-icons">
+            <button type="button" className="ic-icon" disabled title="Удахгүй" aria-label="Хавсралт">📎</button>
+            <button type="button" className="ic-icon" disabled title="Удахгүй" aria-label="Эможи">😀</button>
+            <button type="button" className="ic-icon" disabled title="Удахгүй" aria-label="Видео">🎥</button>
+          </div>
+          <div className="ic-send-row">
+            <button
+              type="button"
+              className="ic-expand"
+              onClick={openExpanded}
+              disabled={submitting}
+            >
+              Дэлгэрэнгүй
+            </button>
+            <button
+              type="button"
+              className="ic-send"
+              onClick={submit}
+              disabled={!canSend}
+              aria-label="Илгээх"
+            >
+              {submitting ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" className="ic-spin" aria-hidden>
+                  <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="3" strokeDasharray="40 60" strokeLinecap="round"/>
+                </svg>
+              ) : '→'}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
