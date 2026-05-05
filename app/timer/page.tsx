@@ -265,9 +265,18 @@ export default function TimerPage() {
   // mobile pageload but no hydration mismatch. 900px breakpoint puts iPad
   // portrait (768) on mobile layout and iPad landscape (1024) on desktop.
   const [isMobile, setIsMobile] = useState(false);
+  // True for the iPad-portrait / large-Android slice (≥700 px AND on
+  // the mobile layout). Used to opt these tablets into a small inline
+  // cube preview between the scramble and the timer — phones stay
+  // clean and desktop already has the full sidebar preview.
+  const [isTablet, setIsTablet] = useState(false);
 
   useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < 900);
+    const check = () => {
+      const w = window.innerWidth;
+      setIsMobile(w < 900);
+      setIsTablet(w >= 700 && w < 1024);
+    };
     check();
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
@@ -571,6 +580,20 @@ export default function TimerPage() {
   useWakeLock(
     timer.state === 'inspecting' || timer.state === 'armed' || timer.state === 'running',
   );
+
+  // Lock the document scroll during an active solve so that pulling /
+  // bouncing on the timer area on iPad / iPhone doesn't drift the
+  // viewport away from the digits. The lock applies in 'inspecting',
+  // 'armed', and 'running'; it lifts the moment the timer is back to
+  // 'idle' or 'stopped'. Restored on unmount in case the user
+  // navigates away mid-solve.
+  useEffect(() => {
+    const active = timer.state === 'inspecting' || timer.state === 'armed' || timer.state === 'running';
+    if (!active) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [timer.state]);
 
   // ── Bluetooth timer (GAN + QiYi) ────────────────────────────────────────
   // Both brands feed the same set of callbacks, so the rest of the page
@@ -1545,6 +1568,12 @@ export default function TimerPage() {
               letterSpacing: '0.04em', color: C.text,
               textAlign: 'center', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
               minHeight: '5rem',
+              // Same iOS-friendly guards as the timer area: scrambles
+              // are read, not selected. The user shouldn't get the
+              // long-press callout when they tap the scramble row.
+              userSelect: 'none',
+              WebkitUserSelect: 'none',
+              WebkitTouchCallout: 'none',
             }}>
               {scramble}
             </div>
@@ -1564,7 +1593,15 @@ export default function TimerPage() {
               }`,
               borderRadius: 16, padding: '2rem 1.5rem',
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-              userSelect: 'none', cursor: 'pointer', textAlign: 'center',
+              // iOS / iPad: kill text selection, long-press callout
+              // (the magnifier / "copy" sheet), and double-tap zoom on
+              // the timer interaction zone. Without this the digits
+              // get selected on every tap and the page drifts.
+              userSelect: 'none',
+              WebkitUserSelect: 'none',
+              WebkitTouchCallout: 'none',
+              touchAction: 'manipulation',
+              cursor: 'pointer', textAlign: 'center',
               transition: 'border-color 0.15s',
             }}
           >
@@ -1944,7 +1981,37 @@ export default function TimerPage() {
                   onDismissHint={dismissSwipeHint}
                 />
 
-                {/* Big timer area */}
+                {/* Inline cube preview — only on tablets. Phones already
+                    have the 92 px preview in the Stats footer; desktop
+                    has the full sidebar one. Tap to enlarge to the
+                    existing fullscreen modal. */}
+                {isTablet && (
+                  <div style={{
+                    display: 'flex', justifyContent: 'center',
+                    margin: '0.2rem 0 0.6rem',
+                  }}>
+                    <button
+                      onClick={() => setCubeFullscreenOpen(true)}
+                      aria-label="Enlarge cube"
+                      style={{
+                        width: 140, height: 140, padding: 6,
+                        background: C.cardAlt,
+                        border: `1px solid ${C.border}`, borderRadius: 12,
+                        display: 'flex', cursor: 'pointer',
+                        fontFamily: 'inherit',
+                        WebkitTapHighlightColor: 'transparent',
+                      }}
+                    >
+                      <CubeViewer eventId={eventId} scramble={scramble} />
+                    </button>
+                  </div>
+                )}
+
+                {/* Big timer area. Background stays transparent across
+                    every state — only the digit colour swaps red→green→
+                    white during arming, since the background flash was
+                    visually noisy on tablets where the timer area takes
+                    a large share of the viewport. */}
                 <section
                   onTouchStart={onTimerTouchStart}
                   onTouchEnd={onTimerTouchEnd}
@@ -1952,11 +2019,13 @@ export default function TimerPage() {
                     flex: '1 1 auto', minHeight: 0,
                     display: 'flex', flexDirection: 'column',
                     alignItems: 'center', justifyContent: 'center',
-                    userSelect: 'none', cursor: 'pointer', textAlign: 'center',
+                    userSelect: 'none',
+                    WebkitUserSelect: 'none',
+                    WebkitTouchCallout: 'none',
+                    cursor: 'pointer', textAlign: 'center',
                     touchAction: 'manipulation',
                     margin: '0 0.7rem',
-                    background: timer.state === 'armed' && timer.armedReady ? `${C.success}10` : 'transparent',
-                    transition: 'background 0.12s',
+                    background: 'transparent',
                   }}
                 >
                   {connectedTimerName && (
@@ -4511,6 +4580,7 @@ function SwipeScrambleRow({
         touchAction: 'pan-y',
         userSelect: 'none',
         WebkitUserSelect: 'none',
+        WebkitTouchCallout: 'none',
       }}
     >
       <div
