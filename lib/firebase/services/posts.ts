@@ -2,7 +2,7 @@ import { db } from '@/lib/firebase';
 import {
   collection, doc, addDoc, deleteDoc, getDocs, getDoc,
   onSnapshot, query, orderBy, serverTimestamp, Timestamp,
-  where, limit as fbLimit,
+  where, limit as fbLimit, increment, runTransaction,
 } from 'firebase/firestore';
 
 export type PostCategory = 'announcement' | 'question' | 'achievement' | 'general' | 'video';
@@ -68,4 +68,59 @@ export async function createPost(input: CreatePostInput): Promise<string> {
     createdAt: serverTimestamp(),
   });
   return ref.id;
+}
+
+export interface Comment {
+  id: string;
+  authorId: string;
+  authorName: string;
+  authorPhoto?: string;
+  authorRole?: 'member' | 'athlete' | 'admin';
+  body: string;
+  createdAt: Timestamp;
+}
+
+export interface CreateCommentInput {
+  postId: string;
+  body: string;
+  authorId: string;
+  authorName: string;
+  authorPhoto?: string;
+  authorRole?: 'member' | 'athlete' | 'admin';
+}
+
+const commentsCol = (postId: string) =>
+  collection(db, 'posts', postId, 'comments');
+
+export function subscribeComments(
+  postId: string,
+  onChange: (comments: Comment[]) => void,
+) {
+  const q = query(commentsCol(postId), orderBy('createdAt', 'asc'));
+  return onSnapshot(q, (snap) => {
+    const items = snap.docs.map(d => ({ id: d.id, ...d.data() }) as Comment);
+    onChange(items);
+  });
+}
+
+export async function createComment(input: CreateCommentInput): Promise<string> {
+  const { postId, ...commentData } = input;
+  // Use a transaction so commentCount on the post stays accurate.
+  const result = await runTransaction(db, async (tx) => {
+    const postRef = postDoc(postId);
+    const postSnap = await tx.get(postRef);
+    if (!postSnap.exists()) throw new Error('Post not found');
+    const newCommentRef = doc(commentsCol(postId));
+    tx.set(newCommentRef, {
+      ...commentData,
+      createdAt: serverTimestamp(),
+    });
+    tx.update(postRef, { commentCount: increment(1) });
+    return newCommentRef.id;
+  });
+  return result;
+}
+
+export async function deletePost(postId: string): Promise<void> {
+  await deleteDoc(postDoc(postId));
 }
