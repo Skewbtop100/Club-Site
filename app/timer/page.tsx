@@ -1994,43 +1994,6 @@ export default function TimerPage() {
                   onDismissHint={dismissSwipeHint}
                 />
 
-                {/* Inline cube preview — only on tablets (700–1023 px,
-                    which captures iPad portrait). Phones (<700) keep
-                    the 92 px preview in the Stats footer; desktop
-                    (≥1024) keeps the full sidebar one. Wrapper shape
-                    mirrors the working desktop sidebar (line ~1760):
-                    a column-flex outer with an inner flex row that
-                    holds CubeViewer at flex:1. Earlier this branch
-                    used a single-level button + overflow:hidden, and
-                    the CubeViewer's flex:'1 1 auto' was collapsing to
-                    zero before TwistyPlayer's WebGL canvas could mount,
-                    leaving an empty grey box on iPad. */}
-                {isTablet && (
-                  <div style={{
-                    display: 'flex', justifyContent: 'center',
-                    margin: '0.2rem 0 0.6rem',
-                  }}>
-                    <button
-                      onClick={() => setCubeFullscreenOpen(true)}
-                      aria-label="Cube preview — tap to enlarge"
-                      style={{
-                        width: 140, height: 140, padding: 6,
-                        background: C.cardAlt,
-                        border: `1px solid ${C.border}`, borderRadius: 12,
-                        display: 'flex', flexDirection: 'column',
-                        cursor: 'pointer',
-                        fontFamily: 'inherit',
-                        flexShrink: 0,
-                        WebkitTapHighlightColor: 'transparent',
-                      }}
-                    >
-                      <div style={{ flex: 1, minHeight: 0, width: '100%', display: 'flex' }}>
-                        <CubeViewer eventId={eventId} scramble={scramble} />
-                      </div>
-                    </button>
-                  </div>
-                )}
-
                 {/* Big timer area. Background stays transparent across
                     every state — only the digit colour swaps red→green→
                     white during arming, since the background flash was
@@ -2431,14 +2394,19 @@ export default function TimerPage() {
                     onClick={() => setCubeFullscreenOpen(true)}
                     aria-label="Enlarge cube"
                     style={{
-                      width: 92, height: 92,
+                      width: 92, height: 92, padding: 4,
                       background: C.cardAlt, border: `1px solid ${C.border}`,
-                      borderRadius: 10, padding: 4,
-                      display: 'flex', cursor: 'pointer',
+                      borderRadius: 10,
+                      display: 'flex', flexDirection: 'column',
+                      cursor: 'pointer',
                       fontFamily: 'inherit',
+                      flexShrink: 0,
+                      WebkitTapHighlightColor: 'transparent',
                     }}
                   >
-                    <CubeViewer eventId={eventId} scramble={scramble} />
+                    <div style={{ flex: 1, minHeight: 0, width: '100%', display: 'flex' }}>
+                      <CubeViewer eventId={eventId} scramble={scramble} />
+                    </div>
                   </button>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
                     <MobileMicroStat label="Ao5"   value={fmtMs(stats.ao5,  false, precision)} accent={stats.ao5 != null} />
