@@ -1,11 +1,8 @@
 import {
-  getDocs,
   setDoc,
   updateDoc,
   deleteDoc,
   onSnapshot,
-  query,
-  where,
   Timestamp,
 } from 'firebase/firestore';
 import { userDoc, usersCol } from '@/lib/firebase/collections';
@@ -29,18 +26,6 @@ export function subscribeUsers(
     (snap) => onData(snap.docs.map((d) => ({ id: d.id, ...d.data() } as AppUser))),
     (err) => onError?.(err),
   );
-}
-
-/**
- * Look up a user by username.
- * Returns the matching document, or null if not found.
- */
-export async function findUserByUsername(username: string): Promise<AppUser | null> {
-  const q = query(usersCol(), where('username', '==', username));
-  const snap = await getDocs(q);
-  if (snap.empty) return null;
-  const d = snap.docs[0];
-  return { id: d.id, ...d.data() } as AppUser;
 }
 
 /** Create a new user with a generated id. */

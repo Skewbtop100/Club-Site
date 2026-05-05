@@ -18,15 +18,8 @@ const SECTION_NAMES: { match: (p: string) => boolean; name: string }[] = [
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  // The /admin login page lives at this same route segment. It must NOT
-  // be wrapped in chrome (the user isn't authenticated yet) or gated
-  // (would cause an infinite redirect loop).
-  const isLoginPage = pathname === '/admin';
-
-  if (isLoginPage) return <>{children}</>;
-
   return (
-    <AdminGate>
+    <AdminGate pathname={pathname}>
       <AdminChrome pathname={pathname}>{children}</AdminChrome>
     </AdminGate>
   );
@@ -34,38 +27,21 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
 // ── Auth gate ─────────────────────────────────────────────────────────────
 //
-// Accepts any of: Firebase Google admin (user.role === 'admin'), the legacy
-// localStorage `isAdmin` flag (set by /admin login), or the legacy session
-// blob `cubeAthleteUser` with role: 'admin'. This matches the gating logic
-// the old single-page dashboard used so we don't break either auth path.
-function AdminGate({ children }: { children: React.ReactNode }) {
+// Admin access requires Google sign-in AND users/{uid}.role === 'admin'.
+// Three states: loading → spinner; signed-out → /login?redirect=…;
+// signed-in non-admin → access-denied card.
+function AdminGate({ pathname, children }: { pathname: string; children: React.ReactNode }) {
   const router = useRouter();
   const { user, loading } = useAuth();
-  const [allowed, setAllowed] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (loading) return;
-    let legacyAdmin = false;
-    try {
-      if (typeof window !== 'undefined') {
-        legacyAdmin = window.localStorage.getItem('isAdmin') === 'true';
-        if (!legacyAdmin) {
-          const session = JSON.parse(window.localStorage.getItem('cubeAthleteUser') || 'null');
-          legacyAdmin = session?.role === 'admin';
-        }
-      }
-    } catch { /* corrupt session blob — treat as not admin */ }
-
-    const isAdmin = user?.role === 'admin' || legacyAdmin;
-    if (!isAdmin) {
-      router.replace('/admin');
-      setAllowed(false);
-    } else {
-      setAllowed(true);
+    if (!user) {
+      router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
     }
-  }, [loading, user, router]);
+  }, [loading, user, pathname, router]);
 
-  if (allowed !== true) {
+  if (loading || (!user)) {
     return (
       <div style={{
         minHeight: '100vh',
@@ -86,6 +62,41 @@ function AdminGate({ children }: { children: React.ReactNode }) {
     );
   }
 
+  if (user.role !== 'admin') {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'var(--bg)', color: 'var(--text)', padding: '2rem 1rem',
+        fontFamily: "'Segoe UI', system-ui, sans-serif",
+      }}>
+        <div style={{
+          maxWidth: 420, width: '100%', textAlign: 'center',
+          background: 'var(--card)', border: '1px solid rgba(255,255,255,0.08)',
+          borderRadius: 16, padding: '2rem 1.6rem',
+          boxShadow: '0 20px 50px rgba(0,0,0,0.45)',
+        }}>
+          <div style={{ fontSize: '2.4rem', marginBottom: '0.5rem' }}>🔒</div>
+          <h1 style={{ fontSize: '1.25rem', fontWeight: 700, margin: '0 0 0.4rem' }}>Хандах эрхгүй</h1>
+          <p style={{ fontSize: '0.9rem', color: 'var(--muted)', margin: '0 0 1.2rem' }}>
+            Энэ хэсэгт нэвтрэх админ эрх шаардлагатай.
+          </p>
+          <Link
+            href="/"
+            style={{
+              display: 'inline-block', padding: '0.55rem 1.1rem', borderRadius: 9,
+              background: 'linear-gradient(135deg, var(--accent), var(--accent2))',
+              color: '#fff', fontWeight: 600, fontSize: '0.88rem',
+              textDecoration: 'none',
+            }}
+          >
+            Нүүр хуудас
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   return <>{children}</>;
 }
 
@@ -101,13 +112,9 @@ function AdminChrome({ pathname, children }: { pathname: string; children: React
   );
 
   async function handleSignOut() {
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem('isAdmin');
-      // cubeAthleteUser left intact — other parts of the app may still need it.
-    }
     try { await signOut(); } catch { /* ignore — best effort */ }
     setMenuOpen(false);
-    router.push('/admin');
+    router.push('/');
   }
 
   return (

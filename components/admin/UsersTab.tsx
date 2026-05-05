@@ -68,14 +68,7 @@ function formatDate(ms: number | null): string {
 export default function UsersTab() {
   const { user: currentUser } = useAuth();
 
-  // Allow Firebase admins, OR the legacy localStorage admin (which is what
-  // gates /admin/dashboard today). Falls back to "denied" only when neither
-  // is true — keeps the legacy admin/password flow working unchanged.
-  const isAdmin = useMemo(() => {
-    if (currentUser?.role === 'admin') return true;
-    if (typeof window !== 'undefined' && window.localStorage.getItem('isAdmin') === 'true') return true;
-    return false;
-  }, [currentUser]);
+  const isAdmin = currentUser?.role === 'admin';
 
   const [users, setUsers] = useState<UserRow[]>([]);
   const [athletes, setAthletes] = useState<Athlete[]>([]);

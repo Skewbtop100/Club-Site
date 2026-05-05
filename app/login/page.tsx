@@ -1,8 +1,7 @@
 'use client';
 
-import { Suspense, useState, useEffect } from 'react';
+import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { findUserByUsername } from '@/lib/firebase/services/users';
 import { useAuth } from '@/lib/auth-context';
 import ThemeToggle from '@/components/layout/ThemeToggle';
 import LangToggle from '@/components/layout/LangToggle';
@@ -20,10 +19,7 @@ function LoginPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { signInWithGoogle } = useAuth();
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
   // ?redirect=/foo lets other pages bounce here and come back. We sanitise
@@ -35,34 +31,10 @@ function LoginPageInner() {
       ? redirectParam
       : null;
 
-  // NOTE: We intentionally do NOT auto-redirect already-signed-in users
-  // away from /login on mount. Earlier this effect bounced any signed-in
-  // admin to /admin/dashboard, which caused this bug:
-  //   1. Admin clicks "Профайл" in the timer dropdown.
-  //   2. Anything that briefly routed through /login (back-button, deep
-  //      link, redirect chain) re-fired this effect.
-  //   3. Effect saw role === 'admin' and replaced /profile with
-  //      /admin/dashboard.
-  // The actual sign-in flows handle their own post-success redirect:
-  // `doGoogleSignIn` below (admin → /admin/dashboard, others → /profile)
-  // and `doLogin` for the legacy username/password form. So removing this
-  // mount-time auto-redirect is safe — the only behavior we lose is
-  // automatically bouncing an already-signed-in user who lands here, which
-  // is fine: they just see the form and can sign in again or navigate away.
-
-  // Legacy localStorage-based auto-login (admin/athlete) — preserved.
-  useEffect(() => {
-    try {
-      const session = JSON.parse(localStorage.getItem('cubeAthleteUser') || 'null');
-      if (session?.role === 'admin') {
-        router.replace('/admin/dashboard');
-      } else if (session?.athleteId || session?.role === 'results_entry') {
-        router.replace('/dashboard');
-      }
-    } catch {
-      localStorage.removeItem('cubeAthleteUser');
-    }
-  }, [router]);
+  // Deliberately no auto-redirect for already-signed-in users. A previous
+  // version bounced admins to /admin/dashboard on mount, which hijacked
+  // navigations that briefly routed through /login (back-button, deep
+  // links). The post-success redirect lives in doGoogleSignIn instead.
 
   async function doGoogleSignIn() {
     setError('');
@@ -70,11 +42,7 @@ function LoginPageInner() {
     try {
       const result = await signInWithGoogle();
       if (!result) return;
-      // Mirror admin status into the legacy localStorage flag so
-      // /admin/dashboard's existing gate still passes for Google admins
-      // without changing the dashboard internals.
       if (result.role === 'admin') {
-        try { localStorage.setItem('isAdmin', 'true'); } catch {}
         router.replace(safeRedirect || '/admin/dashboard');
       } else {
         router.replace(safeRedirect || '/profile');
@@ -87,33 +55,6 @@ function LoginPageInner() {
       }
     } finally {
       setGoogleLoading(false);
-    }
-  }
-
-  async function doLogin() {
-    setError('');
-    if (!username || !password) {
-      setError('Please enter your username and password.');
-      return;
-    }
-    setLoading(true);
-    try {
-      const user = await findUserByUsername(username);
-      if (!user || user.password !== password) {
-        setError('Invalid username or password.');
-        return;
-      }
-      localStorage.setItem('cubeAthleteUser', JSON.stringify({
-        uid: user.id,
-        username: user.username,
-        athleteId: user.athleteId || null,
-        role: user.role || 'athlete',
-      }));
-      router.push(user.role === 'admin' ? '/admin/dashboard' : '/dashboard');
-    } catch (e: unknown) {
-      setError('Login failed: ' + (e instanceof Error ? e.message : String(e)));
-    } finally {
-      setLoading(false);
     }
   }
 
@@ -150,10 +91,9 @@ function LoginPageInner() {
               background: 'linear-gradient(135deg, var(--accent), var(--accent2))',
               WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
             }}>CUBE MN</div>
-            <div style={{ fontSize: '0.82rem', color: 'var(--muted)', marginTop: '0.3rem' }}>Athlete Portal</div>
+            <div style={{ fontSize: '0.82rem', color: 'var(--muted)', marginTop: '0.3rem' }}>Sign in to continue</div>
           </div>
 
-          {/* Google sign-in (primary path for members) */}
           <button
             onClick={doGoogleSignIn}
             disabled={googleLoading}
@@ -179,83 +119,6 @@ function LoginPageInner() {
               <path fill="#EA4335" d="M24 9.75c3.23 0 6.13 1.11 8.41 3.29l6.31-6.31C34.91 3.18 29.93 1 24 1 15.4 1 7.96 5.93 4.34 13.12l7.35 5.7C13.42 13.62 18.27 9.75 24 9.75z"/>
             </svg>
             <span>{googleLoading ? 'Signing in…' : 'Sign in with Google'}</span>
-          </button>
-
-          {/* Divider */}
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: '0.7rem',
-            margin: '1.4rem 0 1rem',
-            color: 'var(--muted)', fontSize: '0.72rem',
-            letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
-          }}>
-            <span style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.08)' }} />
-            <span>or admin login</span>
-            <span style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.08)' }} />
-          </div>
-
-          {/* Username */}
-          <div className="form-group">
-            <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.4rem' }}>
-              Username
-            </label>
-            <input
-              type="text"
-              value={username}
-              onChange={e => setUsername(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && document.getElementById('pw-input')?.focus()}
-              placeholder="Enter your username"
-              autoComplete="username"
-              style={{
-                width: '100%', padding: '0.72rem 0.95rem',
-                background: 'var(--input-bg)', border: '1px solid var(--input-border)',
-                borderRadius: '9px', color: 'var(--text)', fontSize: '0.95rem',
-                outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box',
-              }}
-              onFocus={e => { e.target.style.borderColor = 'var(--accent)'; e.target.style.boxShadow = '0 0 0 3px rgba(124,58,237,0.15)'; }}
-              onBlur={e => { e.target.style.borderColor = 'var(--input-border)'; e.target.style.boxShadow = 'none'; }}
-            />
-          </div>
-
-          {/* Password */}
-          <div className="form-group">
-            <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.4rem' }}>
-              Password
-            </label>
-            <input
-              id="pw-input"
-              type="password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && doLogin()}
-              placeholder="Enter your password"
-              autoComplete="current-password"
-              style={{
-                width: '100%', padding: '0.72rem 0.95rem',
-                background: 'var(--input-bg)', border: '1px solid var(--input-border)',
-                borderRadius: '9px', color: 'var(--text)', fontSize: '0.95rem',
-                outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box',
-              }}
-              onFocus={e => { e.target.style.borderColor = 'var(--accent)'; e.target.style.boxShadow = '0 0 0 3px rgba(124,58,237,0.15)'; }}
-              onBlur={e => { e.target.style.borderColor = 'var(--input-border)'; e.target.style.boxShadow = 'none'; }}
-            />
-          </div>
-
-          {/* Submit */}
-          <button
-            onClick={doLogin}
-            disabled={loading}
-            style={{
-              width: '100%', padding: '0.8rem', marginTop: '0.4rem',
-              background: 'linear-gradient(135deg, var(--accent), var(--accent2))',
-              border: 'none', borderRadius: '9px', color: '#fff',
-              fontSize: '0.96rem', fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer',
-              opacity: loading ? 0.55 : 1, transition: 'opacity 0.2s, transform 0.15s',
-              letterSpacing: '0.03em', fontFamily: 'inherit',
-            }}
-            onMouseEnter={e => { if (!loading) e.currentTarget.style.opacity = '0.88'; }}
-            onMouseLeave={e => { if (!loading) e.currentTarget.style.opacity = '1'; }}
-          >
-            {loading ? 'Checking credentials…' : 'Sign In to My Profile'}
           </button>
 
           {/* Error */}

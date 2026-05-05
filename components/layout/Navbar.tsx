@@ -12,7 +12,6 @@ type SessionRole = 'admin' | 'athlete' | 'results_entry' | null;
 
 function getSessionRole(): SessionRole {
   try {
-    if (localStorage.getItem('isAdmin') === 'true') return 'admin';
     const user =
       JSON.parse(localStorage.getItem('cubeAthleteUser') || 'null') ??
       JSON.parse(localStorage.getItem('currentUser') || 'null');
@@ -46,7 +45,6 @@ export default function Navbar() {
   useEffect(() => { setAvatarBroken(false); }, [user?.photoURL]);
 
   async function signOut() {
-    localStorage.removeItem('isAdmin');
     localStorage.removeItem('cubeAthleteUser');
     localStorage.removeItem('currentUser');
     try { await firebaseSignOut(); } catch (err) { console.error('[nav] signOut', err); }
@@ -79,6 +77,7 @@ export default function Navbar() {
       <div style={{ display: 'flex', alignItems: 'center', gap: '1.6rem' }} className="nav-links">
         <Link href="/" className="nav-link hide-mobile">{t('nav.home')}</Link>
         <Link href="/competition" className="nav-link">{t('nav.competition')}</Link>
+        <Link href="/community" className="nav-link">Community</Link>
         <Link href="/timer" className="nav-link nav-soon hide-mobile" title={t('nav.coming-soon')}>
           {t('nav.timer')}
           <span className="soon-badge">soon</span>
