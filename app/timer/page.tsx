@@ -1237,8 +1237,13 @@ export default function TimerPage() {
     (ganConnected && gan.liveState === 'getSet');
 
   // ── Render ───────────────────────────────────────────────────────────────
+  // Focus mode: while a solve is running, fade out everything except the
+  // digits. Inspection and armed states keep the surrounding context
+  // (countdown, hold/release prompts) visible.
+  const focusMode = timer.state === 'running';
+
   return (
-    <div style={{
+    <div className={`timer-page ${focusMode ? 'focus-mode' : ''}`} style={{
       height: '100vh', overflow: 'hidden',
       background: C.bg, color: C.text,
       display: 'flex',
@@ -1261,7 +1266,7 @@ export default function TimerPage() {
         maxWidth: '1600px', margin: '0 auto',
       }}>
         {/* ── LEFT SIDEBAR (Settings + Session History) ─────────────────── */}
-        <aside style={{
+        <aside className="pv-sidebar" style={{
           flex: '0 0 260px',
           background: C.card, border: `1px solid ${C.border}`,
           borderRadius: 16,
@@ -1558,7 +1563,7 @@ export default function TimerPage() {
           height: '100%', overflow: 'hidden',
         }}>
           {/* Scramble box */}
-          <section style={{
+          <section className="pv-scramble" style={{
             background: C.card, border: `1px solid ${C.border}`,
             borderRadius: 16, padding: '1.25rem 1.5rem',
           }}>
@@ -1677,7 +1682,7 @@ export default function TimerPage() {
             }}
           >
             {connectedTimerName && (
-              <div style={{
+              <div className="pv-bt-indicator" style={{
                 display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
                 fontSize: '0.66rem', letterSpacing: '0.15em', textTransform: 'uppercase',
                 color: C.success, marginBottom: '0.85rem', fontWeight: 700,
@@ -1728,7 +1733,7 @@ export default function TimerPage() {
             {timer.state === 'stopped' && lastSolve && lastSolve.penalty !== 'none' && (
               <UndoActionRow isMobile={isMobile} disabled={!actionsArmed} onUndo={undoPenaltyOnLast} />
             )}
-            <div style={{ fontSize: '0.78rem', color: C.muted, marginTop: '1.5rem', letterSpacing: '0.06em', minHeight: '1.2rem' }}>
+            <div className="pv-instruction" style={{ fontSize: '0.78rem', color: C.muted, marginTop: '1.5rem', letterSpacing: '0.06em', minHeight: '1.2rem' }}>
               {ganConnected && timer.state !== 'running' && timer.state !== 'inspecting' && timer.state !== 'armed' && 'Use the GAN timer pads'}
               {timer.state === 'inspecting' && 'Hold SPACE to arm, release to start'}
               {timer.state === 'armed' && !timer.armedReady && (
@@ -1745,7 +1750,7 @@ export default function TimerPage() {
         </main>
 
         {/* ── RIGHT PANEL ───────────────────────────────────────────────── */}
-        <aside style={{
+        <aside className="pv-right-panel" style={{
           flex: '0 0 280px', minWidth: 0,
           display: 'flex', flexDirection: 'column', gap: '0.75rem',
           height: '100%', overflow: 'hidden',
@@ -1958,7 +1963,7 @@ export default function TimerPage() {
                 flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column',
               }}>
                 {/* Header capsule */}
-                <div style={{
+                <div className="pv-mobile-header" style={{
                   margin: '0.7rem 0.7rem 0.5rem',
                   background: C.card, border: `1px solid ${C.border}`,
                   borderRadius: 999, padding: '0.45rem 0.55rem',
@@ -2044,14 +2049,16 @@ export default function TimerPage() {
                     The history-navigation button is intentionally gone;
                     the gesture replaces both the "New scramble" tap and
                     the (mostly hidden) keyboard 'N' shortcut. */}
-                <SwipeScrambleRow
-                  scramble={scramble}
-                  scrambleFontPx={getScrambleFontSize(scramble, scrambleFontSize)}
-                  onNext={goNextScramble}
-                  onPrev={goPrevScramble}
-                  showHint={!swipeHintDismissed}
-                  onDismissHint={dismissSwipeHint}
-                />
+                <div className="pv-scramble">
+                  <SwipeScrambleRow
+                    scramble={scramble}
+                    scrambleFontPx={getScrambleFontSize(scramble, scrambleFontSize)}
+                    onNext={goNextScramble}
+                    onPrev={goPrevScramble}
+                    showHint={!swipeHintDismissed}
+                    onDismissHint={dismissSwipeHint}
+                  />
+                </div>
 
                 {/* Big timer area. Background stays transparent across
                     every state — only the digit colour swaps red→green→
@@ -2080,7 +2087,7 @@ export default function TimerPage() {
                   }}
                 >
                   {connectedTimerName && (
-                    <div style={{
+                    <div className="pv-bt-indicator" style={{
                       display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
                       fontSize: '0.6rem', letterSpacing: '0.15em', textTransform: 'uppercase',
                       color: C.success, marginBottom: '0.5rem', fontWeight: 700,
@@ -2127,7 +2134,7 @@ export default function TimerPage() {
                   {timer.state === 'stopped' && lastSolve && lastSolve.penalty !== 'none' && (
                     <UndoActionRow isMobile={isMobile} disabled={!actionsArmed} onUndo={undoPenaltyOnLast} />
                   )}
-                  <div style={{ fontSize: '0.7rem', color: C.muted, marginTop: '0.7rem', letterSpacing: '0.06em', minHeight: '1rem' }}>
+                  <div className="pv-instruction" style={{ fontSize: '0.7rem', color: C.muted, marginTop: '0.7rem', letterSpacing: '0.06em', minHeight: '1rem' }}>
                     {ganConnected && timer.state !== 'running' && timer.state !== 'inspecting' && timer.state !== 'armed' && 'Use the GAN timer pads'}
                     {timer.state === 'inspecting' && 'Hold to arm, release to start'}
                     {timer.state === 'armed' && !timer.armedReady && (
@@ -2501,7 +2508,7 @@ export default function TimerPage() {
                 so they never get clipped or covered. */}
             <div style={{ flexShrink: 0 }}>
               {mobileTab === 'timer' && (
-                <div style={{
+                <div className="pv-mobile-stats" style={{
                   display: 'grid', gridTemplateColumns: '1fr auto 1fr',
                   gap: '0.5rem', padding: '0.4rem 0.7rem 0.6rem',
                   alignItems: 'center',
@@ -2541,7 +2548,7 @@ export default function TimerPage() {
                 </div>
               )}
 
-              <nav style={{
+              <nav className="pv-mobile-nav" style={{
                 // iOS: 56 px of tab content plus the home-indicator inset
                 // below it, so the buttons sit above the indicator and the
                 // background color extends to the screen edge.
@@ -2965,6 +2972,32 @@ export default function TimerPage() {
         @keyframes pv-scramble-fade {
           0%   { opacity: 0.35; }
           100% { opacity: 1; }
+        }
+
+        /* Focus mode: while a solve is running, fade out everything
+           except the digit display. Opacity (rather than display:none /
+           visibility:hidden) keeps the layout intact so the digits don't
+           jump, and gives a smooth fade in/out around solve start/stop. */
+        .timer-page .pv-sidebar,
+        .timer-page .pv-right-panel,
+        .timer-page .pv-scramble,
+        .timer-page .pv-mobile-header,
+        .timer-page .pv-mobile-stats,
+        .timer-page .pv-mobile-nav,
+        .timer-page .pv-bt-indicator,
+        .timer-page .pv-instruction {
+          transition: opacity 0.18s ease;
+        }
+        .timer-page.focus-mode .pv-sidebar,
+        .timer-page.focus-mode .pv-right-panel,
+        .timer-page.focus-mode .pv-scramble,
+        .timer-page.focus-mode .pv-mobile-header,
+        .timer-page.focus-mode .pv-mobile-stats,
+        .timer-page.focus-mode .pv-mobile-nav,
+        .timer-page.focus-mode .pv-bt-indicator,
+        .timer-page.focus-mode .pv-instruction {
+          opacity: 0;
+          pointer-events: none;
         }
       `}</style>
     </div>
