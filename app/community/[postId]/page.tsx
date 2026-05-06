@@ -180,12 +180,14 @@ export default function PostDetailPage() {
         </div>
 
         {/* Title */}
-        <h1 style={{
-          fontSize: 'clamp(1.4rem, 4vw, 1.85rem)', fontWeight: 800,
-          color: 'var(--text)', lineHeight: 1.25, marginBottom: '0.85rem',
-        }}>
-          {post.title}
-        </h1>
+        {post.title?.trim() && (
+          <h1 style={{
+            fontSize: 'clamp(1.4rem, 4vw, 1.85rem)', fontWeight: 800,
+            color: 'var(--text)', lineHeight: 1.25, marginBottom: '0.85rem',
+          }}>
+            {post.title}
+          </h1>
+        )}
 
         {/* Author */}
         <div style={{

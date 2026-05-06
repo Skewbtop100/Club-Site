@@ -855,7 +855,7 @@ function TopCompose({
           ? { imageUrls: urls }
           : {};
       await createPost({
-        title: trimmed.slice(0, 60).trim(),
+        title: '',
         body: trimmed,
         category: postCategory,
         authorId: user.uid,
@@ -1065,7 +1065,7 @@ function PostCard({ post, canManage }: { post: Post; canManage: boolean }) {
       </header>
 
       <Link href={`/community/${post.id}`} className="pc-body-link">
-        {post.title && <h3 className="pc-title">{post.title}</h3>}
+        {post.title?.trim() && <h3 className="pc-title">{post.title}</h3>}
         <p className="pc-text">{post.body}</p>
       </Link>
 
