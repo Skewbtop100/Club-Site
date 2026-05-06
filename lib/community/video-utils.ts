@@ -6,6 +6,8 @@
 //   https://www.youtube.com/watch?v=ID&t=20s
 //   https://youtu.be/ID
 //   https://www.youtube.com/shorts/ID
+//   https://www.youtube.com/live/ID
+//   https://www.youtube.com/embed/ID
 //   https://m.youtube.com/watch?v=ID
 //
 // Supported Vimeo forms:
@@ -30,12 +32,10 @@ export function parseVideoUrl(input: string): ParsedVideo | null {
   const url = input.trim();
   if (!url) return null;
 
-  // YouTube — covers watch?v=, youtu.be/, shorts/.
-  const yt = url.match(
-    /(?:youtube\.com\/(?:watch\?(?:[^#&]*&)*v=|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/,
-  );
-  if (yt) {
-    const id = yt[1];
+  // YouTube — covers watch?v=, youtu.be/, shorts/, live/, embed/.
+  const ytMatch = url.match(/(?:youtube\.com\/(?:watch\?v=|shorts\/|live\/|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+  if (ytMatch) {
+    const id = ytMatch[1];
     return {
       type: 'youtube',
       url,
