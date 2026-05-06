@@ -564,6 +564,11 @@ export default function TimerPage() {
   const ao5Projection = useMemo(() => {
     if (!showAo5Projection) return null;
     if (solves.length < 4) return null;
+    // Show only on solves 4, 9, 14, 19… — i.e. right before a 5-solve
+    // window completes. Once the Ao5 lands (5, 10, 15…) it disappears
+    // until the next "4 since reset" milestone, so the projection never
+    // overlaps with the just-formed real Ao5 in the side panel.
+    if (solves.length % 5 !== 4) return null;
     const trailingFour = solves.slice(-4);
     if (trailingFour.some(isDnf)) return null;
     const [t1, t2, t3, t4] = trailingFour.map(finalMs).sort((a, b) => a - b);
@@ -1284,67 +1289,28 @@ export default function TimerPage() {
   // (countdown, hold/release prompts) visible.
   const focusMode = timer.state === 'running';
 
-  // Ao5 projection card — same JSX in both desktop and mobile layouts so
-  // it's defined once and rendered under each instruction line. Hidden
-  // mid-solve (running / inspecting / armed) so it doesn't compete with
-  // the live cues; reappears the moment state returns to idle/stopped.
+  // Ao5 projection — minimal "best — worst" line, color coded. Defined
+  // once so desktop and mobile share the same JSX, slotted under the
+  // instruction text in each layout. Hidden mid-solve (running /
+  // inspecting / armed) and during focus mode (.pv-projection in the
+  // focus-mode CSS list).
   const ao5ProjectionEl = ao5Projection && (timer.state === 'idle' || timer.state === 'stopped') ? (
     <div className="pv-projection" style={{
-      marginTop: '1.5rem',
-      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem',
-      opacity: 0.9,
+      marginTop: '0.85rem',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      gap: '0.85rem',
+      fontFamily: '"JetBrains Mono", monospace',
+      fontSize: '0.95rem', fontWeight: 600,
+      fontVariantNumeric: 'tabular-nums',
+      letterSpacing: '0.02em',
     }}>
-      <div style={{
-        fontSize: '0.7rem', letterSpacing: '0.12em', textTransform: 'uppercase',
-        color: C.muted, fontWeight: 600,
-      }}>
-        Дараагийн Ao5
-      </div>
-      <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
-        <div style={{
-          display: 'flex', flexDirection: 'column', alignItems: 'center',
-          padding: '0.45rem 0.85rem', borderRadius: 10,
-          background: 'rgba(52,211,153,0.10)',
-          border: '1px solid rgba(52,211,153,0.3)',
-        }}>
-          <span style={{
-            fontSize: '0.6rem', letterSpacing: '0.08em', textTransform: 'uppercase',
-            color: C.success, fontWeight: 700,
-          }}>
-            Хамгийн сайн
-          </span>
-          <span style={{
-            fontFamily: '"JetBrains Mono", monospace',
-            fontSize: '1.05rem', fontWeight: 700,
-            color: C.success, fontVariantNumeric: 'tabular-nums',
-            marginTop: '0.1rem',
-          }}>
-            {fmtMs(ao5Projection.best, false, precision)}
-          </span>
-        </div>
-        <span style={{ color: C.mutedDim, fontSize: '0.85rem' }}>→</span>
-        <div style={{
-          display: 'flex', flexDirection: 'column', alignItems: 'center',
-          padding: '0.45rem 0.85rem', borderRadius: 10,
-          background: 'rgba(239,68,68,0.10)',
-          border: '1px solid rgba(239,68,68,0.3)',
-        }}>
-          <span style={{
-            fontSize: '0.6rem', letterSpacing: '0.08em', textTransform: 'uppercase',
-            color: C.danger, fontWeight: 700,
-          }}>
-            Хамгийн муу
-          </span>
-          <span style={{
-            fontFamily: '"JetBrains Mono", monospace',
-            fontSize: '1.05rem', fontWeight: 700,
-            color: C.danger, fontVariantNumeric: 'tabular-nums',
-            marginTop: '0.1rem',
-          }}>
-            {fmtMs(ao5Projection.worst, false, precision)}
-          </span>
-        </div>
-      </div>
+      <span style={{ color: C.success }}>
+        {fmtMs(ao5Projection.best, false, precision)}
+      </span>
+      <span style={{ color: C.mutedDim, fontSize: '0.75rem' }}>—</span>
+      <span style={{ color: C.danger }}>
+        {fmtMs(ao5Projection.worst, false, precision)}
+      </span>
     </div>
   ) : null;
 
