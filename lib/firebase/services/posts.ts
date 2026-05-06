@@ -4,6 +4,7 @@ import {
   onSnapshot, query, orderBy, serverTimestamp, Timestamp,
   where, limit as fbLimit, increment, runTransaction,
 } from 'firebase/firestore';
+import type { ReactionType } from '@/lib/community/reactions';
 
 export type PostCategory = 'announcement' | 'question' | 'achievement' | 'general' | 'video';
 
@@ -85,6 +86,9 @@ export interface Comment {
   authorRole?: 'member' | 'athlete' | 'admin';
   body: string;
   createdAt: Timestamp;
+  parentCommentId?: string;
+  reactionCounts?: Partial<Record<ReactionType, number>>;
+  likeCount?: number;
 }
 
 export interface CreateCommentInput {
@@ -94,6 +98,7 @@ export interface CreateCommentInput {
   authorName: string;
   authorPhoto?: string;
   authorRole?: 'member' | 'athlete' | 'admin';
+  parentCommentId?: string;
 }
 
 const commentsCol = (postId: string) =>
@@ -111,8 +116,12 @@ export function subscribeComments(
 }
 
 export async function createComment(input: CreateCommentInput): Promise<string> {
-  const { postId, ...commentData } = input;
+  const { postId, parentCommentId, ...commentData } = input;
+  const isTopLevel = !parentCommentId;
   // Use a transaction so commentCount on the post stays accurate.
+  // Only top-level comments increment the post's commentCount; replies
+  // are tracked under their parent and deliberately don't bump the
+  // headline number.
   const result = await runTransaction(db, async (tx) => {
     const postRef = postDoc(postId);
     const postSnap = await tx.get(postRef);
@@ -120,12 +129,55 @@ export async function createComment(input: CreateCommentInput): Promise<string> 
     const newCommentRef = doc(commentsCol(postId));
     tx.set(newCommentRef, {
       ...commentData,
+      ...(parentCommentId ? { parentCommentId } : {}),
       createdAt: serverTimestamp(),
     });
-    tx.update(postRef, { commentCount: increment(1) });
+    if (isTopLevel) {
+      tx.update(postRef, { commentCount: increment(1) });
+    }
     return newCommentRef.id;
   });
   return result;
+}
+
+export async function deleteComment(
+  postId: string,
+  commentId: string,
+  isTopLevel: boolean,
+): Promise<void> {
+  await runTransaction(db, async (tx) => {
+    tx.delete(doc(commentsCol(postId), commentId));
+    if (isTopLevel) {
+      tx.update(postDoc(postId), { commentCount: increment(-1) });
+    }
+    // Note: doesn't delete child replies — they become orphaned but the
+    // UI groups by parent and filters them out. TODO: cascade later (or
+    // accept the slow leak; user-deleted comments are rare).
+  });
+}
+
+/** Toggle a per-uid reaction doc on a comment and bump the comment's
+ * likeCount in the same transaction. Returns true if the reaction was
+ * created (liked), false if it was removed (unliked). */
+export async function toggleCommentReaction(
+  postId: string,
+  commentId: string,
+  uid: string,
+  type: ReactionType = '❤️',
+): Promise<boolean> {
+  const reactionRef = doc(db, 'posts', postId, 'comments', commentId, 'reactions', uid);
+  const commentRef = doc(commentsCol(postId), commentId);
+  return runTransaction(db, async (tx) => {
+    const snap = await tx.get(reactionRef);
+    const liking = !snap.exists();
+    if (liking) {
+      tx.set(reactionRef, { type, createdAt: serverTimestamp() });
+    } else {
+      tx.delete(reactionRef);
+    }
+    tx.update(commentRef, { likeCount: increment(liking ? 1 : -1) });
+    return liking;
+  });
 }
 
 export async function deletePost(postId: string): Promise<void> {

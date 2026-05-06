@@ -20,6 +20,8 @@ import ImageGrid from '@/components/community/ImageGrid';
 import VideoUploader, { type VideoData } from '@/components/community/VideoUploader';
 import VideoPlayer from '@/components/community/VideoPlayer';
 import { AppleEmoji } from '@/lib/community/AppleEmoji';
+import { REACTION_TYPES, type ReactionType } from '@/lib/community/reactions';
+import InlineCommentThread from '@/components/community/InlineCommentThread';
 
 type ChannelId = PostCategory | 'feed';
 
@@ -766,6 +768,10 @@ function CommunityInner() {
           background: rgba(127,127,127,0.08);
           color: var(--text);
         }
+        .pc-action.active {
+          background: rgba(167,139,250,0.12);
+          color: var(--accent);
+        }
 
         @keyframes pcFade {
           from { opacity: 0; transform: translateY(-4px); }
@@ -1099,6 +1105,7 @@ function PostCard({ post, canManage }: { post: Post; canManage: boolean }) {
   const role = post.authorRole;
   const badge = role ? ROLE_BADGE[role] : null;
   const cat = CATEGORY_META[post.category];
+  const [threadOpen, setThreadOpen] = useState(false);
 
   async function onShare(e: React.MouseEvent) {
     e.preventDefault();
@@ -1167,19 +1174,28 @@ function PostCard({ post, canManage }: { post: Post; canManage: boolean }) {
       <Reactions post={post} />
 
       <div className="pc-actions">
-        <Link href={`/community/${post.id}`} className="pc-action">
+        <button
+          type="button"
+          className={`pc-action${threadOpen ? ' active' : ''}`}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setThreadOpen((v) => !v);
+          }}
+          aria-label="Comment"
+          aria-expanded={threadOpen}
+        >
           <span>💬</span> Comment{post.commentCount > 0 ? ` ${post.commentCount}` : ''}
-        </Link>
+        </button>
         <button type="button" className="pc-action" onClick={onShare} aria-label="Share">
           <span>↗</span> Share
         </button>
       </div>
+
+      {threadOpen && <InlineCommentThread postId={post.id} />}
     </article>
   );
 }
-
-const REACTION_TYPES = ['❤️', '🔥', '👏', '😂', '😮'] as const;
-type ReactionType = typeof REACTION_TYPES[number];
 
 function Reactions({ post }: { post: Post }) {
   // TODO(reactions): wire to Firestore in step 4. Counts and `myReactions`

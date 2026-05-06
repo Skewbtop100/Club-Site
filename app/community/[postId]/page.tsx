@@ -6,11 +6,12 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { formatRelativeTime } from '@/lib/relative-time';
 import {
-  getPost, subscribeComments, createComment, deletePost,
-  type Post, type Comment, type PostCategory,
+  getPost, deletePost,
+  type Post, type PostCategory,
 } from '@/lib/firebase/services/posts';
 import ImageGrid from '@/components/community/ImageGrid';
 import VideoPlayer from '@/components/community/VideoPlayer';
+import InlineCommentThread from '@/components/community/InlineCommentThread';
 
 const CATEGORIES: Record<PostCategory, { label: string; emoji: string }> = {
   announcement: { label: 'Зар',     emoji: '📢' },
@@ -19,8 +20,6 @@ const CATEGORIES: Record<PostCategory, { label: string; emoji: string }> = {
   video:        { label: 'Видео',   emoji: '🎥' },
   general:      { label: 'Ерөнхий', emoji: '💬' },
 };
-
-const COMMENT_MAX = 1000;
 
 function initialOf(name: string | null | undefined): string {
   const trimmed = (name ?? '').trim();
@@ -64,8 +63,7 @@ export default function PostDetailPage() {
 
   const [post, setPost] = useState<Post | null>(null);
   const [postLoading, setPostLoading] = useState(true);
-  const [comments, setComments] = useState<Comment[]>([]);
-  const [now, setNow] = useState(() => Date.now());
+  const [, setNowTick] = useState(0);
 
   // One-time fetch of the post.
   useEffect(() => {
@@ -81,16 +79,9 @@ export default function PostDetailPage() {
     return () => { cancelled = true; };
   }, [postId]);
 
-  // Realtime comments.
+  // Tick every 30s so the post's own relative timestamp refreshes.
   useEffect(() => {
-    if (!postId) return;
-    const unsub = subscribeComments(postId, setComments);
-    return () => unsub();
-  }, [postId]);
-
-  // Tick every 30s so relative timestamps refresh.
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 30_000);
+    const id = setInterval(() => setNowTick((n) => n + 1), 30_000);
     return () => clearInterval(id);
   }, []);
 
@@ -238,7 +229,7 @@ export default function PostDetailPage() {
           fontSize: '0.82rem', color: 'var(--muted)',
         }}>
           <span>
-            💬 {comments.length} · ❤️ {post.likeCount}
+            💬 {post.commentCount} · ❤️ {post.likeCount}
           </span>
           {canDelete && (
             <button
@@ -257,183 +248,14 @@ export default function PostDetailPage() {
         </div>
       </article>
 
-      {/* Comments */}
-      <CommentsSection
-        postId={post.id}
-        comments={comments}
-        nowTick={now}
-      />
-    </main>
-  );
-}
-
-function CommentsSection({
-  postId, comments, nowTick,
-}: { postId: string; comments: Comment[]; nowTick: number }) {
-  const { user } = useAuth();
-  const [body, setBody] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!user) return;
-    const trimmed = body.trim();
-    if (!trimmed || trimmed.length > COMMENT_MAX || submitting) return;
-    setError(null);
-    setSubmitting(true);
-    try {
-      await createComment({
-        postId,
-        body: trimmed,
-        authorId: user.uid,
-        authorName: user.displayName,
-        ...(user.photoURL ? { authorPhoto: user.photoURL } : {}),
-        authorRole: user.role,
-      });
-      setBody('');
-    } catch (err) {
-      console.error('[community] createComment', err);
-      setError(err instanceof Error ? err.message : 'Сэтгэгдэл илгээхэд алдаа гарлаа.');
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <section>
-      <h2 style={{
-        fontSize: '1.05rem', fontWeight: 800, color: 'var(--text)',
-        marginBottom: '1rem',
+      <section style={{
+        background: 'var(--card)',
+        border: '1px solid rgba(127,127,127,0.16)',
+        borderRadius: 14,
+        overflow: 'hidden',
       }}>
-        Сэтгэгдэл ({comments.length})
-      </h2>
-
-      {user ? (
-        <form onSubmit={onSubmit} style={{ marginBottom: '1.5rem' }}>
-          {error && (
-            <div style={{
-              padding: '0.6rem 0.85rem', marginBottom: '0.6rem',
-              background: 'rgba(248,113,113,0.1)',
-              border: '1px solid rgba(248,113,113,0.3)',
-              borderRadius: 8,
-              color: '#fca5a5', fontSize: '0.82rem',
-            }}>
-              {error}
-            </div>
-          )}
-          <textarea
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            maxLength={COMMENT_MAX}
-            rows={3}
-            placeholder="Сэтгэгдэл бичих..."
-            style={{
-              width: '100%',
-              padding: '0.75rem 0.9rem',
-              background: 'var(--card)',
-              border: '1px solid rgba(255,255,255,0.08)',
-              borderRadius: 10,
-              color: 'var(--text)', fontSize: '0.92rem', lineHeight: 1.5,
-              fontFamily: 'inherit', outline: 'none',
-              resize: 'vertical', minHeight: 80,
-            }}
-          />
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-            marginTop: '0.5rem', gap: '0.75rem',
-          }}>
-            <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>
-              {body.length}/{COMMENT_MAX}
-            </span>
-            <button
-              type="submit"
-              disabled={submitting || !body.trim()}
-              style={{
-                padding: '0.55rem 1.2rem', borderRadius: 8, border: 'none',
-                fontSize: '0.85rem', fontWeight: 700, fontFamily: 'inherit',
-                background: !submitting && body.trim()
-                  ? 'linear-gradient(135deg, var(--accent), var(--accent2))'
-                  : 'rgba(167,139,250,0.25)',
-                color: '#fff',
-                cursor: !submitting && body.trim() ? 'pointer' : 'not-allowed',
-                opacity: !submitting && body.trim() ? 1 : 0.7,
-              }}
-            >
-              {submitting ? '...' : 'Илгээх'}
-            </button>
-          </div>
-        </form>
-      ) : (
-        <div style={{
-          padding: '0.9rem 1rem', marginBottom: '1.5rem',
-          background: 'var(--card)',
-          border: '1px solid rgba(255,255,255,0.06)',
-          borderRadius: 10,
-          fontSize: '0.85rem', color: 'var(--muted)', textAlign: 'center',
-        }}>
-          Сэтгэгдэл бичихийн тулд{' '}
-          <Link href="/login" style={{ color: 'var(--accent)', fontWeight: 700 }}>
-            нэвтэрнэ үү
-          </Link>
-        </div>
-      )}
-
-      {comments.length === 0 ? (
-        <div style={{
-          textAlign: 'center', padding: '2.2rem 1rem',
-          color: 'var(--muted)', fontSize: '0.88rem',
-        }}>
-          Анхны сэтгэгдлийг бичээрэй
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.7rem' }}>
-          {comments.map((c) => (
-            <CommentItem key={c.id} comment={c} nowTick={nowTick} />
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function CommentItem({ comment, nowTick }: { comment: Comment; nowTick: number }) {
-  // nowTick is intentionally read so the relative timestamp re-renders on tick.
-  void nowTick;
-  const date = comment.createdAt?.toDate ? comment.createdAt.toDate() : new Date();
-  return (
-    <div style={{
-      display: 'flex', gap: '0.65rem',
-      padding: '0.85rem 1rem',
-      background: 'var(--card)',
-      border: '1px solid rgba(255,255,255,0.05)',
-      borderRadius: 12,
-    }}>
-      <Avatar name={comment.authorName} photo={comment.authorPhoto} size={32} />
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{
-          display: 'flex', alignItems: 'baseline', gap: '0.5rem',
-          marginBottom: '0.25rem', flexWrap: 'wrap',
-        }}>
-          <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text)' }}>
-            {comment.authorName}
-          </span>
-          {comment.authorRole === 'admin' && (
-            <span style={{ fontSize: '0.62rem', color: 'var(--accent)', fontWeight: 700 }}>
-              ADMIN
-            </span>
-          )}
-          <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }} title={date.toLocaleString('mn-MN')}>
-            {formatRelativeTime(date)}
-          </span>
-        </div>
-        <div style={{
-          fontSize: '0.9rem', lineHeight: 1.55, color: 'var(--text)',
-          whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-        }}>
-          {comment.body}
-        </div>
-      </div>
-    </div>
+        <InlineCommentThread postId={post.id} />
+      </section>
+    </main>
   );
 }
