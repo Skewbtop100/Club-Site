@@ -3,9 +3,7 @@
 import { useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 
-// TODO: replace with the real server invite once we have it. Keeping it
-// here as a single constant so it's a one-line swap when ready.
-const DISCORD_INVITE_URL = 'https://discord.gg/YOUR_INVITE_CODE';
+const DISCORD_INVITE_URL = 'https://discord.gg/VxrmRDN3nK';
 
 // TODO: set this to the real Discord server ID, then uncomment the
 // useEffect below to fetch live presence from the public widget JSON
