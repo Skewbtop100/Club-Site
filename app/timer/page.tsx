@@ -285,6 +285,10 @@ export default function TimerPage() {
   // Default DEFAULT_HOLD_TIME_MS (550) = WCA Stackmat standard.
   // Configurable in Settings → Timer.
   const [holdTimeMs, setHoldTimeMs] = useState(DEFAULT_HOLD_TIME_MS);
+  // When true, the running clock is replaced by a static placeholder so
+  // the user can't watch the time tick during a solve. The actual elapsed
+  // ms keeps counting in useTimer; only the display string changes.
+  const [hideTimeWhileRunning, setHideTimeWhileRunning] = useState(false);
   const [scrambleFontSize, setScrambleFontSize] = useState<'sm' | 'md' | 'lg'>('md');
   // Where the next solve's time comes from. 'default' = keyboard/touch
   // arming; 'manual' = type digits straight into the timer area;
@@ -499,6 +503,7 @@ export default function TimerPage() {
           precision?: Precision;
           holdToStart?: boolean;
           holdTimeMs?: number;
+          hideTimeWhileRunning?: boolean;
           scrambleFontSize?: 'sm' | 'md' | 'lg';
           qiyiDebugMode?: boolean;
           timeEntryMode?: TimeEntryMode;
@@ -516,6 +521,7 @@ export default function TimerPage() {
           // can't push the timer into a useless state.
           setHoldTimeMs(clampHoldTimeMs(parsed.holdTimeMs));
         }
+        if (typeof parsed.hideTimeWhileRunning === 'boolean') setHideTimeWhileRunning(parsed.hideTimeWhileRunning);
         if (parsed.scrambleFontSize === 'sm' || parsed.scrambleFontSize === 'md' || parsed.scrambleFontSize === 'lg') {
           setScrambleFontSize(parsed.scrambleFontSize);
         }
@@ -532,9 +538,9 @@ export default function TimerPage() {
   useEffect(() => {
     if (!prefsLoadedRef.current) return;
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify({ inspectionEnabled, precision, holdToStart, holdTimeMs, scrambleFontSize, qiyiDebugMode, timeEntryMode }));
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ inspectionEnabled, precision, holdToStart, holdTimeMs, hideTimeWhileRunning, scrambleFontSize, qiyiDebugMode, timeEntryMode }));
     } catch { /* ignore */ }
-  }, [inspectionEnabled, precision, holdToStart, holdTimeMs, scrambleFontSize, qiyiDebugMode, timeEntryMode]);
+  }, [inspectionEnabled, precision, holdToStart, holdTimeMs, hideTimeWhileRunning, scrambleFontSize, qiyiDebugMode, timeEntryMode]);
 
   // Stats — recomputed on every solves change
   const stats = useMemo(() => calcStats(solves), [solves]);
@@ -1184,6 +1190,14 @@ export default function TimerPage() {
       return sec <= -2 ? 'DNF' : '+2';
     }
     if (timer.state === 'armed') return precision === 'ms' ? '0.000' : '0.00';
+    // "Hide time while running" — replaces the live ticking digits with a
+    // static placeholder so the user can't peek at the clock mid-solve.
+    // Applied above the ganConnected branch so BT-driven displays are
+    // also masked. Stopped/inspecting/armed are unaffected: the final
+    // result, inspection countdown, and arm prompt all stay visible.
+    if (timer.state === 'running' && hideTimeWhileRunning) {
+      return 'Solving...';
+    }
     if (timer.state === 'stopped' && lastSolve) {
       if (lastSolve.penalty === 'dnf') return 'DNF';
       if (lastSolve.penalty === '+2') return `${fmtMs(lastSolve.ms + 2000, false, precision)}+`;
@@ -2781,6 +2795,7 @@ export default function TimerPage() {
           inspectionEnabled={inspectionEnabled} setInspectionEnabled={setInspectionEnabled}
           holdToStart={holdToStart} setHoldToStart={setHoldToStart}
           holdTimeMs={holdTimeMs} setHoldTimeMs={setHoldTimeMs}
+          hideTimeWhileRunning={hideTimeWhileRunning} setHideTimeWhileRunning={setHideTimeWhileRunning}
           precision={precision} setPrecision={setPrecision}
           timeEntryMode={timeEntryMode} setTimeEntryMode={setTimeEntryMode}
           // Bluetooth
@@ -3728,6 +3743,8 @@ interface SettingsPanelProps {
   setHoldToStart: (v: boolean) => void;
   holdTimeMs: number;
   setHoldTimeMs: (n: number) => void;
+  hideTimeWhileRunning: boolean;
+  setHideTimeWhileRunning: (v: boolean) => void;
   precision: Precision;
   setPrecision: (p: Precision) => void;
   timeEntryMode: 'default' | 'manual' | 'bluetooth';
@@ -3794,6 +3811,11 @@ function SettingsPanel(props: SettingsPanelProps) {
           c={c}
         />
       )}
+      <ToggleRow
+        label="Solve үед цаг нуух"
+        value={props.hideTimeWhileRunning}
+        onChange={props.setHideTimeWhileRunning}
+      />
       <SegmentedRow
         label={t('timer.precision')}
         value={props.precision}
