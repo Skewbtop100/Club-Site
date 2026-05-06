@@ -19,6 +19,7 @@ import ImageUploader, {
 import ImageGrid from '@/components/community/ImageGrid';
 import VideoUploader, { type VideoData } from '@/components/community/VideoUploader';
 import VideoPlayer from '@/components/community/VideoPlayer';
+import { AppleEmoji } from '@/lib/community/AppleEmoji';
 
 type ChannelId = PostCategory | 'feed';
 
@@ -657,12 +658,93 @@ function CommunityInner() {
         .pc-images {
           padding: 0 0.875rem 0.875rem;
         }
-        .pc-stats {
-          padding: 0.7rem 0.875rem;
+        .pc-reactions {
+          position: relative;
+          padding: 0.65rem 0.875rem;
           border-top: 1px solid rgba(127,127,127,0.14);
-          font-size: 0.78rem; color: var(--muted);
-          display: flex; gap: 0.6rem;
+          display: flex; flex-wrap: wrap; gap: 0.4rem;
+          align-items: center;
         }
+        .reaction-pill {
+          display: inline-flex; align-items: center;
+          gap: 6px;
+          padding: 4px 10px 4px 8px;
+          border-radius: 999px;
+          background: var(--card);
+          border: 1px solid rgba(127,127,127,0.16);
+          color: var(--muted);
+          font-family: inherit;
+          cursor: pointer;
+          transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+        }
+        .reaction-pill:hover {
+          transform: translateY(-1px) scale(1.05);
+          background: rgba(127,127,127,0.08);
+        }
+        .reaction-pill:active { transform: scale(0.95); }
+        .reaction-pill.active {
+          background: rgba(167,139,250,0.15);
+          border-color: rgba(167,139,250,0.4);
+          color: var(--accent);
+        }
+        .reaction-pill.active:hover {
+          background: rgba(167,139,250,0.22);
+        }
+        .reaction-pill img {
+          transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .reaction-pill:hover img {
+          animation: emoji-bounce 0.4s ease;
+        }
+        .reaction-pill.just-clicked img {
+          animation: emoji-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .reaction-count {
+          font-size: 13px; font-weight: 500; line-height: 1;
+        }
+        @keyframes emoji-bounce {
+          0%, 100% { transform: translateY(0) rotate(0deg); }
+          30%      { transform: translateY(-4px) rotate(-8deg); }
+          60%      { transform: translateY(-2px) rotate(8deg); }
+        }
+        @keyframes emoji-pop {
+          0%   { transform: scale(1); }
+          30%  { transform: scale(1.5); }
+          60%  { transform: scale(0.9); }
+          100% { transform: scale(1); }
+        }
+
+        .picker-row {
+          position: absolute;
+          bottom: calc(100% - 4px);
+          left: 0.875rem;
+          display: flex; gap: 4px;
+          padding: 6px;
+          background: var(--card);
+          border: 1px solid rgba(127,127,127,0.2);
+          border-radius: 999px;
+          box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+          z-index: 20;
+          animation: picker-pop 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .picker-emoji {
+          background: transparent; border: none;
+          padding: 6px;
+          border-radius: 999px;
+          cursor: pointer;
+          display: inline-flex; align-items: center; justify-content: center;
+          transition: transform 0.2s ease, opacity 0.2s ease;
+        }
+        .picker-row:hover .picker-emoji { opacity: 0.5; }
+        .picker-row .picker-emoji:hover {
+          opacity: 1;
+          transform: scale(1.4) translateY(-4px);
+        }
+        @keyframes picker-pop {
+          from { transform: translateY(8px) scale(0.85); opacity: 0; }
+          to   { transform: translateY(0) scale(1); opacity: 1; }
+        }
+
         .pc-actions {
           display: flex;
           padding: 0.4rem;
@@ -684,7 +766,6 @@ function CommunityInner() {
           background: rgba(127,127,127,0.08);
           color: var(--text);
         }
-        .pc-action.like:hover { color: #f87171; }
 
         @keyframes pcFade {
           from { opacity: 0; transform: translateY(-4px); }
@@ -1083,24 +1164,125 @@ function PostCard({ post, canManage }: { post: Post; canManage: boolean }) {
         </div>
       ) : null}
 
-      <div className="pc-stats">
-        <span>❤️ {post.likeCount} likes</span>
-        <span>·</span>
-        <span>💬 {post.commentCount} comments</span>
-      </div>
+      <Reactions post={post} />
 
       <div className="pc-actions">
-        <button type="button" className="pc-action like" aria-label="Like">
-          <span>❤️</span> Like
-        </button>
         <Link href={`/community/${post.id}`} className="pc-action">
-          <span>💬</span> Comment
+          <span>💬</span> Comment{post.commentCount > 0 ? ` ${post.commentCount}` : ''}
         </Link>
         <button type="button" className="pc-action" onClick={onShare} aria-label="Share">
           <span>↗</span> Share
         </button>
       </div>
     </article>
+  );
+}
+
+const REACTION_TYPES = ['❤️', '🔥', '👏', '😂', '😮'] as const;
+type ReactionType = typeof REACTION_TYPES[number];
+
+function Reactions({ post }: { post: Post }) {
+  // TODO(reactions): wire to Firestore in step 4. Counts and `myReactions`
+  // currently live in component state only — they don't persist across
+  // refresh, and other viewers don't see your reaction. The `❤️` count is
+  // seeded from post.likeCount so the UI demonstrates non-zero state.
+  const [myReactions, setMyReactions] = useState<Set<ReactionType>>(() => new Set());
+  const [counts, setCounts] = useState<Record<ReactionType, number>>(() => ({
+    '❤️': post.likeCount,
+    '🔥': 0,
+    '👏': 0,
+    '😂': 0,
+    '😮': 0,
+  }));
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [justClicked, setJustClicked] = useState<ReactionType | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  // Outside-click closes the picker.
+  useEffect(() => {
+    if (!pickerOpen) return;
+    function onDoc(e: MouseEvent) {
+      if (!wrapRef.current?.contains(e.target as Node)) setPickerOpen(false);
+    }
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [pickerOpen]);
+
+  function toggleReaction(type: ReactionType, e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const adding = !myReactions.has(type);
+    setMyReactions((prev) => {
+      const next = new Set(prev);
+      if (adding) next.add(type);
+      else next.delete(type);
+      return next;
+    });
+    setCounts((prev) => ({
+      ...prev,
+      [type]: Math.max(0, prev[type] + (adding ? 1 : -1)),
+    }));
+    if (adding) {
+      setJustClicked(type);
+      window.setTimeout(() => setJustClicked((cur) => (cur === type ? null : cur)), 400);
+    }
+    setPickerOpen(false);
+  }
+
+  const visible = REACTION_TYPES.filter((t) => counts[t] > 0 || myReactions.has(t));
+
+  return (
+    <div className="pc-reactions" ref={wrapRef}>
+      {visible.map((t) => {
+        const active = myReactions.has(t);
+        const popped = justClicked === t;
+        return (
+          <button
+            key={t}
+            type="button"
+            className={`reaction-pill${active ? ' active' : ''}${popped ? ' just-clicked' : ''}`}
+            onClick={(e) => toggleReaction(t, e)}
+            aria-label={`${t} reaction (${counts[t]})`}
+            aria-pressed={active}
+          >
+            <AppleEmoji emoji={t} size={14} />
+            <span className="reaction-count">{counts[t]}</span>
+          </button>
+        );
+      })}
+      <button
+        type="button"
+        className="reaction-pill add-reaction"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setPickerOpen((p) => !p);
+        }}
+        aria-label="Reaction нэмэх"
+        aria-haspopup="menu"
+        aria-expanded={pickerOpen}
+      >
+        <AppleEmoji emoji="😀" size={14} />
+        <span className="reaction-count">+</span>
+      </button>
+
+      {pickerOpen && (
+        <div className="picker-row" role="menu">
+          {REACTION_TYPES.map((t) => (
+            <button
+              key={t}
+              type="button"
+              className="picker-emoji"
+              onClick={(e) => toggleReaction(t, e)}
+              aria-label={t}
+              role="menuitem"
+            >
+              <AppleEmoji emoji={t} size={24} />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
