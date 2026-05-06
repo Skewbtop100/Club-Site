@@ -1300,6 +1300,12 @@ export default function TimerPage() {
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       gap: '1.5rem',
     }}>
+      <div style={{
+        fontSize: '0.55rem', color: '#ec4899', letterSpacing: '0.1em',
+        marginBottom: '0.3rem', fontWeight: 700,
+      }}>
+        BUILD-CHECK-V2
+      </div>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.15rem' }}>
         <span style={{
           fontSize: '0.6rem', letterSpacing: '0.16em', textTransform: 'uppercase',
