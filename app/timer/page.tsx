@@ -1296,20 +1296,18 @@ export default function TimerPage() {
   // focus-mode CSS list).
   const ao5ProjectionEl = ao5Projection && (timer.state === 'idle' || timer.state === 'stopped') ? (
     <div className="pv-projection" style={{
-      marginTop: '1.1rem',
+      marginTop: '0.55rem',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       gap: '1.5rem',
     }}>
-      <div style={{
-        fontSize: '0.55rem', color: '#ec4899', letterSpacing: '0.1em',
-        marginBottom: '0.3rem', fontWeight: 700,
-      }}>
-        BUILD-CHECK-V2
-      </div>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.15rem' }}>
         <span style={{
-          fontSize: '0.6rem', letterSpacing: '0.16em', textTransform: 'uppercase',
-          color: C.mutedDim, fontWeight: 600,
+          fontSize: '0.78rem',
+          letterSpacing: '0.18em',
+          textTransform: 'uppercase',
+          color: C.muted,
+          fontWeight: 700,
+          fontFamily: '"Inter", -apple-system, system-ui, sans-serif',
         }}>
           best
         </span>
@@ -1329,8 +1327,12 @@ export default function TimerPage() {
       }} />
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.15rem' }}>
         <span style={{
-          fontSize: '0.6rem', letterSpacing: '0.16em', textTransform: 'uppercase',
-          color: C.mutedDim, fontWeight: 600,
+          fontSize: '0.78rem',
+          letterSpacing: '0.18em',
+          textTransform: 'uppercase',
+          color: C.muted,
+          fontWeight: 700,
+          fontFamily: '"Inter", -apple-system, system-ui, sans-serif',
         }}>
           worst
         </span>
