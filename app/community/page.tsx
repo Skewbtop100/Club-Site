@@ -5,11 +5,6 @@ import { QRCodeSVG } from 'qrcode.react';
 
 const DISCORD_INVITE_URL = 'https://discord.gg/VxrmRDN3nK';
 
-// Discord widget JSON exposes only `presence_count` (online users) — total
-// member count isn't on the public widget endpoint and would require a
-// bot token. We deliberately show the online count only.
-const SERVER_ID = '1501190782647013498';
-
 const FEATURES: { emoji: string; title: string; desc: string }[] = [
   { emoji: '📢', title: 'Зар',        desc: 'Тэмцээний шинэ мэдээ' },
   { emoji: '❓', title: 'Асуулт',     desc: 'Алгоритм, тоног төхөөрөмж' },
@@ -37,20 +32,18 @@ function DiscordLogo({ size = 88 }: { size?: number }) {
 }
 
 export default function CommunityPage() {
-  const [stats, setStats] = useState<{ online: number } | null>(null);
+  const [stats, setStats] = useState<{ total: number; online: number } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     async function fetchStats() {
       try {
-        const res = await fetch(`https://discord.com/api/guilds/${SERVER_ID}/widget.json`);
+        const res = await fetch('/api/discord-stats');
         if (!res.ok) return;
         const data = await res.json();
-        if (!cancelled) {
-          setStats({ online: data.presence_count ?? 0 });
-        }
+        if (!cancelled) setStats({ total: data.total, online: data.online });
       } catch {
-        // Network or CORS issue — silently keep last known value
+        // Keep last known value
       }
     }
     fetchStats();
@@ -73,24 +66,39 @@ export default function CommunityPage() {
         <h1 className="dc-title">Mongolian Speedcubers Community</h1>
         <p className="dc-subtitle">Шоочдын нэгдэл — Discord дээр</p>
 
-        {stats !== null ? (
+        {stats !== null && (
           <div style={{
-            display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
-            padding: '0.45rem 1.1rem', borderRadius: 999,
-            background: 'rgba(34,197,94,0.12)',
-            border: '1px solid rgba(34,197,94,0.3)',
+            display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center',
             marginBottom: '2rem',
           }}>
-            <span style={{
-              width: 8, height: 8, borderRadius: '50%',
-              background: '#22c55e',
-              animation: 'pulse 2s ease-in-out infinite',
-            }} />
-            <span style={{ color: '#4ade80', fontWeight: 600, fontSize: '0.9rem' }}>
-              {stats.online} онлайн
-            </span>
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
+              padding: '0.45rem 1.1rem', borderRadius: 999,
+              background: 'rgba(124,58,237,0.14)',
+              border: '1px solid rgba(124,58,237,0.35)',
+            }}>
+              <span aria-hidden>📊</span>
+              <span style={{ color: '#c4b5fd', fontWeight: 600, fontSize: '0.9rem' }}>
+                {stats.total} гишүүн
+              </span>
+            </div>
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
+              padding: '0.45rem 1.1rem', borderRadius: 999,
+              background: 'rgba(34,197,94,0.12)',
+              border: '1px solid rgba(34,197,94,0.3)',
+            }}>
+              <span style={{
+                width: 8, height: 8, borderRadius: '50%',
+                background: '#22c55e',
+                animation: 'pulse 2s ease-in-out infinite',
+              }} />
+              <span style={{ color: '#4ade80', fontWeight: 600, fontSize: '0.9rem' }}>
+                {stats.online} онлайн
+              </span>
+            </div>
           </div>
-        ) : null}
+        )}
 
         <button type="button" className="dc-cta" onClick={openDiscord}>
           <span className="dc-cta-label">
