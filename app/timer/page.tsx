@@ -1366,8 +1366,8 @@ export default function TimerPage() {
       <div className="pv-grid" style={{
         position: 'relative', zIndex: 1,
         display: 'flex',
-        gap: '1rem',
-        padding: '1rem',
+        gap: '1.25rem',
+        padding: '0.85rem',
         width: '100%',
         height: '100%',
         maxWidth: '1600px', margin: '0 auto',
@@ -1376,7 +1376,7 @@ export default function TimerPage() {
         <aside className="pv-sidebar" style={{
           flex: '0 0 260px',
           background: C.card, border: `1px solid ${C.border}`,
-          borderRadius: 16,
+          borderRadius: 18,
           display: 'flex', flexDirection: 'column',
           minHeight: 0,
           overflow: 'hidden',
@@ -1386,28 +1386,40 @@ export default function TimerPage() {
               on the right. */}
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '0.85rem 1rem 0.6rem',
-            borderBottom: `1px solid ${C.border}`,
+            padding: '0.9rem 1rem 0.7rem',
           }}>
             <button
               onClick={() => setSettingsOpen(true)}
               aria-label="Settings"
               title="Settings"
               style={{
-                width: 30, height: 30, borderRadius: 8,
+                width: 36, height: 36, borderRadius: 10,
                 background: 'transparent', border: `1px solid ${C.border}`,
-                color: C.muted, cursor: 'pointer', fontSize: '0.95rem',
+                color: C.muted, cursor: 'pointer', fontSize: '1.05rem',
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+                transition: 'background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s',
               }}
-              onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.muted; }}
+              onMouseEnter={e => {
+                e.currentTarget.style.background = C.accentDim;
+                e.currentTarget.style.color = C.accent;
+                e.currentTarget.style.borderColor = C.borderHi;
+                e.currentTarget.style.boxShadow = '0 0 0 3px rgba(167,139,250,0.12)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background = 'transparent';
+                e.currentTarget.style.color = C.muted;
+                e.currentTarget.style.borderColor = C.border;
+                e.currentTarget.style.boxShadow = 'none';
+              }}
             >⚙</button>
-            <TimerProfileMenu size={28} redirectAfterLogin="/timer" align="right" />
+            <TimerProfileMenu size={32} redirectAfterLogin="/timer" align="right" />
           </div>
+          {/* Inset divider — sits clear of the sidebar's outer border so the
+              header reads as its own slot rather than running edge-to-edge. */}
+          <div style={{ height: 1, background: C.border, margin: '0 0.85rem 0.4rem' }} />
 
           {/* Session selector — clickable name with dropdown panel */}
-          <div style={{ position: 'relative', padding: '0.7rem 0.7rem 0.4rem' }}>
+          <div style={{ position: 'relative', padding: '0.4rem 0.7rem 0.5rem' }}>
             <button
               onClick={() => setSessionDropdownOpen(o => !o)}
               aria-expanded={sessionDropdownOpen}
@@ -1416,32 +1428,39 @@ export default function TimerPage() {
                 width: '100%',
                 background: sessionDropdownOpen ? C.accentDim : C.cardAlt,
                 border: `1px solid ${sessionDropdownOpen ? C.borderHi : C.border}`,
-                borderRadius: 8,
-                padding: '0.45rem 0.6rem',
-                display: 'grid', gridTemplateColumns: '1fr auto',
-                alignItems: 'center', gap: '0.35rem',
+                borderRadius: 10,
+                padding: '0.55rem 0.7rem',
+                display: 'grid', gridTemplateColumns: 'auto 1fr auto',
+                alignItems: 'center', gap: '0.55rem',
                 cursor: 'pointer', fontFamily: 'inherit',
                 color: C.text, textAlign: 'left',
-                transition: 'background 0.12s, border-color 0.12s',
+                transition: 'background 0.15s ease, border-color 0.15s ease, color 0.15s ease',
               }}
             >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem', minWidth: 0 }}>
-                <span style={{ fontSize: '0.55rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, fontWeight: 600 }}>
-                  Session
-                </span>
-                <span style={{
-                  fontSize: '0.85rem', fontWeight: 700,
-                  color: sessionDropdownOpen ? C.accent : C.text,
-                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                }}>
-                  {currentSession?.name ?? 'Default'}
-                </span>
-              </div>
               <span style={{
                 color: sessionDropdownOpen ? C.accent : C.muted,
-                fontSize: '0.7rem',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'color 0.15s ease',
+              }}>
+                {/* Inline folder glyph — matches the IconBase look used elsewhere
+                    in the file without pulling in a new icon component. */}
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                </svg>
+              </span>
+              <span style={{
+                fontSize: '0.9rem', fontWeight: 700,
+                color: sessionDropdownOpen ? C.accent : C.text,
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                transition: 'color 0.15s ease',
+              }}>
+                {currentSession?.name ?? 'Default'}
+              </span>
+              <span style={{
+                color: sessionDropdownOpen ? C.accent : C.mutedDim,
+                fontSize: '0.62rem',
                 transform: sessionDropdownOpen ? 'rotate(180deg)' : 'none',
-                transition: 'transform 0.15s',
+                transition: 'transform 0.18s ease, color 0.15s ease',
               }}>▾</span>
             </button>
 
@@ -1583,13 +1602,24 @@ export default function TimerPage() {
                 Press SPACE to start your first solve.
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                 {[...solves].reverse().map((s, i) => {
                   const idx = solves.length - i;
                   const dnf = isDnf(s);
                   const priorSet = solves.slice(0, solves.length - i).slice(0, -1).filter(x => !isDnf(x));
                   const priorBest = priorSet.length ? Math.min(...priorSet.map(finalMs)) : Infinity;
                   const isPB = !dnf && finalMs(s) < priorBest;
+                  // The most recent solve sits at the top of the reversed list
+                  // (i === 0). It gets a faint lavender wash so the user can
+                  // spot it at a glance without it competing with PB green.
+                  const isLatest = i === 0;
+                  const hovered  = hoveredSolveId === s.id;
+                  // Hover wins; otherwise PB tint, latest tint, then base.
+                  const rowBg = hovered
+                    ? 'rgba(255,255,255,0.05)'
+                    : isPB     ? 'rgba(52,211,153,0.06)'
+                    : isLatest ? 'rgba(167,139,250,0.06)'
+                    :            C.cardAlt;
                   return (
                     <div
                       key={s.id}
@@ -1598,36 +1628,43 @@ export default function TimerPage() {
                       onClick={() => setDetailSolveId(s.id)}
                       style={{
                         display: 'grid',
-                        gridTemplateColumns: '1.7rem 1fr auto auto',
-                        alignItems: 'center', gap: '0.5rem',
-                        padding: '0.5rem 0.6rem', borderRadius: 8,
-                        background: hoveredSolveId === s.id ? 'rgba(255,255,255,0.04)' : C.cardAlt,
+                        gridTemplateColumns: '1.9rem 1fr auto auto',
+                        alignItems: 'center', gap: '0.55rem',
+                        padding: '0.65rem 0.7rem', borderRadius: 10,
+                        background: rowBg,
                         borderLeft: isPB ? `3px solid ${C.success}` : '3px solid transparent',
                         cursor: 'pointer',
-                        transition: 'background 0.12s',
+                        transition: 'background 0.15s ease',
                       }}
                     >
-                      <div style={{ fontSize: '0.66rem', color: C.mutedDim, fontWeight: 600 }}>
+                      <div style={{
+                        fontFamily: '"JetBrains Mono", monospace',
+                        fontSize: '0.7rem', fontWeight: 500,
+                        color: 'rgba(255,255,255,0.25)',
+                        fontVariantNumeric: 'tabular-nums',
+                      }}>
                         {String(idx).padStart(2, '0')}
                       </div>
                       <div style={{
                         fontFamily: '"JetBrains Mono", monospace',
-                        fontSize: '0.92rem', fontWeight: 700,
+                        fontSize: '1rem', fontWeight: 700,
                         color: dnf ? C.danger : isPB ? C.success : C.text,
+                        fontVariantNumeric: 'tabular-nums',
+                        letterSpacing: '-0.005em',
                       }}>
                         {fmtMs(finalMs(s), dnf, precision)}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                         {isPB && !dnf && (
                           <span style={{
-                            fontSize: '0.55rem', fontWeight: 700, padding: '0.1rem 0.35rem', borderRadius: 4,
-                            background: 'rgba(52,211,153,0.15)', color: C.success, letterSpacing: '0.04em',
+                            fontSize: '0.55rem', fontWeight: 700, padding: '0.1rem 0.4rem', borderRadius: 4,
+                            background: 'rgba(52,211,153,0.10)', color: C.success, letterSpacing: '0.06em',
                           }}>PB</span>
                         )}
                         {s.penalty === '+2' && (
                           <span style={{
-                            fontSize: '0.55rem', fontWeight: 700, padding: '0.1rem 0.35rem', borderRadius: 4,
-                            background: 'rgba(251,191,36,0.15)', color: C.warn, letterSpacing: '0.04em',
+                            fontSize: '0.55rem', fontWeight: 700, padding: '0.1rem 0.4rem', borderRadius: 4,
+                            background: 'rgba(251,191,36,0.10)', color: C.warn, letterSpacing: '0.06em',
                           }}>+2</span>
                         )}
                         {s.comment && s.comment.trim() && (
@@ -1648,10 +1685,12 @@ export default function TimerPage() {
                         aria-label="Delete solve"
                         style={{
                           background: 'transparent', border: 'none', cursor: 'pointer',
-                          color: C.mutedDim, fontSize: '0.85rem', padding: '0.1rem 0.25rem',
-                          opacity: hoveredSolveId === s.id ? 1 : 0,
-                          transition: 'opacity 0.12s',
+                          color: C.mutedDim, fontSize: '0.9rem', padding: '0.1rem 0.25rem',
+                          opacity: hovered ? 1 : 0,
+                          transition: 'opacity 0.18s ease, color 0.15s ease',
                         }}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = C.text; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = C.mutedDim; }}
                         title="Delete"
                       >×</button>
                     </div>
@@ -1666,32 +1705,35 @@ export default function TimerPage() {
         {/* ── CENTER PANEL ─────────────────────────────────────────────── */}
         <main style={{
           flex: '1 1 auto', minWidth: 0,
-          display: 'flex', flexDirection: 'column', gap: '1rem',
+          display: 'flex', flexDirection: 'column', gap: '1.25rem',
           height: '100%', overflow: 'hidden',
         }}>
           {/* Scramble box */}
           <section className="pv-scramble" style={{
             background: C.card, border: `1px solid ${C.border}`,
-            borderRadius: 16, padding: '1.25rem 1.5rem',
+            borderRadius: 18, padding: '1.25rem 1.5rem',
+            boxShadow: '0 1px 0 rgba(255,255,255,0.02) inset, 0 4px 16px rgba(0,0,0,0.2)',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem', gap: '0.75rem', flexWrap: 'wrap' }}>
               <div style={{
                 display: 'flex', alignItems: 'center', gap: '0.5rem',
-                fontSize: '0.72rem', letterSpacing: '0.12em',
-                textTransform: 'uppercase', color: C.muted, fontWeight: 600,
+                fontSize: '0.92rem', color: C.text, fontWeight: 600,
               }}>
                 <WcaEventIcon eventId={eventId} size={20} />
-                <span>{sessionEvent.short.toUpperCase()} Competition Scramble</span>
+                <span>{sessionEvent.name}</span>
               </div>
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
                 <select
                   value={eventId}
                   onChange={e => setEventId(e.target.value)}
+                  onMouseEnter={e => (e.currentTarget.style.background = C.accentDim)}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
                   style={{
-                    background: C.cardAlt, color: C.text,
-                    border: `1px solid ${C.border}`, borderRadius: 8,
-                    padding: '0.32rem 0.5rem', fontSize: '0.78rem',
+                    background: 'rgba(255,255,255,0.04)', color: C.text,
+                    border: '1px solid transparent', borderRadius: 8,
+                    padding: '0.34rem 0.55rem', fontSize: '0.78rem',
                     fontFamily: 'inherit', outline: 'none', cursor: 'pointer',
+                    transition: 'background 0.15s ease, border-color 0.15s ease',
                   }}
                 >
                   {EVENTS.map(ev => (
@@ -1700,17 +1742,20 @@ export default function TimerPage() {
                 </select>
                 <button
                   onClick={newScramble}
+                  title="New Scramble"
+                  aria-label="New Scramble"
                   style={{
                     background: 'transparent', color: C.accent,
                     border: `1px solid ${C.borderHi}`, borderRadius: 8,
-                    padding: '0.32rem 0.7rem', fontSize: '0.78rem',
+                    padding: '0.32rem 0.5rem',
                     fontFamily: 'inherit', cursor: 'pointer', fontWeight: 600,
-                    transition: 'background 0.15s',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    transition: 'background 0.15s ease',
                   }}
                   onMouseEnter={e => (e.currentTarget.style.background = C.accentDim)}
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                 >
-                  New Scramble
+                  <IconRefresh size={18} />
                 </button>
                 <button
                   onClick={() => router.push('/timer/multiplayer')}
@@ -1719,15 +1764,15 @@ export default function TimerPage() {
                   style={{
                     background: 'transparent', color: C.text,
                     border: `1px solid ${C.border}`, borderRadius: 8,
-                    padding: '0.32rem 0.6rem', fontSize: '0.78rem',
+                    padding: '0.32rem 0.55rem', fontSize: '0.78rem',
                     fontFamily: 'inherit', cursor: 'pointer', fontWeight: 600,
                     display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
-                    transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+                    transition: 'background 0.15s ease, color 0.15s ease, border-color 0.15s ease',
                   }}
                   onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; e.currentTarget.style.borderColor = C.borderHi; }}
                   onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.text; e.currentTarget.style.borderColor = C.border; }}
                 >
-                  <span aria-hidden>👥</span> Race
+                  <IconUsers size={18} /> Race
                 </button>
                 <GanButton
                   state={gan.state}
@@ -1742,8 +1787,8 @@ export default function TimerPage() {
             <div style={{
               fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
               fontSize: 'clamp(1rem, 2.4vw, 1.7rem)',
-              fontWeight: 500, lineHeight: 1.6,
-              letterSpacing: '0.04em', color: C.text,
+              fontWeight: 500, lineHeight: 1.7,
+              letterSpacing: '0.02em', color: C.text,
               textAlign: 'center', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
               minHeight: '5rem',
               // Same iOS-friendly guards as the timer area: scrambles
@@ -1770,7 +1815,8 @@ export default function TimerPage() {
               flex: '1 1 auto', minHeight: 0,
               background: C.card,
               border: `1px solid ${C.border}`,
-              borderRadius: 16, padding: '2rem 1.5rem',
+              borderRadius: 18, padding: '1.5rem 1.5rem',
+              boxShadow: '0 1px 0 rgba(255,255,255,0.02) inset, 0 4px 16px rgba(0,0,0,0.2)',
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
               // iOS / iPad: kill text selection, long-press callout
               // (the magnifier / "copy" sheet), and double-tap zoom on
@@ -1791,14 +1837,14 @@ export default function TimerPage() {
             {connectedTimerName && (
               <div className="pv-bt-indicator" style={{
                 display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
-                fontSize: '0.66rem', letterSpacing: '0.15em', textTransform: 'uppercase',
-                color: C.success, marginBottom: '0.85rem', fontWeight: 700,
+                fontSize: '0.6rem', letterSpacing: '0.15em', textTransform: 'uppercase',
+                color: C.success, marginBottom: '0.5rem', fontWeight: 700,
               }}>
-                <IconBluetooth size={12} /> {connectedTimerName.toUpperCase()} CONNECTED
+                <IconBluetooth size={11} /> {connectedTimerName.toUpperCase()} CONNECTED
               </div>
             )}
             {timer.state === 'inspecting' && (
-              <div style={{ fontSize: '0.72rem', letterSpacing: '0.15em', textTransform: 'uppercase', color: C.warn, marginBottom: '1rem', fontWeight: 700 }}>
+              <div style={{ fontSize: '0.62rem', letterSpacing: '0.15em', textTransform: 'uppercase', color: C.warn, marginBottom: '0.6rem', fontWeight: 700 }}>
                 Inspection
               </div>
             )}
@@ -1816,13 +1862,18 @@ export default function TimerPage() {
                 fontSize: getTimerFontSize(timerDisplay, false),
                 fontWeight: 700, lineHeight: 0.95,
                 fontVariantNumeric: 'tabular-nums',
+                letterSpacing: '-0.01em',
                 color: timerColor,
                 // Slower color fade after a stop so the green→white flash
                 // reads as a confirmation pulse rather than an instant
                 // snap. Otherwise 0.12s keeps the red↔green arming flip
                 // feeling responsive.
                 transition: `color ${timer.state === 'stopped' ? 0.3 : 0.12}s, font-size 0.12s`,
-                textShadow: timerGlow ? `0 0 30px ${C.success}55` : 'none',
+                textShadow: timerGlow
+                  ? `0 0 30px ${C.success}55`
+                  : timer.state === 'stopped'
+                    ? '0 0 20px rgba(255,255,255,0.08)'
+                    : 'none',
               }}>
                 {timerDisplay}
               </div>
@@ -1840,7 +1891,7 @@ export default function TimerPage() {
             {timer.state === 'stopped' && lastSolve && lastSolve.penalty !== 'none' && (
               <UndoActionRow isMobile={isMobile} disabled={!actionsArmed} onUndo={undoPenaltyOnLast} />
             )}
-            <div className="pv-instruction" style={{ fontSize: '0.78rem', color: C.muted, marginTop: '1.5rem', letterSpacing: '0.06em', minHeight: '1.2rem' }}>
+            <div className="pv-instruction" style={{ fontSize: '0.72rem', fontWeight: 400, color: C.muted, marginTop: '1.25rem', letterSpacing: '0.06em', minHeight: '1.1rem' }}>
               {ganConnected && timer.state !== 'running' && timer.state !== 'inspecting' && timer.state !== 'armed' && 'Use the GAN timer pads'}
               {timer.state === 'inspecting' && 'Hold SPACE to arm, release to start'}
               {timer.state === 'armed' && !timer.armedReady && (
