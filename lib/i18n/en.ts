@@ -149,6 +149,7 @@ const en = {
   'admin.tab.events': '⚙ Events',
   'admin.tab.analytics': '📊 Analytics',
   'admin.tab.assignments': '👥 Assignments',
+  'admin.tab.navigation':  '🧭 Navigation',
 
   // ADMIN — COMMON
   'admin.btn.edit': 'Edit',

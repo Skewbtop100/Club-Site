@@ -210,6 +210,7 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'admin.tab.events': '⚙ Үйл явдал',
   'admin.tab.analytics': '📊 Шинжилгээ',
   'admin.tab.assignments': '👥 Хуваарь',
+  'admin.tab.navigation':  '🧭 Цэс',
 
   // ADMIN — COMMON
   'admin.btn.edit': 'Засах',

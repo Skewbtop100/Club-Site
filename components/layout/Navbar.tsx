@@ -5,6 +5,11 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useLang } from '@/lib/i18n';
 import { useAuth } from '@/lib/auth-context';
+import {
+  subscribeNavigation,
+  getDefaultNavigation,
+  type NavLink,
+} from '@/lib/firebase/services/navigation';
 import ThemeToggle from './ThemeToggle';
 import LangToggle from './LangToggle';
 
@@ -33,6 +38,9 @@ export default function Navbar() {
   const [open, setOpen] = useState(false);
   const [role, setRole] = useState<SessionRole>(null);
   const [avatarBroken, setAvatarBroken] = useState(false);
+  // Seed with defaults so the navbar paints correctly before Firestore
+  // resolves; subscribeNavigation also yields defaults on missing/error.
+  const [navLinks, setNavLinks] = useState<NavLink[]>(() => getDefaultNavigation());
   const router = useRouter();
   const { t } = useLang();
   const { user, signOut: firebaseSignOut } = useAuth();
@@ -40,6 +48,11 @@ export default function Navbar() {
   useEffect(() => {
     setRole(getSessionRole());
   }, [user]);
+
+  useEffect(() => {
+    const unsub = subscribeNavigation(setNavLinks);
+    return () => unsub();
+  }, []);
 
   // Reset broken-avatar fallback when the user (or their photoURL) changes.
   useEffect(() => { setAvatarBroken(false); }, [user?.photoURL]);
@@ -76,20 +89,35 @@ export default function Navbar() {
       {/* Desktop nav links */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '1.6rem' }} className="nav-links">
         <Link href="/" className="nav-link hide-mobile">{t('nav.home')}</Link>
-        <Link href="/competition" className="nav-link">{t('nav.competition')}</Link>
-        <Link href="/community" className="nav-link">Community</Link>
-        <Link href="/timer" className="nav-link nav-soon hide-mobile" title={t('nav.coming-soon')}>
-          {t('nav.timer')}
-          <span className="soon-badge">soon</span>
-        </Link>
-        <Link href="/algorithms" className="nav-link nav-soon hide-mobile" title={t('nav.coming-soon')}>
-          {t('nav.algorithms')}
-          <span className="soon-badge">soon</span>
-        </Link>
-        <Link href="/gallery" className="nav-link nav-soon hide-mobile" title={t('nav.coming-soon')}>
-          {t('nav.gallery')}
-          <span className="soon-badge">soon</span>
-        </Link>
+        {navLinks
+          .filter((l) => l.visible && l.status !== 'hidden')
+          .map((l) => {
+            const featuredCls = l.featured ? ' nav-featured' : '';
+            if (l.status === 'soon') {
+              return (
+                <span
+                  key={l.id}
+                  className={`nav-link nav-soon${featuredCls}`}
+                  title={t('nav.coming-soon')}
+                  aria-disabled="true"
+                >
+                  {l.label}
+                  <span className="soon-badge">Удахгүй</span>
+                  {l.featured && <span className="nav-featured-dot" aria-hidden />}
+                </span>
+              );
+            }
+            return (
+              <Link
+                key={l.id}
+                href={l.href}
+                className={`nav-link${featuredCls}`}
+              >
+                {l.label}
+                {l.featured && <span className="nav-featured-dot" aria-hidden />}
+              </Link>
+            );
+          })}
 
         {/* Auth dropdown */}
         <div style={{ position: 'relative' }}>
@@ -331,12 +359,40 @@ export default function Navbar() {
           transition: color 0.2s; text-decoration: none;
         }
         .nav-link:hover { color: var(--text); }
-        .nav-soon { position: relative; display: inline-flex; align-items: center; gap: 0.3rem; }
+        .nav-soon {
+          position: relative; display: inline-flex; align-items: center; gap: 0.3rem;
+          cursor: not-allowed;
+        }
+        .nav-soon:hover { color: var(--muted); }
         .soon-badge {
           font-size: 0.55rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
           padding: 0.1rem 0.35rem; border-radius: 4px; line-height: 1;
           background: rgba(124,58,237,0.18); color: #a78bfa;
           vertical-align: middle;
+        }
+        .nav-featured {
+          position: relative;
+          display: inline-flex; align-items: center; gap: 0.5rem;
+          font-weight: 700;
+          background: linear-gradient(135deg, var(--accent), var(--accent2));
+          -webkit-background-clip: text;
+          background-clip: text;
+          -webkit-text-fill-color: transparent;
+        }
+        .nav-featured:hover {
+          filter: brightness(1.15);
+        }
+        .nav-featured-dot {
+          width: 6px; height: 6px;
+          border-radius: 50%;
+          background: var(--accent2);
+          box-shadow: 0 0 8px var(--accent2);
+          animation: navPulse 2s ease-in-out infinite;
+          flex-shrink: 0;
+        }
+        @keyframes navPulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50%      { opacity: 0.55; transform: scale(1.35); }
         }
         .nd-link:hover { background: rgba(124,58,237,0.1); }
         @keyframes ndFadeIn {
