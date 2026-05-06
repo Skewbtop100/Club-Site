@@ -1296,21 +1296,48 @@ export default function TimerPage() {
   // focus-mode CSS list).
   const ao5ProjectionEl = ao5Projection && (timer.state === 'idle' || timer.state === 'stopped') ? (
     <div className="pv-projection" style={{
-      marginTop: '0.85rem',
+      marginTop: '1.1rem',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      gap: '0.85rem',
-      fontFamily: '"JetBrains Mono", monospace',
-      fontSize: '0.95rem', fontWeight: 600,
-      fontVariantNumeric: 'tabular-nums',
-      letterSpacing: '0.02em',
+      gap: '1.5rem',
     }}>
-      <span style={{ color: C.success }}>
-        {fmtMs(ao5Projection.best, false, precision)}
-      </span>
-      <span style={{ color: C.mutedDim, fontSize: '0.75rem' }}>—</span>
-      <span style={{ color: C.danger }}>
-        {fmtMs(ao5Projection.worst, false, precision)}
-      </span>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.15rem' }}>
+        <span style={{
+          fontSize: '0.6rem', letterSpacing: '0.16em', textTransform: 'uppercase',
+          color: C.mutedDim, fontWeight: 600,
+        }}>
+          best
+        </span>
+        <span style={{
+          fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
+          fontSize: '1.15rem', fontWeight: 500,
+          color: C.success,
+          fontVariantNumeric: 'tabular-nums',
+          letterSpacing: '0.01em',
+        }}>
+          {fmtMs(ao5Projection.best, false, precision)}
+        </span>
+      </div>
+      <span style={{
+        width: 1, height: 24,
+        background: C.border,
+      }} />
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.15rem' }}>
+        <span style={{
+          fontSize: '0.6rem', letterSpacing: '0.16em', textTransform: 'uppercase',
+          color: C.mutedDim, fontWeight: 600,
+        }}>
+          worst
+        </span>
+        <span style={{
+          fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
+          fontSize: '1.15rem', fontWeight: 500,
+          color: C.danger,
+          fontVariantNumeric: 'tabular-nums',
+          letterSpacing: '0.01em',
+        }}>
+          {fmtMs(ao5Projection.worst, false, precision)}
+        </span>
+      </div>
     </div>
   ) : null;
 
