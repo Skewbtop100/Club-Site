@@ -289,6 +289,10 @@ export default function TimerPage() {
   // the user can't watch the time tick during a solve. The actual elapsed
   // ms keeps counting in useTimer; only the display string changes.
   const [hideTimeWhileRunning, setHideTimeWhileRunning] = useState(false);
+  // After 4 valid solves, show the BEST/WORST possible Ao5 the next solve
+  // could produce. Useful for milestone awareness ("a 12s solve here drops
+  // me below my PB Ao5"). Default on — it's purely additive UI.
+  const [showAo5Projection, setShowAo5Projection] = useState(true);
   const [scrambleFontSize, setScrambleFontSize] = useState<'sm' | 'md' | 'lg'>('md');
   // Where the next solve's time comes from. 'default' = keyboard/touch
   // arming; 'manual' = type digits straight into the timer area;
@@ -504,6 +508,7 @@ export default function TimerPage() {
           holdToStart?: boolean;
           holdTimeMs?: number;
           hideTimeWhileRunning?: boolean;
+          showAo5Projection?: boolean;
           scrambleFontSize?: 'sm' | 'md' | 'lg';
           qiyiDebugMode?: boolean;
           timeEntryMode?: TimeEntryMode;
@@ -522,6 +527,7 @@ export default function TimerPage() {
           setHoldTimeMs(clampHoldTimeMs(parsed.holdTimeMs));
         }
         if (typeof parsed.hideTimeWhileRunning === 'boolean') setHideTimeWhileRunning(parsed.hideTimeWhileRunning);
+        if (typeof parsed.showAo5Projection === 'boolean')    setShowAo5Projection(parsed.showAo5Projection);
         if (parsed.scrambleFontSize === 'sm' || parsed.scrambleFontSize === 'md' || parsed.scrambleFontSize === 'lg') {
           setScrambleFontSize(parsed.scrambleFontSize);
         }
@@ -538,12 +544,34 @@ export default function TimerPage() {
   useEffect(() => {
     if (!prefsLoadedRef.current) return;
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify({ inspectionEnabled, precision, holdToStart, holdTimeMs, hideTimeWhileRunning, scrambleFontSize, qiyiDebugMode, timeEntryMode }));
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ inspectionEnabled, precision, holdToStart, holdTimeMs, hideTimeWhileRunning, showAo5Projection, scrambleFontSize, qiyiDebugMode, timeEntryMode }));
     } catch { /* ignore */ }
-  }, [inspectionEnabled, precision, holdToStart, holdTimeMs, hideTimeWhileRunning, scrambleFontSize, qiyiDebugMode, timeEntryMode]);
+  }, [inspectionEnabled, precision, holdToStart, holdTimeMs, hideTimeWhileRunning, showAo5Projection, scrambleFontSize, qiyiDebugMode, timeEntryMode]);
 
   // Stats — recomputed on every solves change
   const stats = useMemo(() => calcStats(solves), [solves]);
+
+  // Ao5 projection — given the trailing 4 valid solves, what's the
+  // best/worst Ao5 the next solve could produce?
+  //   best  = next solve hypothetically perfect (0 ms) → drops as the
+  //           best, worst of the four drops as the worst, average the
+  //           remaining 3 fastest = (t1 + t2 + t3) / 3
+  //   worst = next solve hypothetically DNF → DNF drops as the worst,
+  //           fastest of the four drops as the best, average the
+  //           remaining 3 slowest = (t2 + t3 + t4) / 3
+  // Returns null when projection isn't meaningful (fewer than 4 solves,
+  // any DNF in the trailing window, or the user has it toggled off).
+  const ao5Projection = useMemo(() => {
+    if (!showAo5Projection) return null;
+    if (solves.length < 4) return null;
+    const trailingFour = solves.slice(-4);
+    if (trailingFour.some(isDnf)) return null;
+    const [t1, t2, t3, t4] = trailingFour.map(finalMs).sort((a, b) => a - b);
+    return {
+      best:  (t1 + t2 + t3) / 3,
+      worst: (t2 + t3 + t4) / 3,
+    };
+  }, [solves, showAo5Projection]);
   const sessionEvent = useMemo(() => EVENTS.find(e => e.id === eventId) ?? EVENTS[0], [eventId]);
 
   // Commit a solve to the active session and immediately roll a new scramble
@@ -1256,6 +1284,70 @@ export default function TimerPage() {
   // (countdown, hold/release prompts) visible.
   const focusMode = timer.state === 'running';
 
+  // Ao5 projection card — same JSX in both desktop and mobile layouts so
+  // it's defined once and rendered under each instruction line. Hidden
+  // mid-solve (running / inspecting / armed) so it doesn't compete with
+  // the live cues; reappears the moment state returns to idle/stopped.
+  const ao5ProjectionEl = ao5Projection && (timer.state === 'idle' || timer.state === 'stopped') ? (
+    <div className="pv-projection" style={{
+      marginTop: '1.5rem',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem',
+      opacity: 0.9,
+    }}>
+      <div style={{
+        fontSize: '0.7rem', letterSpacing: '0.12em', textTransform: 'uppercase',
+        color: C.muted, fontWeight: 600,
+      }}>
+        Дараагийн Ao5
+      </div>
+      <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
+        <div style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center',
+          padding: '0.45rem 0.85rem', borderRadius: 10,
+          background: 'rgba(52,211,153,0.10)',
+          border: '1px solid rgba(52,211,153,0.3)',
+        }}>
+          <span style={{
+            fontSize: '0.6rem', letterSpacing: '0.08em', textTransform: 'uppercase',
+            color: C.success, fontWeight: 700,
+          }}>
+            Хамгийн сайн
+          </span>
+          <span style={{
+            fontFamily: '"JetBrains Mono", monospace',
+            fontSize: '1.05rem', fontWeight: 700,
+            color: C.success, fontVariantNumeric: 'tabular-nums',
+            marginTop: '0.1rem',
+          }}>
+            {fmtMs(ao5Projection.best, false, precision)}
+          </span>
+        </div>
+        <span style={{ color: C.mutedDim, fontSize: '0.85rem' }}>→</span>
+        <div style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center',
+          padding: '0.45rem 0.85rem', borderRadius: 10,
+          background: 'rgba(239,68,68,0.10)',
+          border: '1px solid rgba(239,68,68,0.3)',
+        }}>
+          <span style={{
+            fontSize: '0.6rem', letterSpacing: '0.08em', textTransform: 'uppercase',
+            color: C.danger, fontWeight: 700,
+          }}>
+            Хамгийн муу
+          </span>
+          <span style={{
+            fontFamily: '"JetBrains Mono", monospace',
+            fontSize: '1.05rem', fontWeight: 700,
+            color: C.danger, fontVariantNumeric: 'tabular-nums',
+            marginTop: '0.1rem',
+          }}>
+            {fmtMs(ao5Projection.worst, false, precision)}
+          </span>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div className={`timer-page ${focusMode ? 'focus-mode' : ''}`} style={{
       height: '100vh', overflow: 'hidden',
@@ -1758,6 +1850,7 @@ export default function TimerPage() {
               )}
               {!ganConnected && timer.state === 'running' && 'Press SPACE / tap to stop'}
             </div>
+            {ao5ProjectionEl}
 
           </section>
 
@@ -2159,6 +2252,7 @@ export default function TimerPage() {
                     )}
                     {!ganConnected && timer.state === 'running' && 'TAP TO STOP'}
                   </div>
+                  {ao5ProjectionEl}
                 </section>
               </div>
             )}
@@ -2796,6 +2890,7 @@ export default function TimerPage() {
           holdToStart={holdToStart} setHoldToStart={setHoldToStart}
           holdTimeMs={holdTimeMs} setHoldTimeMs={setHoldTimeMs}
           hideTimeWhileRunning={hideTimeWhileRunning} setHideTimeWhileRunning={setHideTimeWhileRunning}
+          showAo5Projection={showAo5Projection} setShowAo5Projection={setShowAo5Projection}
           precision={precision} setPrecision={setPrecision}
           timeEntryMode={timeEntryMode} setTimeEntryMode={setTimeEntryMode}
           // Bluetooth
@@ -3000,7 +3095,8 @@ export default function TimerPage() {
         .timer-page .pv-mobile-stats,
         .timer-page .pv-mobile-nav,
         .timer-page .pv-bt-indicator,
-        .timer-page .pv-instruction {
+        .timer-page .pv-instruction,
+        .timer-page .pv-projection {
           transition: opacity 0.18s ease;
         }
         .timer-page.focus-mode .pv-sidebar,
@@ -3010,9 +3106,17 @@ export default function TimerPage() {
         .timer-page.focus-mode .pv-mobile-stats,
         .timer-page.focus-mode .pv-mobile-nav,
         .timer-page.focus-mode .pv-bt-indicator,
-        .timer-page.focus-mode .pv-instruction {
+        .timer-page.focus-mode .pv-instruction,
+        .timer-page.focus-mode .pv-projection {
           opacity: 0;
           pointer-events: none;
+        }
+
+        /* Subtle entrance for the Ao5 projection card so it doesn't snap in
+           the moment the trailing-4 window fills. Reuses the same fade
+           keyframe the post-stop action row already runs on. */
+        .pv-projection {
+          animation: pv-actionrow-fade 0.35s cubic-bezier(0.2, 0.8, 0.3, 1) both;
         }
       `}</style>
     </div>
@@ -3745,6 +3849,8 @@ interface SettingsPanelProps {
   setHoldTimeMs: (n: number) => void;
   hideTimeWhileRunning: boolean;
   setHideTimeWhileRunning: (v: boolean) => void;
+  showAo5Projection: boolean;
+  setShowAo5Projection: (v: boolean) => void;
   precision: Precision;
   setPrecision: (p: Precision) => void;
   timeEntryMode: 'default' | 'manual' | 'bluetooth';
@@ -3816,6 +3922,19 @@ function SettingsPanel(props: SettingsPanelProps) {
         value={props.hideTimeWhileRunning}
         onChange={props.setHideTimeWhileRunning}
       />
+      <div>
+        <ToggleRow
+          label="Ao5 төсөөлөл харуулах"
+          value={props.showAo5Projection}
+          onChange={props.setShowAo5Projection}
+        />
+        <div style={{
+          fontSize: '0.7rem', color: c.muted, marginTop: '0.3rem',
+          lineHeight: 1.4,
+        }}>
+          4 удаагийн солвыг хийсний дараа 5 дахь солв-оос хамаарч гарах боломжит сайн ба муу Ao5-ийг харуулна.
+        </div>
+      </div>
       <SegmentedRow
         label={t('timer.precision')}
         value={props.precision}
