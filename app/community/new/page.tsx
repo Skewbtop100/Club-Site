@@ -12,7 +12,6 @@ import ImageUploader, {
 } from '@/components/community/ImageUploader';
 import VideoUploader, { type VideoData } from '@/components/community/VideoUploader';
 
-const TITLE_MAX = 120;
 const BODY_MAX = 5000;
 
 const CATEGORIES: { id: PostCategory; label: string; emoji: string; adminOnly?: boolean }[] = [
@@ -61,7 +60,6 @@ function NewPostInner() {
 
   const initialChannel = readChannelParam(searchParams?.get('channel'));
   const [category, setCategory] = useState<PostCategory>(initialChannel);
-  const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -99,12 +97,10 @@ function NewPostInner() {
   }
 
   const isAdmin = user.role === 'admin';
-  const titleTrim = title.trim();
   const bodyTrim = body.trim();
   const uploading = isUploading(images) || videoUploading;
   const canSubmit =
     !submitting && !uploading &&
-    titleTrim.length > 0 && titleTrim.length <= TITLE_MAX &&
     bodyTrim.length > 0 && bodyTrim.length <= BODY_MAX &&
     (category !== 'announcement' || isAdmin);
 
@@ -142,7 +138,7 @@ function NewPostInner() {
           ? { imageUrls: urls }
           : {};
       const id = await createPost({
-        title: titleTrim,
+        title: '',
         body: bodyTrim,
         category,
         authorId: user.uid,
@@ -167,8 +163,8 @@ function NewPostInner() {
         </Link>
 
         <header className="np-header">
-          <h1 className="np-title">Дэлгэрэнгүй post бичих</h1>
-          <p className="np-subtitle">Гарчиг + урт текст бүхий пост</p>
+          <h1 className="np-title">Дэлгэрэнгүй пост бичих</h1>
+          <p className="np-subtitle">Урт текст, олон зураг, бичлэгтэй пост</p>
         </header>
 
         {error && <div className="np-error">{error}</div>}
@@ -197,20 +193,6 @@ function NewPostInner() {
             </div>
           </div>
 
-          {/* Title */}
-          <div>
-            <input
-              type="text"
-              value={title}
-              onChange={e => setTitle(e.target.value)}
-              maxLength={TITLE_MAX}
-              placeholder="Гарчиг..."
-              required
-              className="np-input"
-            />
-            <div className="np-counter">{title.length}/{TITLE_MAX}</div>
-          </div>
-
           {/* Body */}
           <div>
             <textarea
@@ -219,7 +201,7 @@ function NewPostInner() {
               maxLength={BODY_MAX}
               placeholder="Та юу бичмээр байна?"
               required
-              rows={10}
+              rows={12}
               className="np-textarea"
             />
             <div className="np-counter">{body.length}/{BODY_MAX}</div>
@@ -371,7 +353,7 @@ function NewPostInner() {
           color: var(--accent);
         }
         .np-pill.disabled { opacity: 0.4; cursor: not-allowed; }
-        .np-input, .np-textarea {
+        .np-textarea {
           width: 100%;
           background: #34353c;
           border: 1px solid rgba(255,255,255,0.05);
@@ -380,23 +362,14 @@ function NewPostInner() {
           font-family: inherit;
           outline: none;
           transition: border-color 0.15s;
-        }
-        .np-input:focus, .np-textarea:focus { border-color: rgba(167,139,250,0.4); }
-        .np-input {
-          padding: 0.85rem 1rem;
-          font-size: 1rem;
-          font-weight: 600;
-        }
-        .np-input::placeholder, .np-textarea::placeholder {
-          color: rgba(255,255,255,0.35);
-        }
-        .np-textarea {
           padding: 0.85rem 1rem;
           font-size: 0.95rem;
           line-height: 1.55;
           resize: vertical;
-          min-height: 200px;
+          min-height: 240px;
         }
+        .np-textarea:focus { border-color: rgba(167,139,250,0.4); }
+        .np-textarea::placeholder { color: rgba(255,255,255,0.35); }
         .np-counter {
           margin-top: 0.3rem;
           font-size: 0.7rem;
