@@ -1,17 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 
 const DISCORD_INVITE_URL = 'https://discord.gg/VxrmRDN3nK';
 
-// TODO: set this to the real Discord server ID, then uncomment the
-// useEffect below to fetch live presence from the public widget JSON
-// endpoint. Note that `presence_count` from the widget is online-only;
-// `members` array is also online-only — total member count isn't exposed
-// without a bot token. For "X гишүүн" we'll need a manual update or a
-// tiny server-side route holding a bot token.
-const SERVER_ID = '';
+// Discord widget JSON exposes only `presence_count` (online users) — total
+// member count isn't on the public widget endpoint and would require a
+// bot token. We deliberately show the online count only.
+const SERVER_ID = '1501190782647013498';
 
 const FEATURES: { emoji: string; title: string; desc: string }[] = [
   { emoji: '📢', title: 'Зар',        desc: 'Тэмцээний шинэ мэдээ' },
@@ -40,8 +37,26 @@ function DiscordLogo({ size = 88 }: { size?: number }) {
 }
 
 export default function CommunityPage() {
-  // Live stats placeholder — see SERVER_ID TODO above.
-  const [stats] = useState({ members: 152, online: 23 });
+  const [stats, setStats] = useState<{ online: number } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchStats() {
+      try {
+        const res = await fetch(`https://discord.com/api/guilds/${SERVER_ID}/widget.json`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) {
+          setStats({ online: data.presence_count ?? 0 });
+        }
+      } catch {
+        // Network or CORS issue — silently keep last known value
+      }
+    }
+    fetchStats();
+    const interval = setInterval(fetchStats, 60_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
 
   function openDiscord() {
     window.open(DISCORD_INVITE_URL, '_blank', 'noopener,noreferrer');
@@ -58,16 +73,24 @@ export default function CommunityPage() {
         <h1 className="dc-title">Mongolian Speedcubers Community</h1>
         <p className="dc-subtitle">Шоочдын нэгдэл — Discord дээр</p>
 
-        <div className="dc-stats">
-          <span className="dc-pill">
-            <span aria-hidden>📊</span>
-            <span>{stats.members} гишүүн</span>
-          </span>
-          <span className="dc-pill">
-            <span className="dc-dot" aria-hidden />
-            <span>{stats.online} онлайн</span>
-          </span>
-        </div>
+        {stats !== null ? (
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
+            padding: '0.45rem 1.1rem', borderRadius: 999,
+            background: 'rgba(34,197,94,0.12)',
+            border: '1px solid rgba(34,197,94,0.3)',
+            marginBottom: '2rem',
+          }}>
+            <span style={{
+              width: 8, height: 8, borderRadius: '50%',
+              background: '#22c55e',
+              animation: 'pulse 2s ease-in-out infinite',
+            }} />
+            <span style={{ color: '#4ade80', fontWeight: 600, fontSize: '0.9rem' }}>
+              {stats.online} онлайн
+            </span>
+          </div>
+        ) : null}
 
         <button type="button" className="dc-cta" onClick={openDiscord}>
           <span className="dc-cta-label">
@@ -159,30 +182,6 @@ export default function CommunityPage() {
           font-size: clamp(0.95rem, 2.5vw, 1.05rem);
           color: rgba(255,255,255,0.72);
           margin-bottom: 1.5rem;
-        }
-
-        /* ── Stats pills ──────────────────────────────────────── */
-        .dc-stats {
-          display: flex; flex-wrap: wrap; justify-content: center;
-          gap: 0.5rem;
-          margin-bottom: 2rem;
-        }
-        .dc-pill {
-          display: inline-flex; align-items: center; gap: 0.45rem;
-          padding: 0.4rem 0.85rem;
-          background: rgba(255,255,255,0.06);
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 999px;
-          font-size: 0.85rem;
-          font-weight: 600;
-          color: rgba(255,255,255,0.85);
-        }
-        .dc-dot {
-          width: 8px; height: 8px;
-          border-radius: 999px;
-          background: #23a55a;
-          box-shadow: 0 0 8px rgba(35,165,90,0.6);
-          animation: dcPulse 2s ease-in-out infinite;
         }
 
         /* ── CTA button ───────────────────────────────────────── */
@@ -334,9 +333,9 @@ export default function CommunityPage() {
           0%, 100% { transform: translateY(0); }
           50%      { transform: translateY(-8px); }
         }
-        @keyframes dcPulse {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50%      { opacity: 0.55; transform: scale(0.85); }
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50%      { opacity: 0.5; }
         }
 
         /* ── Responsive ───────────────────────────────────────── */
@@ -354,7 +353,7 @@ export default function CommunityPage() {
           .dc-features-section { margin-top: 3rem; }
         }
         @media (prefers-reduced-motion: reduce) {
-          .dc-logo, .dc-dot, .dc-hero, .dc-cta::after { animation: none; transition: none; }
+          .dc-logo, .dc-hero, .dc-cta::after { animation: none; transition: none; }
         }
       `}</style>
     </main>
