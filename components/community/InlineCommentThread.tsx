@@ -171,76 +171,45 @@ export default function InlineCommentThread({ postId }: Props) {
         <div className="ict-empty">Анхны сэтгэгдлийг бичээрэй</div>
       ) : (
         <div className="ict-list">
-          {topLevel.map((c) => (
-            <CommentItem
-              key={c.id}
-              postId={postId}
-              comment={c}
-              isReply={false}
-              myLiked={myLiked}
-              setMyLiked={setMyLiked}
-            >
-              {replyToId === c.id && (
-                <div className="ict-reply-row">
-                  <Avatar name={user?.displayName ?? '?'} photo={user?.photoURL} size={28} />
-                  <textarea
-                    autoFocus
-                    rows={1}
-                    value={replyBody}
-                    onChange={(e) => setReplyBody(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        submitReply(c.id);
-                      } else if (e.key === 'Escape') {
-                        cancelReply();
-                      }
-                    }}
-                    placeholder={`${c.authorName}-д хариулах...`}
-                    disabled={replySubmitting}
-                    className="ict-reply-textarea"
-                  />
-                  <button
-                    type="button"
-                    className="ict-reply-x"
-                    onClick={cancelReply}
-                    aria-label="Болих"
-                  >
-                    ×
-                  </button>
-                  <button
-                    type="button"
-                    className="ict-send"
-                    onClick={() => submitReply(c.id)}
-                    disabled={!replyBody.trim() || replySubmitting}
-                    aria-label="Илгээх"
-                  >
-                    →
-                  </button>
-                </div>
-              )}
-              {(repliesByParent[c.id] ?? []).length > 0 && (
-                <div className="ict-replies">
-                  {repliesByParent[c.id].map((r) => (
-                    <CommentItem
-                      key={r.id}
-                      postId={postId}
-                      comment={r}
-                      isReply
-                      myLiked={myLiked}
-                      setMyLiked={setMyLiked}
-                    />
-                  ))}
-                </div>
-              )}
-              {!isReplyOpenSomewhereElse(replyToId, c.id) && (
-                <ReplyButton
-                  onClick={() => openReply(c.id)}
-                  disabled={!user}
+          {topLevel.map((c) => {
+            const replies = repliesByParent[c.id] ?? [];
+            return (
+              <div key={c.id} className="ci-block">
+                <CommentItem
+                  postId={postId}
+                  comment={c}
+                  isReply={false}
+                  myLiked={myLiked}
+                  setMyLiked={setMyLiked}
+                  onReplyClick={user ? () => openReply(c.id) : undefined}
                 />
-              )}
-            </CommentItem>
-          ))}
+                {replyToId === c.id && (
+                  <ReplyForm
+                    authorName={c.authorName}
+                    body={replyBody}
+                    onChange={setReplyBody}
+                    onCancel={cancelReply}
+                    onSend={() => submitReply(c.id)}
+                    submitting={replySubmitting}
+                  />
+                )}
+                {replies.length > 0 && (
+                  <div className="ict-replies">
+                    {replies.map((r) => (
+                      <CommentItem
+                        key={r.id}
+                        postId={postId}
+                        comment={r}
+                        isReply
+                        myLiked={myLiked}
+                        setMyLiked={setMyLiked}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -302,6 +271,11 @@ export default function InlineCommentThread({ postId }: Props) {
           gap: 12px;
           margin-bottom: 12px;
         }
+        .ci-block {
+          /* Block-level container so nested reply form / replies list
+           * can take their own row without affecting sibling widths. */
+          display: block;
+        }
         .ict-replies {
           margin-top: 8px;
           margin-left: 32px;
@@ -310,36 +284,6 @@ export default function InlineCommentThread({ postId }: Props) {
           display: flex; flex-direction: column;
           gap: 10px;
         }
-        .ict-reply-row {
-          display: flex; align-items: flex-start;
-          gap: 8px;
-          margin-top: 8px;
-          margin-left: 32px;
-        }
-        .ict-reply-textarea {
-          flex: 1; min-width: 0;
-          min-height: 32px; max-height: 100px;
-          padding: 6px 10px;
-          background: var(--card);
-          border: 1px solid rgba(127,127,127,0.2);
-          border-radius: 12px;
-          color: var(--text);
-          font-family: inherit; font-size: 14px; line-height: 1.45;
-          outline: none;
-          resize: none;
-        }
-        .ict-reply-textarea:focus { border-color: rgba(167,139,250,0.5); }
-        .ict-reply-x {
-          width: 28px; height: 28px;
-          background: transparent;
-          border: 1px solid rgba(127,127,127,0.2);
-          border-radius: 999px;
-          color: var(--muted);
-          font-size: 1rem; line-height: 1;
-          cursor: pointer;
-          display: inline-flex; align-items: center; justify-content: center;
-        }
-        .ict-reply-x:hover { background: rgba(127,127,127,0.1); color: var(--text); }
         .ict-send {
           width: 32px; height: 32px;
           background: linear-gradient(135deg, var(--accent), var(--accent2));
@@ -400,44 +344,143 @@ export default function InlineCommentThread({ postId }: Props) {
 
         @media (max-width: 600px) {
           .ict-replies { margin-left: 16px; padding-left: 10px; }
-          .ict-reply-row { margin-left: 16px; }
         }
       `}</style>
     </div>
   );
 }
 
-// Top-level only check used to hide the Reply button when this thread has
-// another open reply box (prevents two open at once visually).
-function isReplyOpenSomewhereElse(replyToId: string | null, ownId: string) {
-  return replyToId !== null && replyToId !== ownId;
-}
+function ReplyForm({
+  authorName, body, onChange, onCancel, onSend, submitting,
+}: {
+  authorName: string;
+  body: string;
+  onChange: (v: string) => void;
+  onCancel: () => void;
+  onSend: () => void;
+  submitting: boolean;
+}) {
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  const canSend = !!body.trim() && !submitting;
 
-function ReplyButton({ onClick, disabled }: { onClick: () => void; disabled: boolean }) {
+  // Auto-grow on every value change, capped at 120px (textarea scrolls past).
+  useEffect(() => {
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+  }, [body]);
+
+  const cancelBtnStyle: React.CSSProperties = {
+    width: 32, height: 32, borderRadius: 8,
+    background: 'transparent',
+    border: '1px solid rgba(127,127,127,0.2)',
+    color: 'var(--muted)',
+    cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    fontFamily: 'inherit',
+    fontSize: '0.95rem',
+    lineHeight: 1,
+    padding: 0,
+  };
+
+  const sendBtnStyle: React.CSSProperties = {
+    width: 32, height: 32, borderRadius: 8,
+    background: canSend
+      ? 'linear-gradient(135deg, var(--accent), var(--accent2))'
+      : 'rgba(127,127,127,0.15)',
+    border: 'none',
+    color: canSend ? '#fff' : 'var(--muted)',
+    cursor: canSend ? 'pointer' : 'not-allowed',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    fontWeight: 700,
+    fontFamily: 'inherit',
+    fontSize: '1rem',
+    lineHeight: 1,
+    padding: 0,
+  };
+
   return (
-    <button
-      type="button"
-      className="ci-reply"
-      onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClick(); }}
-      disabled={disabled}
-      title={disabled ? 'Хариулахын тулд нэвтэрнэ үү' : undefined}
+    <div
+      style={{
+        marginLeft: 44, // 32px avatar + 12px .ci gap → align with body text
+        marginTop: 8,
+        padding: 8,
+        background: 'rgba(127,127,127,0.05)',
+        border: '1px solid rgba(127,127,127,0.2)',
+        borderRadius: 10,
+        display: 'flex',
+        gap: 8,
+        alignItems: 'flex-end',
+        width: 'auto',
+      }}
+      className="ict-reply-form"
     >
-      <span aria-hidden>💬</span> Reply
+      <textarea
+        ref={taRef}
+        autoFocus
+        rows={1}
+        value={body}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            onSend();
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            onCancel();
+          }
+        }}
+        placeholder={`${authorName}-д хариулах...`}
+        disabled={submitting}
+        style={{
+          flex: 1,
+          minWidth: 0,
+          minHeight: 36,
+          maxHeight: 120,
+          resize: 'none',
+          background: 'transparent',
+          border: 'none',
+          outline: 'none',
+          color: 'var(--text)',
+          fontSize: 14,
+          fontFamily: 'inherit',
+          lineHeight: 1.5,
+          padding: '6px 8px',
+        }}
+      />
+      <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+        <button
+          type="button"
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCancel(); }}
+          style={cancelBtnStyle}
+          aria-label="Болих"
+        >
+          ✕
+        </button>
+        <button
+          type="button"
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSend(); }}
+          disabled={!canSend}
+          style={sendBtnStyle}
+          aria-label="Илгээх"
+        >
+          →
+        </button>
+      </div>
+
       <style>{`
-        .ci-reply {
-          display: inline-flex; align-items: center; gap: 4px;
-          padding: 2px 8px;
-          background: transparent; border: none;
-          color: var(--muted);
-          font-family: inherit; font-size: 12px; font-weight: 600;
-          cursor: pointer; border-radius: 6px;
+        @media (max-width: 600px) {
+          .ict-reply-form { margin-left: 28px !important; }
         }
-        .ci-reply:hover:not(:disabled) {
-          background: rgba(127,127,127,0.08); color: var(--text);
-        }
-        .ci-reply:disabled { opacity: 0.5; cursor: not-allowed; }
       `}</style>
-    </button>
+    </div>
   );
 }
 
@@ -447,11 +490,11 @@ interface CommentItemProps {
   isReply: boolean;
   myLiked: Set<string>;
   setMyLiked: React.Dispatch<React.SetStateAction<Set<string>>>;
-  children?: React.ReactNode;
+  onReplyClick?: () => void;
 }
 
 function CommentItem({
-  postId, comment, isReply, myLiked, setMyLiked, children,
+  postId, comment, isReply, myLiked, setMyLiked, onReplyClick,
 }: CommentItemProps) {
   const { user } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -586,14 +629,22 @@ function CommentItem({
             <AppleEmoji emoji="❤️" size={12} />
             {likeCount > 0 && <span className="ci-like-count">{likeCount}</span>}
           </button>
-          {children}
+          {onReplyClick && (
+            <button
+              type="button"
+              className="ci-reply"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onReplyClick(); }}
+            >
+              <span aria-hidden>💬</span> Reply
+            </button>
+          )}
         </div>
       </div>
 
       <style>{`
         .ci {
           display: flex;
-          gap: 10px;
+          gap: 12px;
         }
         .ci-content {
           flex: 1; min-width: 0;
@@ -625,7 +676,7 @@ function CommentItem({
           margin-top: 4px;
           display: flex; align-items: center; gap: 4px;
         }
-        .ci-like {
+        .ci-like, .ci-reply {
           display: inline-flex; align-items: center; gap: 4px;
           padding: 2px 8px;
           background: transparent; border: none; border-radius: 6px;
@@ -634,8 +685,10 @@ function CommentItem({
           cursor: pointer;
           transition: background 0.12s, color 0.12s, transform 0.1s;
         }
-        .ci-like:hover { background: rgba(127,127,127,0.08); color: var(--text); }
-        .ci-like:active { transform: scale(0.92); }
+        .ci-like:hover, .ci-reply:hover {
+          background: rgba(127,127,127,0.08); color: var(--text);
+        }
+        .ci-like:active, .ci-reply:active { transform: scale(0.92); }
         .ci-like.liked { color: var(--accent); }
         .ci-like-count { font-size: 12px; }
         .ci-menu-wrap {
