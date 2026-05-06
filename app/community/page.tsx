@@ -5,19 +5,50 @@ import { QRCodeSVG } from 'qrcode.react';
 
 const DISCORD_INVITE_URL = 'https://discord.gg/VxrmRDN3nK';
 
+type FeatureIconName = 'megaphone' | 'lightbulb' | 'trophy' | 'play' | 'headphones' | 'chat';
+
 const FEATURES: {
-  emoji: string;
   title: string;
   desc: string;
-  tintBg: string;
-  tintBorder: string;
+  color: string;
+  icon: FeatureIconName;
 }[] = [
-  { emoji: '📢', title: 'Зар',        desc: 'Тэмцээний шинэ мэдээ',     tintBg: 'rgba(239,68,68,0.15)',   tintBorder: 'rgba(239,68,68,0.35)' },
-  { emoji: '❓', title: 'Асуулт',     desc: 'Алгоритм, тоног төхөөрөмж', tintBg: 'rgba(59,130,246,0.15)',  tintBorder: 'rgba(59,130,246,0.35)' },
-  { emoji: '🏆', title: 'Амжилт',     desc: 'PR, медаль хуваалцана',    tintBg: 'rgba(234,179,8,0.15)',   tintBorder: 'rgba(234,179,8,0.35)' },
-  { emoji: '🎥', title: 'Видео',      desc: 'Solve видеонууд',          tintBg: 'rgba(167,139,250,0.15)', tintBorder: 'rgba(167,139,250,0.35)' },
-  { emoji: '🎤', title: 'Voice chat', desc: 'Хамт practice',            tintBg: 'rgba(16,185,129,0.15)',  tintBorder: 'rgba(16,185,129,0.35)' },
-  { emoji: '💬', title: 'Чат',        desc: 'Юу ч ярина',               tintBg: 'rgba(6,182,212,0.15)',   tintBorder: 'rgba(6,182,212,0.35)' },
+  {
+    title: 'Тэмцээний шинэ мэдээ',
+    desc: 'Удахгүй болох тэмцээн, бүртгэлийн хугацаа, шагнал — бүгд эхлээд энд зарлагдана.',
+    color: '#ef4444',
+    icon: 'megaphone',
+  },
+  {
+    title: 'Алгоритм нэгтгэл',
+    desc: 'OLL, PLL, F2L, шинэ техник, тоног төхөөрөмжийн зөвлөгөө — ах нараас сурна.',
+    color: '#3b82f6',
+    icon: 'lightbulb',
+  },
+  {
+    title: 'Амжилт хуваалцах',
+    desc: 'Шинэ PR, медаль, тэмцээний дүн — баяраа хуваалцаж бусдыг урамшуулна.',
+    color: '#fbbf24',
+    icon: 'trophy',
+  },
+  {
+    title: 'Solve видео',
+    desc: 'Өөрийн solve-оо хуваалцаж сайжруулалт авна. Бусдын hand-cam-аас санаа аваарай.',
+    color: '#ec4899',
+    icon: 'play',
+  },
+  {
+    title: 'Хамт practice',
+    desc: 'Voice channel дээр чатлан хамт solve хийнэ. Хэн нэгний хажууд практик илүү таатай.',
+    color: '#22c55e',
+    icon: 'headphones',
+  },
+  {
+    title: 'Чөлөөт яриа',
+    desc: 'Cubing-ийн талаар юу ч ярь — meme, ярилцлага, тоног төхөөрөмжийн review. Хязгааргүй.',
+    color: '#a78bfa',
+    icon: 'chat',
+  },
 ];
 
 function DiscordLogo({ size = 120 }: { size?: number }) {
@@ -34,6 +65,100 @@ function DiscordLogo({ size = 120 }: { size?: number }) {
       />
     </svg>
   );
+}
+
+function CubeIcon({ size = 22 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 22 22" className="dc-cube" aria-hidden>
+      <g transform="rotate(15 11 11)">
+        <rect x="2"  y="2"  width="6" height="6" fill="#ef4444" rx="1"/>
+        <rect x="8"  y="2"  width="6" height="6" fill="#fff"    rx="1"/>
+        <rect x="14" y="2"  width="6" height="6" fill="#3b82f6" rx="1"/>
+        <rect x="2"  y="8"  width="6" height="6" fill="#22c55e" rx="1"/>
+        <rect x="8"  y="8"  width="6" height="6" fill="#fbbf24" rx="1"/>
+        <rect x="14" y="8"  width="6" height="6" fill="#ef4444" rx="1"/>
+        <rect x="2"  y="14" width="6" height="6" fill="#fff"    rx="1"/>
+        <rect x="8"  y="14" width="6" height="6" fill="#f97316" rx="1"/>
+        <rect x="14" y="14" width="6" height="6" fill="#22c55e" rx="1"/>
+      </g>
+    </svg>
+  );
+}
+
+function TimerIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg
+      width={size} height={size} viewBox="0 0 20 20"
+      fill="none" stroke="#4ade80" strokeWidth={1.5}
+      strokeLinecap="round" strokeLinejoin="round"
+      aria-hidden
+    >
+      <circle cx="10" cy="11" r="6" />
+      <line x1="10" y1="11" x2="10" y2="7" className="dc-timer-hand" />
+      <line x1="8" y1="3" x2="12" y2="3" />
+      <line x1="10" y1="3" x2="10" y2="5" />
+    </svg>
+  );
+}
+
+function FeatureIcon({ name, size = 28 }: { name: FeatureIconName; size?: number }) {
+  const props = {
+    width: size, height: size, viewBox: '0 0 24 24',
+    fill: 'none' as const,
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+  };
+  switch (name) {
+    case 'megaphone':
+      return (
+        <svg {...props}>
+          <path d="M3 11v2a1 1 0 001 1h3l8 5V5l-8 5H4a1 1 0 00-1 1z" />
+          <path d="M19 8a4 4 0 010 8" />
+        </svg>
+      );
+    case 'lightbulb':
+      return (
+        <svg {...props}>
+          <path d="M9 18h6" />
+          <path d="M10 22h4" />
+          <path d="M12 2a7 7 0 00-4 12c.6.5 1 1.3 1 2v2h6v-2c0-.7.4-1.5 1-2a7 7 0 00-4-12z" />
+        </svg>
+      );
+    case 'trophy':
+      return (
+        <svg {...props}>
+          <path d="M8 21h8" />
+          <path d="M12 17v4" />
+          <path d="M7 4h10v6a5 5 0 01-10 0V4z" />
+          <path d="M17 4h3a2 2 0 01-2 4" />
+          <path d="M7 4H4a2 2 0 002 4" />
+        </svg>
+      );
+    case 'play':
+      return (
+        <svg {...props}>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M10 8l6 4-6 4V8z" />
+        </svg>
+      );
+    case 'headphones':
+      return (
+        <svg {...props}>
+          <path d="M3 14v-2a9 9 0 0118 0v2" />
+          <path d="M3 14v3a2 2 0 002 2h2v-7H5a2 2 0 00-2 2z" />
+          <path d="M21 14v3a2 2 0 01-2 2h-2v-7h2a2 2 0 012 2z" />
+        </svg>
+      );
+    case 'chat':
+      return (
+        <svg {...props}>
+          <path d="M21 12a8 8 0 01-12 7l-5 2 2-5a8 8 0 1115-4z" />
+        </svg>
+      );
+  }
 }
 
 export default function CommunityPage() {
@@ -89,18 +214,24 @@ export default function CommunityPage() {
             Mongolian Speedcubers Community
           </h1>
           <p className="dc-subtitle fade-in" style={{ animationDelay: '200ms' }}>
-            Шоочдын нэгдэл — Discord дээр
+            <span>Куб эргүүлдэг бид нэг дор</span>
+            <span className="dc-sub-dot" aria-hidden>•</span>
+            <span>Алгоритм хуваалцана</span>
+            <span className="dc-sub-dot" aria-hidden>•</span>
+            <span>Тэмцээнд бэлдэнэ</span>
+            <span className="dc-sub-dot" aria-hidden>•</span>
+            <span>Хамт ургана</span>
           </p>
 
           {stats !== null && (
             <div className="dc-stats fade-in" style={{ animationDelay: '300ms' }}>
               <div className="dc-pill dc-pill-purple">
-                <span aria-hidden style={{ fontSize: '1rem' }}>📊</span>
-                <span>{stats.total} гишүүн</span>
+                <CubeIcon size={22} />
+                <span>{stats.total} cuber</span>
               </div>
               <div className="dc-pill dc-pill-green">
-                <span className="dc-online-dot" aria-hidden />
-                <span>{stats.online} онлайн</span>
+                <TimerIcon size={20} />
+                <span>{stats.online} solving</span>
               </div>
             </div>
           )}
@@ -155,11 +286,17 @@ export default function CommunityPage() {
             >
               <div
                 className="dc-feature-icon"
-                style={{ background: f.tintBg, borderColor: f.tintBorder }}
+                style={{
+                  background: `${f.color}1A`,
+                  borderColor: `${f.color}33`,
+                  color: f.color,
+                }}
               >
-                {f.emoji}
+                <FeatureIcon name={f.icon} size={28} />
               </div>
-              <div className="dc-feature-name">{f.title}</div>
+              <div className="dc-feature-name" style={{ color: f.color }}>
+                {f.title}
+              </div>
               <div className="dc-feature-desc">{f.desc}</div>
             </div>
           ))}
@@ -318,10 +455,23 @@ export default function CommunityPage() {
           -webkit-text-fill-color: transparent;
         }
         .dc-subtitle {
-          font-size: clamp(0.95rem, 2.4vw, 1.15rem);
-          color: rgba(255,255,255,0.6);
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          justify-content: center;
+          gap: 0.65rem;
+          font-size: 1.1rem;
+          line-height: 1.5;
+          color: rgba(255,255,255,0.7);
+          letter-spacing: 0.02em;
           margin-bottom: 1.85rem;
-          max-width: 520px;
+          max-width: 760px;
+        }
+        .dc-sub-dot {
+          color: #a78bfa;
+          font-size: 0.7rem;
+          opacity: 0.8;
+          line-height: 1;
         }
 
         /* Stats pills (glass) */
@@ -346,30 +496,27 @@ export default function CommunityPage() {
         }
         .dc-pill-purple {
           color: #c4b5fd;
+          perspective: 600px;
         }
         .dc-pill-green {
           color: #4ade80;
         }
-        .dc-online-dot {
-          position: relative;
-          width: 10px; height: 10px;
-          border-radius: 50%;
-          background: #22c55e;
-          flex-shrink: 0;
-          box-shadow: 0 0 12px rgba(34,197,94,0.6);
+        .dc-cube {
+          transition: transform 0.18s ease;
+          transform-style: preserve-3d;
         }
-        .dc-online-dot::before, .dc-online-dot::after {
-          content: '';
-          position: absolute;
-          inset: 0;
-          border-radius: 50%;
-          background: #22c55e;
-          animation: dcPing 2s ease-out infinite;
+        .dc-pill-purple:hover .dc-cube {
+          animation: dcCubeFlip 1.2s ease-in-out;
         }
-        .dc-online-dot::after { animation-delay: 1s; }
-        @keyframes dcPing {
-          0%   { transform: scale(1);    opacity: 0.55; }
-          100% { transform: scale(2.6);  opacity: 0; }
+        @keyframes dcCubeFlip {
+          to { transform: rotateY(360deg); }
+        }
+        .dc-timer-hand {
+          transform-origin: 10px 11px;
+          animation: dcSpin 4s linear infinite;
+        }
+        @keyframes dcSpin {
+          to { transform: rotate(360deg); }
         }
 
         /* CTA */
@@ -529,15 +676,14 @@ export default function CommunityPage() {
           box-shadow: 0 10px 30px rgba(124,58,237,0.18);
         }
         .dc-feature-icon {
-          width: 44px; height: 44px;
-          border-radius: 11px;
+          width: 56px; height: 56px;
+          border-radius: 14px;
           border: 1px solid;
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          font-size: 1.5rem;
           line-height: 1;
-          margin-bottom: 0.95rem;
+          margin-bottom: 1rem;
         }
         .dc-feature-name {
           font-size: 1rem;
@@ -585,6 +731,12 @@ export default function CommunityPage() {
           .dc-features-grid { grid-template-columns: repeat(2, 1fr); }
         }
         @media (max-width: 768px) {
+          .dc-subtitle {
+            flex-direction: column;
+            gap: 4px;
+            font-size: 0.95rem;
+          }
+          .dc-sub-dot { display: none; }
           .dc-hero { min-height: 90dvh; padding: 3rem 1rem 4.5rem; }
           .dc-orb-tl, .dc-orb-tr {
             width: 380px; height: 380px;
@@ -603,8 +755,9 @@ export default function CommunityPage() {
         }
         @media (prefers-reduced-motion: reduce) {
           .dc-logo-halo::before,
-          .dc-online-dot::before,
-          .dc-online-dot::after,
+          .dc-timer-hand,
+          .dc-cube,
+          .dc-pill-purple:hover .dc-cube,
           .dc-scroll-hint,
           .fade-in,
           .dc-cta::after { animation: none; }
