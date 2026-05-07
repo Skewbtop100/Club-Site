@@ -345,6 +345,17 @@ export default function TimerPage() {
       setIsTablet(w >= 700 && w < 1024);
     };
     check();
+    // Defensive cleanup of any inline overflow leaked from a previous
+    // page (multiplayer's racing-screen / modal effects use the snapshot-
+    // and-restore pattern, which can leave body/html stuck at 'hidden'
+    // when nested or interrupted by a route change). /timer reapplies
+    // its own scrolling locks via the page-scoped `<style>` rule below
+    // and the running-solve effect, so clearing inline values here is
+    // safe — we just want a known starting point on every mount.
+    if (typeof document !== 'undefined') {
+      document.body.style.overflow = '';
+      document.documentElement.style.overflow = '';
+    }
     setMounted(true);
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);

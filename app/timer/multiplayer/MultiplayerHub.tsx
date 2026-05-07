@@ -1145,7 +1145,7 @@ function OnlineUserRow({
               {eventLabel(room.event)} · Round {room.round}/{room.maxRounds}
               {' · '}
               <span style={{ color: C.text, fontWeight: 700 }}>
-                Solve {Math.min(member.currentSolve + 1, 5)}/5
+                Эвлүүлэлт {Math.min(member.currentSolve + 1, 5)}/5
               </span>
             </>
           ) : (
@@ -1570,7 +1570,7 @@ function RoomDetailMemberRow({
           {racing && !queued ? (
             <>
               <span style={{ color: C.text, fontWeight: 700 }}>
-                Solve {Math.min(member.currentSolve + 1, 5)}/5
+                Эвлүүлэлт {Math.min(member.currentSolve + 1, 5)}/5
               </span>
               {member.roundAverage != null && (
                 <>
@@ -2134,12 +2134,12 @@ function AchievementsCard({
 function HowToPlayCard() {
   const [open, setOpen] = useState(false);
   const steps: string[] = [
-    'WCA-ийн стандартаар тоглоно',
-    '1 Round = 5 solve → Ao5 (best/worst дроп)',
+    'WCA-ийн стандартаар уралдана',
+    '1 Round = 5 эвлүүлэлт → Ao5 (best/worst дроп)',
     'Хамгийн сайн Ao5-той хүн round хождог',
     'Олон round-той тэмцээнд хамгийн их хожсон нь түрүүлдэг',
     'DNF тоо нэгээс олон бол → DNF Ao5',
-    'Disconnect = тэр solve DNF болно (round дунд орж ирвэл үргэлжлүүлэх боломжтой)',
+    'Disconnect = тэр эвлүүлэлт DNF болно (round дунд орж ирвэл үргэлжлүүлэх боломжтой)',
   ];
   return (
     <section style={{
@@ -2167,7 +2167,7 @@ function HowToPlayCard() {
           }} aria-hidden="true">
             <IconGameController size={18} />
           </span>
-          <span>Хэрхэн тоглох вэ?</span>
+          <span>Тэмцээний дүрэм</span>
         </span>
         <span style={{
           fontSize: '1rem', color: C.muted,

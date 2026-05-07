@@ -826,6 +826,22 @@ function MultiplayerPageInner() {
     };
   }, [view, room?.status]);
 
+  // Belt-and-braces unmount cleanup: when the user leaves multiplayer
+  // entirely (router.push back to /timer), force any inline overflow
+  // snapshot the racing/modal effects might have left stuck back to the
+  // empty string. Without this, a nested-effect race (e.g. modal opens
+  // mid-race, captures prev='hidden', restores to 'hidden' instead of
+  // '') can persist as inline body/html style across the route change
+  // and break /timer's mobile layout. /timer reapplies its own locks on
+  // mount, so clearing here is safe.
+  useEffect(() => {
+    return () => {
+      if (typeof document === 'undefined') return;
+      document.body.style.overflow = '';
+      document.documentElement.style.overflow = '';
+    };
+  }, []);
+
   // Keep the screen on for the entire racing phase — solves can take longer
   // than mobile auto-dim timeouts (30–60 s), and dimming mid-solve is
   // disruptive. We hold the lock across the whole round (not just the local
@@ -1327,7 +1343,7 @@ function MultiplayerPageInner() {
       if (!e || typeof e !== 'object') continue;
       if (e.uid === userId) continue;            // requester — no self-toast
       if (e.round !== room.round) continue;      // stale, not from this round
-      pushNotif(`${e.name} нэмэлт scramble хүслээ (solve ${e.solveIdx + 1})`, 'info', { icon: IconRefresh });
+      pushNotif(`${e.name} нэмэлт scramble хүслээ (эвлүүлэлт ${e.solveIdx + 1})`, 'info', { icon: IconRefresh });
     }
   }, [room, userId, pushNotif]);
 
@@ -2419,10 +2435,10 @@ function MultiplayerPageInner() {
         else if (type === 'retrySolve') {
           // Self-toast for the initiator, third-person for everyone else.
           if (v.initiator === userId) {
-            pushNotif('Solve буцаагдлаа', 'success', { icon: IconUndo });
+            pushNotif('Эвлүүлэлт буцаагдлаа', 'success', { icon: IconUndo });
           } else if (v.solveIdx != null) {
             pushNotif(
-              `${v.initiatorName} solve ${v.solveIdx + 1}-г дахин хийж байна`,
+              `${v.initiatorName} ${v.solveIdx + 1}-р эвлүүлэлтийг дахин хийж байна`,
               'info',
               { icon: IconUndo },
             );
@@ -2775,7 +2791,7 @@ function MultiplayerPageInner() {
               setPauseConfirmOpen(true);
             }}
             retryAvailable={retryAvailable}
-            retrySolveLabel={retryIdx != null ? `Solve ${retryIdx + 1}` : 'Solve'}
+            retrySolveLabel={retryIdx != null ? `Эвлүүлэлт ${retryIdx + 1}` : 'Эвлүүлэлт'}
             retryVoteInFlight={!!room?.votes?.retrySolve}
             retryQuotaSpent={quotaSpent}
             onRetrySolve={() => {
@@ -6914,9 +6930,10 @@ function BigButton({
 // controls (event + rounds); other players see the same values read-only
 // so everyone can confirm what they're about to race. Default-collapsed
 // so it doesn't dominate the layout — most rooms keep defaults.
-// Round-count options shown in the redesigned panel. WCA-flavoured ladder
-// of odd-numbered counts; getRoundName above generates the bracket names.
-const MP_ROUND_OPTIONS = [1, 3, 5, 7];
+// Round-count options shown in the redesigned panel. Capped at 4 — host
+// picks 1, 2, 3, or 4 rounds; getRoundName above maps each value to a
+// bracket name.
+const MP_ROUND_OPTIONS = [1, 2, 3, 4];
 
 function SettingsPanel({
   isHost, event, maxRounds, onSetEvent, onSetMaxRounds,
@@ -7039,7 +7056,7 @@ function SettingsPanel({
 
           {/* Helper line explaining the scoring rule — kept very short. */}
           <div style={{ fontSize: '0.7rem', color: C.mutedDim, lineHeight: 1.45 }}>
-            Раунд тутамд 5 солв · Best / Worst дроп Ao5
+            Раунд тутамд 5 эвлүүлэлт · Best / Worst дроп Ao5
           </div>
         </div>
       )}
