@@ -1262,49 +1262,79 @@ function MultiplayerPageInner() {
     prevStatusRef.current = cur;
   }, [now, room?.members, userId, pushNotif]);
 
-  // Member-membership detection — fires three different toast variants:
-  //   • new uid in cur (not in prev, prev was loaded once already) → JOIN
-  //   • uid in prev, gone from cur, prev status was 'disconnected'   → KICK
-  //   • uid in prev, gone from cur, prev status was online/idle      → LEAVE
-  // The `loaded` ref-flag suppresses join-spam when we first load the
-  // room snapshot (every existing member would otherwise re-announce
-  // their presence to us on mount).
-  const prevMembersRef = useRef<{
-    map: Record<string, { name: string; status: ConnectionStatus }>;
-    loaded: boolean;
-  }>({ map: {}, loaded: false });
+  // Member-membership detection — fires three toast variants:
+  //   • uid first seen in cur (and not us) → JOIN
+  //   • uid in prev, gone from cur, prev status 'disconnected' → KICK
+  //   • uid in prev, gone from cur, prev status online/idle    → LEAVE
+  //
+  // The notification gate is a `Set<uid>` of "already-toasted" players.
+  // On the first snapshot we seed it with EVERYONE currently in the
+  // room — that suppresses the spam-on-mount where existing members
+  // would otherwise look "new" to us. Later snapshots only toast uids
+  // that aren't in the set yet. The current user's uid is added to the
+  // set unconditionally on every pass, so the host never gets toasted
+  // about their own join (this guards against userId hydrating after
+  // the room snapshot lands, which previously caused a self-toast on
+  // create-room).
+  //
+  // Leavers are removed from the set when they disappear from cur, so a
+  // genuine rejoin (member entry recreated) re-toasts as a fresh join.
+  // We also keep a small "last seen" map so leave/kick toasts can
+  // include the right name + reason without depending on cur.
+  const notifiedUidsRef = useRef<Set<string>>(new Set());
+  const seededRef = useRef<boolean>(false);
+  const lastSeenMembersRef = useRef<Record<string, { name: string; status: ConnectionStatus }>>({});
   useEffect(() => {
     if (!room?.members) {
-      prevMembersRef.current = { map: {}, loaded: false };
+      // Reset on un-room — re-entering a different room should re-seed.
+      notifiedUidsRef.current = new Set();
+      seededRef.current = false;
+      lastSeenMembersRef.current = {};
       return;
     }
-    const prev = prevMembersRef.current.map;
-    const wasLoaded = prevMembersRef.current.loaded;
     const cur = room.members;
-    if (wasLoaded) {
-      for (const uid of Object.keys(prev)) {
+    const seen = notifiedUidsRef.current;
+
+    if (!seededRef.current) {
+      // First snapshot for this room: seed without toasting anyone.
+      for (const uid of Object.keys(cur)) seen.add(uid);
+      if (userId) seen.add(userId);
+      seededRef.current = true;
+    } else {
+      // Always treat self as already-notified so the toast can never
+      // fire for our own uid even if `userId` hydrated late.
+      if (userId) seen.add(userId);
+
+      // LEAVE / KICK — uids in last-seen but missing from cur.
+      const last = lastSeenMembersRef.current;
+      for (const uid of Object.keys(last)) {
         if (cur[uid]) continue;
+        seen.delete(uid);
         if (uid === userId) continue;
-        if (prev[uid].status === 'disconnected') {
-          pushNotif(`${prev[uid].name} холболт тасарсан`, 'warn', { icon: IconWifiOff });
+        if (last[uid].status === 'disconnected') {
+          pushNotif(`${last[uid].name} холболт тасарсан`, 'warn', { icon: IconWifiOff });
         } else {
-          pushNotif(`${prev[uid].name} гарлаа`, 'info', { icon: IconUserMinus });
+          pushNotif(`${last[uid].name} гарлаа`, 'info', { icon: IconUserMinus });
         }
       }
+
+      // JOIN — uids in cur not yet in `seen` (and not us).
       for (const [uid, m] of Object.entries(cur)) {
-        if (prev[uid]) continue;
-        if (uid === userId) continue;
+        if (seen.has(uid)) continue;
+        if (uid === userId) { seen.add(uid); continue; }
         // Mid-round joiners enter as `queued: true`; show the same
         // join toast either way — the "queued" state is conveyed by the
         // opponent panel, not this notification.
         pushNotif(`${m.name} орж ирлээ`, 'info', { icon: IconUserPlus });
+        seen.add(uid);
       }
     }
-    const next: typeof prev = {};
+
+    const nextSeen: Record<string, { name: string; status: ConnectionStatus }> = {};
     for (const [uid, m] of Object.entries(cur)) {
-      next[uid] = { name: m.name, status: getConnectionStatus(m, now) };
+      nextSeen[uid] = { name: m.name, status: getConnectionStatus(m, now) };
     }
-    prevMembersRef.current = { map: next, loaded: true };
+    lastSeenMembersRef.current = nextSeen;
   }, [now, room?.members, userId, pushNotif]);
 
   // Settings-change toast — only fires when the host edits event/maxRounds
