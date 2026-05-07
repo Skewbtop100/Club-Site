@@ -39,9 +39,11 @@ import {
   IconRefresh, IconPause, IconPlay, IconUndo, IconHourglass, IconTrophy,
   IconCrown, IconFlag, IconCheck, IconAlertCircle, IconUserPlus,
   IconUserMinus, IconWifi, IconWifiOff, IconClose, IconSettings as IconSettingsLib,
+  IconCopy, IconShare,
   MEDAL_GOLD,
 } from '@/lib/icons';
 import type { IconProps as LibIconProps } from '@/lib/icons';
+import { WcaEventIcon } from '@/lib/wca-event-icon';
 
 // Solo-timer prefs key — multiplayer reads `holdTimeMs` from here on
 // first visit so a user who already configured it on /timer doesn't
@@ -83,6 +85,11 @@ const EVENTS: EventDef[] = [
   { id: 'clock',   name: 'Clock',            short: 'Clock' },
   { id: 'minx',    name: 'Megaminx',         short: 'Mega'  },
 ];
+
+// Events that show under the collapsible "Тусгай төрлүүд" section in
+// the picker. Multiplayer doesn't currently scramble BLD/FMC, but the
+// list is here so the picker stays structurally identical to /timer's.
+const SPECIAL_EVENT_IDS: string[] = [];
 
 const SCRAMBOW_TYPE: Record<string, string> = {
   '333': '333', '222': '222', '444': '444', '555': '555', '666': '666', '777': '777',
@@ -494,11 +501,20 @@ function getRoundName(round: number, maxRounds: number): string {
     if (round === 2) return 'Second Round';
     return 'Final';
   }
-  // maxRounds === 4
-  if (round === 1) return 'First Round';
-  if (round === 2) return 'Second Round';
-  if (round === 3) return 'Semi Final';
-  return 'Final';
+  if (maxRounds === 4) {
+    if (round === 1) return 'First Round';
+    if (round === 2) return 'Second Round';
+    if (round === 3) return 'Semi Final';
+    return 'Final';
+  }
+  // maxRounds 5+ — generic numbering for early rounds, named brackets
+  // at the top of the ladder. Covers the new 5- and 7-round options
+  // exposed by the redesigned SettingsPanel without rewriting the
+  // existing 1..4 cases above.
+  if (round >= maxRounds) return 'Final';
+  if (round === maxRounds - 1) return 'Semi Final';
+  if (round === maxRounds - 2 && maxRounds >= 6) return 'Quarter Final';
+  return `Round ${round}`;
 }
 
 function effectiveSolveMs(s: SolveData): number {
@@ -643,10 +659,17 @@ function MultiplayerPageInner() {
   const [displayName, setDisplayName] = useState<string>('');
 
   // UI state
-  const [view, setView] = useState<'lobby' | 'create' | 'join' | 'room'>('lobby');
+  // 'create' was retired with the room-create form: clicking the lobby
+  // CTA now goes straight from 'lobby' → (transient `creating`) → 'room'.
+  const [view, setView] = useState<'lobby' | 'join' | 'room'>('lobby');
   const [joinCode, setJoinCode] = useState('');
   const [invitedCode, setInvitedCode] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
+  // Brief loading flag while createRoom() runs the RTDB transaction.
+  // Renders a fullscreen "Үүсгэж байна…" overlay so the user has feedback
+  // during the network round-trip without seeing an empty intermediate
+  // screen.
+  const [creating, setCreating] = useState(false);
 
   // Active room
   const [roomCode, setRoomCode] = useState<string>('');
@@ -2537,9 +2560,14 @@ function MultiplayerPageInner() {
   if (!authUser)        return null;
   if (!trimmedAuthName) return <DisplayNamePrompt />;
 
+  // Mobile + the racing screen lock the page to the visible viewport so
+  // the layout never overflows the URL-bar dynamics on iOS / Android.
+  // Inner sections (lobby hub, waiting room, results) handle their own
+  // vertical scroll via the <main> wrapper below.
+  const lockToViewport = isRacing || isMobile;
   return (
     <div style={{
-      ...(isRacing
+      ...(lockToViewport
         ? {
             // dvh tracks the visible viewport on mobile so URL-bar dynamics
             // don't cause the layout to overflow. Older browsers without dvh
@@ -2573,8 +2601,18 @@ function MultiplayerPageInner() {
 
       <main style={{
         flex: '1 1 auto', minWidth: 0,
-        padding: (view === 'room' && room?.status === 'racing') ? 0 : '1rem',
+        // The racing screen owns its own padding (cube preview + timer
+        // grid). Everywhere else, mobile gets a tighter band so the
+        // waiting room / hub fit a 100dvh viewport without being
+        // crammed against the safe-area paddings.
+        padding: (view === 'room' && room?.status === 'racing')
+          ? 0
+          : (isMobile ? '0.5rem 0.6rem' : '1rem'),
         display: 'flex', flexDirection: 'column',
+        // When the outer is locked to the viewport (mobile or racing),
+        // <main> becomes the scroll container so the lobby + waiting
+        // room can overflow internally instead of pushing the page tall.
+        ...(lockToViewport ? { minHeight: 0, overflowY: 'auto' as const } : null),
       }}>
         {errorMsg && view !== 'room' && (
           <div style={{
@@ -2594,7 +2632,16 @@ function MultiplayerPageInner() {
               try { localStorage.removeItem(LAST_ROOM_KEY); } catch {}
               setPendingRejoin('');
             }}
-            onCreate={() => { setErrorMsg(''); setView('create'); }}
+            onCreate={async () => {
+              // Skip the old confirm-only CreateForm: the player's name
+              // already comes from useAuth(), so there's nothing to fill
+              // in. Go straight to the RTDB write — createRoom flips the
+              // view to 'room' on success.
+              setErrorMsg('');
+              setCreating(true);
+              try { await createRoom(); }
+              finally { setCreating(false); }
+            }}
             onJoin={() => { setErrorMsg(''); setView('join'); }}
             onJoinRoom={(code) => {
               setErrorMsg('');
@@ -2604,14 +2651,6 @@ function MultiplayerPageInner() {
               // back to the form.
               joinRoom(code);
             }}
-          />
-        )}
-
-        {view === 'create' && (
-          <CreateForm
-            isMobile={isMobile}
-            onSubmit={createRoom}
-            onBack={() => setView('lobby')}
           />
         )}
 
@@ -2856,6 +2895,7 @@ function MultiplayerPageInner() {
           onConfirm={confirmedLeave}
         />
       )}
+      {creating && <MpCreatingOverlay />}
       {pendingMidRoundJoin && (
         <MpQueueConfirmModal
           isMobile={isMobile}
@@ -2963,6 +3003,41 @@ function MpAuthLoading() {
   );
 }
 
+// Brief fullscreen overlay shown while createRoom() runs the RTDB
+// transaction. Replaces the old confirm-only CreateForm intermediate
+// step — the user clicks "Өрөө үүсгэх" in the hub once and lands in
+// the waiting room as soon as the write returns.
+function MpCreatingOverlay() {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9500,
+      background: 'rgba(10,10,15,0.7)', backdropFilter: 'blur(6px)',
+      WebkitBackdropFilter: 'blur(6px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      flexDirection: 'column', gap: '0.85rem',
+      color: C.text,
+      fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+    }}>
+      <span
+        aria-hidden
+        style={{
+          width: 28, height: 28,
+          border: `2px solid ${C.border}`,
+          borderTopColor: C.accent,
+          borderRadius: '50%',
+          animation: 'mp-creating-spin 0.7s linear infinite',
+        }}
+      />
+      <div style={{ fontSize: '0.9rem', color: C.muted }}>Үүсгэж байна…</div>
+      <style>{`
+        @keyframes mp-creating-spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 function DisplayNamePrompt() {
   const router = useRouter();
   return (
@@ -3000,24 +3075,6 @@ function DisplayNamePrompt() {
         </button>
       </div>
     </div>
-  );
-}
-
-// ── CreateForm ────────────────────────────────────────────────────────────
-// The display-name field that used to live here is gone — multiplayer
-// pulls the authenticated user's saved displayName from useAuth() now,
-// so there's nothing for the user to type. The form is just a confirm
-// button.
-function CreateForm({
-  isMobile, onSubmit, onBack,
-}: {
-  isMobile: boolean;
-  onSubmit: () => void; onBack: () => void;
-}) {
-  return (
-    <FormShell isMobile={isMobile} title="Create Room" onBack={onBack}>
-      <BigButton accent onClick={onSubmit}>Create Room</BigButton>
-    </FormShell>
   );
 }
 
@@ -3463,9 +3520,11 @@ function WaitingRoom({
     <div className="mp-room-container" style={{
       width: '100%',
       maxWidth: isMobile ? '100%' : '720px',
-      padding: isMobile ? '1rem' : '2rem',
+      // Mobile reclaims most of the side padding so the cards run
+      // edge-to-edge inside the viewport-locked main scroller.
+      padding: isMobile ? '0.4rem 0' : '2rem',
       margin: '0 auto',
-      display: 'flex', flexDirection: 'column', gap: '1rem',
+      display: 'flex', flexDirection: 'column', gap: isMobile ? '0.7rem' : '1rem',
     }}>
       <RoomCodeCard code={roomCode} />
       <SharePanel roomCode={roomCode} />
@@ -5503,10 +5562,11 @@ function OpponentsPanel({
             style={{
               background: 'transparent', color: C.muted,
               border: `1px solid ${C.border}`, borderRadius: 8,
-              padding: '0.15rem 0.5rem', fontSize: '0.85rem',
+              padding: '0.2rem 0.4rem',
               fontFamily: 'inherit', cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             }}
-          >×</button>
+          ><IconClose size={14} /></button>
         )}
       </div>
       {rows.map(r => {
@@ -6854,6 +6914,10 @@ function BigButton({
 // controls (event + rounds); other players see the same values read-only
 // so everyone can confirm what they're about to race. Default-collapsed
 // so it doesn't dominate the layout — most rooms keep defaults.
+// Round-count options shown in the redesigned panel. WCA-flavoured ladder
+// of odd-numbered counts; getRoundName above generates the bracket names.
+const MP_ROUND_OPTIONS = [1, 3, 5, 7];
+
 function SettingsPanel({
   isHost, event, maxRounds, onSetEvent, onSetMaxRounds,
 }: {
@@ -6864,7 +6928,9 @@ function SettingsPanel({
   onSetMaxRounds: (n: number) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const eventName = EVENTS.find(e => e.id === event)?.name ?? event;
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const ev = EVENTS.find(e => e.id === event);
+  const eventName = ev?.name ?? event;
   return (
     <Card>
       <button
@@ -6897,61 +6963,281 @@ function SettingsPanel({
       </button>
 
       {open && (
-        <div style={{ marginTop: '0.7rem' }}>
-          {isHost ? (
-            <>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.7rem' }}>
-                <Field label="Event">
-                  <select
-                    value={event}
-                    onChange={e => onSetEvent(e.target.value)}
-                    style={inputStyle}
+        <div style={{
+          marginTop: '0.85rem',
+          display: 'flex', flexDirection: 'column', gap: '1rem',
+        }}>
+          {/* Section 1 — Төрөл (event picker pill) */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+            <MpMicroLabel>Төрөл</MpMicroLabel>
+            <button
+              type="button"
+              onClick={() => { if (isHost) setPickerOpen(true); }}
+              disabled={!isHost}
+              aria-haspopup={isHost ? 'dialog' : undefined}
+              aria-expanded={isHost ? pickerOpen : undefined}
+              style={{
+                alignSelf: 'flex-start',
+                background: 'rgba(255,255,255,0.04)',
+                color: C.text,
+                border: `1px solid ${C.border}`,
+                borderRadius: 999,
+                padding: '0.4rem 0.9rem',
+                fontSize: '0.85rem', fontWeight: 600, fontFamily: 'inherit',
+                cursor: isHost ? 'pointer' : 'default',
+                opacity: isHost ? 1 : 0.75,
+                display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
+                transition: 'background 0.15s ease, border-color 0.15s ease',
+              }}
+              onMouseEnter={e => { if (isHost) { e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; e.currentTarget.style.borderColor = C.borderHi; } }}
+              onMouseLeave={e => { if (isHost) { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.borderColor = C.border; } }}
+            >
+              <WcaEventIcon eventId={event} size={18} />
+              <span>{eventName}</span>
+              {isHost && (
+                <span aria-hidden style={{ color: C.mutedDim, fontSize: '0.62rem', marginLeft: '0.1rem' }}>▾</span>
+              )}
+            </button>
+          </div>
+
+          {/* Section 2 — Раунд (segmented 1 / 3 / 5 / 7) */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+            <MpMicroLabel>Раунд</MpMicroLabel>
+            <div role={isHost ? 'radiogroup' : undefined} aria-label="Round count" style={{
+              display: 'grid',
+              gridTemplateColumns: `repeat(${MP_ROUND_OPTIONS.length}, 1fr)`,
+              gap: '0.4rem',
+            }}>
+              {MP_ROUND_OPTIONS.map(n => {
+                const active = n === maxRounds;
+                return (
+                  <button
+                    key={n}
+                    type="button"
+                    role={isHost ? 'radio' : undefined}
+                    aria-checked={isHost ? active : undefined}
+                    onClick={() => { if (isHost) onSetMaxRounds(n); }}
+                    disabled={!isHost}
+                    style={{
+                      padding: '0.55rem 0',
+                      background: active ? C.accentDim : 'transparent',
+                      color: active ? C.accent : C.text,
+                      border: `1px solid ${active ? C.borderHi : C.border}`,
+                      borderRadius: 8,
+                      fontSize: '0.95rem', fontWeight: 700, fontFamily: 'inherit',
+                      cursor: isHost ? 'pointer' : 'default',
+                      opacity: isHost ? 1 : (active ? 1 : 0.55),
+                      transition: 'background 0.15s ease, color 0.15s ease, border-color 0.15s ease',
+                    }}
                   >
-                    {EVENTS.map(ev => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
-                  </select>
-                </Field>
-                <Field label="Rounds (1–4)">
-                  <select
-                    value={maxRounds}
-                    onChange={e => onSetMaxRounds(parseInt(e.target.value, 10))}
-                    style={inputStyle}
-                  >
-                    {[1, 2, 3, 4].map(n => (
-                      <option key={n} value={n}>
-                        {n} — {Array.from({ length: n }, (_, i) => getRoundName(i + 1, n)).join(' → ')}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-              </div>
-              <div style={{ marginTop: '0.6rem', fontSize: '0.72rem', color: C.muted, lineHeight: 1.45 }}>
-                Each round is 5 solves, ranked by Average of 5 (drop best + worst, WCA style). Changes save instantly and broadcast to all players.
-              </div>
-            </>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.7rem' }}>
-              <ReadOnlyField label="Event" value={eventName} />
-              <ReadOnlyField label="Rounds" value={String(maxRounds)} />
+                    {n}
+                  </button>
+                );
+              })}
             </div>
-          )}
+          </div>
+
+          {/* Helper line explaining the scoring rule — kept very short. */}
+          <div style={{ fontSize: '0.7rem', color: C.mutedDim, lineHeight: 1.45 }}>
+            Раунд тутамд 5 солв · Best / Worst дроп Ao5
+          </div>
         </div>
+      )}
+
+      {pickerOpen && isHost && (
+        <MpEventPickerSheet
+          currentEventId={event}
+          onSelect={(id) => onSetEvent(id)}
+          onClose={() => setPickerOpen(false)}
+        />
       )}
     </Card>
   );
 }
 
-function ReadOnlyField({ label, value }: { label: string; value: string }) {
+// Tiny uppercase microlabel used above each settings section. Matches
+// the ratio + tracking the rest of the timer's section labels follow.
+function MpMicroLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div>
-      <div style={{
-        fontSize: '0.66rem', letterSpacing: '0.1em', textTransform: 'uppercase',
-        color: C.muted, fontWeight: 700, marginBottom: '0.3rem',
-      }}>{label}</div>
-      <div style={{
-        background: C.cardAlt, border: `1px solid ${C.border}`, borderRadius: 8,
-        padding: '0.55rem 0.7rem', fontSize: '0.85rem', color: C.text,
-        fontWeight: 600,
-      }}>{value}</div>
+    <div style={{
+      fontSize: '0.6rem', letterSpacing: '0.16em',
+      textTransform: 'uppercase', color: C.mutedDim, fontWeight: 700,
+    }}>{children}</div>
+  );
+}
+
+// ── Event picker (multiplayer-local) ──────────────────────────────────────
+// Mirrors /timer's EventPickerSheet but uses multiplayer's local C
+// palette and EVENTS list. Sheet works fine on both desktop and mobile,
+// so we don't ship a separate dropdown variant here.
+function MpEventTile({
+  event, active, onClick,
+}: {
+  event: EventDef;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        background: active ? C.accentDim : C.cardAlt,
+        border: `1px solid ${active ? C.borderHi : C.border}`,
+        borderRadius: 12,
+        display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+        gap: '0.4rem',
+        cursor: 'pointer', fontFamily: 'inherit',
+        color: active ? C.accent : C.text,
+        transition: 'background 0.12s, border-color 0.12s',
+        minHeight: 80,
+      }}
+    >
+      <WcaEventIcon eventId={event.id} size={28} />
+      <span style={{
+        fontSize: '0.72rem', fontWeight: 600,
+        letterSpacing: '0.02em',
+      }}>
+        {event.short}
+      </span>
+    </button>
+  );
+}
+
+function MpEventPickerSheet({
+  currentEventId, onSelect, onClose,
+}: {
+  currentEventId: string;
+  onSelect: (id: string) => void;
+  onClose: () => void;
+}) {
+  const [specialOpen, setSpecialOpen] = useState(
+    SPECIAL_EVENT_IDS.includes(currentEventId),
+  );
+  const primaryEvents = EVENTS.filter(e => !SPECIAL_EVENT_IDS.includes(e.id));
+  const specialEvents = EVENTS.filter(e => SPECIAL_EVENT_IDS.includes(e.id));
+
+  // Capture-phase ESC so this sheet's close beats any other key listener
+  // wired to the same key (race-screen handlers, etc.).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') { e.stopPropagation(); onClose(); }
+    }
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 9000,
+        background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)',
+        WebkitBackdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: 'flex-end', justifyContent: 'stretch',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: '100%', maxHeight: '85vh',
+          background: C.card, borderTop: `1px solid ${C.border}`,
+          borderTopLeftRadius: 16, borderTopRightRadius: 16,
+          paddingBottom: 'env(safe-area-inset-bottom)',
+          display: 'flex', flexDirection: 'column',
+          boxShadow: '0 -16px 40px rgba(0,0,0,0.55)',
+        }}
+      >
+        <div style={{
+          flexShrink: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0.85rem 0.95rem',
+          borderBottom: `1px solid ${C.border}`,
+        }}>
+          <div style={{ fontSize: '1rem', fontWeight: 700, color: C.text }}>
+            Төрөл сонгох
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Хаах"
+            style={{
+              width: 30, height: 30, borderRadius: 8,
+              background: 'transparent', border: `1px solid ${C.border}`,
+              color: C.muted, cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          ><IconClose size={14} /></button>
+        </div>
+
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+          <div style={{
+            padding: '0.85rem',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: '0.6rem',
+          }}>
+            {primaryEvents.map(ev => (
+              <MpEventTile
+                key={ev.id}
+                event={ev}
+                active={ev.id === currentEventId}
+                onClick={() => { onSelect(ev.id); onClose(); }}
+              />
+            ))}
+          </div>
+
+          {specialEvents.length > 0 && (
+            <div style={{
+              borderTop: `1px solid ${C.border}`,
+              padding: '0 0.85rem 0.85rem',
+            }}>
+              <button
+                onClick={() => setSpecialOpen(o => !o)}
+                aria-expanded={specialOpen}
+                style={{
+                  width: '100%',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '0.85rem 0.2rem',
+                  background: 'transparent', border: 'none', cursor: 'pointer',
+                  color: C.text, fontFamily: 'inherit',
+                }}
+              >
+                <span style={{
+                  fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.06em',
+                  color: specialOpen ? C.accent : C.muted,
+                  textTransform: 'uppercase',
+                }}>
+                  Тусгай төрлүүд (BLD / FMC)
+                </span>
+                <span style={{
+                  color: specialOpen ? C.accent : C.muted,
+                  fontSize: '0.72rem',
+                  transform: specialOpen ? 'rotate(180deg)' : 'none',
+                  transition: 'transform 0.18s',
+                }}>▾</span>
+              </button>
+              {specialOpen && (
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(3, 1fr)',
+                  gap: '0.6rem',
+                  paddingTop: '0.2rem',
+                }}>
+                  {specialEvents.map(ev => (
+                    <MpEventTile
+                      key={ev.id}
+                      event={ev}
+                      active={ev.id === currentEventId}
+                      onClick={() => { onSelect(ev.id); onClose(); }}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -7364,7 +7650,7 @@ function SharePanel({ roomCode }: { roomCode: string }) {
             transition: 'background 0.15s, color 0.15s, border-color 0.15s',
           }}
         >
-          <span aria-hidden>📋</span> {copied ? 'Copied!' : 'Copy Link'}
+          <IconCopy size={14} /> {copied ? 'Copied!' : 'Copy Link'}
         </button>
         {canShare && (
           <button
@@ -7379,7 +7665,7 @@ function SharePanel({ roomCode }: { roomCode: string }) {
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem',
             }}
           >
-            <span aria-hidden>📤</span> Share
+            <IconShare size={14} /> Share
           </button>
         )}
       </div>

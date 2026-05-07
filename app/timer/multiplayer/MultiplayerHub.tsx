@@ -26,7 +26,7 @@ import {
   IconUsers, IconCrown, IconTrophy, IconMedalGold, IconMedalSilver,
   IconMedalBronze, IconStar, IconDiamond, IconTarget, IconFire,
   IconRocket, IconDot, IconHourglass, IconFlag, IconGameController,
-  IconBolt, IconChart, IconLock, MEDAL_GOLD,
+  IconBolt, IconChart, IconLock, IconClose, MEDAL_GOLD,
 } from '@/lib/icons';
 
 // ── Theme ─────────────────────────────────────────────────────────────────
@@ -1250,7 +1250,7 @@ function RoomDetailModal({
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
               flexShrink: 0,
             }}
-          >×</button>
+          ><IconClose size={14} /></button>
         </header>
 
         <div style={{
@@ -1426,7 +1426,7 @@ function JoinByCodeModal({
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
               flexShrink: 0,
             }}
-          >×</button>
+          ><IconClose size={14} /></button>
         </header>
 
         <div style={{
@@ -2263,7 +2263,7 @@ function MatchDetailModal({
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
               flexShrink: 0, fontFamily: 'inherit',
             }}
-          >×</button>
+          ><IconClose size={14} /></button>
         </header>
 
         <div style={{
@@ -2451,7 +2451,7 @@ function QuickActions({
                 padding: '0 0.85rem', fontSize: '1rem',
                 fontFamily: 'inherit', cursor: 'pointer', fontWeight: 700,
               }}
-            >×</button>
+            ><IconClose size={14} /></button>
           </div>
         </div>
       )}

@@ -358,6 +358,29 @@ export function IconClose(p: IconProps) {
   return <IconBase {...p}><path d="M6 6l12 12" /><path d="M18 6l-12 12" /></IconBase>;
 }
 
+export function IconCopy(p: IconProps) {
+  // 📋 replacement — two stacked rounded rectangles representing the
+  // foreground "copy" and background "source" sheets.
+  return (
+    <IconBase {...p}>
+      <rect x={9} y={9} width={11} height={11} rx={2} />
+      <path d="M5 15V6a2 2 0 0 1 2-2h9" />
+    </IconBase>
+  );
+}
+
+export function IconShare(p: IconProps) {
+  // 📤 replacement — box with an upward arrow piercing the top edge,
+  // matching the iOS-style "share / send out" affordance.
+  return (
+    <IconBase {...p}>
+      <path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7" />
+      <path d="M16 6l-4-4-4 4" />
+      <path d="M12 2v13" />
+    </IconBase>
+  );
+}
+
 export function IconLock(p: IconProps) {
   // 🔒 replacement.
   return (
