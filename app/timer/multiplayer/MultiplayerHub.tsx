@@ -1836,7 +1836,7 @@ function LeaderboardCard({ uid }: { uid: string }) {
   ];
 
   return (
-    <Section icon={<IconTrophy size={18} color={MEDAL_GOLD} />} title="Шилдэг тоглогчид">
+    <Section icon={<IconTrophy size={18} color={MEDAL_GOLD} />} title="Шилдэг өрсөлдөгчид">
       <div style={{
         display: 'inline-flex', gap: '0.3rem',
         background: C.cardAlt, border: `1px solid ${C.border}`,
@@ -2135,8 +2135,8 @@ function HowToPlayCard() {
   const [open, setOpen] = useState(false);
   const steps: string[] = [
     'WCA-ийн стандартаар уралдана',
-    '1 Round = 5 эвлүүлэлт → Ao5 (best/worst дроп)',
-    'Хамгийн сайн Ao5-той хүн round хождог',
+    '1 Round = 5 эвлүүлэлт → Ao5 (best/worst)',
+    'Хамгийн сайн Ao5-той хүн round-д хожно',
     'Олон round-той тэмцээнд хамгийн их хожсон нь түрүүлдэг',
     'DNF тоо нэгээс олон бол → DNF Ao5',
     'Disconnect = тэр эвлүүлэлт DNF болно (round дунд орж ирвэл үргэлжлүүлэх боломжтой)',
@@ -2167,7 +2167,7 @@ function HowToPlayCard() {
           }} aria-hidden="true">
             <IconGameController size={18} />
           </span>
-          <span>Тэмцээний дүрэм</span>
+          <span>Хэрхэн өрсөлдөх вэ?</span>
         </span>
         <span style={{
           fontSize: '1rem', color: C.muted,
