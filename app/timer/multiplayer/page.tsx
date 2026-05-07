@@ -200,20 +200,6 @@ function genRoomCode(): string {
   return out;
 }
 
-function genUserId(): string {
-  return 'u_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
-}
-
-function getUserId(): string {
-  if (typeof window === 'undefined') return '';
-  let uid = localStorage.getItem('mp_user_id');
-  if (!uid) {
-    uid = genUserId();
-    localStorage.setItem('mp_user_id', uid);
-  }
-  return uid;
-}
-
 // Thin adapter over the shared engine's fmtMs. Multiplayer historically
 // stored precision as `2 | 3` (digits after the decimal) in MP_PREFS_KEY;
 // converting to the shared 'cs'/'ms' surface here keeps that on-disk
@@ -639,7 +625,18 @@ export default function MultiplayerPage() {
 function MultiplayerPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user: authUser } = useAuth();
+  const { user: authUser, loading: authLoading } = useAuth();
+
+  // Sign-in is required to access multiplayer. Anonymous play was
+  // dropped in step 2 of the auth refactor — every room write is now
+  // keyed by the Firebase uid and uses the user's saved displayName
+  // from /timer/profile, so we redirect unauthenticated visitors out
+  // before any room hooks fire.
+  useEffect(() => {
+    if (!authLoading && !authUser) {
+      router.replace('/login?redirect=/timer/multiplayer');
+    }
+  }, [authLoading, authUser, router]);
 
   // Identity (persisted)
   const [userId, setUserId] = useState<string>('');
@@ -647,9 +644,7 @@ function MultiplayerPageInner() {
 
   // UI state
   const [view, setView] = useState<'lobby' | 'create' | 'join' | 'room'>('lobby');
-  const [createName, setCreateName] = useState('');
   const [joinCode, setJoinCode] = useState('');
-  const [joinName, setJoinName] = useState('');
   const [invitedCode, setInvitedCode] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
 
@@ -955,15 +950,16 @@ function MultiplayerPageInner() {
     roomCode, userId, authUser?.uid, room,
   ]);
 
-  // Initial mount: pull user id + saved name
+  // Mirror the authenticated user's uid + displayName into the local
+  // identity state used by every room write below. Reacts to both
+  // first sign-in and later /timer/profile renames; existing rooms
+  // already in flight keep the snapshot they were created with — see
+  // the stale-name TODO at the createRoom/performJoin write sites.
   useEffect(() => {
-    const uid = getUserId();
-    setUserId(uid);
-    const savedName = localStorage.getItem('mp_display_name') || '';
-    setDisplayName(savedName);
-    setCreateName(savedName);
-    setJoinName(savedName);
-  }, []);
+    if (!authUser) return;
+    setUserId(authUser.uid);
+    setDisplayName((authUser.displayName ?? '').trim());
+  }, [authUser]);
 
   // Auto-join via ?join=ABC123 — pre-fill the join form and switch view.
   // Only runs once on first mount; users can manually navigate away after.
@@ -1333,23 +1329,18 @@ function MultiplayerPageInner() {
   }, [roomCode, userId, room, wasKicked]);
 
   // ── Actions ──────────────────────────────────────────────────────────────
-  const persistName = useCallback((n: string) => {
-    setDisplayName(n);
-    try { localStorage.setItem('mp_display_name', n); } catch {}
-  }, []);
+  // Identity is now sourced from useAuth(): userId === authUser.uid and
+  // displayName === authUser.displayName. The auth gate below blocks
+  // render until both are non-empty, so room writes can rely on them.
 
   const createRoom = useCallback(async () => {
     setErrorMsg('');
-    const name = createName.trim();
-    if (!name) { setErrorMsg('Enter a display name.'); return; }
-    // Self-heal: if the mount-effect hasn't populated userId yet, generate now.
-    let uid = userId;
-    if (!uid) {
-      uid = getUserId();
-      setUserId(uid);
-    }
-    if (!uid) { setErrorMsg('Could not establish a user id (localStorage unavailable?).'); return; }
-    persistName(name);
+    const name = displayName.trim();
+    const uid = userId;
+    // Belt-and-suspenders: the auth gate already ensures both are set,
+    // but the form button can fire one render before authUser lands on
+    // a slow connection. A friendly error here beats a silent failure.
+    if (!uid || !name) { setErrorMsg('Sign in required.'); return; }
     console.log('[mp] createRoom start', { uid, name, rtdb });
     try {
       // Try a few times in case of code collision
@@ -1370,6 +1361,12 @@ function MultiplayerPageInner() {
           createdAt: now,
           expiresAt: now + ROOM_TTL_MS,
           members: {
+            // TODO(stale-displayName): `name` is a snapshot of the user's
+            // displayName at room-creation time. If the user renames
+            // themselves on /timer/profile while still in this room,
+            // the rendered name in the standings won't update until
+            // they leave + rejoin. Acceptable for now — revisit if
+            // mid-room renames become a common UX gripe.
             [uid]: {
               name,
               ready: false,
@@ -1396,7 +1393,7 @@ function MultiplayerPageInner() {
       // Most common cause: RTDB rules deny writes, RTDB not enabled, or wrong databaseURL.
       setErrorMsg(`Couldn't create room: ${msg}. Check Firebase RTDB is enabled and rules allow writes.`);
     }
-  }, [createName, userId, persistName]);
+  }, [userId, displayName]);
 
   // Inner write — used both by the normal join path and by the mid-round
   // queue-confirmation path. When `queued` is true the new member will
@@ -1436,16 +1433,10 @@ function MultiplayerPageInner() {
     // back to the form-controlled joinCode state.
     const rawCode = typeof overrideCode === 'string' ? overrideCode : joinCode;
     const code = String(rawCode ?? '').trim().toUpperCase();
-    const name = String(joinName ?? '').trim();
+    const name = displayName.trim();
+    const uid = userId;
     if (!code) { setErrorMsg('Enter a room code.'); return; }
-    if (!name) { setErrorMsg('Enter a display name.'); return; }
-    let uid = userId;
-    if (!uid) {
-      uid = getUserId();
-      setUserId(uid);
-    }
-    if (!uid) { setErrorMsg('Could not establish a user id (localStorage unavailable?).'); return; }
-    persistName(name);
+    if (!uid || !name) { setErrorMsg('Sign in required.'); return; }
     console.log('[mp] joinRoom', { code, uid, name });
     try {
       const roomRef = ref(rtdb, `rooms/${code}`);
@@ -1483,7 +1474,7 @@ function MultiplayerPageInner() {
       const msg = err instanceof Error ? err.message : String(err);
       setErrorMsg(`Couldn't join: ${msg}. Check Firebase RTDB is enabled and rules allow reads/writes.`);
     }
-  }, [joinCode, joinName, userId, persistName, performJoin]);
+  }, [joinCode, displayName, userId, performJoin]);
 
   const confirmMidRoundJoin = useCallback(async () => {
     if (!pendingMidRoundJoin) return;
@@ -1539,7 +1530,10 @@ function MultiplayerPageInner() {
   // any saved share-links keep working.
   const rejoinAfterKick = useCallback(async () => {
     if (!roomCode || !userId) return;
-    const name = (displayName || localStorage.getItem('mp_display_name') || '').trim() || 'Player';
+    // displayName comes from useAuth() now (mirrored into local state by
+    // the authUser sync effect); fall back to 'Player' only as a defence
+    // against an empty profile name slipping past the gate.
+    const name = displayName.trim() || 'Player';
     try {
       const memberRef = ref(rtdb, `rooms/${roomCode}/members/${userId}`);
       const memberData: MemberData = {
@@ -1647,19 +1641,12 @@ function MultiplayerPageInner() {
   const rejoinRoom = useCallback(async () => {
     setErrorMsg('');
     if (!pendingRejoin) return;
-    let uid = userId;
-    if (!uid) {
-      uid = getUserId();
-      setUserId(uid);
-    }
-    if (!uid) { setErrorMsg('Could not establish a user id.'); return; }
-    const name = (displayName || localStorage.getItem('mp_display_name') || '').trim();
-    if (!name) {
-      // No saved name — fall back to manual join with code pre-filled.
-      setJoinCode(pendingRejoin);
-      setView('join');
-      return;
-    }
+    const uid = userId;
+    const name = displayName.trim();
+    // The auth gate ensures both are populated, but if useAuth() is
+    // mid-load when the rejoin button fires, surface a friendly error
+    // rather than silently no-op.
+    if (!uid || !name) { setErrorMsg('Sign in required.'); return; }
     try {
       const roomRef = ref(rtdb, `rooms/${pendingRejoin}`);
       const snap = await get(roomRef);
@@ -2535,6 +2522,21 @@ function MultiplayerPageInner() {
   // views (lobby / create / join / waiting / results) fall back to 100vh
   // and scroll normally.
   const isRacing = view === 'room' && room?.status === 'racing';
+
+  // Auth gate — runs after every hook above so React's hook-order
+  // invariant holds. Pre-auth states branch off here:
+  //   1. authLoading           → fullscreen "Уншиж байна…" placeholder
+  //   2. !authUser              → null (the redirect effect above is
+  //                               on its way to /login?redirect=…)
+  //   3. authUser w/ no name    → DisplayNamePrompt — user must set a
+  //                               name on /timer/profile first
+  // Anything past these branches has a guaranteed uid + non-empty
+  // displayName, which is what every room write below assumes.
+  const trimmedAuthName = (authUser?.displayName ?? '').trim();
+  if (authLoading)      return <MpAuthLoading />;
+  if (!authUser)        return null;
+  if (!trimmedAuthName) return <DisplayNamePrompt />;
+
   return (
     <div style={{
       ...(isRacing
@@ -2597,15 +2599,9 @@ function MultiplayerPageInner() {
             onJoinRoom={(code) => {
               setErrorMsg('');
               setJoinCode(code);
-              const savedName = (
-                joinName ||
-                displayName ||
-                (typeof window !== 'undefined'
-                  ? (localStorage.getItem('mp_display_name') ?? '')
-                  : '')
-              ).trim();
-              if (!savedName) { setView('join'); return; }
-              if (!joinName.trim()) setJoinName(savedName);
+              // displayName is guaranteed by the auth gate, so we can
+              // submit the join straight through — no need to fall
+              // back to the form.
               joinRoom(code);
             }}
           />
@@ -2614,8 +2610,6 @@ function MultiplayerPageInner() {
         {view === 'create' && (
           <CreateForm
             isMobile={isMobile}
-            name={createName}
-            setName={setCreateName}
             onSubmit={createRoom}
             onBack={() => setView('lobby')}
           />
@@ -2626,8 +2620,6 @@ function MultiplayerPageInner() {
             isMobile={isMobile}
             code={joinCode}
             setCode={setJoinCode}
-            name={joinName}
-            setName={setJoinName}
             invitedCode={invitedCode}
             onSubmit={joinRoom}
             onBack={() => setView('lobby')}
@@ -2952,39 +2944,92 @@ function TopBar({ roomCode, onBack }: { roomCode: string; onBack: () => void }) 
   );
 }
 
+// ── Auth gate UI ──────────────────────────────────────────────────────────
+// Two fullscreen placeholders rendered by MultiplayerPageInner before
+// the main UI mounts. Kept as plain function components (no hooks
+// beyond the router for nav) so they can sit outside the main page's
+// hook block without any ordering concerns.
+
+function MpAuthLoading() {
+  return (
+    <div style={{
+      minHeight: '100vh', background: C.bg, color: C.muted,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif',
+      fontSize: '0.9rem',
+    }}>
+      Уншиж байна…
+    </div>
+  );
+}
+
+function DisplayNamePrompt() {
+  const router = useRouter();
+  return (
+    <div style={{
+      minHeight: '100vh', background: C.bg, color: C.text,
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: '1.5rem',
+    }}>
+      <div style={{
+        width: '100%', maxWidth: 460,
+        background: C.card, border: `1px solid ${C.border}`,
+        borderRadius: 16, padding: '1.6rem 1.5rem',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.85rem',
+        textAlign: 'center',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+      }}>
+        <div style={{ fontSize: '1.15rem', fontWeight: 700 }}>
+          Нэр тохируулах
+        </div>
+        <div style={{ fontSize: '0.9rem', color: C.muted, lineHeight: 1.55 }}>
+          Multiplayer-д орохын тулд эхлээд нэрээ тохируулна уу.
+        </div>
+        <button
+          onClick={() => router.push('/timer/profile')}
+          style={{
+            marginTop: '0.4rem',
+            background: C.accentDim, color: C.accent,
+            border: `1px solid ${C.borderHi}`, borderRadius: 10,
+            padding: '0.6rem 1.1rem', fontSize: '0.9rem', fontWeight: 700,
+            fontFamily: 'inherit', cursor: 'pointer',
+          }}
+        >
+          Profile-руу очих →
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── CreateForm ────────────────────────────────────────────────────────────
+// The display-name field that used to live here is gone — multiplayer
+// pulls the authenticated user's saved displayName from useAuth() now,
+// so there's nothing for the user to type. The form is just a confirm
+// button.
 function CreateForm({
-  isMobile, name, setName, onSubmit, onBack,
+  isMobile, onSubmit, onBack,
 }: {
   isMobile: boolean;
-  name: string; setName: (v: string) => void;
   onSubmit: () => void; onBack: () => void;
 }) {
   return (
     <FormShell isMobile={isMobile} title="Create Room" onBack={onBack}>
-      <Field label="Display name">
-        <input
-          autoFocus
-          value={name}
-          onChange={e => setName(e.target.value)}
-          placeholder="Your name"
-          maxLength={24}
-          onKeyDown={e => { if (e.key === 'Enter') onSubmit(); }}
-          style={inputStyle}
-        />
-      </Field>
       <BigButton accent onClick={onSubmit}>Create Room</BigButton>
     </FormShell>
   );
 }
 
 // ── JoinForm ──────────────────────────────────────────────────────────────
+// Display-name field removed — the player's displayName comes from
+// useAuth() now. The form only collects the room code (skipped when
+// the user arrived via an ?join=ABC123 invite link).
 function JoinForm({
-  isMobile, code, setCode, name, setName, invitedCode, onSubmit, onBack,
+  isMobile, code, setCode, invitedCode, onSubmit, onBack,
 }: {
   isMobile: boolean;
   code: string; setCode: (v: string) => void;
-  name: string; setName: (v: string) => void;
   invitedCode?: string;
   onSubmit: () => void; onBack: () => void;
 }) {
@@ -3060,17 +3105,6 @@ function JoinForm({
           )}
         </>
       )}
-      <Field label="Display name">
-        <input
-          autoFocus={isInvited}
-          value={name}
-          onChange={e => setName(e.target.value)}
-          placeholder="Your name"
-          maxLength={24}
-          onKeyDown={e => { if (e.key === 'Enter') onSubmit(); }}
-          style={inputStyle}
-        />
-      </Field>
       <BigButton accent onClick={onSubmit}>{isInvited ? 'Join Race' : 'Join'}</BigButton>
     </FormShell>
   );
