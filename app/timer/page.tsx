@@ -1596,7 +1596,7 @@ export default function TimerPage() {
           </div>
 
           {/* Scrollable solve list */}
-          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 0.5rem 0.5rem' }}>
+          <div className="pv-solves-list" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 0.5rem 0.5rem' }}>
             {solves.length === 0 ? (
               <div style={{ padding: '1.5rem 0.5rem', textAlign: 'center', color: C.mutedDim, fontSize: '0.78rem' }}>
                 Press SPACE to start your first solve.
@@ -1714,74 +1714,77 @@ export default function TimerPage() {
             borderRadius: 18, padding: '1.25rem 1.5rem',
             boxShadow: '0 1px 0 rgba(255,255,255,0.02) inset, 0 4px 16px rgba(0,0,0,0.2)',
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem', gap: '0.75rem', flexWrap: 'wrap' }}>
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: '0.5rem',
-                fontSize: '0.92rem', color: C.text, fontWeight: 600,
-              }}>
-                <WcaEventIcon eventId={eventId} size={20} />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', marginBottom: '0.5rem', gap: '0.4rem', flexWrap: 'wrap' }}>
+              <button
+                onClick={newScramble}
+                title="New Scramble"
+                aria-label="New Scramble"
+                style={{
+                  background: 'transparent', color: C.accent,
+                  border: `1px solid ${C.borderHi}`, borderRadius: 8,
+                  padding: '0.32rem 0.5rem',
+                  fontFamily: 'inherit', cursor: 'pointer', fontWeight: 600,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  transition: 'background 0.15s ease',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.background = C.accentDim)}
+                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+              >
+                <IconRefresh size={18} />
+              </button>
+              <button
+                onClick={() => router.push('/timer/multiplayer')}
+                title="Multiplayer Racing"
+                aria-label="Multiplayer Racing"
+                style={{
+                  background: 'transparent', color: C.text,
+                  border: `1px solid ${C.border}`, borderRadius: 8,
+                  padding: '0.32rem 0.55rem', fontSize: '0.78rem',
+                  fontFamily: 'inherit', cursor: 'pointer', fontWeight: 600,
+                  display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
+                  transition: 'background 0.15s ease, color 0.15s ease, border-color 0.15s ease',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; e.currentTarget.style.borderColor = C.borderHi; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.text; e.currentTarget.style.borderColor = C.border; }}
+              >
+                <IconUsers size={18} /> Race
+              </button>
+              <GanButton
+                state={gan.state}
+                onConnect={gan.connect}
+                onDisconnect={gan.disconnect}
+                size={32}
+                iconSize={16}
+              />
+            </div>
+
+            {/* Centered event picker — opens the same EventPickerSheet
+                that mobile uses (single source of truth). Replaces the
+                old inline native <select> + the duplicate left-side
+                label, so the event identity now reads in one place,
+                centered above the scramble. */}
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '0.6rem' }}>
+              <button
+                onClick={() => setEventPickerOpen(true)}
+                aria-label="Pick event"
+                style={{
+                  background: 'rgba(255,255,255,0.04)',
+                  color: C.text,
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 999,
+                  padding: '0.4rem 1rem',
+                  fontSize: '0.85rem', fontWeight: 600, fontFamily: 'inherit',
+                  cursor: 'pointer',
+                  display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
+                  transition: 'background 0.15s ease, border-color 0.15s ease, color 0.15s ease',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; e.currentTarget.style.borderColor = C.borderHi; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.borderColor = C.border; }}
+              >
+                <WcaEventIcon eventId={eventId} size={18} />
                 <span>{sessionEvent.name}</span>
-              </div>
-              <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-                <select
-                  value={eventId}
-                  onChange={e => setEventId(e.target.value)}
-                  onMouseEnter={e => (e.currentTarget.style.background = C.accentDim)}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
-                  style={{
-                    background: 'rgba(255,255,255,0.04)', color: C.text,
-                    border: '1px solid transparent', borderRadius: 8,
-                    padding: '0.34rem 0.55rem', fontSize: '0.78rem',
-                    fontFamily: 'inherit', outline: 'none', cursor: 'pointer',
-                    transition: 'background 0.15s ease, border-color 0.15s ease',
-                  }}
-                >
-                  {EVENTS.map(ev => (
-                    <option key={ev.id} value={ev.id}>{ev.name}</option>
-                  ))}
-                </select>
-                <button
-                  onClick={newScramble}
-                  title="New Scramble"
-                  aria-label="New Scramble"
-                  style={{
-                    background: 'transparent', color: C.accent,
-                    border: `1px solid ${C.borderHi}`, borderRadius: 8,
-                    padding: '0.32rem 0.5rem',
-                    fontFamily: 'inherit', cursor: 'pointer', fontWeight: 600,
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    transition: 'background 0.15s ease',
-                  }}
-                  onMouseEnter={e => (e.currentTarget.style.background = C.accentDim)}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                >
-                  <IconRefresh size={18} />
-                </button>
-                <button
-                  onClick={() => router.push('/timer/multiplayer')}
-                  title="Multiplayer Racing"
-                  aria-label="Multiplayer Racing"
-                  style={{
-                    background: 'transparent', color: C.text,
-                    border: `1px solid ${C.border}`, borderRadius: 8,
-                    padding: '0.32rem 0.55rem', fontSize: '0.78rem',
-                    fontFamily: 'inherit', cursor: 'pointer', fontWeight: 600,
-                    display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
-                    transition: 'background 0.15s ease, color 0.15s ease, border-color 0.15s ease',
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; e.currentTarget.style.borderColor = C.borderHi; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.text; e.currentTarget.style.borderColor = C.border; }}
-                >
-                  <IconUsers size={18} /> Race
-                </button>
-                <GanButton
-                  state={gan.state}
-                  onConnect={gan.connect}
-                  onDisconnect={gan.disconnect}
-                  size={32}
-                  iconSize={16}
-                />
-              </div>
+                <span aria-hidden style={{ color: C.mutedDim, fontSize: '0.62rem', marginLeft: '0.1rem' }}>▾</span>
+              </button>
             </div>
 
             <div style={{
@@ -2915,9 +2918,12 @@ export default function TimerPage() {
         );
       })()}
 
-      {/* Mobile event picker — bottom sheet replacing the native <select>.
-          Desktop keeps its inline <select>; this only mounts when the
-          mobile button at line ~1951 sets eventPickerOpen=true. */}
+      {/* Event picker — shared bottom sheet for both desktop and mobile.
+          Mounts whenever any event-button (mobile capsule or the
+          desktop centered pill above the scramble) sets
+          eventPickerOpen=true. The native <select> previously used on
+          desktop has been retired in favour of this single picker so
+          the event identity reads from one source. */}
       {eventPickerOpen && (
         <EventPickerSheet
           currentEventId={eventId}
@@ -3108,6 +3114,18 @@ export default function TimerPage() {
 
       <style>{`
         .pv-grid > main > section { box-sizing: border-box; }
+
+        /* Hide the default scrollbar on the desktop sidebar's solve list
+           (the light track clashes with the dark theme). Scroll still
+           works — only the visual track/thumb is hidden. */
+        .pv-solves-list {
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
+        .pv-solves-list::-webkit-scrollbar {
+          display: none;
+        }
+
         @media (max-width: 1100px) {
           .pv-grid { flex-direction: column !important; height: auto !important; overflow: auto !important; }
           .pv-grid > aside { flex: 0 0 auto !important; height: auto !important; max-height: 60vh; }
