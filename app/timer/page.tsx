@@ -1400,7 +1400,7 @@ export default function TimerPage() {
               Settings panel, solve count moved to the Performance panel
               on the right. */}
           <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            display: 'flex', alignItems: 'center', gap: '0.4rem',
             padding: '0.9rem 1rem 0.7rem',
           }}>
             <button
@@ -1427,7 +1427,36 @@ export default function TimerPage() {
                 e.currentTarget.style.boxShadow = 'none';
               }}
             >⚙</button>
-            <TimerProfileMenu size={32} redirectAfterLogin="/timer" align="right" />
+            {/* Race — matches the cog's 36×36 icon-only style. Icon-only
+                because the sidebar is 260px wide and a labeled button
+                would push the avatar off the row. Tooltip carries the
+                action name. */}
+            <button
+              onClick={() => router.push('/timer/multiplayer')}
+              aria-label="Multiplayer Racing"
+              title="Multiplayer Racing"
+              style={{
+                width: 36, height: 36, borderRadius: 10,
+                background: 'transparent', border: `1px solid ${C.border}`,
+                color: C.muted, cursor: 'pointer',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; e.currentTarget.style.borderColor = C.borderHi; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.muted; e.currentTarget.style.borderColor = C.border; }}
+            >
+              <IconUsers size={18} />
+            </button>
+            <GanButton
+              state={gan.state}
+              onConnect={gan.connect}
+              onDisconnect={gan.disconnect}
+              size={36}
+              iconSize={16}
+            />
+            <div style={{ marginLeft: 'auto' }}>
+              <TimerProfileMenu size={32} redirectAfterLogin="/timer" align="right" />
+            </div>
           </div>
           {/* Inset divider — sits clear of the sidebar's outer border so the
               header reads as its own slot rather than running edge-to-edge. */}
@@ -1718,52 +1747,12 @@ export default function TimerPage() {
         </aside>
 
         {/* ── CENTER PANEL ─────────────────────────────────────────────── */}
-        {/* Main column reserves a header band at the top via paddingTop so
-            the scramble box's first content row aligns with the sidebar's
-            session selector. The Race / Bluetooth strip floats inside
-            that reserved band, anchored to main directly (position:
-            relative). The +1px on top accounts for the sidebar's outer
-            border, which offsets the cog by 1px relative to main's
-            content edge — without it, Race sits 1px above the cog. */}
         <main style={{
-          position: 'relative',
           flex: '1 1 auto', minWidth: 0,
           display: 'flex', flexDirection: 'column', gap: '1.25rem',
-          paddingTop: 'calc(0.9rem + 36px + 0.7rem + 0.4rem + 2px)',
           height: '100%', overflow: 'hidden',
         }}>
-          <div className="pv-top-actions" style={{
-            position: 'absolute',
-            top: 'calc(0.9rem + 1px)', right: '0.85rem',
-            display: 'flex', gap: '0.5rem', alignItems: 'center',
-            zIndex: 5,
-          }}>
-              <button
-                onClick={() => router.push('/timer/multiplayer')}
-                title="Multiplayer Racing"
-                aria-label="Multiplayer Racing"
-                style={{
-                  background: 'transparent', color: C.text,
-                  border: `1px solid ${C.border}`, borderRadius: 10,
-                  padding: '0 0.7rem', height: 36, fontSize: '0.78rem',
-                  fontFamily: 'inherit', cursor: 'pointer', fontWeight: 600,
-                  display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
-                  transition: 'background 0.15s ease, color 0.15s ease, border-color 0.15s ease',
-                }}
-                onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; e.currentTarget.style.borderColor = C.borderHi; }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.text; e.currentTarget.style.borderColor = C.border; }}
-              >
-                <IconUsers size={16} /> Race
-              </button>
-              <GanButton
-                state={gan.state}
-                onConnect={gan.connect}
-                onDisconnect={gan.disconnect}
-                size={36}
-                iconSize={16}
-              />
-            </div>
-            <section className="pv-scramble" style={{
+          <section className="pv-scramble" style={{
               background: C.card, border: `1px solid ${C.border}`,
               borderRadius: 18, padding: '1.25rem 1.5rem',
               boxShadow: '0 1px 0 rgba(255,255,255,0.02) inset, 0 4px 16px rgba(0,0,0,0.2)',
