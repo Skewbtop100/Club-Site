@@ -1144,7 +1144,8 @@ function MultiplayerPageInner() {
   // time (older ones drop off the top while newer ones appear at the
   // bottom of the stack — the visual order matches the UI position).
   const MAX_VISIBLE_NOTIFS = 3;
-  const NOTIF_TTL_MS = 4000;
+  const NOTIF_TTL_MS = 3000;
+  const NOTIF_EXIT_MS = 250;
   type NotifTone = 'info' | 'success' | 'warn' | 'error';
   type NotifIcon = (p: LibIconProps) => React.ReactElement;
   type Notif = {
@@ -1154,6 +1155,9 @@ function MultiplayerPageInner() {
     icon?: NotifIcon;
     /** Optional accent override (defaults derived from tone). */
     accent?: string;
+    /** Marked true ~250ms before unmount so the toast plays its
+     *  reverse slide+fade animation before being removed. */
+    exiting?: boolean;
   };
   const [notifs, setNotifs] = useState<Notif[]>([]);
   const pushNotif = useCallback((
@@ -1165,18 +1169,26 @@ function MultiplayerPageInner() {
     setNotifs(prev => {
       const next = [...prev, { id, text, tone, icon: options?.icon, accent: options?.accent }];
       // Keep at most MAX_VISIBLE_NOTIFS — drop the oldest. Auto-dismiss
-      // for the dropped one is harmless; the timeout below just becomes
-      // a no-op once it can't find the id.
+      // for the dropped one is harmless; the timeouts below just become
+      // no-ops once they can't find the id.
       return next.length > MAX_VISIBLE_NOTIFS
         ? next.slice(next.length - MAX_VISIBLE_NOTIFS)
         : next;
     });
+    // Two-stage dismiss: mark exiting so the reverse slide+fade plays,
+    // then unmount once the animation has finished.
+    window.setTimeout(() => {
+      setNotifs(prev => prev.map(n => (n.id === id ? { ...n, exiting: true } : n)));
+    }, NOTIF_TTL_MS - NOTIF_EXIT_MS);
     window.setTimeout(() => {
       setNotifs(prev => prev.filter(n => n.id !== id));
     }, NOTIF_TTL_MS);
   }, []);
   const dismissNotif = useCallback((id: string) => {
-    setNotifs(prev => prev.filter(n => n.id !== id));
+    setNotifs(prev => prev.map(n => (n.id === id ? { ...n, exiting: true } : n)));
+    window.setTimeout(() => {
+      setNotifs(prev => prev.filter(n => n.id !== id));
+    }, NOTIF_EXIT_MS);
   }, []);
 
   // Bump the idle clock back to zero. Called on any user-initiated
@@ -1230,7 +1242,8 @@ function MultiplayerPageInner() {
 
   // Reconnect detection: when a member's status flips from 'disconnected' →
   // 'online' between status ticks, fire a toast for everyone except the
-  // member themselves.
+  // member themselves. Uses the same wording as a fresh join — keeps the
+  // notification copy uniform regardless of whether they previously dropped.
   const prevStatusRef = useRef<Record<string, ConnectionStatus>>({});
   useEffect(() => {
     if (!room?.members) return;
@@ -1243,7 +1256,7 @@ function MultiplayerPageInner() {
       if (uid === userId) continue;
       if (prev[uid] === 'disconnected' && cur[uid] === 'online') {
         const name = room.members[uid]?.name ?? 'A player';
-        pushNotif(`${name} буцаж орлоо`, 'success', { icon: IconWifi });
+        pushNotif(`${name} орж ирлээ`, 'success', { icon: IconWifi });
       }
     }
     prevStatusRef.current = cur;
@@ -1284,7 +1297,7 @@ function MultiplayerPageInner() {
         // Mid-round joiners enter as `queued: true`; show the same
         // join toast either way — the "queued" state is conveyed by the
         // opponent panel, not this notification.
-        pushNotif(`${m.name} орлоо`, 'info', { icon: IconUserPlus });
+        pushNotif(`${m.name} орж ирлээ`, 'info', { icon: IconUserPlus });
       }
     }
     const next: typeof prev = {};
@@ -7404,16 +7417,18 @@ function StatusDot({ status, size = 8 }: { status: ConnectionStatus; size?: numb
 }
 
 // Stacked toast queue for room events: joins/leaves, host transfer,
-// round transitions, vote outcomes, etc. Position: top-center on mobile,
-// top-right on desktop. Tap or click the X to dismiss; tap on the body
-// also dismisses (per spec). The page owns the queue lifecycle (push +
-// auto-expire); this component just renders + forwards dismiss clicks.
+// round transitions, vote outcomes, etc. Always top-center (mobile and
+// desktop) so it sits above thumbs without colliding with the right-rail
+// panels. Tap anywhere on the toast to dismiss early. The page owns the
+// queue lifecycle (push + auto-expire + exit-marking); this component
+// just renders + forwards dismiss clicks.
 type NotifItem = {
   id: string;
   text: string;
   tone: 'info' | 'success' | 'warn' | 'error';
   icon?: (p: LibIconProps) => React.ReactElement;
   accent?: string;
+  exiting?: boolean;
 };
 function NotificationStack({
   isMobile, notifs, onDismiss,
@@ -7422,40 +7437,39 @@ function NotificationStack({
   notifs: NotifItem[];
   onDismiss: (id: string) => void;
 }) {
-  // Tone → palette. Lavender info, mint success, amber warn, red error.
-  // The accent override (set per-notif by callers like host-transfer
-  // gold) replaces the border color only — bg + text track the tone so
-  // contrast stays sane.
-  const paletteFor = (tone: NotifItem['tone'], accentOverride?: string) => {
-    const base = tone === 'success'
-      ? { fg: C.success, border: C.success, bg: C.successDim }
-      : tone === 'warn'
-      ? { fg: C.warn,    border: C.warn,    bg: 'rgba(251,191,36,0.12)' }
-      : tone === 'error'
-      ? { fg: C.danger,  border: C.danger,  bg: C.dangerDim }
-      : { fg: C.accent,  border: C.borderHi, bg: C.accentDim };
-    return accentOverride ? { ...base, border: accentOverride } : base;
+  // Container chrome is unified dark glass for legibility on both light
+  // and busy backgrounds; only the icon picks up the tone color so the
+  // event type still reads at a glance. Per-call `accent` overrides the
+  // icon tint (host-transfer gold etc).
+  const iconColorFor = (tone: NotifItem['tone'], accentOverride?: string) => {
+    if (accentOverride) return accentOverride;
+    switch (tone) {
+      case 'success': return C.success;
+      case 'warn':    return C.warn;
+      case 'error':   return C.danger;
+      default:        return C.accent;
+    }
   };
 
   return (
     <div
       style={{
         position: 'fixed',
-        top: 'calc(env(safe-area-inset-top) + 0.75rem)',
-        ...(isMobile
-          ? { left: '50%', transform: 'translateX(-50%)' }
-          : { right: '1rem' }),
-        zIndex: 999,
+        top: `calc(env(safe-area-inset-top) + ${isMobile ? '1rem' : '1.5rem'})`,
+        left: '50%',
+        transform: 'translateX(-50%)',
+        zIndex: 1000,
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.45rem',
-        alignItems: isMobile ? 'center' : 'flex-end',
+        gap: '8px',
+        alignItems: 'center',
         pointerEvents: 'none',
-        maxWidth: isMobile ? 'calc(100vw - 1.5rem)' : '420px',
+        maxWidth: 'calc(100vw - 2rem)',
+        width: 'max-content',
       }}
     >
       {notifs.map(n => {
-        const palette = paletteFor(n.tone, n.accent);
+        const iconColor = iconColorFor(n.tone, n.accent);
         const Icon = n.icon;
         return (
           <button
@@ -7466,26 +7480,33 @@ function NotificationStack({
             onClick={() => onDismiss(n.id)}
             title="Dismiss"
             style={{
-              background: palette.bg,
-              border: `1px solid ${palette.border}`,
-              color: palette.fg,
+              background: 'rgba(20,20,30,0.95)',
+              backdropFilter: 'blur(12px)',
+              WebkitBackdropFilter: 'blur(12px)',
+              border: '1px solid rgba(167,139,250,0.3)',
+              color: '#fff',
               borderRadius: 12,
-              padding: '0.55rem 0.7rem 0.55rem 0.85rem',
-              fontSize: '0.82rem',
-              fontWeight: 700, fontFamily: 'inherit',
-              boxShadow: '0 8px 24px rgba(0,0,0,0.42)',
-              animation: 'mp-notif-in 0.22s ease-out',
+              padding: '0.7rem 1.1rem',
+              fontSize: '0.88rem',
+              fontWeight: 500,
+              fontFamily: 'inherit',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+              animation: n.exiting
+                ? 'mp-notif-out 0.25s ease-in forwards'
+                : 'mp-notif-in 0.25s ease-out',
               pointerEvents: 'auto',
               cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: '0.55rem',
-              maxWidth: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.6rem',
+              maxWidth: 'calc(100vw - 2rem)',
               textAlign: 'left',
             }}
           >
             {Icon && (
               <span aria-hidden="true" style={{
                 display: 'inline-flex', alignItems: 'center',
-                color: palette.fg, flexShrink: 0,
+                color: iconColor, flexShrink: 0,
               }}>
                 <Icon size={16} />
               </span>
@@ -7494,20 +7515,17 @@ function NotificationStack({
               flex: '1 1 auto', minWidth: 0,
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
             }}>{n.text}</span>
-            <span aria-hidden="true" style={{
-              display: 'inline-flex', alignItems: 'center',
-              color: palette.fg, opacity: 0.55, flexShrink: 0,
-              marginLeft: '0.15rem',
-            }}>
-              <IconClose size={13} />
-            </span>
           </button>
         );
       })}
       <style>{`
         @keyframes mp-notif-in {
-          from { opacity: 0; transform: translateY(-8px); }
+          from { opacity: 0; transform: translateY(-20px); }
           to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes mp-notif-out {
+          from { opacity: 1; transform: translateY(0); }
+          to   { opacity: 0; transform: translateY(-20px); }
         }
       `}</style>
     </div>
