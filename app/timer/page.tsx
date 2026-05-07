@@ -268,6 +268,11 @@ export default function TimerPage() {
   const [, forceTick] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [eventPickerOpen, setEventPickerOpen] = useState(false);
+  // Desktop uses an inline dropdown anchored under the picker pill rather
+  // than the mobile bottom sheet — separate state so we can mount one or
+  // the other (never both) and never end up with a dangling open flag if
+  // the viewport changes mid-interaction.
+  const [desktopEventPickerOpen, setDesktopEventPickerOpen] = useState(false);
   const [detailSolveId, setDetailSolveId] = useState<string | null>(null);
   // Comment-edit modal — when set, the inline comment editor is open
   // for that solve id. The action-row's 💬 button and the keyboard 'C'
@@ -1708,38 +1713,25 @@ export default function TimerPage() {
           display: 'flex', flexDirection: 'column', gap: '1.25rem',
           height: '100%', overflow: 'hidden',
         }}>
-          {/* Scramble box */}
-          <section className="pv-scramble" style={{
-            background: C.card, border: `1px solid ${C.border}`,
-            borderRadius: 18, padding: '1.25rem 1.5rem',
-            boxShadow: '0 1px 0 rgba(255,255,255,0.02) inset, 0 4px 16px rgba(0,0,0,0.2)',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', marginBottom: '0.5rem', gap: '0.4rem', flexWrap: 'wrap' }}>
-              <button
-                onClick={newScramble}
-                title="New Scramble"
-                aria-label="New Scramble"
-                style={{
-                  background: 'transparent', color: C.accent,
-                  border: `1px solid ${C.borderHi}`, borderRadius: 8,
-                  padding: '0.32rem 0.5rem',
-                  fontFamily: 'inherit', cursor: 'pointer', fontWeight: 600,
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  transition: 'background 0.15s ease',
-                }}
-                onMouseEnter={e => (e.currentTarget.style.background = C.accentDim)}
-                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-              >
-                <IconRefresh size={18} />
-              </button>
+          {/* Scramble box wrapped in pv-top-row so the Race + Bluetooth
+              actions can float at the top-right, visually aligned with
+              the sidebar's settings cog row across the column gap. */}
+          <div className="pv-top-row" style={{ position: 'relative' }}>
+            <div className="pv-top-actions" style={{
+              position: 'absolute',
+              top: 0, right: 0,
+              display: 'flex', gap: '0.5rem', alignItems: 'center',
+              padding: '0.9rem 0.9rem 0 0',
+              zIndex: 5,
+            }}>
               <button
                 onClick={() => router.push('/timer/multiplayer')}
                 title="Multiplayer Racing"
                 aria-label="Multiplayer Racing"
                 style={{
                   background: 'transparent', color: C.text,
-                  border: `1px solid ${C.border}`, borderRadius: 8,
-                  padding: '0.32rem 0.55rem', fontSize: '0.78rem',
+                  border: `1px solid ${C.border}`, borderRadius: 10,
+                  padding: '0 0.7rem', height: 36, fontSize: '0.78rem',
                   fontFamily: 'inherit', cursor: 'pointer', fontWeight: 600,
                   display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
                   transition: 'background 0.15s ease, color 0.15s ease, border-color 0.15s ease',
@@ -1747,45 +1739,87 @@ export default function TimerPage() {
                 onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; e.currentTarget.style.borderColor = C.borderHi; }}
                 onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.text; e.currentTarget.style.borderColor = C.border; }}
               >
-                <IconUsers size={18} /> Race
+                <IconUsers size={16} /> Race
               </button>
               <GanButton
                 state={gan.state}
                 onConnect={gan.connect}
                 onDisconnect={gan.disconnect}
-                size={32}
+                size={36}
                 iconSize={16}
               />
             </div>
-
-            {/* Centered event picker — opens the same EventPickerSheet
-                that mobile uses (single source of truth). Replaces the
-                old inline native <select> + the duplicate left-side
-                label, so the event identity now reads in one place,
-                centered above the scramble. */}
-            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '0.6rem' }}>
-              <button
-                onClick={() => setEventPickerOpen(true)}
-                aria-label="Pick event"
-                style={{
-                  background: 'rgba(255,255,255,0.04)',
-                  color: C.text,
-                  border: `1px solid ${C.border}`,
-                  borderRadius: 999,
-                  padding: '0.4rem 1rem',
-                  fontSize: '0.85rem', fontWeight: 600, fontFamily: 'inherit',
-                  cursor: 'pointer',
-                  display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
-                  transition: 'background 0.15s ease, border-color 0.15s ease, color 0.15s ease',
-                }}
-                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; e.currentTarget.style.borderColor = C.borderHi; }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.borderColor = C.border; }}
-              >
-                <WcaEventIcon eventId={eventId} size={18} />
-                <span>{sessionEvent.name}</span>
-                <span aria-hidden style={{ color: C.mutedDim, fontSize: '0.62rem', marginLeft: '0.1rem' }}>▾</span>
-              </button>
-            </div>
+            <section className="pv-scramble" style={{
+              background: C.card, border: `1px solid ${C.border}`,
+              borderRadius: 18, padding: '1.25rem 1.5rem',
+              boxShadow: '0 1px 0 rgba(255,255,255,0.02) inset, 0 4px 16px rgba(0,0,0,0.2)',
+            }}>
+              {/* Picker row — event picker pill + "New Scramble" pill,
+                  centered as a pair. The event picker carries the
+                  EventPickerDropdown panel anchored to its wrapper. */}
+              <div style={{
+                display: 'flex', justifyContent: 'center', alignItems: 'center',
+                gap: '1rem', marginBottom: '0.85rem',
+                // Reserve right-side space so the floating Race / BT
+                // actions don't visually collide with the picker pair
+                // when the main column is narrow.
+                paddingRight: '7rem', paddingLeft: '7rem',
+                flexWrap: 'wrap',
+              }}>
+                <div style={{ position: 'relative' }}>
+                  <button
+                    onClick={() => setDesktopEventPickerOpen(o => !o)}
+                    aria-haspopup="dialog"
+                    aria-expanded={desktopEventPickerOpen}
+                    aria-label="Pick event"
+                    style={{
+                      background: desktopEventPickerOpen ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.04)',
+                      color: C.text,
+                      border: `1px solid ${desktopEventPickerOpen ? C.borderHi : C.border}`,
+                      borderRadius: 999,
+                      padding: '0.4rem 1rem',
+                      fontSize: '0.85rem', fontWeight: 600, fontFamily: 'inherit',
+                      cursor: 'pointer',
+                      display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
+                      transition: 'background 0.15s ease, border-color 0.15s ease, color 0.15s ease',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; e.currentTarget.style.borderColor = C.borderHi; }}
+                    onMouseLeave={e => { if (!desktopEventPickerOpen) { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.borderColor = C.border; } }}
+                  >
+                    <WcaEventIcon eventId={eventId} size={18} />
+                    <span>{sessionEvent.name}</span>
+                    <span aria-hidden style={{
+                      color: C.mutedDim, fontSize: '0.62rem', marginLeft: '0.1rem',
+                      transform: desktopEventPickerOpen ? 'rotate(180deg)' : 'none',
+                      transition: 'transform 0.18s ease',
+                    }}>▾</span>
+                  </button>
+                  {desktopEventPickerOpen && (
+                    <EventPickerDropdown
+                      currentEventId={eventId}
+                      onSelect={setEventId}
+                      onClose={() => setDesktopEventPickerOpen(false)}
+                    />
+                  )}
+                </div>
+                <button
+                  onClick={newScramble}
+                  aria-label="New Scramble"
+                  style={{
+                    background: 'transparent', color: C.accent,
+                    border: `1px solid ${C.borderHi}`, borderRadius: 999,
+                    padding: '0.4rem 1rem',
+                    fontSize: '0.85rem', fontWeight: 600, fontFamily: 'inherit',
+                    cursor: 'pointer',
+                    display: 'inline-flex', alignItems: 'center', gap: '0.45rem',
+                    transition: 'background 0.15s ease',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = C.accentDim)}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                >
+                  <IconRefresh size={16} /> New Scramble
+                </button>
+              </div>
 
             <div style={{
               fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
@@ -1803,7 +1837,8 @@ export default function TimerPage() {
             }}>
               {scramble}
             </div>
-          </section>
+            </section>
+          </div>
 
           {/* Main timer. Border + background are constant across every
               timer state — the only colour cue tied to arming lives on
@@ -5597,5 +5632,121 @@ function EventPickerSheet({
         </div>
       </div>
     </div>
+  );
+}
+
+// Desktop counterpart to EventPickerSheet — same content (primary grid +
+// collapsible BLD/FMC special events) but rendered as a dropdown panel
+// anchored beneath the picker pill rather than a bottom sheet. The
+// caller wraps it in a `position: relative` element; the panel pins
+// itself to that wrapper's left edge with `top: calc(100% + 8px)`.
+function EventPickerDropdown({
+  currentEventId, onSelect, onClose,
+}: {
+  currentEventId: string;
+  onSelect: (id: string) => void;
+  onClose: () => void;
+}) {
+  const [specialOpen, setSpecialOpen] = useState(
+    SPECIAL_EVENT_IDS.includes(currentEventId),
+  );
+  const primaryEvents = EVENTS.filter(e => !SPECIAL_EVENT_IDS.includes(e.id));
+  const specialEvents = EVENTS.filter(e => SPECIAL_EVENT_IDS.includes(e.id));
+
+  // Capture-phase ESC so the dropdown closes ahead of any other key
+  // listener (matches EventPickerSheet's behaviour).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') { e.stopPropagation(); onClose(); }
+    }
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
+
+  return (
+    <>
+      {/* Click-outside catcher — transparent fixed-inset backdrop sitting
+          one z-layer beneath the panel itself. */}
+      <div
+        onClick={onClose}
+        style={{ position: 'fixed', inset: 0, zIndex: 99, background: 'transparent' }}
+      />
+      <div
+        role="dialog"
+        aria-label="Pick event"
+        style={{
+          position: 'absolute',
+          top: 'calc(100% + 8px)',
+          left: 0,
+          width: 320,
+          zIndex: 100,
+          background: C.card,
+          border: `1px solid ${C.border}`,
+          borderRadius: 12,
+          padding: '0.5rem',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+        }}
+      >
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, 1fr)',
+          gap: '0.5rem',
+        }}>
+          {primaryEvents.map(ev => (
+            <EventTile
+              key={ev.id}
+              event={ev}
+              active={ev.id === currentEventId}
+              onClick={() => { onSelect(ev.id); onClose(); }}
+            />
+          ))}
+        </div>
+
+        <div style={{ borderTop: `1px solid ${C.border}`, marginTop: '0.5rem' }}>
+          <button
+            onClick={() => setSpecialOpen(o => !o)}
+            aria-expanded={specialOpen}
+            style={{
+              width: '100%',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '0.6rem 0.2rem',
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              color: C.text, fontFamily: 'inherit',
+            }}
+          >
+            <span style={{
+              fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.06em',
+              color: specialOpen ? C.accent : C.muted,
+              textTransform: 'uppercase',
+            }}>
+              Тусгай төрлүүд (BLD / FMC)
+            </span>
+            <span style={{
+              color: specialOpen ? C.accent : C.muted,
+              fontSize: '0.7rem',
+              transform: specialOpen ? 'rotate(180deg)' : 'none',
+              transition: 'transform 0.18s',
+            }}>▾</span>
+          </button>
+          {specialOpen && (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gap: '0.5rem',
+              paddingBottom: '0.25rem',
+            }}>
+              {specialEvents.map(ev => (
+                <EventTile
+                  key={ev.id}
+                  event={ev}
+                  active={ev.id === currentEventId}
+                  onClick={() => { onSelect(ev.id); onClose(); }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
   );
 }
