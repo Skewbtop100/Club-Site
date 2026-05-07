@@ -281,7 +281,7 @@ export default function TimerProfileMenu({
             </>
           )}
 
-          <MenuItem onClick={() => handleNav('/profile')} icon={<UserIcon />}>Профайл</MenuItem>
+          <MenuItem onClick={() => handleNav('/timer/profile')} icon={<UserIcon />}>Профайл</MenuItem>
           <MenuItem onClick={() => handleNav('/')}        icon={<HomeIcon />}>Нүүр хуудас</MenuItem>
           {user.role === 'admin' && (
             <MenuItem onClick={() => handleNav('/admin/dashboard')} icon={<DashboardIcon />}>Админ хэсэг</MenuItem>
