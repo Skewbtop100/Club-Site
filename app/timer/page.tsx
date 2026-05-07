@@ -192,6 +192,16 @@ function getScrambleFontSize(
   return Math.round(basePx * multiplier * 2) / 2;
 }
 
+// Desktop scramble uses a viewport-clamped font instead of the px-bucket
+// auto-fit (the column is wide enough that long scrambles don't need a
+// length-aware base). The user's sm/md/lg preference still applies — same
+// three-step ramp as mobile, just expressed as `clamp(...)` strings.
+function getDesktopScrambleFontSize(pref: 'sm' | 'md' | 'lg'): string {
+  if (pref === 'sm') return 'clamp(0.9rem, 2.0vw, 1.4rem)';
+  if (pref === 'lg') return 'clamp(1.15rem, 2.8vw, 2rem)';
+  return 'clamp(1rem, 2.4vw, 1.7rem)';
+}
+
 // avgOfN, calcStats, useTimer — all imported from @/lib/timer-engine.
 
 // ── Main page ───────────────────────────────────────────────────────────────
@@ -1708,22 +1718,26 @@ export default function TimerPage() {
         </aside>
 
         {/* ── CENTER PANEL ─────────────────────────────────────────────── */}
+        {/* Main column reserves a header band at the top via paddingTop so
+            the scramble box's first content row aligns with the sidebar's
+            session selector. The Race / Bluetooth strip floats inside
+            that reserved band, anchored to main directly (position:
+            relative). The +1px on top accounts for the sidebar's outer
+            border, which offsets the cog by 1px relative to main's
+            content edge — without it, Race sits 1px above the cog. */}
         <main style={{
+          position: 'relative',
           flex: '1 1 auto', minWidth: 0,
           display: 'flex', flexDirection: 'column', gap: '1.25rem',
+          paddingTop: 'calc(0.9rem + 36px + 0.7rem + 0.4rem + 2px)',
           height: '100%', overflow: 'hidden',
         }}>
-          {/* Scramble box wrapped in pv-top-row so the Race + Bluetooth
-              actions can float at the top-right, visually aligned with
-              the sidebar's settings cog row across the column gap. */}
-          <div className="pv-top-row" style={{ position: 'relative' }}>
-            <div className="pv-top-actions" style={{
-              position: 'absolute',
-              top: 0, right: 0,
-              display: 'flex', gap: '0.5rem', alignItems: 'center',
-              padding: '0.9rem 0.9rem 0 0',
-              zIndex: 5,
-            }}>
+          <div className="pv-top-actions" style={{
+            position: 'absolute',
+            top: 'calc(0.9rem + 1px)', right: '0.85rem',
+            display: 'flex', gap: '0.5rem', alignItems: 'center',
+            zIndex: 5,
+          }}>
               <button
                 onClick={() => router.push('/timer/multiplayer')}
                 title="Multiplayer Racing"
@@ -1756,14 +1770,13 @@ export default function TimerPage() {
             }}>
               {/* Picker row — event picker pill + "New Scramble" pill,
                   centered as a pair. The event picker carries the
-                  EventPickerDropdown panel anchored to its wrapper. */}
+                  EventPickerDropdown panel anchored to its wrapper.
+                  No side reservation needed: the Race / BT strip now
+                  lives in main's reserved header band above this
+                  scramble box, not floating over it. */}
               <div style={{
                 display: 'flex', justifyContent: 'center', alignItems: 'center',
                 gap: '1rem', marginBottom: '0.85rem',
-                // Reserve right-side space so the floating Race / BT
-                // actions don't visually collide with the picker pair
-                // when the main column is narrow.
-                paddingRight: '7rem', paddingLeft: '7rem',
                 flexWrap: 'wrap',
               }}>
                 <div style={{ position: 'relative' }}>
@@ -1823,7 +1836,7 @@ export default function TimerPage() {
 
             <div style={{
               fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
-              fontSize: 'clamp(1rem, 2.4vw, 1.7rem)',
+              fontSize: getDesktopScrambleFontSize(scrambleFontSize),
               fontWeight: 500, lineHeight: 1.7,
               letterSpacing: '0.02em', color: C.text,
               textAlign: 'center', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
@@ -1837,8 +1850,7 @@ export default function TimerPage() {
             }}>
               {scramble}
             </div>
-            </section>
-          </div>
+          </section>
 
           {/* Main timer. Border + background are constant across every
               timer state — the only colour cue tied to arming lives on
@@ -5090,23 +5102,6 @@ function ManualInlineInput({
           caretColor: C.accent,
         }}
       />
-      <button
-        type="button"
-        onClick={onCommit}
-        disabled={previewMs == null}
-        style={{
-          padding: '0.5rem 1.1rem', borderRadius: 999,
-          fontSize: '0.82rem', fontWeight: 700, fontFamily: 'inherit',
-          background: previewMs == null ? C.cardAlt : C.accentDim,
-          color: previewMs == null ? C.mutedDim : C.accent,
-          border: `1px solid ${previewMs == null ? C.border : C.borderHi}`,
-          cursor: previewMs == null ? 'not-allowed' : 'pointer',
-          letterSpacing: '0.04em',
-          display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
-        }}
-      >
-        ✓ Хадгалах
-      </button>
     </div>
   );
 }
