@@ -172,10 +172,10 @@ function getTimerFontSize(text: string, isMobile: boolean): string {
 // oldest fall back to creation order on missing timestamps.
 type SortMode = 'newest' | 'oldest' | 'fastest' | 'slowest';
 const SORT_LABELS: Record<SortMode, string> = {
-  newest: 'Шинэ — Хуучин',
-  oldest: 'Хуучин — Шинэ',
-  fastest: 'Хурдан — Удаан',
-  slowest: 'Удаан — Хурдан',
+  newest: 'Шинэ → Хуучин',
+  oldest: 'Хуучин → Шинэ',
+  fastest: 'Хурдан → Удаан',
+  slowest: 'Удаан → Хурдан',
 };
 // Pill-button label is the shorter form so it fits next to the count.
 const SORT_PILL_LABELS: Record<SortMode, string> = {
@@ -184,7 +184,15 @@ const SORT_PILL_LABELS: Record<SortMode, string> = {
   fastest: 'Хурдан',
   slowest: 'Удаан',
 };
-const SORT_OPTIONS: SortMode[] = ['newest', 'oldest', 'fastest', 'slowest'];
+// Sort modes presented in the dropdown grouped by what they sort on
+// (date vs duration). The group headers also drive which leading icon
+// the trigger pill shows — calendar for date sorts, stopwatch for
+// duration sorts.
+const SORT_GROUPS: { header: string; options: SortMode[] }[] = [
+  { header: 'Он сар өдөр', options: ['newest', 'oldest'] },
+  { header: 'Хугацаа',     options: ['fastest', 'slowest'] },
+];
+const isDateSort = (m: SortMode) => m === 'newest' || m === 'oldest';
 
 // Format a solve's completion timestamp as "YYYY-MM-DD  HH:mm" in the
 // user's local timezone. Older solves saved before `ts` was added (and
@@ -1828,76 +1836,96 @@ export default function TimerPage() {
                       onMouseLeave={() => setHoveredSolveId(prev => prev === s.id ? null : prev)}
                       onClick={() => setDetailSolveId(s.id)}
                       style={{
-                        display: 'grid',
-                        gridTemplateColumns: '2.4rem 1fr auto auto',
-                        alignItems: 'center', gap: '0.55rem',
-                        padding: '0.65rem 0.7rem', borderRadius: 10,
+                        position: 'relative',
+                        display: 'flex', flexDirection: 'column',
+                        gap: '0.1rem',
+                        padding: '0.45rem 0.7rem',
+                        minHeight: 52,
+                        borderRadius: 10,
                         background: rowBg,
                         borderLeft: isPB ? `3px solid ${C.success}` : '3px solid transparent',
                         cursor: 'pointer',
                         transition: 'background 0.15s ease',
                       }}
                     >
-                      {/* Compact "M/D" date in the leading column. Empty
-                          for legacy solves that pre-date the `ts` field —
-                          the column collapses visually rather than
-                          showing a placeholder. */}
+                      {/* Top row — hover-revealed delete × on the left,
+                          compact "M/D" date on the right. The × shares
+                          this slot rather than getting its own column so
+                          the card height isn't padded out by an
+                          always-visible action affordance. */}
                       <div style={{
-                        fontSize: '0.65rem', fontWeight: 500,
-                        color: 'rgba(255,255,255,0.35)',
-                        letterSpacing: '0.04em',
-                        fontVariantNumeric: 'tabular-nums',
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        minHeight: 12,
                       }}>
-                        {formatSolveDate(s.ts)}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); deleteSolve(s.id); }}
+                          aria-label="Delete solve"
+                          title="Delete"
+                          style={{
+                            background: 'transparent', border: 'none', cursor: 'pointer',
+                            color: C.mutedDim, fontSize: '0.85rem',
+                            padding: 0, lineHeight: 1,
+                            opacity: hovered ? 1 : 0,
+                            transition: 'opacity 0.18s ease, color 0.15s ease',
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.color = C.text; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.color = C.mutedDim; }}
+                        >×</button>
+                        <span style={{
+                          fontSize: '0.65rem', fontWeight: 500,
+                          color: 'rgba(255,255,255,0.35)',
+                          letterSpacing: '0.04em',
+                          fontVariantNumeric: 'tabular-nums',
+                        }}>{formatSolveDate(s.ts)}</span>
                       </div>
+
+                      {/* Center row — badges + time grouped together,
+                          centered horizontally. Order is [PB][+2][time]
+                          [comment] so the time stays the visual anchor
+                          and any meta-signals cluster around it without
+                          shoving it off-center. */}
                       <div style={{
-                        fontFamily: '"JetBrains Mono", monospace',
-                        fontSize: '1rem', fontWeight: 700,
-                        color: dnf ? C.danger : isPB ? C.success : C.text,
-                        fontVariantNumeric: 'tabular-nums',
-                        letterSpacing: '-0.005em',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        gap: '0.25rem',
                       }}>
-                        {fmtMs(finalMs(s), dnf, precision)}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                         {isPB && !dnf && (
                           <span style={{
-                            fontSize: '0.55rem', fontWeight: 700, padding: '0.1rem 0.4rem', borderRadius: 4,
-                            background: 'rgba(52,211,153,0.10)', color: C.success, letterSpacing: '0.06em',
+                            fontSize: '0.55rem', fontWeight: 700,
+                            padding: '0.1rem 0.4rem', borderRadius: 4,
+                            background: 'rgba(52,211,153,0.10)', color: C.success,
+                            letterSpacing: '0.06em',
                           }}>PB</span>
                         )}
                         {s.penalty === '+2' && (
                           <span style={{
-                            fontSize: '0.55rem', fontWeight: 700, padding: '0.1rem 0.4rem', borderRadius: 4,
-                            background: 'rgba(251,191,36,0.10)', color: C.warn, letterSpacing: '0.06em',
+                            fontSize: '0.55rem', fontWeight: 700,
+                            padding: '0.1rem 0.4rem', borderRadius: 4,
+                            background: 'rgba(251,191,36,0.10)', color: C.warn,
+                            letterSpacing: '0.06em',
                           }}>+2</span>
                         )}
+                        <span style={{
+                          fontFamily: '"JetBrains Mono", monospace',
+                          fontSize: '1.05rem', fontWeight: 700,
+                          color: dnf ? C.danger : isPB ? C.success : C.text,
+                          fontVariantNumeric: 'tabular-nums',
+                          letterSpacing: '-0.005em',
+                        }}>
+                          {fmtMs(finalMs(s), dnf, precision)}
+                        </span>
                         {s.comment && s.comment.trim() && (
                           <span
                             title={s.comment}
                             aria-label="Has comment"
                             style={{
                               display: 'inline-flex', alignItems: 'center',
-                              color: C.muted, padding: '0 0.15rem',
+                              color: C.muted,
                             }}
                           >
                             <IconComment size={11} />
                           </span>
                         )}
                       </div>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); deleteSolve(s.id); }}
-                        aria-label="Delete solve"
-                        style={{
-                          background: 'transparent', border: 'none', cursor: 'pointer',
-                          color: C.mutedDim, fontSize: '0.9rem', padding: '0.1rem 0.25rem',
-                          opacity: hovered ? 1 : 0,
-                          transition: 'opacity 0.18s ease, color 0.15s ease',
-                        }}
-                        onMouseEnter={(e) => { e.currentTarget.style.color = C.text; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.color = C.mutedDim; }}
-                        title="Delete"
-                      >×</button>
                     </div>
                   );
                 })}
@@ -2686,37 +2714,37 @@ export default function TimerPage() {
                               border: `1px solid ${cardBorder}`,
                               borderLeft: leftAccent ? `3px solid ${leftAccent}` : `1px solid ${cardBorder}`,
                               borderRadius: 12,
-                              padding: '0.6rem 0.55rem 0.55rem',
-                              display: 'flex', flexDirection: 'column', gap: '0.3rem',
-                              minHeight: 76,
+                              padding: '0.45rem 0.7rem',
+                              display: 'flex', flexDirection: 'column', gap: '0.1rem',
+                              minHeight: 52,
                               boxShadow: glowColor ? `0 0 16px ${glowColor}` : 'none',
                               transition: 'transform 0.12s, border-color 0.12s, box-shadow 0.2s',
                             }}
                           >
                             {selectMode && (
                               <span style={{
-                                position: 'absolute', top: 4, right: 4,
-                                width: 18, height: 18, borderRadius: 999,
+                                position: 'absolute', top: 4, left: 4,
+                                width: 16, height: 16, borderRadius: 999,
                                 background: selected ? C.accent : 'rgba(255,255,255,0.06)',
                                 border: `1px solid ${selected ? C.accent : C.border}`,
                                 color: selected ? '#0a0a0a' : 'transparent',
                                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                               }}>
-                                {selected && <IconCheck size={12} />}
+                                {selected && <IconCheck size={11} />}
                               </span>
                             )}
 
-                            {/* Top row — compact "M/D" completion date +
-                                comment dot. Empty span for legacy solves
-                                that pre-date the `ts` field so the row
-                                stays a clean empty corner. The PB / best
-                                / worst / latest emphasis lives on the
-                                card's left rail and big time text — the
-                                date label stays uniformly muted to
-                                avoid competing with those signals. */}
+                            {/* Top row — empty left, compact "M/D" date
+                                in the top-right corner. Empty span for
+                                legacy solves that pre-date the `ts`
+                                field so the row stays a clean empty
+                                corner with no placeholder. The select-
+                                mode checkbox occupies the top-left
+                                absolute slot when active, which is why
+                                the date sits on the right. */}
                             <div style={{
-                              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                              gap: '0.3rem',
+                              display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+                              minHeight: 12,
                             }}>
                               <span style={{
                                 fontSize: '0.65rem', fontWeight: 500,
@@ -2726,53 +2754,58 @@ export default function TimerPage() {
                               }}>
                                 {formatSolveDate(s.ts)}
                               </span>
+                            </div>
+
+                            {/* Center row — badges + time grouped and
+                                centered together, mirroring the desktop
+                                row's anchor layout. PB / +2 sit before
+                                the time; the comment indicator follows
+                                so the time itself stays the visual
+                                anchor regardless of how many meta
+                                signals are present. */}
+                            <div style={{
+                              flex: '1 1 auto',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              gap: '0.25rem',
+                            }}>
+                              {isBest && !dnf && (
+                                <span style={{
+                                  fontSize: '0.55rem', fontWeight: 700,
+                                  padding: '0.1rem 0.4rem', borderRadius: 4,
+                                  background: 'rgba(52,211,153,0.20)', color: C.success,
+                                  letterSpacing: '0.06em',
+                                }}>PB</span>
+                              )}
+                              {s.penalty === '+2' && !dnf && (
+                                <span style={{
+                                  fontSize: '0.55rem', fontWeight: 700,
+                                  padding: '0.1rem 0.4rem', borderRadius: 4,
+                                  background: 'rgba(251,191,36,0.20)', color: C.warn,
+                                  letterSpacing: '0.06em',
+                                }}>+2</span>
+                              )}
+                              <span style={{
+                                fontFamily: '"JetBrains Mono", monospace',
+                                fontSize: '1.05rem', fontWeight: 700,
+                                color: dnf ? C.danger
+                                     : isBest ? C.success
+                                     : isWorst ? '#fca5a5'
+                                     : isLatest ? C.accent
+                                     : C.text,
+                                fontVariantNumeric: 'tabular-nums',
+                                letterSpacing: '-0.005em',
+                                lineHeight: 1.1,
+                              }}>
+                                {fmtMs(finalMs(s), dnf, precision)}
+                              </span>
                               {hasComment && (
                                 <span aria-label="Has comment" style={{
-                                  display: 'inline-flex', color: C.mutedDim,
+                                  display: 'inline-flex', color: C.muted,
                                 }}>
-                                  <IconComment size={10} />
+                                  <IconComment size={11} />
                                 </span>
                               )}
                             </div>
-
-                            <div style={{
-                              fontFamily: '"JetBrains Mono", monospace',
-                              fontSize: '1.05rem', fontWeight: 800,
-                              color: dnf ? C.danger
-                                   : isBest ? C.success
-                                   : isWorst ? '#fca5a5'
-                                   : isLatest ? C.accent
-                                   : C.text,
-                              fontVariantNumeric: 'tabular-nums',
-                              letterSpacing: '-0.01em',
-                              lineHeight: 1.1,
-                            }}>
-                              {fmtMs(finalMs(s), dnf, precision)}
-                            </div>
-
-                            {((isBest && !dnf) || (s.penalty === '+2' && !dnf)) && (
-                              <div style={{
-                                display: 'flex', alignItems: 'center', gap: '0.25rem',
-                                marginTop: '0.1rem', flexWrap: 'wrap',
-                              }}>
-                                {isBest && !dnf && (
-                                  <span style={{
-                                    fontSize: '0.52rem', fontWeight: 800,
-                                    padding: '0.12rem 0.35rem', borderRadius: 4,
-                                    background: 'rgba(52,211,153,0.2)', color: C.success,
-                                    letterSpacing: '0.06em',
-                                  }}>PB</span>
-                                )}
-                                {s.penalty === '+2' && !dnf && (
-                                  <span style={{
-                                    fontSize: '0.52rem', fontWeight: 800,
-                                    padding: '0.12rem 0.35rem', borderRadius: 4,
-                                    background: 'rgba(251,191,36,0.2)', color: C.warn,
-                                    letterSpacing: '0.06em',
-                                  }}>+2</span>
-                                )}
-                              </div>
-                            )}
                           </button>
                         );
                       })}
@@ -4033,6 +4066,31 @@ function SortPicker({ sortMode, onChange }: {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [open]);
 
+  // Trigger icon picks up the current sort's group: calendar for date
+  // sorts (newest/oldest), stopwatch for duration sorts (fastest/slowest).
+  // Both inline 13-pixel SVGs at the IconBase 1.8 stroke weight so they
+  // match the rest of the timer's icon set without pulling in a new
+  // exported icon component.
+  const triggerIcon = isDateSort(sortMode) ? (
+    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+         style={{ flexShrink: 0 }}>
+      <rect x={3} y={5} width={18} height={16} rx={2} />
+      <path d="M3 10h18" />
+      <path d="M8 3v4" />
+      <path d="M16 3v4" />
+    </svg>
+  ) : (
+    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+         style={{ flexShrink: 0 }}>
+      <circle cx={12} cy={14} r={8} />
+      <path d="M12 14V9" />
+      <path d="M9 2h6" />
+      <path d="M12 2v3" />
+    </svg>
+  );
+
   return (
     <div style={{ position: 'relative' }}>
       <button
@@ -4054,14 +4112,7 @@ function SortPicker({ sortMode, onChange }: {
           whiteSpace: 'nowrap',
         }}
       >
-        {/* Three-line "sort" glyph — matches the IconBase 1.8-stroke style. */}
-        <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor"
-             strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
-             style={{ flexShrink: 0 }}>
-          <path d="M3 6h12" />
-          <path d="M3 12h9" />
-          <path d="M3 18h6" />
-        </svg>
+        {triggerIcon}
         <span>{SORT_PILL_LABELS[sortMode]}</span>
         <span aria-hidden style={{
           fontSize: '0.62rem',
@@ -4084,39 +4135,66 @@ function SortPicker({ sortMode, onChange }: {
             style={{
               position: 'absolute', top: 'calc(100% + 0.3rem)', right: 0, zIndex: 51,
               background: C.card, border: `1px solid ${C.border}`,
-              borderRadius: 10, padding: '0.3rem',
-              minWidth: 180,
+              borderRadius: 10, padding: '0.25rem 0',
+              minWidth: 200,
               boxShadow: '0 12px 30px rgba(0,0,0,0.55)',
-              display: 'flex', flexDirection: 'column', gap: '0.15rem',
+              display: 'flex', flexDirection: 'column',
             }}
           >
-            {SORT_OPTIONS.map(opt => {
-              const active = opt === sortMode;
-              return (
-                <button
-                  key={opt}
-                  role="option"
-                  aria-selected={active}
-                  onClick={() => { onChange(opt); setOpen(false); }}
-                  style={{
-                    display: 'grid', gridTemplateColumns: '1fr auto',
-                    alignItems: 'center', gap: '0.5rem',
-                    background: active ? C.accentDim : 'transparent',
-                    color: active ? C.accent : C.text,
-                    border: 'none', borderRadius: 7,
-                    padding: '0.5rem 0.7rem',
-                    fontSize: '0.82rem', fontWeight: 600, fontFamily: 'inherit',
-                    cursor: 'pointer', textAlign: 'left',
-                    transition: 'background 0.12s, color 0.12s',
-                  }}
-                  onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
-                  onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent'; }}
-                >
-                  <span>{SORT_LABELS[opt]}</span>
-                  {active && <IconCheck size={14} />}
-                </button>
-              );
-            })}
+            {SORT_GROUPS.map((group, gi) => (
+              <div key={group.header} role="group" aria-label={group.header}>
+                {/* Subtle separator between groups so the list reads as
+                    two distinct categories without dominating the popup. */}
+                {gi > 0 && (
+                  <div style={{
+                    height: 1, background: C.border, margin: '0.3rem 0.5rem',
+                  }} />
+                )}
+                <div style={{
+                  fontSize: '0.55rem', letterSpacing: '0.16em',
+                  textTransform: 'uppercase', color: C.mutedDim, fontWeight: 700,
+                  padding: '0.45rem 0.85rem 0.25rem',
+                }}>
+                  {group.header}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.05rem', padding: '0 0.25rem' }}>
+                  {group.options.map(opt => {
+                    const active = opt === sortMode;
+                    return (
+                      <button
+                        key={opt}
+                        role="option"
+                        aria-selected={active}
+                        onClick={() => { onChange(opt); setOpen(false); }}
+                        style={{
+                          // Reserved 14px slot keeps every label aligned
+                          // whether or not it has the leading checkmark.
+                          display: 'grid', gridTemplateColumns: '14px 1fr',
+                          alignItems: 'center', gap: '0.25rem',
+                          background: active ? C.accentDim : 'transparent',
+                          color: active ? C.accent : C.text,
+                          border: 'none', borderRadius: 7,
+                          padding: '0.45rem 0.65rem',
+                          fontSize: '0.82rem', fontWeight: 600, fontFamily: 'inherit',
+                          cursor: 'pointer', textAlign: 'left',
+                          transition: 'background 0.12s, color 0.12s',
+                        }}
+                        onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                        onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+                      >
+                        <span aria-hidden style={{
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          width: 14, height: 14, color: C.accent,
+                        }}>
+                          {active && <IconCheck size={12} />}
+                        </span>
+                        <span>{SORT_LABELS[opt]}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         </>
       )}
