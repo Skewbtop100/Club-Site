@@ -2178,29 +2178,55 @@ export default function TimerPage() {
                 {timerDisplay}
               </div>
             )}
-            {/* Action row stays visible whenever there's a last solve to
-                act on — only hidden during an active timer run. This
-                lets the user tap ✕ / DNF / +2 / 💬 across an accidental
-                arm-and-release cycle: tapping to begin a hold and then
-                releasing early lands the engine back in 'inspecting'
-                or 'idle' (NOT 'stopped'), so the old `state==='stopped'`
-                gate would drop the row mid-recovery. `lastSolve` is
-                never cleared on a state transition — it's a derived
-                view of solves[length-1] — so widening the gate here is
-                the entire fix. */}
-            {timer.state !== 'running' && lastSolve && lastSolve.penalty === 'none' && (
-              <SolveActionRow
-                solve={lastSolve}
-                isMobile={isMobile}
-                disabled={false}
-                onDelete={() => setDeleteConfirmOpen(true)}
-                onSetPenalty={setPenaltyOnLast}
-                onOpenComment={() => setCommentSolveId(lastSolve.id)}
-              />
-            )}
-            {timer.state !== 'running' && lastSolve && lastSolve.penalty !== 'none' && (
-              <UndoActionRow isMobile={isMobile} disabled={false} onUndo={undoPenaltyOnLast} />
-            )}
+            {/* Action row visibility is now opacity-driven so the fade
+                between 'stopped' (visible) and 'armed' / 'inspecting'
+                / 'running' (hidden) is smooth. The wrapper stays
+                mounted as long as `lastSolve` exists — so an
+                accidental arm-and-release cycle doesn't unmount the
+                inner SolveActionRow and re-trigger its entrance
+                animation; instead the wrapper's opacity ramps from
+                1 → 0 → 1 across the cycle. visibility:hidden also
+                blocks pointer events on the way out without affecting
+                layout, so the timer digits don't jump as the row
+                appears or hides.
+
+                Keying the inner row on `lastSolve.id` means a NEW
+                solve replaces the old one with a fresh mount → the
+                pv-actionrow-fade entrance plays once per real solve,
+                not on every armed/stopped flicker. */}
+            {lastSolve && (() => {
+              const showActionRow = timer.state === 'stopped' || timer.state === 'idle';
+              return (
+                <div
+                  aria-hidden={!showActionRow}
+                  style={{
+                    opacity: showActionRow ? 1 : 0,
+                    visibility: showActionRow ? 'visible' : 'hidden',
+                    pointerEvents: showActionRow ? 'auto' : 'none',
+                    transition: 'opacity 0.2s ease, visibility 0.2s ease',
+                  }}
+                >
+                  {lastSolve.penalty === 'none' ? (
+                    <SolveActionRow
+                      key={lastSolve.id}
+                      solve={lastSolve}
+                      isMobile={isMobile}
+                      disabled={false}
+                      onDelete={() => setDeleteConfirmOpen(true)}
+                      onSetPenalty={setPenaltyOnLast}
+                      onOpenComment={() => setCommentSolveId(lastSolve.id)}
+                    />
+                  ) : (
+                    <UndoActionRow
+                      key={lastSolve.id}
+                      isMobile={isMobile}
+                      disabled={false}
+                      onUndo={undoPenaltyOnLast}
+                    />
+                  )}
+                </div>
+              );
+            })()}
             <div className="pv-instruction" style={{ fontSize: '0.72rem', fontWeight: 400, color: C.muted, marginTop: '1.25rem', letterSpacing: '0.06em', minHeight: '1.1rem' }}>
               {ganConnected && timer.state !== 'running' && timer.state !== 'inspecting' && timer.state !== 'armed' && 'Use the GAN timer pads'}
               {timer.state === 'inspecting' && 'Hold SPACE to arm, release to start'}
@@ -2595,21 +2621,41 @@ export default function TimerPage() {
                       {timerDisplay}
                     </div>
                   )}
-                  {/* Same widened gate as the desktop branch — see the
-                      comment there for the rationale. */}
-                  {timer.state !== 'running' && lastSolve && lastSolve.penalty === 'none' && (
-                    <SolveActionRow
-                      solve={lastSolve}
-                      isMobile={isMobile}
-                      disabled={false}
-                      onDelete={() => setDeleteConfirmOpen(true)}
-                      onSetPenalty={setPenaltyOnLast}
-                      onOpenComment={() => setCommentSolveId(lastSolve.id)}
-                    />
-                  )}
-                  {timer.state !== 'running' && lastSolve && lastSolve.penalty !== 'none' && (
-                    <UndoActionRow isMobile={isMobile} disabled={false} onUndo={undoPenaltyOnLast} />
-                  )}
+                  {/* Same opacity/visibility wrapper as the desktop
+                      branch — see the comment there for the rationale. */}
+                  {lastSolve && (() => {
+                    const showActionRow = timer.state === 'stopped' || timer.state === 'idle';
+                    return (
+                      <div
+                        aria-hidden={!showActionRow}
+                        style={{
+                          opacity: showActionRow ? 1 : 0,
+                          visibility: showActionRow ? 'visible' : 'hidden',
+                          pointerEvents: showActionRow ? 'auto' : 'none',
+                          transition: 'opacity 0.2s ease, visibility 0.2s ease',
+                        }}
+                      >
+                        {lastSolve.penalty === 'none' ? (
+                          <SolveActionRow
+                            key={lastSolve.id}
+                            solve={lastSolve}
+                            isMobile={isMobile}
+                            disabled={false}
+                            onDelete={() => setDeleteConfirmOpen(true)}
+                            onSetPenalty={setPenaltyOnLast}
+                            onOpenComment={() => setCommentSolveId(lastSolve.id)}
+                          />
+                        ) : (
+                          <UndoActionRow
+                            key={lastSolve.id}
+                            isMobile={isMobile}
+                            disabled={false}
+                            onUndo={undoPenaltyOnLast}
+                          />
+                        )}
+                      </div>
+                    );
+                  })()}
                   <div className="pv-instruction" style={{ fontSize: '0.7rem', color: C.muted, marginTop: '0.7rem', letterSpacing: '0.06em', minHeight: '1rem' }}>
                     {ganConnected && timer.state !== 'running' && timer.state !== 'inspecting' && timer.state !== 'armed' && 'Use the GAN timer pads'}
                     {timer.state === 'inspecting' && 'Hold to arm, release to start'}
