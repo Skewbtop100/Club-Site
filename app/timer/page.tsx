@@ -165,6 +165,39 @@ function getTimerFontSize(text: string, isMobile: boolean): string {
   return 'clamp(2.2rem, 8vw, 6rem)';
 }
 
+// Format a solve's completion timestamp as "YYYY-MM-DD  HH:mm" in the
+// user's local timezone. Older solves saved before `ts` was added (and
+// any future code path that omits it) get a dash placeholder rather
+// than an inaccurate auto-filled value.
+function formatSolveTime(epoch: number | undefined): string {
+  if (!epoch) return 'Тодорхойгүй';
+  const d = new Date(epoch);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}  ${hh}:${min}`;
+}
+
+// Small clock SVG used next to the timestamp in the Solve Detail view.
+// Inline (rather than from lib/icons.tsx) to keep the timer module
+// self-contained — same convention as the other one-off icons here.
+function IconClock() {
+  return (
+    <svg
+      width={14} height={14} viewBox="0 0 24 24"
+      fill="none" stroke="currentColor"
+      strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"
+      aria-hidden="true"
+      style={{ display: 'block', flexShrink: 0 }}
+    >
+      <circle cx={12} cy={12} r={10} />
+      <polyline points="12 6 12 12 16 14" />
+    </svg>
+  );
+}
+
 // Mobile scramble font sizing. The static sm/md/lg buckets we expose in
 // Settings overflow on Megaminx (~250 chars) and look stranded on 2x2
 // (~15 chars), so the user preference is now a *multiplier* on top of an
@@ -3041,6 +3074,17 @@ export default function TimerPage() {
                 {s.penalty === '+2' && !dnf && (
                   <div style={{ fontSize: '0.75rem', color: C.warn, marginTop: '0.25rem' }}>+2 penalty applied</div>
                 )}
+                {/* When this solve was completed. Older solves persisted
+                    before `ts` was tracked render with a "—" placeholder
+                    rather than a guessed value. */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: '0.4rem',
+                  fontSize: '0.78rem', color: C.muted,
+                  marginTop: '0.55rem',
+                }}>
+                  <IconClock />
+                  <span>{formatSolveTime(s.ts)}</span>
+                </div>
               </div>
 
               <div>
