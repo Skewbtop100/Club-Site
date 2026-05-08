@@ -212,9 +212,11 @@ function formatSolveDate(epoch: number | undefined): string {
   return `${m}/${day}`;
 }
 
-// Build the text payload for the Solve Detail "Share" button. Lines are
-// emoji-prefixed for visual chunking inside chat apps; comment line is
-// only emitted when the solve actually has one. Penalty is folded into
+// Build the text payload for the Solve Detail "Share" button. Plain
+// "Label: value" lines in Mongolian — easier to read in chat clients
+// that strip emoji or render them inconsistently. Date and comment
+// lines are omitted when empty so the output never carries an
+// awkward trailing "Сэтгэгдэл:" with no value. Penalty is folded into
 // the time via finalMs() so a +2 reads as the post-penalty value.
 function buildSolveShareText(solve: Solve, precision: Precision): string {
   const lines: string[] = [];
@@ -225,16 +227,16 @@ function buildSolveShareText(solve: Solve, precision: Precision): string {
     const dd = String(d.getDate()).padStart(2, '0');
     const hh = String(d.getHours()).padStart(2, '0');
     const min = String(d.getMinutes()).padStart(2, '0');
-    lines.push(`📅 ${yyyy}-${mm}-${dd} ${hh}:${min}`);
+    lines.push(`Огноо: ${yyyy}-${mm}-${dd} ${hh}:${min}`);
   }
-  // Use isDnf() so a DNF solve shares as "DNF" rather than a time. The
-  // false flag forces fmtMs to return the value as-is for non-DNF.
-  lines.push(`⏱  ${fmtMs(finalMs(solve), isDnf(solve), precision)}`);
+  // Use isDnf() so a DNF solve shares as "DNF" rather than a time.
+  lines.push(`Эвлүүлэлт: ${fmtMs(finalMs(solve), isDnf(solve), precision)}`);
   if (solve.scramble) {
-    lines.push(`🧩 ${solve.scramble}`);
+    lines.push(`Холилт: ${solve.scramble}`);
   }
-  if (solve.comment?.trim()) {
-    lines.push(`💬 ${solve.comment.trim()}`);
+  const cmt = solve.comment?.trim();
+  if (cmt) {
+    lines.push(`Сэтгэгдэл: ${cmt}`);
   }
   return lines.join('\n');
 }
