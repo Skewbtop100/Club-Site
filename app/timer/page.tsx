@@ -177,22 +177,13 @@ const SORT_LABELS: Record<SortMode, string> = {
   fastest: 'Хурдан → Удаан',
   slowest: 'Удаан → Хурдан',
 };
-// Pill-button label is the shorter form so it fits next to the count.
-const SORT_PILL_LABELS: Record<SortMode, string> = {
-  newest: 'Шинэ',
-  oldest: 'Хуучин',
-  fastest: 'Хурдан',
-  slowest: 'Удаан',
-};
-// Sort modes presented in the dropdown grouped by what they sort on
-// (date vs duration). The group headers also drive which leading icon
-// the trigger pill shows — calendar for date sorts, stopwatch for
-// duration sorts.
+// Sort modes presented in the dropdown grouped by what they sort on —
+// date vs duration. Groups render with section headers in the popup so
+// the user can scan to the relevant axis quickly.
 const SORT_GROUPS: { header: string; options: SortMode[] }[] = [
   { header: 'Он сар өдөр', options: ['newest', 'oldest'] },
   { header: 'Хугацаа',     options: ['fastest', 'slowest'] },
 ];
-const isDateSort = (m: SortMode) => m === 'newest' || m === 'oldest';
 
 // Format a solve's completion timestamp as "YYYY-MM-DD  HH:mm" in the
 // user's local timezone. Older solves saved before `ts` was added (and
@@ -1837,10 +1828,9 @@ export default function TimerPage() {
                       onClick={() => setDetailSolveId(s.id)}
                       style={{
                         position: 'relative',
-                        display: 'flex', flexDirection: 'column',
-                        gap: '0.1rem',
-                        padding: '0.45rem 0.7rem',
-                        minHeight: 52,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        padding: '0.5rem 0.7rem',
+                        minHeight: 48,
                         borderRadius: 10,
                         background: rowBg,
                         borderLeft: isPB ? `3px solid ${C.success}` : '3px solid transparent',
@@ -1848,48 +1838,54 @@ export default function TimerPage() {
                         transition: 'background 0.15s ease',
                       }}
                     >
-                      {/* Top row — hover-revealed delete × on the left,
-                          compact "M/D" date on the right. The × shares
-                          this slot rather than getting its own column so
-                          the card height isn't padded out by an
-                          always-visible action affordance. */}
-                      <div style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                        minHeight: 12,
-                      }}>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); deleteSolve(s.id); }}
-                          aria-label="Delete solve"
-                          title="Delete"
-                          style={{
-                            background: 'transparent', border: 'none', cursor: 'pointer',
-                            color: C.mutedDim, fontSize: '0.85rem',
-                            padding: 0, lineHeight: 1,
-                            opacity: hovered ? 1 : 0,
-                            transition: 'opacity 0.18s ease, color 0.15s ease',
-                          }}
-                          onMouseEnter={(e) => { e.currentTarget.style.color = C.text; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.color = C.mutedDim; }}
-                        >×</button>
-                        <span style={{
-                          fontSize: '0.65rem', fontWeight: 500,
-                          color: 'rgba(255,255,255,0.35)',
-                          letterSpacing: '0.04em',
-                          fontVariantNumeric: 'tabular-nums',
-                        }}>{formatSolveDate(s.ts)}</span>
-                      </div>
+                      {/* Date pinned to the top-left corner via absolute
+                          positioning so it never affects the centered
+                          time group below. Empty for legacy solves
+                          missing `ts` (no placeholder). */}
+                      <span style={{
+                        position: 'absolute', top: 6, left: 8,
+                        fontSize: '0.65rem', fontWeight: 500,
+                        color: 'rgba(255,255,255,0.35)',
+                        letterSpacing: '0.04em',
+                        fontVariantNumeric: 'tabular-nums',
+                        pointerEvents: 'none',
+                      }}>{formatSolveDate(s.ts)}</span>
 
-                      {/* Center row — badges + time grouped together,
-                          centered horizontally. Order is [PB][+2][time]
-                          [comment] so the time stays the visual anchor
-                          and any meta-signals cluster around it without
-                          shoving it off-center. */}
+                      {/* Hover-revealed delete × pinned to the top-right
+                          corner, also absolute so it doesn't push the
+                          centered time off-axis. */}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); deleteSolve(s.id); }}
+                        aria-label="Delete solve"
+                        title="Delete"
+                        style={{
+                          position: 'absolute', top: 4, right: 6,
+                          background: 'transparent', border: 'none', cursor: 'pointer',
+                          color: C.mutedDim, fontSize: '0.85rem',
+                          padding: 0, lineHeight: 1,
+                          opacity: hovered ? 1 : 0,
+                          transition: 'opacity 0.18s ease, color 0.15s ease',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = C.text; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = C.mutedDim; }}
+                      >×</button>
+
+                      {/* Centered group — [PB][+2][time][comment] sits
+                          on a single baseline as a unit. align-items:
+                          center keeps the small pills aligned with the
+                          time text's optical center; justify-content:
+                          center on the parent guarantees the group is
+                          horizontally centered regardless of which
+                          pills are present, so a PB row and a non-PB
+                          row both render the time in the same column. */}
                       <div style={{
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        gap: '0.25rem',
+                        gap: '0.5rem',
+                        width: '100%',
                       }}>
                         {isPB && !dnf && (
                           <span style={{
+                            alignSelf: 'center',
                             fontSize: '0.55rem', fontWeight: 700,
                             padding: '0.1rem 0.4rem', borderRadius: 4,
                             background: 'rgba(52,211,153,0.10)', color: C.success,
@@ -1898,6 +1894,7 @@ export default function TimerPage() {
                         )}
                         {s.penalty === '+2' && (
                           <span style={{
+                            alignSelf: 'center',
                             fontSize: '0.55rem', fontWeight: 700,
                             padding: '0.1rem 0.4rem', borderRadius: 4,
                             background: 'rgba(251,191,36,0.10)', color: C.warn,
@@ -1918,6 +1915,7 @@ export default function TimerPage() {
                             title={s.comment}
                             aria-label="Has comment"
                             style={{
+                              alignSelf: 'center',
                               display: 'inline-flex', alignItems: 'center',
                               color: C.muted,
                             }}
@@ -2299,6 +2297,101 @@ export default function TimerPage() {
         // strip below the bottom nav. Detect once and apply selectively.
         const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent);
 
+        // Shared mobile header — capsule (Settings, GAN, event picker,
+        // session +, avatar) plus the scramble row. Lifted out of the
+        // Timer-tab body so every tab sees the same header at the top
+        // of the screen; tab switches only swap the body underneath.
+        // Rendered once just above the tab-body branches below.
+        const sharedMobileHeader = (
+          <>
+            <div className="pv-mobile-header" style={{
+              flexShrink: 0,
+              margin: '0.7rem 0.7rem 0.5rem',
+              background: C.card, border: `1px solid ${C.border}`,
+              borderRadius: 999, padding: '0.45rem 0.55rem',
+              display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: '0.45rem',
+            }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                <button
+                  onClick={() => setSettingsOpen(true)}
+                  aria-label="Settings"
+                  style={{
+                    width: 36, height: 36, borderRadius: 999,
+                    background: 'transparent', border: 'none',
+                    color: C.muted, cursor: 'pointer',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  }}
+                ><IconSettings size={20} /></button>
+                <GanButton
+                  state={gan.state}
+                  onConnect={gan.connect}
+                  onDisconnect={gan.disconnect}
+                  size={36}
+                  iconSize={18}
+                />
+              </div>
+              <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <button
+                  onClick={() => setEventPickerOpen(true)}
+                  aria-label="Төрөл сонгох"
+                  style={{
+                    width: '100%', appearance: 'none',
+                    background: 'transparent', color: C.text,
+                    border: 'none', borderRadius: 999,
+                    padding: '0.15rem 0.7rem 0 0.7rem',
+                    fontSize: '0.92rem', fontWeight: 600, fontFamily: 'inherit',
+                    cursor: 'pointer', textAlign: 'center',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    gap: '0.45rem',
+                  }}
+                >
+                  <WcaEventIcon eventId={eventId} size={18} />
+                  <span>{sessionEvent.name}</span>
+                </button>
+                <div style={{
+                  fontSize: '0.6rem', color: C.mutedDim,
+                  letterSpacing: '0.05em', fontWeight: 600,
+                  lineHeight: 1, paddingBottom: '0.2rem',
+                }}>
+                  {currentSession?.name ?? 'Default'}
+                </div>
+              </div>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                <button
+                  onClick={() => { setNewSessionName(''); setSessionPanelOpen(true); }}
+                  aria-label="Шинэ session"
+                  title="Шинэ session"
+                  style={{
+                    width: 36, height: 36, borderRadius: '50%',
+                    background: 'transparent', border: `1px solid ${C.border}`,
+                    color: C.muted, cursor: 'pointer',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; e.currentTarget.style.borderColor = C.borderHi; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.muted; e.currentTarget.style.borderColor = C.border; }}
+                ><IconPlus size={18} /></button>
+                <TimerProfileMenu
+                  size={36}
+                  redirectAfterLogin="/timer"
+                  align="right"
+                />
+              </div>
+            </div>
+
+            <div className="pv-scramble" style={{ flexShrink: 0 }}>
+              <SwipeScrambleRow
+                scramble={scramble}
+                scrambleFontPx={getScrambleFontSize(scramble, scrambleFontSize)}
+                onNext={goNextScramble}
+                onPrev={goPrevScramble}
+                showHint={!swipeHintDismissed}
+                onDismissHint={dismissSwipeHint}
+              />
+            </div>
+          </>
+        );
+
         return (
           <div style={{
             position: 'relative', zIndex: 1,
@@ -2343,109 +2436,12 @@ export default function TimerPage() {
               overflow: 'hidden',
               display: 'flex', flexDirection: 'column',
             }}>
+            {sharedMobileHeader}
             {/* ── TIMER TAB ─────────────────────────────────────────────── */}
             {mobileTab === 'timer' && (
               <div style={{
                 flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column',
               }}>
-                {/* Header capsule */}
-                <div className="pv-mobile-header" style={{
-                  margin: '0.7rem 0.7rem 0.5rem',
-                  background: C.card, border: `1px solid ${C.border}`,
-                  borderRadius: 999, padding: '0.45rem 0.55rem',
-                  display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: '0.45rem',
-                }}>
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
-                    <button
-                      onClick={() => setSettingsOpen(true)}
-                      aria-label="Settings"
-                      style={{
-                        width: 36, height: 36, borderRadius: 999,
-                        background: 'transparent', border: 'none',
-                        color: C.muted, cursor: 'pointer',
-                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      }}
-                    ><IconSettings size={20} /></button>
-                    <GanButton
-                      state={gan.state}
-                      onConnect={gan.connect}
-                      onDisconnect={gan.disconnect}
-                      size={36}
-                      iconSize={18}
-                    />
-                  </div>
-                  <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    <button
-                      onClick={() => setEventPickerOpen(true)}
-                      aria-label="Төрөл сонгох"
-                      style={{
-                        width: '100%', appearance: 'none',
-                        background: 'transparent', color: C.text,
-                        border: 'none', borderRadius: 999,
-                        // Symmetric horizontal padding to keep the label
-                        // centred above the session row, matching the
-                        // pre-button native-select layout.
-                        padding: '0.15rem 0.7rem 0 0.7rem',
-                        fontSize: '0.92rem', fontWeight: 600, fontFamily: 'inherit',
-                        cursor: 'pointer', textAlign: 'center',
-                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                        gap: '0.45rem',
-                      }}
-                    >
-                      <WcaEventIcon eventId={eventId} size={18} />
-                      <span>{sessionEvent.name}</span>
-                    </button>
-                    <div style={{
-                      fontSize: '0.6rem', color: C.mutedDim,
-                      letterSpacing: '0.05em', fontWeight: 600,
-                      lineHeight: 1, paddingBottom: '0.2rem',
-                    }}>
-                      {currentSession?.name ?? 'Default'}
-                    </div>
-                  </div>
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
-                    {/* Right cluster: visible "+" creates a session, then
-                        the avatar dropdown. Multiplayer used to live here
-                        as an icon and inside the dropdown — now it lives
-                        on the Нэмэлтүүд bottom-nav tab so we don't repeat
-                        ourselves. */}
-                    <button
-                      onClick={() => { setNewSessionName(''); setSessionPanelOpen(true); }}
-                      aria-label="Шинэ session"
-                      title="Шинэ session"
-                      style={{
-                        width: 36, height: 36, borderRadius: '50%',
-                        background: 'transparent', border: `1px solid ${C.border}`,
-                        color: C.muted, cursor: 'pointer',
-                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                        transition: 'background 0.15s, color 0.15s, border-color 0.15s',
-                      }}
-                      onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; e.currentTarget.style.borderColor = C.borderHi; }}
-                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.muted; e.currentTarget.style.borderColor = C.border; }}
-                    ><IconPlus size={18} /></button>
-                    <TimerProfileMenu
-                      size={36}
-                      redirectAfterLogin="/timer"
-                      align="right"
-                    />
-                  </div>
-                </div>
-
-                {/* Scramble row — swipe LEFT for next, RIGHT for previous.
-                    The history-navigation button is intentionally gone;
-                    the gesture replaces both the "New scramble" tap and
-                    the (mostly hidden) keyboard 'N' shortcut. */}
-                <div className="pv-scramble">
-                  <SwipeScrambleRow
-                    scramble={scramble}
-                    scrambleFontPx={getScrambleFontSize(scramble, scrambleFontSize)}
-                    onNext={goNextScramble}
-                    onPrev={goPrevScramble}
-                    showHint={!swipeHintDismissed}
-                    onDismissHint={dismissSwipeHint}
-                  />
-                </div>
-
                 {/* Big timer area. Background stays transparent across
                     every state — only the digit colour swaps red→green→
                     white during arming, since the background flash was
@@ -2542,7 +2538,11 @@ export default function TimerPage() {
                 flex: '1 1 auto', minHeight: 0,
                 display: 'flex', flexDirection: 'column',
               }}>
-                {/* Header — switches to a select-mode action bar when active */}
+                {/* The shared mobile header above already shows event /
+                    session / scramble, so the Solves body skips its own
+                    title row and goes straight to a search + ⋮ menu
+                    line. Select mode replaces this row with the bulk
+                    action bar. */}
                 {selectMode ? (
                   <div style={{
                     display: 'grid', gridTemplateColumns: 'auto 1fr auto auto',
@@ -2591,41 +2591,16 @@ export default function TimerPage() {
                     ><IconTrash size={14} />Delete</button>
                   </div>
                 ) : (
-                  <div style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '0.7rem 0.85rem 0.4rem',
-                    gap: '0.5rem',
-                  }}>
-                    <div style={{ fontSize: '1rem', fontWeight: 700, flexShrink: 0 }}>
-                      Эвлүүлэлт ({solves.length})
-                    </div>
-                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}>
-                      {solves.length > 1 && (
-                        <SortPicker sortMode={sortMode} onChange={setSortMode} />
-                      )}
-                      <button
-                        onClick={() => router.push('/')}
-                        aria-label="Exit timer"
-                        style={{
-                          width: 34, height: 34, borderRadius: 8,
-                          background: 'transparent', border: `1px solid ${C.border}`,
-                          color: C.mutedDim, cursor: 'pointer',
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          flexShrink: 0,
-                        }}
-                      ><IconClose size={16} /></button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Search bar — hidden in select mode */}
-                {!selectMode && (
-                  <div style={{ padding: '0 0.85rem 0.6rem' }}>
+                  /* Search bar with the ⋮ menu pinned to its right edge
+                     as a trailing accessory. Sort options live inside
+                     that menu so the search row stays the only chrome
+                     above the grid. */
+                  <div style={{ padding: '0.5rem 0.85rem 0.6rem' }}>
                     <div style={{
-                      display: 'grid', gridTemplateColumns: 'auto 1fr',
+                      display: 'grid', gridTemplateColumns: 'auto 1fr auto',
                       gap: '0.4rem', alignItems: 'center',
                       background: C.card, border: `1px solid ${C.border}`,
-                      borderRadius: 999, padding: '0.4rem 0.85rem',
+                      borderRadius: 999, padding: '0.25rem 0.45rem 0.25rem 0.85rem',
                     }}>
                       <span style={{ color: C.muted, display: 'inline-flex' }}><IconSearch size={16} /></span>
                       <input
@@ -2638,6 +2613,7 @@ export default function TimerPage() {
                           width: '100%',
                         }}
                       />
+                      <SortPicker sortMode={sortMode} onChange={setSortMode} />
                     </div>
                   </div>
                 )}
@@ -2714,16 +2690,31 @@ export default function TimerPage() {
                               border: `1px solid ${cardBorder}`,
                               borderLeft: leftAccent ? `3px solid ${leftAccent}` : `1px solid ${cardBorder}`,
                               borderRadius: 12,
-                              padding: '0.45rem 0.7rem',
-                              display: 'flex', flexDirection: 'column', gap: '0.1rem',
-                              minHeight: 52,
+                              padding: '0.5rem 0.7rem',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              minHeight: 48,
                               boxShadow: glowColor ? `0 0 16px ${glowColor}` : 'none',
                               transition: 'transform 0.12s, border-color 0.12s, box-shadow 0.2s',
                             }}
                           >
+                            {/* Date pinned absolutely to the top-left so
+                                it never affects the centered time group
+                                below. Empty span for legacy solves that
+                                pre-date the `ts` field — no placeholder,
+                                so the corner reads as intentionally
+                                empty. */}
+                            <span style={{
+                              position: 'absolute', top: 6, left: 8,
+                              fontSize: '0.65rem', fontWeight: 500,
+                              color: 'rgba(255,255,255,0.35)',
+                              letterSpacing: '0.04em',
+                              fontVariantNumeric: 'tabular-nums',
+                              pointerEvents: 'none',
+                            }}>{formatSolveDate(s.ts)}</span>
+
                             {selectMode && (
                               <span style={{
-                                position: 'absolute', top: 4, left: 4,
+                                position: 'absolute', top: 4, right: 4,
                                 width: 16, height: 16, borderRadius: 999,
                                 background: selected ? C.accent : 'rgba(255,255,255,0.06)',
                                 border: `1px solid ${selected ? C.accent : C.border}`,
@@ -2734,42 +2725,20 @@ export default function TimerPage() {
                               </span>
                             )}
 
-                            {/* Top row — empty left, compact "M/D" date
-                                in the top-right corner. Empty span for
-                                legacy solves that pre-date the `ts`
-                                field so the row stays a clean empty
-                                corner with no placeholder. The select-
-                                mode checkbox occupies the top-left
-                                absolute slot when active, which is why
-                                the date sits on the right. */}
+                            {/* Centered group — [PB][+2][time][comment]
+                                rendered as a single inline-flex unit so
+                                the time stays at the same horizontal
+                                position regardless of which pills are
+                                present (a PB row and a non-PB row both
+                                anchor the time on the same baseline). */}
                             <div style={{
-                              display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-                              minHeight: 12,
-                            }}>
-                              <span style={{
-                                fontSize: '0.65rem', fontWeight: 500,
-                                color: 'rgba(255,255,255,0.35)',
-                                letterSpacing: '0.04em',
-                                fontVariantNumeric: 'tabular-nums',
-                              }}>
-                                {formatSolveDate(s.ts)}
-                              </span>
-                            </div>
-
-                            {/* Center row — badges + time grouped and
-                                centered together, mirroring the desktop
-                                row's anchor layout. PB / +2 sit before
-                                the time; the comment indicator follows
-                                so the time itself stays the visual
-                                anchor regardless of how many meta
-                                signals are present. */}
-                            <div style={{
-                              flex: '1 1 auto',
                               display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              gap: '0.25rem',
+                              gap: '0.5rem',
+                              width: '100%',
                             }}>
                               {isBest && !dnf && (
                                 <span style={{
+                                  alignSelf: 'center',
                                   fontSize: '0.55rem', fontWeight: 700,
                                   padding: '0.1rem 0.4rem', borderRadius: 4,
                                   background: 'rgba(52,211,153,0.20)', color: C.success,
@@ -2778,6 +2747,7 @@ export default function TimerPage() {
                               )}
                               {s.penalty === '+2' && !dnf && (
                                 <span style={{
+                                  alignSelf: 'center',
                                   fontSize: '0.55rem', fontWeight: 700,
                                   padding: '0.1rem 0.4rem', borderRadius: 4,
                                   background: 'rgba(251,191,36,0.20)', color: C.warn,
@@ -2800,6 +2770,7 @@ export default function TimerPage() {
                               </span>
                               {hasComment && (
                                 <span aria-label="Has comment" style={{
+                                  alignSelf: 'center',
                                   display: 'inline-flex', color: C.muted,
                                 }}>
                                   <IconComment size={11} />
@@ -4047,10 +4018,11 @@ function BottomTab({ label, icon, active, onClick, C: c }: { label: string; icon
   );
 }
 
-// Sort-mode picker used in the Solves list header (desktop sidebar +
-// mobile tab). Pill button shows the current short label + chevron;
-// click opens a small popup with the four sort options. Click-outside
-// catcher and ESC both close it.
+// Solves-tab "more" menu — currently hosts only the sort options, but
+// kept structurally generic so future actions ("Clear all solves",
+// "Export") can join the same menu. Trigger is a 32×32 ⋮ icon button
+// that fits inline at the right edge of the search bar (mobile) or the
+// solves header (desktop). Click-outside catcher and ESC both close it.
 function SortPicker({ sortMode, onChange }: {
   sortMode: SortMode;
   onChange: (m: SortMode) => void;
@@ -4066,60 +4038,37 @@ function SortPicker({ sortMode, onChange }: {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [open]);
 
-  // Trigger icon picks up the current sort's group: calendar for date
-  // sorts (newest/oldest), stopwatch for duration sorts (fastest/slowest).
-  // Both inline 13-pixel SVGs at the IconBase 1.8 stroke weight so they
-  // match the rest of the timer's icon set without pulling in a new
-  // exported icon component.
-  const triggerIcon = isDateSort(sortMode) ? (
-    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor"
-         strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
-         style={{ flexShrink: 0 }}>
-      <rect x={3} y={5} width={18} height={16} rx={2} />
-      <path d="M3 10h18" />
-      <path d="M8 3v4" />
-      <path d="M16 3v4" />
-    </svg>
-  ) : (
-    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor"
-         strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
-         style={{ flexShrink: 0 }}>
-      <circle cx={12} cy={14} r={8} />
-      <path d="M12 14V9" />
-      <path d="M9 2h6" />
-      <path d="M12 2v3" />
-    </svg>
-  );
-
   return (
     <div style={{ position: 'relative' }}>
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        aria-haspopup="listbox"
+        aria-haspopup="menu"
         aria-expanded={open}
-        title="Эрэмбэлэх"
+        aria-label="More options"
+        title="More options"
         style={{
+          width: 32, height: 32, borderRadius: 8,
           background: open ? C.accentDim : 'transparent',
-          color: open ? C.accent : C.text,
-          border: `1px solid ${open ? C.borderHi : C.border}`,
-          borderRadius: 999,
-          padding: '0.4rem 0.8rem',
-          fontSize: '0.78rem', fontWeight: 600, fontFamily: 'inherit',
+          color: open ? C.accent : C.muted,
+          border: 'none',
           cursor: 'pointer',
-          display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
-          transition: 'background 0.15s, color 0.15s, border-color 0.15s',
-          whiteSpace: 'nowrap',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          transition: 'background 0.15s, color 0.15s',
+          flexShrink: 0,
         }}
+        onMouseEnter={e => { if (!open) e.currentTarget.style.color = C.text; }}
+        onMouseLeave={e => { if (!open) e.currentTarget.style.color = C.muted; }}
       >
-        {triggerIcon}
-        <span>{SORT_PILL_LABELS[sortMode]}</span>
-        <span aria-hidden style={{
-          fontSize: '0.62rem',
-          transform: open ? 'rotate(180deg)' : 'none',
-          transition: 'transform 0.18s ease',
-          color: C.mutedDim,
-        }}>▾</span>
+        {/* Three-dot vertical glyph — three filled circles stacked on
+            the y-axis, currentColor so the button's own color tracks
+            the open/hover state. */}
+        <svg width={18} height={18} viewBox="0 0 24 24" fill="currentColor"
+             aria-hidden="true" style={{ display: 'block' }}>
+          <circle cx={12} cy={5}  r={1.6} />
+          <circle cx={12} cy={12} r={1.6} />
+          <circle cx={12} cy={19} r={1.6} />
+        </svg>
       </button>
 
       {open && (
