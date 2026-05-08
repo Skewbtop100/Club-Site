@@ -165,6 +165,27 @@ function getTimerFontSize(text: string, isMobile: boolean): string {
   return 'clamp(2.2rem, 8vw, 6rem)';
 }
 
+// Sort modes for the Solves list. The same enum drives both the desktop
+// sidebar list and the mobile Solves tab — see the `sortedSolves`
+// useMemo below for the comparator details. DNFs always settle to the
+// extreme of the sort (end for fastest, start for slowest); newest /
+// oldest fall back to creation order on missing timestamps.
+type SortMode = 'newest' | 'oldest' | 'fastest' | 'slowest';
+const SORT_LABELS: Record<SortMode, string> = {
+  newest: 'Шинэ — Хуучин',
+  oldest: 'Хуучин — Шинэ',
+  fastest: 'Хурдан — Удаан',
+  slowest: 'Удаан — Хурдан',
+};
+// Pill-button label is the shorter form so it fits next to the count.
+const SORT_PILL_LABELS: Record<SortMode, string> = {
+  newest: 'Шинэ',
+  oldest: 'Хуучин',
+  fastest: 'Хурдан',
+  slowest: 'Удаан',
+};
+const SORT_OPTIONS: SortMode[] = ['newest', 'oldest', 'fastest', 'slowest'];
+
 // Format a solve's completion timestamp as "YYYY-MM-DD  HH:mm" in the
 // user's local timezone. Older solves saved before `ts` was added (and
 // any future code path that omits it) get a dash placeholder rather
@@ -397,6 +418,12 @@ export default function TimerPage() {
   // Mobile tab navigation + entry modals
   const [mobileTab, setMobileTab] = useState<'timer' | 'solves' | 'stats' | 'tools'>('timer');
   const [mobileSearch, setMobileSearch] = useState('');
+
+  // Solves-list sort mode. Persisted via PREFS_KEY so the user's choice
+  // survives reloads. Used by both the desktop sidebar list and the
+  // mobile Solves tab — same state drives both renders. Each
+  // `<SortPicker />` instance owns its own open/close state.
+  const [sortMode, setSortMode] = useState<SortMode>('newest');
   // Inline manual-entry input value — only used when timeEntryMode==='manual'.
   // The legacy modal that prompted for a time has been removed; users
   // who want to type a time directly do so via the timer area itself
@@ -571,6 +598,7 @@ export default function TimerPage() {
           scrambleFontSize?: 'sm' | 'md' | 'lg';
           qiyiDebugMode?: boolean;
           timeEntryMode?: TimeEntryMode;
+          sortMode?: SortMode;
         };
         if (typeof parsed.inspectionEnabled === 'boolean') setInspectionEnabled(parsed.inspectionEnabled);
         if (parsed.precision === 'cs' || parsed.precision === 'ms') {
@@ -594,6 +622,10 @@ export default function TimerPage() {
         if (parsed.timeEntryMode === 'default' || parsed.timeEntryMode === 'manual' || parsed.timeEntryMode === 'bluetooth') {
           setTimeEntryMode(parsed.timeEntryMode);
         }
+        if (parsed.sortMode === 'newest' || parsed.sortMode === 'oldest'
+            || parsed.sortMode === 'fastest' || parsed.sortMode === 'slowest') {
+          setSortMode(parsed.sortMode);
+        }
       }
     } catch { /* ignore */ }
     prefsLoadedRef.current = true;
@@ -603,12 +635,57 @@ export default function TimerPage() {
   useEffect(() => {
     if (!prefsLoadedRef.current) return;
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify({ inspectionEnabled, precision, holdToStart, holdTimeMs, hideTimeWhileRunning, showAo5Projection, scrambleFontSize, qiyiDebugMode, timeEntryMode }));
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ inspectionEnabled, precision, holdToStart, holdTimeMs, hideTimeWhileRunning, showAo5Projection, scrambleFontSize, qiyiDebugMode, timeEntryMode, sortMode }));
     } catch { /* ignore */ }
-  }, [inspectionEnabled, precision, holdToStart, holdTimeMs, hideTimeWhileRunning, showAo5Projection, scrambleFontSize, qiyiDebugMode, timeEntryMode]);
+  }, [inspectionEnabled, precision, holdToStart, holdTimeMs, hideTimeWhileRunning, showAo5Projection, scrambleFontSize, qiyiDebugMode, timeEntryMode, sortMode]);
 
   // Stats — recomputed on every solves change
   const stats = useMemo(() => calcStats(solves), [solves]);
+
+  // Sorted solves for the Solves list views. We sort on `s.ts` (the
+  // existing completion timestamp) for newest/oldest, and on `finalMs`
+  // for fastest/slowest. DNFs always settle to the extreme of a value
+  // sort (end for fastest, start for slowest) so they never pretend to
+  // be a 0-ms result. The sorted array is the render order; rendering
+  // code still resolves the chronological "#N" badge from the unsorted
+  // `solves` so the index never changes when the user re-sorts.
+  const sortedSolves = useMemo(() => {
+    const arr = solves.slice();
+    switch (sortMode) {
+      case 'newest':
+        return arr.sort((a, b) => (b.ts ?? 0) - (a.ts ?? 0));
+      case 'oldest':
+        return arr.sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0));
+      case 'fastest':
+        return arr.sort((a, b) => {
+          const aDnf = a.penalty === 'dnf';
+          const bDnf = b.penalty === 'dnf';
+          if (aDnf && !bDnf) return 1;
+          if (!aDnf && bDnf) return -1;
+          if (aDnf && bDnf) return 0;
+          return finalMs(a) - finalMs(b);
+        });
+      case 'slowest':
+        return arr.sort((a, b) => {
+          const aDnf = a.penalty === 'dnf';
+          const bDnf = b.penalty === 'dnf';
+          if (aDnf && !bDnf) return -1;
+          if (!aDnf && bDnf) return 1;
+          if (aDnf && bDnf) return 0;
+          return finalMs(b) - finalMs(a);
+        });
+    }
+  }, [solves, sortMode]);
+
+  // Chronological-position lookup. Built once per `solves` change so the
+  // hot inner loops (desktop + mobile rows) don't pay an O(n) findIndex
+  // per row. Maps each solve's id → its 1-based position in the unsorted
+  // array (1 = first solve ever made; N = most recent).
+  const chronologicalIndexById = useMemo(() => {
+    const m = new Map<string, number>();
+    for (let i = 0; i < solves.length; i++) m.set(solves[i].id, i + 1);
+    return m;
+  }, [solves]);
 
   // Ao5 projection — given the trailing 4 valid solves, what's the
   // best/worst Ao5 the next solve could produce?
@@ -1683,6 +1760,24 @@ export default function TimerPage() {
             })()}
           </div>
 
+          {/* Solves list header — count + sort pill. Sits above the
+              scroll container so the pill stays put while the list
+              scrolls beneath. */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '0.4rem 0.7rem 0.5rem', gap: '0.5rem',
+          }}>
+            <span style={{
+              fontSize: '0.78rem', letterSpacing: '0.06em',
+              color: C.muted, fontWeight: 700,
+            }}>
+              Эвлүүлэлт ({solves.length})
+            </span>
+            {solves.length > 1 && (
+              <SortPicker sortMode={sortMode} onChange={setSortMode} />
+            )}
+          </div>
+
           {/* Scrollable solve list */}
           <div className="pv-solves-list" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 0.5rem 0.5rem' }}>
             {solves.length === 0 ? (
@@ -1691,10 +1786,16 @@ export default function TimerPage() {
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                {[...solves].reverse().map((s, i) => {
-                  const idx = solves.length - i;
+                {sortedSolves.map((s, i) => {
+                  // Chronological position from the unsorted `solves`
+                  // array so the # badge means "first solve I ever
+                  // made was #1" regardless of the current sort.
+                  const idx = chronologicalIndexById.get(s.id) ?? 0;
                   const dnf = isDnf(s);
-                  const priorSet = solves.slice(0, solves.length - i).slice(0, -1).filter(x => !isDnf(x));
+                  // PB detection still uses chronological order: a solve
+                  // is a PB if it beat every valid solve that came
+                  // BEFORE it, not every solve currently rendered above.
+                  const priorSet = solves.slice(0, idx - 1).filter(x => !isDnf(x));
                   const priorBest = priorSet.length ? Math.min(...priorSet.map(finalMs)) : Infinity;
                   const isPB = !dnf && finalMs(s) < priorBest;
                   // The most recent solve sits at the top of the reversed list
@@ -2098,12 +2199,11 @@ export default function TimerPage() {
       )}
 
       {mounted && isMobile && (() => {
-        // Solves sorted newest-first (used by Solves and Stats tabs)
-        const solvesNewest = [...solves].slice().reverse();
-
-        // Filter for the Solves tab search box
+        // The Solves tab honors the user's sort choice from PREFS_KEY;
+        // search filtering is applied AFTER the sort so the matching
+        // subset stays in their chosen order.
         const q = mobileSearch.trim().toLowerCase();
-        const solvesFiltered = !q ? solvesNewest : solvesNewest.filter(s => {
+        const solvesFiltered = !q ? sortedSolves : sortedSolves.filter(s => {
           const time = fmtMs(finalMs(s), isDnf(s), precision).toLowerCase();
           const date = new Date(s.ts).toLocaleString().toLowerCase();
           return time.includes(q) || date.includes(q) || s.scramble.toLowerCase().includes(q);
@@ -2450,18 +2550,27 @@ export default function TimerPage() {
                   <div style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                     padding: '0.7rem 0.85rem 0.4rem',
+                    gap: '0.5rem',
                   }}>
-                    <div style={{ fontSize: '1rem', fontWeight: 700 }}>Solves</div>
-                    <button
-                      onClick={() => router.push('/')}
-                      aria-label="Exit timer"
-                      style={{
-                        width: 34, height: 34, borderRadius: 8,
-                        background: 'transparent', border: `1px solid ${C.border}`,
-                        color: C.mutedDim, cursor: 'pointer',
-                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      }}
-                    ><IconClose size={16} /></button>
+                    <div style={{ fontSize: '1rem', fontWeight: 700, flexShrink: 0 }}>
+                      Эвлүүлэлт ({solves.length})
+                    </div>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}>
+                      {solves.length > 1 && (
+                        <SortPicker sortMode={sortMode} onChange={setSortMode} />
+                      )}
+                      <button
+                        onClick={() => router.push('/')}
+                        aria-label="Exit timer"
+                        style={{
+                          width: 34, height: 34, borderRadius: 8,
+                          background: 'transparent', border: `1px solid ${C.border}`,
+                          color: C.mutedDim, cursor: 'pointer',
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          flexShrink: 0,
+                        }}
+                      ><IconClose size={16} /></button>
+                    </div>
                   </div>
                 )}
 
@@ -2581,9 +2690,11 @@ export default function TimerPage() {
                               </span>
                             )}
 
-                            {/* Top row — depth-from-latest index + comment dot.
-                                Index numbering is 1 = most recent, N = oldest,
-                                so the badge reads as "how recent is this". */}
+                            {/* Top row — chronological index + comment dot.
+                                Index 1 = first solve ever made in this
+                                session, N = most recent. Stable across
+                                re-sorts so the badge always identifies
+                                the same solve. */}
                             <div style={{
                               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                               gap: '0.3rem',
@@ -2597,7 +2708,7 @@ export default function TimerPage() {
                                 letterSpacing: '0.04em',
                                 fontFamily: '"JetBrains Mono", monospace',
                               }}>
-                                #{solves.length - solves.findIndex(x => x.id === s.id)}
+                                #{chronologicalIndexById.get(s.id) ?? 0}
                               </span>
                               {hasComment && (
                                 <span aria-label="Has comment" style={{
@@ -3884,6 +3995,116 @@ function BottomTab({ label, icon, active, onClick, C: c }: { label: string; icon
         }} />
       )}
     </button>
+  );
+}
+
+// Sort-mode picker used in the Solves list header (desktop sidebar +
+// mobile tab). Pill button shows the current short label + chevron;
+// click opens a small popup with the four sort options. Click-outside
+// catcher and ESC both close it.
+function SortPicker({ sortMode, onChange }: {
+  sortMode: SortMode;
+  onChange: (m: SortMode) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); }
+    }
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [open]);
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        title="Эрэмбэлэх"
+        style={{
+          background: open ? C.accentDim : 'transparent',
+          color: open ? C.accent : C.text,
+          border: `1px solid ${open ? C.borderHi : C.border}`,
+          borderRadius: 999,
+          padding: '0.4rem 0.8rem',
+          fontSize: '0.78rem', fontWeight: 600, fontFamily: 'inherit',
+          cursor: 'pointer',
+          display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
+          transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {/* Three-line "sort" glyph — matches the IconBase 1.8-stroke style. */}
+        <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+             style={{ flexShrink: 0 }}>
+          <path d="M3 6h12" />
+          <path d="M3 12h9" />
+          <path d="M3 18h6" />
+        </svg>
+        <span>{SORT_PILL_LABELS[sortMode]}</span>
+        <span aria-hidden style={{
+          fontSize: '0.62rem',
+          transform: open ? 'rotate(180deg)' : 'none',
+          transition: 'transform 0.18s ease',
+          color: C.mutedDim,
+        }}>▾</span>
+      </button>
+
+      {open && (
+        <>
+          {/* Click-outside catcher */}
+          <div
+            onClick={() => setOpen(false)}
+            style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'transparent' }}
+          />
+          <div
+            role="listbox"
+            aria-label="Эрэмбэлэх"
+            style={{
+              position: 'absolute', top: 'calc(100% + 0.3rem)', right: 0, zIndex: 51,
+              background: C.card, border: `1px solid ${C.border}`,
+              borderRadius: 10, padding: '0.3rem',
+              minWidth: 180,
+              boxShadow: '0 12px 30px rgba(0,0,0,0.55)',
+              display: 'flex', flexDirection: 'column', gap: '0.15rem',
+            }}
+          >
+            {SORT_OPTIONS.map(opt => {
+              const active = opt === sortMode;
+              return (
+                <button
+                  key={opt}
+                  role="option"
+                  aria-selected={active}
+                  onClick={() => { onChange(opt); setOpen(false); }}
+                  style={{
+                    display: 'grid', gridTemplateColumns: '1fr auto',
+                    alignItems: 'center', gap: '0.5rem',
+                    background: active ? C.accentDim : 'transparent',
+                    color: active ? C.accent : C.text,
+                    border: 'none', borderRadius: 7,
+                    padding: '0.5rem 0.7rem',
+                    fontSize: '0.82rem', fontWeight: 600, fontFamily: 'inherit',
+                    cursor: 'pointer', textAlign: 'left',
+                    transition: 'background 0.12s, color 0.12s',
+                  }}
+                  onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                  onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <span>{SORT_LABELS[opt]}</span>
+                  {active && <IconCheck size={14} />}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
