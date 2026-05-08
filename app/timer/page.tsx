@@ -212,6 +212,33 @@ function formatSolveDate(epoch: number | undefined): string {
   return `${m}/${day}`;
 }
 
+// Build the text payload for the Solve Detail "Share" button. Lines are
+// emoji-prefixed for visual chunking inside chat apps; comment line is
+// only emitted when the solve actually has one. Penalty is folded into
+// the time via finalMs() so a +2 reads as the post-penalty value.
+function buildSolveShareText(solve: Solve, precision: Precision): string {
+  const lines: string[] = [];
+  if (solve.ts) {
+    const d = new Date(solve.ts);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const min = String(d.getMinutes()).padStart(2, '0');
+    lines.push(`📅 ${yyyy}-${mm}-${dd} ${hh}:${min}`);
+  }
+  // Use isDnf() so a DNF solve shares as "DNF" rather than a time. The
+  // false flag forces fmtMs to return the value as-is for non-DNF.
+  lines.push(`⏱  ${fmtMs(finalMs(solve), isDnf(solve), precision)}`);
+  if (solve.scramble) {
+    lines.push(`🧩 ${solve.scramble}`);
+  }
+  if (solve.comment?.trim()) {
+    lines.push(`💬 ${solve.comment.trim()}`);
+  }
+  return lines.join('\n');
+}
+
 // Small clock SVG used next to the timestamp in the Solve Detail view.
 // Inline (rather than from lib/icons.tsx) to keep the timer module
 // self-contained — same convention as the other one-off icons here.
@@ -349,6 +376,11 @@ export default function TimerPage() {
   // the viewport changes mid-interaction.
   const [desktopEventPickerOpen, setDesktopEventPickerOpen] = useState(false);
   const [detailSolveId, setDetailSolveId] = useState<string | null>(null);
+  // Solve Detail modal — inline comment editor toggle + draft text.
+  // Reset whenever the modal closes so a fresh open seeds cleanly from
+  // the next solve's comment field.
+  const [detailCommentOpen, setDetailCommentOpen] = useState(false);
+  const [detailCommentDraft, setDetailCommentDraft] = useState('');
   // Comment-edit modal — when set, the inline comment editor is open
   // for that solve id. The action-row's 💬 button and the keyboard 'C'
   // shortcut both target the most-recent solve through this state.
@@ -988,6 +1020,39 @@ export default function TimerPage() {
       return next;
     }));
   }, [setSolves]);
+
+  // Whenever the Solve Detail modal closes (or swaps to a different
+  // solve), drop the inline comment-panel state so a fresh open seeds
+  // from that solve's own comment rather than the previous one.
+  useEffect(() => {
+    setDetailCommentOpen(false);
+    setDetailCommentDraft('');
+  }, [detailSolveId]);
+
+  // Share the targeted solve via the Web Share API on supported devices
+  // (iOS / Android / some desktop browsers); fall back to clipboard on
+  // anything else, with a toast confirming the copy. Selection-cancel
+  // (AbortError) is silent — the user explicitly dismissed the sheet.
+  const onShareSolve = useCallback(async (solve: Solve) => {
+    const text = buildSolveShareText(solve, precision);
+    try {
+      if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+        await navigator.share({ text });
+      } else {
+        await navigator.clipboard.writeText(text);
+        showToast({ msg: 'Хуулагдлаа ✓', tone: 'success' });
+      }
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return;
+      console.error('[timer] share solve failed', err);
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast({ msg: 'Хуулагдлаа ✓', tone: 'success' });
+      } catch {
+        showToast({ msg: 'Хуулж чадсангүй', tone: 'error' });
+      }
+    }
+  }, [precision]);
 
   // Inline action-row helpers — operate on the most-recent solve, which
   // is what the buttons under the timer display target. The DNF / +2
@@ -3201,14 +3266,23 @@ export default function TimerPage() {
         const s = solves.find(x => x.id === detailSolveId);
         if (!s) return null;
         const dnf = isDnf(s);
-        const ev = EVENTS.find(e => e.id === s.event);
+        const hasComment = !!(s.comment && s.comment.trim());
+        // Action-row buttons follow a single 5-up grid so OK/+2/DNF read
+        // as the same kind of affordance as 💬 / share — equal sizing,
+        // 0.4rem gap. Penalty buttons get tone tints when active.
+        const penaltyOpts: { value: Penalty; label: string; color: string }[] = [
+          { value: 'none', label: 'OK',  color: C.success },
+          { value: '+2',   label: '+2',  color: C.warn    },
+          { value: 'dnf',  label: 'DNF', color: C.danger  },
+        ];
         return (
-          <ModalShell title="Solve Detail" onClose={() => setDetailSolveId(null)}>
+          <ModalShell onClose={() => setDetailSolveId(null)}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div>
-                <div style={{ fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, marginBottom: '0.4rem', fontWeight: 600 }}>
-                  Time {ev ? `· ${ev.short}` : ''}
-                </div>
+              {/* Time block — no microlabel above so the time itself is
+                  the first prominent content. Reserves a tiny right
+                  inset so the absolute close × in the header doesn't
+                  visually crowd large multi-minute times. */}
+              <div style={{ paddingRight: '2.25rem' }}>
                 <div style={{
                   fontFamily: '"JetBrains Mono", monospace',
                   fontSize: '2.5rem', fontWeight: 800,
@@ -3221,9 +3295,6 @@ export default function TimerPage() {
                 {s.penalty === '+2' && !dnf && (
                   <div style={{ fontSize: '0.75rem', color: C.warn, marginTop: '0.25rem' }}>+2 penalty applied</div>
                 )}
-                {/* When this solve was completed. Older solves persisted
-                    before `ts` was tracked render with a "—" placeholder
-                    rather than a guessed value. */}
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: '0.4rem',
                   fontSize: '0.78rem', color: C.muted,
@@ -3234,88 +3305,166 @@ export default function TimerPage() {
                 </div>
               </div>
 
-              <div>
-                <div style={{ fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, marginBottom: '0.4rem', fontWeight: 600 }}>
-                  Penalty
-                </div>
-                <PenaltyRow
-                  penalty={s.penalty}
-                  onSet={(p) => setSolvePenalty(s.id, p)}
-                />
+              {/* Scramble — kept identifiable by its mono+box treatment;
+                  no microlabel since the modal trimmed all section
+                  headers per the redesign. */}
+              <div style={{
+                fontFamily: '"JetBrains Mono", monospace',
+                fontSize: '0.92rem', lineHeight: 1.6,
+                color: C.text, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                background: C.cardAlt, border: `1px solid ${C.border}`,
+                borderRadius: 8, padding: '0.75rem 0.85rem',
+              }}>
+                {s.scramble}
               </div>
 
-              <div>
-                <div style={{ fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, marginBottom: '0.4rem', fontWeight: 600 }}>
-                  Scramble
-                </div>
+              {/* Action row — 5 equal-sized buttons:
+                    [OK] [+2] [DNF] [💬] [↗]
+                  Penalty buttons set s.penalty via setSolvePenalty;
+                  💬 toggles the inline comment editor below the row;
+                  ↗ shares via Web Share API (clipboard fallback). */}
+              <div style={{
+                display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)',
+                gap: '0.4rem',
+              }}>
+                {penaltyOpts.map(o => {
+                  const active = s.penalty === o.value;
+                  return (
+                    <button
+                      key={o.value}
+                      onClick={() => setSolvePenalty(s.id, o.value)}
+                      aria-pressed={active}
+                      style={{
+                        height: 44, borderRadius: 9,
+                        background: active ? `${o.color}26` : 'rgba(255,255,255,0.04)',
+                        border: `1px solid ${active ? o.color : 'rgba(255,255,255,0.08)'}`,
+                        color: active ? o.color : C.muted,
+                        fontSize: '0.82rem', fontWeight: 700, fontFamily: 'inherit',
+                        letterSpacing: '0.04em',
+                        cursor: 'pointer',
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        transition: 'background 0.12s, color 0.12s, border-color 0.12s',
+                      }}
+                    >
+                      {o.label}
+                    </button>
+                  );
+                })}
+                <button
+                  onClick={() => {
+                    setDetailCommentDraft(s.comment ?? '');
+                    setDetailCommentOpen(o => !o);
+                  }}
+                  aria-label={hasComment ? 'Edit comment' : 'Add comment'}
+                  aria-pressed={detailCommentOpen}
+                  title={hasComment ? 'Edit comment' : 'Add comment'}
+                  style={{
+                    position: 'relative',
+                    height: 44, borderRadius: 9,
+                    background: detailCommentOpen ? C.accentDim : 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${detailCommentOpen ? C.borderHi : 'rgba(255,255,255,0.08)'}`,
+                    color: detailCommentOpen ? C.accent : C.muted,
+                    cursor: 'pointer',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    transition: 'background 0.12s, color 0.12s, border-color 0.12s',
+                  }}
+                >
+                  <IconComment size={18} />
+                  {hasComment && (
+                    // Lavender corner dot signalling "comment exists" —
+                    // visible whether the panel is open or not.
+                    <span aria-hidden="true" style={{
+                      position: 'absolute', top: 6, right: 6,
+                      width: 6, height: 6, borderRadius: 999,
+                      background: C.accent,
+                    }} />
+                  )}
+                </button>
+                <button
+                  onClick={() => onShareSolve(s)}
+                  aria-label="Share solve"
+                  title="Share"
+                  style={{
+                    height: 44, borderRadius: 9,
+                    background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    color: C.muted,
+                    cursor: 'pointer',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    transition: 'background 0.12s, color 0.12s, border-color 0.12s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.color = C.text; e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.color = C.muted; e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                >
+                  <IconShareOut size={18} />
+                </button>
+              </div>
+
+              {/* Inline comment editor — only renders when the 💬 button
+                  is toggled on. Saves via setSolveComment; cancel just
+                  collapses the panel without committing the draft. */}
+              {detailCommentOpen && (
                 <div style={{
-                  fontFamily: '"JetBrains Mono", monospace',
-                  fontSize: '0.92rem', lineHeight: 1.6,
-                  color: C.text, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  display: 'flex', flexDirection: 'column', gap: '0.5rem',
                   background: C.cardAlt, border: `1px solid ${C.border}`,
-                  borderRadius: 8, padding: '0.75rem 0.85rem',
+                  borderRadius: 8, padding: '0.7rem 0.8rem',
                 }}>
-                  {s.scramble}
-                </div>
-              </div>
-
-              <div>
-                <div style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  marginBottom: '0.4rem',
-                }}>
-                  <div style={{ fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted, fontWeight: 600 }}>
-                    Тайлбар
-                  </div>
-                  <button
-                    onClick={() => setCommentSolveId(s.id)}
+                  <textarea
+                    value={detailCommentDraft}
+                    onChange={e => setDetailCommentDraft(e.target.value)}
+                    placeholder="Тайлбар..."
+                    rows={3}
                     style={{
-                      background: 'transparent', border: 'none', cursor: 'pointer',
-                      color: C.accent, fontSize: '0.74rem', fontWeight: 600,
-                      fontFamily: 'inherit', padding: '0.1rem 0.25rem',
+                      width: '100%', resize: 'vertical', minHeight: 64,
+                      background: C.card, color: C.text,
+                      border: `1px solid ${C.border}`, borderRadius: 7,
+                      padding: '0.5rem 0.65rem',
+                      fontFamily: 'inherit', fontSize: '0.9rem', lineHeight: 1.5,
+                      outline: 'none',
                     }}
-                  >{s.comment ? 'Засах' : 'Тайлбар оруулах'}</button>
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.4rem' }}>
+                    <button
+                      onClick={() => setDetailCommentOpen(false)}
+                      style={{
+                        padding: '0.4rem 0.85rem', borderRadius: 7,
+                        background: 'transparent', color: C.muted,
+                        border: `1px solid ${C.border}`,
+                        fontSize: '0.78rem', fontWeight: 600, fontFamily: 'inherit',
+                        cursor: 'pointer',
+                      }}
+                    >Болих</button>
+                    <button
+                      onClick={() => {
+                        setSolveComment(s.id, detailCommentDraft);
+                        setDetailCommentOpen(false);
+                      }}
+                      style={{
+                        padding: '0.4rem 0.85rem', borderRadius: 7,
+                        background: C.accentDim, color: C.accent,
+                        border: `1px solid ${C.borderHi}`,
+                        fontSize: '0.78rem', fontWeight: 700, fontFamily: 'inherit',
+                        cursor: 'pointer',
+                      }}
+                    >Хадгалах</button>
+                  </div>
                 </div>
-                {s.comment && s.comment.trim() ? (
-                  <div style={{
-                    fontSize: '0.88rem', color: C.text, lineHeight: 1.55,
-                    fontStyle: 'italic',
-                    background: C.cardAlt, border: `1px solid ${C.border}`,
-                    borderRadius: 8, padding: '0.6rem 0.8rem',
-                    whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                  }}>
-                    {s.comment}
-                  </div>
-                ) : (
-                  <div style={{ fontSize: '0.78rem', color: C.mutedDim, fontStyle: 'italic' }}>
-                    —
-                  </div>
-                )}
-              </div>
+              )}
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+              {/* Subtle Delete affordance, separated from the action row
+                  so the destructive action doesn't sit next to the
+                  reversible penalty buttons. The modal's own × close
+                  in the corner covers the dismiss path. */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                 <button
                   onClick={() => { deleteSolve(s.id); setDetailSolveId(null); }}
                   style={{
-                    padding: '0.5rem 0.9rem', borderRadius: 8,
-                    fontSize: '0.82rem', fontWeight: 600, fontFamily: 'inherit',
+                    padding: '0.45rem 0.85rem', borderRadius: 7,
+                    fontSize: '0.78rem', fontWeight: 600, fontFamily: 'inherit',
                     background: 'rgba(239,68,68,0.1)', color: '#f87171',
                     border: '1px solid rgba(239,68,68,0.3)', cursor: 'pointer',
                   }}
-                >
-                  Delete
-                </button>
-                <button
-                  onClick={() => setDetailSolveId(null)}
-                  style={{
-                    padding: '0.5rem 0.9rem', borderRadius: 8,
-                    fontSize: '0.82rem', fontWeight: 600, fontFamily: 'inherit',
-                    background: C.accentDim, color: C.accent,
-                    border: `1px solid ${C.borderHi}`, cursor: 'pointer',
-                  }}
-                >
-                  Close
-                </button>
+                >Delete</button>
               </div>
             </div>
           </ModalShell>
@@ -4863,13 +5012,17 @@ function ShortcutCell({ label, kbd, c }: { label: string; kbd: string; c: typeof
   );
 }
 
-function ModalShell({ title, onClose, headerAction, children }: { title: string; onClose: () => void; headerAction?: React.ReactNode; children: React.ReactNode }) {
+function ModalShell({ title, onClose, headerAction, children }: { title?: string; onClose: () => void; headerAction?: React.ReactNode; children: React.ReactNode }) {
   // Close on ESC
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, [onClose]);
+  // Title is optional: when omitted (or empty), the header collapses to
+  // just the close × in the top-right corner. Used by the Solve Detail
+  // modal so the time itself is the first prominent content.
+  const showTitleBar = !!title || !!headerAction;
   return (
     <div
       onClick={onClose}
@@ -4883,28 +5036,46 @@ function ModalShell({ title, onClose, headerAction, children }: { title: string;
       <div
         onClick={e => e.stopPropagation()}
         style={{
+          position: 'relative',
           width: '100%', maxWidth: 460,
           background: C.card, border: `1px solid ${C.border}`,
           borderRadius: 14, padding: '1.1rem 1.25rem',
           boxShadow: '0 20px 60px rgba(0,0,0,0.6)',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.85rem', gap: '0.5rem' }}>
-          <div style={{ fontSize: '1rem', fontWeight: 700, color: C.text }}>{title}</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-            {headerAction}
-            <button
-              onClick={onClose}
-              aria-label="Close"
-              style={{
-                width: 28, height: 28, borderRadius: 7,
-                background: 'transparent', border: `1px solid ${C.border}`,
-                color: C.muted, cursor: 'pointer',
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              }}
-            ><IconClose size={14} /></button>
+        {showTitleBar ? (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.85rem', gap: '0.5rem' }}>
+            <div style={{ fontSize: '1rem', fontWeight: 700, color: C.text }}>{title}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              {headerAction}
+              <button
+                onClick={onClose}
+                aria-label="Close"
+                style={{
+                  width: 28, height: 28, borderRadius: 7,
+                  background: 'transparent', border: `1px solid ${C.border}`,
+                  color: C.muted, cursor: 'pointer',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              ><IconClose size={14} /></button>
+            </div>
           </div>
-        </div>
+        ) : (
+          // Title-less variant: float a small × in the top-right corner
+          // of the modal so it doesn't reserve any vertical space above
+          // the content.
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              position: 'absolute', top: 10, right: 10,
+              width: 28, height: 28, borderRadius: 7,
+              background: 'transparent', border: `1px solid ${C.border}`,
+              color: C.muted, cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          ><IconClose size={14} /></button>
+        )}
         {children}
       </div>
     </div>
@@ -5772,6 +5943,7 @@ function IconPalette(p: IconProps)    { return <IconBase {...p}><path d="M12 3a9
 function IconBan(p: IconProps)        { return <IconBase {...p}><circle cx={12} cy={12} r={9}/><path d="M5.6 5.6l12.8 12.8"/></IconBase>; }
 function IconFlag(p: IconProps)       { return <IconBase {...p}><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></IconBase>; }
 function IconComment(p: IconProps)    { return <IconBase {...p}><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></IconBase>; }
+function IconShareOut(p: IconProps)   { return <IconBase {...p}><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/></IconBase>; }
 function IconUndoArrow(p: IconProps)  { return <IconBase {...p}><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 5 5v0a5 5 0 0 1-5 5H10"/></IconBase>; }
 
 // ── Event picker (mobile) ───────────────────────────────────────────────────
