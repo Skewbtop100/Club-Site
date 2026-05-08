@@ -2178,7 +2178,17 @@ export default function TimerPage() {
                 {timerDisplay}
               </div>
             )}
-            {timer.state === 'stopped' && lastSolve && lastSolve.penalty === 'none' && (
+            {/* Action row stays visible whenever there's a last solve to
+                act on — only hidden during an active timer run. This
+                lets the user tap ✕ / DNF / +2 / 💬 across an accidental
+                arm-and-release cycle: tapping to begin a hold and then
+                releasing early lands the engine back in 'inspecting'
+                or 'idle' (NOT 'stopped'), so the old `state==='stopped'`
+                gate would drop the row mid-recovery. `lastSolve` is
+                never cleared on a state transition — it's a derived
+                view of solves[length-1] — so widening the gate here is
+                the entire fix. */}
+            {timer.state !== 'running' && lastSolve && lastSolve.penalty === 'none' && (
               <SolveActionRow
                 solve={lastSolve}
                 isMobile={isMobile}
@@ -2188,7 +2198,7 @@ export default function TimerPage() {
                 onOpenComment={() => setCommentSolveId(lastSolve.id)}
               />
             )}
-            {timer.state === 'stopped' && lastSolve && lastSolve.penalty !== 'none' && (
+            {timer.state !== 'running' && lastSolve && lastSolve.penalty !== 'none' && (
               <UndoActionRow isMobile={isMobile} disabled={false} onUndo={undoPenaltyOnLast} />
             )}
             <div className="pv-instruction" style={{ fontSize: '0.72rem', fontWeight: 400, color: C.muted, marginTop: '1.25rem', letterSpacing: '0.06em', minHeight: '1.1rem' }}>
@@ -2585,7 +2595,9 @@ export default function TimerPage() {
                       {timerDisplay}
                     </div>
                   )}
-                  {timer.state === 'stopped' && lastSolve && lastSolve.penalty === 'none' && (
+                  {/* Same widened gate as the desktop branch — see the
+                      comment there for the rationale. */}
+                  {timer.state !== 'running' && lastSolve && lastSolve.penalty === 'none' && (
                     <SolveActionRow
                       solve={lastSolve}
                       isMobile={isMobile}
@@ -2595,7 +2607,7 @@ export default function TimerPage() {
                       onOpenComment={() => setCommentSolveId(lastSolve.id)}
                     />
                   )}
-                  {timer.state === 'stopped' && lastSolve && lastSolve.penalty !== 'none' && (
+                  {timer.state !== 'running' && lastSolve && lastSolve.penalty !== 'none' && (
                     <UndoActionRow isMobile={isMobile} disabled={false} onUndo={undoPenaltyOnLast} />
                   )}
                   <div className="pv-instruction" style={{ fontSize: '0.7rem', color: C.muted, marginTop: '0.7rem', letterSpacing: '0.06em', minHeight: '1rem' }}>
