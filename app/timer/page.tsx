@@ -2444,31 +2444,41 @@ export default function TimerPage() {
                   iconSize={18}
                 />
               </div>
+              {/* Middle column hosts the event picker + session
+                  subtitle. The picker is irrelevant on Tools (it's a
+                  utility tab — no event/session context drives the
+                  content), so we hide its contents while keeping the
+                  grid column allocated so the avatar / + cluster on
+                  the right stays pinned at column 3. */}
               <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                <button
-                  onClick={() => setEventPickerOpen(true)}
-                  aria-label="Төрөл сонгох"
-                  style={{
-                    width: '100%', appearance: 'none',
-                    background: 'transparent', color: C.text,
-                    border: 'none', borderRadius: 999,
-                    padding: '0.15rem 0.7rem 0 0.7rem',
-                    fontSize: '0.92rem', fontWeight: 600, fontFamily: 'inherit',
-                    cursor: 'pointer', textAlign: 'center',
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    gap: '0.45rem',
-                  }}
-                >
-                  <WcaEventIcon eventId={eventId} size={18} />
-                  <span>{sessionEvent.name}</span>
-                </button>
-                <div style={{
-                  fontSize: '0.6rem', color: C.mutedDim,
-                  letterSpacing: '0.05em', fontWeight: 600,
-                  lineHeight: 1, paddingBottom: '0.2rem',
-                }}>
-                  {currentSession?.name ?? 'Default'}
-                </div>
+                {mobileTab !== 'tools' && (
+                  <>
+                    <button
+                      onClick={() => setEventPickerOpen(true)}
+                      aria-label="Төрөл сонгох"
+                      style={{
+                        width: '100%', appearance: 'none',
+                        background: 'transparent', color: C.text,
+                        border: 'none', borderRadius: 999,
+                        padding: '0.15rem 0.7rem 0 0.7rem',
+                        fontSize: '0.92rem', fontWeight: 600, fontFamily: 'inherit',
+                        cursor: 'pointer', textAlign: 'center',
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        gap: '0.45rem',
+                      }}
+                    >
+                      <WcaEventIcon eventId={eventId} size={18} />
+                      <span>{sessionEvent.name}</span>
+                    </button>
+                    <div style={{
+                      fontSize: '0.6rem', color: C.mutedDim,
+                      letterSpacing: '0.05em', fontWeight: 600,
+                      lineHeight: 1, paddingBottom: '0.2rem',
+                    }}>
+                      {currentSession?.name ?? 'Default'}
+                    </div>
+                  </>
+                )}
               </div>
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
                 <button
@@ -2493,12 +2503,11 @@ export default function TimerPage() {
               </div>
             </div>
 
-            {/* Scramble row hidden on the Solves tab — the long move
-                sequence isn't useful while browsing past solves and
-                would push the list below the fold on smaller phones.
-                Event picker + capsule controls above stay visible so
-                the user can still switch event from this tab. */}
-            {mobileTab !== 'solves' && (
+            {/* Scramble row only appears on the Timer tab. On Solves
+                / Stats / Tools the long move sequence eats vertical
+                space without serving the tab's purpose — the event
+                picker in the capsule above is enough context. */}
+            {mobileTab === 'timer' && (
               <div className="pv-scramble" style={{ flexShrink: 0 }}>
                 <SwipeScrambleRow
                   scramble={scramble}
