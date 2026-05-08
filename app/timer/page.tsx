@@ -1851,9 +1851,47 @@ export default function TimerPage() {
                         pointerEvents: 'none',
                       }}>{formatSolveDate(s.ts)}</span>
 
-                      {/* Hover-revealed delete × pinned to the top-right
-                          corner, also absolute so it doesn't push the
-                          centered time off-axis. */}
+                      {/* Top-right corner stack — state badges (PB / +2
+                          / DNF) on top, comment indicator below. Plain
+                          colored text per badge type, no pill chrome.
+                          Hidden during hover so the delete × can claim
+                          the same corner without overlap. */}
+                      {(isPB || s.penalty === '+2' || dnf || (s.comment && s.comment.trim())) && (
+                        <div style={{
+                          position: 'absolute', top: 6, right: 8,
+                          display: 'flex', flexDirection: 'column',
+                          alignItems: 'flex-end', gap: 2,
+                          fontSize: '0.65rem', fontWeight: 700,
+                          letterSpacing: '0.04em',
+                          fontVariantNumeric: 'tabular-nums',
+                          pointerEvents: 'none',
+                          opacity: hovered ? 0 : 1,
+                          transition: 'opacity 0.18s ease',
+                        }}>
+                          {(isPB || s.penalty === '+2' || dnf) && (
+                            <div style={{
+                              display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+                            }}>
+                              {isPB && !dnf && <span style={{ color: C.success }}>PB</span>}
+                              {s.penalty === '+2' && !dnf && <span style={{ color: C.warn }}>+2</span>}
+                              {dnf && <span style={{ color: C.danger }}>DNF</span>}
+                            </div>
+                          )}
+                          {s.comment && s.comment.trim() && (
+                            <span
+                              aria-label="Has comment"
+                              style={{ display: 'inline-flex', color: C.muted }}
+                            >
+                              <IconComment size={11} />
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Hover-revealed delete × pinned to the same
+                          top-right slot. Inversely tied to the badge
+                          opacity so badges and × never compete for the
+                          corner — info on rest, action on hover. */}
                       <button
                         onClick={(e) => { e.stopPropagation(); deleteSolve(s.id); }}
                         aria-label="Delete solve"
@@ -1870,37 +1908,14 @@ export default function TimerPage() {
                         onMouseLeave={(e) => { e.currentTarget.style.color = C.mutedDim; }}
                       >×</button>
 
-                      {/* Centered group — [PB][+2][time][comment] sits
-                          on a single baseline as a unit. align-items:
-                          center keeps the small pills aligned with the
-                          time text's optical center; justify-content:
-                          center on the parent guarantees the group is
-                          horizontally centered regardless of which
-                          pills are present, so a PB row and a non-PB
-                          row both render the time in the same column. */}
+                      {/* Centered row — time only. With PB/+2 lifted
+                          to the corner, a PB solve and a non-PB solve
+                          render the time at the exact same horizontal
+                          position. */}
                       <div style={{
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        gap: '0.5rem',
                         width: '100%',
                       }}>
-                        {isPB && !dnf && (
-                          <span style={{
-                            alignSelf: 'center',
-                            fontSize: '0.55rem', fontWeight: 700,
-                            padding: '0.1rem 0.4rem', borderRadius: 4,
-                            background: 'rgba(52,211,153,0.10)', color: C.success,
-                            letterSpacing: '0.06em',
-                          }}>PB</span>
-                        )}
-                        {s.penalty === '+2' && (
-                          <span style={{
-                            alignSelf: 'center',
-                            fontSize: '0.55rem', fontWeight: 700,
-                            padding: '0.1rem 0.4rem', borderRadius: 4,
-                            background: 'rgba(251,191,36,0.10)', color: C.warn,
-                            letterSpacing: '0.06em',
-                          }}>+2</span>
-                        )}
                         <span style={{
                           fontFamily: '"JetBrains Mono", monospace',
                           fontSize: '1.05rem', fontWeight: 700,
@@ -1910,19 +1925,6 @@ export default function TimerPage() {
                         }}>
                           {fmtMs(finalMs(s), dnf, precision)}
                         </span>
-                        {s.comment && s.comment.trim() && (
-                          <span
-                            title={s.comment}
-                            aria-label="Has comment"
-                            style={{
-                              alignSelf: 'center',
-                              display: 'inline-flex', alignItems: 'center',
-                              color: C.muted,
-                            }}
-                          >
-                            <IconComment size={11} />
-                          </span>
-                        )}
                       </div>
                     </div>
                   );
@@ -2379,16 +2381,23 @@ export default function TimerPage() {
               </div>
             </div>
 
-            <div className="pv-scramble" style={{ flexShrink: 0 }}>
-              <SwipeScrambleRow
-                scramble={scramble}
-                scrambleFontPx={getScrambleFontSize(scramble, scrambleFontSize)}
-                onNext={goNextScramble}
-                onPrev={goPrevScramble}
-                showHint={!swipeHintDismissed}
-                onDismissHint={dismissSwipeHint}
-              />
-            </div>
+            {/* Scramble row hidden on the Solves tab — the long move
+                sequence isn't useful while browsing past solves and
+                would push the list below the fold on smaller phones.
+                Event picker + capsule controls above stay visible so
+                the user can still switch event from this tab. */}
+            {mobileTab !== 'solves' && (
+              <div className="pv-scramble" style={{ flexShrink: 0 }}>
+                <SwipeScrambleRow
+                  scramble={scramble}
+                  scrambleFontPx={getScrambleFontSize(scramble, scrambleFontSize)}
+                  onNext={goNextScramble}
+                  onPrev={goPrevScramble}
+                  showHint={!swipeHintDismissed}
+                  onDismissHint={dismissSwipeHint}
+                />
+              </div>
+            )}
           </>
         );
 
@@ -2720,40 +2729,55 @@ export default function TimerPage() {
                                 border: `1px solid ${selected ? C.accent : C.border}`,
                                 color: selected ? '#0a0a0a' : 'transparent',
                                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                zIndex: 1,
                               }}>
                                 {selected && <IconCheck size={11} />}
                               </span>
                             )}
 
-                            {/* Centered group — [PB][+2][time][comment]
-                                rendered as a single inline-flex unit so
-                                the time stays at the same horizontal
-                                position regardless of which pills are
-                                present (a PB row and a non-PB row both
-                                anchor the time on the same baseline). */}
+                            {/* Top-right corner stack — state badges
+                                (PB / +2 / DNF) on top, comment indicator
+                                below. Plain colored text per badge type,
+                                no pill chrome. Hidden in select mode so
+                                it doesn't fight the selection checkbox
+                                for the same corner. */}
+                            {!selectMode && (isBest || s.penalty === '+2' || dnf || hasComment) && (
+                              <div style={{
+                                position: 'absolute', top: 6, right: 8,
+                                display: 'flex', flexDirection: 'column',
+                                alignItems: 'flex-end', gap: 2,
+                                fontSize: '0.65rem', fontWeight: 700,
+                                letterSpacing: '0.04em',
+                                fontVariantNumeric: 'tabular-nums',
+                                pointerEvents: 'none',
+                              }}>
+                                {(isBest || s.penalty === '+2' || dnf) && (
+                                  <div style={{
+                                    display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+                                  }}>
+                                    {isBest && !dnf && <span style={{ color: C.success }}>PB</span>}
+                                    {s.penalty === '+2' && !dnf && <span style={{ color: C.warn }}>+2</span>}
+                                    {dnf && <span style={{ color: C.danger }}>DNF</span>}
+                                  </div>
+                                )}
+                                {hasComment && (
+                                  <span aria-label="Has comment" style={{
+                                    display: 'inline-flex', color: C.muted,
+                                  }}>
+                                    <IconComment size={11} />
+                                  </span>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Centered row — time only. PB/+2/DNF/
+                                comment lifted to the corner stack above
+                                so the time anchors at the same column
+                                regardless of which badges are present. */}
                             <div style={{
                               display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              gap: '0.5rem',
                               width: '100%',
                             }}>
-                              {isBest && !dnf && (
-                                <span style={{
-                                  alignSelf: 'center',
-                                  fontSize: '0.55rem', fontWeight: 700,
-                                  padding: '0.1rem 0.4rem', borderRadius: 4,
-                                  background: 'rgba(52,211,153,0.20)', color: C.success,
-                                  letterSpacing: '0.06em',
-                                }}>PB</span>
-                              )}
-                              {s.penalty === '+2' && !dnf && (
-                                <span style={{
-                                  alignSelf: 'center',
-                                  fontSize: '0.55rem', fontWeight: 700,
-                                  padding: '0.1rem 0.4rem', borderRadius: 4,
-                                  background: 'rgba(251,191,36,0.20)', color: C.warn,
-                                  letterSpacing: '0.06em',
-                                }}>+2</span>
-                              )}
                               <span style={{
                                 fontFamily: '"JetBrains Mono", monospace',
                                 fontSize: '1.05rem', fontWeight: 700,
@@ -2768,14 +2792,6 @@ export default function TimerPage() {
                               }}>
                                 {fmtMs(finalMs(s), dnf, precision)}
                               </span>
-                              {hasComment && (
-                                <span aria-label="Has comment" style={{
-                                  alignSelf: 'center',
-                                  display: 'inline-flex', color: C.muted,
-                                }}>
-                                  <IconComment size={11} />
-                                </span>
-                              )}
                             </div>
                           </button>
                         );
