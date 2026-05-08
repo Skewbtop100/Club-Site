@@ -2625,7 +2625,7 @@ function MultiplayerPageInner() {
   // vertical scroll via the <main> wrapper below.
   const lockToViewport = isRacing || isMobile;
   return (
-    <div style={{
+    <div className="timer-page" style={{
       ...(lockToViewport
         ? {
             // dvh tracks the visible viewport on mobile so URL-bar dynamics

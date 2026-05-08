@@ -2079,20 +2079,17 @@ export default function TimerPage() {
                 </button>
               </div>
 
-            <div style={{
-              fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
-              fontSize: getDesktopScrambleFontSize(scrambleFontSize),
-              fontWeight: 500, lineHeight: 1.7,
-              letterSpacing: '0.02em', color: C.text,
-              textAlign: 'center', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-              minHeight: '5rem',
-              // Same iOS-friendly guards as the timer area: scrambles
-              // are read, not selected. The user shouldn't get the
-              // long-press callout when they tap the scramble row.
-              userSelect: 'none',
-              WebkitUserSelect: 'none',
-              WebkitTouchCallout: 'none',
-            }}>
+            <div
+              className="pv-scramble-text"
+              style={{
+                fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
+                fontSize: getDesktopScrambleFontSize(scrambleFontSize),
+                fontWeight: 500, lineHeight: 1.7,
+                letterSpacing: '0.02em', color: C.text,
+                textAlign: 'center', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                minHeight: '5rem',
+              }}
+            >
               {scramble}
             </div>
           </section>
@@ -2106,6 +2103,12 @@ export default function TimerPage() {
           <section
             onTouchStart={onTimerTouchStart}
             onTouchEnd={onTimerTouchEnd}
+            // Suppress the long-press / right-click context menu so
+            // Android's Circle-to-Search and the desktop browser's
+            // native menu can't pop up over a solve in progress. The
+            // tap-to-arm flow is unaffected — context menu fires on
+            // long-press / right-click only.
+            onContextMenu={e => e.preventDefault()}
             style={{
               flex: '1 1 auto', minHeight: 0,
               background: C.card,
@@ -2113,19 +2116,7 @@ export default function TimerPage() {
               borderRadius: 18, padding: '1.5rem 1.5rem',
               boxShadow: '0 1px 0 rgba(255,255,255,0.02) inset, 0 4px 16px rgba(0,0,0,0.2)',
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-              // iOS / iPad: kill text selection, long-press callout
-              // (the magnifier / "copy" sheet), and double-tap zoom on
-              // the timer interaction zone. Without this the digits
-              // get selected on every tap and the page drifts.
-              userSelect: 'none',
-              WebkitUserSelect: 'none',
-              WebkitTouchCallout: 'none',
               touchAction: 'manipulation',
-              // Android Chrome flashes a cyan tap-highlight on any
-              // element with cursor:pointer + a touch handler. The
-              // section is the timer-arming target, so the highlight
-              // reads as "the whole panel turned blue" — kill it.
-              WebkitTapHighlightColor: 'transparent',
               cursor: 'pointer', textAlign: 'center',
             }}
           >
@@ -2309,6 +2300,10 @@ export default function TimerPage() {
       </div>
       )}
 
+      {/* Mobile root wrapper — gets the `timer-page` class so the layout-
+          level lockdown CSS (no text selection, no long-press callout)
+          applies on phones the same way it does for the desktop branch
+          above. */}
       {mounted && isMobile && (() => {
         // The Solves tab honors the user's sort choice from PREFS_KEY;
         // search filtering is applied AFTER the sort so the matching
@@ -2469,7 +2464,7 @@ export default function TimerPage() {
         );
 
         return (
-          <div style={{
+          <div className="timer-page" style={{
             position: 'relative', zIndex: 1,
             // Root is exactly the viewport, with a flex-column children
             // arrangement so the footer (stats + nav) sits in normal flow
@@ -2526,20 +2521,17 @@ export default function TimerPage() {
                 <section
                   onTouchStart={onTimerTouchStart}
                   onTouchEnd={onTimerTouchEnd}
+                  // Same long-press / context-menu suppression as the
+                  // desktop section above. Critical on Android, where
+                  // a hold-tap during inspection would otherwise pop up
+                  // Circle-to-Search and steal focus from the solve.
+                  onContextMenu={e => e.preventDefault()}
                   style={{
                     flex: '1 1 auto', minHeight: 0,
                     display: 'flex', flexDirection: 'column',
                     alignItems: 'center', justifyContent: 'center',
-                    userSelect: 'none',
-                    WebkitUserSelect: 'none',
-                    WebkitTouchCallout: 'none',
                     cursor: 'pointer', textAlign: 'center',
                     touchAction: 'manipulation',
-                    // Android Chrome's default cyan tap-highlight on
-                    // any cursor:pointer element with a touch handler
-                    // shows up as "the whole panel turned blue" during
-                    // arming — suppress it.
-                    WebkitTapHighlightColor: 'transparent',
                     margin: '0 0.7rem',
                     background: 'transparent',
                   }}
@@ -5512,6 +5504,7 @@ function SwipeScrambleRow({
     >
       <div
         key={fadeKey}
+        className="pv-scramble-text"
         style={{
           fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
           fontSize: scrambleFontPx,

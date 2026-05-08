@@ -180,7 +180,7 @@ export default function TimerProfilePage() {
       typeof x.ms === 'number' && Number.isFinite(x.ms));
 
   return (
-    <div style={{
+    <div className="timer-page" style={{
       minHeight: '100vh', background: C.bg, color: C.text,
       fontFamily: FONT_STACK,
     }}>
