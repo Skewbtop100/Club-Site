@@ -201,6 +201,18 @@ function formatSolveTime(epoch: number | undefined): string {
   return `${yyyy}-${mm}-${dd}  ${hh}:${min}`;
 }
 
+// Compact "M/D" date label rendered in the corner of each solve row in
+// place of the old #N chronological index. Returns an empty string for
+// legacy solves missing the timestamp so the UI just shows an empty
+// corner rather than a placeholder.
+function formatSolveDate(epoch: number | undefined): string {
+  if (!epoch) return '';
+  const d = new Date(epoch);
+  const m = d.getMonth() + 1;
+  const day = d.getDate();
+  return `${m}/${day}`;
+}
+
 // Small clock SVG used next to the timestamp in the Solve Detail view.
 // Inline (rather than from lib/icons.tsx) to keep the timer module
 // self-contained — same convention as the other one-off icons here.
@@ -1817,7 +1829,7 @@ export default function TimerPage() {
                       onClick={() => setDetailSolveId(s.id)}
                       style={{
                         display: 'grid',
-                        gridTemplateColumns: '1.9rem 1fr auto auto',
+                        gridTemplateColumns: '2.4rem 1fr auto auto',
                         alignItems: 'center', gap: '0.55rem',
                         padding: '0.65rem 0.7rem', borderRadius: 10,
                         background: rowBg,
@@ -1826,13 +1838,17 @@ export default function TimerPage() {
                         transition: 'background 0.15s ease',
                       }}
                     >
+                      {/* Compact "M/D" date in the leading column. Empty
+                          for legacy solves that pre-date the `ts` field —
+                          the column collapses visually rather than
+                          showing a placeholder. */}
                       <div style={{
-                        fontFamily: '"JetBrains Mono", monospace',
-                        fontSize: '0.7rem', fontWeight: 500,
-                        color: 'rgba(255,255,255,0.25)',
+                        fontSize: '0.65rem', fontWeight: 500,
+                        color: 'rgba(255,255,255,0.35)',
+                        letterSpacing: '0.04em',
                         fontVariantNumeric: 'tabular-nums',
                       }}>
-                        {String(idx).padStart(2, '0')}
+                        {formatSolveDate(s.ts)}
                       </div>
                       <div style={{
                         fontFamily: '"JetBrains Mono", monospace',
@@ -2690,25 +2706,25 @@ export default function TimerPage() {
                               </span>
                             )}
 
-                            {/* Top row — chronological index + comment dot.
-                                Index 1 = first solve ever made in this
-                                session, N = most recent. Stable across
-                                re-sorts so the badge always identifies
-                                the same solve. */}
+                            {/* Top row — compact "M/D" completion date +
+                                comment dot. Empty span for legacy solves
+                                that pre-date the `ts` field so the row
+                                stays a clean empty corner. The PB / best
+                                / worst / latest emphasis lives on the
+                                card's left rail and big time text — the
+                                date label stays uniformly muted to
+                                avoid competing with those signals. */}
                             <div style={{
                               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                               gap: '0.3rem',
                             }}>
                               <span style={{
-                                fontSize: '0.62rem', fontWeight: 800,
-                                color: isBest && !dnf ? C.success
-                                     : isWorst && !dnf ? '#f87171'
-                                     : isLatest ? C.accent
-                                     : C.mutedDim,
+                                fontSize: '0.65rem', fontWeight: 500,
+                                color: 'rgba(255,255,255,0.35)',
                                 letterSpacing: '0.04em',
-                                fontFamily: '"JetBrains Mono", monospace',
+                                fontVariantNumeric: 'tabular-nums',
                               }}>
-                                #{chronologicalIndexById.get(s.id) ?? 0}
+                                {formatSolveDate(s.ts)}
                               </span>
                               {hasComment && (
                                 <span aria-label="Has comment" style={{
