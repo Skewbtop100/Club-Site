@@ -868,6 +868,12 @@ export default function TimerPage() {
   // them visually-dim and pointerEvents:'none' for a brief window so the
   // lift-off can't fire on them; flip to armed=true once the touch is
   // safely over.
+  // 600 ms post-stop cooldown that gates the TIMER-AREA's tap-to-start
+  // behaviour. While the cooldown is running, an accidental tap near
+  // (but not on) an action button is absorbed instead of starting a
+  // new solve and dismissing the row. The action buttons themselves
+  // stay interactive throughout — `actionsArmed` does NOT disable the
+  // row anymore, only the surrounding tap-to-arm surface.
   const [actionsArmed, setActionsArmed] = useState(false);
   useEffect(() => {
     if (timer.state !== 'stopped') {
@@ -875,7 +881,7 @@ export default function TimerPage() {
       return;
     }
     setActionsArmed(false);
-    const id = window.setTimeout(() => setActionsArmed(true), 700);
+    const id = window.setTimeout(() => setActionsArmed(true), 600);
     return () => window.clearTimeout(id);
   }, [timer.state]);
 
@@ -1294,6 +1300,14 @@ export default function TimerPage() {
     if (timeEntryMode === 'manual') return;
     if (ganConnected) return;
     if (timer.state === 'running') { timer.stop(); return; }
+    // Cooldown window after a solve ends: the action row (✕ / DNF / +2
+    // / 💬) is now visible and the user is most likely aiming at one
+    // of those buttons. Drop taps that bubble up here from the timer
+    // section's surrounding area until the cooldown clears, so a
+    // mistap doesn't transition state out of 'stopped' and dismiss the
+    // row. After the cooldown, taps on the timer area resume their
+    // normal "start a new solve" semantics.
+    if (timer.state === 'stopped' && !actionsArmed) return;
     if (timer.state === 'idle' || timer.state === 'stopped') {
       if (inspectionEnabled) {
         timer.beginInspection();
@@ -1308,7 +1322,7 @@ export default function TimerPage() {
       if (holdToStart) timer.startArming();
       else timer.startRunning();
     }
-  }, [timer, inspectionEnabled, holdToStart, ganConnected, timeEntryMode]);
+  }, [timer, inspectionEnabled, holdToStart, ganConnected, timeEntryMode, actionsArmed]);
 
   const onTimerTouchEnd = useCallback(() => {
     if (timeEntryMode === 'manual') return;
@@ -2168,14 +2182,14 @@ export default function TimerPage() {
               <SolveActionRow
                 solve={lastSolve}
                 isMobile={isMobile}
-                disabled={!actionsArmed}
+                disabled={false}
                 onDelete={() => setDeleteConfirmOpen(true)}
                 onSetPenalty={setPenaltyOnLast}
                 onOpenComment={() => setCommentSolveId(lastSolve.id)}
               />
             )}
             {timer.state === 'stopped' && lastSolve && lastSolve.penalty !== 'none' && (
-              <UndoActionRow isMobile={isMobile} disabled={!actionsArmed} onUndo={undoPenaltyOnLast} />
+              <UndoActionRow isMobile={isMobile} disabled={false} onUndo={undoPenaltyOnLast} />
             )}
             <div className="pv-instruction" style={{ fontSize: '0.72rem', fontWeight: 400, color: C.muted, marginTop: '1.25rem', letterSpacing: '0.06em', minHeight: '1.1rem' }}>
               {ganConnected && timer.state !== 'running' && timer.state !== 'inspecting' && timer.state !== 'armed' && 'Use the GAN timer pads'}
@@ -2575,14 +2589,14 @@ export default function TimerPage() {
                     <SolveActionRow
                       solve={lastSolve}
                       isMobile={isMobile}
-                      disabled={!actionsArmed}
+                      disabled={false}
                       onDelete={() => setDeleteConfirmOpen(true)}
                       onSetPenalty={setPenaltyOnLast}
                       onOpenComment={() => setCommentSolveId(lastSolve.id)}
                     />
                   )}
                   {timer.state === 'stopped' && lastSolve && lastSolve.penalty !== 'none' && (
-                    <UndoActionRow isMobile={isMobile} disabled={!actionsArmed} onUndo={undoPenaltyOnLast} />
+                    <UndoActionRow isMobile={isMobile} disabled={false} onUndo={undoPenaltyOnLast} />
                   )}
                   <div className="pv-instruction" style={{ fontSize: '0.7rem', color: C.muted, marginTop: '0.7rem', letterSpacing: '0.06em', minHeight: '1rem' }}>
                     {ganConnected && timer.state !== 'running' && timer.state !== 'inspecting' && timer.state !== 'armed' && 'Use the GAN timer pads'}
