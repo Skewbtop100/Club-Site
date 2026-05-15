@@ -1557,10 +1557,15 @@ export default function TimerPage() {
     (ganConnected && gan.liveState === 'getSet');
 
   // ── Render ───────────────────────────────────────────────────────────────
-  // Focus mode: while a solve is running, fade out everything except the
-  // digits. Inspection and armed states keep the surrounding context
-  // (countdown, hold/release prompts) visible.
-  const focusMode = timer.state === 'running';
+  // Focus mode: fade the surrounding chrome (sidebars, scramble, stats,
+  // nav, BT indicator, Ao5 projection) the moment the user enters
+  // inspection — the cuber's eyes are on the big countdown, and the
+  // sidebar UI competing for attention has caused mis-taps. Stays on
+  // through 'running' so it covers the whole solve. The 'armed' state
+  // is deliberately NOT included: the user's finger is already on the
+  // timer, the red→green arming colour is the only cue that matters,
+  // and keeping the chrome visible during arming hasn't been a problem.
+  const focusMode = timer.state === 'inspecting' || timer.state === 'running';
 
   // Ao5 projection — minimal "best — worst" line, color coded. Defined
   // once so desktop and mobile share the same JSX, slotted under the
