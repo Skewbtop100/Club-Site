@@ -4392,16 +4392,27 @@ function SessionsPanel({
                     onClick={() => setMenuId(null)}
                     style={{ position: 'fixed', inset: 0, zIndex: 52, background: 'transparent' }}
                   />
+                  {/* Submenu opens to the LEFT of the ⋮ button rather
+                      than below it — that way the bottom-most session
+                      row doesn't get its submenu clipped behind the
+                      "New Session" CTA. Vertically centered on the
+                      row; the menu is compact enough (~60 px) to stay
+                      within the row's vertical extent so neither the
+                      first nor the last row clips through the list's
+                      `overflow: auto` boundary. */}
                   <div
                     role="menu"
                     style={{
-                      position: 'absolute', top: 'calc(100% - 0.25rem)', right: '0.4rem',
+                      position: 'absolute',
+                      right: '2.5rem',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
                       zIndex: 53,
                       background: C.card, border: `1px solid ${C.border}`,
-                      borderRadius: 10, padding: '0.3rem',
-                      minWidth: 160,
+                      borderRadius: 10, padding: '0.2rem',
+                      minWidth: 140,
                       boxShadow: '0 12px 30px rgba(0,0,0,0.55)',
-                      display: 'flex', flexDirection: 'column', gap: '0.1rem',
+                      display: 'flex', flexDirection: 'column', gap: '0.05rem',
                     }}
                   >
                     <button
@@ -4414,8 +4425,8 @@ function SessionsPanel({
                       style={{
                         background: 'transparent', border: 'none', cursor: 'pointer',
                         color: C.text, fontFamily: 'inherit', textAlign: 'left',
-                        fontSize: '0.82rem', fontWeight: 600,
-                        padding: '0.5rem 0.65rem', borderRadius: 7,
+                        fontSize: '0.8rem', fontWeight: 600,
+                        padding: '0.4rem 0.55rem', borderRadius: 7,
                         display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
                       }}
                       onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
@@ -4437,8 +4448,8 @@ function SessionsPanel({
                         cursor: list.length > 1 ? 'pointer' : 'not-allowed',
                         color: list.length > 1 ? '#f87171' : 'rgba(248,113,113,0.4)',
                         fontFamily: 'inherit', textAlign: 'left',
-                        fontSize: '0.82rem', fontWeight: 600,
-                        padding: '0.5rem 0.65rem', borderRadius: 7,
+                        fontSize: '0.8rem', fontWeight: 600,
+                        padding: '0.4rem 0.55rem', borderRadius: 7,
                         display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
                       }}
                       onMouseEnter={e => { if (list.length > 1) e.currentTarget.style.background = 'rgba(239,68,68,0.08)'; }}
@@ -4481,7 +4492,7 @@ function SessionsPanel({
                   setNewName('');
                 }
               }}
-              placeholder="Сессийн нэр…"
+              placeholder="New session name"
               style={{
                 background: C.cardAlt, color: C.text,
                 border: `1px solid ${C.borderHi}`, borderRadius: 8,
@@ -4533,7 +4544,7 @@ function SessionsPanel({
             onMouseEnter={e => { e.currentTarget.style.background = 'rgba(167,139,250,0.16)'; }}
             onMouseLeave={e => { e.currentTarget.style.background = 'rgba(167,139,250,0.1)'; }}
           >
-            <IconPlus size={14} /> Шинэ сесс үүсгэх
+            <IconPlus size={14} /> New Session
           </button>
         )}
       </div>
