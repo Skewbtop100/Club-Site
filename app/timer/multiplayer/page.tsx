@@ -34,6 +34,7 @@ import {
   DEFAULT_HOLD_TIME_MS,
   type Precision,
   type UseTimerReturn,
+  type Penalty as EnginePenalty,
 } from '@/lib/timer-engine';
 import {
   IconRefresh, IconPause, IconPlay, IconUndo, IconHourglass, IconTrophy,
@@ -3761,8 +3762,13 @@ function RacingScreen({
   // Re-hides on every solve boundary so each solve starts fresh.
   const [scrambleShown, setScrambleShown] = useState(false);
 
-  const onSolveCommit = useCallback((ms: number, dnf: boolean) => {
-    setPending({ ms, defaultDnf: dnf });
+  const onSolveCommit = useCallback((ms: number, penalty: EnginePenalty) => {
+    // Multiplayer resolves OK / +2 / DNF in the post-solve confirm
+    // dialog (its local `Penalty` uses 'ok' rather than the engine's
+    // 'none'), so we only forward the engine's penalty as the default
+    // DNF state. The +2 inspection signal is dropped here intentionally
+    // — racers can apply +2 explicitly via the dialog buttons.
+    setPending({ ms, defaultDnf: penalty === 'dnf' });
   }, []);
 
   const timer = useTimer(onSolveCommit, holdTimeMs);

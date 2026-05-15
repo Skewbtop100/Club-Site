@@ -187,12 +187,24 @@ export interface UseTimerReturn {
 export const STOP_FLASH_MS = 300;
 
 // onSolveCommit is fired by stop() and finishExternal() with the final
-// ms and a boolean indicating whether inspection ran out (DNF).
+// ms and the WCA inspection penalty derived from how long the user
+// took to start the solve:
+//   - 'none' when the solve started within 15.000 s
+//   - '+2'   when the solve started between 15.001 and 17.000 s
+//   - 'dnf'  when the solve started after 17.000 s (or inspection
+//             timed out entirely)
+//
+// inspectionMs is frozen at the moment the user leaves the 'inspecting'
+// state (the inspection ticker only runs while state==='inspecting'),
+// so its value at commit time is the inspection-elapsed reading the
+// rules apply to. When inspection was never entered (inspectionEnabled
+// is off, or this is a BLE-only flow that bypassed the countdown),
+// inspectionMs stays at INSPECTION_MS and naturally lands in 'none'.
 //
 // holdTimeMs is the user-configured hold-to-arm threshold in ms.
 // fireRunning() bounces back to inspecting/idle if released early.
 export function useTimer(
-  onSolveCommit: (ms: number, dnf: boolean) => void,
+  onSolveCommit: (ms: number, penalty: Penalty) => void,
   holdTimeMs: number,
 ): UseTimerReturn {
   const [state, setState] = useState<TimerState>('idle');
@@ -229,11 +241,18 @@ export function useTimer(
       // The next start press resets to 0 and begins inspection.
       setDisplayMs(final);
       setState('stopped');
-      const dnf = inspectionMs <= -2000;
+      // WCA inspection penalty — see useTimer's leading comment for the
+      // 15 s / 17 s thresholds. Strict inequalities at the boundaries:
+      // elapsed = 15.000 s exactly is still 'none', elapsed = 17.000 s
+      // is still '+2'.
+      const penalty: Penalty =
+        inspectionMs < -2000 ? 'dnf'
+        : inspectionMs < 0   ? '+2'
+        : 'none';
       inspStartRef.current = 0;
       setInspectionMs(INSPECTION_MS);
       triggerStopFlash();
-      onSolveCommit(final, dnf);
+      onSolveCommit(final, penalty);
     }
   }, [state, inspectionMs, onSolveCommit, triggerStopFlash]);
 
@@ -329,15 +348,24 @@ export function useTimer(
   // Drive the timer to "stopped" with an externally-measured time
   // (e.g. authoritative time from a GAN bluetooth timer). Bypasses the
   // local Date.now() math so we record the device's exact ms value.
+  // Inspection penalty is still derived from the frozen inspectionMs
+  // — BLE flows that pass through the inspection countdown get the
+  // same +2 / DNF treatment as a tap-driven solve; BLE-only flows
+  // that skip inspection land at 'none' naturally (inspectionMs is
+  // still its INSPECTION_MS default).
   const finishExternal = useCallback((finalMsArg: number) => {
     cancelAnimationFrame(rafRef.current);
     setDisplayMs(finalMsArg);
     setState('stopped');
+    const penalty: Penalty =
+      inspectionMs < -2000 ? 'dnf'
+      : inspectionMs < 0   ? '+2'
+      : 'none';
     inspStartRef.current = 0;
     setInspectionMs(INSPECTION_MS);
     triggerStopFlash();
-    onSolveCommit(finalMsArg, false);
-  }, [onSolveCommit, triggerStopFlash]);
+    onSolveCommit(finalMsArg, penalty);
+  }, [inspectionMs, onSolveCommit, triggerStopFlash]);
 
   return {
     state, displayMs, inspectionMs,

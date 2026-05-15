@@ -772,14 +772,14 @@ export default function TimerPage() {
   //   * 20 pt for a new Ao5 PB — but only after the user has accumulated
   //     ≥100 lifetime solves. Single-solve PBs no longer award (UI still
   //     highlights them; this is just about the points).
-  const onSolveCommit = useCallback((ms: number, dnf: boolean) => {
+  const onSolveCommit = useCallback((ms: number, penalty: Penalty) => {
     let candidateAo5: number | null = null;
     setSolves(prev => {
       const next: Solve[] = [
         ...prev,
         {
           id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-          ms, penalty: dnf ? 'dnf' : 'none',
+          ms, penalty,
           scramble, event: eventId, ts: Date.now(),
         },
       ];
