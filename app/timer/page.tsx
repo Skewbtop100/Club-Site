@@ -1558,14 +1558,16 @@ export default function TimerPage() {
 
   // ── Render ───────────────────────────────────────────────────────────────
   // Focus mode: fade the surrounding chrome (sidebars, scramble, stats,
-  // nav, BT indicator, Ao5 projection) the moment the user enters
-  // inspection — the cuber's eyes are on the big countdown, and the
-  // sidebar UI competing for attention has caused mis-taps. Stays on
-  // through 'running' so it covers the whole solve. The 'armed' state
-  // is deliberately NOT included: the user's finger is already on the
-  // timer, the red→green arming colour is the only cue that matters,
-  // and keeping the chrome visible during arming hasn't been a problem.
-  const focusMode = timer.state === 'inspecting' || timer.state === 'running';
+  // nav, BT indicator, Ao5 projection) for the entire inspection →
+  // armed → running cycle so the UI never flashes back into view as
+  // the user holds to arm. The 'armed' state in particular is brief
+  // but visually disruptive without this — leaving it out caused the
+  // chrome to pop in for a split second between countdown and the
+  // running timer.
+  const focusMode =
+    timer.state === 'inspecting' ||
+    timer.state === 'armed' ||
+    timer.state === 'running';
 
   // Ao5 projection — minimal "best — worst" line, color coded. Defined
   // once so desktop and mobile share the same JSX, slotted under the
