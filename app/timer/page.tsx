@@ -578,6 +578,17 @@ export default function TimerPage() {
     });
   }, [eventId]);
 
+  const renameSession = useCallback((sessionId: string, rawName: string) => {
+    const name = rawName.trim();
+    if (!name) return;
+    setSessions(prev => {
+      const ev = prev[eventId];
+      if (!ev) return prev;
+      const list = ev.sessions.map(s => (s.id === sessionId ? { ...s, name } : s));
+      return { ...prev, [eventId]: { ...ev, sessions: list } };
+    });
+  }, [eventId]);
+
   // Refresh "X mins ago" labels every 30s
   useEffect(() => {
     const id = setInterval(() => forceTick(n => n + 1), 30_000);
@@ -1837,135 +1848,19 @@ export default function TimerPage() {
               }}>▾</span>
             </button>
 
-            {sessionDropdownOpen && (() => {
-              const ev = sessions[eventId];
-              const list = ev?.sessions ?? [];
-              const currentId = ev?.currentId;
-              return (
-                <>
-                  {/* Click-outside catcher */}
-                  <div
-                    onClick={() => setSessionDropdownOpen(false)}
-                    style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'transparent' }}
-                  />
-                  <div
-                    role="listbox"
-                    style={{
-                      position: 'absolute', top: '100%', left: '0.7rem', right: '0.7rem',
-                      marginTop: '0.3rem', zIndex: 51,
-                      background: C.card, border: `1px solid ${C.border}`,
-                      borderRadius: 10, padding: '0.4rem',
-                      boxShadow: '0 12px 30px rgba(0,0,0,0.55)',
-                      display: 'flex', flexDirection: 'column', gap: '0.25rem',
-                      maxHeight: '60vh', overflowY: 'auto',
-                    }}
-                  >
-                    {list.length === 0 && (
-                      <div style={{ fontSize: '0.78rem', color: C.mutedDim, padding: '0.4rem' }}>
-                        No sessions yet.
-                      </div>
-                    )}
-                    {list.map(s => {
-                      const valid = s.solves.filter(x => !isDnf(x));
-                      const sessBest = valid.length ? Math.min(...valid.map(finalMs)) : null;
-                      const isCurrent = s.id === currentId;
-                      return (
-                        <div
-                          key={s.id}
-                          style={{
-                            display: 'grid', gridTemplateColumns: '1fr auto auto',
-                            alignItems: 'center', gap: '0.35rem',
-                            padding: '0.45rem 0.55rem', borderRadius: 7,
-                            background: isCurrent ? C.accentDim : 'transparent',
-                            border: `1px solid ${isCurrent ? C.borderHi : 'transparent'}`,
-                          }}
-                        >
-                          <button
-                            onClick={() => { switchSession(s.id); setSessionDropdownOpen(false); }}
-                            style={{
-                              background: 'transparent', border: 'none', cursor: 'pointer',
-                              fontFamily: 'inherit', color: 'inherit', padding: 0, textAlign: 'left',
-                              display: 'flex', flexDirection: 'column', gap: '0.1rem',
-                              minWidth: 0,
-                            }}
-                          >
-                            <span style={{
-                              fontSize: '0.82rem', fontWeight: 700,
-                              color: isCurrent ? C.accent : C.text,
-                              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                            }}>
-                              {s.name}
-                            </span>
-                            <span style={{ fontSize: '0.62rem', color: C.muted }}>
-                              {s.solves.length} solve{s.solves.length === 1 ? '' : 's'}
-                              {sessBest != null && (
-                                <> · best <span style={{ fontFamily: '"JetBrains Mono", monospace', color: C.success }}>{fmtMs(sessBest, false, precision)}</span></>
-                              )}
-                            </span>
-                          </button>
-                          {isCurrent
-                            ? <span style={{ color: C.accent, display: 'inline-flex' }}><IconCheck size={14} /></span>
-                            : <span aria-hidden style={{ width: 14, height: 14 }} />}
-                          <button
-                            onClick={() => deleteSession(s.id)}
-                            aria-label="Delete session"
-                            disabled={list.length <= 1}
-                            title={list.length > 1 ? 'Delete session' : 'At least one session is required'}
-                            style={{
-                              background: 'transparent', border: 'none',
-                              cursor: list.length > 1 ? 'pointer' : 'not-allowed',
-                              color: list.length > 1 ? C.mutedDim : 'rgba(255,255,255,0.1)',
-                              padding: '0.15rem',
-                              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                            }}
-                          ><IconTrash size={13} /></button>
-                        </div>
-                      );
-                    })}
-
-                    {/* Divider + new session row */}
-                    <div style={{ height: 1, background: C.border, margin: '0.25rem 0' }} />
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.3rem' }}>
-                      <input
-                        value={newSessionName}
-                        onChange={e => setNewSessionName(e.target.value)}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            createSession(newSessionName);
-                            setNewSessionName('');
-                            setSessionDropdownOpen(false);
-                          }
-                        }}
-                        placeholder="New session name"
-                        style={{
-                          background: C.cardAlt, color: C.text,
-                          border: `1px solid ${C.border}`, borderRadius: 7,
-                          padding: '0.4rem 0.55rem', fontSize: '0.78rem',
-                          fontFamily: 'inherit', outline: 'none', minWidth: 0,
-                        }}
-                      />
-                      <button
-                        onClick={() => {
-                          createSession(newSessionName);
-                          setNewSessionName('');
-                          setSessionDropdownOpen(false);
-                        }}
-                        style={{
-                          padding: '0.4rem 0.55rem', borderRadius: 7,
-                          fontSize: '0.72rem', fontWeight: 700, fontFamily: 'inherit',
-                          background: C.accentDim, color: C.accent,
-                          border: `1px solid ${C.borderHi}`, cursor: 'pointer',
-                          display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
-                        }}
-                      >
-                        <IconPlus size={12} />New
-                      </button>
-                    </div>
-                  </div>
-                </>
-              );
-            })()}
+            {sessionDropdownOpen && (
+              <SessionsPanel
+                mode="sidebar"
+                list={sessions[eventId]?.sessions ?? []}
+                currentId={sessions[eventId]?.currentId}
+                precision={precision}
+                onSwitch={switchSession}
+                onCreate={createSession}
+                onRename={renameSession}
+                onDelete={deleteSession}
+                onClose={() => setSessionDropdownOpen(false)}
+              />
+            )}
           </div>
 
           {/* Solves list header — count + sort pill. Sits above the
@@ -3285,121 +3180,19 @@ export default function TimerPage() {
       )}
 
       {/* Sessions panel modal (mobile + button in header) */}
-      {sessionPanelOpen && (() => {
-        const ev = sessions[eventId];
-        const list = ev?.sessions ?? [];
-        const currentId = ev?.currentId;
-        return (
-          <ModalShell title={`${sessionEvent.short.toUpperCase()} Sessions`} onClose={() => setSessionPanelOpen(false)}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-              {/* Session list */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: '50vh', overflowY: 'auto' }}>
-                {list.length === 0 ? (
-                  <div style={{ fontSize: '0.8rem', color: C.mutedDim, padding: '0.5rem' }}>
-                    No sessions yet.
-                  </div>
-                ) : list.map(s => {
-                  const valid = s.solves.filter(x => !isDnf(x));
-                  const sessBest = valid.length ? Math.min(...valid.map(finalMs)) : null;
-                  const isCurrent = s.id === currentId;
-                  return (
-                    <div
-                      key={s.id}
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: '1fr auto auto',
-                        gap: '0.5rem', alignItems: 'center',
-                        padding: '0.5rem 0.6rem', borderRadius: 8,
-                        background: isCurrent ? C.accentDim : C.cardAlt,
-                        border: `1px solid ${isCurrent ? C.borderHi : C.border}`,
-                      }}
-                    >
-                      <button
-                        onClick={() => { switchSession(s.id); setSessionPanelOpen(false); }}
-                        style={{
-                          background: 'transparent', border: 'none', cursor: 'pointer',
-                          fontFamily: 'inherit', color: 'inherit', padding: 0, textAlign: 'left',
-                          display: 'flex', flexDirection: 'column', gap: '0.15rem',
-                        }}
-                      >
-                        <span style={{ fontSize: '0.88rem', fontWeight: 700, color: isCurrent ? C.accent : C.text }}>
-                          {s.name}
-                        </span>
-                        <span style={{ fontSize: '0.66rem', color: C.muted }}>
-                          {s.solves.length} solve{s.solves.length === 1 ? '' : 's'}
-                          {sessBest != null && (
-                            <> · best <span style={{ fontFamily: '"JetBrains Mono", monospace', color: C.success }}>{fmtMs(sessBest, false, precision)}</span></>
-                          )}
-                        </span>
-                      </button>
-                      {isCurrent && (
-                        <span style={{ color: C.accent, display: 'inline-flex' }}><IconCheck size={16} /></span>
-                      )}
-                      {!isCurrent && (
-                        <span aria-hidden style={{ width: 16, height: 16 }} />
-                      )}
-                      <button
-                        onClick={() => deleteSession(s.id)}
-                        aria-label="Delete session"
-                        title={list.length > 1 ? 'Delete session' : 'At least one session is required'}
-                        disabled={list.length <= 1}
-                        style={{
-                          background: 'transparent', border: 'none', cursor: list.length > 1 ? 'pointer' : 'not-allowed',
-                          color: list.length > 1 ? C.mutedDim : 'rgba(255,255,255,0.1)',
-                          padding: '0.25rem',
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                        }}
-                      ><IconTrash size={15} /></button>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* New session input */}
-              <div style={{
-                display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.4rem',
-                paddingTop: '0.6rem', borderTop: `1px solid ${C.border}`,
-              }}>
-                <input
-                  value={newSessionName}
-                  onChange={e => setNewSessionName(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      createSession(newSessionName);
-                      setNewSessionName('');
-                      setSessionPanelOpen(false);
-                    }
-                  }}
-                  placeholder="New session name"
-                  style={{
-                    background: C.cardAlt, color: C.text,
-                    border: `1px solid ${C.border}`, borderRadius: 8,
-                    padding: '0.5rem 0.7rem', fontSize: '16px',
-                    fontFamily: 'inherit', outline: 'none',
-                  }}
-                />
-                <button
-                  onClick={() => {
-                    createSession(newSessionName);
-                    setNewSessionName('');
-                    setSessionPanelOpen(false);
-                  }}
-                  style={{
-                    padding: '0.5rem 0.85rem', borderRadius: 8,
-                    fontSize: '0.8rem', fontWeight: 700, fontFamily: 'inherit',
-                    background: C.accentDim, color: C.accent,
-                    border: `1px solid ${C.borderHi}`, cursor: 'pointer',
-                    display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
-                  }}
-                >
-                  <IconPlus size={14} />New Session
-                </button>
-              </div>
-            </div>
-          </ModalShell>
-        );
-      })()}
+      {sessionPanelOpen && (
+        <SessionsPanel
+          mode="modal"
+          list={sessions[eventId]?.sessions ?? []}
+          currentId={sessions[eventId]?.currentId}
+          precision={precision}
+          onSwitch={switchSession}
+          onCreate={createSession}
+          onRename={renameSession}
+          onDelete={deleteSession}
+          onClose={() => setSessionPanelOpen(false)}
+        />
+      )}
 
       {/* Event picker — shared bottom sheet for both desktop and mobile.
           Mounts whenever any event-button (mobile capsule or the
@@ -4379,6 +4172,452 @@ function BottomTab({ label, icon, active, onClick, C: c }: { label: string; icon
 // "Export") can join the same menu. Trigger is a 32×32 ⋮ icon button
 // that fits inline at the right edge of the search bar (mobile) or the
 // solves header (desktop). Click-outside catcher and ESC both close it.
+// Sessions popup — opened from the sidebar's session-selector button on
+// desktop and from the mobile capsule's "+" button. Both paths render
+// the SAME panel; only the outer shell differs:
+//   - mode='sidebar' anchors the panel under the trigger (absolute
+//     positioned inside the parent `position: relative` wrapper).
+//   - mode='modal' renders a fixed centered overlay with click-outside
+//     and ESC dismissal.
+// The body itself is identical: header / scrollable list / sticky
+// bottom CTA. Each row has an inline ⋮ menu that exposes rename +
+// delete affordances; the bottom CTA toggles between a plain "Шинэ
+// сесс үүсгэх" button and an inline input + save/cancel pair.
+function SessionsPanel({
+  mode, list, currentId, precision,
+  onSwitch, onCreate, onRename, onDelete, onClose,
+}: {
+  mode: 'sidebar' | 'modal';
+  list: Session[];
+  currentId: string | undefined;
+  precision: Precision;
+  onSwitch: (id: string) => void;
+  onCreate: (name: string) => void;
+  onRename: (id: string, name: string) => void;
+  onDelete: (id: string) => void;
+  onClose: () => void;
+}) {
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [menuId, setMenuId] = useState<string | null>(null);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') { e.stopPropagation(); onClose(); }
+    }
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
+
+  const body = (
+    <>
+      {/* Header — title + dismiss × */}
+      <div style={{
+        flexShrink: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '0.85rem 1rem',
+        borderBottom: `1px solid ${C.border}`,
+        gap: '0.5rem',
+      }}>
+        <div style={{ fontSize: '0.85rem', fontWeight: 700, color: C.text }}>
+          Sessions
+        </div>
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          style={{
+            width: 28, height: 28, borderRadius: 7,
+            background: 'transparent', border: `1px solid ${C.border}`,
+            color: C.muted, cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        ><IconClose size={14} /></button>
+      </div>
+
+      {/* Scrollable session list. Hidden scrollbar via the shared
+          .pv-solves-list rule defined further down in the page. */}
+      <div className="pv-solves-list" style={{
+        flex: '1 1 auto', minHeight: 0,
+        overflowY: 'auto',
+        padding: '0.5rem',
+        display: 'flex', flexDirection: 'column', gap: '0.3rem',
+      }}>
+        {list.length === 0 && (
+          <div style={{ fontSize: '0.8rem', color: C.mutedDim, padding: '0.5rem' }}>
+            No sessions yet.
+          </div>
+        )}
+        {list.map(s => {
+          const valid = s.solves.filter(x => !isDnf(x));
+          const sessBest = valid.length ? Math.min(...valid.map(finalMs)) : null;
+          const lastTs = s.solves.length ? s.solves[s.solves.length - 1].ts : null;
+          const isCurrent = s.id === currentId;
+          const isRenaming = renamingId === s.id;
+          const isMenuOpen = menuId === s.id;
+          return (
+            <div
+              key={s.id}
+              style={{
+                position: 'relative',
+                padding: '0.75rem 0.85rem',
+                borderRadius: 10,
+                background: isCurrent ? 'rgba(167,139,250,0.1)' : 'transparent',
+                border: `1px solid ${isCurrent ? 'rgba(167,139,250,0.3)' : 'transparent'}`,
+                transition: 'background 0.15s ease, border-color 0.15s ease',
+              }}
+              onMouseEnter={e => {
+                if (!isCurrent) e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+              }}
+              onMouseLeave={e => {
+                if (!isCurrent) e.currentTarget.style.background = 'transparent';
+              }}
+            >
+              {isRenaming ? (
+                /* Inline rename input — Enter commits, Esc cancels. */
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: '0.4rem', alignItems: 'center' }}>
+                  <input
+                    autoFocus
+                    value={renameValue}
+                    onChange={e => setRenameValue(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        onRename(s.id, renameValue);
+                        setRenamingId(null);
+                      } else if (e.key === 'Escape') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setRenamingId(null);
+                      }
+                    }}
+                    style={{
+                      background: C.cardAlt, color: C.text,
+                      border: `1px solid ${C.borderHi}`, borderRadius: 7,
+                      padding: '0.4rem 0.6rem', fontSize: '0.9rem',
+                      fontFamily: 'inherit', outline: 'none', minWidth: 0,
+                    }}
+                  />
+                  <button
+                    onClick={() => { onRename(s.id, renameValue); setRenamingId(null); }}
+                    aria-label="Хадгалах"
+                    style={{
+                      width: 30, height: 30, borderRadius: 7,
+                      background: C.accentDim, color: C.accent,
+                      border: `1px solid ${C.borderHi}`, cursor: 'pointer',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    }}
+                  ><IconCheck size={14} /></button>
+                  <button
+                    onClick={() => setRenamingId(null)}
+                    aria-label="Болих"
+                    style={{
+                      width: 30, height: 30, borderRadius: 7,
+                      background: 'transparent', color: C.muted,
+                      border: `1px solid ${C.border}`, cursor: 'pointer',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    }}
+                  ><IconClose size={14} /></button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => { onSwitch(s.id); onClose(); }}
+                  style={{
+                    width: '100%',
+                    background: 'transparent', border: 'none',
+                    cursor: 'pointer', fontFamily: 'inherit', color: 'inherit',
+                    padding: 0, textAlign: 'left',
+                    display: 'grid', gridTemplateColumns: 'auto 1fr auto',
+                    alignItems: 'center', gap: '0.7rem',
+                  }}
+                >
+                  {/* Active = filled circle, inactive = outlined. Keeps
+                      the row scannable at a glance without relying on
+                      colour alone. */}
+                  <span aria-hidden style={{
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    color: isCurrent ? C.accent : C.mutedDim,
+                  }}>
+                    <svg width={14} height={14} viewBox="0 0 24 24" aria-hidden="true">
+                      <circle cx={12} cy={12} r={6} fill={isCurrent ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={1.8} />
+                    </svg>
+                  </span>
+                  <span style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', minWidth: 0 }}>
+                    <span style={{
+                      fontSize: '0.95rem', fontWeight: 600,
+                      color: isCurrent ? C.accent : C.text,
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    }}>
+                      {s.name}
+                    </span>
+                    <span style={{ fontSize: '0.72rem', color: C.muted, fontWeight: 500 }}>
+                      {s.solves.length} эвлүүлэлт
+                      {sessBest != null && (
+                        <> · Шилдэг <span style={{ fontFamily: '"JetBrains Mono", monospace', color: C.success }}>{fmtMs(sessBest, false, precision)}</span></>
+                      )}
+                      {lastTs != null && (
+                        <> · Сүүлд: {formatSolveDate(lastTs)}</>
+                      )}
+                    </span>
+                  </span>
+                  <span
+                    role="button"
+                    aria-label="Илүү"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMenuId(prev => (prev === s.id ? null : s.id));
+                    }}
+                    style={{
+                      width: 28, height: 28, borderRadius: 7,
+                      background: isMenuOpen ? C.accentDim : 'transparent',
+                      color: isMenuOpen ? C.accent : C.muted,
+                      cursor: 'pointer',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <svg width={14} height={14} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <circle cx={12} cy={5}  r={1.6} />
+                      <circle cx={12} cy={12} r={1.6} />
+                      <circle cx={12} cy={19} r={1.6} />
+                    </svg>
+                  </span>
+                </button>
+              )}
+
+              {isMenuOpen && !isRenaming && (
+                <>
+                  <div
+                    onClick={() => setMenuId(null)}
+                    style={{ position: 'fixed', inset: 0, zIndex: 52, background: 'transparent' }}
+                  />
+                  <div
+                    role="menu"
+                    style={{
+                      position: 'absolute', top: 'calc(100% - 0.25rem)', right: '0.4rem',
+                      zIndex: 53,
+                      background: C.card, border: `1px solid ${C.border}`,
+                      borderRadius: 10, padding: '0.3rem',
+                      minWidth: 160,
+                      boxShadow: '0 12px 30px rgba(0,0,0,0.55)',
+                      display: 'flex', flexDirection: 'column', gap: '0.1rem',
+                    }}
+                  >
+                    <button
+                      role="menuitem"
+                      onClick={() => {
+                        setRenamingId(s.id);
+                        setRenameValue(s.name);
+                        setMenuId(null);
+                      }}
+                      style={{
+                        background: 'transparent', border: 'none', cursor: 'pointer',
+                        color: C.text, fontFamily: 'inherit', textAlign: 'left',
+                        fontSize: '0.82rem', fontWeight: 600,
+                        padding: '0.5rem 0.65rem', borderRadius: 7,
+                        display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <IconPencil size={14} /> Нэр өөрчлөх
+                    </button>
+                    <button
+                      role="menuitem"
+                      disabled={list.length <= 1}
+                      onClick={() => {
+                        if (list.length <= 1) return;
+                        onDelete(s.id);
+                        setMenuId(null);
+                      }}
+                      title={list.length > 1 ? '' : 'At least one session is required'}
+                      style={{
+                        background: 'transparent', border: 'none',
+                        cursor: list.length > 1 ? 'pointer' : 'not-allowed',
+                        color: list.length > 1 ? '#f87171' : 'rgba(248,113,113,0.4)',
+                        fontFamily: 'inherit', textAlign: 'left',
+                        fontSize: '0.82rem', fontWeight: 600,
+                        padding: '0.5rem 0.65rem', borderRadius: 7,
+                        display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
+                      }}
+                      onMouseEnter={e => { if (list.length > 1) e.currentTarget.style.background = 'rgba(239,68,68,0.08)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <IconTrash size={14} /> Устгах
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Sticky bottom CTA — collapsed button by default, expands to
+          an inline input on tap. Enter / ✓ commits, Esc / ✕ cancels. */}
+      <div style={{
+        flexShrink: 0,
+        padding: '0.7rem 1rem',
+        borderTop: `1px solid ${C.border}`,
+      }}>
+        {creating ? (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: '0.4rem' }}>
+            <input
+              autoFocus
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  onCreate(newName);
+                  setNewName('');
+                  setCreating(false);
+                  onClose();
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setCreating(false);
+                  setNewName('');
+                }
+              }}
+              placeholder="Сессийн нэр…"
+              style={{
+                background: C.cardAlt, color: C.text,
+                border: `1px solid ${C.borderHi}`, borderRadius: 8,
+                padding: '0.55rem 0.7rem', fontSize: '0.9rem',
+                fontFamily: 'inherit', outline: 'none', minWidth: 0,
+              }}
+            />
+            <button
+              onClick={() => {
+                onCreate(newName);
+                setNewName('');
+                setCreating(false);
+                onClose();
+              }}
+              aria-label="Үүсгэх"
+              style={{
+                width: 36, height: 36, borderRadius: 8,
+                background: C.accentDim, color: C.accent,
+                border: `1px solid ${C.borderHi}`, cursor: 'pointer',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              }}
+            ><IconCheck size={16} /></button>
+            <button
+              onClick={() => { setCreating(false); setNewName(''); }}
+              aria-label="Болих"
+              style={{
+                width: 36, height: 36, borderRadius: 8,
+                background: 'transparent', color: C.muted,
+                border: `1px solid ${C.border}`, cursor: 'pointer',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              }}
+            ><IconClose size={16} /></button>
+          </div>
+        ) : (
+          <button
+            onClick={() => { setCreating(true); setNewName(''); }}
+            style={{
+              width: '100%',
+              background: 'rgba(167,139,250,0.1)',
+              color: C.accent,
+              border: '1px dashed rgba(167,139,250,0.3)',
+              borderRadius: 10,
+              padding: '0.7rem',
+              fontSize: '0.88rem', fontWeight: 600, fontFamily: 'inherit',
+              cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.45rem',
+              transition: 'background 0.15s ease, border-color 0.15s ease',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(167,139,250,0.16)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(167,139,250,0.1)'; }}
+          >
+            <IconPlus size={14} /> Шинэ сесс үүсгэх
+          </button>
+        )}
+      </div>
+    </>
+  );
+
+  // The new-design glass container — same chrome in both shells so the
+  // popup reads as one component regardless of how it was triggered.
+  const container = (extraStyle: React.CSSProperties = {}) => ({
+    background: 'rgba(20,20,30,0.95)',
+    backdropFilter: 'blur(20px)',
+    WebkitBackdropFilter: 'blur(20px)',
+    border: '1px solid rgba(255,255,255,0.08)',
+    borderRadius: 16,
+    boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
+    maxHeight: '70vh',
+    display: 'flex', flexDirection: 'column' as const,
+    overflow: 'hidden' as const,
+    animation: 'pv-sessions-pop 0.16s cubic-bezier(0.2, 0.8, 0.3, 1) both',
+    ...extraStyle,
+  });
+
+  if (mode === 'sidebar') {
+    return (
+      <>
+        <div
+          onClick={onClose}
+          style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'transparent' }}
+        />
+        <div
+          role="dialog"
+          aria-label="Sessions"
+          style={container({
+            position: 'absolute',
+            top: '100%', left: '0.7rem', right: '0.7rem',
+            marginTop: '0.4rem',
+            zIndex: 51,
+          })}
+        >
+          {body}
+        </div>
+        <style>{`
+          @keyframes pv-sessions-pop {
+            from { opacity: 0; transform: scale(0.95); }
+            to   { opacity: 1; transform: scale(1); }
+          }
+        `}</style>
+      </>
+    );
+  }
+
+  return (
+    <div
+      onClick={onClose}
+      role="dialog"
+      aria-label="Sessions"
+      style={{
+        position: 'fixed', inset: 0, zIndex: 9000,
+        background: 'rgba(0,0,0,0.75)',
+        backdropFilter: 'blur(4px)',
+        WebkitBackdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '1rem',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={container({
+          width: '100%',
+          maxWidth: 460,
+        })}
+      >
+        {body}
+      </div>
+      <style>{`
+        @keyframes pv-sessions-pop {
+          from { opacity: 0; transform: scale(0.95); }
+          to   { opacity: 1; transform: scale(1); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 function SortPicker({ sortMode, onChange }: {
   sortMode: SortMode;
   onChange: (m: SortMode) => void;
