@@ -895,6 +895,41 @@ export default function TimerPage() {
     if (timer.state === 'running') runStartedAtRef.current = Date.now();
   }, [timer.state]);
 
+  // Tap-to-stop overlay lifecycle. The overlay stays mounted while the
+  // timer is running AND for ~300 ms after it stops — long enough to
+  // swallow the lingering touchend/click events from the same touch
+  // that stopped the timer. Without this trailing window, the user's
+  // lift-off used to bleed through to whatever sat underneath (the
+  // mobile bottom nav, especially), changing tabs the moment they
+  // stopped a solve. The overlay handlers themselves only call
+  // `timer.stop()` while state is actually 'running'; during the
+  // post-stop window the overlay is inert except for absorbing input.
+  const [overlayActive, setOverlayActive] = useState(false);
+  const overlayTimeoutRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (timer.state === 'running') {
+      if (overlayTimeoutRef.current != null) {
+        window.clearTimeout(overlayTimeoutRef.current);
+        overlayTimeoutRef.current = null;
+      }
+      setOverlayActive(true);
+    } else {
+      if (overlayTimeoutRef.current != null) {
+        window.clearTimeout(overlayTimeoutRef.current);
+      }
+      overlayTimeoutRef.current = window.setTimeout(() => {
+        setOverlayActive(false);
+        overlayTimeoutRef.current = null;
+      }, 300);
+    }
+    return () => {
+      if (overlayTimeoutRef.current != null) {
+        window.clearTimeout(overlayTimeoutRef.current);
+        overlayTimeoutRef.current = null;
+      }
+    };
+  }, [timer.state]);
+
   // ── Bluetooth timer (GAN + QiYi) ────────────────────────────────────────
   // Both brands feed the same set of callbacks, so the rest of the page
   // doesn't care which protocol is driving the solve. The active brand is
@@ -1600,33 +1635,55 @@ export default function TimerPage() {
         backgroundSize: '3px 3px', opacity: 0.7,
       }} />
 
-      {/* Fullscreen tap-to-stop overlay — only mounted during an active
-          run. Lets the user slap ANYWHERE on the screen to stop, not
-          just the central digits area. Lives at the top level of the
-          page so it covers both the desktop sidebar layout and the
-          mobile tab layout without needing two copies. Skipped when a
-          Bluetooth smart timer drives the engine (the device controls
-          start/stop via its own events) and in manual entry mode
-          (there's no running state to stop there). The 50 ms guard
-          guarantees the same touch that fired startRunning /
-          fireRunning can't bubble back in and immediately stop the
-          run at 0.0 s. z-index 9998 sits above the page content but
-          below ModalShell (z 9000 isn't enough — we want this on top
-          of every persistent surface during a run). */}
-      {timer.state === 'running' && !ganConnected && timeEntryMode !== 'manual' && (
+      {/* Fullscreen tap-to-stop overlay. Mounted on `overlayActive`
+          rather than `timer.state === 'running'` so it lingers ~300 ms
+          past the stop, absorbing the lift-off / click events from the
+          same touch that stopped the timer. Without this trailing
+          window, the user's stop-tap used to fire a click on whatever
+          sat behind the overlay — most often the mobile bottom-nav
+          tab. Skipped when a Bluetooth smart timer drives the engine
+          (the device controls start/stop via its own events) and in
+          manual entry mode (there's no running state to stop there).
+          z-index 9998 sits above the page content but is comfortably
+          below the ModalShell stack so an open modal still receives
+          taps. */}
+      {overlayActive && !ganConnected && timeEntryMode !== 'manual' && (
         <div
           aria-label="Tap to stop timer"
           role="button"
           onTouchStart={e => {
-            if (Date.now() - runStartedAtRef.current < 50) return;
             e.preventDefault();
             e.stopPropagation();
+            // Only stop while the timer is actually running. During
+            // the 300 ms post-stop window the overlay is inert — its
+            // job there is purely to swallow the touchend/click from
+            // the same gesture that stopped the timer a moment ago.
+            if (timer.state !== 'running') return;
+            // 50 ms guard against the SAME touch that started the run
+            // (inspecting→armed→running) bubbling back in and stopping
+            // the timer immediately at 0.0 s.
+            if (Date.now() - runStartedAtRef.current < 50) return;
             timer.stop();
           }}
-          onMouseDown={e => {
-            if (Date.now() - runStartedAtRef.current < 50) return;
+          onTouchEnd={e => {
+            // Absorb the lift-off so it can't translate into a click on
+            // an element underneath the overlay.
             e.preventDefault();
+            e.stopPropagation();
+          }}
+          onMouseDown={e => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (timer.state !== 'running') return;
+            if (Date.now() - runStartedAtRef.current < 50) return;
             timer.stop();
+          }}
+          onClick={e => {
+            // A click event still synthesises from touch on most
+            // mobile browsers — absorb that too so the bottom nav
+            // can't be activated by the stop tap.
+            e.preventDefault();
+            e.stopPropagation();
           }}
           style={{
             position: 'fixed',
