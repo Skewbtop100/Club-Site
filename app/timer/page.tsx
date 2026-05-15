@@ -885,6 +885,16 @@ export default function TimerPage() {
     return () => window.clearTimeout(id);
   }, [timer.state]);
 
+  // Wallclock timestamp captured when the timer enters the 'running'
+  // state. The fullscreen tap-to-stop overlay (mounted below) uses this
+  // to drop taps inside the first 50 ms of a run — the SAME touch that
+  // fired fireRunning / startRunning could otherwise bubble straight
+  // back into the overlay and stop the timer at 0.0s.
+  const runStartedAtRef = useRef<number>(0);
+  useEffect(() => {
+    if (timer.state === 'running') runStartedAtRef.current = Date.now();
+  }, [timer.state]);
+
   // ── Bluetooth timer (GAN + QiYi) ────────────────────────────────────────
   // Both brands feed the same set of callbacks, so the rest of the page
   // doesn't care which protocol is driving the solve. The active brand is
@@ -1589,6 +1599,48 @@ export default function TimerPage() {
         backgroundImage: 'radial-gradient(rgba(255,255,255,0.025) 1px, transparent 1px)',
         backgroundSize: '3px 3px', opacity: 0.7,
       }} />
+
+      {/* Fullscreen tap-to-stop overlay — only mounted during an active
+          run. Lets the user slap ANYWHERE on the screen to stop, not
+          just the central digits area. Lives at the top level of the
+          page so it covers both the desktop sidebar layout and the
+          mobile tab layout without needing two copies. Skipped when a
+          Bluetooth smart timer drives the engine (the device controls
+          start/stop via its own events) and in manual entry mode
+          (there's no running state to stop there). The 50 ms guard
+          guarantees the same touch that fired startRunning /
+          fireRunning can't bubble back in and immediately stop the
+          run at 0.0 s. z-index 9998 sits above the page content but
+          below ModalShell (z 9000 isn't enough — we want this on top
+          of every persistent surface during a run). */}
+      {timer.state === 'running' && !ganConnected && timeEntryMode !== 'manual' && (
+        <div
+          aria-label="Tap to stop timer"
+          role="button"
+          onTouchStart={e => {
+            if (Date.now() - runStartedAtRef.current < 50) return;
+            e.preventDefault();
+            e.stopPropagation();
+            timer.stop();
+          }}
+          onMouseDown={e => {
+            if (Date.now() - runStartedAtRef.current < 50) return;
+            e.preventDefault();
+            timer.stop();
+          }}
+          style={{
+            position: 'fixed',
+            top: 0, left: 0, right: 0, bottom: 0,
+            zIndex: 9998,
+            background: 'transparent',
+            cursor: 'pointer',
+            touchAction: 'manipulation',
+            userSelect: 'none',
+            WebkitUserSelect: 'none',
+            WebkitTapHighlightColor: 'transparent',
+          }}
+        />
+      )}
 
       {mounted && !isMobile && (
       <div className="pv-grid" style={{
