@@ -304,11 +304,36 @@ function useMpPrefs(): [MpPrefs, (patch: Partial<MpPrefs>) => void] {
   return [prefs, update];
 }
 
-const SCRAMBLE_FONT_PX: Record<MpPrefs['scrambleFontSize'], { mobile: string; desktop: string }> = {
-  sm: { mobile: '0.78rem', desktop: '0.95rem' },
-  md: { mobile: '0.92rem', desktop: '1.15rem' },
-  lg: { mobile: '1.05rem', desktop: '1.35rem' },
-};
+// Mirrors /timer's mobile scramble sizing exactly — length-aware base px
+// (so Megaminx wraps, 2x2 doesn't look stranded) with the user's sm/md/lg
+// preference applied as a multiplier. Kept in sync with
+// app/timer/page.tsx :: getScrambleFontSize.
+function getMpMobileScrambleFontSize(
+  scramble: string,
+  userPref: MpPrefs['scrambleFontSize'],
+): number {
+  const len = scramble.length;
+  let basePx: number;
+  if (len < 30)        basePx = 24;
+  else if (len < 60)   basePx = 22;
+  else if (len < 100)  basePx = 19;
+  else if (len < 160)  basePx = 17;
+  else if (len < 240)  basePx = 15;
+  else                 basePx = 13;
+  const multiplier = userPref === 'sm' ? 0.85
+                   : userPref === 'lg' ? 1.15
+                   : 1.0;
+  return Math.round(basePx * multiplier * 2) / 2;
+}
+
+// Mirrors /timer's desktop scramble sizing — viewport-clamped, three-step
+// sm/md/lg ramp. Kept in sync with
+// app/timer/page.tsx :: getDesktopScrambleFontSize.
+function getMpDesktopScrambleFontSize(pref: MpPrefs['scrambleFontSize']): string {
+  if (pref === 'sm') return 'clamp(0.9rem, 2.0vw, 1.4rem)';
+  if (pref === 'lg') return 'clamp(1.15rem, 2.8vw, 2rem)';
+  return 'clamp(1rem, 2.4vw, 1.7rem)';
+}
 
 // Timer state machine + fmtMs + helpers all live in @/lib/timer-engine.
 // Multiplayer used to have its own useMpTimer with a hard-coded 350ms hold
@@ -3758,10 +3783,6 @@ function RacingScreen({
   // / scramble-shown state to mimic a fresh attempt.
   const [extraConfirmOpen, setExtraConfirmOpen] = useState(false);
 
-  // Scramble reveal — hidden until the user taps "Tap to reveal scramble".
-  // Re-hides on every solve boundary so each solve starts fresh.
-  const [scrambleShown, setScrambleShown] = useState(false);
-
   const onSolveCommit = useCallback((ms: number, penalty: EnginePenalty) => {
     // Multiplayer resolves OK / +2 / DNF in the post-solve confirm
     // dialog (its local `Penalty` uses 'ok' rather than the engine's
@@ -3773,17 +3794,18 @@ function RacingScreen({
 
   const timer = useTimer(onSolveCommit, holdTimeMs);
 
-  // Timer can't fire until the player has revealed the scramble.
   // Pause / vote interaction lock. While the room is paused or a vote
-  // (any type) is mid-flight, freeze the timer + scramble reveal so the
-  // player can't sneak a solve in. The vote-prompt modal already steals
-  // focus for non-initiators; this gate covers the initiator's view too.
+  // (any type) is mid-flight, freeze the timer so the player can't sneak a
+  // solve in. The vote-prompt modal already steals focus for non-initiators;
+  // this gate covers the initiator's view too. `isWaitingForOpponents`
+  // additionally locks the timer when the fullscreen waiting overlay is
+  // visible (player is ≥2 solves ahead of the slowest opponent).
   const isPaused = !!room.meta?.paused;
   const voteInFlight = !!(room.votes && (
     room.votes.restartRound || room.votes.pause || room.votes.resume
   ));
   const interactionLocked = isWaitingForOpponents || isRoundDone || !!pending
-    || !scrambleShown || isPaused || voteInFlight;
+    || isPaused || voteInFlight;
 
   // Mirror our local timer / pending state into the page-level refs so
   // the idle-warning loop can suppress its check during inspection,
@@ -3806,7 +3828,6 @@ function RacingScreen({
   // Reset local + timer state at solve / round boundary.
   useEffect(() => {
     setPending(null);
-    setScrambleShown(false);
     timer.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myCurrent, room.round]);
@@ -3855,8 +3876,8 @@ function RacingScreen({
 
   // Confirm-step for "Нэмэлт scramble". The pending solve is local
   // (never written to RTDB), so we don't need to clear anything in
-  // `solves` — just discard `pending`, reset the timer, and re-hide the
-  // scramble so the user has to tap to reveal the fresh one.
+  // `solves` — just discard `pending` and reset the timer. The new
+  // scramble is shown immediately (no reveal gate to reset).
   const confirmExtraScramble = useCallback(async () => {
     if (!pending) return;
     const defaultPenalty: Penalty = pending.defaultDnf ? 'dnf' : 'ok';
@@ -3867,7 +3888,6 @@ function RacingScreen({
       console.error('[mp] requestExtraScramble failed', err);
     }
     setPending(null);
-    setScrambleShown(false);
     timer.reset();
   }, [pending, myCurrent, onRequestExtra, timer]);
 
@@ -3985,8 +4005,6 @@ function RacingScreen({
           isRoundDone={isRoundDone}
           isWaitingForOpponents={isWaitingForOpponents}
           currentScramble={currentScramble}
-          scrambleShown={scrambleShown}
-          onRevealScramble={() => { if (!isPaused && !voteInFlight) setScrambleShown(true); }}
           timer={timer}
           pending={pending}
           displayValue={displayValue}
@@ -4019,6 +4037,9 @@ function RacingScreen({
             deadlineMs={undoDeadlineMs}
             onUndo={() => { onInstantUndo(lastConfirmedSolve.idx); }}
           />
+        )}
+        {isWaitingForOpponents && (
+          <WaitingForOpponentsOverlay nextOpponentSolveIndex={minOthers + 1} />
         )}
       </>
     );
@@ -4067,13 +4088,6 @@ function RacingScreen({
         </IconButton>
       </div>
 
-      {isWaitingForOpponents && (
-        <div style={{
-          background: C.accentDim, border: `1px solid ${C.borderHi}`,
-          borderRadius: 12, padding: '0.85rem 1rem', textAlign: 'center',
-          color: C.accent, fontWeight: 700, fontSize: '0.92rem',
-        }}>Waiting for opponents to catch up…</div>
-      )}
       {isRoundDone && (
         <div style={{
           background: C.successDim, border: `1px solid ${C.success}`,
@@ -4085,10 +4099,8 @@ function RacingScreen({
       <ScrambleArea
         isMobile={false}
         scramble={currentScramble}
-        shown={scrambleShown}
-        onReveal={() => { if (!isPaused && !voteInFlight) setScrambleShown(true); }}
-        hidden={isRoundDone || isWaitingForOpponents}
-        fontSizeDesktop={SCRAMBLE_FONT_PX[prefs.scrambleFontSize].desktop}
+        hidden={isRoundDone}
+        fontSize={getMpDesktopScrambleFontSize(prefs.scrambleFontSize)}
       />
 
       <div className="mp-race-grid" style={{
@@ -4136,9 +4148,7 @@ function RacingScreen({
           <div style={{ fontSize: '0.78rem', color: C.muted, marginTop: '0.85rem', letterSpacing: '0.04em', minHeight: '1.1rem' }}>
             {pending && 'Confirm your time'}
             {!pending && isRoundDone && 'Round complete'}
-            {!pending && !isRoundDone && isWaitingForOpponents && 'Waiting for opponents…'}
-            {!pending && !isRoundDone && !isWaitingForOpponents && !scrambleShown && 'Reveal the scramble first'}
-            {!pending && !isRoundDone && !isWaitingForOpponents && scrambleShown && timer.state === 'idle' && 'Hold SPACE / press to arm'}
+            {!pending && !isRoundDone && !isWaitingForOpponents && timer.state === 'idle' && 'Hold SPACE / press to arm'}
             {!pending && timer.state === 'inspecting' && 'Hold to arm, release to start'}
             {!pending && timer.state === 'armed' && !timer.armedReady && (
               <span style={{ color: C.danger, fontWeight: 700 }}>HOLD…</span>
@@ -4184,7 +4194,6 @@ function RacingScreen({
         isRoundDone={isRoundDone}
         eventId={room.event}
         scramble={currentScramble}
-        scrambleShown={scrambleShown}
       />
 
       {extraConfirmOpen && (
@@ -4201,6 +4210,9 @@ function RacingScreen({
           onUndo={() => { onInstantUndo(lastConfirmedSolve.idx); }}
         />
       )}
+      {isWaitingForOpponents && (
+        <WaitingForOpponentsOverlay nextOpponentSolveIndex={minOthers + 1} />
+      )}
     </div>
   );
 }
@@ -4208,7 +4220,7 @@ function RacingScreen({
 // ── Mobile racing layout (header + flex-1 timer + S1..S5/cube row + tabs) ─
 function MobileRacingLayout({
   room, userId, prefs, now, myCurrent, mySolves, isRoundDone, isWaitingForOpponents,
-  currentScramble, scrambleShown, onRevealScramble,
+  currentScramble,
   timer, pending, displayValue, timerColor, timerGlow, borderColor,
   interactionLocked, confirmSolve, onTimerTouchStart, onTimerTouchEnd,
   onOpenSettings, onPause,
@@ -4224,8 +4236,6 @@ function MobileRacingLayout({
   isRoundDone: boolean;
   isWaitingForOpponents: boolean;
   currentScramble: string;
-  scrambleShown: boolean;
-  onRevealScramble: () => void;
   timer: UseTimerReturn;
   pending: { ms: number; defaultDnf: boolean } | null;
   displayValue: string;
@@ -4293,24 +4303,25 @@ function MobileRacingLayout({
           <div style={{
             flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column',
           }}>
-            {/* Scramble (compact, top, muted via ScrambleArea styling) */}
+            {/* Scramble (compact, top). Waiting state is no longer an inline
+                banner — it's the fullscreen overlay rendered by the parent
+                RacingScreen. Only round-done still gets a banner here, since
+                that's a per-player end state and doesn't lock the screen. */}
             <div style={{ flexShrink: 0, padding: '0.4rem 0.55rem 0' }}>
-              {(isRoundDone || isWaitingForOpponents) ? (
+              {isRoundDone ? (
                 <div style={{
-                  background: isRoundDone ? C.successDim : C.accentDim,
-                  border: `1px solid ${isRoundDone ? C.success : C.borderHi}`,
+                  background: C.successDim,
+                  border: `1px solid ${C.success}`,
                   borderRadius: 12, padding: '0.6rem 0.85rem', textAlign: 'center',
-                  color: isRoundDone ? C.success : C.accent, fontWeight: 700, fontSize: '0.82rem',
+                  color: C.success, fontWeight: 700, fontSize: '0.82rem',
                 }}>
-                  {isRoundDone ? 'Round complete — waiting for the others…' : 'Waiting for opponents…'}
+                  Round complete — waiting for the others…
                 </div>
               ) : (
                 <ScrambleArea
                   isMobile={true}
                   scramble={currentScramble}
-                  shown={scrambleShown}
-                  onReveal={onRevealScramble}
-                  fontSizeMobile={SCRAMBLE_FONT_PX[prefs.scrambleFontSize].mobile}
+                  fontSize={getMpMobileScrambleFontSize(currentScramble, prefs.scrambleFontSize)}
                 />
               )}
             </div>
@@ -4367,9 +4378,7 @@ function MobileRacingLayout({
               }}>
                 {pending && 'Confirm your time'}
                 {!pending && isRoundDone && 'Round complete'}
-                {!pending && !isRoundDone && isWaitingForOpponents && 'Waiting for opponents…'}
-                {!pending && !isRoundDone && !isWaitingForOpponents && !scrambleShown && 'Reveal the scramble first'}
-                {!pending && !isRoundDone && !isWaitingForOpponents && scrambleShown && timer.state === 'idle' && 'Hold to arm, release to start'}
+                {!pending && !isRoundDone && !isWaitingForOpponents && timer.state === 'idle' && 'Hold to arm, release to start'}
                 {!pending && timer.state === 'inspecting' && 'Hold to arm, release to start'}
                 {!pending && timer.state === 'armed' && !timer.armedReady && (
                   <span style={{ color: C.danger, fontWeight: 700 }}>HOLD…</span>
@@ -4421,7 +4430,6 @@ function MobileRacingLayout({
           isRoundDone={isRoundDone}
           eventId={room.event}
           scramble={currentScramble}
-          scrambleShown={scrambleShown}
           roundLabel={roundLabel}
         />
       </div>
@@ -4667,23 +4675,18 @@ function RaceTabButton({
 // Behaviour is identical at every breakpoint; only sizes differ.
 
 function ScrambleArea({
-  isMobile, scramble, shown, onReveal, hidden,
-  fontSizeMobile, fontSizeDesktop,
+  isMobile, scramble, hidden, fontSize,
 }: {
   isMobile: boolean;
   scramble: string;
-  shown: boolean;
-  onReveal: () => void;
-  // Optionally suppress the whole component (e.g. round done / waiting banners).
+  // Optionally suppress the whole component (e.g. round done banner).
   hidden?: boolean;
-  // Pref-driven size overrides; default to medium.
-  fontSizeMobile?: string;
-  fontSizeDesktop?: string;
+  // Either a number (mobile px from getMpMobileScrambleFontSize) or a
+  // string (desktop clamp from getMpDesktopScrambleFontSize). Required so
+  // the scramble matches /timer exactly across all sm/md/lg + length combos.
+  fontSize: number | string;
 }) {
   if (hidden) return null;
-  const fontSize = isMobile
-    ? (fontSizeMobile ?? '0.92rem')
-    : (fontSizeDesktop ?? '1.15rem');
   return (
     <div style={{
       background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
@@ -4691,39 +4694,93 @@ function ScrambleArea({
       minHeight: isMobile ? 38 : 64,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
     }}>
-      {shown ? (
-        <div style={{
-          fontFamily: 'JetBrains Mono, monospace',
-          fontSize,
-          color: C.muted,
-          lineHeight: isMobile ? 1.35 : 1.5,
-          letterSpacing: '0.04em',
-          whiteSpace: 'pre-wrap', wordBreak: 'break-word', textAlign: 'center',
-          width: '100%',
-        }}>{scramble}</div>
-      ) : (
-        <button
-          onClick={onReveal}
-          type="button"
-          style={{
-            background: C.accentDim, color: C.accent,
-            border: `1px solid ${C.borderHi}`, borderRadius: 10,
-            padding: isMobile ? '0.35rem 0.85rem' : '0.6rem 1.2rem',
-            fontSize: isMobile ? '0.8rem' : '0.92rem',
-            fontWeight: 700, fontFamily: 'inherit',
-            cursor: 'pointer', letterSpacing: '0.02em',
-          }}
-        >Tap to reveal scramble</button>
-      )}
+      <div style={{
+        // Match /timer's font stack and text styling exactly (mobile uses
+        // lineHeight 1.45 + no letter-spacing; desktop uses 1.7 + 0.02em).
+        fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
+        fontSize,
+        fontWeight: isMobile ? 400 : 500,
+        color: C.text,
+        lineHeight: isMobile ? 1.45 : 1.7,
+        letterSpacing: isMobile ? undefined : '0.02em',
+        whiteSpace: 'pre-wrap', wordBreak: 'break-word', textAlign: 'center',
+        width: '100%',
+      }}>{scramble}</div>
+    </div>
+  );
+}
+
+// Fullscreen "waiting for opponents" gate. Mounted at the top of the
+// RacingScreen subtree when `isWaitingForOpponents` is true (player is
+// ≥2 solves ahead of the slowest still-connected opponent). Replaces the
+// old inline banner so it visually + interactively blocks the timer area
+// — pointerEvents:auto captures stray taps on the scramble/timer.
+// Interaction is already locked via the same flag in `interactionLocked`,
+// so this overlay is purely a UI cue; no extra event handling needed.
+function WaitingForOpponentsOverlay({ nextOpponentSolveIndex }: {
+  // Next solve index the slowest opponent must reach (= minOthers + 1).
+  // Displayed in the secondary line so the racer knows what they're
+  // waiting for.
+  nextOpponentSolveIndex: number;
+}) {
+  return (
+    <div
+      // Stop touch / mouse events so the overlay can't be "tapped through"
+      // — without this, mobile tap-to-arm could still register on the
+      // timer area underneath.
+      onTouchStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
+      onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); }}
+      onMouseDown={(e) => { e.stopPropagation(); }}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.95)',
+        zIndex: 9000,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexDirection: 'column',
+        gap: '1rem',
+        pointerEvents: 'auto',
+      }}
+    >
+      <div
+        className="mp-waiting-pulse"
+        style={{
+          fontSize: '1.2rem',
+          color: 'rgba(255,255,255,0.8)',
+          fontWeight: 600,
+          textAlign: 'center',
+          padding: '0 2rem',
+        }}
+      >
+        Бусад тамирчдаа хүлээнэ үү...
+      </div>
+      <div style={{
+        fontSize: '0.85rem',
+        color: 'rgba(255,255,255,0.4)',
+        fontWeight: 500,
+      }}>
+        {nextOpponentSolveIndex} эвлүүлэлт хүртэл хүлээх
+      </div>
+      <style>{`
+        @keyframes mp-pulse-text {
+          0%, 100% { opacity: 0.8; }
+          50%      { opacity: 0.4; }
+        }
+        .mp-waiting-pulse {
+          animation: mp-pulse-text 2s ease-in-out infinite;
+        }
+      `}</style>
     </div>
   );
 }
 
 // Single horizontal row: 5 solve chips on the left, cube viz cell on the
-// right. The cube viz also respects scrambleShown so the visualisation
-// doesn't leak the scramble before reveal.
+// right. Cube viz mirrors scramble visibility — both are always shown
+// during the round (no reveal gate); only round-done hides the cube.
 function SolveAndCubeRow({
-  isMobile, mySolves, current, isRoundDone, eventId, scramble, scrambleShown, roundLabel,
+  isMobile, mySolves, current, isRoundDone, eventId, scramble, roundLabel,
 }: {
   isMobile: boolean;
   mySolves: SolveData[];
@@ -4731,7 +4788,6 @@ function SolveAndCubeRow({
   isRoundDone: boolean;
   eventId: string;
   scramble: string;
-  scrambleShown: boolean;
   roundLabel?: string;
 }) {
   // Mobile cube shrunk 120 → 92px; the row was the single biggest fixed block
@@ -4793,13 +4849,13 @@ function SolveAndCubeRow({
           flexShrink: 0,
           overflow: 'hidden',
         }}>
-          {scrambleShown && !isRoundDone ? (
+          {!isRoundDone ? (
             <CubeViewer eventId={eventId} scramble={scramble} />
           ) : (
             <div style={{
               fontSize: '0.58rem', letterSpacing: '0.12em', textTransform: 'uppercase',
               color: C.mutedDim, fontWeight: 700, textAlign: 'center',
-            }}>{isRoundDone ? '—' : 'Hidden'}</div>
+            }}>—</div>
           )}
         </div>
       </div>
