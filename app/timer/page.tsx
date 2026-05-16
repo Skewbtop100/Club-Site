@@ -3034,8 +3034,7 @@ export default function TimerPage() {
             {mobileTab === 'tools' && (
               <ToolsTab
                 onNavigate={(path) => router.push(path)}
-                onSwitchToStats={() => setMobileTab('stats')}
-                onOpenSettings={() => setSettingsOpen(true)}
+                solveCount={validCount}
               />
             )}
 
@@ -3869,16 +3868,10 @@ function MobileMicroStat({ label, value, accent }: { label: string; value: strin
 
 // ── Community tab (mobile, internal id 'tools') ─────────────────────────
 //
-// Phone-home-screen-style 4-column app grid. Each tile is square,
-// glass-bordered, with a single SVG icon + short label. Three tile
-// kinds: route navigations (push a path), in-page actions (switch
-// internal tab, open a modal), and "Soon" stubs that render dimmed.
-
-type ToolAction =
-  | { kind: 'route'; route: string }
-  | { kind: 'tab' }
-  | { kind: 'settings' }
-  | { kind: 'soon' };
+// Layout: wide Profile card at the top, then two grouped 3-column grids —
+// "Идэвхтэй" (live destinations, currently just Race) and "Удахгүй"
+// (placeholder tiles rendered dimmed with a SOON badge). Each tile is
+// glass-bordered, square, with a single SVG icon + short label.
 
 interface ToolTile {
   id: string;
@@ -3886,51 +3879,76 @@ interface ToolTile {
   Icon: (p: IconProps) => React.ReactElement;
   /** Tint used for the icon container background + border. */
   tint: string;
-  action: ToolAction;
+  /** Undefined route means the tile is a "Soon" stub (rendered dimmed). */
+  route?: string;
 }
 
-const COMMUNITY_TILES: ToolTile[] = [
-  { id: 'race',         name: 'Race',         Icon: IconStopwatch,  tint: '#A78BFA', action: { kind: 'route', route: '/timer/multiplayer' } },
-  { id: 'competition',  name: 'Competition',  Icon: IconTrophy,     tint: '#fbbf24', action: { kind: 'route', route: '/competition' } },
-  { id: 'community',    name: 'Community',    Icon: IconUsers,      tint: '#60a5fa', action: { kind: 'route', route: '/community' } },
-  { id: 'stats',        name: 'Stats',        Icon: IconBarChart,   tint: '#34D399', action: { kind: 'tab' } },
-  { id: 'settings',     name: 'Settings',     Icon: IconSettings,   tint: '#9ca3af', action: { kind: 'settings' } },
-  { id: 'profile',      name: 'Profile',      Icon: IconUserCircle, tint: '#f472b6', action: { kind: 'route', route: '/timer/profile' } },
-  { id: 'algorithms',   name: 'Algorithms',   Icon: IconCube,       tint: '#22d3ee', action: { kind: 'route', route: '/algorithms' } },
-  { id: 'help',         name: 'Help',         Icon: IconHelp,       tint: '#fb923c', action: { kind: 'soon' } },
+const ACTIVE_TILES: ToolTile[] = [
+  { id: 'race', name: 'Race', Icon: IconStopwatch, tint: '#A78BFA', route: '/timer/multiplayer' },
 ];
 
+const SOON_TILES: ToolTile[] = [
+  { id: 'competition', name: 'Competition', Icon: IconTrophy, tint: '#fbbf24' },
+  { id: 'community',   name: 'Community',   Icon: IconUsers,  tint: '#60a5fa' },
+  { id: 'algorithms',  name: 'Algorithms',  Icon: IconCube,   tint: '#22d3ee' },
+];
+
+const ROLE_LABEL_MN: Record<'member' | 'athlete' | 'admin', string> = {
+  member:  'Гишүүн',
+  athlete: 'Спортсмен',
+  admin:   'Админ',
+};
+
 function ToolsTab({
-  onNavigate, onSwitchToStats, onOpenSettings,
+  onNavigate, solveCount,
 }: {
   onNavigate: (path: string) => void;
-  onSwitchToStats: () => void;
-  onOpenSettings: () => void;
+  solveCount: number;
 }) {
-  const handleClick = (tile: ToolTile) => {
-    if (tile.action.kind === 'soon') return;
-    if (tile.action.kind === 'route') onNavigate(tile.action.route);
-    else if (tile.action.kind === 'tab') onSwitchToStats();
-    else if (tile.action.kind === 'settings') onOpenSettings();
-  };
-
   return (
     <div style={{
       flex: '1 1 auto', minHeight: 0, overflowY: 'auto',
-      padding: '1rem',
+      padding: '1rem 0',
     }}>
+      <div style={{ padding: '0 1rem' }}>
+        <ProfileCard
+          solveCount={solveCount}
+          onClick={() => onNavigate('/timer/profile')}
+        />
+      </div>
+
+      <SectionLabel>Идэвхтэй</SectionLabel>
       <div style={{
+        padding: '0 1rem',
         display: 'grid',
-        gridTemplateColumns: 'repeat(4, 1fr)',
+        gridTemplateColumns: 'repeat(3, 1fr)',
         gap: '0.6rem',
         justifyItems: 'stretch',
       }}>
-        {COMMUNITY_TILES.map((tile, i) => (
+        {ACTIVE_TILES.map((tile, i) => (
           <ToolTileBtn
             key={tile.id}
             tile={tile}
             index={i}
-            onClick={() => handleClick(tile)}
+            onClick={() => tile.route && onNavigate(tile.route)}
+          />
+        ))}
+      </div>
+
+      <SectionLabel>Удахгүй</SectionLabel>
+      <div style={{
+        padding: '0 1rem',
+        display: 'grid',
+        gridTemplateColumns: 'repeat(3, 1fr)',
+        gap: '0.6rem',
+        justifyItems: 'stretch',
+      }}>
+        {SOON_TILES.map((tile, i) => (
+          <ToolTileBtn
+            key={tile.id}
+            tile={tile}
+            index={i + ACTIVE_TILES.length}
+            onClick={() => { /* no-op: opens soon */ }}
           />
         ))}
       </div>
@@ -3945,6 +3963,116 @@ function ToolsTab({
   );
 }
 
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      fontSize: '0.65rem', fontWeight: 700,
+      letterSpacing: '0.16em', textTransform: 'uppercase',
+      color: C.mutedDim,
+      margin: '0.6rem 0',
+      padding: '0 1rem 0 1.5rem',
+    }}>{children}</div>
+  );
+}
+
+function ProfileCard({
+  solveCount, onClick,
+}: {
+  solveCount: number;
+  onClick: () => void;
+}) {
+  const { user } = useAuth();
+  const [avatarBroken, setAvatarBroken] = useState(false);
+
+  const displayName = user?.displayName?.trim() || 'Зочин';
+  const roleLabel = user
+    ? (ROLE_LABEL_MN[user.role] ?? user.role)
+    : 'Нэвтрэх';
+  const initial = displayName.codePointAt(0)
+    ? String.fromCodePoint(displayName.codePointAt(0)!).toUpperCase()
+    : '?';
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label="Профайл"
+      style={{
+        width: '100%',
+        display: 'flex', alignItems: 'center', gap: '0.85rem',
+        padding: '0.85rem 1rem',
+        background: `linear-gradient(135deg, rgba(167,139,250,0.04), ${C.card})`,
+        border: '1px solid rgba(167,139,250,0.15)',
+        borderRadius: 16,
+        color: C.text, fontFamily: 'inherit',
+        cursor: 'pointer',
+        transition: 'transform 0.12s ease, border-color 0.15s ease',
+        WebkitTapHighlightColor: 'transparent',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(167,139,250,0.4)'; }}
+      onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(167,139,250,0.15)'; }}
+      onMouseDown={e => { e.currentTarget.style.transform = 'scale(0.99)'; }}
+      onMouseUp={e => { e.currentTarget.style.transform = 'scale(1)'; }}
+      onTouchStart={e => { e.currentTarget.style.transform = 'scale(0.99)'; }}
+      onTouchEnd={e => { e.currentTarget.style.transform = 'scale(1)'; }}
+      onTouchCancel={e => { e.currentTarget.style.transform = 'scale(1)'; }}
+    >
+      <span style={{
+        width: 48, height: 48, borderRadius: '50%',
+        background: `linear-gradient(135deg, ${C.accent}, #ec4899)`,
+        color: '#fff', fontSize: 20, fontWeight: 800, lineHeight: 1,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        overflow: 'hidden', flexShrink: 0,
+      }}>
+        {user?.photoURL && !avatarBroken ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={user.photoURL}
+            alt=""
+            referrerPolicy="no-referrer"
+            onError={() => setAvatarBroken(true)}
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          />
+        ) : initial}
+      </span>
+
+      <span style={{
+        flex: 1, minWidth: 0,
+        display: 'flex', flexDirection: 'column', gap: '0.15rem',
+        textAlign: 'left',
+      }}>
+        <span style={{
+          fontSize: '1rem', fontWeight: 700, color: C.text,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{displayName}</span>
+        <span style={{
+          fontSize: '0.75rem', color: C.mutedDim,
+          display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          <span style={{
+            padding: '0.05rem 0.4rem',
+            borderRadius: 999,
+            background: 'rgba(167,139,250,0.1)',
+            color: C.accent,
+            fontWeight: 700,
+            fontSize: '0.65rem',
+            letterSpacing: '0.02em',
+          }}>{roleLabel}</span>
+          <span aria-hidden="true">·</span>
+          <span>{solveCount} эвлүүлэлт</span>
+        </span>
+      </span>
+
+      <span aria-hidden="true" style={{
+        color: C.muted, display: 'inline-flex', flexShrink: 0,
+      }}>
+        <IconArrowRight size={16} />
+      </span>
+    </button>
+  );
+}
+
 function ToolTileBtn({
   tile, index, onClick,
 }: {
@@ -3952,7 +4080,7 @@ function ToolTileBtn({
   index: number;
   onClick: () => void;
 }) {
-  const isSoon = tile.action.kind === 'soon';
+  const isSoon = !tile.route;
   const Icon = tile.Icon;
   return (
     <button
@@ -3975,7 +4103,7 @@ function ToolTileBtn({
         gap: '6px',
         color: C.text, fontFamily: 'inherit',
         cursor: isSoon ? 'not-allowed' : 'pointer',
-        opacity: isSoon ? 0.6 : 1,
+        opacity: isSoon ? 0.5 : 1,
         // Press feedback + entrance stagger (30 ms per tile) so the
         // grid feels like a native home-screen.
         animation: `pv-tile-fade 0.28s ease-out both`,
@@ -4009,13 +4137,12 @@ function ToolTileBtn({
       }}>{tile.name}</span>
       {isSoon && (
         <span style={{
-          position: 'absolute', top: 4, right: 4,
-          fontSize: '0.52rem', fontWeight: 800,
-          letterSpacing: '0.06em', textTransform: 'uppercase',
-          padding: '0.1rem 0.35rem', borderRadius: 999,
-          background: 'rgba(255,255,255,0.06)',
+          position: 'absolute', top: 6, right: 8,
+          fontSize: '0.55rem', fontWeight: 700,
+          letterSpacing: '0.1em', textTransform: 'uppercase',
+          padding: '0.15rem 0.4rem', borderRadius: 4,
+          background: 'rgba(255,255,255,0.05)',
           color: C.muted,
-          border: `1px solid ${C.border}`,
         }}>Soon</span>
       )}
     </button>
