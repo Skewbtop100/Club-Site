@@ -2959,22 +2959,15 @@ export default function TimerPage() {
                 flex: '1 1 auto', minHeight: 0,
                 display: 'flex', flexDirection: 'column',
               }}>
-                {/* Header with exit */}
+                {/* Header — title only. The old × close button used to
+                    router.push('/'), which sent users back to the
+                    marketing homepage; the bottom nav already covers
+                    tab switching, so nothing else needs to live here. */}
                 <div style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  display: 'flex', alignItems: 'center',
                   padding: '0.7rem 0.85rem 0.4rem',
                 }}>
                   <div style={{ fontSize: '1rem', fontWeight: 700 }}>Stats</div>
-                  <button
-                    onClick={() => router.push('/')}
-                    aria-label="Exit timer"
-                    style={{
-                      width: 34, height: 34, borderRadius: 8,
-                      background: 'transparent', border: `1px solid ${C.border}`,
-                      color: C.mutedDim, cursor: 'pointer',
-                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    }}
-                  ><IconClose size={16} /></button>
                 </div>
 
                 {/* Chart card — fixed 200px height, last 50 solves only */}
@@ -3037,9 +3030,13 @@ export default function TimerPage() {
               </div>
             )}
 
-            {/* ── TOOLS TAB ─────────────────────────────────────────────── */}
+            {/* ── COMMUNITY TAB (internal id: 'tools') ───────────────────── */}
             {mobileTab === 'tools' && (
-              <ToolsTab onNavigate={(path) => router.push(path)} />
+              <ToolsTab
+                onNavigate={(path) => router.push(path)}
+                onSwitchToStats={() => setMobileTab('stats')}
+                onOpenSettings={() => setSettingsOpen(true)}
+              />
             )}
 
             </main>
@@ -3106,7 +3103,7 @@ export default function TimerPage() {
                 <BottomTab label="Timer"      icon={<IconStopwatch size={20} />} active={mobileTab === 'timer'}  onClick={() => setMobileTab('timer')} C={C} />
                 <BottomTab label="Solves"     icon={<IconList size={20} />}      active={mobileTab === 'solves'} onClick={() => setMobileTab('solves')} C={C} />
                 <BottomTab label="Stats"      icon={<IconChart size={20} />}     active={mobileTab === 'stats'}  onClick={() => setMobileTab('stats')} C={C} />
-                <BottomTab label="Нэмэлтүүд" icon={<IconGrid size={20} />}      active={mobileTab === 'tools'}  onClick={() => setMobileTab('tools')} C={C} />
+                <BottomTab label="Community"  icon={<IconUsers size={20} />}     active={mobileTab === 'tools'}  onClick={() => setMobileTab('tools')} C={C} />
               </nav>
             </div>
           </div>
@@ -3870,271 +3867,156 @@ function MobileMicroStat({ label, value, accent }: { label: string; value: strin
   );
 }
 
-// ── Tools tab (mobile "Нэмэлтүүд") ──────────────────────────────────────
+// ── Community tab (mobile, internal id 'tools') ─────────────────────────
 //
-// Catalogue of side-tools the timer page surfaces. Hardcoded for now —
-// future iterations may pull this from Firestore (e.g., point-gated
-// unlocks). Each entry's `status` drives whether the card is clickable.
-type ToolStatus = 'available' | 'locked' | 'coming-soon';
-interface ToolDef {
+// Phone-home-screen-style 4-column app grid. Each tile is square,
+// glass-bordered, with a single SVG icon + short label. Three tile
+// kinds: route navigations (push a path), in-page actions (switch
+// internal tab, open a modal), and "Soon" stubs that render dimmed.
+
+type ToolAction =
+  | { kind: 'route'; route: string }
+  | { kind: 'tab' }
+  | { kind: 'settings' }
+  | { kind: 'soon' };
+
+interface ToolTile {
   id: string;
   name: string;
-  description: string;
-  icon: string;
-  status: ToolStatus;
-  route: string;
-  color: string;
+  Icon: (p: IconProps) => React.ReactElement;
+  /** Tint used for the icon container background + border. */
+  tint: string;
+  action: ToolAction;
 }
-const TOOLS: ToolDef[] = [
-  {
-    id: 'multiplayer',
-    name: 'Multiplayer Racing',
-    description: 'Найзуудтайгаа хоорондоо өрсөлдөх',
-    icon: '👥',
-    status: 'available',
-    route: '/timer/multiplayer',
-    color: '#A78BFA',
-  },
-  {
-    id: 'algorithms',
-    name: 'Algorithms',
-    description: 'OLL, PLL, F2L сурах',
-    icon: '🧠',
-    status: 'coming-soon',
-    route: '/algorithms',
-    color: '#34D399',
-  },
-  {
-    id: 'trainer',
-    name: 'Trainer',
-    description: 'Тусгай дасгалын горим',
-    icon: '🎯',
-    status: 'coming-soon',
-    route: '/trainer',
-    color: '#fbbf24',
-  },
+
+const COMMUNITY_TILES: ToolTile[] = [
+  { id: 'race',         name: 'Race',         Icon: IconStopwatch,  tint: '#A78BFA', action: { kind: 'route', route: '/timer/multiplayer' } },
+  { id: 'competition',  name: 'Competition',  Icon: IconTrophy,     tint: '#fbbf24', action: { kind: 'route', route: '/competition' } },
+  { id: 'community',    name: 'Community',    Icon: IconUsers,      tint: '#60a5fa', action: { kind: 'route', route: '/community' } },
+  { id: 'stats',        name: 'Stats',        Icon: IconBarChart,   tint: '#34D399', action: { kind: 'tab' } },
+  { id: 'settings',     name: 'Settings',     Icon: IconSettings,   tint: '#9ca3af', action: { kind: 'settings' } },
+  { id: 'profile',      name: 'Profile',      Icon: IconUserCircle, tint: '#f472b6', action: { kind: 'route', route: '/timer/profile' } },
+  { id: 'algorithms',   name: 'Algorithms',   Icon: IconCube,       tint: '#22d3ee', action: { kind: 'route', route: '/algorithms' } },
+  { id: 'help',         name: 'Help',         Icon: IconHelp,       tint: '#fb923c', action: { kind: 'soon' } },
 ];
 
-const TOOLS_VIEW_KEY = 'pv.tools.view';
-type ToolsView = 'grid' | 'list';
-
-function ToolsTab({ onNavigate }: { onNavigate: (path: string) => void }) {
-  // Default to grid; rehydrate from localStorage on mount. SSR-safe — we
-  // start with 'grid' so the server render and the first client render
-  // agree, then swap to the saved value once mounted.
-  const [view, setView] = useState<ToolsView>('grid');
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(TOOLS_VIEW_KEY);
-      if (saved === 'grid' || saved === 'list') setView(saved);
-    } catch { /* ignore corrupt storage */ }
-  }, []);
-  const updateView = (next: ToolsView) => {
-    setView(next);
-    try { window.localStorage.setItem(TOOLS_VIEW_KEY, next); } catch { /* ignore quota / private mode */ }
-  };
-
-  const handleClick = (tool: ToolDef) => {
-    if (tool.status !== 'available') return;
-    onNavigate(tool.route);
+function ToolsTab({
+  onNavigate, onSwitchToStats, onOpenSettings,
+}: {
+  onNavigate: (path: string) => void;
+  onSwitchToStats: () => void;
+  onOpenSettings: () => void;
+}) {
+  const handleClick = (tile: ToolTile) => {
+    if (tile.action.kind === 'soon') return;
+    if (tile.action.kind === 'route') onNavigate(tile.action.route);
+    else if (tile.action.kind === 'tab') onSwitchToStats();
+    else if (tile.action.kind === 'settings') onOpenSettings();
   };
 
   return (
     <div style={{
       flex: '1 1 auto', minHeight: 0, overflowY: 'auto',
-      padding: '0.85rem 0.85rem 1rem',
-      display: 'flex', flexDirection: 'column', gap: '0.85rem',
+      padding: '1rem',
     }}>
-      {/* Header — title + view toggle */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.6rem' }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: '1.05rem', fontWeight: 800, color: C.text, letterSpacing: '0.01em' }}>
-            Нэмэлтүүд
-          </div>
-          <div style={{ fontSize: '0.74rem', color: C.muted, marginTop: '0.15rem' }}>
-            Боломжтой багаж хэрэгслүүд
-          </div>
-        </div>
-        <div role="tablist" aria-label="View mode" style={{
-          display: 'inline-flex', flexShrink: 0,
-          background: C.cardAlt, border: `1px solid ${C.border}`, borderRadius: 8,
-          padding: 2,
-        }}>
-          <ViewToggleBtn active={view === 'grid'} onClick={() => updateView('grid')} aria-label="Grid view" title="Grid">
-            <IconGrid size={14} />
-          </ViewToggleBtn>
-          <ViewToggleBtn active={view === 'list'} onClick={() => updateView('list')} aria-label="List view" title="List">
-            <IconList size={14} />
-          </ViewToggleBtn>
-        </div>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(4, 1fr)',
+        gap: '0.6rem',
+        justifyItems: 'stretch',
+      }}>
+        {COMMUNITY_TILES.map((tile, i) => (
+          <ToolTileBtn
+            key={tile.id}
+            tile={tile}
+            index={i}
+            onClick={() => handleClick(tile)}
+          />
+        ))}
       </div>
 
-      {/* Body */}
-      {TOOLS.length === 0 ? (
-        <div style={{
-          padding: '2.4rem 1rem', textAlign: 'center',
-          color: C.muted, fontSize: '0.88rem', lineHeight: 1.55,
-        }}>
-          Удахгүй илүү боломжууд нэмэгдэнэ
-        </div>
-      ) : view === 'grid' ? (
-        <div className="pv-tools-grid">
-          {TOOLS.map(tool => <ToolGridCard key={tool.id} tool={tool} onClick={() => handleClick(tool)} />)}
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          {TOOLS.map(tool => <ToolListRow key={tool.id} tool={tool} onClick={() => handleClick(tool)} />)}
-        </div>
-      )}
-
       <style>{`
-        .pv-tools-grid {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 0.65rem;
-        }
-        /* Tablets in landscape get the third column. Matches the timer
-           page's 'tablets are mobile' breakpoint (≤1024) so the grid
-           still expands when there's room. */
-        @media (min-width: 720px) and (orientation: landscape) {
-          .pv-tools-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        @keyframes pv-tile-fade {
+          from { opacity: 0; transform: translateY(6px) scale(0.98); }
+          to   { opacity: 1; transform: translateY(0) scale(1); }
         }
       `}</style>
     </div>
   );
 }
 
-function ViewToggleBtn({
-  active, onClick, children, ...rest
-}: { active: boolean; onClick: () => void; children: React.ReactNode } & React.AriaAttributes & { title?: string }) {
+function ToolTileBtn({
+  tile, index, onClick,
+}: {
+  tile: ToolTile;
+  index: number;
+  onClick: () => void;
+}) {
+  const isSoon = tile.action.kind === 'soon';
+  const Icon = tile.Icon;
   return (
     <button
       type="button"
       onClick={onClick}
-      role="tab"
-      aria-selected={active}
-      {...rest}
-      style={{
-        width: 32, height: 26, borderRadius: 6,
-        background: active ? C.accent : 'transparent',
-        color: active ? '#0a0a0a' : C.muted,
-        border: 'none', cursor: 'pointer',
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        transition: 'background 0.12s, color 0.12s',
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
-function ToolBadge({ status }: { status: ToolStatus }) {
-  if (status === 'available') return null;
-  const isLocked = status === 'locked';
-  const fg = isLocked ? '#fbbf24' : C.muted;
-  const bg = isLocked ? 'rgba(251,191,36,0.12)' : 'rgba(255,255,255,0.05)';
-  const border = isLocked ? 'rgba(251,191,36,0.4)' : C.border;
-  return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
-      padding: '0.18rem 0.5rem', borderRadius: 999,
-      fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.04em',
-      background: bg, color: fg, border: `1px solid ${border}`,
-      whiteSpace: 'nowrap',
-    }}>
-      {isLocked ? <><IconLock size={10} /> Цоожтой</> : 'Удахгүй'}
-    </span>
-  );
-}
-
-function ToolGridCard({ tool, onClick }: { tool: ToolDef; onClick: () => void }) {
-  const dim = tool.status !== 'available';
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={dim}
-      aria-label={tool.name}
+      disabled={isSoon}
+      aria-label={tile.name}
       style={{
         position: 'relative',
         aspectRatio: '1 / 1',
-        padding: '0.85rem 0.7rem 0.7rem',
-        background: C.card,
-        border: `1px solid ${dim ? C.border : 'rgba(167,139,250,0.25)'}`,
-        borderRadius: 14,
-        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'space-between',
-        gap: '0.5rem', textAlign: 'center',
-        color: C.text, fontFamily: 'inherit',
-        cursor: dim ? 'not-allowed' : 'pointer',
-        opacity: dim ? 0.55 : 1,
-        transition: 'transform 0.15s, border-color 0.15s, box-shadow 0.15s',
-      }}
-      onMouseEnter={e => { if (!dim) { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.borderColor = 'rgba(167,139,250,0.55)'; e.currentTarget.style.boxShadow = '0 10px 28px rgba(0,0,0,0.35)'; } }}
-      onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.borderColor = dim ? C.border : 'rgba(167,139,250,0.25)'; e.currentTarget.style.boxShadow = 'none'; }}
-    >
-      <div style={{
-        width: 52, height: 52, borderRadius: 14,
-        background: `${tool.color}22`,
-        border: `1px solid ${tool.color}55`,
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: '1.65rem', lineHeight: 1,
-        filter: dim ? 'saturate(0.6)' : 'none',
-      }} aria-hidden="true">{tool.icon}</div>
-      <div style={{
-        fontSize: '0.82rem', fontWeight: 700,
-        overflow: 'hidden', textOverflow: 'ellipsis',
-        display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-      }}>{tool.name}</div>
-      <ToolBadge status={tool.status} />
-    </button>
-  );
-}
-
-function ToolListRow({ tool, onClick }: { tool: ToolDef; onClick: () => void }) {
-  const dim = tool.status !== 'available';
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={dim}
-      aria-label={tool.name}
-      style={{
-        width: '100%', textAlign: 'left',
-        display: 'flex', alignItems: 'center', gap: '0.7rem',
-        padding: '0.7rem 0.85rem',
-        background: C.card,
+        minHeight: 70,
+        padding: '0.7rem',
+        background: 'rgba(255,255,255,0.05)',
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
         border: `1px solid ${C.border}`,
-        borderRadius: 12,
+        borderRadius: 18,
+        display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+        gap: '6px',
         color: C.text, fontFamily: 'inherit',
-        cursor: dim ? 'not-allowed' : 'pointer',
-        opacity: dim ? 0.65 : 1,
-        transition: 'background 0.15s, border-color 0.15s',
+        cursor: isSoon ? 'not-allowed' : 'pointer',
+        opacity: isSoon ? 0.6 : 1,
+        // Press feedback + entrance stagger (30 ms per tile) so the
+        // grid feels like a native home-screen.
+        animation: `pv-tile-fade 0.28s ease-out both`,
+        animationDelay: `${index * 30}ms`,
+        transition: 'transform 0.12s ease, border-color 0.15s ease, background 0.15s ease',
+        WebkitTapHighlightColor: 'transparent',
       }}
-      onMouseEnter={e => { if (!dim) { e.currentTarget.style.borderColor = 'rgba(167,139,250,0.45)'; e.currentTarget.style.background = C.cardAlt; } }}
-      onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.background = C.card; }}
+      onMouseEnter={e => { if (!isSoon) { e.currentTarget.style.transform = 'scale(1.04)'; e.currentTarget.style.borderColor = 'rgba(167,139,250,0.4)'; } }}
+      onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.borderColor = C.border; }}
+      onMouseDown={e => { if (!isSoon) e.currentTarget.style.transform = 'scale(0.96)'; }}
+      onMouseUp={e => { if (!isSoon) e.currentTarget.style.transform = 'scale(1.04)'; }}
+      onTouchStart={e => { if (!isSoon) e.currentTarget.style.transform = 'scale(0.96)'; }}
+      onTouchEnd={e => { if (!isSoon) e.currentTarget.style.transform = 'scale(1)'; }}
+      onTouchCancel={e => { if (!isSoon) e.currentTarget.style.transform = 'scale(1)'; }}
     >
+      <span
+        aria-hidden="true"
+        style={{
+          color: tile.tint,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          filter: isSoon ? 'saturate(0.5)' : 'none',
+        }}
+      >
+        <Icon size={28} />
+      </span>
       <span style={{
-        width: 40, height: 40, borderRadius: 10, flexShrink: 0,
-        background: `${tool.color}22`,
-        border: `1px solid ${tool.color}55`,
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: '1.3rem', lineHeight: 1,
-        filter: dim ? 'saturate(0.6)' : 'none',
-      }} aria-hidden="true">{tool.icon}</span>
-      <div style={{ flex: '1 1 auto', minWidth: 0 }}>
-        <div style={{ fontSize: '0.92rem', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {tool.name}
-        </div>
-        <div style={{ fontSize: '0.74rem', color: C.muted, marginTop: '0.15rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {tool.description}
-        </div>
-      </div>
-      {tool.status === 'available' ? (
-        <span style={{ flexShrink: 0, color: C.accent, display: 'inline-flex' }}>
-          <IconArrowRight size={16} />
-        </span>
-      ) : (
-        <ToolBadge status={tool.status} />
+        fontSize: '0.7rem', fontWeight: 600,
+        letterSpacing: '0.01em',
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        maxWidth: '100%',
+      }}>{tile.name}</span>
+      {isSoon && (
+        <span style={{
+          position: 'absolute', top: 4, right: 4,
+          fontSize: '0.52rem', fontWeight: 800,
+          letterSpacing: '0.06em', textTransform: 'uppercase',
+          padding: '0.1rem 0.35rem', borderRadius: 999,
+          background: 'rgba(255,255,255,0.06)',
+          color: C.muted,
+          border: `1px solid ${C.border}`,
+        }}>Soon</span>
       )}
     </button>
   );
@@ -6387,6 +6269,10 @@ function IconFlag(p: IconProps)       { return <IconBase {...p}><path d="M5 21V4
 function IconComment(p: IconProps)    { return <IconBase {...p}><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></IconBase>; }
 function IconShareOut(p: IconProps)   { return <IconBase {...p}><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/></IconBase>; }
 function IconUndoArrow(p: IconProps)  { return <IconBase {...p}><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 5 5v0a5 5 0 0 1-5 5H10"/></IconBase>; }
+function IconTrophy(p: IconProps)     { return <IconBase {...p}><path d="M8 4h8v6a4 4 0 0 1-8 0z"/><path d="M16 6h3a2 2 0 0 1-3 3"/><path d="M8 6H5a2 2 0 0 0 3 3"/><path d="M12 14v3"/><path d="M9 20h6"/><path d="M10 17h4l-1 3h-2z"/></IconBase>; }
+function IconUserCircle(p: IconProps) { return <IconBase {...p}><circle cx={12} cy={12} r={9}/><circle cx={12} cy={10} r={3.2}/><path d="M5.6 19a7 7 0 0 1 12.8 0"/></IconBase>; }
+function IconHelp(p: IconProps)       { return <IconBase {...p}><circle cx={12} cy={12} r={9}/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.9.4-1.5 1-1.5 1.9V14"/><circle cx={12} cy={17} r={0.5} fill="currentColor"/></IconBase>; }
+function IconBarChart(p: IconProps)   { return <IconBase {...p}><path d="M4 20V4"/><path d="M4 20h16"/><rect x={7}  y={12} width={3} height={6}/><rect x={12} y={8}  width={3} height={10}/><rect x={17} y={14} width={3} height={4}/></IconBase>; }
 
 // ── Event picker (mobile) ───────────────────────────────────────────────────
 // Bottom sheet that replaces the mobile <select>. Two groups: a primary
