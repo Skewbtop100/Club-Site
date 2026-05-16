@@ -469,10 +469,11 @@ interface PauseHistoryEntry {
   reason?: string;
 }
 
-// Audit entry for a single retry — covers both the instant-undo path
-// (within INSTANT_UNDO_WINDOW_MS) and the vote-driven path. `previousMs`
-// / `previousPenalty` capture the discarded result so a future "what
-// did they originally have?" query has the data on hand.
+// Audit entry for a single retry — covers the vote-driven retrySolve
+// path (the per-solve "Нэмэлт холилт авах" tap uses the `extras` audit
+// instead). `previousMs` / `previousPenalty` capture the discarded
+// result so a future "what did they originally have?" query has the
+// data on hand.
 interface RetryEntry {
   uid: string;
   name: string;
@@ -486,11 +487,11 @@ interface RetryEntry {
   reason?: string;
 }
 
-// Window after a confirmation in which the player can undo without a
-// vote. Keep this short — the whole point is "I just clicked DNF by
-// accident, give me a second to back out". Longer windows would let
-// players game it after seeing where they rank.
-const INSTANT_UNDO_WINDOW_MS = 5_000;
+// Auto-confirm window for the post-solve penalty dialog. After this
+// elapses, whichever option is highlighted (OK by default) is saved
+// for the player. Tied to `pending.createdAt` so a new solve restarts
+// the clock but merely re-selecting a different option doesn't.
+const AUTO_CONFIRM_MS = 60_000;
 
 interface RoomData {
   host: string;
@@ -1894,27 +1895,24 @@ function MultiplayerPageInner() {
     await update(ref(rtdb, `rooms/${roomCode}`), updates);
   }, [roomCode, userId, room]);
 
-  // Member: discard the pending solve at `index` and re-roll just THIS
-  // player's scramble for that index. Writes a per-player override so
-  // others continue to see the shared scramble. Bumps the per-round
-  // counter (gated by EXTRA_SCRAMBLES_PER_ROUND on the call site) and
-  // appends an audit entry to `extras`. The pending solve was never
-  // committed to RTDB, so there's nothing to clear in `solves`.
-  const requestExtraScramble = useCallback(async (
-    index: number,
-    originalTime: number,
-    originalPenalty: Penalty,
-  ) => {
+  // Member: per-solve "tap the recorded time → request an extra
+  // scramble for THIS solve" path. Mirrors the writes the legacy
+  // instant-undo flow did (wipe solve, roll currentSolve back to
+  // `index`, generate fresh per-player scramble at that slot, bump
+  // quota) and additionally writes an `extras` audit so the opponent
+  // toast fires. No time-window gate — players can tap any of their
+  // completed solves in the round.
+  const requestExtraForCommittedSolve = useCallback(async (index: number) => {
     if (!roomCode || !userId || !room) return;
     if (room.status !== 'racing') return;
     const me = room.members?.[userId];
     if (!me) return;
+    const solve = room.solves?.[userId]?.[String(index)];
+    if (!solve) return; // can only re-roll a slot that's been filled
     const used = me.extrasThisRound ?? 0;
     if (used >= EXTRA_SCRAMBLES_PER_ROUND) return;
 
     const newScramble = generateScramble(room.event);
-    // Push() under extras to get a stable RTDB-generated key. Doing it
-    // before the multi-path update so the auto-key is known.
     const extrasRef = ref(rtdb, `rooms/${roomCode}/extras`);
     const newExtraKey = push(extrasRef).key;
     if (!newExtraKey) return;
@@ -1925,66 +1923,20 @@ function MultiplayerPageInner() {
       round: room.round,
       solveIdx: index,
       requestedAt: Date.now(),
-      originalTime,
-      originalPenalty,
-    };
-
-    const updates: Record<string, unknown> = {
-      [`playerScrambles/${userId}/${index}`]: newScramble,
-      [`members/${userId}/extrasThisRound`]: used + 1,
-      [`extras/${newExtraKey}`]: entry,
-    };
-    await update(ref(rtdb, `rooms/${roomCode}`), updates);
-  }, [roomCode, userId, room]);
-
-  // Member: instant-undo a CONFIRMED solve at `index` (within the
-  // INSTANT_UNDO_WINDOW_MS grace period). No vote required. The solve
-  // is wiped, currentSolve rolls back by one, a new player-scoped
-  // scramble is generated for that index, and the per-round budget
-  // (shared with extra-scramble) ticks up. The caller is responsible
-  // for gating on the time window — we re-check member quota here
-  // to prevent double-spends from a fast double-tap.
-  const instantUndoSolve = useCallback(async (index: number) => {
-    if (!roomCode || !userId || !room) return;
-    if (room.status !== 'racing') return;
-    const me = room.members?.[userId];
-    if (!me) return;
-    const solve = room.solves?.[userId]?.[String(index)];
-    if (!solve) return; // nothing committed to undo
-    const used = me.extrasThisRound ?? 0;
-    if (used >= EXTRA_SCRAMBLES_PER_ROUND) return;
-    // Hard gate on the time window — UI hides the pill after 5s but
-    // a stale React event could still fire late.
-    if (Date.now() - solve.confirmedAt > INSTANT_UNDO_WINDOW_MS) return;
-
-    const newScramble = generateScramble(room.event);
-    const retriesRef = ref(rtdb, `rooms/${roomCode}/retries`);
-    const retryKey = push(retriesRef).key;
-    if (!retryKey) return;
-
-    const now2 = Date.now();
-    const entry: RetryEntry = {
-      uid: userId,
-      name: me.name,
-      round: room.round,
-      solveIdx: index,
-      type: 'instant',
-      previousMs: solve.time,
-      previousPenalty: solve.penalty,
-      requestedAt: now2,
-      completedAt: now2,
+      originalTime: solve.time,
+      originalPenalty: solve.penalty,
     };
 
     const updates: Record<string, unknown> = {
       [`solves/${userId}/${index}`]: null,
-      // currentSolve rolls back so the player re-does this index. We
-      // also clear roundAverage in case this was solve 5 — the Ao5
-      // would have been written then; recomputed once they re-finish.
+      // Roll currentSolve back to the wiped slot so the racing screen
+      // re-renders the (new) scramble for `index` and the player has
+      // a clear next-step. Mirrors instantUndoSolve.
       [`members/${userId}/currentSolve`]: index,
       [`members/${userId}/roundAverage`]: null,
       [`members/${userId}/extrasThisRound`]: used + 1,
       [`playerScrambles/${userId}/${index}`]: newScramble,
-      [`retries/${retryKey}`]: entry,
+      [`extras/${newExtraKey}`]: entry,
     };
     await update(ref(rtdb, `rooms/${roomCode}`), updates);
   }, [roomCode, userId, room]);
@@ -2836,8 +2788,7 @@ function MultiplayerPageInner() {
             onSetMaxRounds={setMaxRounds}
             onStartRace={startRace}
             onSubmitSolve={submitSolve}
-            onRequestExtra={requestExtraScramble}
-            onInstantUndo={instantUndoSolve}
+            onRequestExtraForCommitted={requestExtraForCommittedSolve}
             onReadyForNext={readyForNext}
             onNextRound={nextRound}
             onRematch={() => setRematchConfirmOpen(true)}
@@ -2880,9 +2831,6 @@ function MultiplayerPageInner() {
         />
       )}
       {pauseOpen && (() => {
-        const me = room?.members?.[userId];
-        const used = me?.extrasThisRound ?? 0;
-        const extrasRemaining = Math.max(0, EXTRA_SCRAMBLES_PER_ROUND - used);
         // Pause availability: not already paused, host has at least one
         // opponent online (so the majority vote is meaningful), and no
         // other vote is in flight. Non-host members can always request a
@@ -2914,9 +2862,6 @@ function MultiplayerPageInner() {
           if (!hostOnline) pauseDisabledReason = 'Host холбогдоогүй байна';
           else canPauseMatch = true;
         }
-        const currentSolveIdx = (me?.currentSolve ?? 0) + 1;
-        const canRequestExtra = !!room && room.status === 'racing'
-          && !room.meta?.paused && (me?.currentSolve ?? 0) < SOLVES_PER_ROUND;
         return (
           <MpPauseModal
             isMobile={isMobile}
@@ -2948,15 +2893,6 @@ function MultiplayerPageInner() {
               setPauseOpen(false);
               try { await requestVote('pause'); }
               catch (err) { console.error('[mp] pause vote', err); }
-            }}
-            currentSolveIdx={currentSolveIdx}
-            extrasRemaining={extrasRemaining}
-            canRequestExtra={canRequestExtra}
-            onRequestExtra={async () => {
-              setPauseOpen(false);
-              const idx = me?.currentSolve ?? 0;
-              try { await requestExtraScramble(idx, 0, 'ok'); }
-              catch (err) { console.error('[mp] requestExtraScramble (menu)', err); }
             }}
           />
         );
@@ -3473,14 +3409,12 @@ interface RoomViewProps {
   onSetMaxRounds: (n: number) => void;
   onStartRace: () => void;
   onSubmitSolve: (index: number, time: number, penalty: Penalty, scramble: string) => void;
-  /** Player asked to redo `index` with a fresh scramble. Counter +1,
-   *  audit entry appended, per-player override written. The pending
-   *  local solve is discarded by the caller (RacingScreen) on success. */
-  onRequestExtra: (index: number, originalTime: number, originalPenalty: Penalty) => Promise<void> | void;
-  /** Within INSTANT_UNDO_WINDOW_MS of confirming, the player can wipe
-   *  the just-confirmed solve at `index` without a vote. Bumps the
-   *  shared retry/extra-scramble quota. */
-  onInstantUndo: (index: number) => Promise<void> | void;
+  /** Per-solve "extra scramble" tap path (CHANGE 1 — racing menu redesign).
+   *  Wipes solves[uid][index], rolls currentSolve back to `index`, writes a
+   *  fresh per-player scramble override, and appends an `extras` audit
+   *  entry that drives the opponent toast. Quota is shared with the legacy
+   *  flows (capped at EXTRA_SCRAMBLES_PER_ROUND). */
+  onRequestExtraForCommitted: (index: number) => Promise<void> | void;
   onReadyForNext: () => void;
   onNextRound: () => void;
   /** Host-initiated rematch confirmation. Opens the confirm modal which,
@@ -3755,7 +3689,7 @@ function WaitingRoom({
 
 // ── Racing screen ─────────────────────────────────────────────────────────
 function RacingScreen({
-  isMobile, room, userId, prefs, now, onSubmitSolve, onRequestExtra, onInstantUndo,
+  isMobile, room, userId, prefs, now, onSubmitSolve, onRequestExtraForCommitted,
   onOpenSettings, onPause,
   btState, btLiveState, btDeviceLabel, onBtConnect, onBtDisconnect, btSolveCallbacksRef,
   isActivelySolvingRef, racingPendingRef,
@@ -3815,47 +3749,27 @@ function RacingScreen({
   const extrasUsed = room.members?.[userId]?.extrasThisRound ?? 0;
   const extrasRemaining = Math.max(0, EXTRA_SCRAMBLES_PER_ROUND - extrasUsed);
 
-  // Most-recent confirmed solve in the current round, for the floating
-  // "Буцаах" pill. We pick by confirmedAt (not just highest index) so
-  // that a player who already retried solve 2 and is back on solve 2
-  // sees the pill referring to their LATEST commit, not solve 3.
-  const lastConfirmedSolve = useMemo(() => {
-    if (room.status !== 'racing') return null;
-    const mySolves = room.solves?.[userId];
-    if (!mySolves) return null;
-    let bestIdx = -1;
-    let bestAt = -1;
-    for (const [k, s] of Object.entries(mySolves)) {
-      const idx = parseInt(k, 10);
-      if (!Number.isFinite(idx) || !s) continue;
-      const at = s.confirmedAt ?? 0;
-      if (at > bestAt) { bestAt = at; bestIdx = idx; }
+  // Solve indices the player has re-rolled this round. Drives the small
+  // 🎲 badge on the per-solve chips. `playerScrambles` is the per-player
+  // override map; once a slot is written it stays for the round even
+  // after the player re-solves it. Recomputed when scrambles change.
+  const extraScrambledIdxs = useMemo(() => {
+    const map = room.playerScrambles?.[userId] || {};
+    const set = new Set<number>();
+    for (const k of Object.keys(map)) {
+      const n = parseInt(k, 10);
+      if (Number.isFinite(n)) set.add(n);
     }
-    if (bestIdx < 0) return null;
-    return { idx: bestIdx, confirmedAt: bestAt };
-  }, [room.status, room.solves, userId]);
+    return set;
+  }, [room.playerScrambles, userId]);
 
-  // Show the pill only inside the 5s grace window AND if budget is left
-  // AND no other vote/pause is locking the round. The component itself
-  // also self-fades when it reaches deadline so a stale render won't
-  // leak a clickable button.
-  const undoEligible = lastConfirmedSolve != null
-    && extrasRemaining > 0
-    && !room.meta?.paused
-    && !(room.votes && Object.values(room.votes).some(Boolean))
-    && Date.now() - lastConfirmedSolve.confirmedAt < INSTANT_UNDO_WINDOW_MS;
-  const undoDeadlineMs = lastConfirmedSolve
-    ? lastConfirmedSolve.confirmedAt + INSTANT_UNDO_WINDOW_MS
-    : 0;
-
-  // Pending = awaiting OK / +2 / DNF confirmation.
-  const [pending, setPending] = useState<{ ms: number; defaultDnf: boolean } | null>(null);
-
-  // Extra-scramble confirmation modal. We hold the would-be commit args
-  // here so the modal can show what's being discarded; on confirm we
-  // forward to the page-level onRequestExtra and reset the local pending
-  // / scramble-shown state to mimic a fresh attempt.
-  const [extraConfirmOpen, setExtraConfirmOpen] = useState(false);
+  // Pending = awaiting confirm. Now a SELECTION flow: user picks
+  // OK/+2/DNF (OK by default, DNF if the timer engine reported a DNF
+  // from inspection timeout), then taps Баталгаажуулах to save. The
+  // 60-second auto-confirm uses `createdAt` as the deadline anchor.
+  const [pending, setPending] = useState<
+    { ms: number; selected: Penalty; createdAt: number } | null
+  >(null);
 
   const onSolveCommit = useCallback((ms: number, penalty: EnginePenalty) => {
     // Multiplayer resolves OK / +2 / DNF in the post-solve confirm
@@ -3863,7 +3777,11 @@ function RacingScreen({
     // 'none'), so we only forward the engine's penalty as the default
     // DNF state. The +2 inspection signal is dropped here intentionally
     // — racers can apply +2 explicitly via the dialog buttons.
-    setPending({ ms, defaultDnf: penalty === 'dnf' });
+    setPending({
+      ms,
+      selected: penalty === 'dnf' ? 'dnf' : 'ok',
+      createdAt: Date.now(),
+    });
   }, []);
 
   const timer = useTimer(onSolveCommit, holdTimeMs);
@@ -3937,33 +3855,44 @@ function RacingScreen({
     return () => { btSolveCallbacksRef.current = {}; };
   }, [btSolveCallbacksRef, interactionLocked, timer]);
 
-  const confirmSolve = useCallback((penalty: Penalty) => {
-    console.log('[mp] Penalty clicked', penalty, 'solveIndex:', myCurrent);
-    if (!pending) {
-      console.warn('[mp] confirmSolve ignored — no pending solve');
-      return;
-    }
-    onSubmitSolve(myCurrent, pending.ms, penalty, currentScramble);
+  // Tentatively change which penalty option is highlighted. Doesn't
+  // write anything — `commitPending` does the actual save.
+  const selectPenalty = useCallback((penalty: Penalty) => {
+    setPending(p => (p ? { ...p, selected: penalty } : null));
+  }, []);
+
+  // Persist the pending solve with the currently-selected penalty. The
+  // myCurrent-change effect resets timer to idle.
+  const commitPending = useCallback(() => {
+    if (!pending) return;
+    onSubmitSolve(myCurrent, pending.ms, pending.selected, currentScramble);
     setPending(null);
-    // The myCurrent-change effect resets timer to idle.
   }, [pending, myCurrent, currentScramble, onSubmitSolve]);
 
-  // Confirm-step for "Нэмэлт scramble". The pending solve is local
-  // (never written to RTDB), so we don't need to clear anything in
-  // `solves` — just discard `pending` and reset the timer. The new
-  // scramble is shown immediately (no reveal gate to reset).
-  const confirmExtraScramble = useCallback(async () => {
-    if (!pending) return;
-    const defaultPenalty: Penalty = pending.defaultDnf ? 'dnf' : 'ok';
-    setExtraConfirmOpen(false);
-    try {
-      await onRequestExtra(myCurrent, pending.ms, defaultPenalty);
-    } catch (err) {
-      console.error('[mp] requestExtraScramble failed', err);
-    }
+  // Per-solve "Нэмэлт холилт авах" — fired from the SolveAndCubeRow popup.
+  // Wipes the recorded solve at `idx` and rolls currentSolve back so the
+  // player redoes it with a fresh scramble. We also clear any local
+  // pending state for safety, though tapping a chip while solving isn't
+  // a normal flow.
+  const onRequestExtraForSolve = useCallback(async (idx: number) => {
+    try { await onRequestExtraForCommitted(idx); }
+    catch (err) { console.error('[mp] requestExtraForCommitted', err); }
     setPending(null);
-    timer.reset();
-  }, [pending, myCurrent, onRequestExtra, timer]);
+  }, [onRequestExtraForCommitted]);
+
+  // 60-second auto-confirm: if the user doesn't tap Баталгаажуулах in
+  // time, persist the current selection. Re-armed whenever the pending
+  // record is replaced (new solve), but NOT when the user merely
+  // changes which option is highlighted — `createdAt` is the only key
+  // that bumps the deadline.
+  useEffect(() => {
+    if (!pending) return;
+    const deadline = pending.createdAt + AUTO_CONFIRM_MS;
+    const remain = deadline - Date.now();
+    if (remain <= 0) { commitPending(); return; }
+    const id = window.setTimeout(commitPending, remain);
+    return () => window.clearTimeout(id);
+  }, [pending?.createdAt, commitPending]);
 
   const onTimerTouchStart = useCallback(() => {
     // BT timer owns the start/stop transitions when connected — we
@@ -4086,32 +4015,20 @@ function RacingScreen({
           timerGlow={timerGlow}
           borderColor={borderColor}
           interactionLocked={interactionLocked}
-          confirmSolve={confirmSolve}
+          onSelectPenalty={selectPenalty}
+          onCommitPending={commitPending}
           onTimerTouchStart={onTimerTouchStart}
           onTimerTouchEnd={onTimerTouchEnd}
           onOpenSettings={onOpenSettings}
           onPause={onPause}
           extrasRemaining={extrasRemaining}
-          onOpenExtraConfirm={() => setExtraConfirmOpen(true)}
+          extraScrambledIdxs={extraScrambledIdxs}
+          onRequestExtraForSolve={onRequestExtraForSolve}
           btState={btState}
           btDeviceLabel={btDeviceLabel}
           onBtConnect={onBtConnect}
           onBtDisconnect={onBtDisconnect}
         />
-        {extraConfirmOpen && (
-          <ExtraScrambleConfirmModal
-            isMobile
-            onCancel={() => setExtraConfirmOpen(false)}
-            onConfirm={confirmExtraScramble}
-          />
-        )}
-        {undoEligible && lastConfirmedSolve && (
-          <InstantUndoPill
-            isMobile
-            deadlineMs={undoDeadlineMs}
-            onUndo={() => { onInstantUndo(lastConfirmedSolve.idx); }}
-          />
-        )}
         {isWaitingForOpponents && (
           <WaitingForOpponentsOverlay nextOpponentSolveIndex={minOthers + 1} />
         )}
@@ -4234,27 +4151,11 @@ function RacingScreen({
           </div>
 
           {pending && (
-            <div
-              onTouchStart={(e) => e.stopPropagation()}
-              onTouchEnd={(e) => e.stopPropagation()}
-              style={{
-                marginTop: '1.2rem',
-                display: 'flex', flexDirection: 'column', gap: '0.55rem',
-                width: '100%', maxWidth: 360,
-              }}
-            >
-              <div style={{
-                display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem',
-              }}>
-                <ConfirmButton color={C.success} onClick={(e) => { e.stopPropagation(); confirmSolve('ok'); }}>OK</ConfirmButton>
-                <ConfirmButton color={C.warn}    onClick={(e) => { e.stopPropagation(); confirmSolve('+2'); }}>+2</ConfirmButton>
-                <ConfirmButton color={C.danger}  onClick={(e) => { e.stopPropagation(); confirmSolve('dnf'); }}>DNF</ConfirmButton>
-              </div>
-              <ExtraScrambleButton
-                onClick={() => setExtraConfirmOpen(true)}
-                remaining={extrasRemaining}
-              />
-            </div>
+            <PendingPenaltyControls
+              pending={pending}
+              onSelect={selectPenalty}
+              onCommit={commitPending}
+            />
           )}
         </div>
 
@@ -4268,22 +4169,11 @@ function RacingScreen({
         isRoundDone={isRoundDone}
         eventId={room.event}
         scramble={currentScramble}
+        extrasRemaining={extrasRemaining}
+        onRequestExtraForSolve={onRequestExtraForSolve}
+        extraScrambledIdxs={extraScrambledIdxs}
       />
 
-      {extraConfirmOpen && (
-        <ExtraScrambleConfirmModal
-          isMobile={false}
-          onCancel={() => setExtraConfirmOpen(false)}
-          onConfirm={confirmExtraScramble}
-        />
-      )}
-      {undoEligible && lastConfirmedSolve && (
-        <InstantUndoPill
-          isMobile={false}
-          deadlineMs={undoDeadlineMs}
-          onUndo={() => { onInstantUndo(lastConfirmedSolve.idx); }}
-        />
-      )}
       {isWaitingForOpponents && (
         <WaitingForOpponentsOverlay nextOpponentSolveIndex={minOthers + 1} />
       )}
@@ -4296,9 +4186,10 @@ function MobileRacingLayout({
   room, userId, prefs, now, myCurrent, mySolves, isRoundDone, isWaitingForOpponents,
   currentScramble,
   timer, pending, displayValue, timerColor, timerGlow, borderColor,
-  interactionLocked, confirmSolve, onTimerTouchStart, onTimerTouchEnd,
+  interactionLocked, onSelectPenalty, onCommitPending,
+  onTimerTouchStart, onTimerTouchEnd,
   onOpenSettings, onPause,
-  extrasRemaining, onOpenExtraConfirm,
+  extrasRemaining, extraScrambledIdxs, onRequestExtraForSolve,
   btState, btDeviceLabel, onBtConnect, onBtDisconnect,
 }: {
   room: RoomData;
@@ -4311,19 +4202,21 @@ function MobileRacingLayout({
   isWaitingForOpponents: boolean;
   currentScramble: string;
   timer: UseTimerReturn;
-  pending: { ms: number; defaultDnf: boolean } | null;
+  pending: { ms: number; selected: Penalty; createdAt: number } | null;
   displayValue: string;
   timerColor: string;
   timerGlow: boolean;
   borderColor: string;
   interactionLocked: boolean;
-  confirmSolve: (p: Penalty) => void;
+  onSelectPenalty: (p: Penalty) => void;
+  onCommitPending: () => void;
   onTimerTouchStart: () => void;
   onTimerTouchEnd: () => void;
   onOpenSettings: () => void;
   onPause: () => void;
   extrasRemaining: number;
-  onOpenExtraConfirm: () => void;
+  extraScrambledIdxs: Set<number>;
+  onRequestExtraForSolve: (idx: number) => void;
   btState: 'unsupported' | 'idle' | 'connecting' | 'connected' | 'error';
   btDeviceLabel: string | null;
   onBtConnect: () => void;
@@ -4464,26 +4357,11 @@ function MobileRacingLayout({
               </div>
 
               {pending && (
-                <div
-                  onTouchStart={(e) => e.stopPropagation()}
-                  onTouchEnd={(e) => e.stopPropagation()}
-                  style={{
-                    marginTop: '1rem',
-                    display: 'flex', flexDirection: 'column', gap: '0.55rem',
-                    width: '100%', maxWidth: 360,
-                    position: 'relative', zIndex: 2,
-                  }}
-                >
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
-                    <ConfirmButton color={C.success} onClick={(e) => { e.stopPropagation(); console.log('[mp] OK clicked'); confirmSolve('ok'); }}>OK</ConfirmButton>
-                    <ConfirmButton color={C.warn}    onClick={(e) => { e.stopPropagation(); console.log('[mp] +2 clicked'); confirmSolve('+2'); }}>+2</ConfirmButton>
-                    <ConfirmButton color={C.danger}  onClick={(e) => { e.stopPropagation(); console.log('[mp] DNF clicked'); confirmSolve('dnf'); }}>DNF</ConfirmButton>
-                  </div>
-                  <ExtraScrambleButton
-                    onClick={onOpenExtraConfirm}
-                    remaining={extrasRemaining}
-                  />
-                </div>
+                <PendingPenaltyControls
+                  pending={pending}
+                  onSelect={onSelectPenalty}
+                  onCommit={onCommitPending}
+                />
               )}
             </div>
           </div>
@@ -4505,6 +4383,9 @@ function MobileRacingLayout({
           eventId={room.event}
           scramble={currentScramble}
           roundLabel={roundLabel}
+          extrasRemaining={extrasRemaining}
+          onRequestExtraForSolve={onRequestExtraForSolve}
+          extraScrambledIdxs={extraScrambledIdxs}
         />
       </div>
 
@@ -4855,6 +4736,7 @@ function WaitingForOpponentsOverlay({ nextOpponentSolveIndex }: {
 // during the round (no reveal gate); only round-done hides the cube.
 function SolveAndCubeRow({
   isMobile, mySolves, current, isRoundDone, eventId, scramble, roundLabel,
+  extrasRemaining, onRequestExtraForSolve, extraScrambledIdxs,
 }: {
   isMobile: boolean;
   mySolves: SolveData[];
@@ -4863,7 +4745,20 @@ function SolveAndCubeRow({
   eventId: string;
   scramble: string;
   roundLabel?: string;
+  /** Per-round extras budget remaining for the local player. Drives the
+   *  "Нэмэлт холилт авах" button visibility in the per-solve popup. */
+  extrasRemaining: number;
+  /** Fires when the user picks "Нэмэлт холилт авах" from the popup. */
+  onRequestExtraForSolve: (idx: number) => void;
+  /** Solve indices the player has already re-rolled this round — drives
+   *  the small 🎲 badge on the chip. */
+  extraScrambledIdxs: Set<number>;
 }) {
+  // Tap-to-popup state — opens a small dialog for a single solve index.
+  // Driven entirely by the chip click handler; cleared on every popup
+  // action (or background tap).
+  const [tappedIdx, setTappedIdx] = useState<number | null>(null);
+
   // Mobile cube shrunk 120 → 92px; the row was the single biggest fixed block
   // in the mobile layout. Desktop keeps its original size.
   const cubeSize = isMobile ? 92 : 160;
@@ -4888,9 +4783,17 @@ function SolveAndCubeRow({
             const s = mySolves[i];
             const isCurrent = i === current && !isRoundDone;
             const dnf = s?.penalty === 'dnf';
+            // Chips with a recorded solve become tappable so the player
+            // can pull up the per-solve popup (extra scramble). Empty
+            // chips and the live "current" chip stay decorative.
+            const tappable = !!s;
+            const wasExtraScrambled = extraScrambledIdxs.has(i);
             return (
-              <div
+              <button
                 key={i}
+                type="button"
+                onClick={tappable ? () => setTappedIdx(i) : undefined}
+                disabled={!tappable}
                 className={isCurrent ? 'mp-solve-current' : undefined}
                 style={{
                   fontFamily: 'JetBrains Mono, monospace',
@@ -4907,11 +4810,18 @@ function SolveAndCubeRow({
                   letterSpacing: dnf ? '0.04em' : '0',
                   minHeight: isMobile ? 28 : 44,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  gap: '0.25rem',
                   overflow: 'hidden',
+                  cursor: tappable ? 'pointer' : 'default',
                 }}
               >
-                {isCurrent && !s ? '●' : !s ? '—' : dnf ? 'DNF' : fmtMs(effectiveSolveMs(s), false, 2)}
-              </div>
+                <span>
+                  {isCurrent && !s ? '●' : !s ? '—' : dnf ? 'DNF' : fmtMs(effectiveSolveMs(s), false, 2)}
+                </span>
+                {wasExtraScrambled && s && (
+                  <IconDice size={isMobile ? 10 : 12} color={C.accent} />
+                )}
+              </button>
             );
           })}
         </div>
@@ -4961,79 +4871,70 @@ function SolveAndCubeRow({
           50%      { box-shadow: 0 0 0 5px rgba(52,211,153,0); }
         }
       `}</style>
+
+      {tappedIdx != null && mySolves[tappedIdx] && (
+        <SolveTapModal
+          isMobile={isMobile}
+          solveIdx={tappedIdx}
+          solve={mySolves[tappedIdx]}
+          extrasRemaining={extrasRemaining}
+          onClose={() => setTappedIdx(null)}
+          onRequestExtra={() => {
+            const idx = tappedIdx;
+            setTappedIdx(null);
+            onRequestExtraForSolve(idx);
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function ConfirmButton({
-  color, onClick, children,
-}: {
-  color: string;
-  onClick: (e: React.MouseEvent) => void;
-  children: React.ReactNode;
-}) {
+// Inline dice icon — small badge added to a solve chip when the player
+// has re-rolled that slot's scramble this round. The lib/icons set
+// doesn't have a die, and this is the only place we need one.
+function IconDice({ size = 12, color = 'currentColor' }: { size?: number; color?: string }) {
   return (
-    <button
-      onClick={onClick}
-      style={{
-        background: color, color: '#0a0a0a',
-        border: `1px solid ${color}`, borderRadius: 12,
-        padding: '0.7rem 0.85rem', fontSize: '1rem', fontWeight: 800,
-        fontFamily: 'inherit', cursor: 'pointer',
-        letterSpacing: '0.02em',
-      }}
-    >{children}</button>
-  );
-}
-
-// "Нэмэлт scramble" — placed BELOW the OK/+2/DNF row so the player
-// reads it as a separate-intent action. Disabled (greyed out, distinct
-// label) once the per-round budget is spent.
-function ExtraScrambleButton({
-  onClick, remaining,
-}: { onClick: () => void; remaining: number }) {
-  const enabled = remaining > 0;
-  return (
-    <button
-      type="button"
-      onClick={(e) => { e.stopPropagation(); if (enabled) onClick(); }}
-      disabled={!enabled}
-      style={{
-        background: enabled ? C.dangerDim : 'transparent',
-        color: enabled ? C.danger : C.mutedDim,
-        border: `1px solid ${enabled ? C.danger : C.border}`,
-        borderRadius: 12, padding: '0.55rem 0.85rem',
-        fontSize: '0.85rem', fontWeight: 700, fontFamily: 'inherit',
-        cursor: enabled ? 'pointer' : 'not-allowed',
-        letterSpacing: '0.02em',
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        gap: '0.4rem',
-      }}
+    <svg
+      width={size} height={size} viewBox="0 0 24 24" fill="none"
+      stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"
+      aria-hidden="true"
     >
-      <IconRefresh size={15} aria-hidden="true" />
-      <span>{enabled ? 'Нэмэлт scramble' : 'Энэ round-д хэрэглэсэн'}</span>
-    </button>
+      <rect x={3} y={3} width={18} height={18} rx={3} />
+      <circle cx={8.5} cy={8.5} r={1.2} fill={color} />
+      <circle cx={15.5} cy={8.5} r={1.2} fill={color} />
+      <circle cx={12}   cy={12}  r={1.2} fill={color} />
+      <circle cx={8.5}  cy={15.5} r={1.2} fill={color} />
+      <circle cx={15.5} cy={15.5} r={1.2} fill={color} />
+    </svg>
   );
 }
 
-// Confirmation step before re-rolling. The body explains both the
-// consequence (this attempt is discarded) and the visibility (other
-// players are notified) so there's no surprise. Cancel / Confirm only.
-function ExtraScrambleConfirmModal({
-  isMobile, onCancel, onConfirm,
+// Popup shown when the player taps a recorded solve in the S1..S5 strip.
+// Single action — request an extra scramble for that specific solve —
+// plus a Хаах button. The extra action is hidden entirely when the
+// per-round budget is exhausted (Үлдсэн still shows).
+function SolveTapModal({
+  isMobile, solveIdx, solve, extrasRemaining, onClose, onRequestExtra,
 }: {
   isMobile: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
+  solveIdx: number;
+  solve: SolveData;
+  extrasRemaining: number;
+  onClose: () => void;
+  onRequestExtra: () => void;
 }) {
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => { document.body.style.overflow = prev; };
   }, []);
+  const dnf = solve.penalty === 'dnf';
+  const timeLabel = dnf ? 'DNF' : fmtMs(effectiveSolveMs(solve), false, 2);
+  const canExtra = extrasRemaining > 0;
   return (
     <div
-      onClick={onCancel}
+      onClick={onClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 1700,
         background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)',
@@ -5044,59 +4945,163 @@ function ExtraScrambleConfirmModal({
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          width: '100%', maxWidth: isMobile ? '100%' : 440,
+          width: '100%', maxWidth: isMobile ? '100%' : 360,
           background: C.card, border: `1px solid ${C.border}`,
           borderRadius: 16,
           boxShadow: '0 24px 60px rgba(0,0,0,0.7)',
           display: 'flex', flexDirection: 'column',
-          maxHeight: 'calc(100dvh - 2rem)', overflow: 'hidden',
+          overflow: 'hidden',
         }}
       >
         <header style={{
           padding: '0.95rem 1rem',
           borderBottom: `1px solid ${C.border}`,
-          fontSize: '0.95rem', fontWeight: 800, color: C.text,
-          display: 'flex', alignItems: 'center', gap: '0.45rem',
+          display: 'flex', alignItems: 'baseline', gap: '0.45rem',
         }}>
-          <IconRefresh size={18} color={C.accent} aria-hidden="true" />
-          <span>Нэмэлт scramble хүсэх</span>
+          <span style={{ fontSize: '0.95rem', fontWeight: 800, color: C.text }}>
+            Эвлүүлэлт {solveIdx + 1}
+          </span>
+          <span style={{
+            marginLeft: 'auto',
+            fontFamily: 'JetBrains Mono, monospace',
+            fontSize: '1rem', fontWeight: 800,
+            color: dnf ? C.danger : C.text,
+            fontVariantNumeric: 'tabular-nums',
+          }}>{timeLabel}</span>
         </header>
         <div style={{
           padding: '1rem',
-          fontSize: '0.86rem', color: C.text, lineHeight: 1.5,
+          display: 'flex', flexDirection: 'column', gap: '0.65rem',
         }}>
-          Энэ solve-ыг хүчингүй болгож, шинэ scramble-аар дахин хийх үү?
-          Шударга байдлын үүднээс энэ үйлдэл бусад тоглогчдод мэдэгдэнэ.
-        </div>
-        <div style={{
-          padding: '0 1rem 1rem',
-          display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem',
-        }}>
+          {canExtra && (
+            <button
+              type="button"
+              onClick={onRequestExtra}
+              style={{
+                background: C.accentDim, color: C.accent,
+                border: `1px solid ${C.accent}`, borderRadius: 12,
+                padding: '0.8rem 1rem', fontSize: '0.95rem', fontWeight: 800,
+                fontFamily: 'inherit', cursor: 'pointer',
+                letterSpacing: '0.02em',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                gap: '0.5rem',
+              }}
+            >
+              <IconDice size={16} color={C.accent} />
+              <span>Нэмэлт холилт авах</span>
+            </button>
+          )}
+          <div style={{
+            fontSize: '0.78rem', color: C.muted, textAlign: 'center',
+            fontWeight: 600,
+          }}>
+            Үлдсэн: {extrasRemaining}
+          </div>
           <button
             type="button"
-            onClick={onCancel}
+            onClick={onClose}
+            autoFocus
             style={{
-              background: C.cardAlt, color: C.text,
+              background: 'transparent', color: C.text,
               border: `1px solid ${C.border}`, borderRadius: 12,
-              padding: '0.8rem 1rem', fontSize: '0.92rem', fontWeight: 800,
+              padding: '0.7rem 1rem', fontSize: '0.95rem', fontWeight: 700,
               fontFamily: 'inherit', cursor: 'pointer',
               letterSpacing: '0.02em',
             }}
-          >Болих</button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            style={{
-              background: C.danger, color: '#0a0a0a',
-              border: `1px solid ${C.danger}`, borderRadius: 12,
-              padding: '0.8rem 1rem', fontSize: '0.92rem', fontWeight: 800,
-              fontFamily: 'inherit', cursor: 'pointer',
-              letterSpacing: '0.02em',
-            }}
-          >Хүсэх</button>
+          >Хаах</button>
         </div>
       </div>
     </div>
+  );
+}
+
+// Post-solve confirm UI — three penalty options (OK default, +2, DNF)
+// rendered as a SELECTION row plus a prominent "Баталгаажуулах ✓" save
+// button. Auto-confirms after AUTO_CONFIRM_MS so a distracted player
+// doesn't strand the round; the actual auto-fire lives in RacingScreen
+// (so it survives this component re-rendering on every selection).
+function PendingPenaltyControls({
+  pending, onSelect, onCommit,
+}: {
+  pending: { ms: number; selected: Penalty; createdAt: number };
+  onSelect: (p: Penalty) => void;
+  onCommit: () => void;
+}) {
+  // Self-driven countdown for the muted "Автомат хадгалах" indicator.
+  // Re-anchored only when pending.createdAt changes (a fresh solve) —
+  // changing selection does NOT bump the deadline.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    const id = window.setInterval(() => setNow(Date.now()), 500);
+    return () => window.clearInterval(id);
+  }, [pending.createdAt]);
+  const deadline = pending.createdAt + AUTO_CONFIRM_MS;
+  const remainingSec = Math.max(0, Math.ceil((deadline - now) / 1000));
+
+  return (
+    <div
+      onTouchStart={(e) => e.stopPropagation()}
+      onTouchEnd={(e) => e.stopPropagation()}
+      style={{
+        marginTop: '1rem',
+        display: 'flex', flexDirection: 'column', gap: '0.55rem',
+        width: '100%', maxWidth: 360,
+        position: 'relative', zIndex: 2,
+      }}
+    >
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+        <PenaltySelectButton label="OK"  selected={pending.selected === 'ok'}
+          onClick={(e) => { e.stopPropagation(); onSelect('ok'); }} />
+        <PenaltySelectButton label="+2"  selected={pending.selected === '+2'}
+          onClick={(e) => { e.stopPropagation(); onSelect('+2'); }} />
+        <PenaltySelectButton label="DNF" selected={pending.selected === 'dnf'}
+          onClick={(e) => { e.stopPropagation(); onSelect('dnf'); }} />
+      </div>
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onCommit(); }}
+        style={{
+          background: C.accent, color: '#0a0a0a',
+          border: `1px solid ${C.accent}`, borderRadius: 12,
+          padding: '0.85rem 1rem', fontSize: '1rem', fontWeight: 800,
+          fontFamily: 'inherit', cursor: 'pointer', letterSpacing: '0.02em',
+        }}
+      >Баталгаажуулах ✓</button>
+      <div style={{
+        fontSize: '0.7rem', color: C.muted, textAlign: 'center',
+        letterSpacing: '0.04em', fontVariantNumeric: 'tabular-nums',
+      }}>
+        Автомат хадгалах: {remainingSec}с
+      </div>
+    </div>
+  );
+}
+
+// Tri-state penalty chip. Selected state uses the accent dim/border
+// treatment from the spec; unselected sits on the card surface.
+function PenaltySelectButton({
+  label, selected, onClick,
+}: {
+  label: string;
+  selected: boolean;
+  onClick: (e: React.MouseEvent) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        background: selected ? C.accentDim : C.card,
+        color: selected ? C.accent : C.text,
+        border: `1px solid ${selected ? C.accent : C.border}`,
+        borderRadius: 12, padding: '0.7rem 0.85rem',
+        fontSize: '1rem', fontWeight: 800,
+        fontFamily: 'inherit', cursor: 'pointer',
+        letterSpacing: '0.02em',
+        transition: 'background 0.12s, color 0.12s, border-color 0.12s',
+      }}
+    >{label}</button>
   );
 }
 
@@ -5253,67 +5258,6 @@ function RetrySolveConfirmModal({
         </div>
       </div>
     </VoteOverlay>
-  );
-}
-
-// Floating "Буцаах" pill — shown for INSTANT_UNDO_WINDOW_MS after a
-// confirmation. Self-driven countdown (no parent re-render needed).
-// Mobile: floats above the bottom nav. Desktop: top-right of the
-// racing area. Tapping fires an instant undo (no vote).
-function InstantUndoPill({
-  isMobile, deadlineMs, onUndo,
-}: {
-  isMobile: boolean;
-  /** Wall-clock ms when the pill should auto-disappear. */
-  deadlineMs: number;
-  onUndo: () => void;
-}) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 100);
-    return () => window.clearInterval(id);
-  }, []);
-  const remainingMs = Math.max(0, deadlineMs - now);
-  const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
-  if (remainingMs <= 0) return null;
-
-  // Fade out over the last 600ms so the pill doesn't snap away.
-  const opacity = remainingMs < 600 ? remainingMs / 600 : 1;
-
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        zIndex: 1480,
-        ...(isMobile
-          ? { left: '50%', transform: 'translateX(-50%)', bottom: '4.6rem' }
-          : { right: '1.5rem', top: '5rem' }),
-        opacity,
-        transition: 'opacity 0.2s',
-      }}
-    >
-      <button
-        type="button"
-        onClick={onUndo}
-        style={{
-          display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
-          padding: '0.55rem 0.95rem', borderRadius: 999,
-          background: C.accentDim, color: C.accent,
-          border: `1px solid ${C.borderHi}`,
-          fontSize: '0.85rem', fontWeight: 700,
-          fontFamily: 'inherit', cursor: 'pointer',
-          letterSpacing: '0.02em',
-          boxShadow: '0 6px 18px rgba(0,0,0,0.4)',
-        }}
-      >
-        <IconUndo size={15} aria-hidden="true" />
-        <span>Буцаах</span>
-        <span style={{
-          fontFamily: 'JetBrains Mono, monospace',
-          color: C.muted, fontWeight: 600,
-        }}>{remainingSec}с</span>
-      </button>
-    </div>
   );
 }
 
@@ -6121,17 +6065,16 @@ function InlineConfirmRow({
 
 // ── Sectioned racing menu ─────────────────────────────────────────────────
 // Replaces the prior flat button stack. Two sections — "ТОГЛОЛТ" for in-
-// game actions (pause request, restart, extra scramble) and "ГАРАХ
-// СОНГОЛТУУД" for leave variants. Destructive rows (restart, exit) flip
-// into an inline confirm panel rather than spawning a separate modal.
+// game actions (pause request, restart) and "ГАРАХ СОНГОЛТУУД" for leave
+// variants. Destructive rows (restart, exit) flip into an inline confirm
+// panel rather than spawning a separate modal. Extra-scramble is no
+// longer in this menu — it's tap-on-a-solve from the S1..S5 strip.
 function MpPauseModal({
   isMobile, onResume, onLeaveTemporarily, onExit,
   canRestartRound, canPauseMatch,
   restartVoteInFlight, pauseVoteInFlight,
   onRestartRound, onPauseMatch,
   pauseDisabledReason,
-  currentSolveIdx, extrasRemaining, canRequestExtra,
-  onRequestExtra,
 }: {
   isMobile: boolean;
   onResume: () => void;
@@ -6150,14 +6093,6 @@ function MpPauseModal({
    *  why the action is unavailable (e.g. "Та host биш"). Empty string =
    *  no tooltip (row was enabled, or the disabled reason is obvious). */
   pauseDisabledReason: string;
-  /** 1-based "current solve" number used in the extras button label. */
-  currentSolveIdx: number;
-  /** Per-round extras budget left for the local player. */
-  extrasRemaining: number;
-  /** Gates the extras row independently of budget — false during
-   *  pause / wrong round status. Tooltip on the disabled state. */
-  canRequestExtra: boolean;
-  onRequestExtra: () => void;
 }) {
   // Which row (if any) is showing its inline-confirm overlay. null = no
   // pending confirm. Only one row can be in confirm mode at a time, so a
@@ -6197,8 +6132,6 @@ function MpPauseModal({
   };
 
   const pauseEnabled  = canPauseMatch && !pauseVoteInFlight;
-  const extrasEnabled = canRequestExtra && extrasRemaining > 0;
-  const extrasLabel = `${currentSolveIdx}-р эвлүүлэлтдээ нэмэлт холилт авах`;
 
   return (
     <ModalShell isMobile={isMobile} title="Сонголт" onClose={onResume} maxWidth={420}>
@@ -6260,33 +6193,6 @@ function MpPauseModal({
             <span>{restartVoteInFlight ? 'Санал явж байна…' : 'Round дахин эхлүүлэх'}</span>
           </button>
         )}
-
-        <button
-          type="button"
-          onClick={() => { if (extrasEnabled) onRequestExtra(); }}
-          disabled={!extrasEnabled}
-          title={extrasEnabled ? undefined : (extrasRemaining === 0 ? 'Энэ round-д хэрэглэсэн' : undefined)}
-          onMouseEnter={(e) => rowHover(e, extrasEnabled)}
-          onMouseLeave={rowOut}
-          style={{
-            ...rowBase,
-            color: extrasEnabled ? C.text : C.mutedDim,
-            cursor: extrasEnabled ? 'pointer' : 'not-allowed',
-            flexDirection: 'column', alignItems: 'stretch',
-          }}
-        >
-          <span style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-            <IconRefresh size={16} aria-hidden="true" />
-            <span style={{ flex: 1 }}>
-              {extrasLabel}
-              {canRequestExtra && (
-                <span style={{ color: C.muted, fontWeight: 600, marginLeft: '0.3rem' }}>
-                  (Үлдсэн: {extrasRemaining})
-                </span>
-              )}
-            </span>
-          </span>
-        </button>
 
         <div style={divider} />
 
