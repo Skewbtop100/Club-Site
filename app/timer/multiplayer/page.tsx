@@ -1168,6 +1168,44 @@ function MultiplayerPageInner() {
     return () => window.clearInterval(id);
   }, [roomCode, userId, isMemberOfRoom]);
 
+  // Background-tab recovery. Mobile browsers throttle setInterval to ≥1 Hz
+  // (often much slower) while a tab is hidden, so the heartbeat above can
+  // drift well past the 'idle' threshold while the user is in another app.
+  // When the tab becomes visible again, fire one immediate heartbeat write
+  // so other clients flip us back to 'online' on their next status tick
+  // instead of waiting up to HEARTBEAT_INTERVAL_MS for the throttled
+  // interval to resume. The write also serves as a liveness probe — if
+  // the Firebase WebSocket was suspended it'll reconnect on first write.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (!roomCode || !userId || !isMemberOfRoom) return;
+      const hbRef = ref(rtdb, `rooms/${roomCode}/members/${userId}/lastHeartbeat`);
+      set(hbRef, serverTimestamp()).catch(() => { /* see heartbeat effect for rationale */ });
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [roomCode, userId, isMemberOfRoom]);
+
+  // displayName drift sync. The member record's `name` is a snapshot taken
+  // at room-creation / join time (see the stale-displayName TODO in
+  // createRoom). If the auth profile name changes — or, more importantly
+  // for this bug, the page remounts after a tab kill and the local member
+  // record happens to have an empty / outdated name — push the current
+  // authoritative `displayName` from useAuth() back into RTDB so the
+  // standings show the right label. Guarded on a non-empty new value so
+  // a transient auth-loading state can't overwrite a good name with ''.
+  useEffect(() => {
+    if (!roomCode || !userId || !isMemberOfRoom) return;
+    const liveName = (displayName ?? '').trim();
+    if (!liveName) return;
+    const rtdbName = room?.members?.[userId]?.name ?? '';
+    if (rtdbName === liveName) return;
+    update(ref(rtdb, `rooms/${roomCode}/members/${userId}`), { name: liveName })
+      .catch(err => console.warn('[mp] displayName sync failed', err));
+  }, [roomCode, userId, isMemberOfRoom, displayName, room?.members]);
+
   // Periodic re-render so connection-status thresholds tick over without
   // requiring snapshot updates. 2s is fast enough that a freshly disconnected
   // player flips to 'idle' / 'disconnected' within one tick of crossing the
