@@ -6157,29 +6157,36 @@ function ActionIconBtn({
       onTouchStart={(e) => {
         e.stopPropagation();
         e.currentTarget.style.transform = 'scale(0.94)';
+        e.currentTarget.style.background = active ? `${tint}40` : 'rgba(255,255,255,0.12)';
       }}
       onTouchEnd={(e) => {
         e.stopPropagation();
         e.currentTarget.style.transform = 'scale(1)';
+        e.currentTarget.style.background = active ? `${tint}26` : 'transparent';
       }}
       onTouchCancel={(e) => {
         e.stopPropagation();
         e.currentTarget.style.transform = 'scale(1)';
+        e.currentTarget.style.background = active ? `${tint}26` : 'transparent';
       }}
       onPointerDown={(e) => {
         e.stopPropagation();
         e.currentTarget.style.transform = 'scale(0.94)';
+        e.currentTarget.style.background = active ? `${tint}40` : 'rgba(255,255,255,0.12)';
       }}
-      onPointerUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+      onPointerUp={(e) => {
+        e.currentTarget.style.transform = 'scale(1)';
+        e.currentTarget.style.background = active ? `${tint}26` : 'transparent';
+      }}
       style={{
         width: size, height: size, padding: 0,
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
         borderRadius: 8,
-        background: active ? `${tint}26` : 'rgba(255,255,255,0.05)',
+        background: active ? `${tint}26` : 'transparent',
         border: 'none',
         color: active ? tint : C.muted,
         fontFamily: 'inherit', cursor: 'pointer',
-        transition: 'background 0.15s, color 0.15s, border-color 0.15s, transform 0.08s',
+        transition: 'background 0.15s, color 0.15s, transform 0.08s',
         // Suppress iOS Safari's grey tap-flash so our own scale/colour
         // feedback is the only thing the user sees on press.
         WebkitTapHighlightColor: 'transparent',
@@ -6187,12 +6194,12 @@ function ActionIconBtn({
       }}
       onMouseEnter={e => {
         if (active) return;
-        e.currentTarget.style.background = 'rgba(255,255,255,0.10)';
+        e.currentTarget.style.background = 'rgba(255,255,255,0.06)';
         e.currentTarget.style.color = C.text;
       }}
       onMouseLeave={e => {
         if (active) return;
-        e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+        e.currentTarget.style.background = 'transparent';
         e.currentTarget.style.color = C.muted;
         e.currentTarget.style.transform = 'scale(1)';
       }}
