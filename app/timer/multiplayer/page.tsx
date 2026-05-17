@@ -532,6 +532,27 @@ interface RoomData {
 // notes future admin tooling could surface this as a room setting.
 const EXTRA_SCRAMBLES_PER_ROUND = 2;
 
+// Derive a player's "next solve slot" purely from their recorded
+// `solves/{uid}/{idx}` map. Returns the first index in [0, SOLVES_PER_ROUND)
+// whose slot is empty, or SOLVES_PER_ROUND when every slot is filled.
+//
+// Authoritative because it can't disagree with the actual solve writes —
+// the previous read of `members/{uid}/currentSolve` was an *intent* field
+// that the writer kept in sync via `update()`; a remount that landed in
+// the brief window between an in-flight solve write and the snapshot
+// catching up could see `currentSolve = 0` while three slots were already
+// filled, causing the next commit to clobber `solves/{uid}/0`. Deriving
+// from the slot map closes that window. Also handles gap-style states
+// correctly — when the extras flow wipes slot 2 mid-round, slots
+// {0,1,3} are filled, "first gap" returns 2, and the redo writes to the
+// right slot rather than appending past slot 3.
+function deriveNextSolveIdx(slots: Record<string, SolveData> | undefined): number {
+  for (let i = 0; i < SOLVES_PER_ROUND; i++) {
+    if (!slots?.[String(i)]) return i;
+  }
+  return SOLVES_PER_ROUND;
+}
+
 // ── Round / scoring helpers ──────────────────────────────────────────────
 function getRoundName(round: number, maxRounds: number): string {
   if (maxRounds === 1) return 'Final';
@@ -3739,8 +3760,16 @@ function RacingScreen({
   const holdToStart = prefs.holdToStart;
   const inspectionEnabled = prefs.inspectionEnabled;
   const holdTimeMs = prefs.holdTimeMs;
-  const me = room.members?.[userId];
-  const myCurrent = me?.currentSolve ?? 0;
+  // Derive the next-slot index from the recorded solves rather than the
+  // member's `currentSolve` field. See deriveNextSolveIdx for the
+  // remount-after-background race condition that motivated this — the
+  // member field was previously the source of truth and could be 0 on
+  // a freshly-mounted client while RTDB already had 3 filled slots,
+  // causing the next commit to overwrite solves/{uid}/0.
+  const myCurrent = useMemo(
+    () => deriveNextSolveIdx(room.solves?.[userId]),
+    [room.solves, userId],
+  );
   const mySolves = useMemo(() => {
     const out: SolveData[] = [];
     for (let i = 0; i < SOLVES_PER_ROUND; i++) {
@@ -3756,18 +3785,22 @@ function RacingScreen({
   //   canProceed: myIndex <= minOpponent + 1  (1-ahead allowed)
   //   wait:      myIndex >  minOpponent + 1  (≥2-ahead → wait)
   //
-  // Where myIndex = number of solves I have CONFIRMED (= members[me].currentSolve).
+  // Where myIndex = number of solves I have CONFIRMED (derived from
+  // room.solves, same as the local `myCurrent` above — see
+  // deriveNextSolveIdx). The opponent equivalent is derived the same way
+  // so a returning-from-background opponent doesn't briefly appear stuck
+  // at a stale member-field value while their snapshot catches up.
   //
   // Disconnected players are excluded from the sync calculation — they could
   // be reconnecting (idle) or fully gone, but either way the round must not
   // stall on them. If they reconnect mid-round they re-enter the gate at
-  // their actual currentSolve, which may briefly stall faster racers (1-
+  // their actual progress, which may briefly stall faster racers (1-
   // ahead rule applies again immediately).
   const otherCurrents = useMemo(() => {
     return Object.entries(room.members || {})
       .filter(([uid, m]) => uid !== userId && getConnectionStatus(m, now) !== 'disconnected')
-      .map(([, m]) => m.currentSolve);
-  }, [room.members, userId, now]);
+      .map(([uid]) => deriveNextSolveIdx(room.solves?.[uid]));
+  }, [room.members, room.solves, userId, now]);
   const minOthers = otherCurrents.length === 0 ? Number.POSITIVE_INFINITY : Math.min(...otherCurrents);
   const isWaitingForOpponents = otherCurrents.length > 0 && (myCurrent - minOthers) >= 2 && myCurrent < SOLVES_PER_ROUND;
 
@@ -5626,7 +5659,11 @@ function OpponentsPanel({
       }
       return {
         uid, name: m.name,
-        currentSolve: m.currentSolve,
+        // Derive from the slot map so a returning opponent who was at
+        // solve 4 doesn't briefly appear stuck on solve 1 while their
+        // member-record snapshot catches up. Stays in sync with the
+        // RacingScreen's own `myCurrent` derivation.
+        currentSolve: deriveNextSolveIdx(room.solves?.[uid]),
         solves, runningAvg, runningDnf,
         status: getConnectionStatus(m, now),
       };
