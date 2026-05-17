@@ -14,6 +14,10 @@ import { useAuth } from '@/lib/auth-context';
 import { useLang, type Lang } from '@/lib/i18n';
 import { awardSolvePointIfUnderLimit, awardAo5PbIfEligible } from '@/lib/points';
 import { showToast } from '@/lib/toast';
+import {
+  trackPresence, updatePresenceEvent, subscribeOnlineUsers,
+  type OnlineUser,
+} from '@/lib/firebase/services/presence';
 import { WcaEventIcon } from '@/lib/wca-event-icon';
 import {
   useTimer,
@@ -975,6 +979,30 @@ export default function TimerPage() {
     };
   }, [solves, showAo5Projection]);
   const sessionEvent = useMemo(() => EVENTS.find(e => e.id === eventId) ?? EVENTS[0], [eventId]);
+
+  // Presence: register the user as online in /presence/timer/{uid}.
+  // Runs once on login; event changes are handled by the second effect.
+  useEffect(() => {
+    if (!user?.uid || !user.displayName) return;
+    const eventName = sessionEvent?.name ?? eventId;
+    return trackPresence(
+      user.uid,
+      user.displayName,
+      user.photoURL ?? null,
+      eventId,
+      eventName,
+    );
+    // intentionally omit eventId / sessionEvent — initial write captures the
+    // current event; subsequent changes go through updatePresenceEvent below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid, user?.displayName, user?.photoURL]);
+
+  // Update the presence record whenever the active event changes.
+  useEffect(() => {
+    if (!user?.uid) return;
+    const eventName = sessionEvent?.name ?? eventId;
+    updatePresenceEvent(user.uid, eventId, eventName);
+  }, [eventId, user?.uid, sessionEvent?.name]);
 
   // Commit a solve to the active session and immediately roll a new scramble
   // so the timer is ready for the next attempt. Inline scramble generation
@@ -3250,6 +3278,7 @@ export default function TimerPage() {
               <ToolsTab
                 onNavigate={(path) => router.push(path)}
                 solveCount={validCount}
+                currentUserId={user?.uid}
               />
             )}
 
@@ -4125,10 +4154,11 @@ const ROLE_LABEL_MN: Record<'member' | 'athlete' | 'admin', string> = {
 };
 
 function ToolsTab({
-  onNavigate, solveCount,
+  onNavigate, solveCount, currentUserId,
 }: {
   onNavigate: (path: string) => void;
   solveCount: number;
+  currentUserId?: string;
 }) {
   return (
     <div style={{
@@ -4141,6 +4171,8 @@ function ToolsTab({
           onClick={() => onNavigate('/timer/profile')}
         />
       </div>
+
+      <OnlineUsersPanel currentUserId={currentUserId} />
 
       <SectionLabel>Идэвхтэй</SectionLabel>
       <div style={{
@@ -4182,6 +4214,115 @@ function ToolsTab({
         @keyframes pv-tile-fade {
           from { opacity: 0; transform: translateY(6px) scale(0.98); }
           to   { opacity: 1; transform: translateY(0) scale(1); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function OnlineUsersPanel({ currentUserId }: { currentUserId?: string }) {
+  const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([]);
+  const [avatarErrors, setAvatarErrors] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    return subscribeOnlineUsers(setOnlineUsers);
+  }, []);
+
+  const others = onlineUsers.filter(u => u.uid !== currentUserId);
+
+  return (
+    <div style={{ padding: '0 1rem' }}>
+      <div style={{
+        fontSize: '0.65rem', fontWeight: 700,
+        letterSpacing: '0.16em', textTransform: 'uppercase',
+        color: C.mutedDim,
+        margin: '0.6rem 0',
+        paddingLeft: '0.5rem',
+      }}>
+        ОДОО ОНЛАЙН{others.length > 0 ? ` (${others.length})` : ''}
+      </div>
+      <div style={{
+        background: C.card,
+        border: `1px solid ${C.border}`,
+        borderRadius: 12,
+        overflow: 'hidden',
+      }}>
+        {others.length === 0 ? (
+          <div style={{
+            padding: '0.9rem 1rem',
+            textAlign: 'center',
+            color: C.mutedDim,
+            fontSize: '0.8rem',
+          }}>
+            Танаас өөр хэн ч одоо онлайн биш
+          </div>
+        ) : (
+          <div style={{ maxHeight: 240, overflowY: 'auto' }}>
+            {others.map((u, i) => {
+              const initial = (u.displayName ?? '?').codePointAt(0)
+                ? String.fromCodePoint((u.displayName ?? '?').codePointAt(0)!).toUpperCase()
+                : '?';
+              return (
+                <div
+                  key={u.uid}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '0.65rem',
+                    padding: '0.6rem 0.85rem',
+                    borderBottom: i < others.length - 1 ? `1px solid ${C.border}` : 'none',
+                  }}
+                >
+                  <div style={{ position: 'relative', flexShrink: 0 }}>
+                    <div style={{
+                      width: 32, height: 32, borderRadius: '50%',
+                      background: `linear-gradient(135deg, ${C.accent}, #ec4899)`,
+                      color: '#fff', fontSize: 13, fontWeight: 800, lineHeight: 1,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      overflow: 'hidden',
+                    }}>
+                      {u.photoURL && !avatarErrors[u.uid] ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={u.photoURL}
+                          alt=""
+                          referrerPolicy="no-referrer"
+                          onError={() => setAvatarErrors(p => ({ ...p, [u.uid]: true }))}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        />
+                      ) : initial}
+                    </div>
+                    <span style={{
+                      position: 'absolute', bottom: 0, right: 0,
+                      width: 8, height: 8, borderRadius: '50%',
+                      background: '#34d399',
+                      boxShadow: `0 0 0 2px ${C.card}`,
+                      animation: 'pulse-online 2s ease-in-out infinite',
+                      display: 'inline-block',
+                    }} />
+                  </div>
+                  <span style={{
+                    flex: 1, minWidth: 0,
+                    fontSize: '0.88rem', fontWeight: 600, color: C.text,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {u.displayName}
+                  </span>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: '0.3rem',
+                    flexShrink: 0, color: C.mutedDim, fontSize: '0.75rem',
+                  }}>
+                    <WcaEventIcon eventId={u.event} size={14} />
+                    <span>{u.eventName ?? u.event}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      <style>{`
+        @keyframes pulse-online {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
         }
       `}</style>
     </div>

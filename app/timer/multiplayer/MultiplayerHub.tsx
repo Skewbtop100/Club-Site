@@ -2612,7 +2612,7 @@ export default function MultiplayerHub({
           fontWeight: 800, letterSpacing: '-0.02em',
         }}>Multiplayer Racing</div>
         <div style={{ color: C.muted, fontSize: '0.85rem', marginTop: '0.4rem' }}>
-          Найзуудтайгаа шууд тэмцээн
+          Найзуудтайгаа өрсөлдөөрэй
         </div>
       </div>
 
