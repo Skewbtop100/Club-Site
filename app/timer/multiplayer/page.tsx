@@ -5109,6 +5109,9 @@ function PendingPenaltyControls({
   }, [pending.createdAt]);
   const deadline = pending.createdAt + AUTO_CONFIRM_MS;
   const remainingSec = Math.max(0, Math.ceil((deadline - now) / 1000));
+  // 2-second cooldown after solve stops so an overshooting tap can't
+  // accidentally commit before the player has a chance to review.
+  const confirmArmed = (now - pending.createdAt) >= 2000;
 
   return (
     <div
@@ -5131,12 +5134,17 @@ function PendingPenaltyControls({
       </div>
       <button
         type="button"
-        onClick={(e) => { e.stopPropagation(); onCommit(); }}
+        disabled={!confirmArmed}
+        onClick={(e) => { e.stopPropagation(); if (confirmArmed) onCommit(); }}
         style={{
           background: C.accent, color: '#0a0a0a',
           border: `1px solid ${C.accent}`, borderRadius: 12,
           padding: '0.85rem 1rem', fontSize: '1rem', fontWeight: 800,
-          fontFamily: 'inherit', cursor: 'pointer', letterSpacing: '0.02em',
+          fontFamily: 'inherit', letterSpacing: '0.02em',
+          cursor: confirmArmed ? 'pointer' : 'not-allowed',
+          opacity: confirmArmed ? 1 : 0.4,
+          transition: 'opacity 0.3s ease',
+          pointerEvents: 'auto',
         }}
       >Баталгаажуулах ✓</button>
       <div style={{

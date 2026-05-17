@@ -2611,13 +2611,10 @@ export default function MultiplayerHub({
           fontSize: 'clamp(1.5rem, 5vw, 2rem)',
           fontWeight: 800, letterSpacing: '-0.02em',
         }}>Multiplayer Racing</div>
-        <div style={{ color: C.muted, fontSize: '0.85rem', marginTop: '0.4rem' }}>
-          Найзуудтайгаа өрсөлдөөрэй
-        </div>
       </div>
 
       {/* Section 1: Quick actions */}
-      <Section icon={<IconBolt size={18} color={C.accent} />} title="Хурдан үйлдлүүд">
+      <Section icon={<span style={{ opacity: 0.55 }}><IconBolt size={16} color={C.accent} /></span>} title="Өөрөө үүсгээд найзуудтайгаа өрсөлдөөрэй">
         <QuickActions
           isMobile={isMobile}
           pendingRejoin={pendingRejoin}
