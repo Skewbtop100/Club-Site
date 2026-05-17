@@ -2644,6 +2644,7 @@ export default function TimerPage() {
               borderRadius: 999, padding: '0.45rem 0.55rem',
               display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: '0.45rem',
               backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+              position: 'relative', zIndex: 10,
             }}>
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
                 <button
@@ -2670,7 +2671,7 @@ export default function TimerPage() {
                   content), so we hide its contents while keeping the
                   grid column allocated so the avatar / + cluster on
                   the right stays pinned at column 3. */}
-              <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 0 }}>
                 {mobileTab !== 'tools' && (
                   <>
                     <button
@@ -2690,11 +2691,16 @@ export default function TimerPage() {
                       <WcaEventIcon eventId={eventId} size={18} />
                       <span>{sessionEvent.name}</span>
                     </button>
-                    <div style={{
-                      fontSize: '0.6rem', color: C.mutedDim,
-                      letterSpacing: '0.05em', fontWeight: 600,
-                      lineHeight: 1, paddingBottom: '0.2rem',
-                    }}>
+                    <div
+                      title={currentSession?.name ?? 'Default'}
+                      style={{
+                        fontSize: '0.6rem', color: C.mutedDim,
+                        letterSpacing: '0.05em', fontWeight: 600,
+                        lineHeight: 1, paddingBottom: '0.2rem',
+                        maxWidth: '140px', overflow: 'hidden',
+                        textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}
+                    >
                       {currentSession?.name ?? 'Default'}
                     </div>
                   </>
@@ -4507,6 +4513,7 @@ function SessionsPanel({
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: '0.4rem', alignItems: 'center' }}>
                   <input
                     autoFocus
+                    maxLength={30}
                     value={renameValue}
                     onChange={e => setRenameValue(e.target.value)}
                     onKeyDown={e => {
@@ -6168,8 +6175,8 @@ function ActionIconBtn({
         width: size, height: size, padding: 0,
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
         borderRadius: 8,
-        background: active ? `${tint}26` : 'rgba(255,255,255,0.03)',
-        border: `1px solid ${active ? tint : 'rgba(255,255,255,0.10)'}`,
+        background: active ? `${tint}26` : 'rgba(255,255,255,0.05)',
+        border: 'none',
         color: active ? tint : C.muted,
         fontFamily: 'inherit', cursor: 'pointer',
         transition: 'background 0.15s, color 0.15s, border-color 0.15s, transform 0.08s',
@@ -6180,12 +6187,12 @@ function ActionIconBtn({
       }}
       onMouseEnter={e => {
         if (active) return;
-        e.currentTarget.style.background = 'rgba(255,255,255,0.07)';
+        e.currentTarget.style.background = 'rgba(255,255,255,0.10)';
         e.currentTarget.style.color = C.text;
       }}
       onMouseLeave={e => {
         if (active) return;
-        e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
+        e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
         e.currentTarget.style.color = C.muted;
         e.currentTarget.style.transform = 'scale(1)';
       }}
