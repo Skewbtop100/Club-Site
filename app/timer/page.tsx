@@ -69,6 +69,11 @@ interface Theme {
   name: string;
   preview: string;  // hex colour shown in the picker tile
   colors: ThemeColors;
+  // Optional vertical-gradient background for vibrant themes. When set,
+  // the page wrapper paints this instead of `colors.bg` (which still
+  // doubles as the document body's solid fallback so overscroll on
+  // mobile blends in). Black/white use plain bg.
+  bgGradient?: string;
 }
 
 // Shared semantic constants that don't change per theme. Inspection-time
@@ -125,70 +130,73 @@ const THEMES: Record<ThemeId, Theme> = {
   },
   ocean: {
     id: 'ocean',
-    name: 'Ocean',
-    preview: '#1e3a8a',
+    name: 'Blue',
+    preview: '#2563eb',
+    bgGradient: 'linear-gradient(180deg, #1e3a8a 0%, #2c4cf0 30%, #1e3a8a 100%)',
     colors: {
-      bg: '#1e3a8a',
-      card: '#1e40af',
-      cardAlt: '#2547b8',
-      border: 'rgba(255,255,255,0.15)',
-      borderHi: 'rgba(251,191,36,0.5)',
+      bg: '#2c4cf0',
+      card: 'rgba(255,255,255,0.08)',
+      cardAlt: 'rgba(255,255,255,0.12)',
+      border: 'rgba(255,255,255,0.18)',
+      borderHi: 'rgba(255,255,255,0.5)',
       text: '#ffffff',
-      muted: 'rgba(255,255,255,0.65)',
-      mutedDim: 'rgba(255,255,255,0.4)',
-      accent: '#fbbf24',
-      accent2: '#fde047',
-      accentDim: 'rgba(251,191,36,0.18)',
-      success: '#34D399',
-      danger: '#f87171',
-      warning: '#fbbf24',
-      warn: '#fbbf24',
+      muted: 'rgba(255,255,255,0.75)',
+      mutedDim: 'rgba(255,255,255,0.5)',
+      accent: '#ffffff',
+      accent2: '#dbeafe',
+      accentDim: 'rgba(255,255,255,0.15)',
+      success: '#86efac',
+      danger: '#fecaca',
+      warning: '#fde047',
+      warn: '#fde047',
       orange: ORANGE_WARNING,
     },
   },
   forest: {
     id: 'forest',
-    name: 'Forest',
-    preview: '#14532d',
+    name: 'Red',
+    preview: '#dc2626',
+    bgGradient: 'linear-gradient(180deg, #b91c1c 0%, #e8311c 30%, #991b1b 100%)',
     colors: {
-      bg: '#14532d',
-      card: '#166534',
-      cardAlt: '#1b7339',
-      border: 'rgba(255,255,255,0.15)',
-      borderHi: 'rgba(253,224,71,0.5)',
+      bg: '#e8311c',
+      card: 'rgba(255,255,255,0.08)',
+      cardAlt: 'rgba(255,255,255,0.12)',
+      border: 'rgba(255,255,255,0.18)',
+      borderHi: 'rgba(255,255,255,0.5)',
       text: '#ffffff',
-      muted: 'rgba(255,255,255,0.65)',
-      mutedDim: 'rgba(255,255,255,0.4)',
-      accent: '#fde047',
-      accent2: '#facc15',
-      accentDim: 'rgba(253,224,71,0.18)',
+      muted: 'rgba(255,255,255,0.75)',
+      mutedDim: 'rgba(255,255,255,0.5)',
+      accent: '#ffffff',
+      accent2: '#fecaca',
+      accentDim: 'rgba(255,255,255,0.15)',
       success: '#86efac',
-      danger: '#f87171',
-      warning: '#fbbf24',
-      warn: '#fbbf24',
+      danger: '#fff',
+      warning: '#fde047',
+      warn: '#fde047',
       orange: ORANGE_WARNING,
     },
   },
   rose: {
     id: 'rose',
-    name: 'Rose',
-    preview: '#9f1239',
+    name: 'Pink',
+    preview: '#e11d48',
+    bgGradient: 'linear-gradient(180deg, #be185d 0%, #dc2660 30%, #831843 100%)',
     colors: {
-      bg: '#9f1239',
-      card: '#a8174a',
-      cardAlt: '#b81f56',
-      border: 'rgba(255,255,255,0.15)',
-      borderHi: 'rgba(253,224,71,0.5)',
+      bg: '#dc2660',
+      card: 'rgba(255,255,255,0.08)',
+      cardAlt: 'rgba(255,255,255,0.12)',
+      border: 'rgba(255,255,255,0.18)',
+      borderHi: 'rgba(255,255,255,0.5)',
       text: '#ffffff',
-      muted: 'rgba(255,255,255,0.65)',
-      mutedDim: 'rgba(255,255,255,0.4)',
-      accent: '#fde047',
-      accent2: '#facc15',
-      accentDim: 'rgba(253,224,71,0.18)',
-      success: '#34D399',
-      danger: '#fff',
-      warning: '#fbbf24',
-      warn: '#fbbf24',
+      muted: 'rgba(255,255,255,0.75)',
+      mutedDim: 'rgba(255,255,255,0.5)',
+      accent: '#ffffff',
+      accent2: '#fce7f3',
+      accentDim: 'rgba(255,255,255,0.15)',
+      success: '#86efac',
+      danger: '#fecaca',
+      warning: '#fde047',
+      warn: '#fde047',
       orange: ORANGE_WARNING,
     },
   },
@@ -876,8 +884,9 @@ export default function TimerPage() {
   // Mirror the theme's bg onto <body> and <html> so the overscroll /
   // rubber-band area on mobile, and any 100vh measurement gap, blend with
   // the page instead of showing the user-agent default (white) or the
-  // previous theme's bg. Snapshot + restore so navigating away from
-  // /timer doesn't leak the timer palette onto other routes.
+  // previous theme's bg. The page wrapper paints any bgGradient on top;
+  // body/html use the solid colour so the rubber-band area stays a clean
+  // single tone rather than a tiled gradient peeking past the edge.
   useEffect(() => {
     if (typeof document === 'undefined') return;
     const bg = THEMES[themeId].colors.bg;
@@ -1839,7 +1848,8 @@ export default function TimerPage() {
   return (
     <div className={`timer-page ${focusMode ? 'focus-mode' : ''}`} style={{
       height: '100vh', overflow: 'hidden',
-      background: C.bg, color: C.text,
+      background: THEMES[themeId].bgGradient ?? C.bg,
+      color: C.text,
       display: 'flex',
       transition: 'background-color 0.25s ease, color 0.25s ease',
     }}>
@@ -2234,6 +2244,7 @@ export default function TimerPage() {
               background: C.card, border: `1px solid ${C.border}`,
               borderRadius: 18, padding: '1.25rem 1.5rem',
               boxShadow: '0 1px 0 rgba(255,255,255,0.02) inset, 0 4px 16px rgba(0,0,0,0.2)',
+              backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
             }}>
               {/* Picker row — event picker pill + "New Scramble" pill,
                   centered as a pair. The event picker carries the
@@ -2632,6 +2643,7 @@ export default function TimerPage() {
               background: C.card, border: `1px solid ${C.border}`,
               borderRadius: 999, padding: '0.45rem 0.55rem',
               display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: '0.45rem',
+              backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
             }}>
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
                 <button
@@ -3248,6 +3260,7 @@ export default function TimerPage() {
                   alignItems: 'center',
                   background: C.card,
                   borderTop: `1px solid ${C.border}`,
+                  backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
                 }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
                     <MobileMicroStat label="Dev"   value={stats.stdDev == null ? '—' : (stats.stdDev / 1000).toFixed(2)} />
@@ -3295,6 +3308,7 @@ export default function TimerPage() {
                 flexShrink: 0,
                 display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)',
                 background: C.card, borderTop: `1px solid ${C.border}`,
+                backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
               }}>
                 <BottomTab label="Timer"      icon={<IconStopwatch size={20} />} active={mobileTab === 'timer'}  onClick={() => setMobileTab('timer')} C={C} />
                 <BottomTab label="Solves"     icon={<IconList size={20} />}      active={mobileTab === 'solves'} onClick={() => setMobileTab('solves')} C={C} />
