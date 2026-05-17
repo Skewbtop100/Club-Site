@@ -33,23 +33,177 @@ import {
 } from '@/lib/timer-engine';
 
 
-// ── Theme constants (lavender + mint, matches the screenshot) ───────────────
-const C = {
-  bg:        '#0a0a0a',
-  card:      '#141414',
-  cardAlt:   '#1a1a1a',
-  border:    'rgba(255,255,255,0.06)',
-  borderHi:  'rgba(167,139,250,0.4)',
-  text:      '#e8e8ed',
-  muted:     '#8b8d98',
-  mutedDim:  '#5a5d68',
-  accent:    '#a78bfa',  // lavender
-  accentDim: 'rgba(167,139,250,0.15)',
-  success:   '#34d399',  // mint green for PBs
-  warn:      '#fbbf24',  // 8s inspection warning
-  orange:    '#f97316',  // 12s warning
-  danger:    '#ef4444',  // 15s+ / DNF
-} as const;
+// ── Themes ───────────────────────────────────────────────────────────────────
+// Five presets. Each defines the full palette the rest of the file reads via
+// the module-level mutable `C` below. The user picks a theme in Settings →
+// Display; the chosen id is persisted under THEME_KEY and applied by mutating
+// `C` in-place inside TimerPage so module-scope helpers (ModalShell,
+// SessionsPanel, etc.) that reference `C.xxx` re-read the new palette on the
+// next React render. `borderHi` is derived from `accent` at 0.4 opacity per
+// theme; `warn` mirrors `warning`; `orange` is shared inspection-time semantic
+// colour and stays constant across themes (the 8s / 12s / 15s warnings always
+// read the same).
+type ThemeId = 'lavender' | 'mint' | 'sunset' | 'ocean' | 'mono';
+
+interface ThemeColors {
+  bg: string;
+  card: string;
+  cardAlt: string;
+  border: string;
+  borderHi: string;
+  text: string;
+  muted: string;
+  mutedDim: string;
+  accent: string;
+  accent2: string;
+  accentDim: string;
+  success: string;
+  danger: string;
+  warning: string;
+  warn: string;
+  orange: string;
+}
+
+interface Theme {
+  id: ThemeId;
+  name: string;
+  preview: string;  // hex colour shown in the picker tile
+  colors: ThemeColors;
+}
+
+// Shared semantic constants that don't change per theme. Inspection-time
+// warning is always orange→red regardless of accent so the visual rhythm
+// stays consistent for users tracking 8s/12s/15s thresholds.
+const ORANGE_WARNING = '#f97316';
+
+const THEMES: Record<ThemeId, Theme> = {
+  lavender: {
+    id: 'lavender',
+    name: 'Lavender',
+    preview: '#A78BFA',
+    colors: {
+      bg: '#0a0a0a',
+      card: '#141414',
+      cardAlt: '#1a1a1a',
+      border: 'rgba(255,255,255,0.08)',
+      borderHi: 'rgba(167,139,250,0.4)',
+      text: '#fff',
+      muted: 'rgba(255,255,255,0.55)',
+      mutedDim: 'rgba(255,255,255,0.3)',
+      accent: '#A78BFA',
+      accent2: '#7c3aed',
+      accentDim: 'rgba(167,139,250,0.12)',
+      success: '#34D399',
+      danger: '#f87171',
+      warning: '#fbbf24',
+      warn: '#fbbf24',
+      orange: ORANGE_WARNING,
+    },
+  },
+  mint: {
+    id: 'mint',
+    name: 'Mint',
+    preview: '#34D399',
+    colors: {
+      bg: '#0a0a0a',
+      card: '#141414',
+      cardAlt: '#1a1a1a',
+      border: 'rgba(255,255,255,0.08)',
+      borderHi: 'rgba(52,211,153,0.4)',
+      text: '#fff',
+      muted: 'rgba(255,255,255,0.55)',
+      mutedDim: 'rgba(255,255,255,0.3)',
+      accent: '#34D399',
+      accent2: '#10b981',
+      accentDim: 'rgba(52,211,153,0.12)',
+      success: '#86efac',
+      danger: '#f87171',
+      warning: '#fbbf24',
+      warn: '#fbbf24',
+      orange: ORANGE_WARNING,
+    },
+  },
+  sunset: {
+    id: 'sunset',
+    name: 'Sunset',
+    preview: '#F97316',
+    colors: {
+      bg: '#0f0a0a',
+      card: '#1a1414',
+      cardAlt: '#1f1818',
+      border: 'rgba(255,255,255,0.08)',
+      borderHi: 'rgba(249,115,22,0.4)',
+      text: '#fff',
+      muted: 'rgba(255,255,255,0.55)',
+      mutedDim: 'rgba(255,255,255,0.3)',
+      accent: '#F97316',
+      accent2: '#ea580c',
+      accentDim: 'rgba(249,115,22,0.12)',
+      success: '#34D399',
+      danger: '#f87171',
+      warning: '#fbbf24',
+      warn: '#fbbf24',
+      orange: ORANGE_WARNING,
+    },
+  },
+  ocean: {
+    id: 'ocean',
+    name: 'Ocean',
+    preview: '#3b82f6',
+    colors: {
+      bg: '#080a14',
+      card: '#101626',
+      cardAlt: '#16203a',
+      border: 'rgba(255,255,255,0.08)',
+      borderHi: 'rgba(59,130,246,0.4)',
+      text: '#fff',
+      muted: 'rgba(255,255,255,0.55)',
+      mutedDim: 'rgba(255,255,255,0.3)',
+      accent: '#3b82f6',
+      accent2: '#2563eb',
+      accentDim: 'rgba(59,130,246,0.15)',
+      success: '#34D399',
+      danger: '#f87171',
+      warning: '#fbbf24',
+      warn: '#fbbf24',
+      orange: ORANGE_WARNING,
+    },
+  },
+  mono: {
+    id: 'mono',
+    name: 'Mono',
+    preview: '#fff',
+    colors: {
+      bg: '#000',
+      card: '#0a0a0a',
+      cardAlt: '#141414',
+      border: 'rgba(255,255,255,0.1)',
+      borderHi: 'rgba(255,255,255,0.4)',
+      text: '#fff',
+      muted: 'rgba(255,255,255,0.55)',
+      mutedDim: 'rgba(255,255,255,0.3)',
+      accent: '#fff',
+      accent2: '#e5e7eb',
+      accentDim: 'rgba(255,255,255,0.08)',
+      success: '#fff',
+      danger: '#f87171',
+      warning: '#fbbf24',
+      warn: '#fbbf24',
+      orange: ORANGE_WARNING,
+    },
+  },
+};
+
+const DEFAULT_THEME_ID: ThemeId = 'lavender';
+const THEME_KEY = 'pv.timer.theme';
+
+// Module-level mutable palette. Initialised from the default theme and
+// re-synced inside TimerPage when the user picks a new one. Existing code
+// throughout this file reads C.accent / C.card / etc. unchanged — the
+// indirection is the whole reason this object is mutable rather than a fresh
+// reference each theme switch (module-scope helpers like ModalShell capture
+// the binding once at definition time).
+const C: ThemeColors = { ...THEMES[DEFAULT_THEME_ID].colors };
 
 // ── Events ──────────────────────────────────────────────────────────────────
 interface EventDef { id: string; name: string; short: string }
@@ -420,6 +574,14 @@ export default function TimerPage() {
   // data is arriving even when the parser silently drops it. Only useful
   // for unknown firmware variants (e.g. QY-Timer-V2-3650).
   const [qiyiDebugMode, setQiyiDebugMode] = useState(false);
+  // Active colour theme. Persisted under THEME_KEY (separate from PREFS_KEY
+  // so the picker can write/read without going through the prefs migration
+  // path). Synced to module-level `C` during render below.
+  const [themeId, setThemeId] = useState<ThemeId>(DEFAULT_THEME_ID);
+  // Mutate the module-level palette in place every render so that
+  // module-scope helper components (which captured the `C` binding at file
+  // load) read the active theme's colours on this same render pass.
+  Object.assign(C, THEMES[themeId].colors);
   // Default false to match SSR; updated after mount. 900px breakpoint
   // puts iPad portrait (768) on mobile layout and iPad landscape
   // (1024) on desktop.
@@ -694,6 +856,22 @@ export default function TimerPage() {
       localStorage.setItem(PREFS_KEY, JSON.stringify({ inspectionEnabled, precision, holdToStart, holdTimeMs, hideTimeWhileRunning, showAo5Projection, scrambleFontSize, qiyiDebugMode, timeEntryMode, sortMode }));
     } catch { /* ignore */ }
   }, [inspectionEnabled, precision, holdToStart, holdTimeMs, hideTimeWhileRunning, showAo5Projection, scrambleFontSize, qiyiDebugMode, timeEntryMode, sortMode]);
+
+  // Load/persist active theme. Kept in its own slot rather than inside
+  // PREFS_KEY so an older device with stale prefs JSON doesn't accidentally
+  // wipe a freshly-picked theme on the next save.
+  const themeLoadedRef = useRef(false);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(THEME_KEY);
+      if (raw && raw in THEMES) setThemeId(raw as ThemeId);
+    } catch { /* ignore */ }
+    themeLoadedRef.current = true;
+  }, []);
+  useEffect(() => {
+    if (!themeLoadedRef.current) return;
+    try { localStorage.setItem(THEME_KEY, themeId); } catch { /* ignore */ }
+  }, [themeId]);
 
   // Stats — recomputed on every solves change
   const stats = useMemo(() => calcStats(solves), [solves]);
@@ -1645,6 +1823,7 @@ export default function TimerPage() {
       height: '100vh', overflow: 'hidden',
       background: C.bg, color: C.text,
       display: 'flex',
+      transition: 'background 0.2s, color 0.2s',
     }}>
       {/* Subtle grain background */}
       <div style={{
@@ -3229,6 +3408,7 @@ export default function TimerPage() {
           setQiyiDebugMode={setQiyiDebugMode}
           // Display
           scrambleFontSize={scrambleFontSize} setScrambleFontSize={setScrambleFontSize}
+          themeId={themeId} setThemeId={setThemeId}
         />
       )}
 
@@ -4903,6 +5083,8 @@ interface SettingsPanelProps {
   setScrambleFontSize: (s: 'sm' | 'md' | 'lg') => void;
   qiyiDebugMode: boolean;
   setQiyiDebugMode: (v: boolean) => void;
+  themeId: ThemeId;
+  setThemeId: (id: ThemeId) => void;
 }
 
 // Static section ordering / icons. Labels themselves come from i18n at
@@ -5172,6 +5354,12 @@ function SettingsPanel(props: SettingsPanelProps) {
 
   const renderDisplay = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+      <ThemePicker
+        isMobile={isMobile}
+        themeId={props.themeId}
+        setThemeId={props.setThemeId}
+        c={c}
+      />
       <SegmentedRow<Lang>
         label={t('timer.language')}
         value={lang}
@@ -5193,14 +5381,6 @@ function SettingsPanel(props: SettingsPanelProps) {
         ]}
         c={c}
       />
-      <div style={{
-        background: c.cardAlt, border: `1px solid ${c.border}`,
-        borderRadius: 10, padding: '0.7rem 0.85rem',
-        fontSize: '0.78rem', color: c.muted, lineHeight: 1.55,
-      }}>
-        <div style={{ color: c.text, fontWeight: 700, marginBottom: '0.2rem' }}>{t('timer.theme')}</div>
-        {t('timer.theme.description')}
-      </div>
     </div>
   );
 
@@ -5680,6 +5860,82 @@ function HoldTimeSlider({
           cursor: pointer;
         }
       `}</style>
+    </div>
+  );
+}
+
+// BlockTimer-style colour-tile picker. Lives at the top of Settings →
+// Display. Switches the active theme on tap (no save button) and uses
+// inline styles for the selected ring so the tile reflects whichever
+// theme is currently active — `c.accent` is the *new* theme's accent
+// because Object.assign(C, …) above ran during the same render.
+function ThemePicker({
+  isMobile,
+  themeId,
+  setThemeId,
+  c,
+}: {
+  isMobile: boolean;
+  themeId: ThemeId;
+  setThemeId: (id: ThemeId) => void;
+  c: typeof C;
+}) {
+  const tileSize = isMobile ? 52 : 60;
+  return (
+    <div>
+      <div style={{
+        fontSize: '0.7rem', fontWeight: 700,
+        letterSpacing: '0.08em', textTransform: 'uppercase',
+        color: c.mutedDim, marginBottom: '0.5rem',
+      }}>
+        Загвар
+      </div>
+      <div style={{
+        display: 'flex', gap: '0.5rem',
+        flexWrap: isMobile ? 'nowrap' : 'wrap',
+        overflowX: isMobile ? 'auto' : 'visible',
+        WebkitOverflowScrolling: 'touch',
+        paddingBottom: isMobile ? '0.25rem' : 0,
+      }}>
+        {(Object.values(THEMES)).map(theme => {
+          const active = theme.id === themeId;
+          return (
+            <button
+              key={theme.id}
+              onClick={() => setThemeId(theme.id)}
+              aria-pressed={active}
+              title={theme.name}
+              style={{
+                flex: '0 0 auto',
+                display: 'inline-flex', flexDirection: 'column',
+                alignItems: 'center', gap: '0.35rem',
+                background: 'transparent', border: 'none',
+                padding: 0, cursor: 'pointer', fontFamily: 'inherit',
+                transition: 'transform 0.15s',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.05)'; }}
+              onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}
+            >
+              <span style={{
+                width: tileSize, height: tileSize, borderRadius: 12,
+                background: theme.preview,
+                border: active ? `2px solid ${c.accent}` : '2px solid transparent',
+                boxShadow: active ? `0 0 0 1px ${c.bg}` : 'none',
+                display: 'block',
+                transition: 'border-color 0.15s, box-shadow 0.15s',
+              }} />
+              <span style={{
+                fontSize: '0.7rem',
+                fontWeight: active ? 700 : 500,
+                color: active ? c.text : c.mutedDim,
+                whiteSpace: 'nowrap',
+              }}>
+                {theme.name}
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
