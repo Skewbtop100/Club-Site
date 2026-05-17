@@ -82,17 +82,17 @@ const THEMES: Record<ThemeId, Theme> = {
     name: 'Lavender',
     preview: '#A78BFA',
     colors: {
-      bg: '#0a0a0a',
-      card: '#141414',
-      cardAlt: '#1a1a1a',
-      border: 'rgba(255,255,255,0.08)',
+      bg: '#1a1235',
+      card: '#251a45',
+      cardAlt: '#2e2156',
+      border: 'rgba(167,139,250,0.18)',
       borderHi: 'rgba(167,139,250,0.4)',
       text: '#fff',
-      muted: 'rgba(255,255,255,0.55)',
-      mutedDim: 'rgba(255,255,255,0.3)',
+      muted: 'rgba(255,255,255,0.6)',
+      mutedDim: 'rgba(255,255,255,0.35)',
       accent: '#A78BFA',
-      accent2: '#7c3aed',
-      accentDim: 'rgba(167,139,250,0.12)',
+      accent2: '#c4b5fd',
+      accentDim: 'rgba(167,139,250,0.18)',
       success: '#34D399',
       danger: '#f87171',
       warning: '#fbbf24',
@@ -105,17 +105,17 @@ const THEMES: Record<ThemeId, Theme> = {
     name: 'Mint',
     preview: '#34D399',
     colors: {
-      bg: '#0a0a0a',
-      card: '#141414',
-      cardAlt: '#1a1a1a',
-      border: 'rgba(255,255,255,0.08)',
-      borderHi: 'rgba(52,211,153,0.4)',
+      bg: '#0a2820',
+      card: '#0f3a2e',
+      cardAlt: '#134a3a',
+      border: 'rgba(52,211,153,0.2)',
+      borderHi: 'rgba(52,211,153,0.45)',
       text: '#fff',
-      muted: 'rgba(255,255,255,0.55)',
-      mutedDim: 'rgba(255,255,255,0.3)',
+      muted: 'rgba(255,255,255,0.6)',
+      mutedDim: 'rgba(255,255,255,0.35)',
       accent: '#34D399',
-      accent2: '#10b981',
-      accentDim: 'rgba(52,211,153,0.12)',
+      accent2: '#6ee7b7',
+      accentDim: 'rgba(52,211,153,0.18)',
       success: '#86efac',
       danger: '#f87171',
       warning: '#fbbf24',
@@ -128,17 +128,17 @@ const THEMES: Record<ThemeId, Theme> = {
     name: 'Sunset',
     preview: '#F97316',
     colors: {
-      bg: '#0f0a0a',
-      card: '#1a1414',
-      cardAlt: '#1f1818',
-      border: 'rgba(255,255,255,0.08)',
-      borderHi: 'rgba(249,115,22,0.4)',
+      bg: '#2a1408',
+      card: '#3a1d0f',
+      cardAlt: '#4a2614',
+      border: 'rgba(249,115,22,0.2)',
+      borderHi: 'rgba(249,115,22,0.45)',
       text: '#fff',
-      muted: 'rgba(255,255,255,0.55)',
-      mutedDim: 'rgba(255,255,255,0.3)',
+      muted: 'rgba(255,255,255,0.6)',
+      mutedDim: 'rgba(255,255,255,0.35)',
       accent: '#F97316',
-      accent2: '#ea580c',
-      accentDim: 'rgba(249,115,22,0.12)',
+      accent2: '#fb923c',
+      accentDim: 'rgba(249,115,22,0.18)',
       success: '#34D399',
       danger: '#f87171',
       warning: '#fbbf24',
@@ -151,17 +151,17 @@ const THEMES: Record<ThemeId, Theme> = {
     name: 'Ocean',
     preview: '#3b82f6',
     colors: {
-      bg: '#080a14',
-      card: '#101626',
-      cardAlt: '#16203a',
-      border: 'rgba(255,255,255,0.08)',
-      borderHi: 'rgba(59,130,246,0.4)',
+      bg: '#0a1838',
+      card: '#102245',
+      cardAlt: '#162d55',
+      border: 'rgba(59,130,246,0.22)',
+      borderHi: 'rgba(59,130,246,0.45)',
       text: '#fff',
-      muted: 'rgba(255,255,255,0.55)',
-      mutedDim: 'rgba(255,255,255,0.3)',
+      muted: 'rgba(255,255,255,0.6)',
+      mutedDim: 'rgba(255,255,255,0.35)',
       accent: '#3b82f6',
-      accent2: '#2563eb',
-      accentDim: 'rgba(59,130,246,0.15)',
+      accent2: '#60a5fa',
+      accentDim: 'rgba(59,130,246,0.18)',
       success: '#34D399',
       danger: '#f87171',
       warning: '#fbbf24',
@@ -172,11 +172,11 @@ const THEMES: Record<ThemeId, Theme> = {
   mono: {
     id: 'mono',
     name: 'Mono',
-    preview: '#fff',
+    preview: '#1a1a1a',
     colors: {
-      bg: '#000',
-      card: '#0a0a0a',
-      cardAlt: '#141414',
+      bg: '#0a0a0a',
+      card: '#141414',
+      cardAlt: '#1a1a1a',
       border: 'rgba(255,255,255,0.1)',
       borderHi: 'rgba(255,255,255,0.4)',
       text: '#fff',
@@ -184,8 +184,8 @@ const THEMES: Record<ThemeId, Theme> = {
       mutedDim: 'rgba(255,255,255,0.3)',
       accent: '#fff',
       accent2: '#e5e7eb',
-      accentDim: 'rgba(255,255,255,0.08)',
-      success: '#fff',
+      accentDim: 'rgba(255,255,255,0.1)',
+      success: '#34D399',
       danger: '#f87171',
       warning: '#fbbf24',
       warn: '#fbbf24',
@@ -871,6 +871,24 @@ export default function TimerPage() {
   useEffect(() => {
     if (!themeLoadedRef.current) return;
     try { localStorage.setItem(THEME_KEY, themeId); } catch { /* ignore */ }
+  }, [themeId]);
+
+  // Mirror the theme's bg onto <body> and <html> so the overscroll /
+  // rubber-band area on mobile, and any 100vh measurement gap, blend with
+  // the page instead of showing the user-agent default (white) or the
+  // previous theme's bg. Snapshot + restore so navigating away from
+  // /timer doesn't leak the timer palette onto other routes.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const bg = THEMES[themeId].colors.bg;
+    const prevBody = document.body.style.background;
+    const prevHtml = document.documentElement.style.background;
+    document.body.style.background = bg;
+    document.documentElement.style.background = bg;
+    return () => {
+      document.body.style.background = prevBody;
+      document.documentElement.style.background = prevHtml;
+    };
   }, [themeId]);
 
   // Stats — recomputed on every solves change
@@ -1823,7 +1841,7 @@ export default function TimerPage() {
       height: '100vh', overflow: 'hidden',
       background: C.bg, color: C.text,
       display: 'flex',
-      transition: 'background 0.2s, color 0.2s',
+      transition: 'background-color 0.25s ease, color 0.25s ease',
     }}>
       {/* Subtle grain background */}
       <div style={{
@@ -3727,6 +3745,13 @@ export default function TimerPage() {
         .timer-page.focus-mode .pv-projection {
           opacity: 0;
           pointer-events: none;
+        }
+        /* Force pure black behind the digits during a solve, regardless of
+           theme. The themed bg is great for browsing but during the actual
+           running state the goal is for the time to pop — coloured panels
+           drained to opacity 0 still leave a coloured backdrop otherwise. */
+        .timer-page.focus-mode {
+          background: #000 !important;
         }
 
         /* Subtle entrance for the Ao5 projection card so it doesn't snap in
