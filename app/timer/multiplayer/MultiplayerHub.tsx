@@ -744,9 +744,7 @@ function LiveActivityCard({ onJoinRoom }: { onJoinRoom?: (code: string) => void 
 
   return (
     <Section
-      icon={<IconDot size={12} color={C.success} />}
-      title="Шууд тоглолт"
-      action={
+      icon={
         <span style={{
           display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
           fontSize: '0.68rem', color: C.success, fontWeight: 700,
@@ -759,18 +757,12 @@ function LiveActivityCard({ onJoinRoom }: { onJoinRoom?: (code: string) => void 
           LIVE
         </span>
       }
+      title=""
     >
       <div style={{
         display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
         gap: '0.55rem',
       }}>
-        <ClickableStatTile
-          label="Идэвхтэй"
-          value={live.loaded ? String(live.activeRooms) : '—'}
-          accent={C.accent}
-          active={panel === 'rooms'}
-          onClick={() => togglePanel('rooms')}
-        />
         <ClickableStatTile
           label="Online"
           value={String(otherOnline.length)}
@@ -778,6 +770,13 @@ function LiveActivityCard({ onJoinRoom }: { onJoinRoom?: (code: string) => void 
           active={panel === 'online'}
           pulse
           onClick={() => togglePanel('online')}
+        />
+        <ClickableStatTile
+          label="Идэвхтэй өрөө"
+          value={live.loaded ? String(live.activeRooms) : '—'}
+          accent={C.accent}
+          active={panel === 'rooms'}
+          onClick={() => togglePanel('rooms')}
         />
         <ClickableStatTile
           label="Уралдаж"
