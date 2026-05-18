@@ -743,32 +743,40 @@ function LiveActivityCard({ onJoinRoom }: { onJoinRoom?: (code: string) => void 
   };
 
   return (
-    <Section
-      icon={
+    <div style={{
+      background: C.card,
+      border: `1px solid ${C.border}`,
+      borderRadius: 16,
+      padding: '0.75rem 1.1rem 1rem',
+    }}>
+      <div style={{ marginBottom: '0.4rem' }}>
         <span style={{
-          display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
-          fontSize: '0.68rem', color: C.success, fontWeight: 700,
+          display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
+          fontSize: '0.62rem', color: C.success, fontWeight: 700,
+          letterSpacing: '0.18em',
+          background: 'rgba(52,211,153,0.1)',
+          border: '1px solid rgba(52,211,153,0.3)',
+          borderRadius: 999,
+          padding: '0.2rem 0.55rem',
         }}>
           <span style={{
-            width: 8, height: 8, borderRadius: '50%', background: C.success,
-            boxShadow: `0 0 0 0 ${C.success}`,
+            width: 6, height: 6, borderRadius: '50%', background: C.success,
+            flexShrink: 0,
             animation: 'mphPulse 1.6s ease-out infinite',
           }} />
           LIVE
         </span>
-      }
-      title=""
-    >
+      </div>
+
       <div style={{
         display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-        gap: '0.55rem',
+        gap: '0.6rem',
       }}>
         <ClickableStatTile
           label="Online"
           value={String(otherOnline.length)}
           accent={C.success}
           active={panel === 'online'}
-          pulse
           onClick={() => togglePanel('online')}
         />
         <ClickableStatTile
@@ -823,26 +831,31 @@ function LiveActivityCard({ onJoinRoom }: { onJoinRoom?: (code: string) => void 
           100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); }
         }
       `}</style>
-    </Section>
+    </div>
   );
 }
 
 function ClickableStatTile({
-  label, value, accent, active, onClick, pulse,
+  label, value, accent, active, onClick,
 }: {
   label: string; value: string; accent?: string;
-  active: boolean; onClick: () => void; pulse?: boolean;
+  active: boolean; onClick: () => void;
 }) {
+  const [hovered, setHovered] = useState(false);
   return (
     <button
       type="button"
       onClick={onClick}
       aria-expanded={active}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
-        padding: '0.65rem 0.6rem', borderRadius: 12,
-        background: active ? C.accentDim : 'rgba(255,255,255,0.03)',
+        padding: '0.9rem 1rem', borderRadius: 14,
+        background: active
+          ? C.accentDim
+          : hovered ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.02)',
         border: `1px solid ${active ? C.borderHi : C.border}`,
-        display: 'flex', flexDirection: 'column', gap: '0.18rem',
+        display: 'flex', flexDirection: 'column', gap: '0.35rem',
         minWidth: 0,
         color: C.text, fontFamily: 'inherit', cursor: 'pointer',
         textAlign: 'left',
@@ -853,36 +866,24 @@ function ClickableStatTile({
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         gap: '0.25rem',
       }}>
-        {/* Tighter typography — short label words ("Идэвхтэй", "Online",
-            "Уралдаж") fit in even the narrowest 3-col mobile layout
-            without ellipsis. We deliberately drop the overflow:hidden
-            cascade so a slightly-too-wide label wraps to a second line
-            instead of being silently clipped. */}
         <span style={{
-          fontSize: '0.58rem', color: C.muted, letterSpacing: '0.06em',
-          textTransform: 'uppercase', fontWeight: 700,
+          fontSize: '0.65rem', color: C.muted, letterSpacing: '0.14em',
+          textTransform: 'uppercase', fontWeight: 600,
           lineHeight: 1.2,
         }}>{label}</span>
         <span aria-hidden="true" style={{
-          fontSize: '0.7rem', color: C.muted,
+          fontSize: '0.75rem', color: C.mutedDim,
           transform: active ? 'rotate(180deg)' : 'rotate(0deg)',
           transition: 'transform 0.15s',
           flexShrink: 0,
         }}>▾</span>
       </div>
       <div style={{
-        fontSize: '1.25rem', fontWeight: 800,
+        fontSize: '1.5rem', fontWeight: 700,
         color: accent ?? C.text,
+        fontVariantNumeric: 'tabular-nums',
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        display: 'flex', alignItems: 'center', gap: '0.3rem',
       }}>
-        {pulse && (
-          <span style={{
-            width: 7, height: 7, borderRadius: '50%',
-            background: C.success, flexShrink: 0,
-            animation: 'mphPulse 1.6s ease-out infinite',
-          }} />
-        )}
         {value}
       </div>
     </button>
