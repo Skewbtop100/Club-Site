@@ -16,6 +16,9 @@ import { matchHistoryCol } from '@/lib/firebase/collections';
 import {
   subscribeUserMatches, tsToMs as matchTsToMs,
 } from '@/lib/firebase/services/matchHistory';
+import {
+  subscribeOnlineUsers, type OnlineUser,
+} from '@/lib/firebase/services/presence';
 import type {
   MatchHistory, MatchPlayerSummary, MatchSolve,
 } from '@/lib/types';
@@ -699,8 +702,13 @@ type LivePanel = 'rooms' | 'online' | 'racing' | null;
 
 function LiveActivityCard({ onJoinRoom }: { onJoinRoom?: (code: string) => void }) {
   const live = useLiveActivity();
+  const { user } = useAuth();
   const [panel, setPanel] = useState<LivePanel>(null);
   const [openRoom, setOpenRoom] = useState<ActiveRoom | null>(null);
+
+  const [presenceUsers, setPresenceUsers] = useState<OnlineUser[]>([]);
+  useEffect(() => subscribeOnlineUsers(setPresenceUsers), []);
+  const otherOnline = presenceUsers.filter(u => u.uid !== user?.uid);
   // Per-row "Нэгдэх" target — opens the code-entry modal pre-scoped
   // to that specific room. Cleared when the modal closes or join
   // succeeds. We keep it separate from openRoom so the detail modal
@@ -765,9 +773,10 @@ function LiveActivityCard({ onJoinRoom }: { onJoinRoom?: (code: string) => void 
         />
         <ClickableStatTile
           label="Online"
-          value={live.loaded ? String(live.totalPlayers) : '—'}
+          value={String(otherOnline.length)}
           accent={C.success}
           active={panel === 'online'}
+          pulse
           onClick={() => togglePanel('online')}
         />
         <ClickableStatTile
@@ -787,7 +796,7 @@ function LiveActivityCard({ onJoinRoom }: { onJoinRoom?: (code: string) => void 
         />
       )}
       {panel === 'online' && (
-        <OnlineUsersPanel rooms={live.rooms} mode="online" />
+        <PresenceOnlinePanel users={otherOnline} />
       )}
       {panel === 'racing' && (
         <OnlineUsersPanel rooms={live.rooms} mode="racing" />
@@ -820,10 +829,10 @@ function LiveActivityCard({ onJoinRoom }: { onJoinRoom?: (code: string) => void 
 }
 
 function ClickableStatTile({
-  label, value, accent, active, onClick,
+  label, value, accent, active, onClick, pulse,
 }: {
   label: string; value: string; accent?: string;
-  active: boolean; onClick: () => void;
+  active: boolean; onClick: () => void; pulse?: boolean;
 }) {
   return (
     <button
@@ -866,7 +875,15 @@ function ClickableStatTile({
         fontSize: '1.25rem', fontWeight: 800,
         color: accent ?? C.text,
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        display: 'flex', alignItems: 'center', gap: '0.3rem',
       }}>
+        {pulse && (
+          <span style={{
+            width: 7, height: 7, borderRadius: '50%',
+            background: C.success, flexShrink: 0,
+            animation: 'mphPulse 1.6s ease-out infinite',
+          }} />
+        )}
         {value}
       </div>
     </button>
@@ -1053,6 +1070,68 @@ function ActiveRoomRow({ room, onOpen, onJoin }: {
             }}
           >Нэгдэх <span aria-hidden="true">→</span></button>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ── Presence-based online panel (presence/timer RTDB) ────────────────────
+function PresenceOnlinePanel({ users }: { users: OnlineUser[] }) {
+  if (users.length === 0) {
+    return (
+      <div style={panelStyle()}>
+        <div style={{ color: C.muted, fontSize: '0.86rem', textAlign: 'center' }}>
+          Танаас өөр хэн ч одоо онлайн биш
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div style={panelStyle()}>
+      {users.map((u) => (
+        <PresenceUserRow key={u.uid} user={u} />
+      ))}
+      <style>{`
+        @keyframes mphFade {
+          from { opacity: 0; transform: translateY(-4px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function PresenceUserRow({ user: u }: { user: OnlineUser }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: '0.6rem',
+      padding: '0.55rem 0.7rem',
+      background: 'rgba(255,255,255,0.03)',
+      border: `1px solid ${C.border}`,
+      borderRadius: 11,
+    }}>
+      <span style={{ position: 'relative', flexShrink: 0 }}>
+        <Thumb name={u.displayName} url={u.photoURL ?? null} size={32} />
+        <span style={{
+          position: 'absolute', bottom: 0, right: 0,
+          width: 8, height: 8, borderRadius: '50%',
+          background: C.success,
+          border: `1.5px solid ${C.card}`,
+          animation: 'mphPulse 1.6s ease-out infinite',
+        }} />
+      </span>
+      <div style={{
+        minWidth: 0, flex: '1 1 auto',
+        fontSize: '0.9rem', fontWeight: 600, color: C.text,
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }}>
+        {u.displayName}
+      </div>
+      <div style={{
+        fontSize: '0.75rem', color: C.mutedDim, fontWeight: 500,
+        flexShrink: 0,
+      }}>
+        {u.eventName ?? eventName(u.event)}
       </div>
     </div>
   );
