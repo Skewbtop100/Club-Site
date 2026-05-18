@@ -1,0 +1,98 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Requires the Firebase custom claim `admin: true` to be set on the user
+    // via Admin SDK (e.g. admin.auth().setCustomUserClaims(uid, { admin: true }))
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.admin == true;
+    }
+
+    // ─── Existing collections ─────────────────────────────────────────────────
+    // TODO: tighten these rules for each collection as needed.
+
+    match /athletes/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /competitions/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /results/{doc} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    match /users/{uid} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.auth.uid == uid;
+    }
+
+    match /assignments/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /wcaRecords/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /settings/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /athleteRequests/{doc} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    match /matchHistory/{doc} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    match /pointTransactions/{doc} {
+      allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow write: if isAdmin();
+    }
+
+    // ─── Virtual Competitions ─────────────────────────────────────────────────
+
+    match /virtualCompetitions/{compId} {
+      allow read: if resource.data.status != 'draft' || isAdmin();
+      allow write: if isAdmin();
+
+      match /rounds/{roundId} {
+        allow read: if get(/databases/$(database)/documents/virtualCompetitions/$(compId)).data.status != 'draft' || isAdmin();
+        allow write: if isAdmin();
+      }
+
+      match /participants/{uid} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && request.auth.uid == uid;
+        allow update: if isSignedIn() && request.auth.uid == uid;
+        allow delete: if (isSignedIn() && request.auth.uid == uid) || isAdmin();
+      }
+
+      match /participantResults/{resultId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && request.auth.uid == resultId.split('_')[0];
+        allow update: if isAdmin();
+        allow delete: if isAdmin();
+      }
+    }
+
+  }
+}
