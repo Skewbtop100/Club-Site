@@ -112,6 +112,232 @@ function validateRoundForm(
   return e;
 }
 
+// ─── WCA Bulk Import Parser ───────────────────────────────────────────────────
+
+// Ordered longest-first to prevent prefix collisions, e.g. "3x3x3 One-Handed"
+// must be checked before "3x3x3 Cube".
+const WCA_EVENT_NAMES: [string, string][] = [
+  ['3x3x3 One-Handed', '333oh'],
+  ['3x3 One-Handed', '333oh'],
+  ['3x3x3 Blindfolded', '333bf'],
+  ['4x4x4 Blindfolded', '444bf'],
+  ['5x5x5 Blindfolded', '555bf'],
+  ['3x3x3 Multi-Blind', '333mbf'],
+  ['3x3x3 Fewest Moves', '333fm'],
+  ['3x3 Fewest Moves', '333fm'],
+  ['3x3x3 Cube', '333'],
+  ['2x2x2 Cube', '222'],
+  ['4x4x4 Cube', '444'],
+  ['5x5x5 Cube', '555'],
+  ['6x6x6 Cube', '666'],
+  ['7x7x7 Cube', '777'],
+  ['Pyraminx', 'pyram'],
+  ['Megaminx', 'minx'],
+  ['Skewb', 'skewb'],
+  ['Square-1', 'sq1'],
+  ['Clock', 'clock'],
+  ['FMC', '333fm'],
+];
+
+// Round label (lowercased) → sort priority. Lower = earlier round.
+// "Final" is always 99 so it becomes the highest round number for its event.
+const ROUND_PRIORITY: Record<string, number> = {
+  'first round': 1,
+  'second round': 2,
+  'third round': 3,
+  'semi final': 4,
+  'semifinal': 4,
+  'semi-final': 4,
+  'final': 99,
+};
+
+interface ParsedGroup {
+  name: string;
+  scrambles: string[];
+  extraScrambles: string[];
+}
+
+interface ParsedRound {
+  eventId: string;
+  eventName: string;
+  roundLabel: string;   // original label, e.g. "Final", "Second round"
+  roundNumber: number;  // assigned after sorting by priority
+  groups: ParsedGroup[];
+  allScrambles: string[]; // all group main scrambles flattened
+}
+
+interface BulkParseResult {
+  rounds: ParsedRound[];
+  byEvent: Record<string, ParsedRound[]>; // eventId → rounds (sorted by roundNumber)
+  parseErrors: string[];
+  warnings: string[];   // event IDs found in import but not in competition's events
+}
+
+// Tries to match a line as a round header, e.g. "3x3x3 Cube Final"
+function tryMatchEventHeader(
+  line: string,
+): { eventId: string; eventName: string; roundLabel: string } | null {
+  const trimmed = line.trim();
+  for (const [name, id] of WCA_EVENT_NAMES) {
+    if (trimmed.startsWith(name)) {
+      const rest = trimmed.slice(name.length).trim();
+      // rest must be non-empty and not a bare number (to avoid false matches)
+      if (rest.length > 0 && !/^\d+$/.test(rest)) {
+        return { eventId: id, eventName: name, roundLabel: rest };
+      }
+    }
+  }
+  return null;
+}
+
+// Parses a scramble data line in tab-separated or space-separated WCA export format:
+//   Tab:   "A\t1\tscramble"  |  "\t2\tscramble"  |  "\tExtra 1\tscramble"
+//   Space: "A  1  scramble"  |  "   2  scramble"  |  "   Extra 1  scramble"
+// Returns null when the line doesn't match.
+function tryParseScrambleLine(line: string): {
+  groupLetter: string | null;
+  isExtra: boolean;
+  scramble: string;
+} | null {
+  let groupLetter: string | null = null;
+  let indexRaw: string;
+  let scramble: string;
+
+  if (line.includes('\t')) {
+    // Tab-separated: col[0]=group letter or empty, col[1]=index, col[2+]=scramble
+    const cols = line.split('\t');
+    if (cols.length < 3) return null;
+    const col0 = cols[0].trim();
+    const col1 = cols[1].trim();
+    const col2 = cols.slice(2).join(' ').trim();
+    if (!col2 || !col1) return null;
+    groupLetter = /^[A-Z]$/.test(col0) ? col0 : null;
+    indexRaw = col1;
+    scramble = col2;
+  } else {
+    // Space-separated: optional capital letter + 1+ spaces + (number | "Extra N") + 2+ spaces + scramble
+    const m = line.match(/^([A-Z])?\s{1,}(Extra\s+\d+|\d+)\s{2,}(.+)$/);
+    if (!m) return null;
+    groupLetter = m[1] ?? null;
+    indexRaw = m[2].trim();
+    scramble = m[3].trim();
+  }
+
+  if (!scramble) return null;
+  const isExtra = /^Extra\s+\d+$/i.test(indexRaw);
+  if (!isExtra && !/^\d+$/.test(indexRaw)) return null;
+
+  return { groupLetter, isExtra, scramble };
+}
+
+// State-machine parser for WCA scramble export text.
+//
+// WCA exports are reverse-ordered (Final first, First round last), so each
+// event's rounds are sorted by ROUND_PRIORITY after parsing and then assigned
+// sequential 1-based round numbers (First round=1, Final=highest).
+//
+// competitionEvents is used only to populate the warnings list — rounds for
+// events not in the competition are still parsed so the preview can flag them.
+function parseWcaExport(rawText: string, competitionEvents: string[]): BulkParseResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  interface RawRound {
+    eventId: string;
+    eventName: string;
+    roundLabel: string;
+    groups: ParsedGroup[];
+  }
+
+  const rawRounds: RawRound[] = [];
+  let cur: RawRound | null = null;
+  let curGroup: ParsedGroup | null = null;
+
+  const flushGroup = () => {
+    if (curGroup && cur) { cur.groups.push(curGroup); curGroup = null; }
+  };
+  const flushRound = () => {
+    flushGroup();
+    if (cur) { rawRounds.push(cur); cur = null; }
+  };
+
+  for (const rawLine of rawText.split('\n')) {
+    const line = rawLine.replace(/\r$/, '');
+    if (!line.trim()) continue;
+    if (/^Group\s+#\s+Scramble/i.test(line.trim())) continue; // skip column header
+
+    const header = tryMatchEventHeader(line);
+    if (header) {
+      flushRound();
+      cur = { ...header, groups: [] };
+      continue;
+    }
+
+    if (!cur) continue;
+
+    const parsed = tryParseScrambleLine(line);
+    if (!parsed) continue;
+
+    if (parsed.groupLetter) {
+      // New group letter — flush previous group and start a new one
+      flushGroup();
+      curGroup = { name: parsed.groupLetter, scrambles: [], extraScrambles: [] };
+    } else if (!curGroup) {
+      // No group letter seen yet — implicit single group "A"
+      curGroup = { name: 'A', scrambles: [], extraScrambles: [] };
+    }
+
+    if (parsed.isExtra) curGroup!.extraScrambles.push(parsed.scramble);
+    else curGroup!.scrambles.push(parsed.scramble);
+  }
+  flushRound();
+
+  if (rawRounds.length === 0) {
+    errors.push(
+      'Таньж болохуйц формат олдсонгүй. WCA scramble export форматаар оруулна уу. ' +
+      'Жишээ: "3x3x3 Cube Final" гэсэн мөрүүд байх ёстой.',
+    );
+    return { rounds: [], byEvent: {}, parseErrors: errors, warnings };
+  }
+
+  // Group by event, sort by priority, assign 1-based round numbers
+  const byEventRaw = new Map<string, RawRound[]>();
+  for (const r of rawRounds) {
+    const list = byEventRaw.get(r.eventId) ?? [];
+    list.push(r);
+    byEventRaw.set(r.eventId, list);
+  }
+
+  const allRounds: ParsedRound[] = [];
+  const byEvent: Record<string, ParsedRound[]> = {};
+
+  for (const [eventId, evRounds] of byEventRaw) {
+    const sorted = [...evRounds].sort(
+      (a, b) =>
+        (ROUND_PRIORITY[a.roundLabel.toLowerCase()] ?? 50) -
+        (ROUND_PRIORITY[b.roundLabel.toLowerCase()] ?? 50),
+    );
+
+    const parsedForEvent: ParsedRound[] = sorted.map((r, idx) => ({
+      eventId: r.eventId,
+      eventName: r.eventName,
+      roundLabel: r.roundLabel,
+      roundNumber: idx + 1,
+      groups: r.groups,
+      allScrambles: r.groups.flatMap((g) => g.scrambles),
+    }));
+
+    allRounds.push(...parsedForEvent);
+    byEvent[eventId] = parsedForEvent;
+
+    if (!competitionEvents.includes(eventId)) {
+      warnings.push(eventId);
+    }
+  }
+
+  return { rounds: allRounds, byEvent, parseErrors: errors, warnings };
+}
+
 // ─── Comp form types ──────────────────────────────────────────────────────────
 
 interface CompFormState {
@@ -158,6 +384,10 @@ export default function VirtualCompetitionsTab() {
     roundId: string;
     label: string;
   } | null>(null);
+
+  // ── Bulk paste ───────────────────────────────────────────────────────────
+  const [bulkPasteOpen, setBulkPasteOpen] = useState(false);
+  const [bulkSaving, setBulkSaving] = useState(false);
 
   // ── Subscriptions / effects ──────────────────────────────────────────────
   useEffect(() => {
@@ -401,6 +631,41 @@ export default function VirtualCompetitionsTab() {
     } finally { setRoundSaving(false); }
   }
 
+  // Creates rounds from a bulk parse result. Only processes events that are in
+  // the competition's selected events. Stores groups (when multiple exist) plus
+  // a flat scrambles array for backwards-compatible display.
+  async function handleBulkCreate(parseResult: BulkParseResult) {
+    if (!selectedId || selectedId === 'new') return;
+    setBulkSaving(true);
+    let created = 0;
+    try {
+      for (const [eventId, eventRounds] of Object.entries(parseResult.byEvent)) {
+        if (!form.events.includes(eventId)) continue;
+        const maxRound = Math.max(...eventRounds.map((r) => r.roundNumber));
+        for (const round of eventRounds) {
+          const isFinal = round.roundNumber === maxRound;
+          await addRound(selectedId, {
+            eventId: round.eventId,
+            roundNumber: round.roundNumber,
+            roundName: round.roundLabel,
+            format: 'avg5',
+            advancementType: isFinal ? 'final' : 'fixed',
+            advancementValue: isFinal ? undefined : 8,
+            scrambles: round.allScrambles,
+            groups: round.groups.length > 0 ? round.groups : undefined,
+            historicalResults: [],
+          });
+          created++;
+        }
+      }
+      showToast('success', `${created} раунд үүсгэгдэв`);
+      setBulkPasteOpen(false);
+      await refreshRounds();
+    } catch (err) {
+      showToast('error', 'Алдаа: ' + (err instanceof Error ? err.message : String(err)));
+    } finally { setBulkSaving(false); }
+  }
+
   // ── Derived ──────────────────────────────────────────────────────────────
   const currentComp = selectedId && selectedId !== 'new' ? (comps.find((c) => c.id === selectedId) ?? null) : null;
   const canPublish = !!currentComp && currentComp.status === 'draft'
@@ -561,6 +826,7 @@ export default function VirtualCompetitionsTab() {
             onAddRound={openAddRound}
             onEditRound={openEditRound}
             onDeleteRound={(r) => setRoundDeleteConfirm({ roundId: r.id, label: `R${r.roundNumber} · ${r.roundName}` })}
+            onBulkPaste={() => setBulkPasteOpen(true)}
           />
         )}
 
@@ -602,6 +868,16 @@ export default function VirtualCompetitionsTab() {
             danger saving={roundSaving}
             onConfirm={() => handleDeleteRound(roundDeleteConfirm.roundId)}
             onCancel={() => setRoundDeleteConfirm(null)}
+          />
+        )}
+
+        {/* Bulk paste modal */}
+        {bulkPasteOpen && (
+          <BulkPasteModal
+            competitionEvents={form.events}
+            saving={bulkSaving}
+            onCreate={handleBulkCreate}
+            onClose={() => setBulkPasteOpen(false)}
           />
         )}
       </div>
@@ -652,7 +928,7 @@ export default function VirtualCompetitionsTab() {
 
 function RoundsSection({
   events, rounds, loading, collapsedEvents,
-  onToggleCollapse, onAddRound, onEditRound, onDeleteRound,
+  onToggleCollapse, onAddRound, onEditRound, onDeleteRound, onBulkPaste,
 }: {
   events: string[];
   rounds: VirtualRound[];
@@ -662,10 +938,34 @@ function RoundsSection({
   onAddRound: (eventId: string) => void;
   onEditRound: (round: VirtualRound) => void;
   onDeleteRound: (round: VirtualRound) => void;
+  onBulkPaste: () => void;
 }) {
   return (
     <div className="card" style={{ marginTop: '1rem' }}>
-      <div className="card-title"><span className="title-accent" />Раундууд</div>
+      {/* Card header with bulk paste button */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+        <div className="card-title" style={{ marginBottom: 0 }}>
+          <span className="title-accent" />Раундууд
+        </div>
+        {!loading && events.length > 0 && (
+          <button
+            onClick={onBulkPaste}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
+              padding: '0.38rem 0.8rem', borderRadius: '8px',
+              background: 'rgba(124,58,237,0.08)',
+              border: '1px solid rgba(124,58,237,0.28)',
+              color: '#a78bfa', cursor: 'pointer',
+              fontFamily: 'inherit', fontSize: '0.8rem', fontWeight: 600,
+              transition: 'background 0.12s',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(124,58,237,0.16)')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(124,58,237,0.08)')}
+          >
+            📋 Bulk paste
+          </button>
+        )}
+      </div>
 
       {loading ? (
         <div className="spinner-row">Ачааллаж байна…<span className="spinner-ring" /></div>
@@ -769,6 +1069,12 @@ function RoundCard({
     return `${round.advancementValue}% шилжинэ`;
   }
 
+  const groupCount = round.groups?.length ?? 0;
+  const scrambleCount = groupCount > 0
+    ? round.groups!.reduce((sum, g) => sum + g.scrambles.length, 0)
+    : round.scrambles.length;
+  const groupLabel = groupCount > 1 ? `${groupCount} груп · ` : '';
+
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: '0.6rem',
@@ -789,7 +1095,7 @@ function RoundCard({
           }}>
             {FORMAT_LABELS[round.format] ?? round.format}
           </span>
-          {advText()} · {round.scrambles.length} холилт
+          {advText()} · {groupLabel}{scrambleCount} холилт
         </div>
       </div>
       <div style={{ display: 'flex', gap: '0.3rem', flexShrink: 0 }}>
@@ -979,6 +1285,260 @@ function RoundModal({
           style={{ width: '100%' }}>
           {saving ? 'Хадгалж байна...' : roundId ? 'Хадгалах' : 'Раунд үүсгэх'}
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── BulkPasteModal ───────────────────────────────────────────────────────────
+
+function BulkPasteModal({
+  competitionEvents,
+  saving,
+  onCreate,
+  onClose,
+}: {
+  competitionEvents: string[];
+  saving: boolean;
+  onCreate: (result: BulkParseResult) => void;
+  onClose: () => void;
+}) {
+  const [step, setStep] = useState<'input' | 'preview'>('input');
+  const [text, setText] = useState('');
+  const [parseResult, setParseResult] = useState<BulkParseResult | null>(null);
+
+  function handleParse() {
+    if (!text.trim()) return;
+    const result = parseWcaExport(text, competitionEvents);
+    setParseResult(result);
+    if (result.rounds.length > 0) setStep('preview');
+  }
+
+  const MODAL_STYLE: React.CSSProperties = {
+    background: 'var(--card, #1a1730)',
+    border: '1px solid rgba(124,58,237,0.3)',
+    borderRadius: '14px', padding: '1.5rem',
+    width: '100%', maxWidth: '600px',
+    boxShadow: '0 24px 60px rgba(0,0,0,0.7)',
+    marginBottom: 'auto',
+  };
+
+  const OVERLAY_STYLE: React.CSSProperties = {
+    position: 'fixed', inset: 0, zIndex: 1100,
+    background: 'rgba(0,0,0,0.75)',
+    display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+    padding: '2rem 1rem', overflowY: 'auto',
+  };
+
+  if (step === 'input') {
+    const hasError = parseResult?.parseErrors && parseResult.parseErrors.length > 0 && parseResult.rounds.length === 0;
+
+    return (
+      <div onClick={onClose} style={OVERLAY_STYLE}>
+        <div onClick={(e) => e.stopPropagation()} style={MODAL_STYLE}>
+          {/* Header */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '1rem' }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: '1rem' }}>Bulk paste — Тэмцээний холилтыг оруулах</div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--muted)', marginTop: '0.15rem' }}>
+                WCA export format-аар бүх төрөл, раунд, группын холилтыг хуулж энд тавина.
+              </div>
+            </div>
+            <button onClick={onClose} style={{
+              background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: '7px', color: 'var(--muted)', cursor: 'pointer',
+              fontFamily: 'inherit', fontSize: '1rem', lineHeight: 1, padding: '0.3rem 0.6rem',
+              flexShrink: 0, marginLeft: '0.75rem',
+            }}>✕</button>
+          </div>
+
+          {/* Textarea */}
+          <textarea
+            value={text}
+            onChange={(e) => { setText(e.target.value); setParseResult(null); }}
+            rows={14}
+            placeholder={
+              '3x3x3 Cube Final\nGroup\t#\tScramble\nA\t1\tF U2 F D L2 D R D\' U2 F U2 R2 B2 U2 B L2 F U2 L\'\n\t2\tD2 L\' F\' R2 F\' D2 R2 B2 U2 F D\' R B L\' R D\' L U\' R\n...\n\n3x3x3 Cube Second round\n...'
+            }
+            style={{
+              width: '100%', boxSizing: 'border-box',
+              padding: '0.65rem 0.75rem', borderRadius: '8px',
+              background: 'rgba(255,255,255,0.03)',
+              border: `1px solid ${hasError ? 'rgba(239,68,68,0.5)' : 'rgba(255,255,255,0.1)'}`,
+              color: 'var(--text)', fontFamily: 'monospace', fontSize: '0.77rem',
+              resize: 'vertical', outline: 'none', lineHeight: 1.6,
+              marginBottom: '0.65rem',
+            }}
+          />
+
+          {hasError && parseResult?.parseErrors.map((err, i) => (
+            <div key={i} style={{
+              padding: '0.55rem 0.75rem', borderRadius: '7px', marginBottom: '0.65rem',
+              background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
+              color: '#f87171', fontSize: '0.82rem', lineHeight: 1.5,
+              whiteSpace: 'pre-wrap',
+            }}>{err}</div>
+          ))}
+
+          <button
+            onClick={handleParse}
+            disabled={!text.trim()}
+            style={{
+              width: '100%', padding: '0.55rem 1rem', borderRadius: '8px',
+              fontFamily: 'inherit', fontSize: '0.88rem', fontWeight: 700,
+              background: text.trim() ? 'rgba(124,58,237,0.7)' : 'rgba(124,58,237,0.2)',
+              border: '1px solid rgba(124,58,237,0.9)',
+              color: text.trim() ? '#fff' : 'rgba(255,255,255,0.3)',
+              cursor: text.trim() ? 'pointer' : 'not-allowed',
+              transition: 'background 0.15s',
+            }}
+          >
+            Шинжлэх →
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Preview step ──────────────────────────────────────────────────────────
+  const result = parseResult!;
+  const totalRoundsToCreate = Object.entries(result.byEvent)
+    .filter(([eventId]) => competitionEvents.includes(eventId))
+    .reduce((sum, [, rounds]) => sum + rounds.length, 0);
+
+  return (
+    <div onClick={onClose} style={OVERLAY_STYLE}>
+      <div onClick={(e) => e.stopPropagation()} style={MODAL_STYLE}>
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '1.1rem' }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: '1rem' }}>Шинжлэлийн үр дүн</div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--muted)', marginTop: '0.15rem' }}>
+              {totalRoundsToCreate} раунд үүсгэгдэнэ
+            </div>
+          </div>
+          <button onClick={onClose} style={{
+            background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: '7px', color: 'var(--muted)', cursor: 'pointer',
+            fontFamily: 'inherit', fontSize: '1rem', lineHeight: 1, padding: '0.3rem 0.6rem',
+            flexShrink: 0, marginLeft: '0.75rem',
+          }}>✕</button>
+        </div>
+
+        {/* Per-event preview rows */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.2rem' }}>
+
+          {/* Events in competition */}
+          {competitionEvents.map((eventId) => {
+            const ev = getEvent(eventId);
+            const evName = ev?.name ?? eventId;
+            const evRounds = result.byEvent[eventId];
+
+            if (!evRounds || evRounds.length === 0) {
+              return (
+                <div key={eventId} style={{
+                  padding: '0.6rem 0.8rem', borderRadius: '8px',
+                  background: 'rgba(245,158,11,0.07)',
+                  border: '1px solid rgba(245,158,11,0.2)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                    <span style={{ fontSize: '0.9rem' }}>⚠</span>
+                    <span style={{ fontWeight: 600, fontSize: '0.85rem', color: '#fbbf24' }}>
+                      {evName}
+                    </span>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>— олдсонгүй</span>
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <div key={eventId} style={{
+                padding: '0.6rem 0.8rem', borderRadius: '8px',
+                background: 'rgba(34,197,94,0.06)',
+                border: '1px solid rgba(34,197,94,0.2)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', marginBottom: '0.35rem' }}>
+                  <span style={{ fontSize: '0.9rem' }}>✅</span>
+                  <span style={{ fontWeight: 700, fontSize: '0.85rem', color: '#4ade80' }}>
+                    {evName}
+                  </span>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>
+                    — {evRounds.length} раунд олдлоо
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.18rem', paddingLeft: '1.55rem' }}>
+                  {evRounds.map((r) => {
+                    const groupCount = r.groups.length;
+                    const groupLabel = groupCount > 1 ? `${groupCount} груп, ` : '';
+                    const extraCount = r.groups.reduce((sum, g) => sum + g.extraScrambles.length, 0);
+                    const extraLabel = extraCount > 0 ? ` + ${extraCount} extra` : '';
+                    return (
+                      <div key={r.roundNumber} style={{ fontSize: '0.79rem', color: 'var(--muted)' }}>
+                        • {r.roundLabel} ({groupLabel}{r.allScrambles.length} холилт{extraLabel})
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Events found in import but not in competition */}
+          {result.warnings.map((eventId) => {
+            const ev = getEvent(eventId);
+            const evName = ev?.name ?? eventId;
+            const evRounds = result.byEvent[eventId] ?? [];
+            return (
+              <div key={`extra-${eventId}`} style={{
+                padding: '0.6rem 0.8rem', borderRadius: '8px',
+                background: 'rgba(100,116,139,0.08)',
+                border: '1px solid rgba(100,116,139,0.2)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                  <span style={{ fontSize: '0.9rem' }}>ℹ</span>
+                  <span style={{ fontWeight: 600, fontSize: '0.85rem', color: '#94a3b8' }}>
+                    {evName}
+                  </span>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>
+                    — {evRounds.length} раунд · тэмцээнд байхгүй тул оруулагдахгүй
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Action buttons */}
+        <div style={{ display: 'flex', gap: '0.6rem' }}>
+          <button
+            onClick={() => setStep('input')}
+            style={{
+              flex: 1, padding: '0.5rem 1rem', borderRadius: '8px',
+              fontFamily: 'inherit', fontSize: '0.88rem', fontWeight: 600,
+              background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+              color: 'var(--text)', cursor: 'pointer',
+            }}
+          >
+            ← Буцах
+          </button>
+          <button
+            onClick={() => onCreate(result)}
+            disabled={saving || totalRoundsToCreate === 0}
+            style={{
+              flex: 2, padding: '0.5rem 1rem', borderRadius: '8px',
+              fontFamily: 'inherit', fontSize: '0.88rem', fontWeight: 700,
+              background: totalRoundsToCreate > 0 && !saving
+                ? 'rgba(34,197,94,0.7)' : 'rgba(34,197,94,0.2)',
+              border: '1px solid rgba(34,197,94,0.8)',
+              color: totalRoundsToCreate > 0 && !saving ? '#fff' : 'rgba(255,255,255,0.3)',
+              cursor: totalRoundsToCreate > 0 && !saving ? 'pointer' : 'not-allowed',
+              transition: 'background 0.15s',
+            }}
+          >
+            {saving ? 'Үүсгэж байна...' : `✓ Үүсгэх (${totalRoundsToCreate} раунд)`}
+          </button>
+        </div>
       </div>
     </div>
   );

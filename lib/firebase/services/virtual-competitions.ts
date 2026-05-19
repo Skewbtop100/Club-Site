@@ -42,6 +42,12 @@ export interface HistoricalResult {
   rank?: number;
 }
 
+export interface RoundGroup {
+  name: string;          // "A", "B", "C"
+  scrambles: string[];   // main solves (1–5)
+  extraScrambles: string[];
+}
+
 export interface VirtualRound {
   id: string;
   eventId: string;
@@ -52,6 +58,7 @@ export interface VirtualRound {
   advancementType: 'fixed' | 'percentage' | 'final';
   advancementValue?: number;
   historicalResults: HistoricalResult[];
+  groups?: RoundGroup[];
   createdAt: Timestamp;
 }
 
