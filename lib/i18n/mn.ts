@@ -211,6 +211,7 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'admin.tab.analytics': '📊 Шинжилгээ',
   'admin.tab.assignments': '👥 Хуваарь',
   'admin.tab.navigation':  '🧭 Цэс',
+  'admin.tab.virtual-competitions': '🥇 Виртуал тэмцээн',
 
   // ADMIN — COMMON
   'admin.btn.edit': 'Засах',

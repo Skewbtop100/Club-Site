@@ -150,6 +150,7 @@ const en = {
   'admin.tab.analytics': '📊 Analytics',
   'admin.tab.assignments': '👥 Assignments',
   'admin.tab.navigation':  '🧭 Navigation',
+  'admin.tab.virtual-competitions': '🥇 Virtual Competitions',
 
   // ADMIN — COMMON
   'admin.btn.edit': 'Edit',
