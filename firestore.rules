@@ -8,10 +8,11 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Requires the Firebase custom claim `admin: true` to be set on the user
-    // via Admin SDK (e.g. admin.auth().setCustomUserClaims(uid, { admin: true }))
+    // Checks users/{uid}.role == 'admin' in Firestore — matches the app-level
+    // auth check (useAuth().user.role). No custom claims needed.
     function isAdmin() {
-      return isSignedIn() && request.auth.token.admin == true;
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
 
     // ─── Existing collections ─────────────────────────────────────────────────
