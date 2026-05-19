@@ -14,6 +14,7 @@ interface Stats {
   totalAthletes: number | null;
   totalRecords: number | null;
   totalUsers: number | null;
+  totalVirtualComps: number | null;
 }
 
 const INITIAL: Stats = {
@@ -22,6 +23,7 @@ const INITIAL: Stats = {
   totalAthletes: null,
   totalRecords: null,
   totalUsers: null,
+  totalVirtualComps: null,
 };
 
 export default function AdminDashboardPage() {
@@ -49,6 +51,10 @@ export default function AdminDashboardPage() {
     // want to surface here.
     getCountFromServer(collection(db, 'wcaRecords'))
       .then(snap => set({ totalRecords: snap.data().count }))
+      .catch(() => {});
+
+    getCountFromServer(collection(db, 'virtualCompetitions'))
+      .then(snap => set({ totalVirtualComps: snap.data().count }))
       .catch(() => {});
 
     // Filter `users` to rows that have an email field — those are the new
@@ -119,6 +125,15 @@ export default function AdminDashboardPage() {
           href="/admin/users"
           stats={[
             { label: 'Нийт', value: stats.totalUsers },
+          ]}
+        />
+        <SectionCard
+          icon="⏱"
+          title="Таймер"
+          subtitle="Виртуал тэмцээн, таймер тохиргоо"
+          href="/admin/timer"
+          stats={[
+            { label: 'Виртуал', value: stats.totalVirtualComps },
           ]}
         />
       </div>

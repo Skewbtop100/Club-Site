@@ -12,17 +12,15 @@ const AssignmentsTab  = dynamic(() => import('@/components/admin/AssignmentsTab'
 const HistoryTab      = dynamic(() => import('@/components/admin/HistoryTab'),      { ssr: false });
 const WcaImportTab    = dynamic(() => import('@/components/admin/WcaImportTab'),    { ssr: false });
 const AnalyticsTab    = dynamic(() => import('@/components/admin/AnalyticsTab'),    { ssr: false });
-const VirtualCompetitionsTab = dynamic(() => import('@/components/admin/VirtualCompetitionsTab'), { ssr: false });
 
 const TABS: SectionTab[] = [
-  { id: 'competitions',        labelKey: 'admin.tab.competitions',        render: () => <CompetitionsTab /> },
-  { id: 'virtual-competitions',labelKey: 'admin.tab.virtual-competitions',render: () => <VirtualCompetitionsTab /> },
-  { id: 'results',             labelKey: 'admin.tab.results',             render: () => <ResultsEntryTab /> },
-  { id: 'compResults',         labelKey: 'admin.tab.comp-results',        render: () => <CompResultsTab /> },
-  { id: 'assignments',         labelKey: 'admin.tab.assignments',         render: () => <AssignmentsTab /> },
-  { id: 'history',             labelKey: 'admin.tab.history',             render: () => <HistoryTab /> },
-  { id: 'wcaImport',           labelKey: 'admin.tab.wca-records',         render: () => <WcaImportTab /> },
-  { id: 'analytics',           labelKey: 'admin.tab.analytics',           render: () => <AnalyticsTab /> },
+  { id: 'competitions', labelKey: 'admin.tab.competitions', render: () => <CompetitionsTab /> },
+  { id: 'results',      labelKey: 'admin.tab.results',      render: () => <ResultsEntryTab /> },
+  { id: 'compResults',  labelKey: 'admin.tab.comp-results', render: () => <CompResultsTab /> },
+  { id: 'assignments',  labelKey: 'admin.tab.assignments',  render: () => <AssignmentsTab /> },
+  { id: 'history',      labelKey: 'admin.tab.history',      render: () => <HistoryTab /> },
+  { id: 'wcaImport',    labelKey: 'admin.tab.wca-records',  render: () => <WcaImportTab /> },
+  { id: 'analytics',    labelKey: 'admin.tab.analytics',    render: () => <AnalyticsTab /> },
 ];
 
 export default function AdminCompetitionsPage() {

@@ -14,6 +14,7 @@ const SECTION_NAMES: { match: (p: string) => boolean; name: string }[] = [
   { match: (p) => p === '/admin/competitions' || p.startsWith('/admin/competitions/'), name: 'Тэмцээн' },
   { match: (p) => p === '/admin/club'         || p.startsWith('/admin/club/'),         name: 'Клуб' },
   { match: (p) => p === '/admin/users'        || p.startsWith('/admin/users/'),        name: 'Хэрэглэгчид' },
+  { match: (p) => p === '/admin/timer'        || p.startsWith('/admin/timer/'),        name: 'Таймер' },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
