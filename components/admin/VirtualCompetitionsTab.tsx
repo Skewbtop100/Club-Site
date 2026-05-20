@@ -178,7 +178,7 @@ function parseWcaExport(rawText: string, competitionEvents: string[]): BulkParse
     const parsed = tryParseScrambleLine(line);
     if (!parsed) continue;
 
-    if (parsed.groupLetter) {
+    if (parsed.groupLetter && parsed.groupLetter !== (curGroup as ParsedGroup | null)?.name) {
       flushGroup();
       curGroup = { name: parsed.groupLetter, scrambles: [], extraScrambles: [] };
     } else if (!curGroup) {
