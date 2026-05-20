@@ -755,41 +755,51 @@ function EventPasteSection({
   }
 
   function handleCreateClick() {
+    console.log('[paste] handleCreateClick', { eventId, existingCount: existingRounds.length, parsedCount: parsedRounds.length });
     if (existingRounds.length > 0) {
+      console.log('[paste] → showing confirmReplace modal');
       setConfirmReplace(true);
     } else {
+      console.log('[paste] → calling doCreate directly');
       void doCreate();
     }
   }
 
   async function doCreate() {
+    console.log('[paste] doCreate start', { compId, eventId, parsedCount: parsedRounds.length, existingCount: existingRounds.length });
     setConfirmReplace(false);
     setSaving(true);
     try {
       for (const r of existingRounds) {
+        console.log('[paste] deleting existing round', r.id);
         await svcDeleteRound(compId, r.id);
       }
       const maxRound = Math.max(...parsedRounds.map((r) => r.roundNumber));
       for (const round of parsedRounds) {
         const isFinal = round.roundNumber === maxRound;
-        await addRound(compId, {
+        const payload = {
           eventId: round.eventId,
           roundNumber: round.roundNumber,
           roundName: round.roundLabel,
-          format: 'avg5',
-          advancementType: isFinal ? 'final' : 'fixed',
+          format: 'avg5' as const,
+          advancementType: (isFinal ? 'final' : 'fixed') as 'final' | 'fixed',
           ...(isFinal ? {} : { advancementValue: 8 }),
           scrambles: round.allScrambles,
           ...(round.groups.length > 0 ? { groups: round.groups } : {}),
-          historicalResults: [],
-        });
+          historicalResults: [] as [],
+        };
+        console.log('[paste] addRound payload', payload);
+        await addRound(compId, payload);
+        console.log('[paste] addRound OK for round', round.roundNumber);
       }
+      console.log('[paste] all rounds created — showing toast');
       onToast('success', `${parsedRounds.length} раунд үүсгэгдэв`);
       setText('');
       setPhase('idle');
       setParsedRounds([]);
       await onRefresh();
     } catch (err) {
+      console.error('[paste] doCreate ERROR', err);
       onToast('error', 'Алдаа: ' + (err instanceof Error ? err.message : String(err)));
     } finally {
       setSaving(false);
