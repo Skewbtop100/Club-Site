@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { subscribePublishedCompetitions } from '@/lib/firebase/services/virtual-competitions';
 import type { VirtualCompetition } from '@/lib/firebase/services/virtual-competitions';
 import { getEvent } from '@/lib/wca-events';
+import { WcaEventIcon } from '@/lib/wca-event-icon';
 
 const C = {
   bg:      '#0a0a0a',
@@ -66,7 +67,9 @@ function EventChips({ events }: { events: string[] }) {
             background: 'rgba(167,139,250,0.12)',
             color: C.accent,
             border: '1px solid rgba(167,139,250,0.2)',
+            display: 'inline-flex', alignItems: 'center', gap: '0.2rem',
           }}>
+            <WcaEventIcon eventId={id} size={11} />
             {ev?.short ?? id}
           </span>
         );
