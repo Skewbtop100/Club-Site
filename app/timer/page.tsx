@@ -4137,13 +4137,13 @@ interface ToolTile {
 }
 
 const ACTIVE_TILES: ToolTile[] = [
-  { id: 'race', name: 'Race', Icon: IconStopwatch, tint: '#A78BFA', route: '/timer/multiplayer' },
+  { id: 'race',        name: 'Race',        Icon: IconStopwatch, tint: '#A78BFA', route: '/timer/multiplayer' },
+  { id: 'competition', name: 'Competition', Icon: IconTrophy,    tint: '#fbbf24', route: '/timer/competitions' },
 ];
 
 const SOON_TILES: ToolTile[] = [
-  { id: 'competition', name: 'Competition', Icon: IconTrophy, tint: '#fbbf24' },
-  { id: 'community',   name: 'Community',   Icon: IconUsers,  tint: '#60a5fa' },
-  { id: 'algorithms',  name: 'Algorithms',  Icon: IconCube,   tint: '#22d3ee' },
+  { id: 'community',  name: 'Community',  Icon: IconUsers, tint: '#60a5fa' },
+  { id: 'algorithms', name: 'Algorithms', Icon: IconCube,  tint: '#22d3ee' },
 ];
 
 const ROLE_LABEL_MN: Record<'member' | 'athlete' | 'admin', string> = {
