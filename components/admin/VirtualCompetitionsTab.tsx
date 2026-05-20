@@ -428,6 +428,156 @@ function matchRoundByLabel(label: string, rounds: VirtualRound[]): VirtualRound 
   return rounds.find((r) => norm(r.roundName) === nl) ?? null;
 }
 
+// ─── WCA Schedule Bulk Advancement Parser ────────────────────────────────────
+
+interface ParsedAdvancement {
+  eventId: string;
+  eventName: string;
+  roundName: string;
+  advancementType: 'fixed' | 'percentage' | 'final';
+  advancementValue?: number;
+}
+
+interface BulkAdvResult {
+  byEvent: Record<string, ParsedAdvancement[]>;
+  parseErrors: string[];
+  notInComp: string[];
+}
+
+const KNOWN_ROUND_LABELS = [
+  'first round', 'second round', 'third round',
+  'semi final', 'semifinal', 'semi-final', 'final',
+];
+
+// Parses the "Proceed" column text.
+// "Top 48 advance to next round" → fixed:48
+// "Top 25%" → percentage:25
+// empty → final
+function parseProceedCell(text: string): {
+  advancementType: 'fixed' | 'percentage' | 'final';
+  advancementValue?: number;
+} {
+  const t = text.trim();
+  if (!t) return { advancementType: 'final' };
+  const fixedM = t.match(/top\s+(\d+)\s+advance/i);
+  if (fixedM) return { advancementType: 'fixed', advancementValue: parseInt(fixedM[1], 10) };
+  const pctM = t.match(/top\s+(\d+)\s*%/i) ?? t.match(/\b(\d+)\s*%\b.*advance/i);
+  if (pctM) return { advancementType: 'percentage', advancementValue: parseInt(pctM[1], 10) };
+  return { advancementType: 'final' };
+}
+
+// Parses a WCA schedule table (tab-separated or space-padded).
+// Tracks "current event" across continuation rows (empty event cell).
+// Returns per-event, per-round advancement settings from the "Proceed" column.
+function parseScheduleTable(rawText: string, competitionEvents: string[]): BulkAdvResult {
+  const byEvent: Record<string, ParsedAdvancement[]> = {};
+  const parseErrors: string[] = [];
+  const notInComp: string[] = [];
+  const useTabMode = rawText.includes('\t');
+
+  let currentEventId: string | null = null;
+  let currentEventName: string | null = null;
+
+  for (const rawLine of rawText.split('\n')) {
+    const line = rawLine.replace(/\r$/, '');
+    if (!line.trim()) continue;
+    // Skip header row ("Event  Round  Format  ...")
+    if (/^\s*Event\s*(\t|  )/i.test(line)) continue;
+
+    let eventCell = '';
+    let roundCell = '';
+    let proceedCell = '';
+
+    if (useTabMode) {
+      const cols = line.split('\t');
+      eventCell = (cols[0] ?? '').trim();
+      roundCell = (cols[1] ?? '').trim();
+      // Col 5 = Proceed in standard WCA schedule export
+      proceedCell = (cols[5] ?? '').trim();
+      // Fallback: search cols 4+ for "advance" or "%" keywords
+      if (!proceedCell) {
+        for (let i = 4; i < cols.length; i++) {
+          const v = (cols[i] ?? '').trim();
+          if (/advance|%/i.test(v)) { proceedCell = v; break; }
+        }
+      }
+    } else {
+      const trimmed = line.trimStart();
+      const indented = line.length > trimmed.length;
+      if (!indented) {
+        // Non-indented line: check for event name at start
+        for (const [name] of WCA_EVENT_NAMES) {
+          if (trimmed.toLowerCase().startsWith(name.toLowerCase())) {
+            eventCell = name;
+            const afterEvent = trimmed.slice(name.length).trim();
+            const rl = KNOWN_ROUND_LABELS.find((r) => afterEvent.toLowerCase().startsWith(r));
+            if (rl) {
+              roundCell = afterEvent.slice(0, rl.length);
+              proceedCell = afterEvent.slice(rl.length); // may include format, time limit, etc.
+            }
+            break;
+          }
+        }
+      } else {
+        // Indented: look for round label at start of trimmed text
+        const rl = KNOWN_ROUND_LABELS.find((r) => trimmed.toLowerCase().startsWith(r));
+        if (rl) {
+          roundCell = trimmed.slice(0, rl.length);
+          proceedCell = trimmed.slice(rl.length); // may include format, time limit, etc.
+        }
+      }
+    }
+
+    // Update tracked event when a non-empty event cell is found
+    if (eventCell) {
+      let foundId: string | null = null;
+      let foundName: string | null = null;
+      for (const [name, id] of WCA_EVENT_NAMES) {
+        if (eventCell.toLowerCase().startsWith(name.toLowerCase())) {
+          foundId = id;
+          foundName = name;
+          break;
+        }
+      }
+      if (foundId) {
+        currentEventId = foundId;
+        currentEventName = foundName;
+        if (!competitionEvents.includes(foundId) && !notInComp.includes(foundId)) {
+          notInComp.push(foundId);
+        }
+      }
+    }
+
+    if (!currentEventId || !currentEventName || !roundCell.trim()) continue;
+
+    // Only accept recognized round labels to avoid false positives
+    const rl = KNOWN_ROUND_LABELS.find((r) => roundCell.trim().toLowerCase() === r);
+    if (!rl) continue;
+
+    const adv = parseProceedCell(proceedCell);
+    const roundNameFormatted = roundCell.trim().replace(/\b\w/g, (c) => c.toUpperCase());
+
+    if (!byEvent[currentEventId]) byEvent[currentEventId] = [];
+    const already = byEvent[currentEventId].some(
+      (r) => r.roundName.toLowerCase() === roundNameFormatted.toLowerCase(),
+    );
+    if (!already) {
+      byEvent[currentEventId].push({
+        eventId: currentEventId,
+        eventName: currentEventName,
+        roundName: roundNameFormatted,
+        ...adv,
+      });
+    }
+  }
+
+  if (Object.keys(byEvent).length === 0) {
+    parseErrors.push('Таньж болохуйц формат олдсонгүй. WCA schedule хүснэгтийг хуулж тавина уу.');
+  }
+
+  return { byEvent, parseErrors, notInComp };
+}
+
 // ─── Comp form types ──────────────────────────────────────────────────────────
 
 interface CompFormState {
@@ -842,6 +992,8 @@ function ScrambleSection({
   onRefresh: () => Promise<void>;
   onToast: (type: 'success' | 'error', text: string) => void;
 }) {
+  const [showBulkModal, setShowBulkModal] = useState(false);
+
   return (
     <div className="card" style={{ marginTop: '1rem' }}>
       <div className="card-title" style={{ marginBottom: '1rem' }}>
@@ -855,18 +1007,46 @@ function ScrambleSection({
           Төрөл сонгогдоогүй байна. Дээрх Үндсэн мэдээлэлд төрөл сонго.
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
-          {events.map((eventId) => (
-            <EventPasteSection
-              key={eventId}
-              eventId={eventId}
+        <>
+          <div style={{ marginBottom: '0.8rem' }}>
+            <button
+              onClick={() => setShowBulkModal(true)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
+                padding: '0.42rem 0.85rem', borderRadius: '8px',
+                fontFamily: 'inherit', fontSize: '0.82rem', fontWeight: 600,
+                background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.3)',
+                color: '#c4b5fd', cursor: 'pointer', transition: 'background 0.15s',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(124,58,237,0.18)')}
+              onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(124,58,237,0.1)')}
+            >
+              📋 Бүх раундын тохиргоо хуулж тавих
+            </button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
+            {events.map((eventId) => (
+              <EventPasteSection
+                key={eventId}
+                eventId={eventId}
+                compId={compId}
+                existingRounds={rounds.filter((r) => r.eventId === eventId)}
+                onRefresh={onRefresh}
+                onToast={onToast}
+              />
+            ))}
+          </div>
+          {showBulkModal && (
+            <BulkAdvancementModal
               compId={compId}
-              existingRounds={rounds.filter((r) => r.eventId === eventId)}
-              onRefresh={onRefresh}
+              rounds={rounds}
+              events={events}
+              onClose={() => setShowBulkModal(false)}
               onToast={onToast}
+              onRefresh={onRefresh}
             />
-          ))}
-        </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -1654,6 +1834,280 @@ function EventPasteSection({
           onCancel={() => setConfirmResultsReplace(false)}
         />
       )}
+    </div>
+  );
+}
+
+// ─── BulkAdvancementModal ─────────────────────────────────────────────────────
+
+function BulkAdvancementModal({
+  compId,
+  rounds,
+  events,
+  onClose,
+  onToast,
+  onRefresh,
+}: {
+  compId: string;
+  rounds: VirtualRound[];
+  events: string[];
+  onClose: () => void;
+  onToast: (type: 'success' | 'error', text: string) => void;
+  onRefresh: () => Promise<void>;
+}) {
+  const [text, setText] = useState('');
+  const [phase, setPhase] = useState<'idle' | 'preview'>('idle');
+  const [parsed, setParsed] = useState<BulkAdvResult | null>(null);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  function handleAnalyze() {
+    if (!text.trim()) return;
+    const result = parseScheduleTable(text, events);
+    if (result.parseErrors.length > 0) {
+      setParseError(result.parseErrors[0]);
+      setParsed(null);
+      return;
+    }
+    setParseError(null);
+    setParsed(result);
+    setPhase('preview');
+  }
+
+  async function handleApply() {
+    if (!parsed) return;
+    setSaving(true);
+    try {
+      const updates: Array<Promise<void>> = [];
+      let matched = 0;
+      let skipped = 0;
+      for (const [eventId, advRows] of Object.entries(parsed.byEvent)) {
+        if (!events.includes(eventId)) { skipped += advRows.length; continue; }
+        const eventRounds = rounds.filter((r) => r.eventId === eventId);
+        for (const adv of advRows) {
+          const round = matchRoundByLabel(adv.roundName, eventRounds);
+          if (!round) { skipped++; continue; }
+          const u: { advancementType: 'fixed' | 'percentage' | 'final'; advancementValue?: number } = {
+            advancementType: adv.advancementType,
+          };
+          if (adv.advancementValue != null) u.advancementValue = adv.advancementValue;
+          updates.push(updateRound(compId, round.id, u));
+          matched++;
+        }
+      }
+      await Promise.all(updates);
+      onToast(
+        'success',
+        `${matched} раундын тохиргоо шинэчлэгдлээ ✓${skipped > 0 ? ` (${skipped} тохирохгүй)` : ''}`,
+      );
+      await onRefresh();
+      onClose();
+    } catch (err) {
+      onToast('error', 'Алдаа: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Count how many rounds will actually be updated (in comp + matched)
+  const totalApplicable = parsed
+    ? Object.entries(parsed.byEvent)
+        .filter(([eventId]) => events.includes(eventId))
+        .reduce((sum, [eventId, advRows]) => {
+          const eventRounds = rounds.filter((r) => r.eventId === eventId);
+          return sum + advRows.filter((adv) => matchRoundByLabel(adv.roundName, eventRounds) !== null).length;
+        }, 0)
+    : 0;
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.72)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: 'var(--card, #1a1730)', border: '1px solid rgba(255,255,255,0.1)',
+          borderRadius: '14px', padding: '1.75rem',
+          maxWidth: '580px', width: '100%', maxHeight: '85vh',
+          overflow: 'hidden', display: 'flex', flexDirection: 'column',
+          boxShadow: '0 24px 60px rgba(0,0,0,0.7)',
+        }}
+      >
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.1rem', flexShrink: 0 }}>
+          <div style={{ fontSize: '1rem', fontWeight: 700 }}>Раундын тохиргоог бүлэгээр оруулах</div>
+          <button
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: '1.2rem', lineHeight: 1, padding: '0.1rem 0.3rem' }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Scrollable body */}
+        <div style={{ flex: 1, overflow: 'auto' }}>
+          {phase === 'idle' && (
+            <>
+              <div style={{ fontSize: '0.83rem', color: 'var(--muted)', marginBottom: '0.85rem', lineHeight: 1.55 }}>
+                WCA-н тэмцээний schedule хүснэгтийг хуулж тавина. Бүх төрөл, раундын advancement тохиргоо автоматаар тогтоно.
+              </div>
+              <textarea
+                value={text}
+                onChange={(e) => { setText(e.target.value); setParseError(null); }}
+                rows={14}
+                placeholder={
+                  'Event\tRound\tFormat\tTime limit\tCutoff\tProceed\n' +
+                  '3x3x3 Cube\tFirst round\tAo5\t2:00.00\t\tTop 48 advance to next round\n' +
+                  '\tSecond round\tAo5\t1:00.00\t\tTop 16 advance to next round\n' +
+                  '\tFinal\tAo5\t1:00.00\t\t'
+                }
+                style={{
+                  width: '100%', boxSizing: 'border-box',
+                  padding: '0.6rem 0.75rem', borderRadius: '8px',
+                  background: 'rgba(255,255,255,0.03)',
+                  border: `1px solid ${parseError ? 'rgba(239,68,68,0.5)' : 'rgba(255,255,255,0.1)'}`,
+                  color: 'var(--text)', fontFamily: 'monospace', fontSize: '0.75rem',
+                  resize: 'vertical', outline: 'none', lineHeight: 1.6,
+                  marginBottom: '0.55rem',
+                }}
+              />
+              {parseError && (
+                <div style={{
+                  padding: '0.45rem 0.65rem', borderRadius: '7px', marginBottom: '0.55rem',
+                  background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
+                  color: '#f87171', fontSize: '0.8rem', lineHeight: 1.5,
+                }}>
+                  {parseError}
+                </div>
+              )}
+              <button
+                onClick={handleAnalyze}
+                disabled={!text.trim()}
+                style={{
+                  width: '100%', padding: '0.5rem 1rem', borderRadius: '8px',
+                  fontFamily: 'inherit', fontSize: '0.85rem', fontWeight: 700,
+                  background: text.trim() ? 'rgba(124,58,237,0.7)' : 'rgba(124,58,237,0.2)',
+                  border: '1px solid rgba(124,58,237,0.9)',
+                  color: text.trim() ? '#fff' : 'rgba(255,255,255,0.3)',
+                  cursor: text.trim() ? 'pointer' : 'not-allowed',
+                  transition: 'background 0.15s',
+                }}
+              >
+                Шинжлэх →
+              </button>
+            </>
+          )}
+
+          {phase === 'preview' && parsed && (
+            <>
+              <div style={{ fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.6rem' }}>
+                Шинжлэлийн үр дүн
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                {Object.entries(parsed.byEvent).map(([eventId, advRows]) => {
+                  const inComp = events.includes(eventId);
+                  const ev = getEvent(eventId);
+                  const eventRounds = rounds.filter((r) => r.eventId === eventId);
+                  const rowStatuses = advRows.map((adv) => {
+                    const matchedRound = matchRoundByLabel(adv.roundName, eventRounds);
+                    const differentFromCurrent =
+                      matchedRound != null && (
+                        matchedRound.advancementType !== adv.advancementType ||
+                        (adv.advancementValue != null &&
+                          matchedRound.advancementValue !== adv.advancementValue)
+                      );
+                    return { adv, matchedRound, differentFromCurrent };
+                  });
+                  const hasWarning = !inComp || rowStatuses.some((s) => !s.matchedRound);
+
+                  return (
+                    <div key={eventId} style={{
+                      padding: '0.55rem 0.7rem', borderRadius: '8px',
+                      border: `1px solid ${hasWarning ? 'rgba(245,158,11,0.3)' : 'rgba(34,197,94,0.2)'}`,
+                      background: hasWarning ? 'rgba(245,158,11,0.04)' : 'rgba(34,197,94,0.04)',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.25rem' }}>
+                        <span style={{ fontSize: '0.85rem' }}>{hasWarning ? '⚠' : '✓'}</span>
+                        <span style={{ fontWeight: 700, fontSize: '0.85rem', color: hasWarning ? '#fbbf24' : '#4ade80' }}>
+                          {ev?.name ?? eventId}
+                        </span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
+                          — {advRows.length} раунд
+                        </span>
+                      </div>
+                      {!inComp && (
+                        <div style={{ fontSize: '0.72rem', color: '#fbbf24', paddingLeft: '1.3rem', marginBottom: '0.2rem' }}>
+                          Энэ төрлийн раунд тэмцээнд оруулаагүй
+                        </div>
+                      )}
+                      {rowStatuses.map(({ adv, matchedRound, differentFromCurrent }) => {
+                        const advLabel =
+                          adv.advancementType === 'final'
+                            ? 'Final round'
+                            : adv.advancementType === 'fixed'
+                              ? `Top ${adv.advancementValue} advance`
+                              : `Top ${adv.advancementValue}%`;
+                        return (
+                          <div key={adv.roundName} style={{
+                            fontSize: '0.77rem',
+                            color: !matchedRound ? '#fbbf24' : differentFromCurrent ? '#c4b5fd' : 'var(--muted)',
+                            paddingLeft: '1.3rem', lineHeight: 1.6,
+                          }}>
+                            {adv.roundName} → {advLabel}
+                            {!matchedRound && ' ⚠ раунд олдсонгүй'}
+                            {matchedRound && differentFromCurrent && ' ↺ солино'}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+                {parsed.notInComp.length > 0 && (
+                  <div style={{ fontSize: '0.72rem', color: 'var(--muted)', marginTop: '0.2rem' }}>
+                    ⚠ Тэмцээнд оруулаагүй: {parsed.notInComp.map((id) => getEvent(id)?.name ?? id).join(', ')}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        {phase === 'preview' && parsed && (
+          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.9rem', flexShrink: 0 }}>
+            <button
+              onClick={() => setPhase('idle')}
+              style={{
+                flex: 1, padding: '0.5rem 0.75rem', borderRadius: '8px',
+                fontFamily: 'inherit', fontSize: '0.85rem', fontWeight: 600,
+                background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+                color: 'var(--text)', cursor: 'pointer',
+              }}
+            >
+              ← Буцах
+            </button>
+            <button
+              onClick={() => void handleApply()}
+              disabled={saving || totalApplicable === 0}
+              style={{
+                flex: 2, padding: '0.5rem 0.75rem', borderRadius: '8px',
+                fontFamily: 'inherit', fontSize: '0.85rem', fontWeight: 700,
+                background: saving || totalApplicable === 0 ? 'rgba(34,197,94,0.2)' : 'rgba(34,197,94,0.7)',
+                border: '1px solid rgba(34,197,94,0.8)',
+                color: saving || totalApplicable === 0 ? 'rgba(255,255,255,0.3)' : '#fff',
+                cursor: saving || totalApplicable === 0 ? 'not-allowed' : 'pointer',
+                transition: 'background 0.15s',
+              }}
+            >
+              {saving ? 'Хадгалж байна...' : `✓ Үүсгэх (${totalApplicable} раунд)`}
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
