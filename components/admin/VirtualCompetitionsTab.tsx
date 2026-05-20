@@ -11,6 +11,7 @@ import {
   getRounds,
   addRound,
   deleteRound as svcDeleteRound,
+  updateRound,
   importHistoricalResults,
 } from '@/lib/firebase/services/virtual-competitions';
 import type { VirtualCompetition, VirtualRound, HistoricalResult } from '@/lib/firebase/services/virtual-competitions';
@@ -873,6 +874,8 @@ function ScrambleSection({
 
 // ─── EventPasteSection ────────────────────────────────────────────────────────
 
+type AdvEdit = { type: 'fixed' | 'percentage' | 'final'; value: string };
+
 function EventPasteSection({
   eventId,
   compId,
@@ -908,6 +911,11 @@ function EventPasteSection({
   const [resultsSaving, setResultsSaving] = useState(false);
   const [confirmResultsReplace, setConfirmResultsReplace] = useState(false);
 
+  // ── Advancement edit state ────────────────────────────────────────────────
+  const [advEdits, setAdvEdits] = useState<Record<string, AdvEdit>>({});
+  const [advSaving, setAdvSaving] = useState(false);
+  const [advErrors, setAdvErrors] = useState<Record<string, string>>({});
+
   useEffect(() => {
     if (!menuOpen) return;
     function handler(e: PointerEvent) {
@@ -918,6 +926,18 @@ function EventPasteSection({
     document.addEventListener('pointerdown', handler);
     return () => document.removeEventListener('pointerdown', handler);
   }, [menuOpen]);
+
+  useEffect(() => {
+    const init: Record<string, AdvEdit> = {};
+    for (const r of existingRounds) {
+      init[r.id] = {
+        type: r.advancementType,
+        value: r.advancementValue != null ? String(r.advancementValue) : '',
+      };
+    }
+    setAdvEdits(init);
+    setAdvErrors({});
+  }, [existingRounds]);
 
   function handleAnalyze() {
     if (!text.trim()) return;
@@ -1052,6 +1072,81 @@ function EventPasteSection({
       setResultsSaving(false);
     }
   }
+
+  // ── Advancement handlers ──────────────────────────────────────────────────
+
+  function applyAutoSuggest() {
+    const sorted = [...existingRounds].sort((a, b) => a.roundNumber - b.roundNumber);
+    const total = sorted.length;
+    const next = { ...advEdits };
+    sorted.forEach((r, i) => {
+      const isLast = i === total - 1;
+      if (isLast) {
+        next[r.id] = { type: 'final', value: '' };
+      } else {
+        const lbl = r.roundName.toLowerCase();
+        if (lbl.includes('first')) {
+          next[r.id] = { type: 'percentage', value: '75' };
+        } else if (lbl.includes('semi')) {
+          next[r.id] = { type: 'fixed', value: '12' };
+        } else {
+          next[r.id] = { type: 'fixed', value: '25' };
+        }
+      }
+    });
+    setAdvEdits(next);
+    setAdvErrors({});
+  }
+
+  async function handleAdvSave() {
+    const errs: Record<string, string> = {};
+    for (const r of existingRounds) {
+      const edit = advEdits[r.id];
+      if (!edit) continue;
+      if (edit.type === 'fixed') {
+        const n = parseInt(edit.value, 10);
+        if (isNaN(n) || n < 0 || !Number.isInteger(n)) errs[r.id] = 'Эерэг бүхэл тоо оруулна уу';
+      } else if (edit.type === 'percentage') {
+        const n = parseInt(edit.value, 10);
+        if (isNaN(n) || n < 1 || n > 100) errs[r.id] = '1-100 хооронд тоо оруулна уу';
+      }
+    }
+    if (Object.keys(errs).length > 0) { setAdvErrors(errs); return; }
+    setAdvErrors({});
+    setAdvSaving(true);
+    try {
+      const changed = existingRounds.filter((r) => {
+        const edit = advEdits[r.id];
+        if (!edit) return false;
+        if (edit.type !== r.advancementType) return true;
+        return edit.value !== (r.advancementValue != null ? String(r.advancementValue) : '');
+      });
+      await Promise.all(
+        changed.map((r) => {
+          const edit = advEdits[r.id]!;
+          const val = edit.type !== 'final' ? parseInt(edit.value, 10) : undefined;
+          const updates: Partial<import('@/lib/firebase/services/virtual-competitions').VirtualRound> = {
+            advancementType: edit.type,
+          };
+          if (val != null) updates.advancementValue = val;
+          return updateRound(compId, r.id, updates);
+        }),
+      );
+      onToast('success', `${changed.length} раундын тохиргоо хадгалагдлаа`);
+      await onRefresh();
+    } catch (err) {
+      onToast('error', 'Алдаа: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setAdvSaving(false);
+    }
+  }
+
+  const advDirty = existingRounds.some((r) => {
+    const edit = advEdits[r.id];
+    if (!edit) return false;
+    if (edit.type !== r.advancementType) return true;
+    return edit.value !== (r.advancementValue != null ? String(r.advancementValue) : '');
+  });
 
   const sortedRounds = [...existingRounds].sort((a, b) => a.roundNumber - b.roundNumber);
 
@@ -1261,6 +1356,118 @@ function EventPasteSection({
               </div>
             </>
           )}
+
+          {/* ── Advancement section ── */}
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', marginTop: '1rem', paddingTop: '0.85rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.65rem' }}>
+              <div style={{
+                fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.1em',
+                textTransform: 'uppercase', color: 'var(--muted)',
+              }}>
+                Раундын тохиргоо
+              </div>
+              {sortedRounds.length > 0 && (
+                <button
+                  onClick={applyAutoSuggest}
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    fontFamily: 'inherit', fontSize: '0.72rem', color: '#a78bfa',
+                    padding: 0, textDecoration: 'underline',
+                  }}
+                >
+                  Автомат тооцоо
+                </button>
+              )}
+            </div>
+
+            {sortedRounds.length === 0 ? (
+              <div style={{ fontSize: '0.82rem', color: 'var(--muted)', fontStyle: 'italic' }}>
+                Эхлээд холилт оруулна уу
+              </div>
+            ) : (
+              <>
+                {sortedRounds.map((r) => {
+                  const edit = advEdits[r.id] ?? { type: r.advancementType, value: r.advancementValue != null ? String(r.advancementValue) : '' };
+                  const err = advErrors[r.id];
+                  return (
+                    <div key={r.id} style={{
+                      padding: '0.6rem 0.7rem', marginBottom: '0.4rem',
+                      border: '1px solid rgba(255,255,255,0.065)', borderRadius: '8px',
+                      background: 'rgba(255,255,255,0.015)',
+                    }}>
+                      <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text)', marginBottom: '0.35rem' }}>
+                        {r.roundName}
+                      </div>
+                      <div style={{ fontSize: '0.74rem', color: 'var(--muted)', marginBottom: '0.3rem' }}>
+                        Дараагийн шатанд орох тоо:
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                        {(['fixed', 'percentage', 'final'] as const).map((opt) => {
+                          const selected = edit.type === opt;
+                          const label = opt === 'fixed' ? 'Тоогоор' : opt === 'percentage' ? 'Хувиар' : 'Final';
+                          return (
+                            <label key={opt} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer' }}>
+                              <input
+                                type="radio"
+                                checked={selected}
+                                onChange={() => setAdvEdits((prev) => ({
+                                  ...prev,
+                                  [r.id]: { type: opt, value: opt === 'final' ? '' : (prev[r.id]?.value ?? '') },
+                                }))}
+                                style={{ accentColor: '#a78bfa', cursor: 'pointer' }}
+                              />
+                              <span style={{ fontSize: '0.8rem', color: selected ? '#c4b5fd' : 'var(--muted)' }}>
+                                {label}
+                              </span>
+                              {opt !== 'final' && (
+                                <input
+                                  type="number"
+                                  value={selected ? edit.value : ''}
+                                  disabled={!selected}
+                                  onChange={(e) => {
+                                    if (!selected) return;
+                                    setAdvEdits((prev) => ({ ...prev, [r.id]: { type: opt, value: e.target.value } }));
+                                    if (advErrors[r.id]) setAdvErrors((prev) => ({ ...prev, [r.id]: '' }));
+                                  }}
+                                  style={{
+                                    width: '3.5rem', padding: '0.2rem 0.35rem', borderRadius: '5px',
+                                    background: selected ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.02)',
+                                    border: `1px solid ${err && selected ? 'rgba(239,68,68,0.5)' : 'rgba(255,255,255,0.1)'}`,
+                                    color: selected ? 'var(--text)' : 'rgba(255,255,255,0.2)',
+                                    fontFamily: 'inherit', fontSize: '0.82rem', outline: 'none',
+                                  }}
+                                />
+                              )}
+                            </label>
+                          );
+                        })}
+                      </div>
+                      {err && (
+                        <div style={{ fontSize: '0.72rem', color: '#f87171', marginTop: '0.3rem' }}>{err}</div>
+                      )}
+                    </div>
+                  );
+                })}
+                {advDirty && (
+                  <button
+                    onClick={() => void handleAdvSave()}
+                    disabled={advSaving}
+                    style={{
+                      marginTop: '0.3rem', width: '100%', padding: '0.45rem 1rem', borderRadius: '8px',
+                      fontFamily: 'inherit', fontSize: '0.85rem', fontWeight: 700,
+                      background: advSaving ? 'rgba(124,58,237,0.2)' : 'rgba(124,58,237,0.7)',
+                      border: '1px solid rgba(124,58,237,0.9)',
+                      color: advSaving ? 'rgba(255,255,255,0.3)' : '#fff',
+                      cursor: advSaving ? 'not-allowed' : 'pointer',
+                      transition: 'background 0.15s',
+                    }}
+                  >
+                    {advSaving ? 'Хадгалж байна...' : 'Хадгалах'}
+                  </button>
+                )}
+              </>
+            )}
+          </div>
 
           {/* ── Results section ── */}
           <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', marginTop: '1rem', paddingTop: '0.85rem' }}>
