@@ -11,8 +11,9 @@ import {
   getRounds,
   addRound,
   deleteRound as svcDeleteRound,
+  importHistoricalResults,
 } from '@/lib/firebase/services/virtual-competitions';
-import type { VirtualCompetition, VirtualRound } from '@/lib/firebase/services/virtual-competitions';
+import type { VirtualCompetition, VirtualRound, HistoricalResult } from '@/lib/firebase/services/virtual-competitions';
 import { WCA_EVENTS, getEvent } from '@/lib/wca-events';
 import { useAuth } from '@/lib/auth-context';
 
@@ -255,6 +256,175 @@ function parseEventRounds(
     };
   }
   return { rounds, error: null };
+}
+
+// ─── WCA Results Parser ───────────────────────────────────────────────────────
+
+// Parses a WCA time string like "5.55", "1:23.45", "DNF", "(5.55)".
+// Returns { ms, penalty } or null if unparseable.
+function parseWcaTimeStr(raw: string): { ms: number; penalty: 'none' | 'dnf' } | null {
+  const s = raw.replace(/[()]/g, '').trim();
+  if (!s) return null;
+  if (/^(DNF|DNS)$/i.test(s)) return { ms: -1, penalty: 'dnf' };
+  const m = s.match(/^(?:(\d+):)?(\d{1,2})\.(\d{2})$/);
+  if (!m) return null;
+  const mins = parseInt(m[1] ?? '0', 10);
+  const secs = parseInt(m[2], 10);
+  const cs   = parseInt(m[3], 10); // centiseconds
+  return { ms: (mins * 60 + secs) * 1000 + cs * 10, penalty: 'none' };
+}
+
+function looksLikeTime(token: string): boolean {
+  const s = token.replace(/[()]/g, '').trim();
+  return /^(DNF|DNS)$/i.test(s) || /^(?:\d+:)?\d{1,2}\.\d{2}$/.test(s);
+}
+
+// Formats ms back to display string ("5.55", "1:23.45", "DNF").
+function formatMs(ms: number): string {
+  if (ms < 0) return 'DNF';
+  const totalSecs = Math.floor(ms / 1000);
+  const cs = Math.round((ms % 1000) / 10);
+  const mins = Math.floor(totalSecs / 60);
+  const secs = totalSecs % 60;
+  if (mins > 0) return `${mins}:${String(secs).padStart(2, '0')}.${String(cs).padStart(2, '0')}`;
+  return `${secs}.${String(cs).padStart(2, '0')}`;
+}
+
+interface ResultRow {
+  rank: number;
+  name: string;
+  best: number;
+  bestPenalty: 'none' | 'dnf';
+  average: number;
+  averagePenalty: 'none' | 'dnf';
+  solves: Array<{ ms: number; penalty: 'none' | 'dnf' }>;
+}
+
+// Parses one athlete result row from a WCA results export.
+// Handles both tab-separated (copied from WCA website table) and
+// space-padded formats. Returns null if the line is not a results row.
+function parseResultLine(line: string): ResultRow | null {
+  if (line.includes('\t')) {
+    const cols = line.split('\t').map((s) => s.trim());
+    const rank = parseInt(cols[0], 10);
+    if (!rank || isNaN(rank) || cols.length < 3) return null;
+    const name = cols[1];
+    if (!name) return null;
+    const bestParsed = parseWcaTimeStr(cols[2]);
+    if (!bestParsed) return null;
+    const avgParsed = cols[3] ? parseWcaTimeStr(cols[3]) : null;
+    // Remaining cols after avg: skip non-time (NR, country), collect time tokens
+    const solves = cols
+      .slice(4)
+      .filter(looksLikeTime)
+      .map((s) => parseWcaTimeStr(s) ?? { ms: -1, penalty: 'dnf' as const });
+    return {
+      rank, name,
+      best: bestParsed.ms, bestPenalty: bestParsed.penalty,
+      average: avgParsed?.ms ?? -1, averagePenalty: avgParsed?.penalty ?? 'dnf',
+      solves,
+    };
+  } else {
+    // Space-separated: rank at start, then name up to first time-like token
+    const leadMatch = line.match(/^\s*(\d+)\s+/);
+    if (!leadMatch) return null;
+    const rank = parseInt(leadMatch[1], 10);
+    if (isNaN(rank)) return null;
+    const rest = line.slice(leadMatch[0].length);
+    const tokens = rest.split(/\s+/).filter((s) => s.length > 0);
+    let firstTimeIdx = -1;
+    for (let i = 0; i < tokens.length; i++) {
+      if (looksLikeTime(tokens[i])) { firstTimeIdx = i; break; }
+    }
+    if (firstTimeIdx < 1) return null; // need at least one name token before first time
+    const name = tokens.slice(0, firstTimeIdx).join(' ');
+    const bestParsed = parseWcaTimeStr(tokens[firstTimeIdx]);
+    if (!bestParsed) return null;
+    const avgParsed = tokens[firstTimeIdx + 1] ? parseWcaTimeStr(tokens[firstTimeIdx + 1]) : null;
+    // After best + avg, filter to time-like tokens (skips representing, NR, etc.)
+    const solves = tokens
+      .slice(firstTimeIdx + 2)
+      .filter(looksLikeTime)
+      .map((s) => parseWcaTimeStr(s) ?? { ms: -1, penalty: 'dnf' as const });
+    return {
+      rank, name,
+      best: bestParsed.ms, bestPenalty: bestParsed.penalty,
+      average: avgParsed?.ms ?? -1, averagePenalty: avgParsed?.penalty ?? 'dnf',
+      solves,
+    };
+  }
+}
+
+// State-machine parser for WCA competition results text, scoped to one event.
+// Returns a map of roundLabel → HistoricalResult[] for rounds matching eventId.
+function parseWcaResults(
+  rawText: string,
+  eventId: string,
+): { byRoundLabel: Record<string, HistoricalResult[]>; parseErrors: string[]; warnings: string[] } {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const byRoundLabel: Record<string, HistoricalResult[]> = {};
+
+  let curLabel: string | null = null;
+  let curResults: HistoricalResult[] = [];
+
+  const flush = () => {
+    if (curLabel !== null) { byRoundLabel[curLabel] = curResults; curResults = []; curLabel = null; }
+  };
+
+  for (const rawLine of rawText.split('\n')) {
+    const line = rawLine.replace(/\r$/, '');
+    if (!line.trim()) continue;
+    if (/^\s*#\s/.test(line)) continue; // column header row: "# Name  Best  Average..."
+
+    const header = tryMatchEventHeader(line);
+    if (header) {
+      flush();
+      if (header.eventId === eventId) {
+        curLabel = header.roundLabel;
+      } else if (!warnings.includes(header.eventId)) {
+        warnings.push(header.eventId);
+      }
+      continue;
+    }
+
+    if (curLabel === null) continue;
+
+    const row = parseResultLine(line);
+    if (!row) continue;
+
+    curResults.push({
+      athleteName: row.name,
+      times: row.solves.map((s) => s.ms),
+      penalties: row.solves.map((s) => s.penalty),
+      best: row.best,
+      average: row.average,
+      rank: row.rank,
+    });
+  }
+  flush();
+
+  if (Object.keys(byRoundLabel).length === 0) {
+    errors.push(
+      warnings.length > 0
+        ? 'Энэ төрлийн үр дүн олдсонгүй. Зөв төрлийн үр дүн тавина уу.'
+        : 'Таньж болохуйц формат олдсонгүй. WCA үр дүний форматаар оруулна уу.',
+    );
+  }
+
+  return { byRoundLabel, parseErrors: errors, warnings };
+}
+
+// Case-insensitive round name matching. "Second round" matches "Second Round".
+function matchRoundByLabel(label: string, rounds: VirtualRound[]): VirtualRound | null {
+  const norm = (s: string) =>
+    s.toLowerCase().trim()
+      .replace(/\s+/g, ' ')
+      .replace(/\b1st\b/g, 'first')
+      .replace(/\b2nd\b/g, 'second')
+      .replace(/\b3rd\b/g, 'third');
+  const nl = norm(label);
+  return rounds.find((r) => norm(r.roundName) === nl) ?? null;
 }
 
 // ─── Comp form types ──────────────────────────────────────────────────────────
@@ -730,6 +900,14 @@ function EventPasteSection({
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
+  // ── Results paste state ──────────────────────────────────────────────────
+  const [resultsText, setResultsText] = useState('');
+  const [resultsPhase, setResultsPhase] = useState<'idle' | 'preview'>('idle');
+  const [parsedResultsByLabel, setParsedResultsByLabel] = useState<Record<string, HistoricalResult[]>>({});
+  const [resultsParseError, setResultsParseError] = useState<string | null>(null);
+  const [resultsSaving, setResultsSaving] = useState(false);
+  const [confirmResultsReplace, setConfirmResultsReplace] = useState(false);
+
   useEffect(() => {
     if (!menuOpen) return;
     function handler(e: PointerEvent) {
@@ -819,6 +997,59 @@ function EventPasteSection({
       onToast('error', 'Алдаа: ' + (err instanceof Error ? err.message : String(err)));
     } finally {
       setSaving(false);
+    }
+  }
+
+  // ── Results paste handlers ────────────────────────────────────────────────
+  function handleResultsAnalyze() {
+    if (!resultsText.trim()) return;
+    const result = parseWcaResults(resultsText, eventId);
+    if (result.parseErrors.length > 0) {
+      setResultsParseError(result.parseErrors[0]);
+      setParsedResultsByLabel({});
+      return;
+    }
+    setResultsParseError(null);
+    setParsedResultsByLabel(result.byRoundLabel);
+    setResultsPhase('preview');
+  }
+
+  function handleResultsCreateClick() {
+    const hasExisting = Object.keys(parsedResultsByLabel).some((label) => {
+      const round = matchRoundByLabel(label, existingRounds);
+      return round != null && round.historicalResults.length > 0;
+    });
+    if (hasExisting) {
+      setConfirmResultsReplace(true);
+    } else {
+      void doSaveResults();
+    }
+  }
+
+  async function doSaveResults() {
+    setConfirmResultsReplace(false);
+    setResultsSaving(true);
+    let saved = 0;
+    let skipped = 0;
+    try {
+      for (const [label, results] of Object.entries(parsedResultsByLabel)) {
+        const round = matchRoundByLabel(label, existingRounds);
+        if (!round) { skipped++; continue; }
+        await importHistoricalResults(compId, round.id, results);
+        saved++;
+      }
+      onToast(
+        'success',
+        `${saved} раундад үр дүн хадгалагдлаа${skipped > 0 ? ` (${skipped} тохирохгүй)` : ''}`,
+      );
+      setResultsText('');
+      setResultsPhase('idle');
+      setParsedResultsByLabel({});
+      await onRefresh();
+    } catch (err) {
+      onToast('error', 'Алдаа: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setResultsSaving(false);
     }
   }
 
@@ -1030,6 +1261,155 @@ function EventPasteSection({
               </div>
             </>
           )}
+
+          {/* ── Results section ── */}
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', marginTop: '1rem', paddingTop: '0.85rem' }}>
+            <div style={{
+              fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.1em',
+              textTransform: 'uppercase', color: 'var(--muted)', marginBottom: '0.65rem',
+            }}>
+              Үр дүн
+            </div>
+
+            {existingRounds.length === 0 ? (
+              <div style={{ fontSize: '0.82rem', color: 'var(--muted)', fontStyle: 'italic' }}>
+                Эхлээд холилт оруулна уу
+              </div>
+            ) : (
+              <>
+                {/* Existing results summary (idle phase) */}
+                {resultsPhase === 'idle' && existingRounds.some((r) => r.historicalResults.length > 0) && (
+                  <div style={{
+                    fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.6rem',
+                    padding: '0.35rem 0.6rem', borderRadius: '6px',
+                    background: 'rgba(124,58,237,0.07)', border: '1px solid rgba(124,58,237,0.18)',
+                  }}>
+                    Одоо: {sortedRounds
+                      .filter((r) => r.historicalResults.length > 0)
+                      .map((r) => `${r.roundName} (${r.historicalResults.length})`)
+                      .join(', ')}
+                  </div>
+                )}
+
+                {/* Textarea (idle phase) */}
+                {resultsPhase === 'idle' && (
+                  <>
+                    <textarea
+                      value={resultsText}
+                      onChange={(e) => { setResultsText(e.target.value); setResultsParseError(null); }}
+                      rows={9}
+                      placeholder={
+                        '3x3x3 Cube Final\n#  Name                  Best  Average  Solves\n' +
+                        '1  Gegeenbileg N.         5.55  7.09     8.58 (5.55) 6.92 5.78 (10.56)\n\n' +
+                        '3x3x3 Cube Second round\n...'
+                      }
+                      style={{
+                        width: '100%', boxSizing: 'border-box',
+                        padding: '0.6rem 0.75rem', borderRadius: '8px',
+                        background: 'rgba(255,255,255,0.03)',
+                        border: `1px solid ${resultsParseError ? 'rgba(239,68,68,0.5)' : 'rgba(255,255,255,0.1)'}`,
+                        color: 'var(--text)', fontFamily: 'monospace', fontSize: '0.77rem',
+                        resize: 'vertical', outline: 'none', lineHeight: 1.6,
+                        marginBottom: '0.55rem',
+                      }}
+                    />
+                    {resultsParseError && (
+                      <div style={{
+                        padding: '0.45rem 0.65rem', borderRadius: '7px', marginBottom: '0.55rem',
+                        background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
+                        color: '#f87171', fontSize: '0.8rem', lineHeight: 1.5,
+                      }}>{resultsParseError}</div>
+                    )}
+                    <button
+                      onClick={handleResultsAnalyze}
+                      disabled={!resultsText.trim()}
+                      style={{
+                        width: '100%', padding: '0.48rem 1rem', borderRadius: '8px',
+                        fontFamily: 'inherit', fontSize: '0.85rem', fontWeight: 700,
+                        background: resultsText.trim() ? 'rgba(124,58,237,0.7)' : 'rgba(124,58,237,0.2)',
+                        border: '1px solid rgba(124,58,237,0.9)',
+                        color: resultsText.trim() ? '#fff' : 'rgba(255,255,255,0.3)',
+                        cursor: resultsText.trim() ? 'pointer' : 'not-allowed',
+                        transition: 'background 0.15s',
+                      }}
+                    >
+                      Шинжлэх →
+                    </button>
+                  </>
+                )}
+
+                {/* Preview phase */}
+                {resultsPhase === 'preview' && (
+                  <>
+                    <div style={{ marginBottom: '0.75rem' }}>
+                      <div style={{ fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.5rem' }}>
+                        Шинжлэлийн үр дүн
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                        {Object.entries(parsedResultsByLabel).map(([label, athletes]) => {
+                          const matchedRound = matchRoundByLabel(label, existingRounds);
+                          const example = athletes[0];
+                          return (
+                            <div key={label} style={{
+                              padding: '0.5rem 0.65rem', borderRadius: '7px', fontSize: '0.82rem',
+                              background: matchedRound ? 'rgba(34,197,94,0.06)' : 'rgba(245,158,11,0.07)',
+                              border: `1px solid ${matchedRound ? 'rgba(34,197,94,0.2)' : 'rgba(245,158,11,0.25)'}`,
+                            }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.2rem' }}>
+                                <span style={{ fontSize: '0.75rem' }}>{matchedRound ? '✓' : '⚠'}</span>
+                                <span style={{ fontWeight: 700, color: matchedRound ? '#4ade80' : '#fbbf24' }}>
+                                  {label}
+                                </span>
+                                <span style={{ color: 'var(--muted)' }}>— {athletes.length} тамирчин</span>
+                                {!matchedRound && (
+                                  <span style={{ fontSize: '0.72rem', color: '#fbbf24' }}>· тохирох раунд олдсонгүй</span>
+                                )}
+                              </div>
+                              {example && (
+                                <div style={{ fontSize: '0.75rem', color: 'var(--muted)', paddingLeft: '1.1rem' }}>
+                                  Жишээ: {example.athleteName} — {formatMs(example.best)}/{formatMs(example.average)}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button
+                        onClick={() => setResultsPhase('idle')}
+                        style={{
+                          flex: 1, padding: '0.45rem 0.75rem', borderRadius: '8px',
+                          fontFamily: 'inherit', fontSize: '0.85rem', fontWeight: 600,
+                          background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+                          color: 'var(--text)', cursor: 'pointer',
+                        }}
+                      >
+                        ← Буцах
+                      </button>
+                      <button
+                        onClick={handleResultsCreateClick}
+                        disabled={resultsSaving}
+                        style={{
+                          flex: 2, padding: '0.45rem 0.75rem', borderRadius: '8px',
+                          fontFamily: 'inherit', fontSize: '0.85rem', fontWeight: 700,
+                          background: resultsSaving ? 'rgba(34,197,94,0.2)' : 'rgba(34,197,94,0.7)',
+                          border: '1px solid rgba(34,197,94,0.8)',
+                          color: resultsSaving ? 'rgba(255,255,255,0.3)' : '#fff',
+                          cursor: resultsSaving ? 'not-allowed' : 'pointer',
+                          transition: 'background 0.15s',
+                        }}
+                      >
+                        {resultsSaving
+                          ? 'Хадгалж байна...'
+                          : `✓ Хадгалах (${Object.values(parsedResultsByLabel).reduce((s, a) => s + a.length, 0)} тамирчин)`}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+          </div>
         </div>
       )}
 
@@ -1054,6 +1434,17 @@ function EventPasteSection({
           saving={saving}
           onConfirm={() => void doDeleteAll()}
           onCancel={() => setConfirmDeleteAll(false)}
+        />
+      )}
+      {confirmResultsReplace && (
+        <ConfirmModal
+          title="Үр дүн солих"
+          body={<>Энэ раундад өмнөх үр дүн байна. Шинээр сольж бичих үү?</>}
+          confirmLabel="Тийм"
+          danger
+          saving={resultsSaving}
+          onConfirm={() => void doSaveResults()}
+          onCancel={() => setConfirmResultsReplace(false)}
         />
       )}
     </div>
