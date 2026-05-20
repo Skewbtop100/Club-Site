@@ -76,12 +76,27 @@ function getSolveCount(format: VirtualRound['format']): number {
   return 5;
 }
 
+// Defensive: Firestore can return array-of-maps as a plain object with numeric
+// keys when there's only one entry or due to SDK quirks. Convert if needed.
+function toStringArray(val: unknown): string[] {
+  if (!val) return [];
+  if (Array.isArray(val)) return val as string[];
+  if (typeof val === 'object') return Object.values(val as Record<string, string>);
+  return [];
+}
+
 function getGroupScrambles(round: VirtualRound, groupIndex: number): string[] {
-  if (round.groups && round.groups.length > 0) {
-    const g = round.groups[groupIndex % round.groups.length];
-    if (g && g.scrambles.length > 0) return g.scrambles;
+  if (round.groups && (Array.isArray(round.groups) ? round.groups.length > 0 : Object.keys(round.groups).length > 0)) {
+    const groupsArr = Array.isArray(round.groups)
+      ? round.groups
+      : Object.values(round.groups as unknown as Record<string, VirtualRound['groups'] extends (infer T)[] | undefined ? T : never>);
+    const g = groupsArr[groupIndex % groupsArr.length];
+    if (g) {
+      const scrms = toStringArray((g as { scrambles: unknown }).scrambles);
+      if (scrms.length > 0) return scrms;
+    }
   }
-  return round.scrambles ?? [];
+  return toStringArray(round.scrambles);
 }
 
 function fmtTime(ms: number): string {
@@ -119,28 +134,20 @@ function getScrambleFontSize(scramble: string): string {
   return 'clamp(0.8rem, 2.8vw, 1rem)';
 }
 
-// Returns parsed ms, -1 for DNF, or null if invalid
 function parseManualTime(input: string): number | null {
   const s = input.trim().toLowerCase();
   if (s === 'dnf') return -1;
-
-  // M:SS.ff
   const mMatch = s.match(/^(\d+):(\d{1,2})\.(\d{1,3})$/);
   if (mMatch) {
-    const m = parseInt(mMatch[1], 10);
-    const sec = parseInt(mMatch[2], 10);
     const frac = mMatch[3];
-    return (m * 60 + sec) * 1000 + parseInt(frac, 10) * Math.pow(10, 3 - frac.length);
+    return (parseInt(mMatch[1], 10) * 60 + parseInt(mMatch[2], 10)) * 1000
+      + parseInt(frac, 10) * Math.pow(10, 3 - frac.length);
   }
-
-  // SS.ff
   const sMatch = s.match(/^(\d+)\.(\d{1,3})$/);
   if (sMatch) {
-    const sec = parseInt(sMatch[1], 10);
     const frac = sMatch[2];
-    return sec * 1000 + parseInt(frac, 10) * Math.pow(10, 3 - frac.length);
+    return parseInt(sMatch[1], 10) * 1000 + parseInt(frac, 10) * Math.pow(10, 3 - frac.length);
   }
-
   return null;
 }
 
@@ -213,10 +220,7 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
 
   if (!puzzleId) return null;
   return (
-    <div ref={containerRef} style={{
-      width: '100%', height: '100%',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-    }} />
+    <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
   );
 }
 
@@ -243,7 +247,7 @@ function ResultView({
   result: ParticipantRoundResult;
 }) {
   const ev = getEvent(round.eventId);
-  const hist = round.historicalResults;
+  const hist = round.historicalResults ?? [];
 
   const rank = computeRank(
     { best: result.best, average: result.average, format: round.format },
@@ -379,7 +383,6 @@ function SolvingPage() {
   const roundId = params.round as string;
   const { eventId, roundNumber } = parseRoundId(roundId);
 
-  // Page state
   const [view, setView] = useState<'loading' | 'solving' | 'result' | 'not_found'>('loading');
   const [round, setRound] = useState<VirtualRound | null>(null);
   const [groupIndex, setGroupIndex] = useState(0);
@@ -388,19 +391,26 @@ function SolvingPage() {
   const [submitting, setSubmitting] = useState(false);
   const [myResult, setMyResult] = useState<ParticipantRoundResult | null>(null);
 
-  // FIX 1: explicit solve index
+  // Explicit solve index — avoids stale-state issues with solves.length
   const [currentSolveIndex, setCurrentSolveIndex] = useState(0);
 
-  // FIX 2: confirm cooldown
+  // Confirm cooldown
   const [confirmArmed, setConfirmArmed] = useState(false);
 
-  // FIX 4: extra scrambles
+  // Extra scrambles
   const [usedExtras, setUsedExtras] = useState(0);
   const [scrambleOverrides, setScrambleOverrides] = useState<Record<string, string>>({});
 
-  // FIX 5: timer mode
-  const [timerMode, setTimerMode] = useState<'standard' | 'manual'>('standard');
+  // Issue 3: timer mode, persisted to localStorage
+  const [timerMode, setTimerMode] = useState<'standard' | 'manual'>(() => {
+    try { return localStorage.getItem('compete.timerMode') === 'manual' ? 'manual' : 'standard'; }
+    catch { return 'standard'; }
+  });
   const [manualInput, setManualInput] = useState('');
+
+  // Issue 3: settings panel state
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsDraft, setSettingsDraft] = useState<'standard' | 'manual'>('standard');
 
   // Refs for stable event listener closures
   const pendingSolveRef = useRef<DraftSolve | null>(null);
@@ -413,7 +423,6 @@ function SolvingPage() {
   const scrambleOverridesRef = useRef<Record<string, string>>({});
   const timerModeRef = useRef<'standard' | 'manual'>('standard');
 
-  // Keep refs current each render
   pendingSolveRef.current = pendingSolve;
   viewRef.current = view;
   solvesRef.current = solves;
@@ -424,7 +433,6 @@ function SolvingPage() {
   scrambleOverridesRef.current = scrambleOverrides;
   timerModeRef.current = timerMode;
 
-  // Timer refs so event listeners stay stable
   const timerStopRef = useRef<() => void>(() => {});
   const timerResetRef = useRef<() => void>(() => {});
   const timerBeginInspectionRef = useRef<() => void>(() => {});
@@ -451,7 +459,6 @@ function SolvingPage() {
 
   const timer = useTimer(onSolveCommit, holdTimeMs);
 
-  // Keep timer refs current
   timerStopRef.current = timer.stop;
   timerResetRef.current = timer.reset;
   timerBeginInspectionRef.current = timer.beginInspection;
@@ -462,12 +469,10 @@ function SolvingPage() {
   // ── Auth guard ──
   useEffect(() => {
     if (authLoading) return;
-    if (!user) {
-      router.push(`/login?redirect=/timer/competitions/${compId}/compete/${roundId}`);
-    }
+    if (!user) router.push(`/login?redirect=/timer/competitions/${compId}/compete/${roundId}`);
   }, [authLoading, user, compId, roundId, router]);
 
-  // ── Init: fetch round + restore progress ──
+  // ── Init ──
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
@@ -503,20 +508,37 @@ function SolvingPage() {
           gi = typeof data.groupIndex === 'number' ? data.groupIndex : 0;
           savedSolves = Array.isArray(data.solves) ? data.solves : [];
           savedUsedExtras = typeof data.usedExtras === 'number' ? data.usedExtras : 0;
-          savedOverrides = data.scrambleOverrides && typeof data.scrambleOverrides === 'object'
-            ? data.scrambleOverrides as Record<string, string>
+          savedOverrides = (data.scrambleOverrides && typeof data.scrambleOverrides === 'object')
+            ? (data.scrambleOverrides as Record<string, string>)
             : {};
-        } else if (roundData.groups && roundData.groups.length > 1) {
+        } else if (roundData.groups && toStringArray(roundData.groups as unknown as unknown[]).length === 0
+            && Array.isArray(roundData.groups) && roundData.groups.length > 1) {
+          gi = hashStringToInt(user!.uid + roundId) % roundData.groups.length;
+          await rtdbSet(rtdbRef(rtdb, path), {
+            groupIndex: gi, solves: [], usedExtras: 0, scrambleOverrides: {},
+          } satisfies SolveProgressData);
+        } else if (Array.isArray(roundData.groups) && roundData.groups.length > 1) {
           gi = hashStringToInt(user!.uid + roundId) % roundData.groups.length;
           await rtdbSet(rtdbRef(rtdb, path), {
             groupIndex: gi, solves: [], usedExtras: 0, scrambleOverrides: {},
           } satisfies SolveProgressData);
         }
 
+        // DEBUG: log scramble data so we can identify the root cause
+        const scrms = getGroupScrambles(roundData, gi);
+        console.log('[compete] round loaded', {
+          roundId,
+          groupIndex: gi,
+          groupsLength: Array.isArray(roundData.groups) ? roundData.groups.length : 'non-array',
+          scrambles: scrms,
+          scrambleCount: scrms.length,
+          savedSolvesLength: savedSolves.length,
+        });
+
         setRound(roundData);
         setGroupIndex(gi);
         setSolves(savedSolves);
-        setCurrentSolveIndex(savedSolves.length); // FIX 1: set from restored progress
+        setCurrentSolveIndex(savedSolves.length);
         setUsedExtras(savedUsedExtras);
         setScrambleOverrides(savedOverrides);
         setView('solving');
@@ -530,24 +552,21 @@ function SolvingPage() {
     return () => { cancelled = true; };
   }, [user, compId, roundId, eventId, roundNumber]);
 
-  // FIX 2: confirm cooldown — resets every time a new pendingSolve appears
+  // ── Confirm cooldown ──
   useEffect(() => {
-    if (!pendingSolve) {
-      setConfirmArmed(false);
-      return;
-    }
+    if (!pendingSolve) { setConfirmArmed(false); return; }
     setConfirmArmed(false);
     const t = setTimeout(() => setConfirmArmed(true), 2000);
     return () => clearTimeout(t);
   }, [pendingSolve]);
 
-  // ── Pointer + keyboard event listeners (registered once) ──
+  // ── Pointer + keyboard listeners (registered once, read from refs) ──
   useEffect(() => {
     function onPointerDown(e: PointerEvent) {
       if ((e.target as HTMLElement)?.closest('[data-ignore]')) return;
       if (viewRef.current !== 'solving') return;
       if (pendingSolveRef.current) return;
-      if (timerModeRef.current !== 'standard') return; // FIX 5: skip in manual mode
+      if (timerModeRef.current !== 'standard') return;
       const s = timerStateRef.current;
       if (s === 'running') {
         timerStopRef.current();
@@ -564,7 +583,7 @@ function SolvingPage() {
       if (timerStateRef.current === 'armed') timerFireRunningRef.current();
     }
     function onKeyDown(e: KeyboardEvent) {
-      if ((e.target as HTMLElement).tagName === 'INPUT') return; // FIX 5: let input handle keys
+      if ((e.target as HTMLElement).tagName === 'INPUT') return;
       if (e.code !== 'Space' && e.code !== 'Enter') return;
       if (e.repeat) return;
       e.preventDefault();
@@ -600,19 +619,24 @@ function SolvingPage() {
     };
   }, []);
 
-  // ── FIX 5: Manual time submit ──
+  // ── Manual submit ──
   function handleManualSubmit() {
     const raw = manualInput.trim();
     if (!raw) return;
     const parsed = parseManualTime(raw);
     if (parsed === null) return;
-    const ms = parsed === -1 ? 0 : parsed;
-    const penalty: 'none' | '+2' | 'dnf' = parsed === -1 ? 'dnf' : 'none';
-    setPendingSolve({ ms, penalty });
+    setPendingSolve({ ms: parsed === -1 ? 0 : parsed, penalty: parsed === -1 ? 'dnf' : 'none' });
     setManualInput('');
   }
 
-  // ── FIX 4: Extra scramble request ──
+  // ── Save settings ──
+  function handleSaveSettings() {
+    setTimerMode(settingsDraft);
+    try { localStorage.setItem('compete.timerMode', settingsDraft); } catch {}
+    setSettingsOpen(false);
+  }
+
+  // ── Extra scramble ──
   async function requestExtraScramble() {
     const r = roundRef.current;
     if (!r || !user) return;
@@ -620,8 +644,9 @@ function SolvingPage() {
     const idx = currentSolveIndexRef.current;
     const extras = usedExtrasRef.current;
     if (extras >= 2) return;
-    const group = r.groups?.[gi % (r.groups?.length ?? 1)];
-    const extraScramble = group?.extraScrambles?.[extras];
+    const groupsArr = Array.isArray(r.groups) ? r.groups : [];
+    const group = groupsArr[gi % (groupsArr.length || 1)];
+    const extraScramble = toStringArray((group as { extraScrambles?: unknown })?.extraScrambles ?? [])[extras];
     if (!extraScramble) return;
 
     const newOverrides = { ...scrambleOverridesRef.current, [String(idx)]: extraScramble };
@@ -630,14 +655,12 @@ function SolvingPage() {
 
     const path = `virtualProgress/${compId}/${user.uid}/${roundId}`;
     await rtdbSet(rtdbRef(rtdb, path), {
-      groupIndex: gi,
-      solves: solvesRef.current,
-      usedExtras: extras + 1,
-      scrambleOverrides: newOverrides,
+      groupIndex: gi, solves: solvesRef.current,
+      usedExtras: extras + 1, scrambleOverrides: newOverrides,
     } satisfies SolveProgressData);
   }
 
-  // ── Confirm a pending solve ──
+  // ── Confirm solve ──
   async function confirmSolve() {
     const ps = pendingSolveRef.current;
     const r = roundRef.current;
@@ -647,36 +670,37 @@ function SolvingPage() {
     const total = getSolveCount(r.format);
     const path = `virtualProgress/${compId}/${user.uid}/${roundId}`;
 
-    // FIX 1: advance solve index explicitly
-    if (newSolves.length < total) {
-      setCurrentSolveIndex(newSolves.length);
-    }
+    // Advance index BEFORE clearing pendingSolve so the next scramble is ready
+    const nextIdx = newSolves.length;
+    if (nextIdx < total) setCurrentSolveIndex(nextIdx);
+
     setSolves(newSolves);
     setPendingSolve(null);
     timer.reset();
 
+    // DEBUG
+    console.log('[compete] solve confirmed', {
+      confirmedIdx: nextIdx - 1,
+      advancingTo: nextIdx < total ? nextIdx : 'result',
+      newSolvesLength: newSolves.length,
+      total,
+    });
+
     if (newSolves.length >= total) {
       setSubmitting(true);
       try {
-        const scrambles = getGroupScrambles(r, groupIndexRef.current);
+        const scrms = getGroupScrambles(r, groupIndexRef.current);
         const overrides = scrambleOverridesRef.current;
         const pSolves: ParticipantSolve[] = newSolves.map((s, i) => ({
-          index: i,
-          ms: s.ms,
-          penalty: s.penalty,
-          scramble: overrides[String(i)] ?? scrambles[i] ?? '',
+          index: i, ms: s.ms, penalty: s.penalty,
+          scramble: overrides[String(i)] ?? scrms[i] ?? '',
           completedAt: Date.now(),
         }));
         const best = computeBest(pSolves);
         const average = computeAverage(pSolves, r.format);
         await submitRoundResult(compId, {
-          uid: user.uid,
-          eventId: r.eventId,
-          roundNumber: r.roundNumber,
-          solves: pSolves,
-          best,
-          average,
-          completedAt: Timestamp.now(),
+          uid: user.uid, eventId: r.eventId, roundNumber: r.roundNumber,
+          solves: pSolves, best, average, completedAt: Timestamp.now(),
         });
         await rtdbRemove(rtdbRef(rtdb, path));
         const savedResult = await getMyResult(compId, user.uid, r.eventId, r.roundNumber);
@@ -688,10 +712,8 @@ function SolvingPage() {
       }
     } else {
       await rtdbSet(rtdbRef(rtdb, path), {
-        groupIndex: groupIndexRef.current,
-        solves: newSolves,
-        usedExtras: usedExtrasRef.current,
-        scrambleOverrides: scrambleOverridesRef.current,
+        groupIndex: groupIndexRef.current, solves: newSolves,
+        usedExtras: usedExtrasRef.current, scrambleOverrides: scrambleOverridesRef.current,
       } satisfies SolveProgressData);
     }
   }
@@ -709,9 +731,7 @@ function SolvingPage() {
       }}>
         <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>Раунд олдсонгүй</div>
         <Link href={`/timer/competitions/${compId}/compete`}
-          style={{ fontSize: '0.85rem', color: C.muted, textDecoration: 'none' }}>
-          ← Буцах
-        </Link>
+          style={{ fontSize: '0.85rem', color: C.muted, textDecoration: 'none' }}>← Буцах</Link>
       </div>
     );
   }
@@ -722,10 +742,8 @@ function SolvingPage() {
 
   // ── Solving UI ──────────────────────────────────────────────────────────────
 
-  const ev = getEvent(round.eventId);
   const scrambles = getGroupScrambles(round, groupIndex);
   const totalSolves = getSolveCount(round.format);
-  // FIX 1: use explicit solve index
   const currentScramble = scrambleOverrides[String(currentSolveIndex)]
     ?? scrambles[currentSolveIndex]
     ?? '';
@@ -736,26 +754,24 @@ function SolvingPage() {
   const isInspecting = timer.state === 'inspecting';
   const showFocus = isRunning || isArmed || isInspecting;
 
-  // FIX 4: extra scramble availability
+  // Extra scramble availability
+  const groupsArr = Array.isArray(round.groups) ? round.groups : [];
+  const curGroup = groupsArr[groupIndex % (groupsArr.length || 1)];
   const extraAvailable =
-    !pendingSolve &&
-    !showFocus &&
-    usedExtras < 2 &&
-    currentSolveIndex < totalSolves &&
-    !!(round.groups?.[groupIndex % (round.groups?.length ?? 1)]?.extraScrambles?.[usedExtras]);
+    !pendingSolve && !showFocus && usedExtras < 2 && currentSolveIndex < totalSolves &&
+    !!(toStringArray((curGroup as { extraScrambles?: unknown })?.extraScrambles ?? [])[usedExtras]);
+
+  // DEBUG: log every render so we can trace scramble changes
+  console.log('[compete] render', { currentSolveIndex, currentScramble, scrambleCount: scrambles.length, showFocus, pendingSolve: !!pendingSolve });
 
   // Timer display
   let timerDisplay: string;
   let timerColor: string = C.text;
-
   if (isInspecting) {
-    if (timer.inspectionMs > 0) {
-      timerDisplay = String(Math.ceil(timer.inspectionMs / 1000));
-    } else if (timer.inspectionMs > -2000) {
-      timerDisplay = '+2'; timerColor = C.warn;
-    } else {
-      timerDisplay = 'DNF'; timerColor = C.danger;
-    }
+    timerDisplay = timer.inspectionMs > 0 ? String(Math.ceil(timer.inspectionMs / 1000))
+      : timer.inspectionMs > -2000 ? '+2' : 'DNF';
+    if (timer.inspectionMs <= -2000) timerColor = C.danger;
+    else if (timer.inspectionMs <= 0) timerColor = C.warn;
   } else if (isArmed) {
     timerDisplay = '0.00';
     timerColor = timer.armedReady ? C.success : C.danger;
@@ -770,153 +786,125 @@ function SolvingPage() {
 
   const isLastSolve = solves.length + 1 >= totalSolves;
 
+  // Solve chips row height is ~80px; cube sits above it
+  const CUBE_BOTTOM = 88;
+
   return (
     <div style={{
       minHeight: '100dvh', background: C.bg, fontFamily: FONT, color: C.text,
-      display: 'flex', flexDirection: 'column',
+      display: 'flex', flexDirection: 'column', position: 'relative',
       userSelect: 'none', touchAction: 'none',
     }}>
-      {/* Header — hide during focus */}
+      {/* ── Header ── */}
       {!showFocus && (
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '0.75rem 1rem', borderBottom: `1px solid ${C.border}`,
-          flexShrink: 0,
+          padding: '0.75rem 1rem', borderBottom: `1px solid ${C.border}`, flexShrink: 0,
         }}>
           <button
             data-ignore="1"
             onClick={() => router.push(`/timer/competitions/${compId}/compete`)}
-            style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              fontSize: '0.82rem', fontWeight: 600, color: C.muted, fontFamily: FONT,
-            }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer',
+              fontSize: '0.82rem', fontWeight: 600, color: C.muted, fontFamily: FONT }}
           >
             ← Дуусгах
           </button>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: '0.4rem',
-            fontSize: '0.82rem', color: C.muted,
-          }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem',
+            fontSize: '0.82rem', color: C.muted }}>
             <WcaEventIcon eventId={round.eventId} size={14} />
             {round.roundName}
           </div>
-          <div style={{ fontSize: '0.78rem', fontWeight: 700, fontFamily: MONO, color: C.accent }}>
-            {Math.min(currentSolveIndex + 1, totalSolves)}/{totalSolves}
+          {/* Issue 3: progress counter + gear icon */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+            <span style={{ fontSize: '0.78rem', fontWeight: 700, fontFamily: MONO, color: C.accent }}>
+              {Math.min(currentSolveIndex + 1, totalSolves)}/{totalSolves}
+            </span>
+            <button
+              data-ignore="1"
+              onClick={() => { setSettingsDraft(timerMode); setSettingsOpen(true); }}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                fontSize: '1rem', color: C.muted, lineHeight: 1, padding: '0.1rem 0',
+                fontFamily: FONT,
+              }}
+              aria-label="Тохиргоо"
+            >
+              ⚙
+            </button>
           </div>
         </div>
       )}
 
-      {/* FIX 5: Mode toggle — hide during focus or when confirming */}
-      {!showFocus && !pendingSolve && (
-        <div style={{
-          display: 'flex', justifyContent: 'center', gap: '0.4rem',
-          padding: '0.6rem 1rem 0', flexShrink: 0,
-        }}>
-          {(['standard', 'manual'] as const).map((mode) => (
-            <button
-              key={mode}
-              data-ignore="1"
-              onClick={() => setTimerMode(mode)}
-              style={{
-                padding: '0.28rem 0.75rem', borderRadius: 999,
-                fontSize: '0.72rem', fontWeight: 700,
-                background: timerMode === mode ? C.accentDim : 'transparent',
-                border: `1px solid ${timerMode === mode ? 'rgba(167,139,250,0.4)' : C.border}`,
-                color: timerMode === mode ? C.accent : C.muted,
-                cursor: 'pointer', fontFamily: FONT,
-              }}
-            >
-              {mode === 'standard' ? 'Стандарт' : 'Гараар бичих'}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* FIX 3: Scramble area + CubeViewer — hide during focus or when pending */}
+      {/* ── Scramble text (no cube here — cube is bottom-right absolute) ── */}
       {!showFocus && !pendingSolve && currentSolveIndex < totalSolves && (
         <div style={{ flexShrink: 0, padding: '0.75rem 1rem 0' }}>
-          {/* Scramble text */}
-          {!noScrambles && (
+          {noScrambles ? (
+            <div style={{ textAlign: 'center', padding: '0.75rem',
+              fontSize: '0.85rem', color: C.muted }}>
+              Холилтуудыг удирдагч бэлдэж байна...
+            </div>
+          ) : currentScramble ? (
             <div style={{
               background: C.card, border: `1px solid ${C.border}`,
-              borderRadius: 12, padding: '0.6rem 0.85rem',
-              textAlign: 'center', marginBottom: '0.5rem',
+              borderRadius: 12, padding: '0.65rem 0.85rem',
+              textAlign: 'center',
             }}>
               <div style={{
                 fontSize: getScrambleFontSize(currentScramble),
                 fontWeight: 600, fontFamily: MONO,
                 color: C.text, lineHeight: 1.65, letterSpacing: '0.03em',
               }}>
-                {currentScramble || '—'}
+                {currentScramble}
               </div>
             </div>
-          )}
-          {noScrambles && (
-            <div style={{
-              textAlign: 'center', padding: '0.75rem',
-              fontSize: '0.85rem', color: C.muted,
-            }}>
-              Холилтуудыг удирдагч бэлдэж байна...
+          ) : (
+            // Scramble slot exists but no string yet (data gap)
+            <div style={{ textAlign: 'center', padding: '0.75rem',
+              fontSize: '0.82rem', color: C.muted }}>
+              Энэ эвлүүлэлтэд холилт оруулаагүй байна
             </div>
           )}
 
-          {/* Cube preview + extra scramble button row */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', justifyContent: 'center' }}>
-            {/* FIX 3: CubeViewer */}
-            <div style={{
-              width: 120, height: 120, flexShrink: 0,
-              borderRadius: 10, overflow: 'hidden',
-              background: 'transparent',
-            }}>
-              <CubeViewer eventId={round.eventId} scramble={currentScramble} />
-            </div>
-
-            {/* FIX 4: Extra scramble button */}
-            {extraAvailable && (
+          {/* Extra scramble button */}
+          {extraAvailable && (
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: '0.5rem' }}>
               <button
                 data-ignore="1"
                 onClick={() => { void requestExtraScramble(); }}
                 style={{
-                  padding: '0.45rem 0.7rem', borderRadius: 8,
+                  padding: '0.35rem 0.85rem', borderRadius: 999,
                   fontSize: '0.75rem', fontWeight: 700, fontFamily: FONT,
                   background: 'rgba(251,191,36,0.1)',
                   border: '1px solid rgba(251,191,36,0.3)',
                   color: C.warn, cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', gap: '0.3rem',
-                  flexDirection: 'column', lineHeight: 1.3,
+                  display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
                 }}
               >
-                <span style={{ fontSize: '1.1rem' }}>🎲</span>
-                <span>Нэмэлт</span>
-                <span>холилт</span>
-                <span style={{ fontSize: '0.62rem', color: C.muted }}>{2 - usedExtras} үлдсэн</span>
+                🎲 Нэмэлт холилт авах
+                <span style={{ fontSize: '0.65rem', color: C.muted }}>({2 - usedExtras} үлдсэн)</span>
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Timer / Manual input — flex: 1, centered */}
+      {/* ── Timer / Manual input ── */}
       <div style={{
         flex: 1, display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center',
         padding: '1rem', minHeight: 160, position: 'relative',
       }}>
-        {/* FIX 5: Standard timer display */}
         {timerMode === 'standard' && (
           <>
             {isInspecting && timer.inspectionMs > 0 && (
-              <div style={{
-                fontSize: '0.65rem', letterSpacing: '0.12em',
-                textTransform: 'uppercase', color: C.muted, marginBottom: '0.5rem',
-              }}>
+              <div style={{ fontSize: '0.65rem', letterSpacing: '0.12em',
+                textTransform: 'uppercase', color: C.muted, marginBottom: '0.5rem' }}>
                 INSPECTION
               </div>
             )}
             <div style={{
               fontSize: 'clamp(3.5rem, 18vw, 8rem)',
-              fontWeight: 700, fontFamily: MONO,
-              color: timerColor, lineHeight: 1,
+              fontWeight: 700, fontFamily: MONO, color: timerColor, lineHeight: 1,
               transition: (isRunning || isArmed) ? 'none' : 'color 0.12s',
             }}>
               {timerDisplay}
@@ -929,7 +917,6 @@ function SolvingPage() {
           </>
         )}
 
-        {/* FIX 5: Manual input mode */}
         {timerMode === 'manual' && !pendingSolve && currentSolveIndex < totalSolves && (
           <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center',
@@ -961,9 +948,7 @@ function SolvingPage() {
                   color: C.accent, fontFamily: FONT, fontSize: '0.88rem',
                   fontWeight: 700, cursor: 'pointer',
                 }}
-              >
-                ↵
-              </button>
+              >↵</button>
             </div>
           </div>
         )}
@@ -976,93 +961,61 @@ function SolvingPage() {
               position: 'absolute', bottom: 0, left: 0, right: 0,
               background: 'rgba(10,10,10,0.97)', borderTop: `1px solid ${C.border}`,
               padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.65rem',
+              zIndex: 10,
             }}
           >
-            {/* FIX 2: cooldown progress hint */}
             {!confirmArmed && (
-              <div style={{
-                textAlign: 'center', fontSize: '0.72rem', color: C.muted,
-                letterSpacing: '0.05em',
-              }}>
+              <div style={{ textAlign: 'center', fontSize: '0.72rem', color: C.muted,
+                letterSpacing: '0.05em' }}>
                 Баталгаажуулах боломжтой болж байна...
               </div>
             )}
-
-            {/* Penalty row */}
             <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
               {(['none', '+2', 'dnf'] as const).map((p) => {
                 const active = pendingSolve.penalty === p;
                 return (
-                  <button
-                    key={p}
-                    type="button"
-                    data-ignore="1"
+                  <button key={p} type="button" data-ignore="1"
                     onClick={() => setPendingSolve((prev) => prev ? { ...prev, penalty: p } : null)}
                     style={{
                       flex: 1, maxWidth: 100, padding: '0.55rem',
                       borderRadius: 9, fontFamily: FONT, fontSize: '0.88rem', fontWeight: 700,
-                      border: `1px solid ${
-                        active ? (p === 'dnf' ? C.danger : p === '+2' ? C.warn : C.accent) : C.border
-                      }`,
-                      background: active
-                        ? (p === 'dnf' ? C.dangerDim : p === '+2' ? 'rgba(251,191,36,0.12)' : C.accentDim)
-                        : C.card,
-                      color: active
-                        ? (p === 'dnf' ? C.danger : p === '+2' ? C.warn : C.accent)
-                        : C.muted,
+                      border: `1px solid ${active ? (p === 'dnf' ? C.danger : p === '+2' ? C.warn : C.accent) : C.border}`,
+                      background: active ? (p === 'dnf' ? C.dangerDim : p === '+2' ? 'rgba(251,191,36,0.12)' : C.accentDim) : C.card,
+                      color: active ? (p === 'dnf' ? C.danger : p === '+2' ? C.warn : C.accent) : C.muted,
                       cursor: 'pointer',
-                    }}
-                  >
+                    }}>
                     {p === 'none' ? 'OK' : p.toUpperCase()}
                   </button>
                 );
               })}
             </div>
-
-            {/* Adjusted time */}
             <div style={{ textAlign: 'center', fontFamily: MONO, fontSize: '0.85rem', color: C.muted }}>
               {pendingSolve.penalty === 'dnf' ? 'DNF'
-                : pendingSolve.penalty === '+2'
-                ? `${fmtMs(pendingSolve.ms + 2000, false, 'cs')} (+2)`
+                : pendingSolve.penalty === '+2' ? `${fmtMs(pendingSolve.ms + 2000, false, 'cs')} (+2)`
                 : fmtMs(pendingSolve.ms, false, 'cs')}
             </div>
-
-            {/* FIX 2: Confirm button with cooldown */}
-            <button
-              type="button"
-              data-ignore="1"
+            <button type="button" data-ignore="1"
               onClick={() => { void confirmSolve(); }}
               disabled={!confirmArmed || submitting}
               style={{
                 width: '100%', padding: '0.78rem', borderRadius: 10,
                 fontFamily: FONT, fontSize: '0.97rem', fontWeight: 700,
-                background: confirmArmed && !submitting
-                  ? 'rgba(167,139,250,0.75)'
-                  : 'rgba(167,139,250,0.25)',
+                background: confirmArmed && !submitting ? 'rgba(167,139,250,0.75)' : 'rgba(167,139,250,0.25)',
                 border: '1px solid rgba(167,139,250,0.9)',
                 color: confirmArmed ? '#fff' : C.muted,
                 cursor: confirmArmed && !submitting ? 'pointer' : 'not-allowed',
-                opacity: 1,
                 transition: 'background 0.2s, color 0.2s',
-              }}
-            >
-              {submitting
-                ? 'Хадгалж байна...'
-                : !confirmArmed
-                ? '...'
-                : isLastSolve
-                ? 'Дуусгах ✓'
-                : 'Баталгаажуулах →'}
+              }}>
+              {submitting ? 'Хадгалж байна...' : !confirmArmed ? '...' : isLastSolve ? 'Дуусгах ✓' : 'Баталгаажуулах →'}
             </button>
           </div>
         )}
       </div>
 
-      {/* FIX 3: Horizontal solve chips — hide during focus */}
+      {/* ── Solve chips ── */}
       {!showFocus && (
         <div style={{
-          flexShrink: 0,
-          borderTop: `1px solid ${C.border}`,
+          flexShrink: 0, borderTop: `1px solid ${C.border}`,
           padding: '0.75rem 1rem 1.25rem',
         }}>
           <div style={{
@@ -1072,39 +1025,149 @@ function SolvingPage() {
           }}>
             {formatLabel(round.format)}
           </div>
-          <div style={{
-            display: 'flex', gap: '0.35rem', flexWrap: 'wrap', justifyContent: 'center',
-          }}>
+          <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', justifyContent: 'center' }}>
             {Array.from({ length: totalSolves }).map((_, i) => {
               const s = solves[i];
               const isCurrent = i === currentSolveIndex;
               const usedExtra = !!scrambleOverrides[String(i)];
               return (
                 <div key={i} style={{
-                  padding: '0.28rem 0.55rem',
-                  borderRadius: 8,
+                  padding: '0.28rem 0.55rem', borderRadius: 8,
                   background: isCurrent ? C.accentDim : s ? 'rgba(255,255,255,0.05)' : 'transparent',
-                  border: `1px solid ${
-                    isCurrent ? 'rgba(167,139,250,0.35)'
-                    : s ? 'rgba(255,255,255,0.08)'
-                    : 'rgba(255,255,255,0.04)'
-                  }`,
+                  border: `1px solid ${isCurrent ? 'rgba(167,139,250,0.35)' : s ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.04)'}`,
                   display: 'flex', alignItems: 'center', gap: '0.2rem',
                 }}>
-                  {usedExtra && (
-                    <span style={{ fontSize: '0.6rem', lineHeight: 1 }}>🎲</span>
-                  )}
+                  {usedExtra && <span style={{ fontSize: '0.6rem', lineHeight: 1 }}>🎲</span>}
                   <span style={{
                     fontSize: '0.8rem', fontFamily: MONO, fontWeight: s ? 600 : 400,
-                    color: s
-                      ? (s.penalty === 'dnf' ? C.danger : C.text)
-                      : isCurrent ? C.accent : C.muted,
+                    color: s ? (s.penalty === 'dnf' ? C.danger : C.text) : isCurrent ? C.accent : C.muted,
                   }}>
                     {i + 1}. {s ? fmtSolve(s.ms, s.penalty) : isCurrent && pendingSolve ? '...' : '—'}
                   </span>
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Issue 2: Cube preview — absolute bottom-right corner ── */}
+      {!pendingSolve && currentScramble && currentSolveIndex < totalSolves && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: CUBE_BOTTOM,
+            right: 16,
+            width: 80,
+            height: 80,
+            zIndex: 5,
+            opacity: 0.85,
+            pointerEvents: 'none',
+            borderRadius: 10,
+            overflow: 'hidden',
+          }}
+        >
+          <CubeViewer eventId={round.eventId} scramble={currentScramble} />
+        </div>
+      )}
+
+      {/* ── Issue 3: Settings bottom sheet ── */}
+      {settingsOpen && (
+        <div
+          data-ignore="1"
+          style={{
+            position: 'fixed', inset: 0, zIndex: 100,
+            background: 'rgba(0,0,0,0.65)',
+            display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
+          }}
+          onClick={() => setSettingsOpen(false)}
+        >
+          <div
+            data-ignore="1"
+            style={{
+              background: '#1a1a1a', borderRadius: '16px 16px 0 0',
+              border: `1px solid ${C.border}`, borderBottom: 'none',
+              padding: '1.25rem 1.25rem 2rem',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Sheet header */}
+            <div style={{
+              display: 'flex', justifyContent: 'space-between',
+              alignItems: 'center', marginBottom: '1.25rem',
+            }}>
+              <span style={{ fontSize: '1rem', fontWeight: 700, color: C.text }}>Тохиргоо</span>
+              <button
+                data-ignore="1"
+                onClick={() => setSettingsOpen(false)}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  fontSize: '1rem', color: C.muted, fontFamily: FONT, padding: '0.2rem',
+                }}
+              >✕</button>
+            </div>
+
+            {/* Timer mode section */}
+            <div style={{
+              fontSize: '0.68rem', fontWeight: 800, letterSpacing: '0.12em',
+              textTransform: 'uppercase', color: C.muted, marginBottom: '0.75rem',
+            }}>
+              Цаг хэмжих горим
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem', marginBottom: '1.25rem' }}>
+              {(['standard', 'manual'] as const).map((mode) => {
+                const active = settingsDraft === mode;
+                return (
+                  <div
+                    key={mode}
+                    data-ignore="1"
+                    onClick={() => setSettingsDraft(mode)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '0.75rem',
+                      padding: '0.65rem 0.75rem', borderRadius: 10, cursor: 'pointer',
+                      background: active ? C.accentDim : 'transparent',
+                      border: `1px solid ${active ? 'rgba(167,139,250,0.25)' : 'transparent'}`,
+                      transition: 'background 0.1s',
+                    }}
+                  >
+                    {/* Radio circle */}
+                    <div style={{
+                      width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
+                      border: `2px solid ${active ? C.accent : C.muted}`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      {active && (
+                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: C.accent }} />
+                      )}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.9rem', fontWeight: 600, color: active ? C.text : C.muted }}>
+                        {mode === 'standard' ? 'Стандарт' : 'Гараар бичих'}
+                      </div>
+                      <div style={{ fontSize: '0.72rem', color: C.muted, marginTop: '0.1rem' }}>
+                        {mode === 'standard'
+                          ? 'Дарж барих таймер'
+                          : 'Цагийг гараар оруулах'}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <button
+              data-ignore="1"
+              onClick={handleSaveSettings}
+              style={{
+                width: '100%', padding: '0.82rem', borderRadius: 12,
+                fontFamily: FONT, fontSize: '0.97rem', fontWeight: 700,
+                background: 'rgba(167,139,250,0.75)',
+                border: '1px solid rgba(167,139,250,0.9)',
+                color: '#fff', cursor: 'pointer',
+              }}
+            >
+              Хадгалах
+            </button>
           </div>
         </div>
       )}
