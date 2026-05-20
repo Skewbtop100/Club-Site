@@ -446,7 +446,9 @@ interface BulkAdvResult {
 
 const KNOWN_ROUND_LABELS = [
   'first round', 'second round', 'third round',
-  'semi final', 'semifinal', 'semi-final', 'final',
+  'quarter final', 'semi final', 'semifinal', 'semi-final', 'final',
+  '1st round', '2nd round', '3rd round',
+  'round 1', 'round 2', 'round 3', 'round 4',
 ];
 
 // Parses the "Proceed" column text.
@@ -466,9 +468,23 @@ function parseProceedCell(text: string): {
   return { advancementType: 'final' };
 }
 
-// Parses a WCA schedule table (tab-separated or space-padded).
-// Tracks "current event" across continuation rows (empty event cell).
-// Returns per-event, per-round advancement settings from the "Proceed" column.
+// Parses a WCA schedule table (tab-separated or 2+-space-separated).
+//
+// KEY INVARIANT: the WCA schedule puts the event name only on the FIRST row of
+// each event group. Continuation rows have an empty event column (tab mode:
+// cols[0]=""; space mode: leading whitespace collapses to cols[0]=""). We track
+// currentEvent across these continuation rows explicitly.
+//
+// Column layout (standard WCA export):
+//   0: Event name (or empty for continuation rows)
+//   1: Round name
+//   2: Format
+//   3: Time limit
+//   4: Cutoff (may be empty)
+//   5: Proceed   ← what we care about
+//
+// We use "last non-empty column" for Proceed so the parser works whether or not
+// the Cutoff column is populated.
 function parseScheduleTable(rawText: string, competitionEvents: string[]): BulkAdvResult {
   const byEvent: Record<string, ParsedAdvancement[]> = {};
   const parseErrors: string[] = [];
@@ -481,81 +497,64 @@ function parseScheduleTable(rawText: string, competitionEvents: string[]): BulkA
   for (const rawLine of rawText.split('\n')) {
     const line = rawLine.replace(/\r$/, '');
     if (!line.trim()) continue;
-    // Skip header row ("Event  Round  Format  ...")
-    if (/^\s*Event\s*(\t|  )/i.test(line)) continue;
+    // Skip header row (contains both "Event" and "Round" as column headers)
+    if (/^\s*Event\b/i.test(line) && /\bRound\b/i.test(line)) continue;
 
-    let eventCell = '';
-    let roundCell = '';
-    let proceedCell = '';
+    // Unified split: tabs take priority; fall back to 2+ spaces.
+    // Both produce cols[0]="" for continuation rows (empty event column or indented line).
+    const rawCols = (useTabMode ? line.split('\t') : line.split(/\s{2,}/)).map((c) => c.trim());
+    if (rawCols.length < 2) continue;
 
-    if (useTabMode) {
-      const cols = line.split('\t');
-      eventCell = (cols[0] ?? '').trim();
-      roundCell = (cols[1] ?? '').trim();
-      // Col 5 = Proceed in standard WCA schedule export
-      proceedCell = (cols[5] ?? '').trim();
-      // Fallback: search cols 4+ for "advance" or "%" keywords
-      if (!proceedCell) {
-        for (let i = 4; i < cols.length; i++) {
-          const v = (cols[i] ?? '').trim();
-          if (/advance|%/i.test(v)) { proceedCell = v; break; }
-        }
-      }
+    const firstCol = rawCols[0] ?? '';
+    const firstColLower = firstCol.toLowerCase();
+    const isEmptyFirst = firstCol === '';
+    const isRoundName = KNOWN_ROUND_LABELS.some((r) => r === firstColLower);
+
+    let roundCell: string;
+
+    if (isEmptyFirst) {
+      // Tab-style continuation: cols[0] is empty, cols[1] is the round name.
+      roundCell = rawCols[1] ?? '';
+      // CRITICAL: do NOT update currentEvent here.
+    } else if (isRoundName) {
+      // Space-padded continuation: line not indented but starts with a round label.
+      roundCell = firstCol;
+      // CRITICAL: do NOT update currentEvent here.
     } else {
-      const trimmed = line.trimStart();
-      const indented = line.length > trimmed.length;
-      if (!indented) {
-        // Non-indented line: check for event name at start
-        for (const [name] of WCA_EVENT_NAMES) {
-          if (trimmed.toLowerCase().startsWith(name.toLowerCase())) {
-            eventCell = name;
-            const afterEvent = trimmed.slice(name.length).trim();
-            const rl = KNOWN_ROUND_LABELS.find((r) => afterEvent.toLowerCase().startsWith(r));
-            if (rl) {
-              roundCell = afterEvent.slice(0, rl.length);
-              proceedCell = afterEvent.slice(rl.length); // may include format, time limit, etc.
-            }
-            break;
-          }
-        }
-      } else {
-        // Indented: look for round label at start of trimmed text
-        const rl = KNOWN_ROUND_LABELS.find((r) => trimmed.toLowerCase().startsWith(r));
-        if (rl) {
-          roundCell = trimmed.slice(0, rl.length);
-          proceedCell = trimmed.slice(rl.length); // may include format, time limit, etc.
-        }
-      }
-    }
-
-    // Update tracked event when a non-empty event cell is found
-    if (eventCell) {
+      // New event row: firstCol should be an event name.
       let foundId: string | null = null;
       let foundName: string | null = null;
       for (const [name, id] of WCA_EVENT_NAMES) {
-        if (eventCell.toLowerCase().startsWith(name.toLowerCase())) {
+        if (firstColLower.startsWith(name.toLowerCase())) {
           foundId = id;
           foundName = name;
           break;
         }
       }
-      if (foundId) {
-        currentEventId = foundId;
-        currentEventName = foundName;
-        if (!competitionEvents.includes(foundId) && !notInComp.includes(foundId)) {
-          notInComp.push(foundId);
-        }
+      if (!foundId) continue; // unrecognized first column — skip
+      currentEventId = foundId;
+      currentEventName = foundName;
+      if (!competitionEvents.includes(foundId) && !notInComp.includes(foundId)) {
+        notInComp.push(foundId);
       }
+      roundCell = rawCols[1] ?? '';
     }
 
-    if (!currentEventId || !currentEventName || !roundCell.trim()) continue;
+    if (!currentEventId || !currentEventName) continue;
 
-    // Only accept recognized round labels to avoid false positives
-    const rl = KNOWN_ROUND_LABELS.find((r) => roundCell.trim().toLowerCase() === r);
-    if (!rl) continue;
+    // Reject unrecognized round labels to avoid false positives from other columns.
+    const roundLower = roundCell.trim().toLowerCase();
+    if (!KNOWN_ROUND_LABELS.some((r) => r === roundLower)) continue;
 
-    const adv = parseProceedCell(proceedCell);
+    // Proceed = last non-empty column (WCA always puts Proceed last; time-limit/cutoff come before).
+    const proceedCell = [...rawCols].reverse().find((c) => c !== '') ?? '';
+    // Guard: if only 1 meaningful column, last non-empty IS the round name itself → no proceed.
+    const effectiveProceed = proceedCell.toLowerCase() === roundLower ? '' : proceedCell;
+
+    const adv = parseProceedCell(effectiveProceed);
     const roundNameFormatted = roundCell.trim().replace(/\b\w/g, (c) => c.toUpperCase());
+
+    console.log('[bulk-adv]', currentEventId, roundNameFormatted, '->', adv.advancementType, adv.advancementValue ?? '(final)');
 
     if (!byEvent[currentEventId]) byEvent[currentEventId] = [];
     const already = byEvent[currentEventId].some(
