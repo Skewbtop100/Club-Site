@@ -50,40 +50,30 @@ function StatusPill({ status }: { status: string }) {
 }
 
 function EventChips({ events }: { events: string[] }) {
-  const MAX_VISIBLE = 5;
+  const MAX_VISIBLE = 10;
   const visible = events.slice(0, MAX_VISIBLE);
   const extra = events.length - MAX_VISIBLE;
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginTop: '0.45rem' }}>
-      {visible.map((id) => {
-        const ev = getEvent(id);
-        return (
-          <span key={id} style={{
-            padding: '0.1rem 0.4rem',
-            borderRadius: 4,
-            fontSize: '0.62rem',
-            fontWeight: 700,
-            fontFamily: MONO,
-            background: 'rgba(167,139,250,0.12)',
-            color: C.accent,
-            border: '1px solid rgba(167,139,250,0.2)',
-            display: 'inline-flex', alignItems: 'center', gap: '0.2rem',
-          }}>
-            <WcaEventIcon eventId={id} size={11} />
-            {ev?.short ?? id}
-          </span>
-        );
-      })}
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: '0.45rem' }}>
+      {visible.map((id) => (
+        <span key={id} title={getEvent(id)?.name ?? id} style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: 28, height: 28, borderRadius: 6,
+          background: 'rgba(167,139,250,0.1)',
+          border: '1px solid rgba(167,139,250,0.18)',
+          color: C.accent, flexShrink: 0,
+        }}>
+          <WcaEventIcon eventId={id} size={18} />
+        </span>
+      ))}
       {extra > 0 && (
         <span style={{
-          padding: '0.1rem 0.4rem',
-          borderRadius: 4,
-          fontSize: '0.62rem',
-          fontWeight: 700,
-          fontFamily: MONO,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: 28, height: 28, borderRadius: 6,
+          fontSize: '0.62rem', fontWeight: 700, fontFamily: MONO,
           background: 'rgba(255,255,255,0.05)',
-          color: C.muted,
           border: '1px solid rgba(255,255,255,0.08)',
+          color: C.muted, flexShrink: 0,
         }}>
           +{extra}
         </span>
