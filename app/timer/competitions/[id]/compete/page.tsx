@@ -313,6 +313,7 @@ export default function CompeteHubPage() {
           0%, 100% { opacity: 1; transform: scale(1); }
           50%       { opacity: 0.45; transform: scale(0.7); }
         }
+        .leaderboard-list::-webkit-scrollbar { display: none; }
       `}</style>
     </div>
   );
@@ -583,19 +584,31 @@ function LeaderboardModal({
         padding: '0.75rem 1rem', borderBottom: `1px solid ${C.border}`,
         background: C.bg, flexShrink: 0,
       }}>
-        <span style={{ fontSize: '1rem', fontWeight: 700 }}>📊 Үзүүлэлт</span>
+        <span style={{ fontSize: '1rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <span style={{
+            width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+            background: C.success,
+            animation: 'lb-pulse 2s ease-in-out infinite',
+            display: 'inline-block',
+          }} />
+          Үзүүлэлт
+        </span>
         <button onClick={onClose} style={{
           background: 'none', border: 'none', color: C.muted,
           cursor: 'pointer', fontSize: '1.15rem', padding: '0.2rem 0.5rem', lineHeight: 1,
         }}>✕</button>
       </div>
 
-      {/* Body */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
-        <div style={{ maxWidth: 480, margin: '0 auto' }}>
+      {/* Body — flex column so table can fill remaining height */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{
+          maxWidth: 480, margin: '0 auto', width: '100%',
+          flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          padding: '0 1rem',
+        }}>
 
-          {/* Selectors */}
-          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.1rem' }}>
+          {/* Selectors — non-scrolling */}
+          <div style={{ display: 'flex', gap: '0.5rem', padding: '1rem 0 1.1rem', flexShrink: 0 }}>
             {/* Event */}
             <select
               value={selectedEventId}
@@ -640,7 +653,7 @@ function LeaderboardModal({
             )}
           </div>
 
-          {/* Content */}
+          {/* Content — fills remaining height */}
           {eventRounds.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '4rem 0', color: C.muted, fontSize: '0.88rem' }}>
               Раунд тохируулагдаагүй
@@ -654,116 +667,110 @@ function LeaderboardModal({
               🔒<br />Энэ раундыг дуусгасны дараа<br />үзүүлэлт харагдана
             </div>
 
+          ) : entries.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '2rem', color: C.muted, fontSize: '0.85rem' }}>
+              Үр дүн байхгүй
+            </div>
+
           ) : (
-            <>
-              {/* Table */}
-              {entries.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '2rem', color: C.muted, fontSize: '0.85rem' }}>
-                  Үр дүн байхгүй
-                </div>
-              ) : (
-                <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden' }}>
-                  {/* Header */}
-                  <div style={{
-                    display: 'grid', gridTemplateColumns: '32px 1fr 68px 72px',
-                    padding: '0.35rem 0.75rem', gap: '0.25rem',
-                    background: 'rgba(255,255,255,0.03)',
-                    borderBottom: `1px solid ${C.border}`,
-                  }}>
-                    {(['#', 'Нэр', 'Best', 'Avg ▾'] as const).map((h, i) => (
-                      <span key={h} style={{
-                        fontSize: '0.6rem', fontWeight: 800,
-                        letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted,
-                        textAlign: i >= 2 ? 'right' : 'left',
-                      }}>{h}</span>
-                    ))}
-                  </div>
+            <div style={{
+              flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+              border: `1px solid ${C.border}`, borderRadius: 10, marginBottom: '1rem',
+            }}>
+              {/* Column header */}
+              <div style={{
+                display: 'grid', gridTemplateColumns: '32px 1fr 68px 72px',
+                padding: '0.35rem 0.75rem', gap: '0.25rem',
+                background: 'rgba(255,255,255,0.03)',
+                borderBottom: `1px solid ${C.border}`,
+                flexShrink: 0,
+              }}>
+                {(['#', 'Нэр', 'Best', 'Avg ▾'] as const).map((h, i) => (
+                  <span key={h} style={{
+                    fontSize: '0.6rem', fontWeight: 800,
+                    letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted,
+                    textAlign: i >= 2 ? 'right' : 'left',
+                  }}>{h}</span>
+                ))}
+              </div>
 
-                  {/* Scrollable rows */}
-                  <div style={{ maxHeight: '55dvh', overflowY: 'auto' }}>
-                    {entries.map((entry, idx) => {
-                      const isMe = entry.isMe;
-                      const expanded = expandedIdx === idx;
-                      const isLast = idx === entries.length - 1;
-                      return (
-                        <div
-                          key={idx}
-                          style={{ borderBottom: isLast && !expanded ? 'none' : `1px solid ${C.border}` }}
+              {/* Scrollable rows — fills remaining height, no visible scrollbar */}
+              <div
+                className="leaderboard-list"
+                style={{ flex: 1, overflowY: 'auto', scrollbarWidth: 'none' }}
+              >
+                {entries.map((entry, idx) => {
+                  const isMe = entry.isMe;
+                  const expanded = expandedIdx === idx;
+                  const isLast = idx === entries.length - 1;
+                  return (
+                    <div
+                      key={idx}
+                      style={{ borderBottom: isLast && !expanded ? 'none' : `1px solid ${C.border}` }}
+                    >
+                      {/* Main row */}
+                      <div style={{
+                        display: 'grid', gridTemplateColumns: '32px 1fr 68px 72px',
+                        padding: '0.55rem 0.75rem', gap: '0.25rem', alignItems: 'center',
+                        background: isMe ? C.accentDim : 'transparent',
+                      }}>
+                        <span style={{
+                          fontFamily: MONO, fontSize: '0.82rem', fontWeight: 700,
+                          color: entry.rank <= 3 ? C.accent : C.muted,
+                        }}>
+                          {entry.rank}
+                        </span>
+                        <span style={{
+                          fontSize: '0.85rem', fontWeight: isMe ? 700 : 400,
+                          color: isMe ? C.accent : C.text,
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        }}>
+                          {entry.name}
+                        </span>
+                        <span style={{
+                          fontFamily: MONO, fontSize: '0.82rem', color: C.success,
+                          textAlign: 'right',
+                        }}>
+                          {fmtTime(entry.best)}
+                        </span>
+                        {/* Avg — tap to expand solves */}
+                        <span
+                          onClick={() => setExpandedIdx((p) => (p === idx ? null : idx))}
+                          style={{
+                            fontFamily: MONO, fontSize: '0.82rem', color: C.text,
+                            cursor: 'pointer', userSelect: 'none',
+                            display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.2rem',
+                          }}
                         >
-                          {/* Main row */}
-                          <div style={{
-                            display: 'grid', gridTemplateColumns: '32px 1fr 68px 72px',
-                            padding: '0.55rem 0.75rem', gap: '0.25rem', alignItems: 'center',
-                            background: isMe ? C.accentDim : 'transparent',
-                          }}>
-                            <span style={{
-                              fontFamily: MONO, fontSize: '0.82rem', fontWeight: 700,
-                              color: entry.rank <= 3 ? C.accent : C.muted,
-                            }}>
-                              {entry.rank}
-                            </span>
-                            <span style={{
-                              fontSize: '0.85rem', fontWeight: isMe ? 700 : 400,
-                              color: isMe ? C.accent : C.text,
-                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                            }}>
-                              {entry.name}
-                              {isMe && (
-                                <span style={{
-                                  marginLeft: '0.4rem', fontSize: '0.62rem',
-                                  background: 'rgba(167,139,250,0.2)', color: C.accent,
-                                  padding: '0.1rem 0.35rem', borderRadius: 999, fontWeight: 800,
-                                }}>Та</span>
-                              )}
-                            </span>
-                            <span style={{
-                              fontFamily: MONO, fontSize: '0.82rem', color: C.success,
-                              textAlign: 'right',
-                            }}>
-                              {fmtTime(entry.best)}
-                            </span>
-                            {/* Avg — tap to expand solves */}
-                            <span
-                              onClick={() => setExpandedIdx((p) => (p === idx ? null : idx))}
-                              style={{
-                                fontFamily: MONO, fontSize: '0.82rem', color: C.text,
-                                cursor: 'pointer', userSelect: 'none',
-                                display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.2rem',
-                              }}
-                            >
-                              {fmtTime(entry.average)}
-                              <span style={{ fontSize: '0.55rem', color: C.muted, lineHeight: 1 }}>
-                                {expanded ? '▴' : '▾'}
-                              </span>
-                            </span>
-                          </div>
+                          {fmtTime(entry.average)}
+                          <span style={{ fontSize: '0.55rem', color: C.muted, lineHeight: 1 }}>
+                            {expanded ? '▴' : '▾'}
+                          </span>
+                        </span>
+                      </div>
 
-                          {/* Expanded solves — centered across full row width */}
-                          {expanded && (
-                            <div style={{
-                              padding: '0.5rem 0.75rem 0.6rem',
-                              borderTop: `1px solid ${C.border}`,
-                              background: isMe
-                                ? 'rgba(167,139,250,0.06)'
-                                : 'rgba(255,255,255,0.02)',
-                              display: 'flex', justifyContent: 'center', alignItems: 'center',
-                              gap: '1rem', flexWrap: 'wrap',
-                              fontFamily: MONO, fontSize: '0.9rem', color: C.muted,
-                            }}>
-                              {formatSolvesWCA(
-                                entry.times,
-                                selectedRoundData?.format ?? 'avg5',
-                                entry.penalties,
-                              )}
-                            </div>
+                      {/* Expanded solves — centered across full row width */}
+                      {expanded && (
+                        <div style={{
+                          padding: '0.5rem 0.75rem 0.6rem',
+                          borderTop: `1px solid ${C.border}`,
+                          background: isMe ? 'rgba(167,139,250,0.06)' : 'rgba(255,255,255,0.02)',
+                          display: 'flex', justifyContent: 'center', alignItems: 'center',
+                          gap: '1rem', flexWrap: 'wrap',
+                          fontFamily: MONO, fontSize: '0.9rem', color: C.muted,
+                        }}>
+                          {formatSolvesWCA(
+                            entry.times,
+                            selectedRoundData?.format ?? 'avg5',
+                            entry.penalties,
                           )}
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           )}
         </div>
       </div>
