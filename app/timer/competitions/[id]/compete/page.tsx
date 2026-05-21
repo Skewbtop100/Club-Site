@@ -9,14 +9,12 @@ import {
   getParticipant,
   getMyResults,
   computeRank,
-  subscribeRoundLeaderboard,
 } from '@/lib/firebase/services/virtual-competitions';
 import type {
   VirtualCompetition,
   VirtualRound,
   VirtualParticipant,
   ParticipantRoundResult,
-  CombinedResult,
 } from '@/lib/firebase/services/virtual-competitions';
 import { getEvent } from '@/lib/wca-events';
 import { WcaEventIcon } from '@/lib/wca-event-icon';
@@ -300,6 +298,7 @@ export default function CompeteHubPage() {
           rounds={rounds}
           myResults={myResults}
           currentUid={user!.uid}
+          currentUserName={participant.displayName}
           onClose={() => setShowLeaderboard(false)}
         />
       )}
@@ -410,12 +409,63 @@ function RoundRow({
 
 // ─── Leaderboard modal ────────────────────────────────────────────────────────
 
+interface LBEntry {
+  isMe: boolean;
+  name: string;
+  best: number;
+  average: number;
+  times: number[];
+  penalties?: string[];
+  rank: number;
+}
+
+function formatSolvesWCA(times: number[], format: string, penalties?: string[]) {
+  if (!times || times.length === 0) return <span style={{ color: C.muted }}>—</span>;
+
+  const fmtSingle = (t: number, pen?: string): string => {
+    if (pen === 'dnf' || t === -1) return 'DNF';
+    if (pen === '+2') return fmtTime(Math.max(0, t - 2000)) + '+';
+    return fmtTime(t);
+  };
+
+  if (format === 'avg5' && times.length >= 5) {
+    const effVals = times.map((t) => (t === -1 ? Infinity : t));
+    const maxEff = Math.max(...effVals);
+    const minEff = Math.min(...effVals);
+    const worstIdx = effVals.lastIndexOf(maxEff);
+    const bestIdx = effVals.indexOf(minEff);
+    return (
+      <>
+        {times.map((t, i) => {
+          const s = fmtSingle(t, penalties?.[i]);
+          const bracket = i === worstIdx || i === bestIdx;
+          return (
+            <span key={i} style={{ marginLeft: i > 0 ? '0.55rem' : 0 }}>
+              {bracket ? `(${s})` : s}
+            </span>
+          );
+        })}
+      </>
+    );
+  }
+  return (
+    <>
+      {times.map((t, i) => (
+        <span key={i} style={{ marginLeft: i > 0 ? '0.55rem' : 0 }}>
+          {fmtSingle(t, penalties?.[i])}
+        </span>
+      ))}
+    </>
+  );
+}
+
 function LeaderboardModal({
-  compId,
+  compId: _compId,
   registeredEvents,
   rounds,
   myResults,
-  currentUid,
+  currentUid: _currentUid,
+  currentUserName,
   onClose,
 }: {
   compId: string;
@@ -423,6 +473,7 @@ function LeaderboardModal({
   rounds: VirtualRound[];
   myResults: ParticipantRoundResult[];
   currentUid: string;
+  currentUserName: string;
   onClose: () => void;
 }) {
   const completedByEvent = useMemo(() => {
@@ -445,28 +496,76 @@ function LeaderboardModal({
     const rns = completedByEvent[defaultEvent] ?? [];
     return rns.length > 0 ? Math.max(...rns) : 1;
   });
-  const [entries, setEntries] = useState<CombinedResult[]>([]);
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
-  // Reset round when event changes
   useEffect(() => {
     const rns = completedByEvent[selectedEventId] ?? [];
     setSelectedRound(rns.length > 0 ? Math.max(...rns) : 1);
-    setEntries([]);
+    setExpandedIdx(null);
   }, [selectedEventId, completedByEvent]);
 
-  const completedRoundsForEvent = useMemo(
-    () => [...(completedByEvent[selectedEventId] ?? [])].sort((a, b) => a - b),
-    [completedByEvent, selectedEventId],
-  );
+  useEffect(() => { setExpandedIdx(null); }, [selectedRound]);
+
+  const completedRoundsForEvent = completedByEvent[selectedEventId] ?? [];
   const isCompleted = completedRoundsForEvent.includes(selectedRound);
 
-  // Live leaderboard subscription
-  useEffect(() => {
-    if (!selectedEventId || !isCompleted) { setEntries([]); return; }
-    return subscribeRoundLeaderboard(compId, selectedEventId, selectedRound, setEntries);
-  }, [compId, selectedEventId, selectedRound, isCompleted]);
+  // All rounds for selected event — sorted
+  const eventRounds = useMemo(
+    () =>
+      [...rounds.filter((r) => r.eventId === selectedEventId)].sort(
+        (a, b) => a.roundNumber - b.roundNumber,
+      ),
+    [rounds, selectedEventId],
+  );
 
-  const myEntry = entries.find((e) => e.uid === currentUid);
+  const selectedRoundData = eventRounds.find((r) => r.roundNumber === selectedRound);
+
+  // Leaderboard: historical results + current user only (no other live participants)
+  const entries = useMemo((): LBEntry[] => {
+    if (!isCompleted || !selectedRoundData) return [];
+
+    console.log(
+      '[leaderboard] historical:',
+      selectedRoundData.historicalResults.map((r) => ({
+        name: r.athleteName, best: r.best, avg: r.average,
+      })),
+    );
+
+    const myRound = myResults.find(
+      (r) => r.eventId === selectedEventId && r.roundNumber === selectedRound,
+    );
+    const eff = (v: number) => (v === -1 ? Infinity : v);
+
+    const raw: Omit<LBEntry, 'rank'>[] = [
+      ...selectedRoundData.historicalResults.map((h) => ({
+        isMe: false,
+        name: h.athleteName,
+        best: h.best,
+        average: h.average,
+        times: h.times,
+        penalties: h.penalties as string[] | undefined,
+      })),
+      ...(myRound
+        ? [{
+            isMe: true,
+            name: currentUserName,
+            best: myRound.best,
+            average: myRound.average,
+            times: myRound.solves.map((s) => s.ms),
+            penalties: myRound.solves.map((s) => s.penalty as string),
+          }]
+        : []),
+    ];
+
+    raw.sort((a, b) => {
+      const da = eff(a.average) - eff(b.average);
+      if (da !== 0) return da;
+      return eff(a.best) - eff(b.best);
+    });
+    return raw.map((e, i) => ({ ...e, rank: i + 1 }));
+  }, [isCompleted, selectedRoundData, myResults, selectedEventId, selectedRound, currentUserName]);
+
+  const myEntry = entries.find((e) => e.isMe);
 
   return (
     <div style={{
@@ -481,24 +580,19 @@ function LeaderboardModal({
         background: C.bg, flexShrink: 0,
       }}>
         <span style={{ fontSize: '1rem', fontWeight: 700 }}>📊 Үзүүлэлт</span>
-        <button
-          onClick={onClose}
-          style={{
-            background: 'none', border: 'none', color: C.muted,
-            cursor: 'pointer', fontSize: '1.15rem', padding: '0.2rem 0.5rem',
-            lineHeight: 1,
-          }}
-        >
-          ✕
-        </button>
+        <button onClick={onClose} style={{
+          background: 'none', border: 'none', color: C.muted,
+          cursor: 'pointer', fontSize: '1.15rem', padding: '0.2rem 0.5rem', lineHeight: 1,
+        }}>✕</button>
       </div>
 
-      {/* Scrollable body */}
+      {/* Body */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
         <div style={{ maxWidth: 480, margin: '0 auto' }}>
 
           {/* Selectors */}
           <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.1rem' }}>
+            {/* Event */}
             <select
               value={selectedEventId}
               onChange={(e) => setSelectedEventId(e.target.value)}
@@ -519,7 +613,8 @@ function LeaderboardModal({
               })}
             </select>
 
-            {completedRoundsForEvent.length > 0 && (
+            {/* Round — ALL rounds shown; incomplete ones marked with 🔒 */}
+            {eventRounds.length > 0 && (
               <select
                 value={selectedRound}
                 onChange={(e) => setSelectedRound(Number(e.target.value))}
@@ -529,13 +624,11 @@ function LeaderboardModal({
                   fontFamily: FONT, fontSize: '0.82rem', outline: 'none',
                 }}
               >
-                {completedRoundsForEvent.map((rn) => {
-                  const rd = rounds.find(
-                    (r) => r.eventId === selectedEventId && r.roundNumber === rn,
-                  );
+                {eventRounds.map((r) => {
+                  const done = completedRoundsForEvent.includes(r.roundNumber);
                   return (
-                    <option key={rn} value={rn}>
-                      {rd?.roundName ?? `Раунд ${rn}`}
+                    <option key={r.roundNumber} value={r.roundNumber}>
+                      {r.roundName}{!done ? ' 🔒' : ''}
                     </option>
                   );
                 })}
@@ -543,26 +636,23 @@ function LeaderboardModal({
             )}
           </div>
 
-          {/* Gate: no completed rounds for this event */}
-          {completedRoundsForEvent.length === 0 ? (
-            <div style={{
-              textAlign: 'center', padding: '4rem 0',
-              color: C.muted, fontSize: '0.88rem',
-            }}>
-              Эхлээд раунд дуусга
+          {/* Content */}
+          {eventRounds.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '4rem 0', color: C.muted, fontSize: '0.88rem' }}>
+              Раунд тохируулагдаагүй
             </div>
 
           ) : !isCompleted ? (
             <div style={{
               textAlign: 'center', padding: '4rem 0',
-              color: C.muted, fontSize: '0.88rem',
+              color: C.muted, fontSize: '0.88rem', lineHeight: 1.7,
             }}>
-              Энэ раундыг дуусгасны дараа харагдана
+              🔒<br />Энэ раундыг дуусгасны дараа<br />үзүүлэлт харагдана
             </div>
 
           ) : (
             <>
-              {/* Rank summary card */}
+              {/* Rank summary */}
               {myEntry ? (
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: '0.85rem',
@@ -595,70 +685,99 @@ function LeaderboardModal({
                   Үр дүн байхгүй
                 </div>
               ) : (
-                <div style={{
-                  border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden',
-                }}>
-                  {/* Sticky thead */}
+                <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden' }}>
+                  {/* Header */}
                   <div style={{
                     display: 'grid', gridTemplateColumns: '40px 1fr 70px 70px',
                     padding: '0.35rem 0.75rem',
                     background: 'rgba(255,255,255,0.03)',
                     borderBottom: `1px solid ${C.border}`,
-                    position: 'sticky', top: 0,
                   }}>
-                    {['#', 'Нэр', 'Best', 'Avg'].map((h) => (
+                    {['#', 'Нэр', 'Best', 'Avg ▾'].map((h) => (
                       <span key={h} style={{
                         fontSize: '0.6rem', fontWeight: 800,
-                        letterSpacing: '0.1em', textTransform: 'uppercase',
-                        color: C.muted,
+                        letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted,
                       }}>{h}</span>
                     ))}
                   </div>
 
-                  {/* Rows */}
+                  {/* Scrollable rows */}
                   <div style={{ maxHeight: '55dvh', overflowY: 'auto' }}>
                     {entries.map((entry, idx) => {
-                      const isMe = entry.uid === currentUid;
+                      const isMe = entry.isMe;
+                      const expanded = expandedIdx === idx;
                       const isLast = idx === entries.length - 1;
                       return (
                         <div
                           key={idx}
-                          style={{
+                          style={{ borderBottom: isLast && !expanded ? 'none' : `1px solid ${C.border}` }}
+                        >
+                          {/* Main row */}
+                          <div style={{
                             display: 'grid', gridTemplateColumns: '40px 1fr 70px 70px',
                             padding: '0.55rem 0.75rem', alignItems: 'center',
                             background: isMe ? C.accentDim : 'transparent',
-                            borderBottom: isLast ? 'none' : `1px solid ${C.border}`,
-                          }}
-                        >
-                          <span style={{
-                            fontFamily: MONO, fontSize: '0.82rem', fontWeight: 700,
-                            color: entry.rank <= 3 ? C.accent : C.muted,
                           }}>
-                            {entry.rank}
-                          </span>
-                          <span style={{
-                            fontSize: '0.85rem', fontWeight: isMe ? 700 : 400,
-                            color: isMe ? C.accent : C.text,
-                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                          }}>
-                            {entry.name}
-                            {isMe && (
-                              <span style={{
-                                marginLeft: '0.4rem', fontSize: '0.62rem',
-                                background: 'rgba(167,139,250,0.2)', color: C.accent,
-                                padding: '0.1rem 0.35rem', borderRadius: 999,
-                                fontWeight: 800,
-                              }}>
-                                Та
+                            <span style={{
+                              fontFamily: MONO, fontSize: '0.82rem', fontWeight: 700,
+                              color: entry.rank <= 3 ? C.accent : C.muted,
+                            }}>
+                              {entry.rank}
+                            </span>
+                            <span style={{
+                              fontSize: '0.85rem', fontWeight: isMe ? 700 : 400,
+                              color: isMe ? C.accent : C.text,
+                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                            }}>
+                              {entry.name}
+                              {isMe && (
+                                <span style={{
+                                  marginLeft: '0.4rem', fontSize: '0.62rem',
+                                  background: 'rgba(167,139,250,0.2)', color: C.accent,
+                                  padding: '0.1rem 0.35rem', borderRadius: 999, fontWeight: 800,
+                                }}>Та</span>
+                              )}
+                            </span>
+                            <span style={{ fontFamily: MONO, fontSize: '0.82rem', color: C.success }}>
+                              {fmtTime(entry.best)}
+                            </span>
+                            {/* Avg — tap to expand solves */}
+                            <span
+                              onClick={() => setExpandedIdx((p) => (p === idx ? null : idx))}
+                              style={{
+                                fontFamily: MONO, fontSize: '0.82rem', color: C.text,
+                                cursor: 'pointer', userSelect: 'none',
+                                display: 'flex', alignItems: 'center', gap: '0.2rem',
+                              }}
+                            >
+                              {fmtTime(entry.average)}
+                              <span style={{ fontSize: '0.55rem', color: C.muted, lineHeight: 1 }}>
+                                {expanded ? '▴' : '▾'}
                               </span>
-                            )}
-                          </span>
-                          <span style={{ fontFamily: MONO, fontSize: '0.82rem', color: C.success }}>
-                            {fmtTime(entry.best)}
-                          </span>
-                          <span style={{ fontFamily: MONO, fontSize: '0.82rem', color: C.text }}>
-                            {fmtTime(entry.average)}
-                          </span>
+                            </span>
+                          </div>
+
+                          {/* Expanded solves */}
+                          {expanded && (
+                            <div style={{
+                              padding: '0.4rem 0.75rem 0.55rem',
+                              borderTop: `1px solid ${C.border}`,
+                              background: isMe
+                                ? 'rgba(167,139,250,0.06)'
+                                : 'rgba(255,255,255,0.02)',
+                            }}>
+                              <div style={{
+                                fontFamily: MONO, fontSize: '0.76rem',
+                                color: C.muted, lineHeight: 1.7,
+                              }}>
+                                {formatSolvesWCA(
+                                  entry.times,
+                                  selectedRoundData?.format ?? 'avg5',
+                                  entry.penalties,
+                                )}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
