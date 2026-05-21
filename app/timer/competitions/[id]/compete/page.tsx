@@ -197,14 +197,19 @@ export default function CompeteHubPage() {
         <button
           onClick={() => setShowLeaderboard(true)}
           style={{
-            display: 'flex', alignItems: 'center', gap: '0.35rem',
+            display: 'flex', alignItems: 'center', gap: '0.4rem',
             background: C.accentDim, border: '1px solid rgba(167,139,250,0.25)',
             borderRadius: 999, padding: '0.3rem 0.75rem',
             fontSize: '0.78rem', fontWeight: 600, color: C.accent,
             cursor: 'pointer', fontFamily: FONT,
           }}
         >
-          📊 Үзүүлэлт
+          <span style={{
+            width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+            background: C.success,
+            animation: 'lb-pulse 2s ease-in-out infinite',
+          }} />
+          Үзүүлэлт
         </button>
       </div>
 
@@ -302,6 +307,13 @@ export default function CompeteHubPage() {
           onClose={() => setShowLeaderboard(false)}
         />
       )}
+
+      <style>{`
+        @keyframes lb-pulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50%       { opacity: 0.45; transform: scale(0.7); }
+        }
+      `}</style>
     </div>
   );
 }
@@ -439,11 +451,7 @@ function formatSolvesWCA(times: number[], format: string, penalties?: string[]) 
         {times.map((t, i) => {
           const s = fmtSingle(t, penalties?.[i]);
           const bracket = i === worstIdx || i === bestIdx;
-          return (
-            <span key={i} style={{ marginLeft: i > 0 ? '0.55rem' : 0 }}>
-              {bracket ? `(${s})` : s}
-            </span>
-          );
+          return <span key={i}>{bracket ? `(${s})` : s}</span>;
         })}
       </>
     );
@@ -451,9 +459,7 @@ function formatSolvesWCA(times: number[], format: string, penalties?: string[]) 
   return (
     <>
       {times.map((t, i) => (
-        <span key={i} style={{ marginLeft: i > 0 ? '0.55rem' : 0 }}>
-          {fmtSingle(t, penalties?.[i])}
-        </span>
+        <span key={i}>{fmtSingle(t, penalties?.[i])}</span>
       ))}
     </>
   );
@@ -565,8 +571,6 @@ function LeaderboardModal({
     return raw.map((e, i) => ({ ...e, rank: i + 1 }));
   }, [isCompleted, selectedRoundData, myResults, selectedEventId, selectedRound, currentUserName]);
 
-  const myEntry = entries.find((e) => e.isMe);
-
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 50,
@@ -652,33 +656,6 @@ function LeaderboardModal({
 
           ) : (
             <>
-              {/* Rank summary */}
-              {myEntry ? (
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: '0.85rem',
-                  padding: '0.85rem 1rem', borderRadius: 12, marginBottom: '1.1rem',
-                  background: C.accentDim, border: '1px solid rgba(167,139,250,0.25)',
-                }}>
-                  <span style={{ fontSize: '1.6rem', lineHeight: 1 }}>🏆</span>
-                  <div>
-                    <div style={{ fontSize: '1.1rem', fontWeight: 800, color: C.accent }}>
-                      {myEntry.rank} / {entries.length} байрт
-                    </div>
-                    <div style={{ fontSize: '0.75rem', color: C.muted, fontFamily: MONO, marginTop: '0.15rem' }}>
-                      Best {fmtTime(myEntry.best)} · Avg {fmtTime(myEntry.average)}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div style={{
-                  padding: '0.65rem 1rem', borderRadius: 10, marginBottom: '1.1rem',
-                  background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.border}`,
-                  fontSize: '0.8rem', color: C.muted,
-                }}>
-                  Таны үр дүн жагсаалтад олдсонгүй
-                </div>
-              )}
-
               {/* Table */}
               {entries.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '2rem', color: C.muted, fontSize: '0.85rem' }}>
@@ -688,15 +665,16 @@ function LeaderboardModal({
                 <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden' }}>
                   {/* Header */}
                   <div style={{
-                    display: 'grid', gridTemplateColumns: '40px 1fr 70px 70px',
-                    padding: '0.35rem 0.75rem',
+                    display: 'grid', gridTemplateColumns: '32px 1fr 68px 72px',
+                    padding: '0.35rem 0.75rem', gap: '0.25rem',
                     background: 'rgba(255,255,255,0.03)',
                     borderBottom: `1px solid ${C.border}`,
                   }}>
-                    {['#', 'Нэр', 'Best', 'Avg ▾'].map((h) => (
+                    {(['#', 'Нэр', 'Best', 'Avg ▾'] as const).map((h, i) => (
                       <span key={h} style={{
                         fontSize: '0.6rem', fontWeight: 800,
                         letterSpacing: '0.1em', textTransform: 'uppercase', color: C.muted,
+                        textAlign: i >= 2 ? 'right' : 'left',
                       }}>{h}</span>
                     ))}
                   </div>
@@ -714,8 +692,8 @@ function LeaderboardModal({
                         >
                           {/* Main row */}
                           <div style={{
-                            display: 'grid', gridTemplateColumns: '40px 1fr 70px 70px',
-                            padding: '0.55rem 0.75rem', alignItems: 'center',
+                            display: 'grid', gridTemplateColumns: '32px 1fr 68px 72px',
+                            padding: '0.55rem 0.75rem', gap: '0.25rem', alignItems: 'center',
                             background: isMe ? C.accentDim : 'transparent',
                           }}>
                             <span style={{
@@ -738,7 +716,10 @@ function LeaderboardModal({
                                 }}>Та</span>
                               )}
                             </span>
-                            <span style={{ fontFamily: MONO, fontSize: '0.82rem', color: C.success }}>
+                            <span style={{
+                              fontFamily: MONO, fontSize: '0.82rem', color: C.success,
+                              textAlign: 'right',
+                            }}>
                               {fmtTime(entry.best)}
                             </span>
                             {/* Avg — tap to expand solves */}
@@ -747,7 +728,7 @@ function LeaderboardModal({
                               style={{
                                 fontFamily: MONO, fontSize: '0.82rem', color: C.text,
                                 cursor: 'pointer', userSelect: 'none',
-                                display: 'flex', alignItems: 'center', gap: '0.2rem',
+                                display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.2rem',
                               }}
                             >
                               {fmtTime(entry.average)}
@@ -757,25 +738,23 @@ function LeaderboardModal({
                             </span>
                           </div>
 
-                          {/* Expanded solves */}
+                          {/* Expanded solves — centered across full row width */}
                           {expanded && (
                             <div style={{
-                              padding: '0.4rem 0.75rem 0.55rem',
+                              padding: '0.5rem 0.75rem 0.6rem',
                               borderTop: `1px solid ${C.border}`,
                               background: isMe
                                 ? 'rgba(167,139,250,0.06)'
                                 : 'rgba(255,255,255,0.02)',
+                              display: 'flex', justifyContent: 'center', alignItems: 'center',
+                              gap: '1rem', flexWrap: 'wrap',
+                              fontFamily: MONO, fontSize: '0.9rem', color: C.muted,
                             }}>
-                              <div style={{
-                                fontFamily: MONO, fontSize: '0.76rem',
-                                color: C.muted, lineHeight: 1.7,
-                              }}>
-                                {formatSolvesWCA(
-                                  entry.times,
-                                  selectedRoundData?.format ?? 'avg5',
-                                  entry.penalties,
-                                )}
-                              </div>
+                              {formatSolvesWCA(
+                                entry.times,
+                                selectedRoundData?.format ?? 'avg5',
+                                entry.penalties,
+                              )}
                             </div>
                           )}
                         </div>
