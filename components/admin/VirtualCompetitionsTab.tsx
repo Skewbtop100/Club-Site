@@ -112,14 +112,29 @@ function tryParseScrambleLine(line: string): {
 
   if (line.includes('\t')) {
     const cols = line.split('\t');
-    if (cols.length < 3) return null;
+    // Need at least: [group/empty, index, scramble] = 3 cols minimum.
+    // But real WCA exports can have extra columns between index and scramble,
+    // so the scramble is always the LAST column, not necessarily cols[2].
+    if (cols.length < 3) {
+      console.log('[parse] SKIP (cols<3):', JSON.stringify(line), 'cols:', cols);
+      return null;
+    }
     const col0 = cols[0].trim();
     const col1 = cols[1].trim();
-    const col2 = cols.slice(2).join(' ').trim();
-    if (!col2 || !col1) return null;
+    // Scramble is always the last tab-column; intermediate columns (e.g. set names) are ignored.
+    const lastCol = cols[cols.length - 1].trim();
+    console.log('[parse] TAB line decision:', {
+      line: JSON.stringify(line),
+      numCols: cols.length,
+      col0,
+      col1,
+      lastCol,
+      isGroupStart: /^[A-Z]$/.test(col0),
+    });
+    if (!lastCol || !col1) return null;
     groupLetter = /^[A-Z]$/.test(col0) ? col0 : null;
     indexRaw = col1;
-    scramble = col2;
+    scramble = lastCol;
   } else {
     const m = line.match(/^([A-Z])?\s{1,}(Extra\s+\d+|\d+)\s{2,}(.+)$/);
     if (!m) return null;
@@ -153,6 +168,13 @@ function parseWcaExport(rawText: string, competitionEvents: string[]): BulkParse
   let cur: RawRound | null = null;
   let curGroup: ParsedGroup | null = null;
 
+  // Diagnostic: show every raw line with visible whitespace markers.
+  console.log('[parse] RAW LINES:', rawText.split('\n').map((line, i) => ({
+    i,
+    visible: line.replace(/\r$/, '').replace(/\t/g, '→TAB→').replace(/^ +/, m => '·'.repeat(m.length)),
+    raw: JSON.stringify(line),
+  })));
+
   const flushGroup = () => {
     if (curGroup && cur) { cur.groups.push(curGroup); curGroup = null; }
   };
@@ -176,6 +198,12 @@ function parseWcaExport(rawText: string, competitionEvents: string[]): BulkParse
     if (!cur) continue;
 
     const parsed = tryParseScrambleLine(line);
+    console.log('[parse] loop decision:', {
+      line: JSON.stringify(line),
+      parsed,
+      curGroupName: curGroup?.name ?? null,
+      willAppend: parsed !== null,
+    });
     if (!parsed) continue;
 
     if (parsed.groupLetter && parsed.groupLetter !== (curGroup as ParsedGroup | null)?.name) {
