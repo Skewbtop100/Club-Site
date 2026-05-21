@@ -609,6 +609,21 @@ function parseScheduleTable(rawText: string, competitionEvents: string[]): BulkA
   return { byEvent, parseErrors, notInComp };
 }
 
+// ─── Cloudinary upload ────────────────────────────────────────────────────────
+
+async function uploadImageToCloudinary(file: File): Promise<string> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('upload_preset', 'community_unsigned');
+  const res = await fetch('https://api.cloudinary.com/v1_1/dzq3strz5/image/upload', {
+    method: 'POST',
+    body: formData,
+  });
+  if (!res.ok) throw new Error('Upload failed');
+  const data = await res.json();
+  return data.secure_url as string;
+}
+
 // ─── Comp form types ──────────────────────────────────────────────────────────
 
 interface CompFormState {
@@ -639,6 +654,9 @@ export default function VirtualCompetitionsTab() {
   const [toast, setToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
+  const [imgUploading, setImgUploading] = useState(false);
+  const [imgError, setImgError] = useState('');
+  const imgInputRef = useRef<HTMLInputElement>(null);
 
   // ── Rounds ───────────────────────────────────────────────────────────────
   const [rounds, setRounds] = useState<VirtualRound[]>([]);
@@ -852,9 +870,102 @@ export default function VirtualCompetitionsTab() {
                 onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))} />
             </div>
             <div className="form-group">
-              <label>Зураг URL</label>
-              <input type="text" value={form.imageUrl} placeholder="https://res.cloudinary.com/..."
-                onChange={(e) => setForm((f) => ({ ...f, imageUrl: e.target.value }))} />
+              <label>Зураг</label>
+              {/* Hidden file input */}
+              <input
+                ref={imgInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                style={{ display: 'none' }}
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = '';
+                  if (!file) return;
+                  if (!file.type.startsWith('image/')) {
+                    setImgError('Зөвхөн зураг оруулна уу');
+                    return;
+                  }
+                  if (file.size > 10 * 1024 * 1024) {
+                    setImgError('Зураг 10MB-аас бага байх ёстой');
+                    return;
+                  }
+                  setImgError('');
+                  setImgUploading(true);
+                  try {
+                    const url = await uploadImageToCloudinary(file);
+                    setForm((f) => ({ ...f, imageUrl: url }));
+                  } catch {
+                    setImgError('Зураг хуулахад алдаа гарлаа. Дахин оролдоно уу.');
+                  } finally {
+                    setImgUploading(false);
+                  }
+                }}
+              />
+              {/* Upload area */}
+              {!form.imageUrl ? (
+                <button
+                  type="button"
+                  disabled={imgUploading}
+                  onClick={() => { setImgError(''); imgInputRef.current?.click(); }}
+                  style={{
+                    width: '100%', aspectRatio: '16/9', display: 'flex',
+                    flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                    gap: '0.5rem', border: '2px dashed var(--input-border, rgba(255,255,255,0.15))',
+                    borderRadius: '12px', background: 'var(--input-bg, rgba(255,255,255,0.03))',
+                    color: 'var(--text-muted, rgba(255,255,255,0.45))', cursor: 'pointer',
+                    fontSize: '0.88rem', transition: 'border-color 0.15s',
+                  }}
+                >
+                  {imgUploading ? (
+                    <>
+                      <span style={{ fontSize: '1.3rem', animation: 'spin 1s linear infinite', display: 'inline-block' }}>⏳</span>
+                      Хуулж байна...
+                    </>
+                  ) : (
+                    <>
+                      <span style={{ fontSize: '1.5rem' }}>📷</span>
+                      Зураг оруулах
+                    </>
+                  )}
+                </button>
+              ) : (
+                <div style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden',
+                  border: '1px solid var(--input-border, rgba(255,255,255,0.12))' }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={form.imageUrl}
+                    alt="Тэмцээний зураг"
+                    style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block' }}
+                  />
+                  {imgUploading && (
+                    <div style={{
+                      position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.55)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: '#fff', fontSize: '0.88rem', gap: '0.4rem',
+                    }}>
+                      <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⏳</span>
+                      Хуулж байна...
+                    </div>
+                  )}
+                </div>
+              )}
+              {/* Action buttons when image is set */}
+              {form.imageUrl && !imgUploading && (
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+                  <button type="button" className="btn-sm"
+                    onClick={() => { setImgError(''); imgInputRef.current?.click(); }}
+                    style={{ fontSize: '0.8rem', padding: '0.3rem 0.75rem' }}>
+                    Зураг солих
+                  </button>
+                  <button type="button" className="btn-sm"
+                    onClick={() => { setForm((f) => ({ ...f, imageUrl: '' })); setImgError(''); }}
+                    style={{ fontSize: '0.8rem', padding: '0.3rem 0.75rem',
+                      color: 'rgba(239,68,68,0.85)', borderColor: 'rgba(239,68,68,0.3)' }}>
+                    Устгах
+                  </button>
+                </div>
+              )}
+              {imgError && <FieldError text={imgError} />}
             </div>
           </div>
 
@@ -902,7 +1013,7 @@ export default function VirtualCompetitionsTab() {
           <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', margin: '0.5rem 0 1.1rem' }} />
 
           <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
-            <button className="btn-sm-primary" onClick={handleSave} disabled={saving}>
+            <button className="btn-sm-primary" onClick={handleSave} disabled={saving || imgUploading}>
               {saving ? 'Хадгалж байна...' : 'Хадгалах'}
             </button>
             {!isNew && status === 'draft' && (
