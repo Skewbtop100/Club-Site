@@ -339,19 +339,38 @@ interface ResultRow {
 // space-padded formats. Returns null if the line is not a results row.
 function parseResultLine(line: string): ResultRow | null {
   if (line.includes('\t')) {
-    const cols = line.split('\t').map((s) => s.trim());
+    // Filter empty cols so double-tab gaps (e.g. Best\t\tAverage) don't shift indices
+    const cols = line.split('\t').map((s) => s.trim()).filter((s) => s.length > 0);
     const rank = parseInt(cols[0], 10);
     if (!rank || isNaN(rank) || cols.length < 3) return null;
     const name = cols[1];
     if (!name) return null;
-    const bestParsed = parseWcaTimeStr(cols[2]);
+
+    // Scan for first and second time-like tokens after rank+name.
+    // Skips NR/CR/WR badges (not time-like) that can appear between Best and Average.
+    const timeIndices: number[] = [];
+    for (let i = 2; i < cols.length; i++) {
+      if (looksLikeTime(cols[i])) timeIndices.push(i);
+    }
+    if (timeIndices.length === 0) return null;
+
+    const bestParsed = parseWcaTimeStr(cols[timeIndices[0]]);
     if (!bestParsed) return null;
-    const avgParsed = cols[3] ? parseWcaTimeStr(cols[3]) : null;
-    // Remaining cols after avg: skip non-time (NR, country), collect time tokens
-    const solves = cols
-      .slice(4)
+    const avgParsed = timeIndices[1] != null ? parseWcaTimeStr(cols[timeIndices[1]]) : null;
+
+    console.log('[import] line cols:', JSON.stringify(cols), 'best:', cols[timeIndices[0]], 'avg:', timeIndices[1] != null ? cols[timeIndices[1]] : '(none)');
+
+    // Everything after the average column: join, re-split by whitespace, keep time tokens.
+    // Handles solves in one tab-col ("8.58 (5.55) 6.92...") or in separate tab-cols.
+    const afterAvgIdx = (timeIndices[1] ?? timeIndices[0]) + 1;
+    const solvesRaw = cols.slice(afterAvgIdx).join(' ');
+    const solves = solvesRaw
+      .split(/\s+/)
       .filter(looksLikeTime)
       .map((s) => parseWcaTimeStr(s) ?? { ms: -1, penalty: 'dnf' as const });
+
+    console.log('[import] parsed:', { name, best: bestParsed.ms, average: avgParsed?.ms ?? -1, solvesCount: solves.length });
+
     return {
       rank, name,
       best: bestParsed.ms, bestPenalty: bestParsed.penalty,
