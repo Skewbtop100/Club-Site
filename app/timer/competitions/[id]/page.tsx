@@ -104,106 +104,18 @@ function NotFoundShell() {
   );
 }
 
-// ─── Advancement text for a round ─────────────────────────────────────────────
+// ─── Advancement chain for a sorted event round list ─────────────────────────
 
-function advancementSummary(round: VirtualRound): string {
-  if (round.advancementType === 'final') return 'Финал';
-  if (round.advancementType === 'fixed' && round.advancementValue != null) {
-    return `Эхний ${round.advancementValue} → дараагийн шат`;
-  }
-  if (round.advancementType === 'percentage' && round.advancementValue != null) {
-    return `Эхний ${round.advancementValue}% → дараагийн шат`;
-  }
-  return '';
-}
-
-// ─── Event card ───────────────────────────────────────────────────────────────
-
-function EventCard({
-  eventId,
-  rounds,
-  selected,
-  isClosed,
-  onToggle,
-}: {
-  eventId: string;
-  rounds: VirtualRound[];
-  selected: boolean;
-  isClosed: boolean;
-  onToggle: (id: string) => void;
-}) {
-  const ev = getEvent(eventId);
-  return (
-    <div
-      onClick={() => !isClosed && onToggle(eventId)}
-      style={{
-        position: 'relative',
-        background: selected ? C.accentDim : C.card,
-        border: `1px solid ${selected ? 'rgba(167,139,250,0.45)' : C.border}`,
-        borderRadius: 12,
-        padding: '0.9rem 1rem',
-        cursor: isClosed ? 'default' : 'pointer',
-        transition: 'border-color 0.12s, background 0.12s',
-        WebkitTapHighlightColor: 'transparent',
-      }}
-    >
-      {/* Selection circle — top right */}
-      <div style={{
-        position: 'absolute', top: '0.9rem', right: '1rem',
-        fontSize: '1.1rem',
-        color: selected ? C.accent : C.muted,
-        lineHeight: 1,
-      }}>
-        {selected ? '◉' : '○'}
-      </div>
-
-      {/* Event icon + name */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: '0.55rem',
-        paddingRight: '1.8rem',
-        marginBottom: rounds.length > 0 ? '0.7rem' : 0,
-      }}>
-        <WcaEventIcon eventId={eventId} size={20} />
-        <span style={{
-          fontSize: '1rem', fontWeight: 700,
-          color: selected ? '#e2d9ff' : C.text,
-        }}>
-          {ev?.name ?? eventId}
-        </span>
-      </div>
-
-      {/* Rounds list */}
-      {rounds.length > 0 && (
-        <div style={{
-          borderTop: `1px solid ${selected ? 'rgba(167,139,250,0.15)' : C.border}`,
-          paddingTop: '0.55rem',
-          display: 'flex', flexDirection: 'column', gap: '0.25rem',
-        }}>
-          {rounds.map((r) => {
-            const adv = advancementSummary(r);
-            return (
-              <div key={r.id} style={{
-                display: 'flex', alignItems: 'baseline',
-                justifyContent: 'space-between', gap: '0.5rem',
-              }}>
-                <span style={{ fontSize: '0.82rem', color: selected ? '#c4b5fd' : C.text }}>
-                  {r.roundName}
-                </span>
-                {adv && (
-                  <span style={{
-                    fontSize: '0.72rem', color: C.muted, fontFamily: MONO,
-                    flexShrink: 0,
-                  }}>
-                    {adv}
-                  </span>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
+function buildAdvancementChain(sortedRounds: VirtualRound[]): string {
+  return sortedRounds
+    .map((r) => {
+      if (r.advancementType === 'final') return 'Финал';
+      if (r.advancementType === 'fixed' && r.advancementValue != null) return String(r.advancementValue);
+      if (r.advancementType === 'percentage' && r.advancementValue != null) return `${r.advancementValue}%`;
+      return '';
+    })
+    .filter(Boolean)
+    .join(' → ');
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -399,50 +311,123 @@ export default function CompetitionDetailPage() {
 
         <div style={{ height: 1, background: C.border, margin: '1.1rem 1rem' }} />
 
-        {/* Events overview — compact icon row */}
-        <div style={{ padding: '0 1rem 0.75rem' }}>
-          <div style={{
-            fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.12em',
-            textTransform: 'uppercase', color: C.muted, marginBottom: '0.5rem',
-          }}>
-            Төрлүүд
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
-            {comp.events.map((eventId) => (
-              <span key={eventId} title={getEvent(eventId)?.name ?? eventId} style={{
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                width: 36, height: 36, borderRadius: '8px',
-                background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                flexShrink: 0,
-              }}>
-                <WcaEventIcon eventId={eventId} size={22} />
-              </span>
-            ))}
-          </div>
-        </div>
-
-        <div style={{ height: 1, background: C.border, margin: '0 1rem 0.75rem' }} />
-
-        {/* Registration — event selection */}
+        {/* ── ТӨРЛҮҮД БА РАУНД — info table ── */}
         <div style={{ padding: '0 1rem 1rem' }}>
           <div style={{
             fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.12em',
             textTransform: 'uppercase', color: C.muted, marginBottom: '0.65rem',
           }}>
+            Төрлүүд ба раунд
+          </div>
+          <div style={{
+            border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden',
+          }}>
+            {/* Table header */}
+            <div style={{
+              display: 'grid', gridTemplateColumns: '36px 80px 1fr',
+              padding: '0.35rem 0.75rem',
+              background: 'rgba(255,255,255,0.03)',
+              borderBottom: `1px solid ${C.border}`,
+              gap: '0.5rem', alignItems: 'center',
+            }}>
+              {['Төрөл', 'Раунд', 'Шилжилт'].map((h) => (
+                <span key={h} style={{
+                  fontSize: '0.6rem', fontWeight: 800, letterSpacing: '0.1em',
+                  textTransform: 'uppercase', color: C.muted,
+                }}>{h}</span>
+              ))}
+            </div>
+            {/* Table rows */}
+            {comp.events.map((eventId, idx) => {
+              const evRounds = roundsByEvent[eventId] ?? [];
+              const chain = buildAdvancementChain(evRounds);
+              const isLast = idx === comp.events.length - 1;
+              return (
+                <div key={eventId} style={{
+                  display: 'grid', gridTemplateColumns: '36px 80px 1fr',
+                  padding: '0.5rem 0.75rem', gap: '0.5rem', alignItems: 'center',
+                  borderBottom: isLast ? 'none' : `1px solid ${C.border}`,
+                }}>
+                  <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.muted }}>
+                    <WcaEventIcon eventId={eventId} size={18} />
+                  </span>
+                  <span style={{ fontSize: '0.82rem', color: C.text }}>
+                    {evRounds.length > 0 ? `${evRounds.length} раунд` : '—'}
+                  </span>
+                  <span style={{
+                    fontSize: '0.78rem', color: C.muted, fontFamily: MONO,
+                    wordBreak: 'break-word', lineHeight: 1.4,
+                  }}>
+                    {chain || '—'}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div style={{ height: 1, background: C.border, margin: '0 1rem' }} />
+
+        {/* ── БҮРТГЭЛ — icon tile registration grid ── */}
+        <div style={{ padding: '1rem 1rem 1rem' }}>
+          <div style={{
+            fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.12em',
+            textTransform: 'uppercase', color: C.muted, marginBottom: '0.25rem',
+          }}>
             Бүртгэл
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
-            {comp.events.map((eventId) => (
-              <EventCard
-                key={eventId}
-                eventId={eventId}
-                rounds={roundsByEvent[eventId] ?? []}
-                selected={selectedEvents.includes(eventId)}
-                isClosed={!!isClosed}
-                onToggle={toggleEvent}
-              />
-            ))}
+          {!isClosed && (
+            <div style={{ fontSize: '0.78rem', color: C.muted, marginBottom: '0.85rem' }}>
+              Оролцох төрлөө сонгоно уу
+            </div>
+          )}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(72px, 1fr))',
+            gap: '0.5rem',
+          }}>
+            {comp.events.map((eventId) => {
+              const selected = selectedEvents.includes(eventId);
+              return (
+                <button
+                  key={eventId}
+                  type="button"
+                  title={getEvent(eventId)?.name ?? eventId}
+                  onClick={() => !isClosed && toggleEvent(eventId)}
+                  style={{
+                    position: 'relative',
+                    display: 'flex', flexDirection: 'column',
+                    alignItems: 'center', justifyContent: 'center',
+                    height: 76, borderRadius: 12,
+                    background: selected ? 'rgba(167,139,250,0.15)' : C.card,
+                    border: `1.5px solid ${selected ? 'rgba(167,139,250,0.55)' : C.border}`,
+                    cursor: isClosed ? 'default' : 'pointer',
+                    transition: 'border-color 0.12s, background 0.12s',
+                    WebkitTapHighlightColor: 'transparent',
+                    gap: '0.3rem', padding: 0,
+                    fontFamily: FONT,
+                  }}
+                >
+                  <span style={{ color: selected ? C.accent : C.muted, display: 'flex' }}>
+                    <WcaEventIcon eventId={eventId} size={26} />
+                  </span>
+                  <span style={{
+                    fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.03em',
+                    color: selected ? C.accent : C.muted, lineHeight: 1,
+                  }}>
+                    {getEvent(eventId)?.short ?? eventId}
+                  </span>
+                  {/* Selection badge */}
+                  {selected && (
+                    <span style={{
+                      position: 'absolute', top: 5, right: 6,
+                      fontSize: '0.6rem', fontWeight: 900, color: C.accent,
+                      lineHeight: 1,
+                    }}>✓</span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
