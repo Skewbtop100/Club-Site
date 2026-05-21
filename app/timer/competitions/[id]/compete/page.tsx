@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -9,12 +9,14 @@ import {
   getParticipant,
   getMyResults,
   computeRank,
+  subscribeRoundLeaderboard,
 } from '@/lib/firebase/services/virtual-competitions';
 import type {
   VirtualCompetition,
   VirtualRound,
   VirtualParticipant,
   ParticipantRoundResult,
+  CombinedResult,
 } from '@/lib/firebase/services/virtual-competitions';
 import { getEvent } from '@/lib/wca-events';
 import { WcaEventIcon } from '@/lib/wca-event-icon';
@@ -101,6 +103,7 @@ export default function CompeteHubPage() {
   const [myResults, setMyResults] = useState<ParticipantRoundResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
 
   useEffect(() => {
     if (authLoading) return;
@@ -185,6 +188,7 @@ export default function CompeteHubPage() {
         position: 'sticky', top: 0, zIndex: 10,
         background: C.bg, borderBottom: `1px solid ${C.border}`,
         padding: '0.75rem 1rem', flexShrink: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       }}>
         <Link href={`/timer/competitions/${compId}`} style={{
           display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
@@ -192,6 +196,18 @@ export default function CompeteHubPage() {
         }}>
           ← Тэмцээний хуудас
         </Link>
+        <button
+          onClick={() => setShowLeaderboard(true)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: '0.35rem',
+            background: C.accentDim, border: '1px solid rgba(167,139,250,0.25)',
+            borderRadius: 999, padding: '0.3rem 0.75rem',
+            fontSize: '0.78rem', fontWeight: 600, color: C.accent,
+            cursor: 'pointer', fontFamily: FONT,
+          }}
+        >
+          📊 Үзүүлэлт
+        </button>
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem 1rem 3rem' }}>
@@ -216,7 +232,7 @@ export default function CompeteHubPage() {
             fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.12em',
             textTransform: 'uppercase', color: C.muted, marginBottom: '0.75rem',
           }}>
-            Хийх төрлүүд
+            Оролцох төрлүүд
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
@@ -276,6 +292,17 @@ export default function CompeteHubPage() {
           )}
         </div>
       </div>
+
+      {showLeaderboard && (
+        <LeaderboardModal
+          compId={compId}
+          registeredEvents={registeredEvents}
+          rounds={rounds}
+          myResults={myResults}
+          currentUid={user!.uid}
+          onClose={() => setShowLeaderboard(false)}
+        />
+      )}
     </div>
   );
 }
@@ -291,6 +318,13 @@ function RoundRow({
 }) {
   const router = useRouter();
   const isAvailable = state === 'available';
+  const myRank =
+    state === 'completed' && myResult && round.historicalResults.length > 0
+      ? computeRank(
+          { best: myResult.best, average: myResult.average, format: round.format },
+          round.historicalResults,
+        )
+      : null;
 
   return (
     <div
@@ -330,6 +364,9 @@ function RoundRow({
         {state === 'completed' && myResult && (
           <div style={{ fontSize: '0.73rem', color: C.muted, fontFamily: MONO, marginTop: '0.1rem' }}>
             Best: {fmtTime(myResult.best)} · Avg: {fmtTime(myResult.average)}
+            {myRank !== null && (
+              <span style={{ color: C.accent }}> · #{myRank} байр</span>
+            )}
           </div>
         )}
         {state === 'locked' && (
@@ -367,6 +404,271 @@ function RoundRow({
           Дууссан
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Leaderboard modal ────────────────────────────────────────────────────────
+
+function LeaderboardModal({
+  compId,
+  registeredEvents,
+  rounds,
+  myResults,
+  currentUid,
+  onClose,
+}: {
+  compId: string;
+  registeredEvents: string[];
+  rounds: VirtualRound[];
+  myResults: ParticipantRoundResult[];
+  currentUid: string;
+  onClose: () => void;
+}) {
+  const completedByEvent = useMemo(() => {
+    const m: Record<string, number[]> = {};
+    for (const r of myResults) {
+      if (registeredEvents.includes(r.eventId)) {
+        (m[r.eventId] ??= []).push(r.roundNumber);
+      }
+    }
+    return m;
+  }, [myResults, registeredEvents]);
+
+  const defaultEvent =
+    registeredEvents.find((eid) => (completedByEvent[eid]?.length ?? 0) > 0) ??
+    registeredEvents[0] ??
+    '';
+
+  const [selectedEventId, setSelectedEventId] = useState(defaultEvent);
+  const [selectedRound, setSelectedRound] = useState<number>(() => {
+    const rns = completedByEvent[defaultEvent] ?? [];
+    return rns.length > 0 ? Math.max(...rns) : 1;
+  });
+  const [entries, setEntries] = useState<CombinedResult[]>([]);
+
+  // Reset round when event changes
+  useEffect(() => {
+    const rns = completedByEvent[selectedEventId] ?? [];
+    setSelectedRound(rns.length > 0 ? Math.max(...rns) : 1);
+    setEntries([]);
+  }, [selectedEventId, completedByEvent]);
+
+  const completedRoundsForEvent = useMemo(
+    () => [...(completedByEvent[selectedEventId] ?? [])].sort((a, b) => a - b),
+    [completedByEvent, selectedEventId],
+  );
+  const isCompleted = completedRoundsForEvent.includes(selectedRound);
+
+  // Live leaderboard subscription
+  useEffect(() => {
+    if (!selectedEventId || !isCompleted) { setEntries([]); return; }
+    return subscribeRoundLeaderboard(compId, selectedEventId, selectedRound, setEntries);
+  }, [compId, selectedEventId, selectedRound, isCompleted]);
+
+  const myEntry = entries.find((e) => e.uid === currentUid);
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 50,
+      background: C.bg, fontFamily: FONT, color: C.text,
+      display: 'flex', flexDirection: 'column',
+    }}>
+      {/* Header */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '0.75rem 1rem', borderBottom: `1px solid ${C.border}`,
+        background: C.bg, flexShrink: 0,
+      }}>
+        <span style={{ fontSize: '1rem', fontWeight: 700 }}>📊 Үзүүлэлт</span>
+        <button
+          onClick={onClose}
+          style={{
+            background: 'none', border: 'none', color: C.muted,
+            cursor: 'pointer', fontSize: '1.15rem', padding: '0.2rem 0.5rem',
+            lineHeight: 1,
+          }}
+        >
+          ✕
+        </button>
+      </div>
+
+      {/* Scrollable body */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
+        <div style={{ maxWidth: 480, margin: '0 auto' }}>
+
+          {/* Selectors */}
+          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.1rem' }}>
+            <select
+              value={selectedEventId}
+              onChange={(e) => setSelectedEventId(e.target.value)}
+              style={{
+                flex: 1, background: C.card, border: `1px solid ${C.border}`,
+                borderRadius: 8, color: C.text, padding: '0.42rem 0.65rem',
+                fontFamily: FONT, fontSize: '0.82rem', outline: 'none',
+              }}
+            >
+              {registeredEvents.map((eid) => {
+                const ev = getEvent(eid);
+                const has = (completedByEvent[eid]?.length ?? 0) > 0;
+                return (
+                  <option key={eid} value={eid}>
+                    {ev?.name ?? eid}{!has ? ' —' : ''}
+                  </option>
+                );
+              })}
+            </select>
+
+            {completedRoundsForEvent.length > 0 && (
+              <select
+                value={selectedRound}
+                onChange={(e) => setSelectedRound(Number(e.target.value))}
+                style={{
+                  flex: 1, background: C.card, border: `1px solid ${C.border}`,
+                  borderRadius: 8, color: C.text, padding: '0.42rem 0.65rem',
+                  fontFamily: FONT, fontSize: '0.82rem', outline: 'none',
+                }}
+              >
+                {completedRoundsForEvent.map((rn) => {
+                  const rd = rounds.find(
+                    (r) => r.eventId === selectedEventId && r.roundNumber === rn,
+                  );
+                  return (
+                    <option key={rn} value={rn}>
+                      {rd?.roundName ?? `Раунд ${rn}`}
+                    </option>
+                  );
+                })}
+              </select>
+            )}
+          </div>
+
+          {/* Gate: no completed rounds for this event */}
+          {completedRoundsForEvent.length === 0 ? (
+            <div style={{
+              textAlign: 'center', padding: '4rem 0',
+              color: C.muted, fontSize: '0.88rem',
+            }}>
+              Эхлээд раунд дуусга
+            </div>
+
+          ) : !isCompleted ? (
+            <div style={{
+              textAlign: 'center', padding: '4rem 0',
+              color: C.muted, fontSize: '0.88rem',
+            }}>
+              Энэ раундыг дуусгасны дараа харагдана
+            </div>
+
+          ) : (
+            <>
+              {/* Rank summary card */}
+              {myEntry ? (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: '0.85rem',
+                  padding: '0.85rem 1rem', borderRadius: 12, marginBottom: '1.1rem',
+                  background: C.accentDim, border: '1px solid rgba(167,139,250,0.25)',
+                }}>
+                  <span style={{ fontSize: '1.6rem', lineHeight: 1 }}>🏆</span>
+                  <div>
+                    <div style={{ fontSize: '1.1rem', fontWeight: 800, color: C.accent }}>
+                      {myEntry.rank} / {entries.length} байрт
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: C.muted, fontFamily: MONO, marginTop: '0.15rem' }}>
+                      Best {fmtTime(myEntry.best)} · Avg {fmtTime(myEntry.average)}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{
+                  padding: '0.65rem 1rem', borderRadius: 10, marginBottom: '1.1rem',
+                  background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.border}`,
+                  fontSize: '0.8rem', color: C.muted,
+                }}>
+                  Таны үр дүн жагсаалтад олдсонгүй
+                </div>
+              )}
+
+              {/* Table */}
+              {entries.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '2rem', color: C.muted, fontSize: '0.85rem' }}>
+                  Үр дүн байхгүй
+                </div>
+              ) : (
+                <div style={{
+                  border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden',
+                }}>
+                  {/* Sticky thead */}
+                  <div style={{
+                    display: 'grid', gridTemplateColumns: '40px 1fr 70px 70px',
+                    padding: '0.35rem 0.75rem',
+                    background: 'rgba(255,255,255,0.03)',
+                    borderBottom: `1px solid ${C.border}`,
+                    position: 'sticky', top: 0,
+                  }}>
+                    {['#', 'Нэр', 'Best', 'Avg'].map((h) => (
+                      <span key={h} style={{
+                        fontSize: '0.6rem', fontWeight: 800,
+                        letterSpacing: '0.1em', textTransform: 'uppercase',
+                        color: C.muted,
+                      }}>{h}</span>
+                    ))}
+                  </div>
+
+                  {/* Rows */}
+                  <div style={{ maxHeight: '55dvh', overflowY: 'auto' }}>
+                    {entries.map((entry, idx) => {
+                      const isMe = entry.uid === currentUid;
+                      const isLast = idx === entries.length - 1;
+                      return (
+                        <div
+                          key={idx}
+                          style={{
+                            display: 'grid', gridTemplateColumns: '40px 1fr 70px 70px',
+                            padding: '0.55rem 0.75rem', alignItems: 'center',
+                            background: isMe ? C.accentDim : 'transparent',
+                            borderBottom: isLast ? 'none' : `1px solid ${C.border}`,
+                          }}
+                        >
+                          <span style={{
+                            fontFamily: MONO, fontSize: '0.82rem', fontWeight: 700,
+                            color: entry.rank <= 3 ? C.accent : C.muted,
+                          }}>
+                            {entry.rank}
+                          </span>
+                          <span style={{
+                            fontSize: '0.85rem', fontWeight: isMe ? 700 : 400,
+                            color: isMe ? C.accent : C.text,
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          }}>
+                            {entry.name}
+                            {isMe && (
+                              <span style={{
+                                marginLeft: '0.4rem', fontSize: '0.62rem',
+                                background: 'rgba(167,139,250,0.2)', color: C.accent,
+                                padding: '0.1rem 0.35rem', borderRadius: 999,
+                                fontWeight: 800,
+                              }}>
+                                Та
+                              </span>
+                            )}
+                          </span>
+                          <span style={{ fontFamily: MONO, fontSize: '0.82rem', color: C.success }}>
+                            {fmtTime(entry.best)}
+                          </span>
+                          <span style={{ fontFamily: MONO, fontSize: '0.82rem', color: C.text }}>
+                            {fmtTime(entry.average)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
