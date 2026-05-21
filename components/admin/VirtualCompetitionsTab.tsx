@@ -907,9 +907,9 @@ export default function VirtualCompetitionsTab() {
           </div>
         </div>
 
-        {/* ── Scramble section (existing comps only) ── */}
+        {/* ── Edit section (existing comps only) ── */}
         {!isNew && (
-          <ScrambleSection
+          <EventEditSection
             events={form.events}
             rounds={rounds}
             loading={roundsLoading}
@@ -974,9 +974,9 @@ export default function VirtualCompetitionsTab() {
   );
 }
 
-// ─── ScrambleSection ──────────────────────────────────────────────────────────
+// ─── EventEditSection ─────────────────────────────────────────────────────────
 
-function ScrambleSection({
+function EventEditSection({
   events,
   rounds,
   loading,
@@ -991,50 +991,138 @@ function ScrambleSection({
   onRefresh: () => Promise<void>;
   onToast: (type: 'success' | 'error', text: string) => void;
 }) {
+  const [selectedEvent, setSelectedEvent] = useState<string>(() => events[0] ?? '');
+  const [activeTab, setActiveTab] = useState<'scrambles' | 'results' | 'advancement'>('scrambles');
   const [showBulkModal, setShowBulkModal] = useState(false);
+
+  useEffect(() => {
+    if (events.length > 0 && !events.includes(selectedEvent)) {
+      setSelectedEvent(events[0]);
+      setActiveTab('scrambles');
+    }
+  }, [events, selectedEvent]);
+
+  const TAB_LABELS: { id: 'scrambles' | 'results' | 'advancement'; label: string }[] = [
+    { id: 'scrambles', label: 'Холилт' },
+    { id: 'results',   label: 'Үр дүн' },
+    { id: 'advancement', label: 'Тохиргоо' },
+  ];
 
   return (
     <div className="card" style={{ marginTop: '1rem' }}>
-      <div className="card-title" style={{ marginBottom: '1rem' }}>
-        <span className="title-accent" />Холилт оруулах
+      <div style={{
+        fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.12em',
+        textTransform: 'uppercase', color: 'var(--muted)', marginBottom: '1rem',
+      }}>
+        Холилт, Үр дүн, Тохиргоо
       </div>
 
       {loading ? (
         <div className="spinner-row">Ачааллаж байна…<span className="spinner-ring" /></div>
       ) : events.length === 0 ? (
         <div style={{ color: 'var(--muted)', fontSize: '0.85rem', fontStyle: 'italic' }}>
-          Төрөл сонгогдоогүй байна. Дээрх Үндсэн мэдээлэлд төрөл сонго.
+          Эхлээд төрөл сонгоно уу
         </div>
       ) : (
         <>
-          <div style={{ marginBottom: '0.8rem' }}>
-            <button
-              onClick={() => setShowBulkModal(true)}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
-                padding: '0.42rem 0.85rem', borderRadius: '8px',
-                fontFamily: 'inherit', fontSize: '0.82rem', fontWeight: 600,
-                background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.3)',
-                color: '#c4b5fd', cursor: 'pointer', transition: 'background 0.15s',
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(124,58,237,0.18)')}
-              onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(124,58,237,0.1)')}
-            >
-              📋 Бүх раундын тохиргоо хуулж тавих
-            </button>
+          {/* Event selector pills */}
+          <div style={{
+            display: 'flex', gap: '0.4rem', overflowX: 'auto',
+            paddingBottom: '0.75rem', scrollbarWidth: 'none',
+          }}>
+            {events.map((evId) => {
+              const ev = getEvent(evId);
+              const active = evId === selectedEvent;
+              return (
+                <button
+                  key={evId}
+                  onClick={() => { setSelectedEvent(evId); setActiveTab('scrambles'); }}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+                    padding: '0.3rem 0.75rem', borderRadius: '999px',
+                    fontFamily: 'inherit', fontSize: '0.8rem', fontWeight: 600,
+                    flexShrink: 0, cursor: 'pointer', transition: 'all 0.12s',
+                    border: `1px solid ${active ? 'rgba(167,139,250,0.6)' : 'rgba(255,255,255,0.12)'}`,
+                    background: active ? 'rgba(124,58,237,0.22)' : 'rgba(255,255,255,0.03)',
+                    color: active ? '#c4b5fd' : 'var(--muted)',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  <span style={{ fontWeight: 800, fontSize: '0.7rem',
+                    background: active ? 'rgba(167,139,250,0.25)' : 'rgba(255,255,255,0.08)',
+                    padding: '0.05rem 0.3rem', borderRadius: '4px',
+                  }}>{ev?.short ?? evId}</span>
+                  <span>{ev?.name ?? evId}</span>
+                  <span style={{ fontSize: '0.68rem', color: active ? 'rgba(196,181,253,0.7)' : 'rgba(255,255,255,0.3)' }}>
+                    ({rounds.filter((r) => r.eventId === evId).length})
+                  </span>
+                </button>
+              );
+            })}
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
-            {events.map((eventId) => (
-              <EventPasteSection
-                key={eventId}
-                eventId={eventId}
-                compId={compId}
-                existingRounds={rounds.filter((r) => r.eventId === eventId)}
-                onRefresh={onRefresh}
-                onToast={onToast}
-              />
-            ))}
+
+          {/* Tab bar */}
+          <div style={{
+            display: 'flex',
+            borderBottom: '1px solid rgba(255,255,255,0.07)',
+            marginBottom: '1rem',
+          }}>
+            {TAB_LABELS.map(({ id, label }) => {
+              const active = activeTab === id;
+              return (
+                <button
+                  key={id}
+                  onClick={() => setActiveTab(id)}
+                  style={{
+                    padding: '0.45rem 1rem', background: 'none', border: 'none',
+                    borderBottom: active ? '2px solid #a78bfa' : '2px solid transparent',
+                    marginBottom: '-1px',
+                    fontFamily: 'inherit', fontSize: '0.84rem',
+                    fontWeight: active ? 700 : 400,
+                    color: active ? '#c4b5fd' : 'var(--muted)',
+                    cursor: 'pointer', transition: 'color 0.12s',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
           </div>
+
+          {/* Bulk advancement button — Тохиргоо tab only */}
+          {activeTab === 'advancement' && (
+            <div style={{ marginBottom: '0.8rem' }}>
+              <button
+                onClick={() => setShowBulkModal(true)}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
+                  padding: '0.42rem 0.85rem', borderRadius: '8px',
+                  fontFamily: 'inherit', fontSize: '0.82rem', fontWeight: 600,
+                  background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.3)',
+                  color: '#c4b5fd', cursor: 'pointer', transition: 'background 0.15s',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(124,58,237,0.18)')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(124,58,237,0.1)')}
+              >
+                📋 Бүх раундын тохиргоо хуулж тавих
+              </button>
+            </div>
+          )}
+
+          {/* Tab content — remount on event change to reset state */}
+          {selectedEvent && (
+            <EventPasteSection
+              key={selectedEvent}
+              eventId={selectedEvent}
+              compId={compId}
+              existingRounds={rounds.filter((r) => r.eventId === selectedEvent)}
+              onRefresh={onRefresh}
+              onToast={onToast}
+              activeTab={activeTab}
+            />
+          )}
+
           {showBulkModal && (
             <BulkAdvancementModal
               compId={compId}
@@ -1061,17 +1149,17 @@ function EventPasteSection({
   existingRounds,
   onRefresh,
   onToast,
+  activeTab,
 }: {
   eventId: string;
   compId: string;
   existingRounds: VirtualRound[];
   onRefresh: () => Promise<void>;
   onToast: (type: 'success' | 'error', text: string) => void;
+  activeTab: 'scrambles' | 'results' | 'advancement';
 }) {
   const ev = getEvent(eventId);
 
-  // Collapsed when no rounds (nothing to show), expanded when rounds exist
-  const [collapsed, setCollapsed] = useState(existingRounds.length === 0);
   const [text, setText] = useState('');
   const [phase, setPhase] = useState<'idle' | 'preview'>('idle');
   const [parsedRounds, setParsedRounds] = useState<ParsedRound[]>([]);
@@ -1079,8 +1167,6 @@ function EventPasteSection({
   const [saving, setSaving] = useState(false);
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
 
   // ── Results paste state ──────────────────────────────────────────────────
   const [resultsText, setResultsText] = useState('');
@@ -1094,17 +1180,6 @@ function EventPasteSection({
   const [advEdits, setAdvEdits] = useState<Record<string, AdvEdit>>({});
   const [advSaving, setAdvSaving] = useState(false);
   const [advErrors, setAdvErrors] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    function handler(e: PointerEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    }
-    document.addEventListener('pointerdown', handler);
-    return () => document.removeEventListener('pointerdown', handler);
-  }, [menuOpen]);
 
   useEffect(() => {
     const init: Record<string, AdvEdit> = {};
@@ -1330,68 +1405,11 @@ function EventPasteSection({
   const sortedRounds = [...existingRounds].sort((a, b) => a.roundNumber - b.roundNumber);
 
   return (
-    <div style={{ border: '1px solid rgba(255,255,255,0.07)', borderRadius: '10px', overflow: 'visible' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', background: 'rgba(255,255,255,0.025)', borderRadius: collapsed ? '10px' : '10px 10px 0 0' }}>
-        <button
-          onClick={() => setCollapsed((c) => !c)}
-          style={{
-            flex: 1, display: 'flex', alignItems: 'center', gap: '0.55rem',
-            padding: '0.65rem 0.9rem', background: 'none',
-            border: 'none', cursor: 'pointer', fontFamily: 'inherit',
-            color: 'var(--text)', textAlign: 'left',
-          }}
-        >
-          <span style={{
-            display: 'inline-block', lineHeight: 1,
-            fontSize: '0.6rem', color: 'var(--muted)',
-            transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
-            transition: 'transform 0.15s',
-          }}>▼</span>
-          <span style={{ fontWeight: 700, fontSize: '0.88rem', flex: 1 }}>
-            {ev?.name ?? eventId}
-          </span>
-          <span style={{ fontSize: '0.72rem', color: 'var(--muted)', flexShrink: 0 }}>
-            {existingRounds.length} раунд
-          </span>
-        </button>
-        {existingRounds.length > 0 && (
-          <div ref={menuRef} style={{ position: 'relative', marginRight: '0.6rem' }} onPointerDown={(e) => e.stopPropagation()}>
-            <button
-              onClick={() => setMenuOpen((p) => !p)}
-              style={{
-                background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: '7px', color: 'var(--muted)', cursor: 'pointer',
-                fontFamily: 'inherit', fontSize: '0.9rem', lineHeight: 1, padding: '0.25rem 0.5rem',
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.09)')}
-              onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
-            >
-              ⋮
-            </button>
-            {menuOpen && (
-              <div style={{
-                position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 200,
-                background: 'var(--card, #1e1b2e)', border: '1px solid rgba(255,255,255,0.12)',
-                borderRadius: '10px', padding: '0.3rem', boxShadow: '0 12px 30px rgba(0,0,0,0.5)',
-                minWidth: '145px',
-              }}>
-                <MenuAction
-                  label="Бүгдийг устгах"
-                  onClick={() => { setMenuOpen(false); setConfirmDeleteAll(true); }}
-                  color="#f87171"
-                />
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Body */}
-      {!collapsed && (
-        <div style={{ padding: '0.75rem 0.9rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-
-          {/* Existing rounds list (idle phase only) */}
+    <>
+      {/* ── Холилт tab ── */}
+      {activeTab === 'scrambles' && (
+        <div>
+          {/* Existing rounds (idle) */}
           {phase === 'idle' && sortedRounds.length > 0 && (
             <div style={{ marginBottom: '0.75rem' }}>
               {sortedRounds.map((r) => {
@@ -1427,7 +1445,7 @@ function EventPasteSection({
             </div>
           )}
 
-          {/* Paste area (idle phase) */}
+          {/* Paste area (idle) */}
           {phase === 'idle' && (
             <>
               <textarea
@@ -1470,7 +1488,7 @@ function EventPasteSection({
             </>
           )}
 
-          {/* Preview phase */}
+          {/* Preview */}
           {phase === 'preview' && (
             <>
               <div style={{ marginBottom: '0.75rem' }}>
@@ -1536,16 +1554,179 @@ function EventPasteSection({
             </>
           )}
 
-          {/* ── Advancement section ── */}
-          <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', marginTop: '1rem', paddingTop: '0.85rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.65rem' }}>
-              <div style={{
-                fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.1em',
-                textTransform: 'uppercase', color: 'var(--muted)',
-              }}>
-                Раундын тохиргоо
-              </div>
-              {sortedRounds.length > 0 && (
+          {/* Delete all */}
+          {existingRounds.length > 0 && phase === 'idle' && (
+            <div style={{ marginTop: '0.9rem', textAlign: 'right' }}>
+              <button
+                onClick={() => setConfirmDeleteAll(true)}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  fontFamily: 'inherit', fontSize: '0.75rem', color: '#f87171',
+                  padding: 0, textDecoration: 'underline',
+                }}
+              >
+                Бүгдийг устгах
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Үр дүн tab ── */}
+      {activeTab === 'results' && (
+        <div>
+          {existingRounds.length === 0 ? (
+            <div style={{ fontSize: '0.82rem', color: 'var(--muted)', fontStyle: 'italic' }}>
+              Эхлээд холилт оруулна уу
+            </div>
+          ) : (
+            <>
+              {resultsPhase === 'idle' && existingRounds.some((r) => r.historicalResults.length > 0) && (
+                <div style={{
+                  fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.6rem',
+                  padding: '0.35rem 0.6rem', borderRadius: '6px',
+                  background: 'rgba(124,58,237,0.07)', border: '1px solid rgba(124,58,237,0.18)',
+                }}>
+                  Одоо: {sortedRounds
+                    .filter((r) => r.historicalResults.length > 0)
+                    .map((r) => `${r.roundName} (${r.historicalResults.length})`)
+                    .join(', ')}
+                </div>
+              )}
+              {resultsPhase === 'idle' && (
+                <>
+                  <textarea
+                    value={resultsText}
+                    onChange={(e) => { setResultsText(e.target.value); setResultsParseError(null); }}
+                    rows={9}
+                    placeholder={
+                      '3x3x3 Cube Final\n#  Name                  Best  Average  Solves\n' +
+                      '1  Gegeenbileg N.         5.55  7.09     8.58 (5.55) 6.92 5.78 (10.56)\n\n' +
+                      '3x3x3 Cube Second round\n...'
+                    }
+                    style={{
+                      width: '100%', boxSizing: 'border-box',
+                      padding: '0.6rem 0.75rem', borderRadius: '8px',
+                      background: 'rgba(255,255,255,0.03)',
+                      border: `1px solid ${resultsParseError ? 'rgba(239,68,68,0.5)' : 'rgba(255,255,255,0.1)'}`,
+                      color: 'var(--text)', fontFamily: 'monospace', fontSize: '0.77rem',
+                      resize: 'vertical', outline: 'none', lineHeight: 1.6,
+                      marginBottom: '0.55rem',
+                    }}
+                  />
+                  {resultsParseError && (
+                    <div style={{
+                      padding: '0.45rem 0.65rem', borderRadius: '7px', marginBottom: '0.55rem',
+                      background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
+                      color: '#f87171', fontSize: '0.8rem', lineHeight: 1.5,
+                    }}>{resultsParseError}</div>
+                  )}
+                  <button
+                    onClick={handleResultsAnalyze}
+                    disabled={!resultsText.trim()}
+                    style={{
+                      width: '100%', padding: '0.48rem 1rem', borderRadius: '8px',
+                      fontFamily: 'inherit', fontSize: '0.85rem', fontWeight: 700,
+                      background: resultsText.trim() ? 'rgba(124,58,237,0.7)' : 'rgba(124,58,237,0.2)',
+                      border: '1px solid rgba(124,58,237,0.9)',
+                      color: resultsText.trim() ? '#fff' : 'rgba(255,255,255,0.3)',
+                      cursor: resultsText.trim() ? 'pointer' : 'not-allowed',
+                      transition: 'background 0.15s',
+                    }}
+                  >
+                    Шинжлэх →
+                  </button>
+                </>
+              )}
+              {resultsPhase === 'preview' && (
+                <>
+                  <div style={{ marginBottom: '0.75rem' }}>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.5rem' }}>
+                      Шинжлэлийн үр дүн
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                      {Object.entries(parsedResultsByLabel).map(([label, athletes]) => {
+                        const matchedRound = matchRoundByLabel(label, existingRounds);
+                        const example = athletes[0];
+                        return (
+                          <div key={label} style={{
+                            padding: '0.5rem 0.65rem', borderRadius: '7px', fontSize: '0.82rem',
+                            background: matchedRound ? 'rgba(34,197,94,0.06)' : 'rgba(245,158,11,0.07)',
+                            border: `1px solid ${matchedRound ? 'rgba(34,197,94,0.2)' : 'rgba(245,158,11,0.25)'}`,
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.2rem' }}>
+                              <span style={{ fontSize: '0.75rem' }}>{matchedRound ? '✓' : '⚠'}</span>
+                              <span style={{ fontWeight: 700, color: matchedRound ? '#4ade80' : '#fbbf24' }}>
+                                {label}
+                              </span>
+                              <span style={{ color: 'var(--muted)' }}>— {athletes.length} тамирчин</span>
+                              {!matchedRound && (
+                                <span style={{ fontSize: '0.72rem', color: '#fbbf24' }}>· тохирох раунд олдсонгүй</span>
+                              )}
+                            </div>
+                            {example && (
+                              <div style={{ fontSize: '0.75rem', color: 'var(--muted)', paddingLeft: '1.1rem' }}>
+                                Жишээ: {example.athleteName} — {formatMs(example.best)}/{formatMs(example.average)}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                      onClick={() => setResultsPhase('idle')}
+                      style={{
+                        flex: 1, padding: '0.45rem 0.75rem', borderRadius: '8px',
+                        fontFamily: 'inherit', fontSize: '0.85rem', fontWeight: 600,
+                        background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+                        color: 'var(--text)', cursor: 'pointer',
+                      }}
+                    >
+                      ← Буцах
+                    </button>
+                    <button
+                      onClick={handleResultsCreateClick}
+                      disabled={resultsSaving}
+                      style={{
+                        flex: 2, padding: '0.45rem 0.75rem', borderRadius: '8px',
+                        fontFamily: 'inherit', fontSize: '0.85rem', fontWeight: 700,
+                        background: resultsSaving ? 'rgba(34,197,94,0.2)' : 'rgba(34,197,94,0.7)',
+                        border: '1px solid rgba(34,197,94,0.8)',
+                        color: resultsSaving ? 'rgba(255,255,255,0.3)' : '#fff',
+                        cursor: resultsSaving ? 'not-allowed' : 'pointer',
+                        transition: 'background 0.15s',
+                      }}
+                    >
+                      {resultsSaving
+                        ? 'Хадгалж байна...'
+                        : `✓ Хадгалах (${Object.values(parsedResultsByLabel).reduce((s, a) => s + a.length, 0)} тамирчин)`}
+                    </button>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── Тохиргоо tab ── */}
+      {activeTab === 'advancement' && (
+        <div>
+          {sortedRounds.length === 0 ? (
+            <div style={{ fontSize: '0.82rem', color: 'var(--muted)', fontStyle: 'italic' }}>
+              Эхлээд холилт оруулна уу
+            </div>
+          ) : (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.65rem' }}>
+                <div style={{
+                  fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.1em',
+                  textTransform: 'uppercase', color: 'var(--muted)',
+                }}>
+                  Раундын тохиргоо
+                </div>
                 <button
                   onClick={applyAutoSuggest}
                   style={{
@@ -1556,246 +1737,88 @@ function EventPasteSection({
                 >
                   Автомат тооцоо
                 </button>
-              )}
-            </div>
-
-            {sortedRounds.length === 0 ? (
-              <div style={{ fontSize: '0.82rem', color: 'var(--muted)', fontStyle: 'italic' }}>
-                Эхлээд холилт оруулна уу
               </div>
-            ) : (
-              <>
-                {sortedRounds.map((r) => {
-                  const edit = advEdits[r.id] ?? { type: r.advancementType, value: r.advancementValue != null ? String(r.advancementValue) : '' };
-                  const err = advErrors[r.id];
-                  return (
-                    <div key={r.id} style={{
-                      padding: '0.6rem 0.7rem', marginBottom: '0.4rem',
-                      border: '1px solid rgba(255,255,255,0.065)', borderRadius: '8px',
-                      background: 'rgba(255,255,255,0.015)',
-                    }}>
-                      <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text)', marginBottom: '0.35rem' }}>
-                        {r.roundName}
-                      </div>
-                      <div style={{ fontSize: '0.74rem', color: 'var(--muted)', marginBottom: '0.3rem' }}>
-                        Дараагийн шатанд орох тоо:
-                      </div>
-                      <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                        {(['fixed', 'percentage', 'final'] as const).map((opt) => {
-                          const selected = edit.type === opt;
-                          const label = opt === 'fixed' ? 'Тоогоор' : opt === 'percentage' ? 'Хувиар' : 'Final';
-                          return (
-                            <label key={opt} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer' }}>
-                              <input
-                                type="radio"
-                                checked={selected}
-                                onChange={() => setAdvEdits((prev) => ({
-                                  ...prev,
-                                  [r.id]: { type: opt, value: opt === 'final' ? '' : (prev[r.id]?.value ?? '') },
-                                }))}
-                                style={{ accentColor: '#a78bfa', cursor: 'pointer' }}
-                              />
-                              <span style={{ fontSize: '0.8rem', color: selected ? '#c4b5fd' : 'var(--muted)' }}>
-                                {label}
-                              </span>
-                              {opt !== 'final' && (
-                                <input
-                                  type="number"
-                                  value={selected ? edit.value : ''}
-                                  disabled={!selected}
-                                  onChange={(e) => {
-                                    if (!selected) return;
-                                    setAdvEdits((prev) => ({ ...prev, [r.id]: { type: opt, value: e.target.value } }));
-                                    if (advErrors[r.id]) setAdvErrors((prev) => ({ ...prev, [r.id]: '' }));
-                                  }}
-                                  style={{
-                                    width: '3.5rem', padding: '0.2rem 0.35rem', borderRadius: '5px',
-                                    background: selected ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.02)',
-                                    border: `1px solid ${err && selected ? 'rgba(239,68,68,0.5)' : 'rgba(255,255,255,0.1)'}`,
-                                    color: selected ? 'var(--text)' : 'rgba(255,255,255,0.2)',
-                                    fontFamily: 'inherit', fontSize: '0.82rem', outline: 'none',
-                                  }}
-                                />
-                              )}
-                            </label>
-                          );
-                        })}
-                      </div>
-                      {err && (
-                        <div style={{ fontSize: '0.72rem', color: '#f87171', marginTop: '0.3rem' }}>{err}</div>
-                      )}
-                    </div>
-                  );
-                })}
-                {advDirty && (
-                  <button
-                    onClick={() => void handleAdvSave()}
-                    disabled={advSaving}
-                    style={{
-                      marginTop: '0.3rem', width: '100%', padding: '0.45rem 1rem', borderRadius: '8px',
-                      fontFamily: 'inherit', fontSize: '0.85rem', fontWeight: 700,
-                      background: advSaving ? 'rgba(124,58,237,0.2)' : 'rgba(124,58,237,0.7)',
-                      border: '1px solid rgba(124,58,237,0.9)',
-                      color: advSaving ? 'rgba(255,255,255,0.3)' : '#fff',
-                      cursor: advSaving ? 'not-allowed' : 'pointer',
-                      transition: 'background 0.15s',
-                    }}
-                  >
-                    {advSaving ? 'Хадгалж байна...' : 'Хадгалах'}
-                  </button>
-                )}
-              </>
-            )}
-          </div>
-
-          {/* ── Results section ── */}
-          <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', marginTop: '1rem', paddingTop: '0.85rem' }}>
-            <div style={{
-              fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.1em',
-              textTransform: 'uppercase', color: 'var(--muted)', marginBottom: '0.65rem',
-            }}>
-              Үр дүн
-            </div>
-
-            {existingRounds.length === 0 ? (
-              <div style={{ fontSize: '0.82rem', color: 'var(--muted)', fontStyle: 'italic' }}>
-                Эхлээд холилт оруулна уу
-              </div>
-            ) : (
-              <>
-                {/* Existing results summary (idle phase) */}
-                {resultsPhase === 'idle' && existingRounds.some((r) => r.historicalResults.length > 0) && (
-                  <div style={{
-                    fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.6rem',
-                    padding: '0.35rem 0.6rem', borderRadius: '6px',
-                    background: 'rgba(124,58,237,0.07)', border: '1px solid rgba(124,58,237,0.18)',
+              {sortedRounds.map((r) => {
+                const edit = advEdits[r.id] ?? { type: r.advancementType, value: r.advancementValue != null ? String(r.advancementValue) : '' };
+                const err = advErrors[r.id];
+                return (
+                  <div key={r.id} style={{
+                    padding: '0.6rem 0.7rem', marginBottom: '0.4rem',
+                    border: '1px solid rgba(255,255,255,0.065)', borderRadius: '8px',
+                    background: 'rgba(255,255,255,0.015)',
                   }}>
-                    Одоо: {sortedRounds
-                      .filter((r) => r.historicalResults.length > 0)
-                      .map((r) => `${r.roundName} (${r.historicalResults.length})`)
-                      .join(', ')}
-                  </div>
-                )}
-
-                {/* Textarea (idle phase) */}
-                {resultsPhase === 'idle' && (
-                  <>
-                    <textarea
-                      value={resultsText}
-                      onChange={(e) => { setResultsText(e.target.value); setResultsParseError(null); }}
-                      rows={9}
-                      placeholder={
-                        '3x3x3 Cube Final\n#  Name                  Best  Average  Solves\n' +
-                        '1  Gegeenbileg N.         5.55  7.09     8.58 (5.55) 6.92 5.78 (10.56)\n\n' +
-                        '3x3x3 Cube Second round\n...'
-                      }
-                      style={{
-                        width: '100%', boxSizing: 'border-box',
-                        padding: '0.6rem 0.75rem', borderRadius: '8px',
-                        background: 'rgba(255,255,255,0.03)',
-                        border: `1px solid ${resultsParseError ? 'rgba(239,68,68,0.5)' : 'rgba(255,255,255,0.1)'}`,
-                        color: 'var(--text)', fontFamily: 'monospace', fontSize: '0.77rem',
-                        resize: 'vertical', outline: 'none', lineHeight: 1.6,
-                        marginBottom: '0.55rem',
-                      }}
-                    />
-                    {resultsParseError && (
-                      <div style={{
-                        padding: '0.45rem 0.65rem', borderRadius: '7px', marginBottom: '0.55rem',
-                        background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
-                        color: '#f87171', fontSize: '0.8rem', lineHeight: 1.5,
-                      }}>{resultsParseError}</div>
+                    <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text)', marginBottom: '0.35rem' }}>
+                      {r.roundName}
+                    </div>
+                    <div style={{ fontSize: '0.74rem', color: 'var(--muted)', marginBottom: '0.3rem' }}>
+                      Дараагийн шатанд орох тоо:
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                      {(['fixed', 'percentage', 'final'] as const).map((opt) => {
+                        const selected = edit.type === opt;
+                        const label = opt === 'fixed' ? 'Тоогоор' : opt === 'percentage' ? 'Хувиар' : 'Final';
+                        return (
+                          <label key={opt} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer' }}>
+                            <input
+                              type="radio"
+                              checked={selected}
+                              onChange={() => setAdvEdits((prev) => ({
+                                ...prev,
+                                [r.id]: { type: opt, value: opt === 'final' ? '' : (prev[r.id]?.value ?? '') },
+                              }))}
+                              style={{ accentColor: '#a78bfa', cursor: 'pointer' }}
+                            />
+                            <span style={{ fontSize: '0.8rem', color: selected ? '#c4b5fd' : 'var(--muted)' }}>
+                              {label}
+                            </span>
+                            {opt !== 'final' && (
+                              <input
+                                type="number"
+                                value={selected ? edit.value : ''}
+                                disabled={!selected}
+                                onChange={(e) => {
+                                  if (!selected) return;
+                                  setAdvEdits((prev) => ({ ...prev, [r.id]: { type: opt, value: e.target.value } }));
+                                  if (advErrors[r.id]) setAdvErrors((prev) => ({ ...prev, [r.id]: '' }));
+                                }}
+                                style={{
+                                  width: '3.5rem', padding: '0.2rem 0.35rem', borderRadius: '5px',
+                                  background: selected ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.02)',
+                                  border: `1px solid ${err && selected ? 'rgba(239,68,68,0.5)' : 'rgba(255,255,255,0.1)'}`,
+                                  color: selected ? 'var(--text)' : 'rgba(255,255,255,0.2)',
+                                  fontFamily: 'inherit', fontSize: '0.82rem', outline: 'none',
+                                }}
+                              />
+                            )}
+                          </label>
+                        );
+                      })}
+                    </div>
+                    {err && (
+                      <div style={{ fontSize: '0.72rem', color: '#f87171', marginTop: '0.3rem' }}>{err}</div>
                     )}
-                    <button
-                      onClick={handleResultsAnalyze}
-                      disabled={!resultsText.trim()}
-                      style={{
-                        width: '100%', padding: '0.48rem 1rem', borderRadius: '8px',
-                        fontFamily: 'inherit', fontSize: '0.85rem', fontWeight: 700,
-                        background: resultsText.trim() ? 'rgba(124,58,237,0.7)' : 'rgba(124,58,237,0.2)',
-                        border: '1px solid rgba(124,58,237,0.9)',
-                        color: resultsText.trim() ? '#fff' : 'rgba(255,255,255,0.3)',
-                        cursor: resultsText.trim() ? 'pointer' : 'not-allowed',
-                        transition: 'background 0.15s',
-                      }}
-                    >
-                      Шинжлэх →
-                    </button>
-                  </>
-                )}
-
-                {/* Preview phase */}
-                {resultsPhase === 'preview' && (
-                  <>
-                    <div style={{ marginBottom: '0.75rem' }}>
-                      <div style={{ fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.5rem' }}>
-                        Шинжлэлийн үр дүн
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-                        {Object.entries(parsedResultsByLabel).map(([label, athletes]) => {
-                          const matchedRound = matchRoundByLabel(label, existingRounds);
-                          const example = athletes[0];
-                          return (
-                            <div key={label} style={{
-                              padding: '0.5rem 0.65rem', borderRadius: '7px', fontSize: '0.82rem',
-                              background: matchedRound ? 'rgba(34,197,94,0.06)' : 'rgba(245,158,11,0.07)',
-                              border: `1px solid ${matchedRound ? 'rgba(34,197,94,0.2)' : 'rgba(245,158,11,0.25)'}`,
-                            }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.2rem' }}>
-                                <span style={{ fontSize: '0.75rem' }}>{matchedRound ? '✓' : '⚠'}</span>
-                                <span style={{ fontWeight: 700, color: matchedRound ? '#4ade80' : '#fbbf24' }}>
-                                  {label}
-                                </span>
-                                <span style={{ color: 'var(--muted)' }}>— {athletes.length} тамирчин</span>
-                                {!matchedRound && (
-                                  <span style={{ fontSize: '0.72rem', color: '#fbbf24' }}>· тохирох раунд олдсонгүй</span>
-                                )}
-                              </div>
-                              {example && (
-                                <div style={{ fontSize: '0.75rem', color: 'var(--muted)', paddingLeft: '1.1rem' }}>
-                                  Жишээ: {example.athleteName} — {formatMs(example.best)}/{formatMs(example.average)}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
-                      <button
-                        onClick={() => setResultsPhase('idle')}
-                        style={{
-                          flex: 1, padding: '0.45rem 0.75rem', borderRadius: '8px',
-                          fontFamily: 'inherit', fontSize: '0.85rem', fontWeight: 600,
-                          background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
-                          color: 'var(--text)', cursor: 'pointer',
-                        }}
-                      >
-                        ← Буцах
-                      </button>
-                      <button
-                        onClick={handleResultsCreateClick}
-                        disabled={resultsSaving}
-                        style={{
-                          flex: 2, padding: '0.45rem 0.75rem', borderRadius: '8px',
-                          fontFamily: 'inherit', fontSize: '0.85rem', fontWeight: 700,
-                          background: resultsSaving ? 'rgba(34,197,94,0.2)' : 'rgba(34,197,94,0.7)',
-                          border: '1px solid rgba(34,197,94,0.8)',
-                          color: resultsSaving ? 'rgba(255,255,255,0.3)' : '#fff',
-                          cursor: resultsSaving ? 'not-allowed' : 'pointer',
-                          transition: 'background 0.15s',
-                        }}
-                      >
-                        {resultsSaving
-                          ? 'Хадгалж байна...'
-                          : `✓ Хадгалах (${Object.values(parsedResultsByLabel).reduce((s, a) => s + a.length, 0)} тамирчин)`}
-                      </button>
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-          </div>
+                  </div>
+                );
+              })}
+              {advDirty && (
+                <button
+                  onClick={() => void handleAdvSave()}
+                  disabled={advSaving}
+                  style={{
+                    marginTop: '0.3rem', width: '100%', padding: '0.45rem 1rem', borderRadius: '8px',
+                    fontFamily: 'inherit', fontSize: '0.85rem', fontWeight: 700,
+                    background: advSaving ? 'rgba(124,58,237,0.2)' : 'rgba(124,58,237,0.7)',
+                    border: '1px solid rgba(124,58,237,0.9)',
+                    color: advSaving ? 'rgba(255,255,255,0.3)' : '#fff',
+                    cursor: advSaving ? 'not-allowed' : 'pointer',
+                    transition: 'background 0.15s',
+                  }}
+                >
+                  {advSaving ? 'Хадгалж байна...' : 'Хадгалах'}
+                </button>
+              )}
+            </>
+          )}
         </div>
       )}
 
@@ -1833,7 +1856,7 @@ function EventPasteSection({
           onCancel={() => setConfirmResultsReplace(false)}
         />
       )}
-    </div>
+    </>
   );
 }
 
