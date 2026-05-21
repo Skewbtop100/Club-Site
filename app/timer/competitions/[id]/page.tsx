@@ -317,7 +317,7 @@ export default function CompetitionDetailPage() {
             fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.12em',
             textTransform: 'uppercase', color: C.muted, marginBottom: '0.65rem',
           }}>
-            Төрлүүд ба раунд
+            Events
           </div>
           <div style={{
             border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden',
@@ -330,8 +330,8 @@ export default function CompetitionDetailPage() {
               borderBottom: `1px solid ${C.border}`,
               gap: '0.5rem', alignItems: 'center',
             }}>
-              {['Төрөл', 'Раунд', 'Шилжилт'].map((h) => (
-                <span key={h} style={{
+              {['', 'Раунд', ''].map((h, i) => (
+                <span key={i} style={{
                   fontSize: '0.6rem', fontWeight: 800, letterSpacing: '0.1em',
                   textTransform: 'uppercase', color: C.muted,
                 }}>{h}</span>
@@ -412,10 +412,11 @@ export default function CompetitionDetailPage() {
                     <WcaEventIcon eventId={eventId} size={26} />
                   </span>
                   <span style={{
-                    fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.03em',
-                    color: selected ? C.accent : C.muted, lineHeight: 1,
+                    fontSize: '0.58rem', fontWeight: 600, letterSpacing: '0.01em',
+                    color: selected ? C.accent : C.muted, lineHeight: 1.25,
+                    textAlign: 'center', padding: '0 4px', wordBreak: 'break-word',
                   }}>
-                    {getEvent(eventId)?.short ?? eventId}
+                    {getEvent(eventId)?.name ?? eventId}
                   </span>
                   {/* Selection badge */}
                   {selected && (
