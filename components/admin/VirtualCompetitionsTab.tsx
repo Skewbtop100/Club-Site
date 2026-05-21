@@ -16,6 +16,7 @@ import {
 } from '@/lib/firebase/services/virtual-competitions';
 import type { VirtualCompetition, VirtualRound, HistoricalResult } from '@/lib/firebase/services/virtual-competitions';
 import { WCA_EVENTS, getEvent } from '@/lib/wca-events';
+import { WcaEventIcon } from '@/lib/wca-event-icon';
 import { useAuth } from '@/lib/auth-context';
 
 // ─── Round format labels ──────────────────────────────────────────────────────
@@ -986,21 +987,25 @@ export default function VirtualCompetitionsTab() {
           <div className="form-group">
             <label>Төрлүүд</label>
             {errors.events && <FieldError text={errors.events} />}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '0.4rem', marginTop: '0.35rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.4rem', marginTop: '0.35rem' }}>
               {WCA_EVENTS.map((ev) => {
                 const active = form.events.includes(ev.id);
                 return (
                   <button key={ev.id} type="button" onClick={() => toggleEvent(ev.id)}
                     style={{
-                      display: 'flex', flexDirection: 'column', alignItems: 'center',
-                      justifyContent: 'center', gap: '0.2rem', padding: '0.5rem 0.3rem',
+                      display: 'flex', flexDirection: 'row', alignItems: 'center',
+                      gap: '0.45rem', padding: '0.45rem 0.6rem',
                       borderRadius: '8px', cursor: 'pointer', fontFamily: 'inherit',
                       border: `1px solid ${active ? 'rgba(124,58,237,0.55)' : 'rgba(255,255,255,0.07)'}`,
                       background: active ? 'rgba(124,58,237,0.12)' : 'rgba(255,255,255,0.02)',
                       color: active ? '#c4b5fd' : 'var(--muted)', transition: 'all 0.12s',
+                      textAlign: 'left',
                     }}>
-                    <span style={{ fontSize: '0.78rem', fontWeight: 700, letterSpacing: '0.03em' }}>{ev.short}</span>
-                    {active && <span style={{ fontSize: '0.6rem', color: '#a78bfa', lineHeight: 1 }}>✓</span>}
+                    <WcaEventIcon eventId={ev.id} size={18} />
+                    <span style={{ fontSize: '0.75rem', fontWeight: active ? 700 : 400, lineHeight: 1.2, flex: 1 }}>
+                      {ev.name}
+                    </span>
+                    {active && <span style={{ fontSize: '0.7rem', color: '#a78bfa', flexShrink: 0 }}>✓</span>}
                   </button>
                 );
               })}
@@ -1310,6 +1315,7 @@ function EventPasteSection({
   const [saving, setSaving] = useState(false);
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [expandedScrambleRounds, setExpandedScrambleRounds] = useState<Set<string>>(new Set());
 
   // ── Results paste state ──────────────────────────────────────────────────
   const [resultsText, setResultsText] = useState('');
@@ -1318,6 +1324,7 @@ function EventPasteSection({
   const [resultsParseError, setResultsParseError] = useState<string | null>(null);
   const [resultsSaving, setResultsSaving] = useState(false);
   const [confirmResultsReplace, setConfirmResultsReplace] = useState(false);
+  const [expandedResultRounds, setExpandedResultRounds] = useState<Set<string>>(new Set());
 
   // ── Advancement edit state ────────────────────────────────────────────────
   const [advEdits, setAdvEdits] = useState<Record<string, AdvEdit>>({});
@@ -1568,35 +1575,100 @@ function EventPasteSection({
       {/* ── Холилт tab ── */}
       {activeTab === 'scrambles' && (
         <div>
-          {/* Existing rounds (idle) */}
+          {/* Existing rounds (idle) — expandable to show group scrambles */}
           {phase === 'idle' && sortedRounds.length > 0 && (
             <div style={{ marginBottom: '0.75rem' }}>
               {sortedRounds.map((r) => {
-                const groupCount = r.groups?.length ?? 0;
+                const groups = r.groups ?? [];
+                const groupCount = groups.length;
                 const scrambleCount = groupCount > 0
-                  ? r.groups!.reduce((sum, g) => sum + g.scrambles.length, 0)
+                  ? groups.reduce((sum, g) => sum + g.scrambles.length, 0)
                   : r.scrambles.length;
+                const isExpanded = expandedScrambleRounds.has(r.id);
+                const toggleExpand = () => setExpandedScrambleRounds((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(r.id)) next.delete(r.id); else next.add(r.id);
+                  return next;
+                });
                 return (
-                  <div key={r.id} style={{
-                    display: 'flex', alignItems: 'center', gap: '0.5rem',
-                    padding: '0.4rem 0.55rem', marginBottom: '0.3rem',
-                    background: 'rgba(255,255,255,0.02)',
-                    border: '1px solid rgba(255,255,255,0.065)',
-                    borderRadius: '7px', fontSize: '0.82rem',
-                  }}>
-                    <span style={{ fontWeight: 600, color: 'var(--text)', flex: 1 }}>
-                      Раунд {r.roundNumber} · {r.roundName}
-                    </span>
-                    <span style={{
-                      padding: '0.05rem 0.35rem',
-                      background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.25)',
-                      borderRadius: '4px', fontSize: '0.68rem', fontWeight: 700, flexShrink: 0,
-                    }}>
-                      {FORMAT_LABELS[r.format] ?? r.format}
-                    </span>
-                    <span style={{ color: 'var(--muted)', fontSize: '0.75rem', flexShrink: 0 }}>
-                      {groupCount > 1 ? `${groupCount} груп · ` : ''}{scrambleCount} холилт
-                    </span>
+                  <div key={r.id} style={{ marginBottom: '0.3rem' }}>
+                    {/* Header row — clickable */}
+                    <div
+                      onClick={toggleExpand}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '0.5rem',
+                        padding: '0.4rem 0.55rem',
+                        background: isExpanded ? 'rgba(124,58,237,0.07)' : 'rgba(255,255,255,0.02)',
+                        border: `1px solid ${isExpanded ? 'rgba(124,58,237,0.2)' : 'rgba(255,255,255,0.065)'}`,
+                        borderRadius: isExpanded ? '7px 7px 0 0' : '7px',
+                        fontSize: '0.82rem', cursor: 'pointer', userSelect: 'none',
+                      }}
+                    >
+                      <span style={{ fontSize: '0.7rem', color: 'var(--muted)', minWidth: '0.8rem' }}>
+                        {isExpanded ? '▾' : '▸'}
+                      </span>
+                      <span style={{ fontWeight: 600, color: 'var(--text)', flex: 1 }}>
+                        Раунд {r.roundNumber} · {r.roundName}
+                      </span>
+                      <span style={{
+                        padding: '0.05rem 0.35rem',
+                        background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.25)',
+                        borderRadius: '4px', fontSize: '0.68rem', fontWeight: 700, flexShrink: 0,
+                      }}>
+                        {FORMAT_LABELS[r.format] ?? r.format}
+                      </span>
+                      <span style={{ color: 'var(--muted)', fontSize: '0.75rem', flexShrink: 0 }}>
+                        {groupCount > 1 ? `${groupCount} груп · ` : ''}{scrambleCount} холилт
+                      </span>
+                    </div>
+                    {/* Expanded scrambles */}
+                    {isExpanded && (
+                      <div style={{
+                        border: '1px solid rgba(124,58,237,0.2)', borderTop: 'none',
+                        borderRadius: '0 0 7px 7px', padding: '0.5rem 0.65rem',
+                        background: 'rgba(124,58,237,0.03)',
+                      }}>
+                        {groupCount > 0 ? groups.map((g) => (
+                          <div key={g.name} style={{ marginBottom: '0.55rem' }}>
+                            <div style={{
+                              fontSize: '0.72rem', fontWeight: 700, color: '#a78bfa',
+                              marginBottom: '0.25rem', letterSpacing: '0.04em',
+                            }}>
+                              Группа {g.name}
+                            </div>
+                            {g.scrambles.map((s, i) => (
+                              <div key={i} style={{
+                                fontSize: '0.75rem', fontFamily: 'monospace',
+                                color: 'var(--text)', padding: '0.1rem 0',
+                                display: 'flex', gap: '0.5rem',
+                              }}>
+                                <span style={{ color: 'var(--muted)', minWidth: '1.5rem', flexShrink: 0 }}>{i + 1}.</span>
+                                <span>{s}</span>
+                              </div>
+                            ))}
+                            {g.extraScrambles.map((s, i) => (
+                              <div key={`ex${i}`} style={{
+                                fontSize: '0.75rem', fontFamily: 'monospace',
+                                color: 'rgba(251,191,36,0.8)', padding: '0.1rem 0',
+                                display: 'flex', gap: '0.5rem',
+                              }}>
+                                <span style={{ color: 'rgba(251,191,36,0.5)', minWidth: '1.5rem', flexShrink: 0, whiteSpace: 'nowrap' }}>E{i + 1}.</span>
+                                <span>{s}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )) : r.scrambles.map((s, i) => (
+                          <div key={i} style={{
+                            fontSize: '0.75rem', fontFamily: 'monospace',
+                            color: 'var(--text)', padding: '0.1rem 0',
+                            display: 'flex', gap: '0.5rem',
+                          }}>
+                            <span style={{ color: 'var(--muted)', minWidth: '1.5rem', flexShrink: 0 }}>{i + 1}.</span>
+                            <span>{s}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -1758,16 +1830,82 @@ function EventPasteSection({
             </div>
           ) : (
             <>
-              {resultsPhase === 'idle' && existingRounds.some((r) => r.historicalResults.length > 0) && (
-                <div style={{
-                  fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.6rem',
-                  padding: '0.35rem 0.6rem', borderRadius: '6px',
-                  background: 'rgba(124,58,237,0.07)', border: '1px solid rgba(124,58,237,0.18)',
-                }}>
-                  Одоо: {sortedRounds
-                    .filter((r) => r.historicalResults.length > 0)
-                    .map((r) => `${r.roundName} (${r.historicalResults.length})`)
-                    .join(', ')}
+              {/* Existing results — expandable per round */}
+              {resultsPhase === 'idle' && sortedRounds.some((r) => r.historicalResults.length > 0) && (
+                <div style={{ marginBottom: '0.75rem' }}>
+                  {sortedRounds.filter((r) => r.historicalResults.length > 0).map((r) => {
+                    const isExpanded = expandedResultRounds.has(r.id);
+                    const toggleExpand = () => setExpandedResultRounds((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(r.id)) next.delete(r.id); else next.add(r.id);
+                      return next;
+                    });
+                    return (
+                      <div key={r.id} style={{ marginBottom: '0.3rem' }}>
+                        <div
+                          onClick={toggleExpand}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: '0.5rem',
+                            padding: '0.4rem 0.55rem', cursor: 'pointer', userSelect: 'none',
+                            background: isExpanded ? 'rgba(124,58,237,0.07)' : 'rgba(255,255,255,0.02)',
+                            border: `1px solid ${isExpanded ? 'rgba(124,58,237,0.2)' : 'rgba(255,255,255,0.065)'}`,
+                            borderRadius: isExpanded ? '7px 7px 0 0' : '7px', fontSize: '0.82rem',
+                          }}
+                        >
+                          <span style={{ fontSize: '0.7rem', color: 'var(--muted)', minWidth: '0.8rem' }}>
+                            {isExpanded ? '▾' : '▸'}
+                          </span>
+                          <span style={{ fontWeight: 600, color: 'var(--text)', flex: 1 }}>
+                            Раунд {r.roundNumber} · {r.roundName}
+                          </span>
+                          <span style={{ color: 'var(--muted)', fontSize: '0.75rem', flexShrink: 0 }}>
+                            {r.historicalResults.length} тамирчин
+                          </span>
+                        </div>
+                        {isExpanded && (
+                          <div style={{
+                            border: '1px solid rgba(124,58,237,0.2)', borderTop: 'none',
+                            borderRadius: '0 0 7px 7px', overflow: 'auto', maxHeight: '260px',
+                            background: 'rgba(0,0,0,0.15)',
+                          }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
+                              <thead>
+                                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+                                  {['#', 'Нэр', 'Шилдэг', 'Дундаж'].map((h) => (
+                                    <th key={h} style={{
+                                      padding: '0.3rem 0.5rem', textAlign: 'left',
+                                      fontWeight: 700, color: 'var(--muted)',
+                                      position: 'sticky', top: 0,
+                                      background: 'rgba(14,14,14,0.95)',
+                                    }}>{h}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {r.historicalResults.map((res, idx) => (
+                                  <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                                    <td style={{ padding: '0.25rem 0.5rem', color: 'var(--muted)', fontFamily: 'monospace' }}>
+                                      {res.rank ?? idx + 1}
+                                    </td>
+                                    <td style={{ padding: '0.25rem 0.5rem', color: 'var(--text)', fontWeight: idx < 3 ? 600 : 400 }}>
+                                      {res.athleteName}
+                                    </td>
+                                    <td style={{ padding: '0.25rem 0.5rem', fontFamily: 'monospace', color: '#4ade80' }}>
+                                      {res.best > 0 ? formatMs(res.best) : 'DNF'}
+                                    </td>
+                                    <td style={{ padding: '0.25rem 0.5rem', fontFamily: 'monospace', color: 'var(--text)' }}>
+                                      {res.average > 0 ? formatMs(res.average) : res.times.length < 5 ? formatMs(res.best) : 'DNF'}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  <div style={{ height: '1px', background: 'rgba(255,255,255,0.07)', margin: '0.65rem 0' }} />
                 </div>
               )}
               {resultsPhase === 'idle' && (

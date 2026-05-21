@@ -369,7 +369,7 @@ export default function CompetitionDetailPage() {
         {/* Cover */}
         {comp.imageUrl ? (
           <img src={comp.imageUrl} alt={comp.name}
-            style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block' }} />
+            style={{ width: '100%', height: 'auto', objectFit: 'contain', display: 'block', background: 'var(--card, #111)', borderRadius: '0 0 12px 12px' }} />
         ) : (
           <CoverPlaceholder name={comp.name} />
         )}
@@ -399,13 +399,38 @@ export default function CompetitionDetailPage() {
 
         <div style={{ height: 1, background: C.border, margin: '1.1rem 1rem' }} />
 
-        {/* Events section */}
+        {/* Events overview — compact icon row */}
+        <div style={{ padding: '0 1rem 0.75rem' }}>
+          <div style={{
+            fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.12em',
+            textTransform: 'uppercase', color: C.muted, marginBottom: '0.5rem',
+          }}>
+            Төрлүүд
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+            {comp.events.map((eventId) => (
+              <span key={eventId} title={getEvent(eventId)?.name ?? eventId} style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: 36, height: 36, borderRadius: '8px',
+                background: 'rgba(255,255,255,0.05)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                flexShrink: 0,
+              }}>
+                <WcaEventIcon eventId={eventId} size={22} />
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ height: 1, background: C.border, margin: '0 1rem 0.75rem' }} />
+
+        {/* Registration — event selection */}
         <div style={{ padding: '0 1rem 1rem' }}>
           <div style={{
             fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.12em',
             textTransform: 'uppercase', color: C.muted, marginBottom: '0.65rem',
           }}>
-            Төрлүүд
+            Бүртгэл
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
             {comp.events.map((eventId) => (

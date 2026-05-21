@@ -137,7 +137,7 @@ function CompCard({ comp }: { comp: VirtualCompetition }) {
           <img
             src={comp.imageUrl}
             alt={comp.name}
-            style={{ width: '100%', aspectRatio: '16 / 9', objectFit: 'cover', display: 'block' }}
+            style={{ width: '100%', height: 'auto', objectFit: 'contain', display: 'block', background: 'var(--card, #111)' }}
           />
         ) : (
           <ImagePlaceholder name={comp.name} />
