@@ -126,29 +126,20 @@ function parseRoundId(roundId: string): { eventId: string; roundNumber: number }
   };
 }
 
-function getScrambleFontSize(scramble: string): string {
-  const len = scramble.length;
-  if (len <= 25) return 'clamp(1.1rem, 4.5vw, 1.5rem)';
-  if (len <= 40) return 'clamp(0.95rem, 3.8vw, 1.3rem)';
-  if (len <= 60) return 'clamp(0.85rem, 3.2vw, 1.1rem)';
-  return 'clamp(0.8rem, 2.8vw, 1rem)';
-}
+const SCRAMBLE_FONT: Record<'sm' | 'md' | 'lg', string> = {
+  sm: 'clamp(0.72rem, 2.6vw, 0.9rem)',
+  md: 'clamp(0.9rem, 3.4vw, 1.15rem)',
+  lg: 'clamp(1.1rem, 4.5vw, 1.5rem)',
+};
 
-function parseManualTime(input: string): number | null {
-  const s = input.trim().toLowerCase();
-  if (s === 'dnf') return -1;
-  const mMatch = s.match(/^(\d+):(\d{1,2})\.(\d{1,3})$/);
-  if (mMatch) {
-    const frac = mMatch[3];
-    return (parseInt(mMatch[1], 10) * 60 + parseInt(mMatch[2], 10)) * 1000
-      + parseInt(frac, 10) * Math.pow(10, 3 - frac.length);
-  }
-  const sMatch = s.match(/^(\d+)\.(\d{1,3})$/);
-  if (sMatch) {
-    const frac = sMatch[2];
-    return parseInt(sMatch[1], 10) * 1000 + parseInt(frac, 10) * Math.pow(10, 3 - frac.length);
-  }
-  return null;
+// cstimer-style: digits only, right-to-left fill (last 2 = cs, next 2 = secs, rest = mins)
+function parseCstimerInput(digits: string): number {
+  const clean = digits.replace(/\D/g, '');
+  if (!clean) return 0;
+  const cs   = parseInt(clean.slice(-2) || '0', 10);
+  const secs = parseInt(clean.slice(-4, -2) || '0', 10);
+  const mins = parseInt(clean.slice(0, -4) || '0', 10);
+  return (mins * 60 + secs) * 1000 + cs * 10;
 }
 
 // ─── RTDB schema ──────────────────────────────────────────────────────────────
@@ -411,6 +402,17 @@ function SolvingPage() {
   // Issue 3: settings panel state
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState<'standard' | 'manual'>('standard');
+  const [scrambleSize, setScrambleSize] = useState<'sm' | 'md' | 'lg'>(() => {
+    try { return (localStorage.getItem('compete.scrambleSize') as 'sm' | 'md' | 'lg' | null) ?? 'md'; }
+    catch { return 'md'; }
+  });
+  const [scrambleSizeDraft, setScrambleSizeDraft] = useState<'sm' | 'md' | 'lg'>('md');
+  const [inspectionEnabled, setInspectionEnabled] = useState(() => {
+    try { return localStorage.getItem('compete.inspection') !== 'false'; }
+    catch { return true; }
+  });
+  const [inspectionEnabledDraft, setInspectionEnabledDraft] = useState(true);
+  const [extraPopupSolveIdx, setExtraPopupSolveIdx] = useState<number | null>(null);
 
   // Refs for stable event listener closures
   const pendingSolveRef = useRef<DraftSolve | null>(null);
@@ -432,6 +434,9 @@ function SolvingPage() {
   usedExtrasRef.current = usedExtras;
   scrambleOverridesRef.current = scrambleOverrides;
   timerModeRef.current = timerMode;
+
+  const inspectionEnabledRef = useRef(true);
+  inspectionEnabledRef.current = inspectionEnabled;
 
   const timerStopRef = useRef<() => void>(() => {});
   const timerResetRef = useRef<() => void>(() => {});
@@ -580,6 +585,7 @@ function SolvingPage() {
       } else if (s === 'idle' || s === 'stopped') {
         timerResetRef.current();
         timerBeginInspectionRef.current();
+        if (!inspectionEnabledRef.current) timerStartArmingRef.current();
       } else if (s === 'inspecting') {
         timerStartArmingRef.current();
       }
@@ -603,6 +609,7 @@ function SolvingPage() {
       } else if (s === 'idle' || s === 'stopped') {
         timerResetRef.current();
         timerBeginInspectionRef.current();
+        if (!inspectionEnabledRef.current) timerStartArmingRef.current();
       } else if (s === 'inspecting') {
         timerStartArmingRef.current();
       }
@@ -630,25 +637,30 @@ function SolvingPage() {
   function handleManualSubmit() {
     const raw = manualInput.trim();
     if (!raw) return;
-    const parsed = parseManualTime(raw);
-    if (parsed === null) return;
-    setPendingSolve({ ms: parsed === -1 ? 0 : parsed, penalty: parsed === -1 ? 'dnf' : 'none' });
+    const ms = parseCstimerInput(raw);
+    if (ms <= 0) return;
+    setPendingSolve({ ms, penalty: 'none' });
     setManualInput('');
   }
 
   // ── Save settings ──
   function handleSaveSettings() {
     setTimerMode(settingsDraft);
-    try { localStorage.setItem('compete.timerMode', settingsDraft); } catch {}
+    setScrambleSize(scrambleSizeDraft);
+    setInspectionEnabled(inspectionEnabledDraft);
+    try {
+      localStorage.setItem('compete.timerMode', settingsDraft);
+      localStorage.setItem('compete.scrambleSize', scrambleSizeDraft);
+      localStorage.setItem('compete.inspection', String(inspectionEnabledDraft));
+    } catch {}
     setSettingsOpen(false);
   }
 
-  // ── Extra scramble ──
-  async function requestExtraScramble() {
+  // ── Extra scramble ── (for a specific completed solve; removes it so user can redo)
+  async function requestExtraScramble(forSolveIdx: number) {
     const r = roundRef.current;
     if (!r || !user) return;
     const gi = groupIndexRef.current;
-    const idx = currentSolveIndexRef.current;
     const extras = usedExtrasRef.current;
     if (extras >= 2) return;
     const groupsArr = Array.isArray(r.groups) ? r.groups : [];
@@ -656,14 +668,21 @@ function SolvingPage() {
     const extraScramble = toStringArray((group as { extraScrambles?: unknown })?.extraScrambles ?? [])[extras];
     if (!extraScramble) return;
 
-    const newOverrides = { ...scrambleOverridesRef.current, [String(idx)]: extraScramble };
+    // Remove the solve at forSolveIdx and all subsequent solves so user can redo from there
+    const newSolves = solvesRef.current.slice(0, forSolveIdx);
+    const newOverrides = { ...scrambleOverridesRef.current, [String(forSolveIdx)]: extraScramble };
+    const newExtras = extras + 1;
+
+    setExtraPopupSolveIdx(null);
+    setSolves(newSolves);
+    setCurrentSolveIndex(forSolveIdx);
     setScrambleOverrides(newOverrides);
-    setUsedExtras(extras + 1);
+    setUsedExtras(newExtras);
 
     const path = `virtualProgress/${compId}/${user.uid}/${roundId}`;
     await rtdbSet(rtdbRef(rtdb, path), {
-      groupIndex: gi, solves: solvesRef.current,
-      usedExtras: extras + 1, scrambleOverrides: newOverrides,
+      groupIndex: gi, solves: newSolves,
+      usedExtras: newExtras, scrambleOverrides: newOverrides,
     } satisfies SolveProgressData);
   }
 
@@ -761,12 +780,14 @@ function SolvingPage() {
   const isInspecting = timer.state === 'inspecting';
   const showFocus = isRunning || isArmed || isInspecting;
 
-  // Extra scramble availability
-  const groupsArr = Array.isArray(round.groups) ? round.groups : [];
-  const curGroup = groupsArr[groupIndex % (groupsArr.length || 1)];
-  const extraAvailable =
-    !pendingSolve && !showFocus && usedExtras < 2 && currentSolveIndex < totalSolves &&
-    !!(toStringArray((curGroup as { extraScrambles?: unknown })?.extraScrambles ?? [])[usedExtras]);
+  // Whether a specific completed solve can be swapped for an extra scramble
+  function canRequestExtraFor(idx: number): boolean {
+    if (!round || !solves[idx] || pendingSolve || showFocus) return false;
+    if (usedExtras >= 2) return false;
+    const gArr = Array.isArray(round.groups) ? round.groups : [];
+    const g = gArr[groupIndex % (gArr.length || 1)];
+    return !!(toStringArray((g as { extraScrambles?: unknown })?.extraScrambles ?? [])[usedExtras]);
+  }
 
   // DEBUG: log every render so we can trace scramble changes
   console.log('[compete] render', { currentSolveIndex, currentScramble, scrambleCount: scrambles.length, showFocus, pendingSolve: !!pendingSolve });
@@ -828,7 +849,7 @@ function SolvingPage() {
             </span>
             <button
               data-ignore="1"
-              onClick={() => { setSettingsDraft(timerMode); setSettingsOpen(true); }}
+              onClick={() => { setSettingsDraft(timerMode); setScrambleSizeDraft(scrambleSize); setInspectionEnabledDraft(inspectionEnabled); setSettingsOpen(true); }}
               style={{
                 background: 'none', border: 'none', cursor: 'pointer',
                 fontSize: '1rem', color: C.muted, lineHeight: 1, padding: '0.1rem 0',
@@ -857,7 +878,7 @@ function SolvingPage() {
               textAlign: 'center',
             }}>
               <div style={{
-                fontSize: getScrambleFontSize(currentScramble),
+                fontSize: SCRAMBLE_FONT[scrambleSize],
                 fontWeight: 600, fontFamily: MONO,
                 color: C.text, lineHeight: 1.65, letterSpacing: '0.03em',
               }}>
@@ -869,27 +890,6 @@ function SolvingPage() {
             <div style={{ textAlign: 'center', padding: '0.75rem',
               fontSize: '0.82rem', color: C.muted }}>
               Энэ эвлүүлэлтэд холилт оруулаагүй байна
-            </div>
-          )}
-
-          {/* Extra scramble button */}
-          {extraAvailable && (
-            <div style={{ display: 'flex', justifyContent: 'center', marginTop: '0.5rem' }}>
-              <button
-                data-ignore="1"
-                onClick={() => { void requestExtraScramble(); }}
-                style={{
-                  padding: '0.35rem 0.85rem', borderRadius: 999,
-                  fontSize: '0.75rem', fontWeight: 700, fontFamily: FONT,
-                  background: 'rgba(251,191,36,0.1)',
-                  border: '1px solid rgba(251,191,36,0.3)',
-                  color: C.warn, cursor: 'pointer',
-                  display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
-                }}
-              >
-                🎲 Нэмэлт холилт авах
-                <span style={{ fontSize: '0.65rem', color: C.muted }}>({2 - usedExtras} үлдсэн)</span>
-              </button>
             </div>
           )}
         </div>
@@ -916,9 +916,9 @@ function SolvingPage() {
             }}>
               {timerDisplay}
             </div>
-            {!showFocus && !pendingSolve && !noScrambles && currentSolveIndex < totalSolves && (
+            {isArmed && !timer.armedReady && !pendingSolve && (
               <div style={{ fontSize: '0.75rem', color: C.muted, marginTop: '0.75rem' }}>
-                {isArmed && !timer.armedReady ? 'Удаан дарсаар байна...' : 'Дарж эхлэх'}
+                Удаан дарсаар байна...
               </div>
             )}
           </>
@@ -927,36 +927,52 @@ function SolvingPage() {
         {timerMode === 'manual' && !pendingSolve && currentSolveIndex < totalSolves && (
           <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center',
-            gap: '0.75rem', width: '100%', maxWidth: 300,
+            gap: '0.65rem', width: '100%', maxWidth: 320,
           }}>
-            <div style={{ fontSize: '0.75rem', color: C.muted }}>Цагаа оруулна уу</div>
-            <div style={{ display: 'flex', gap: '0.5rem', width: '100%' }}>
-              <input
-                data-ignore="1"
-                type="text"
-                value={manualInput}
-                onChange={(e) => setManualInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleManualSubmit(); }}
-                placeholder="1:23.45 / DNF"
-                autoFocus
-                style={{
-                  flex: 1, padding: '0.65rem 0.85rem', borderRadius: 10,
-                  background: C.card, border: `1px solid ${C.border}`,
-                  color: C.text, fontFamily: MONO, fontSize: '1rem',
-                  outline: 'none', touchAction: 'auto',
-                }}
-              />
-              <button
-                data-ignore="1"
-                onClick={handleManualSubmit}
-                style={{
-                  padding: '0.65rem 1rem', borderRadius: 10,
-                  background: C.accentDim, border: '1px solid rgba(167,139,250,0.4)',
-                  color: C.accent, fontFamily: FONT, fontSize: '0.88rem',
-                  fontWeight: 700, cursor: 'pointer',
-                }}
-              >↵</button>
+            {/* Live parsed time preview */}
+            <div style={{
+              fontSize: 'clamp(3rem, 15vw, 6rem)', fontWeight: 700,
+              fontFamily: MONO, lineHeight: 1,
+              color: manualInput ? C.text : C.muted,
+            }}>
+              {manualInput ? fmtMs(parseCstimerInput(manualInput), false, 'cs') : '0.00'}
             </div>
+            <input
+              data-ignore="1"
+              type="text"
+              inputMode="numeric"
+              value={manualInput}
+              onChange={(e) => {
+                const val = e.target.value.replace(/\D/g, '').slice(0, 7);
+                setManualInput(val);
+              }}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleManualSubmit(); }}
+              placeholder="тоо оруулах"
+              autoFocus
+              style={{
+                width: '100%', padding: '0.65rem 0.85rem', borderRadius: 10,
+                background: C.card, border: `1px solid ${C.border}`,
+                color: C.text, fontFamily: MONO, fontSize: '1.1rem',
+                outline: 'none', touchAction: 'auto', textAlign: 'center',
+                boxSizing: 'border-box',
+              }}
+            />
+            <button
+              data-ignore="1"
+              onClick={handleManualSubmit}
+              disabled={!manualInput}
+              style={{
+                width: '100%', padding: '0.75rem', borderRadius: 10,
+                fontFamily: FONT, fontSize: '0.97rem', fontWeight: 700,
+                background: manualInput ? C.accentDim : 'rgba(255,255,255,0.04)',
+                border: `1px solid ${manualInput ? 'rgba(167,139,250,0.4)' : C.border}`,
+                color: manualInput ? C.accent : C.muted,
+                cursor: manualInput ? 'pointer' : 'not-allowed',
+                boxSizing: 'border-box',
+              }}
+            >
+              Баталгаажуулах ↵
+            </button>
           </div>
         )}
 
@@ -1023,30 +1039,38 @@ function SolvingPage() {
       {!showFocus && (
         <div style={{
           flexShrink: 0, borderTop: `1px solid ${C.border}`,
-          padding: '0.75rem 1rem 1.25rem',
+          padding: '0.65rem 1rem 1.1rem',
         }}>
           <div style={{
-            fontSize: '0.58rem', fontWeight: 800, letterSpacing: '0.12em',
-            textTransform: 'uppercase', color: C.muted, marginBottom: '0.45rem',
+            fontSize: '0.56rem', fontWeight: 800, letterSpacing: '0.12em',
+            textTransform: 'uppercase', color: C.muted, marginBottom: '0.4rem',
             textAlign: 'center',
           }}>
             {formatLabel(round.format)}
           </div>
-          <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+          <div style={{ display: 'flex', gap: '0.3rem', justifyContent: 'center', flexWrap: 'wrap' }}>
             {Array.from({ length: totalSolves }).map((_, i) => {
               const s = solves[i];
               const isCurrent = i === currentSolveIndex;
               const usedExtra = !!scrambleOverrides[String(i)];
+              const tappable = !!s && canRequestExtraFor(i);
               return (
-                <div key={i} style={{
-                  padding: '0.28rem 0.55rem', borderRadius: 8,
-                  background: isCurrent ? C.accentDim : s ? 'rgba(255,255,255,0.05)' : 'transparent',
-                  border: `1px solid ${isCurrent ? 'rgba(167,139,250,0.35)' : s ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.04)'}`,
-                  display: 'flex', alignItems: 'center', gap: '0.2rem',
-                }}>
+                <div
+                  key={i}
+                  data-ignore="1"
+                  onClick={() => { if (tappable) setExtraPopupSolveIdx(i); }}
+                  style={{
+                    padding: '0.3rem 0.6rem', borderRadius: 8,
+                    background: isCurrent ? C.accentDim : s ? 'rgba(255,255,255,0.05)' : 'transparent',
+                    border: `1px solid ${isCurrent ? 'rgba(167,139,250,0.35)' : s ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.04)'}`,
+                    display: 'flex', alignItems: 'center', gap: '0.2rem',
+                    cursor: tappable ? 'pointer' : 'default',
+                    transition: 'opacity 0.1s',
+                  }}
+                >
                   {usedExtra && <span style={{ fontSize: '0.6rem', lineHeight: 1 }}>🎲</span>}
                   <span style={{
-                    fontSize: '0.8rem', fontFamily: MONO, fontWeight: s ? 600 : 400,
+                    fontSize: '0.82rem', fontFamily: MONO, fontWeight: s ? 600 : 400,
                     color: s ? (s.penalty === 'dnf' ? C.danger : C.text) : isCurrent ? C.accent : C.muted,
                   }}>
                     {i + 1}. {s ? fmtSolve(s.ms, s.penalty) : isCurrent && pendingSolve ? '...' : '—'}
@@ -1075,6 +1099,62 @@ function SolvingPage() {
           }}
         >
           <CubeViewer eventId={round.eventId} scramble={currentScramble} />
+        </div>
+      )}
+
+      {/* ── Extra scramble popup ── */}
+      {extraPopupSolveIdx !== null && (
+        <div
+          data-ignore="1"
+          style={{
+            position: 'fixed', inset: 0, zIndex: 100,
+            background: 'rgba(0,0,0,0.65)',
+            display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
+          }}
+          onClick={() => setExtraPopupSolveIdx(null)}
+        >
+          <div
+            data-ignore="1"
+            style={{
+              background: '#1a1a1a', borderRadius: '16px 16px 0 0',
+              border: `1px solid ${C.border}`, borderBottom: 'none',
+              padding: '1.25rem 1.25rem 2rem',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{
+              display: 'flex', justifyContent: 'space-between',
+              alignItems: 'center', marginBottom: '1rem',
+            }}>
+              <span style={{ fontSize: '0.95rem', fontWeight: 700, color: C.text }}>
+                {extraPopupSolveIdx + 1}. Эвлүүлэлт
+              </span>
+              <button
+                data-ignore="1"
+                onClick={() => setExtraPopupSolveIdx(null)}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  fontSize: '1rem', color: C.muted, padding: '0.2rem',
+                }}
+              >✕</button>
+            </div>
+            <button
+              data-ignore="1"
+              onClick={() => { void requestExtraScramble(extraPopupSolveIdx); }}
+              style={{
+                width: '100%', padding: '0.78rem', borderRadius: 10,
+                fontFamily: FONT, fontSize: '0.97rem', fontWeight: 700,
+                background: 'rgba(251,191,36,0.12)',
+                border: '1px solid rgba(251,191,36,0.3)',
+                color: C.warn, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem',
+                boxSizing: 'border-box',
+              }}
+            >
+              🎲 Нэмэлт холилт авах
+              <span style={{ fontSize: '0.8rem', color: C.muted }}>({2 - usedExtras} үлдсэн)</span>
+            </button>
+          </div>
         </div>
       )}
 
@@ -1157,6 +1237,70 @@ function SolvingPage() {
                           : 'Цагийг гараар оруулах'}
                       </div>
                     </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Scramble size section */}
+            <div style={{
+              fontSize: '0.68rem', fontWeight: 800, letterSpacing: '0.12em',
+              textTransform: 'uppercase', color: C.muted, marginBottom: '0.6rem',
+            }}>
+              Холилтын хэмжээ
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem' }}>
+              {(['sm', 'md', 'lg'] as const).map((sz) => {
+                const label = sz === 'sm' ? 'Бага' : sz === 'md' ? 'Дунд' : 'Том';
+                const active = scrambleSizeDraft === sz;
+                return (
+                  <div
+                    key={sz}
+                    data-ignore="1"
+                    onClick={() => setScrambleSizeDraft(sz)}
+                    style={{
+                      flex: 1, textAlign: 'center',
+                      padding: '0.55rem 0.4rem', borderRadius: 9, cursor: 'pointer',
+                      background: active ? C.accentDim : 'transparent',
+                      border: `1px solid ${active ? 'rgba(167,139,250,0.35)' : C.border}`,
+                      fontSize: '0.88rem', fontWeight: 600,
+                      color: active ? C.accent : C.muted,
+                      transition: 'background 0.1s',
+                    }}
+                  >
+                    {label}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Inspection section */}
+            <div style={{
+              fontSize: '0.68rem', fontWeight: 800, letterSpacing: '0.12em',
+              textTransform: 'uppercase', color: C.muted, marginBottom: '0.6rem',
+            }}>
+              Inspection
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem' }}>
+              {([true, false] as const).map((val) => {
+                const label = val ? 'Идэвхтэй' : 'Идэвхгүй';
+                const active = inspectionEnabledDraft === val;
+                return (
+                  <div
+                    key={String(val)}
+                    data-ignore="1"
+                    onClick={() => setInspectionEnabledDraft(val)}
+                    style={{
+                      flex: 1, textAlign: 'center',
+                      padding: '0.55rem 0.4rem', borderRadius: 9, cursor: 'pointer',
+                      background: active ? C.accentDim : 'transparent',
+                      border: `1px solid ${active ? 'rgba(167,139,250,0.35)' : C.border}`,
+                      fontSize: '0.88rem', fontWeight: 600,
+                      color: active ? C.accent : C.muted,
+                      transition: 'background 0.1s',
+                    }}
+                  >
+                    {label}
                   </div>
                 );
               })}
