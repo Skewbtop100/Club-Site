@@ -524,7 +524,14 @@ function SolvingPage() {
           } satisfies SolveProgressData);
         }
 
-        // DEBUG: log scramble data so we can identify the root cause
+        // DEBUG — save/read mismatch investigation
+        console.log('[compete] RAW groups from Firestore:', JSON.stringify(roundData.groups, null, 2));
+        console.log('[compete] group detail:', roundData.groups?.map((g, i) => ({
+          index: i,
+          name: g.name,
+          scrambleCount: Array.isArray(g.scrambles) ? g.scrambles.length : ('NOT ARRAY: ' + typeof g.scrambles),
+          scramblesRaw: g.scrambles,
+        })));
         const scrms = getGroupScrambles(roundData, gi);
         console.log('[compete] round loaded', {
           roundId,

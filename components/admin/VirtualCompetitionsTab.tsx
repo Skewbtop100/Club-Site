@@ -1201,6 +1201,11 @@ function EventPasteSection({
       setParsedRounds([]);
       return;
     }
+    console.log('[parse] groups per round:', result.rounds.map((r) => ({
+      round: r.roundLabel,
+      groups: r.groups.map((g) => ({ name: g.name, scrambles: g.scrambles.length, extras: g.extraScrambles.length })),
+      allScrambles: r.allScrambles.length,
+    })));
     setParseError(null);
     setParsedRounds(result.rounds);
     setPhase('preview');
@@ -1240,7 +1245,18 @@ function EventPasteSection({
           ...(round.groups.length > 0 ? { groups: round.groups } : {}),
           historicalResults: [] as [],
         };
-        console.log('[paste] addRound payload', payload);
+        console.log('[paste] addRound payload DETAIL', {
+          eventId: payload.eventId,
+          roundNumber: payload.roundNumber,
+          roundName: payload.roundName,
+          groupCount: payload.groups?.length,
+          groupDetail: payload.groups?.map((g) => ({
+            name: g.name,
+            scrambleCount: g.scrambles?.length,
+            extraCount: g.extraScrambles?.length,
+          })),
+          topLevelScrambleCount: payload.scrambles?.length,
+        });
         await addRound(compId, payload);
         console.log('[paste] addRound OK for round', round.roundNumber);
       }
@@ -1498,22 +1514,40 @@ function EventPasteSection({
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
                   {parsedRounds.map((r) => {
                     const groupCount = r.groups.length;
-                    const groupLabel = groupCount > 1 ? `${groupCount} груп, ` : '';
                     const extraCount = r.groups.reduce((sum, g) => sum + g.extraScrambles.length, 0);
-                    const extraLabel = extraCount > 0 ? ` + ${extraCount} extra` : '';
+                    const scramblesPerGroup = groupCount > 0 ? r.groups[0].scrambles.length : 0;
+                    const allSame = r.groups.every((g) => g.scrambles.length === scramblesPerGroup);
                     return (
                       <div key={r.roundNumber} style={{
-                        padding: '0.45rem 0.65rem', borderRadius: '7px',
+                        padding: '0.5rem 0.7rem', borderRadius: '7px',
                         background: 'rgba(34,197,94,0.06)',
                         border: '1px solid rgba(34,197,94,0.2)',
                         fontSize: '0.82rem',
                       }}>
-                        <span style={{ fontWeight: 600, color: '#4ade80' }}>
+                        <div style={{ fontWeight: 600, color: '#4ade80', marginBottom: groupCount > 1 ? '0.3rem' : 0 }}>
                           Раунд {r.roundNumber} · {r.roundLabel}
-                        </span>
-                        <span style={{ color: 'var(--muted)', marginLeft: '0.5rem' }}>
-                          — {groupLabel}{r.allScrambles.length} холилт{extraLabel}
-                        </span>
+                          <span style={{ fontWeight: 400, color: 'var(--muted)', marginLeft: '0.5rem' }}>
+                            — {groupCount > 1 ? `${groupCount} груп, ` : ''}{r.allScrambles.length} холилт
+                            {extraCount > 0 ? ` + ${extraCount} extra` : ''}
+                            {groupCount > 1 && allSame ? ` (${scramblesPerGroup}/груп)` : ''}
+                          </span>
+                        </div>
+                        {groupCount > 1 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginTop: '0.2rem' }}>
+                            {r.groups.map((g) => (
+                              <span key={g.name} style={{
+                                fontSize: '0.72rem', padding: '0.1rem 0.4rem', borderRadius: '4px',
+                                background: g.scrambles.length < 2
+                                  ? 'rgba(239,68,68,0.15)' : 'rgba(34,197,94,0.1)',
+                                border: `1px solid ${g.scrambles.length < 2 ? 'rgba(239,68,68,0.35)' : 'rgba(34,197,94,0.2)'}`,
+                                color: g.scrambles.length < 2 ? '#f87171' : 'var(--muted)',
+                              }}>
+                                {g.name}: {g.scrambles.length}
+                                {g.scrambles.length < 2 ? ' ⚠' : ''}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
