@@ -101,6 +101,15 @@ function tryMatchEventHeader(
 }
 
 // Parses a scramble data line in tab-separated or space-separated WCA export format.
+//
+// Real WCA clipboard paste produces two distinct row shapes:
+//   Group-start:    "A\t1\tU2 B F..."       → 3 cols (group letter, index, scramble)
+//   Continuation:   "2\tU L U2..."           → 2 cols (index, scramble) — NO leading tab
+//   Extra:          "Extra 1\tU B2 R..."     → 2 cols
+//
+// The old "cols < 3 → skip" rule killed every continuation row.
+// Fix: filter empty tokens, then detect group-start by whether the first
+// non-empty token is a single A-Z letter.
 function tryParseScrambleLine(line: string): {
   groupLetter: string | null;
   isExtra: boolean;
@@ -111,30 +120,26 @@ function tryParseScrambleLine(line: string): {
   let scramble: string;
 
   if (line.includes('\t')) {
-    const cols = line.split('\t');
-    // Need at least: [group/empty, index, scramble] = 3 cols minimum.
-    // But real WCA exports can have extra columns between index and scramble,
-    // so the scramble is always the LAST column, not necessarily cols[2].
-    if (cols.length < 3) {
-      console.log('[parse] SKIP (cols<3):', JSON.stringify(line), 'cols:', cols);
-      return null;
+    // Split by tab, trim each cell, drop empty leading/trailing cells.
+    const nonEmpty = line.split('\t').map(c => c.trim()).filter(c => c.length > 0);
+    // Need at minimum: [index, scramble]
+    if (nonEmpty.length < 2) return null;
+
+    const firstTok = nonEmpty[0];
+    const lastTok = nonEmpty[nonEmpty.length - 1];
+
+    if (/^[A-Z]$/.test(firstTok)) {
+      // Group-start row: first token is single letter (A, B, C…).
+      // Shape: [groupLetter, index, (optional middle cols…), scramble]
+      groupLetter = firstTok;
+      indexRaw = nonEmpty.length >= 3 ? nonEmpty[1] : '1';
+      scramble = lastTok;
+    } else {
+      // Continuation row: first token is the solve index or "Extra N".
+      groupLetter = null;
+      indexRaw = firstTok;
+      scramble = lastTok;
     }
-    const col0 = cols[0].trim();
-    const col1 = cols[1].trim();
-    // Scramble is always the last tab-column; intermediate columns (e.g. set names) are ignored.
-    const lastCol = cols[cols.length - 1].trim();
-    console.log('[parse] TAB line decision:', {
-      line: JSON.stringify(line),
-      numCols: cols.length,
-      col0,
-      col1,
-      lastCol,
-      isGroupStart: /^[A-Z]$/.test(col0),
-    });
-    if (!lastCol || !col1) return null;
-    groupLetter = /^[A-Z]$/.test(col0) ? col0 : null;
-    indexRaw = col1;
-    scramble = lastCol;
   } else {
     const m = line.match(/^([A-Z])?\s{1,}(Extra\s+\d+|\d+)\s{2,}(.+)$/);
     if (!m) return null;
@@ -168,7 +173,6 @@ function parseWcaExport(rawText: string, competitionEvents: string[]): BulkParse
   let cur: RawRound | null = null;
   let curGroup: ParsedGroup | null = null;
 
-  // Diagnostic: show every raw line with visible whitespace markers.
   console.log('[parse] RAW LINES:', rawText.split('\n').map((line, i) => ({
     i,
     visible: line.replace(/\r$/, '').replace(/\t/g, '→TAB→').replace(/^ +/, m => '·'.repeat(m.length)),
@@ -198,12 +202,6 @@ function parseWcaExport(rawText: string, competitionEvents: string[]): BulkParse
     if (!cur) continue;
 
     const parsed = tryParseScrambleLine(line);
-    console.log('[parse] loop decision:', {
-      line: JSON.stringify(line),
-      parsed,
-      curGroupName: curGroup?.name ?? null,
-      willAppend: parsed !== null,
-    });
     if (!parsed) continue;
 
     if (parsed.groupLetter && parsed.groupLetter !== (curGroup as ParsedGroup | null)?.name) {
@@ -259,6 +257,12 @@ function parseWcaExport(rawText: string, competitionEvents: string[]): BulkParse
       warnings.push(eventId);
     }
   }
+
+  console.log('[parse] FINAL:', allRounds.map(r => ({
+    event: r.eventId,
+    round: r.roundLabel,
+    groups: r.groups.map(g => ({ name: g.name, scrambles: g.scrambles.length, extras: g.extraScrambles.length })),
+  })));
 
   return { rounds: allRounds, byEvent, parseErrors: errors, warnings };
 }
