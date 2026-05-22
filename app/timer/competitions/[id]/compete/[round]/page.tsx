@@ -572,6 +572,14 @@ function SolvingPage() {
     return () => clearTimeout(t);
   }, [pendingSolve]);
 
+  // ── Auto-confirm after 60s (matches racing) ──
+  useEffect(() => {
+    if (!pendingSolve) return;
+    const id = window.setTimeout(() => { void confirmSolve(); }, 60_000);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSolve]);
+
   // ── Pointer + keyboard listeners (registered once, read from refs) ──
   useEffect(() => {
     function onPointerDown(e: PointerEvent) {
@@ -814,125 +822,222 @@ function SolvingPage() {
 
   const isLastSolve = solves.length + 1 >= totalSolves;
 
-  // Solve chips row height is ~80px; cube sits above it
-  const CUBE_BOTTOM = 88;
+  // Amber border when confirming, matches racing
+  const borderColor = pendingSolve ? C.warn : C.border;
 
   return (
     <div style={{
-      minHeight: '100dvh', background: C.bg, fontFamily: FONT, color: C.text,
-      display: 'flex', flexDirection: 'column', position: 'relative',
+      height: '100dvh', background: C.bg, fontFamily: FONT, color: C.text,
+      display: 'flex', flexDirection: 'column', overflow: 'hidden',
       userSelect: 'none', touchAction: 'none',
     }}>
-      {/* ── Header ── */}
-      {!showFocus && (
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '0.75rem 1rem', borderBottom: `1px solid ${C.border}`, flexShrink: 0,
-        }}>
+      {/* ── Header — always visible (matches racing) ── */}
+      <header style={{
+        flexShrink: 0,
+        padding: '0.3rem 0.55rem',
+        background: C.card,
+        borderBottom: `1px solid ${C.border}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      }}>
+        <button
+          data-ignore="1"
+          onClick={() => router.push(`/timer/competitions/${compId}/compete`)}
+          style={{
+            background: 'none', border: 'none', cursor: 'pointer',
+            fontSize: '0.82rem', fontWeight: 600, color: C.muted, fontFamily: FONT,
+            padding: '0.3rem 0.2rem',
+          }}
+        >
+          ← Дуусгах
+        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem',
+          fontSize: '0.82rem', color: C.muted }}>
+          <WcaEventIcon eventId={round.eventId} size={14} />
+          {round.roundName}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+          <span style={{ fontSize: '0.78rem', fontWeight: 700, fontFamily: MONO, color: C.accent }}>
+            {Math.min(currentSolveIndex + 1, totalSolves)}/{totalSolves}
+          </span>
           <button
             data-ignore="1"
-            onClick={() => router.push(`/timer/competitions/${compId}/compete`)}
-            style={{ background: 'none', border: 'none', cursor: 'pointer',
-              fontSize: '0.82rem', fontWeight: 600, color: C.muted, fontFamily: FONT }}
+            onClick={() => { setSettingsDraft(timerMode); setScrambleSizeDraft(scrambleSize); setInspectionEnabledDraft(inspectionEnabled); setSettingsOpen(true); }}
+            style={{
+              width: 34, height: 34, borderRadius: 8,
+              background: 'transparent', color: C.muted,
+              border: `1px solid ${C.border}`,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', fontFamily: 'inherit', fontSize: '1rem',
+            }}
+            aria-label="Тохиргоо"
           >
-            ← Дуусгах
+            ⚙
           </button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem',
-            fontSize: '0.82rem', color: C.muted }}>
-            <WcaEventIcon eventId={round.eventId} size={14} />
-            {round.roundName}
-          </div>
-          {/* Issue 3: progress counter + gear icon */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-            <span style={{ fontSize: '0.78rem', fontWeight: 700, fontFamily: MONO, color: C.accent }}>
-              {Math.min(currentSolveIndex + 1, totalSolves)}/{totalSolves}
-            </span>
-            <button
-              data-ignore="1"
-              onClick={() => { setSettingsDraft(timerMode); setScrambleSizeDraft(scrambleSize); setInspectionEnabledDraft(inspectionEnabled); setSettingsOpen(true); }}
-              style={{
-                background: 'none', border: 'none', cursor: 'pointer',
-                fontSize: '1rem', color: C.muted, lineHeight: 1, padding: '0.1rem 0',
-                fontFamily: FONT,
-              }}
-              aria-label="Тохиргоо"
-            >
-              ⚙
-            </button>
-          </div>
         </div>
-      )}
+      </header>
 
-      {/* ── Scramble text (no cube here — cube is bottom-right absolute) ── */}
-      {!showFocus && !pendingSolve && currentSolveIndex < totalSolves && (
-        <div style={{ flexShrink: 0, padding: '0.75rem 1rem 0' }}>
-          {noScrambles ? (
-            <div style={{ textAlign: 'center', padding: '0.75rem',
-              fontSize: '0.85rem', color: C.muted }}>
-              Холилтуудыг удирдагч бэлдэж байна...
-            </div>
-          ) : currentScramble ? (
+      {/* ── Scramble — always visible (matches racing) ── */}
+      <div style={{ flexShrink: 0, padding: '0.4rem 0.55rem 0' }}>
+        {noScrambles ? (
+          <div style={{
+            background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
+            padding: '0.4rem 0.55rem', minHeight: 38,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '0.82rem', color: C.muted, textAlign: 'center',
+          }}>
+            Холилтуудыг удирдагч бэлдэж байна...
+          </div>
+        ) : currentSolveIndex < totalSolves ? (
+          <div style={{
+            background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
+            padding: '0.4rem 0.55rem', minHeight: 38,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
             <div style={{
-              background: C.card, border: `1px solid ${C.border}`,
-              borderRadius: 12, padding: '0.65rem 0.85rem',
-              textAlign: 'center',
+              fontFamily: MONO,
+              fontSize: SCRAMBLE_FONT[scrambleSize],
+              fontWeight: 400, color: C.text, lineHeight: 1.45,
+              whiteSpace: 'pre-wrap', wordBreak: 'break-word', textAlign: 'center',
+              width: '100%',
             }}>
-              <div style={{
-                fontSize: SCRAMBLE_FONT[scrambleSize],
-                fontWeight: 600, fontFamily: MONO,
-                color: C.text, lineHeight: 1.65, letterSpacing: '0.03em',
-              }}>
-                {currentScramble}
-              </div>
+              {currentScramble || '—'}
             </div>
-          ) : (
-            // Scramble slot exists but no string yet (data gap)
-            <div style={{ textAlign: 'center', padding: '0.75rem',
-              fontSize: '0.82rem', color: C.muted }}>
-              Энэ эвлүүлэлтэд холилт оруулаагүй байна
-            </div>
-          )}
-        </div>
-      )}
+          </div>
+        ) : (
+          <div style={{
+            background: C.successDim, border: `1px solid ${C.success}`,
+            borderRadius: 12, padding: '0.6rem 0.85rem', textAlign: 'center',
+            color: C.success, fontWeight: 700, fontSize: '0.82rem',
+          }}>
+            Дууслаа — үр дүнг хүлээж байна…
+          </div>
+        )}
+      </div>
 
-      {/* ── Timer / Manual input ── */}
-      <div style={{
-        flex: 1, display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center',
-        padding: '1rem', minHeight: 160, position: 'relative',
-      }}>
+      {/* ── Timer box — flex:1, bordered, rounded — matches racing's touch target ── */}
+      <div
+        style={{
+          flex: '1 1 0%', minHeight: 0,
+          margin: '0.4rem 0.55rem',
+          background: 'transparent',
+          border: `1px solid ${borderColor}`,
+          borderRadius: 14, padding: '0.4rem',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer', textAlign: 'center',
+          touchAction: 'manipulation',
+          transition: 'border-color 0.12s',
+          overflow: 'hidden',
+        }}
+      >
         {timerMode === 'standard' && (
           <>
-            {isInspecting && timer.inspectionMs > 0 && (
-              <div style={{ fontSize: '0.65rem', letterSpacing: '0.12em',
-                textTransform: 'uppercase', color: C.muted, marginBottom: '0.5rem' }}>
-                INSPECTION
-              </div>
+            {isInspecting && (
+              <div style={{
+                fontSize: '0.65rem', letterSpacing: '0.15em',
+                textTransform: 'uppercase', color: C.warn,
+                marginBottom: '0.4rem', fontWeight: 700,
+              }}>Inspection</div>
             )}
             <div style={{
-              fontSize: 'clamp(3.5rem, 18vw, 8rem)',
-              fontWeight: 700, fontFamily: MONO, color: timerColor, lineHeight: 1,
-              transition: (isRunning || isArmed) ? 'none' : 'color 0.12s',
+              fontFamily: MONO,
+              fontSize: 'clamp(3rem, 18vw, 7rem)',
+              fontWeight: 800, lineHeight: 0.95,
+              fontVariantNumeric: 'tabular-nums',
+              color: timerColor,
+              transition: `color ${isRunning || isArmed ? 0 : 0.12}s`,
             }}>
               {timerDisplay}
             </div>
-            {isArmed && !timer.armedReady && !pendingSolve && (
-              <div style={{ fontSize: '0.75rem', color: C.muted, marginTop: '0.75rem' }}>
-                Удаан дарсаар байна...
+            <div style={{
+              fontSize: '0.7rem', color: C.muted,
+              marginTop: '0.35rem', letterSpacing: '0.04em', minHeight: '0.9rem',
+            }}>
+              {pendingSolve && 'Цагаа баталгаажуулна уу'}
+              {!pendingSolve && !isRunning && !isArmed && !isInspecting && 'Дарж эхлэх'}
+              {!pendingSolve && isInspecting && 'Дарж эхлэх'}
+              {!pendingSolve && isArmed && !timer.armedReady && (
+                <span style={{ color: C.danger, fontWeight: 700 }}>HOLD…</span>
+              )}
+              {!pendingSolve && isArmed && timer.armedReady && (
+                <span style={{ color: C.success, fontWeight: 700 }}>RELEASE TO START</span>
+              )}
+              {!pendingSolve && isRunning && 'Дарж зогсоох'}
+            </div>
+
+            {/* Pending confirm — inside the timer box, matches racing */}
+            {pendingSolve && (
+              <div
+                onPointerDown={(e) => e.stopPropagation()}
+                style={{
+                  marginTop: '1rem',
+                  display: 'flex', flexDirection: 'column', gap: '0.55rem',
+                  width: '100%', maxWidth: 360,
+                  position: 'relative', zIndex: 2,
+                }}
+              >
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+                  {(['none', '+2', 'dnf'] as const).map((p) => {
+                    const sel = pendingSolve.penalty === p;
+                    return (
+                      <button
+                        key={p} type="button" data-ignore="1"
+                        onClick={(e) => { e.stopPropagation(); setPendingSolve((ps) => ps ? { ...ps, penalty: p } : null); }}
+                        style={{
+                          background: sel ? C.accentDim : C.card,
+                          color: sel ? C.accent : C.text,
+                          border: `1px solid ${sel ? C.accent : C.border}`,
+                          borderRadius: 12, padding: '0.7rem 0.85rem',
+                          fontSize: '1rem', fontWeight: 800,
+                          fontFamily: 'inherit', cursor: 'pointer',
+                          letterSpacing: '0.02em',
+                          transition: 'background 0.12s, color 0.12s, border-color 0.12s',
+                        }}
+                      >
+                        {p === 'none' ? 'OK' : p.toUpperCase()}
+                      </button>
+                    );
+                  })}
+                </div>
+                <button
+                  type="button" data-ignore="1"
+                  disabled={!confirmArmed || submitting}
+                  onClick={(e) => { e.stopPropagation(); if (confirmArmed && !submitting) void confirmSolve(); }}
+                  style={{
+                    background: C.accent, color: '#0a0a0a',
+                    border: `1px solid ${C.accent}`, borderRadius: 12,
+                    padding: '0.85rem 1rem', fontSize: '1rem', fontWeight: 800,
+                    fontFamily: 'inherit', letterSpacing: '0.02em',
+                    cursor: confirmArmed && !submitting ? 'pointer' : 'not-allowed',
+                    opacity: confirmArmed && !submitting ? 1 : 0.4,
+                    transition: 'opacity 0.3s ease',
+                    pointerEvents: 'auto',
+                  }}
+                >
+                  {submitting ? 'Хадгалж байна...' : 'Баталгаажуулах ✓'}
+                </button>
+                <div style={{
+                  fontSize: '0.7rem', color: C.muted, textAlign: 'center',
+                  letterSpacing: '0.04em',
+                }}>
+                  {!confirmArmed
+                    ? 'Баталгаажуулах боломжтой болж байна...'
+                    : isLastSolve ? 'Дуусгах' : 'Автомат хадгалах: 60с'}
+                </div>
               </div>
             )}
           </>
         )}
 
+        {/* Manual entry — same cstimer-style as racing */}
         {timerMode === 'manual' && !pendingSolve && currentSolveIndex < totalSolves && (
           <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center',
             gap: '0.65rem', width: '100%', maxWidth: 320,
           }}>
-            {/* Live parsed time preview */}
             <div style={{
-              fontSize: 'clamp(3rem, 15vw, 6rem)', fontWeight: 700,
-              fontFamily: MONO, lineHeight: 1,
+              fontFamily: MONO, lineHeight: 0.95,
+              fontSize: 'clamp(3rem, 15vw, 6rem)', fontWeight: 800,
+              fontVariantNumeric: 'tabular-nums',
               color: manualInput ? C.text : C.muted,
             }}>
               {manualInput ? fmtMs(parseCstimerInput(manualInput), false, 'cs') : '0.00'}
@@ -962,203 +1067,193 @@ function SolvingPage() {
               onClick={handleManualSubmit}
               disabled={!manualInput}
               style={{
-                width: '100%', padding: '0.75rem', borderRadius: 10,
-                fontFamily: FONT, fontSize: '0.97rem', fontWeight: 700,
-                background: manualInput ? C.accentDim : 'rgba(255,255,255,0.04)',
-                border: `1px solid ${manualInput ? 'rgba(167,139,250,0.4)' : C.border}`,
-                color: manualInput ? C.accent : C.muted,
+                width: '100%', padding: '0.85rem 1rem', borderRadius: 12,
+                fontFamily: 'inherit', fontSize: '1rem', fontWeight: 800,
+                background: C.accent, color: '#0a0a0a',
+                border: `1px solid ${C.accent}`,
                 cursor: manualInput ? 'pointer' : 'not-allowed',
+                opacity: manualInput ? 1 : 0.4,
+                transition: 'opacity 0.3s ease',
+                letterSpacing: '0.02em',
                 boxSizing: 'border-box',
               }}
             >
-              Баталгаажуулах ↵
-            </button>
-          </div>
-        )}
-
-        {/* Pending confirm overlay */}
-        {pendingSolve && (
-          <div
-            data-ignore="1"
-            style={{
-              position: 'absolute', bottom: 0, left: 0, right: 0,
-              background: 'rgba(10,10,10,0.97)', borderTop: `1px solid ${C.border}`,
-              padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.65rem',
-              zIndex: 10,
-            }}
-          >
-            {!confirmArmed && (
-              <div style={{ textAlign: 'center', fontSize: '0.72rem', color: C.muted,
-                letterSpacing: '0.05em' }}>
-                Баталгаажуулах боломжтой болж байна...
-              </div>
-            )}
-            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
-              {(['none', '+2', 'dnf'] as const).map((p) => {
-                const active = pendingSolve.penalty === p;
-                return (
-                  <button key={p} type="button" data-ignore="1"
-                    onClick={() => setPendingSolve((prev) => prev ? { ...prev, penalty: p } : null)}
-                    style={{
-                      flex: 1, maxWidth: 100, padding: '0.55rem',
-                      borderRadius: 9, fontFamily: FONT, fontSize: '0.88rem', fontWeight: 700,
-                      border: `1px solid ${active ? (p === 'dnf' ? C.danger : p === '+2' ? C.warn : C.accent) : C.border}`,
-                      background: active ? (p === 'dnf' ? C.dangerDim : p === '+2' ? 'rgba(251,191,36,0.12)' : C.accentDim) : C.card,
-                      color: active ? (p === 'dnf' ? C.danger : p === '+2' ? C.warn : C.accent) : C.muted,
-                      cursor: 'pointer',
-                    }}>
-                    {p === 'none' ? 'OK' : p.toUpperCase()}
-                  </button>
-                );
-              })}
-            </div>
-            <div style={{ textAlign: 'center', fontFamily: MONO, fontSize: '0.85rem', color: C.muted }}>
-              {pendingSolve.penalty === 'dnf' ? 'DNF'
-                : pendingSolve.penalty === '+2' ? `${fmtMs(pendingSolve.ms + 2000, false, 'cs')} (+2)`
-                : fmtMs(pendingSolve.ms, false, 'cs')}
-            </div>
-            <button type="button" data-ignore="1"
-              onClick={() => { void confirmSolve(); }}
-              disabled={!confirmArmed || submitting}
-              style={{
-                width: '100%', padding: '0.78rem', borderRadius: 10,
-                fontFamily: FONT, fontSize: '0.97rem', fontWeight: 700,
-                background: confirmArmed && !submitting ? 'rgba(167,139,250,0.75)' : 'rgba(167,139,250,0.25)',
-                border: '1px solid rgba(167,139,250,0.9)',
-                color: confirmArmed ? '#fff' : C.muted,
-                cursor: confirmArmed && !submitting ? 'pointer' : 'not-allowed',
-                transition: 'background 0.2s, color 0.2s',
-              }}>
-              {submitting ? 'Хадгалж байна...' : !confirmArmed ? '...' : isLastSolve ? 'Дуусгах ✓' : 'Баталгаажуулах →'}
+              Баталгаажуулах ✓
             </button>
           </div>
         )}
       </div>
 
-      {/* ── Solve chips ── */}
-      {!showFocus && (
+      {/* ── Solve chips + cube row — SolveAndCubeRow style, always visible ── */}
+      <div style={{ flexShrink: 0, padding: '0 0.55rem 0.4rem' }}>
         <div style={{
-          flexShrink: 0, borderTop: `1px solid ${C.border}`,
-          padding: '0.65rem 1rem 1.1rem',
+          background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
+          padding: '0.4rem 0.5rem',
+          display: 'flex', flexDirection: 'column', gap: '0.25rem',
         }}>
           <div style={{
-            fontSize: '0.56rem', fontWeight: 800, letterSpacing: '0.12em',
-            textTransform: 'uppercase', color: C.muted, marginBottom: '0.4rem',
-            textAlign: 'center',
+            display: 'grid',
+            gridTemplateColumns: `minmax(0, 1fr) 92px`,
+            gap: '0.4rem', alignItems: 'center',
+          }}>
+            {/* Chip grid */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: `repeat(${totalSolves}, minmax(0, 1fr))`,
+              gap: '0.25rem', minWidth: 0,
+            }}>
+              {Array.from({ length: totalSolves }).map((_, i) => {
+                const s = solves[i];
+                const isCurrent = i === currentSolveIndex;
+                const usedExtra = !!scrambleOverrides[String(i)];
+                const tappable = !!s && canRequestExtraFor(i);
+                const dnf = s?.penalty === 'dnf';
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    data-ignore="1"
+                    onClick={() => { if (tappable) setExtraPopupSolveIdx(i); }}
+                    disabled={!tappable}
+                    className={isCurrent && !s ? 'vc-solve-current' : undefined}
+                    style={{
+                      fontFamily: MONO, fontSize: '0.74rem', fontWeight: 700,
+                      fontVariantNumeric: 'tabular-nums', textAlign: 'center',
+                      padding: '0.3rem 0.15rem',
+                      background: s ? '#1a1a1a' : 'transparent',
+                      border: `1px solid ${isCurrent ? C.accent : C.border}`,
+                      borderRadius: 999,
+                      color: isCurrent && !s ? C.accent : !s ? C.muted : dnf ? C.danger : C.text,
+                      minHeight: 28,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      gap: '0.2rem', overflow: 'hidden',
+                      cursor: tappable ? 'pointer' : 'default',
+                    }}
+                  >
+                    <span>
+                      {isCurrent && !s ? '●' : !s ? '—' : dnf ? 'DNF' : fmtSolve(s.ms, s.penalty)}
+                    </span>
+                    {usedExtra && s && (
+                      <span style={{ fontSize: '0.6rem', lineHeight: 1, flexShrink: 0 }}>🎲</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            {/* Cube — inline, matches racing */}
+            <div style={{
+              width: 92, height: 92,
+              background: '#1a1a1a', border: `1px solid ${C.border}`, borderRadius: 10,
+              padding: 2,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0, overflow: 'hidden',
+            }}>
+              {currentSolveIndex < totalSolves && currentScramble ? (
+                <CubeViewer eventId={round.eventId} scramble={currentScramble} />
+              ) : (
+                <div style={{
+                  fontSize: '0.58rem', letterSpacing: '0.12em',
+                  textTransform: 'uppercase', color: C.muted, fontWeight: 700,
+                }}>—</div>
+              )}
+            </div>
+          </div>
+          <div style={{
+            fontSize: '0.55rem', letterSpacing: '0.12em', textTransform: 'uppercase',
+            color: C.muted, fontWeight: 700, textAlign: 'center',
           }}>
             {formatLabel(round.format)}
           </div>
-          <div style={{ display: 'flex', gap: '0.3rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-            {Array.from({ length: totalSolves }).map((_, i) => {
-              const s = solves[i];
-              const isCurrent = i === currentSolveIndex;
-              const usedExtra = !!scrambleOverrides[String(i)];
-              const tappable = !!s && canRequestExtraFor(i);
-              return (
-                <div
-                  key={i}
-                  data-ignore="1"
-                  onClick={() => { if (tappable) setExtraPopupSolveIdx(i); }}
-                  style={{
-                    padding: '0.3rem 0.6rem', borderRadius: 8,
-                    background: isCurrent ? C.accentDim : s ? 'rgba(255,255,255,0.05)' : 'transparent',
-                    border: `1px solid ${isCurrent ? 'rgba(167,139,250,0.35)' : s ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.04)'}`,
-                    display: 'flex', alignItems: 'center', gap: '0.2rem',
-                    cursor: tappable ? 'pointer' : 'default',
-                    transition: 'opacity 0.1s',
-                  }}
-                >
-                  {usedExtra && <span style={{ fontSize: '0.6rem', lineHeight: 1 }}>🎲</span>}
-                  <span style={{
-                    fontSize: '0.82rem', fontFamily: MONO, fontWeight: s ? 600 : 400,
-                    color: s ? (s.penalty === 'dnf' ? C.danger : C.text) : isCurrent ? C.accent : C.muted,
-                  }}>
-                    {i + 1}. {s ? fmtSolve(s.ms, s.penalty) : isCurrent && pendingSolve ? '...' : '—'}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
         </div>
-      )}
+      </div>
 
-      {/* ── Issue 2: Cube preview — absolute bottom-right corner ── */}
-      {!pendingSolve && currentScramble && currentSolveIndex < totalSolves && (
-        <div
-          style={{
-            position: 'absolute',
-            bottom: CUBE_BOTTOM,
-            right: 16,
-            width: 80,
-            height: 80,
-            zIndex: 5,
-            opacity: 0.85,
-            pointerEvents: 'none',
-            borderRadius: 10,
-            overflow: 'hidden',
-          }}
-        >
-          <CubeViewer eventId={round.eventId} scramble={currentScramble} />
-        </div>
-      )}
-
-      {/* ── Extra scramble popup ── */}
-      {extraPopupSolveIdx !== null && (
-        <div
-          data-ignore="1"
-          style={{
-            position: 'fixed', inset: 0, zIndex: 100,
-            background: 'rgba(0,0,0,0.65)',
-            display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
-          }}
-          onClick={() => setExtraPopupSolveIdx(null)}
-        >
+      {/* ── Extra scramble popup — center modal (matches racing's SolveTapModal) ── */}
+      {extraPopupSolveIdx !== null && (() => {
+        const tapS = solves[extraPopupSolveIdx];
+        const tapDnf = tapS?.penalty === 'dnf';
+        const tapLabel = tapS ? (tapDnf ? 'DNF' : fmtSolve(tapS.ms, tapS.penalty)) : '';
+        const canExtra = usedExtras < 2;
+        return (
           <div
             data-ignore="1"
+            onClick={() => setExtraPopupSolveIdx(null)}
             style={{
-              background: '#1a1a1a', borderRadius: '16px 16px 0 0',
-              border: `1px solid ${C.border}`, borderBottom: 'none',
-              padding: '1.25rem 1.25rem 2rem',
+              position: 'fixed', inset: 0, zIndex: 1700,
+              background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: '1rem',
             }}
-            onClick={(e) => e.stopPropagation()}
           >
-            <div style={{
-              display: 'flex', justifyContent: 'space-between',
-              alignItems: 'center', marginBottom: '1rem',
-            }}>
-              <span style={{ fontSize: '0.95rem', fontWeight: 700, color: C.text }}>
-                {extraPopupSolveIdx + 1}. Эвлүүлэлт
-              </span>
-              <button
-                data-ignore="1"
-                onClick={() => setExtraPopupSolveIdx(null)}
-                style={{
-                  background: 'none', border: 'none', cursor: 'pointer',
-                  fontSize: '1rem', color: C.muted, padding: '0.2rem',
-                }}
-              >✕</button>
-            </div>
-            <button
-              data-ignore="1"
-              onClick={() => { void requestExtraScramble(extraPopupSolveIdx); }}
+            <div
+              onClick={(e) => e.stopPropagation()}
               style={{
-                width: '100%', padding: '0.78rem', borderRadius: 10,
-                fontFamily: FONT, fontSize: '0.97rem', fontWeight: 700,
-                background: 'rgba(251,191,36,0.12)',
-                border: '1px solid rgba(251,191,36,0.3)',
-                color: C.warn, cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem',
-                boxSizing: 'border-box',
+                width: '100%', maxWidth: '100%',
+                background: C.card, border: `1px solid ${C.border}`,
+                borderRadius: 16, boxShadow: '0 24px 60px rgba(0,0,0,0.7)',
+                display: 'flex', flexDirection: 'column', overflow: 'hidden',
               }}
             >
-              🎲 Нэмэлт холилт авах
-              <span style={{ fontSize: '0.8rem', color: C.muted }}>({2 - usedExtras} үлдсэн)</span>
-            </button>
+              <header style={{
+                padding: '0.95rem 1rem', borderBottom: `1px solid ${C.border}`,
+                display: 'flex', alignItems: 'baseline', gap: '0.45rem',
+              }}>
+                <span style={{ fontSize: '0.95rem', fontWeight: 800, color: C.text }}>
+                  Эвлүүлэлт {extraPopupSolveIdx + 1}
+                </span>
+                <span style={{
+                  marginLeft: 'auto', fontFamily: MONO,
+                  fontSize: '1rem', fontWeight: 800,
+                  color: tapDnf ? C.danger : C.text,
+                  fontVariantNumeric: 'tabular-nums',
+                }}>
+                  {tapLabel}
+                </span>
+              </header>
+              <div style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                {canExtra && (
+                  <button
+                    type="button" data-ignore="1"
+                    onClick={() => { void requestExtraScramble(extraPopupSolveIdx!); }}
+                    style={{
+                      background: C.accentDim, color: C.accent,
+                      border: `1px solid ${C.accent}`, borderRadius: 12,
+                      padding: '0.8rem 1rem', fontSize: '0.95rem', fontWeight: 800,
+                      fontFamily: 'inherit', cursor: 'pointer', letterSpacing: '0.02em',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      gap: '0.5rem',
+                    }}
+                  >
+                    🎲 <span>Нэмэлт холилт авах</span>
+                  </button>
+                )}
+                <div style={{ fontSize: '0.78rem', color: C.muted, textAlign: 'center', fontWeight: 600 }}>
+                  Үлдсэн: {2 - usedExtras}
+                </div>
+                <button
+                  type="button" data-ignore="1"
+                  onClick={() => setExtraPopupSolveIdx(null)}
+                  style={{
+                    background: 'transparent', color: C.text,
+                    border: `1px solid ${C.border}`, borderRadius: 12,
+                    padding: '0.7rem 1rem', fontSize: '0.95rem', fontWeight: 700,
+                    fontFamily: 'inherit', cursor: 'pointer', letterSpacing: '0.02em',
+                  }}
+                >Хаах</button>
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
-      {/* ── Issue 3: Settings bottom sheet ── */}
+      <style>{`
+        @keyframes vc-solve-current {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(167, 139, 250, 0); }
+          50%      { box-shadow: 0 0 14px 0 rgba(167, 139, 250, 0.55); }
+        }
+        .vc-solve-current { animation: vc-solve-current 1.2s ease-in-out infinite; }
+      `}</style>
+
+      {/* ── Settings bottom sheet ── */}
       {settingsOpen && (
         <div
           data-ignore="1"
