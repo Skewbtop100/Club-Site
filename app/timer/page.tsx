@@ -77,6 +77,8 @@ interface Theme {
   // doubles as the document body's solid fallback so overscroll on
   // mobile blends in). Black/white use plain bg.
   bgGradient?: string;
+  // Optional backdrop-filter value for card elements on this theme.
+  cardBlur?: string;
 }
 
 // Shared semantic constants that don't change per theme. Inspection-time
@@ -134,20 +136,21 @@ const THEMES: Record<ThemeId, Theme> = {
   ocean: {
     id: 'ocean',
     name: 'Blue',
-    preview: '#2563eb',
-    bgGradient: 'linear-gradient(180deg, #1e3a8a 0%, #2c4cf0 30%, #1e3a8a 100%)',
+    preview: '#2952f0',
+    bgGradient: 'linear-gradient(180deg, #1d3fd4 0%, #2952f0 45%, #1a37c0 100%)',
+    cardBlur: 'blur(12px)',
     colors: {
-      bg: '#2c4cf0',
-      card: 'rgba(255,255,255,0.08)',
-      cardAlt: 'rgba(255,255,255,0.12)',
-      border: 'rgba(255,255,255,0.18)',
-      borderHi: 'rgba(255,255,255,0.5)',
+      bg: '#2952f0',
+      card: 'rgba(255,255,255,0.10)',
+      cardAlt: 'rgba(255,255,255,0.15)',
+      border: 'rgba(255,255,255,0.16)',
+      borderHi: 'rgba(255,255,255,0.55)',
       text: '#ffffff',
-      muted: 'rgba(255,255,255,0.75)',
-      mutedDim: 'rgba(255,255,255,0.5)',
+      muted: 'rgba(255,255,255,0.82)',
+      mutedDim: 'rgba(255,255,255,0.58)',
       accent: '#ffffff',
       accent2: '#dbeafe',
-      accentDim: 'rgba(255,255,255,0.15)',
+      accentDim: 'rgba(255,255,255,0.18)',
       success: '#86efac',
       danger: '#fecaca',
       warning: '#fde047',
@@ -158,20 +161,21 @@ const THEMES: Record<ThemeId, Theme> = {
   forest: {
     id: 'forest',
     name: 'Red',
-    preview: '#dc2626',
-    bgGradient: 'linear-gradient(180deg, #b91c1c 0%, #e8311c 30%, #991b1b 100%)',
+    preview: '#e63420',
+    bgGradient: 'linear-gradient(180deg, #c5241a 0%, #e63420 45%, #a81d14 100%)',
+    cardBlur: 'blur(12px)',
     colors: {
-      bg: '#e8311c',
-      card: 'rgba(255,255,255,0.08)',
-      cardAlt: 'rgba(255,255,255,0.12)',
-      border: 'rgba(255,255,255,0.18)',
-      borderHi: 'rgba(255,255,255,0.5)',
+      bg: '#e63420',
+      card: 'rgba(255,255,255,0.10)',
+      cardAlt: 'rgba(255,255,255,0.15)',
+      border: 'rgba(255,255,255,0.16)',
+      borderHi: 'rgba(255,255,255,0.55)',
       text: '#ffffff',
-      muted: 'rgba(255,255,255,0.75)',
-      mutedDim: 'rgba(255,255,255,0.5)',
+      muted: 'rgba(255,255,255,0.82)',
+      mutedDim: 'rgba(255,255,255,0.58)',
       accent: '#ffffff',
       accent2: '#fecaca',
-      accentDim: 'rgba(255,255,255,0.15)',
+      accentDim: 'rgba(255,255,255,0.18)',
       success: '#86efac',
       danger: '#fff',
       warning: '#fde047',
@@ -182,20 +186,21 @@ const THEMES: Record<ThemeId, Theme> = {
   rose: {
     id: 'rose',
     name: 'Pink',
-    preview: '#e11d48',
-    bgGradient: 'linear-gradient(180deg, #be185d 0%, #dc2660 30%, #831843 100%)',
+    preview: '#e02568',
+    bgGradient: 'linear-gradient(180deg, #c01c54 0%, #e02568 45%, #a8164a 100%)',
+    cardBlur: 'blur(12px)',
     colors: {
-      bg: '#dc2660',
-      card: 'rgba(255,255,255,0.08)',
-      cardAlt: 'rgba(255,255,255,0.12)',
-      border: 'rgba(255,255,255,0.18)',
-      borderHi: 'rgba(255,255,255,0.5)',
+      bg: '#e02568',
+      card: 'rgba(255,255,255,0.10)',
+      cardAlt: 'rgba(255,255,255,0.15)',
+      border: 'rgba(255,255,255,0.16)',
+      borderHi: 'rgba(255,255,255,0.55)',
       text: '#ffffff',
-      muted: 'rgba(255,255,255,0.75)',
-      mutedDim: 'rgba(255,255,255,0.5)',
+      muted: 'rgba(255,255,255,0.82)',
+      mutedDim: 'rgba(255,255,255,0.58)',
       accent: '#ffffff',
       accent2: '#fce7f3',
-      accentDim: 'rgba(255,255,255,0.15)',
+      accentDim: 'rgba(255,255,255,0.18)',
       success: '#86efac',
       danger: '#fecaca',
       warning: '#fde047',
@@ -3765,6 +3770,21 @@ export default function TimerPage() {
         @keyframes pv-scramble-fade {
           0%   { opacity: 0.35; }
           100% { opacity: 1; }
+        }
+
+        /* Frosted-glass card treatment for vivid themes. --pv-card-blur is
+           set to the theme's cardBlur value (e.g. blur(12px)) or 'none'. */
+        .timer-page {
+          --pv-card-blur: ${THEMES[themeId].cardBlur ?? 'none'};
+        }
+        .timer-page .pv-sidebar,
+        .timer-page .pv-right-panel,
+        .timer-page .pv-scramble,
+        .timer-page .pv-mobile-header,
+        .timer-page .pv-mobile-stats,
+        .timer-page .pv-mobile-nav {
+          backdrop-filter: var(--pv-card-blur);
+          -webkit-backdrop-filter: var(--pv-card-blur);
         }
 
         /* Focus mode: while a solve is running, fade out everything
