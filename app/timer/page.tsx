@@ -4207,6 +4207,38 @@ function ToolsTab({
         ))}
       </div>
 
+      <div style={{ padding: '0 1rem', marginTop: '1.5rem', marginBottom: '1rem' }}>
+        <a
+          href="https://m.me/ch/AbZ1rFu-7_RtQf_g/"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            width: '100%',
+            padding: '0.85rem 1rem',
+            background: 'var(--card)',
+            border: '1px solid var(--border)',
+            borderRadius: '12px',
+            color: 'var(--text)',
+            fontSize: '0.9rem',
+            fontWeight: 600,
+            textDecoration: 'none',
+            cursor: 'pointer',
+            boxSizing: 'border-box',
+          }}
+          onMouseEnter={e => (e.currentTarget.style.filter = 'brightness(1.08)')}
+          onMouseLeave={e => (e.currentTarget.style.filter = '')}
+        >
+          <span style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            <IconComment size={18} />
+            Алдаа мэдээлэх
+          </span>
+          <IconArrowRight size={16} />
+        </a>
+      </div>
+
       <style>{`
         @keyframes pv-tile-fade {
           from { opacity: 0; transform: translateY(6px) scale(0.98); }

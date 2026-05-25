@@ -401,6 +401,22 @@ export function IconSettings(p: IconProps) {
   );
 }
 
+export function IconMessageCircle(p: IconProps) {
+  return (
+    <IconBase {...p}>
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </IconBase>
+  );
+}
+
+export function IconChevronRight(p: IconProps) {
+  return (
+    <IconBase {...p}>
+      <polyline points="9 18 15 12 9 6" />
+    </IconBase>
+  );
+}
+
 // ── Rank helper ────────────────────────────────────────────────────────────
 // Returns a medal icon for ranks 1–3, null otherwise. Replaces the
 // hand-rolled rank-emoji selectors we used to have inline.
