@@ -136,11 +136,11 @@ const THEMES: Record<ThemeId, Theme> = {
   ocean: {
     id: 'ocean',
     name: 'Blue',
-    preview: '#2952f0',
-    bgGradient: 'linear-gradient(180deg, #1d3fd4 0%, #2952f0 45%, #1a37c0 100%)',
+    preview: '#2541e0',
+    bgGradient: 'linear-gradient(180deg, #1a2fb8 0%, #2541e0 45%, #16259e 100%)',
     cardBlur: 'blur(12px)',
     colors: {
-      bg: '#2952f0',
+      bg: '#2541e0',
       card: 'rgba(255,255,255,0.10)',
       cardAlt: 'rgba(255,255,255,0.15)',
       border: 'rgba(255,255,255,0.16)',
@@ -161,11 +161,11 @@ const THEMES: Record<ThemeId, Theme> = {
   forest: {
     id: 'forest',
     name: 'Red',
-    preview: '#e63420',
-    bgGradient: 'linear-gradient(180deg, #c5241a 0%, #e63420 45%, #a81d14 100%)',
+    preview: '#d62a1a',
+    bgGradient: 'linear-gradient(180deg, #a81d14 0%, #d62a1a 45%, #8e1610 100%)',
     cardBlur: 'blur(12px)',
     colors: {
-      bg: '#e63420',
+      bg: '#d62a1a',
       card: 'rgba(255,255,255,0.10)',
       cardAlt: 'rgba(255,255,255,0.15)',
       border: 'rgba(255,255,255,0.16)',
@@ -186,11 +186,11 @@ const THEMES: Record<ThemeId, Theme> = {
   rose: {
     id: 'rose',
     name: 'Pink',
-    preview: '#e02568',
-    bgGradient: 'linear-gradient(180deg, #c01c54 0%, #e02568 45%, #a8164a 100%)',
+    preview: '#d01f5e',
+    bgGradient: 'linear-gradient(180deg, #a01548 0%, #d01f5e 45%, #8e1240 100%)',
     cardBlur: 'blur(12px)',
     colors: {
-      bg: '#e02568',
+      bg: '#d01f5e',
       card: 'rgba(255,255,255,0.10)',
       cardAlt: 'rgba(255,255,255,0.15)',
       border: 'rgba(255,255,255,0.16)',
