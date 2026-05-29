@@ -240,15 +240,48 @@ function ResultView({
   const ev = getEvent(round.eventId);
   const hist = round.historicalResults ?? [];
 
-  const rank = computeRank(
-    { best: result.best, average: result.average, format: round.format },
-    hist,
-  );
-  const total = hist.length + 1;
+  // Build combined ranked list (historical athletes + user)
+  const effMs = (v: number) => (v === -1 ? Infinity : v);
+  interface LBEntry { name: string; best: number; average: number; isUser: boolean; rank: number }
 
+  const allEntries: LBEntry[] = [
+    ...hist.map((h): LBEntry => ({ name: h.athleteName, best: h.best, average: h.average, isUser: false, rank: 0 })),
+    { name: 'Та', best: result.best, average: result.average, isUser: true, rank: 0 },
+  ];
+  allEntries.sort((a, b) => {
+    const da = effMs(a.average) - effMs(b.average);
+    if (da !== 0) return da;
+    return effMs(a.best) - effMs(b.best);
+  });
+  allEntries.forEach((e, i) => { e.rank = i + 1; });
+
+  const total = allEntries.length;
+  const userIndex = allEntries.findIndex((e) => e.isUser);
+  const rank = userIndex + 1;
+
+  // Determine leaderboard window: 2 above + user + 2 below, clamped at edges
+  let sliceStart: number;
+  let sliceEnd: number;
+  if (total <= 5) {
+    sliceStart = 0;
+    sliceEnd = total;
+  } else if (userIndex < 3) {
+    sliceStart = 0;
+    sliceEnd = 5;
+  } else if (userIndex >= total - 3) {
+    sliceStart = total - 5;
+    sliceEnd = total;
+  } else {
+    sliceStart = userIndex - 2;
+    sliceEnd = userIndex + 3;
+  }
+  const leaderboardRows = allEntries.slice(sliceStart, sliceEnd);
+
+  // Advancement check
+  const isFinal = round.advancementType === 'final';
   let advancedText: string | null = null;
   let advancedGreen = true;
-  if (round.advancementType !== 'final') {
+  if (!isFinal) {
     let threshold = 0;
     if (round.advancementType === 'fixed' && round.advancementValue != null) {
       threshold = round.advancementValue;
@@ -259,8 +292,8 @@ function ResultView({
       const advanced = rank <= threshold;
       advancedGreen = advanced;
       advancedText = advanced
-        ? `✓ Дараагийн раундад шилжих эрхтэй (Top ${threshold})`
-        : `✗ Дараагийн раундад шилжээгүй (#${rank} / Top ${threshold} шаардлагатай)`;
+        ? '✓ Дараагийн раундад шилжих эрхтэй'
+        : '✗ Дараагийн раундад шилжээгүй';
     }
   }
 
@@ -280,6 +313,7 @@ function ResultView({
         {ev?.name ?? round.eventId} · {round.roundName}
       </div>
 
+      {/* Solves + Best + Average */}
       <div style={{
         width: '100%', maxWidth: 400,
         background: C.card, border: `1px solid ${C.border}`,
@@ -321,31 +355,102 @@ function ResultView({
         </div>
       </div>
 
+      {/* Rank statement */}
       <div style={{
-        width: '100%', maxWidth: 400,
-        background: C.card, border: `1px solid ${C.border}`,
-        borderRadius: 14, padding: '0.9rem 1.25rem', marginBottom: '0.75rem',
-        display: 'flex', alignItems: 'center', gap: '0.75rem',
+        width: '100%', maxWidth: 400, marginBottom: '1.25rem',
+        fontSize: '1rem', fontWeight: 600, color: C.muted,
+        textAlign: 'center',
       }}>
-        <div style={{ fontSize: '1.5rem' }}>🏆</div>
-        <div>
-          <div style={{ fontSize: '1.05rem', fontWeight: 700 }}>#{rank} байрт орлоо</div>
-          <div style={{ fontSize: '0.78rem', color: C.muted }}>{total} хүний дотор</div>
-        </div>
+        Та{' '}
+        <span style={{ color: C.accent, fontSize: '1.15rem', fontWeight: 800 }}>{rank}</span>
+        {' '}/ {total} байрт
       </div>
 
-      {advancedText && (
+      {/* Mini leaderboard — only when there are competitors to show */}
+      {hist.length > 0 && (
+        <div style={{
+          width: '100%', maxWidth: 400,
+          background: C.card, border: `1px solid ${C.border}`,
+          borderRadius: 14, padding: '0.85rem 1rem', marginBottom: '0.75rem',
+        }}>
+          <div style={{
+            fontSize: '0.62rem', fontWeight: 800, letterSpacing: '0.1em',
+            textTransform: 'uppercase', color: C.muted,
+            textAlign: 'center', marginBottom: '0.85rem',
+          }}>
+            Өрсөлдөгчид
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
+            {leaderboardRows.map((entry) => (
+              <div
+                key={entry.rank}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '2.4rem 1fr 3.8rem 3.8rem',
+                  alignItems: 'center',
+                  gap: '0.3rem',
+                  padding: '0.48rem 0.55rem',
+                  borderRadius: 8,
+                  background: entry.isUser ? 'rgba(167,139,250,0.12)' : 'transparent',
+                  border: `1px solid ${entry.isUser ? 'rgba(167,139,250,0.22)' : 'transparent'}`,
+                }}
+              >
+                <span style={{
+                  fontFamily: MONO, fontSize: '0.76rem', fontWeight: entry.isUser ? 700 : 400,
+                  color: entry.isUser ? C.accent : C.muted,
+                }}>
+                  #{entry.rank}
+                </span>
+                <span style={{
+                  fontSize: '0.82rem', fontWeight: entry.isUser ? 700 : 400,
+                  color: entry.isUser ? C.text : C.muted,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  {entry.name}
+                </span>
+                <span style={{
+                  fontFamily: MONO, fontSize: '0.76rem', textAlign: 'right',
+                  color: entry.isUser ? C.text : C.muted,
+                }}>
+                  {fmtTime(entry.best)}
+                </span>
+                {round.format !== 'bo1' && (
+                  <span style={{
+                    fontFamily: MONO, fontSize: '0.76rem', textAlign: 'right',
+                    color: entry.isUser ? C.text : C.muted,
+                  }}>
+                    {fmtTime(entry.average)}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Advancement status */}
+      {isFinal ? (
         <div style={{
           width: '100%', maxWidth: 400,
           padding: '0.75rem 1rem', borderRadius: 10, marginBottom: '0.75rem',
-          background: advancedGreen ? C.successDim : C.dangerDim,
-          border: `1px solid ${advancedGreen ? 'rgba(52,211,153,0.3)' : 'rgba(239,68,68,0.3)'}`,
+          background: 'rgba(255,255,255,0.04)', border: `1px solid ${C.border}`,
+          fontSize: '0.85rem', fontWeight: 600, color: C.muted, textAlign: 'center',
+        }}>
+          Финалын раунд
+        </div>
+      ) : advancedText ? (
+        <div style={{
+          width: '100%', maxWidth: 400,
+          padding: '0.75rem 1rem', borderRadius: 10, marginBottom: '0.75rem',
+          background: advancedGreen ? C.successDim : 'rgba(255,255,255,0.04)',
+          border: `1px solid ${advancedGreen ? 'rgba(52,211,153,0.3)' : C.border}`,
           fontSize: '0.85rem', fontWeight: 600,
-          color: advancedGreen ? C.success : C.danger,
+          color: advancedGreen ? C.success : C.muted,
+          textAlign: 'center',
         }}>
           {advancedText}
         </div>
-      )}
+      ) : null}
 
       <Link
         href={`/timer/competitions/${compId}/compete`}
@@ -357,7 +462,7 @@ function ResultView({
           color: C.muted, textDecoration: 'none',
         }}
       >
-        ← Буцах
+        ← Тэмцээний хуудас руу
       </Link>
     </div>
   );
