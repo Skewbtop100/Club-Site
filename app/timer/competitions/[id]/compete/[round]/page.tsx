@@ -240,13 +240,31 @@ function ResultView({
   const ev = getEvent(round.eventId);
   const hist = round.historicalResults ?? [];
 
-  // Build combined ranked list (historical athletes + user)
+  const [expandedRank, setExpandedRank] = useState<number | null>(null);
+  const userRowRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // Build combined ranked list (historical athletes + user) including individual solve data
   const effMs = (v: number) => (v === -1 ? Infinity : v);
-  interface LBEntry { name: string; best: number; average: number; isUser: boolean; rank: number }
+  type LBEntry = {
+    name: string; best: number; average: number;
+    isUser: boolean; rank: number;
+    times: number[]; penalties: ('none' | '+2' | 'dnf')[];
+  };
 
   const allEntries: LBEntry[] = [
-    ...hist.map((h): LBEntry => ({ name: h.athleteName, best: h.best, average: h.average, isUser: false, rank: 0 })),
-    { name: 'Та', best: result.best, average: result.average, isUser: true, rank: 0 },
+    ...hist.map((h): LBEntry => ({
+      name: h.athleteName, best: h.best, average: h.average,
+      isUser: false, rank: 0,
+      times: h.times ?? [],
+      penalties: (h.penalties ?? []) as ('none' | '+2' | 'dnf')[],
+    })),
+    {
+      name: 'Та', best: result.best, average: result.average,
+      isUser: true, rank: 0,
+      times: result.solves.map((s) => s.ms),
+      penalties: result.solves.map((s) => s.penalty),
+    },
   ];
   allEntries.sort((a, b) => {
     const da = effMs(a.average) - effMs(b.average);
@@ -259,23 +277,13 @@ function ResultView({
   const userIndex = allEntries.findIndex((e) => e.isUser);
   const rank = userIndex + 1;
 
-  // Determine leaderboard window: 2 above + user + 2 below, clamped at edges
-  let sliceStart: number;
-  let sliceEnd: number;
-  if (total <= 5) {
-    sliceStart = 0;
-    sliceEnd = total;
-  } else if (userIndex < 3) {
-    sliceStart = 0;
-    sliceEnd = 5;
-  } else if (userIndex >= total - 3) {
-    sliceStart = total - 5;
-    sliceEnd = total;
-  } else {
-    sliceStart = userIndex - 2;
-    sliceEnd = userIndex + 3;
-  }
-  const leaderboardRows = allEntries.slice(sliceStart, sliceEnd);
+  // Center user row in the scroll container on first render
+  useEffect(() => {
+    const row = userRowRef.current;
+    const container = scrollContainerRef.current;
+    if (!row || !container) return;
+    container.scrollTop = row.offsetTop - container.clientHeight / 2 + row.offsetHeight / 2;
+  }, []);
 
   // Advancement check
   const isFinal = round.advancementType === 'final';
@@ -296,6 +304,51 @@ function ResultView({
         : '✗ Дараагийн раундад шилжээгүй';
     }
   }
+
+  // Render individual solves in WCA bracket format: (best) x x x (worst) for avg5
+  function renderExpanded(entry: LBEntry) {
+    if (entry.times.length === 0) return null;
+    const effs = entry.times.map((t, i) => {
+      const pen = entry.penalties[i] ?? 'none';
+      if (pen === 'dnf') return Infinity;
+      return pen === '+2' ? t + 2000 : t;
+    });
+    let bestIdx = -1, worstIdx = -1;
+    if (round.format === 'avg5' && effs.length >= 5) {
+      let lo = Infinity, hi = -Infinity;
+      effs.forEach((v, i) => {
+        if (v < lo) { lo = v; bestIdx = i; }
+        if (v > hi) { hi = v; worstIdx = i; }
+      });
+    }
+    return (
+      <div style={{
+        display: 'flex', flexWrap: 'wrap', gap: '0.25rem 0.55rem',
+        justifyContent: 'center', padding: '0.55rem 0.5rem 0.5rem',
+        fontFamily: MONO, fontSize: '0.73rem',
+      }}>
+        {entry.times.map((t, i) => {
+          const pen = entry.penalties[i] ?? 'none';
+          const isBrk = i === bestIdx || i === worstIdx;
+          let txt: string;
+          if (pen === 'dnf') txt = 'DNF';
+          else if (pen === '+2') txt = `${fmtMs(t + 2000, false, 'cs')}+`;
+          else txt = fmtMs(t, false, 'cs');
+          return (
+            <span key={i} style={{ color: isBrk ? C.muted : C.text, opacity: isBrk ? 0.65 : 1 }}>
+              {isBrk ? `(${txt})` : txt}
+            </span>
+          );
+        })}
+      </div>
+    );
+  }
+
+  const COLS = round.format !== 'bo1' ? '2.4rem 1fr 3.8rem 3.8rem' : '2.4rem 1fr 3.8rem';
+  const colHdr = {
+    fontSize: '0.62rem' as const, fontWeight: 800 as const,
+    letterSpacing: '0.08em', textTransform: 'uppercase' as const, color: C.muted,
+  };
 
   return (
     <div style={{
@@ -366,64 +419,108 @@ function ResultView({
         {' '}/ {total} байрт
       </div>
 
-      {/* Mini leaderboard — only when there are competitors to show */}
+      {/* Full leaderboard — scrollable, auto-centered on user row */}
       {hist.length > 0 && (
         <div style={{
           width: '100%', maxWidth: 400,
           background: C.card, border: `1px solid ${C.border}`,
-          borderRadius: 14, padding: '0.85rem 1rem', marginBottom: '0.75rem',
+          borderRadius: 14, overflow: 'hidden', marginBottom: '0.75rem',
         }}>
+          {/* Section label */}
           <div style={{
             fontSize: '0.62rem', fontWeight: 800, letterSpacing: '0.1em',
             textTransform: 'uppercase', color: C.muted,
-            textAlign: 'center', marginBottom: '0.85rem',
+            textAlign: 'center', padding: '0.75rem 1rem 0.5rem',
           }}>
             Өрсөлдөгчид
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
-            {leaderboardRows.map((entry) => (
-              <div
-                key={entry.rank}
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '2.4rem 1fr 3.8rem 3.8rem',
-                  alignItems: 'center',
-                  gap: '0.3rem',
-                  padding: '0.48rem 0.55rem',
-                  borderRadius: 8,
-                  background: entry.isUser ? 'rgba(167,139,250,0.12)' : 'transparent',
-                  border: `1px solid ${entry.isUser ? 'rgba(167,139,250,0.22)' : 'transparent'}`,
-                }}
-              >
-                <span style={{
-                  fontFamily: MONO, fontSize: '0.76rem', fontWeight: entry.isUser ? 700 : 400,
-                  color: entry.isUser ? C.accent : C.muted,
-                }}>
-                  #{entry.rank}
-                </span>
-                <span style={{
-                  fontSize: '0.82rem', fontWeight: entry.isUser ? 700 : 400,
-                  color: entry.isUser ? C.text : C.muted,
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>
-                  {entry.name}
-                </span>
-                <span style={{
-                  fontFamily: MONO, fontSize: '0.76rem', textAlign: 'right',
-                  color: entry.isUser ? C.text : C.muted,
-                }}>
-                  {fmtTime(entry.best)}
-                </span>
-                {round.format !== 'bo1' && (
-                  <span style={{
-                    fontFamily: MONO, fontSize: '0.76rem', textAlign: 'right',
-                    color: entry.isUser ? C.text : C.muted,
+
+          {/* Column headers — above the scroll container so always visible */}
+          <div style={{
+            display: 'grid', gridTemplateColumns: COLS, gap: '0.3rem',
+            padding: '0.3rem 0.55rem',
+            borderBottom: `1px solid ${C.border}`,
+          }}>
+            <span style={colHdr}>#</span>
+            <span style={colHdr}>Нэр</span>
+            <span style={{ ...colHdr, textAlign: 'right' }}>Best</span>
+            {round.format !== 'bo1' && (
+              <span style={{ ...colHdr, textAlign: 'right' }}>Avg</span>
+            )}
+          </div>
+
+          {/* Rows — fixed height (~5 rows), hidden scrollbar */}
+          <style>{`.vc-lb-noscroll::-webkit-scrollbar{display:none}`}</style>
+          <div
+            ref={scrollContainerRef}
+            className="vc-lb-noscroll"
+            style={{ height: '180px', overflowY: 'scroll', scrollbarWidth: 'none' }}
+          >
+            {allEntries.map((entry) => {
+              const isExp = expandedRank === entry.rank;
+              return (
+                <div key={entry.rank} ref={entry.isUser ? userRowRef : undefined}>
+                  {/* Main row */}
+                  <div style={{
+                    display: 'grid', gridTemplateColumns: COLS,
+                    alignItems: 'center', gap: '0.3rem',
+                    padding: '0.48rem 0.55rem',
+                    background: entry.isUser ? 'rgba(167,139,250,0.12)' : 'transparent',
+                    border: `1px solid ${entry.isUser ? 'rgba(167,139,250,0.22)' : 'transparent'}`,
+                    borderRadius: isExp ? '8px 8px 0 0' : 8,
                   }}>
-                    {fmtTime(entry.average)}
-                  </span>
-                )}
-              </div>
-            ))}
+                    <span style={{
+                      fontFamily: MONO, fontSize: '0.76rem',
+                      fontWeight: entry.isUser ? 700 : 400,
+                      color: entry.isUser ? C.accent : C.muted,
+                    }}>
+                      #{entry.rank}
+                    </span>
+                    <span style={{
+                      fontSize: '0.82rem', fontWeight: entry.isUser ? 700 : 400,
+                      color: entry.isUser ? C.text : C.muted,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                      {entry.name}
+                    </span>
+                    <span style={{
+                      fontFamily: MONO, fontSize: '0.76rem', textAlign: 'right',
+                      color: entry.isUser ? C.text : C.muted,
+                    }}>
+                      {fmtTime(entry.best)}
+                    </span>
+                    {round.format !== 'bo1' && (
+                      <span
+                        onClick={() => setExpandedRank(isExp ? null : entry.rank)}
+                        style={{
+                          fontFamily: MONO, fontSize: '0.76rem', textAlign: 'right',
+                          color: entry.isUser ? C.text : C.muted,
+                          cursor: entry.times.length > 0 ? 'pointer' : 'default',
+                          userSelect: 'none',
+                          textDecoration: isExp ? 'underline' : 'none',
+                          textUnderlineOffset: '2px',
+                        }}
+                      >
+                        {fmtTime(entry.average)}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Expanded individual solves */}
+                  {isExp && entry.times.length > 0 && (
+                    <div style={{
+                      background: entry.isUser ? 'rgba(167,139,250,0.07)' : 'rgba(255,255,255,0.03)',
+                      borderLeft: `1px solid ${entry.isUser ? 'rgba(167,139,250,0.22)' : C.border}`,
+                      borderRight: `1px solid ${entry.isUser ? 'rgba(167,139,250,0.22)' : C.border}`,
+                      borderBottom: `1px solid ${entry.isUser ? 'rgba(167,139,250,0.22)' : C.border}`,
+                      borderRadius: '0 0 8px 8px',
+                    }}>
+                      {renderExpanded(entry)}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
