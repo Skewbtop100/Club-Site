@@ -240,6 +240,7 @@ function ResultView({
   const ev = getEvent(round.eventId);
   const hist = round.historicalResults ?? [];
 
+  const { user } = useAuth();
   const [expandedRank, setExpandedRank] = useState<number | null>(null);
   const userRowRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -260,7 +261,7 @@ function ResultView({
       penalties: (h.penalties ?? []) as ('none' | '+2' | 'dnf')[],
     })),
     {
-      name: 'Та', best: result.best, average: result.average,
+      name: user?.displayName ?? 'Та', best: result.best, average: result.average,
       isUser: true, rank: 0,
       times: result.solves.map((s) => s.ms),
       penalties: result.solves.map((s) => s.penalty),
@@ -277,12 +278,9 @@ function ResultView({
   const userIndex = allEntries.findIndex((e) => e.isUser);
   const rank = userIndex + 1;
 
-  // Center user row in the scroll container on first render
+  // Scroll user row into view (centered) immediately on mount
   useEffect(() => {
-    const row = userRowRef.current;
-    const container = scrollContainerRef.current;
-    if (!row || !container) return;
-    container.scrollTop = row.offsetTop - container.clientHeight / 2 + row.offsetHeight / 2;
+    userRowRef.current?.scrollIntoView({ block: 'center', behavior: 'auto' });
   }, []);
 
   // Advancement check
