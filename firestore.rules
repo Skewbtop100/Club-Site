@@ -93,6 +93,29 @@ service cloud.firestore {
         allow update: if isAdmin();
         allow delete: if isAdmin();
       }
+
+      match /attempts/{attemptId} {
+        allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
+        allow read: if isAdmin();
+        allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
+        allow update: if isSignedIn() && resource.data.uid == request.auth.uid;
+        allow delete: if isAdmin();
+
+        match /results/{resultId} {
+          allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
+          allow read: if isAdmin();
+          allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
+          allow update: if isSignedIn() && resource.data.uid == request.auth.uid;
+          allow update: if isAdmin();
+          allow delete: if isAdmin();
+        }
+      }
+    }
+
+    // Collection group rule — enables collectionGroup('attempts') queries filtered by uid
+    match /{path=**}/attempts/{attemptId} {
+      allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow read: if isAdmin();
     }
 
   }
