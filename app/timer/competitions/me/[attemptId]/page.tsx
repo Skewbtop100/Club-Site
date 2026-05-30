@@ -49,9 +49,7 @@ function fmtTime(ms: number): string {
 
 function fmtDate(ts: { toMillis: () => number } | undefined): string {
   if (!ts) return '—';
-  return new Date(ts.toMillis()).toLocaleDateString('mn-MN', {
-    year: 'numeric', month: 'short', day: 'numeric',
-  });
+  return new Date(ts.toMillis()).toISOString().slice(0, 10);
 }
 
 function fmtSolve(ms: number, penalty: 'none' | '+2' | 'dnf'): string {
@@ -409,26 +407,33 @@ function AttemptDetailInner() {
       <div style={{ flex: 1, overflowY: 'auto', padding: '1.25rem 1rem 3rem' }}>
         <div style={{ maxWidth: 480, margin: '0 auto' }}>
           {/* Title */}
-          <h1 style={{ fontSize: '1.25rem', fontWeight: 700, margin: '0 0 0.25rem' }}>
+          <h1 style={{ fontSize: '1.25rem', fontWeight: 700, margin: '0 0 0.2rem' }}>
             {attempt.attemptNumber}-р оролдлого
           </h1>
-          <div style={{ fontSize: '0.78rem', color: C.muted, fontFamily: MONO, marginBottom: '0.4rem' }}>
+          <div style={{ fontSize: '0.82rem', color: C.text, fontWeight: 600, marginBottom: '0.55rem' }}>
             {comp.name}
           </div>
           <div style={{
-            fontSize: '0.72rem', color: C.muted, marginBottom: '1.5rem',
-            display: 'flex', alignItems: 'center', gap: '0.5rem',
+            fontSize: '0.71rem', color: C.muted, fontFamily: MONO,
+            lineHeight: 1.7, marginBottom: '1.5rem',
           }}>
-            <span>{fmtDate(attempt.finishedAt ?? attempt.startedAt)}</span>
-            <span>·</span>
-            <span>{attempt.registeredEvents.length} төрөл</span>
-            {attempt.status === 'in_progress' && (
-              <span style={{
-                padding: '0.1rem 0.45rem', borderRadius: 999, fontSize: '0.6rem',
-                fontWeight: 800, background: 'rgba(167,139,250,0.15)', color: C.accent,
-                border: '1px solid rgba(167,139,250,0.3)', letterSpacing: '0.06em',
-              }}>ЯВАГДАЖ БАЙНА</span>
-            )}
+            <div>Тэмцээний огноо: {comp.date}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+              <span>
+                {attempt.status === 'in_progress'
+                  ? 'Явагдаж байна'
+                  : `Оролцсон: ${fmtDate(attempt.finishedAt ?? attempt.startedAt)}`}
+              </span>
+              <span>·</span>
+              <span>{attempt.registeredEvents.length} төрөл</span>
+              {attempt.status === 'in_progress' && (
+                <span style={{
+                  padding: '0.1rem 0.45rem', borderRadius: 999, fontSize: '0.6rem',
+                  fontWeight: 800, background: 'rgba(167,139,250,0.15)', color: C.accent,
+                  border: '1px solid rgba(167,139,250,0.3)', letterSpacing: '0.06em',
+                }}>ЯВАГДАЖ БАЙНА</span>
+              )}
+            </div>
           </div>
 
           {/* Results by event */}

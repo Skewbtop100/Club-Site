@@ -3,9 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import {
-  getAllMyAttempts,
-} from '@/lib/firebase/services/virtual-competitions';
+import { getAllMyAttempts } from '@/lib/firebase/services/virtual-competitions';
 import type {
   VirtualCompetition,
   CompetitionAttempt,
@@ -35,18 +33,12 @@ const MONO = '"JetBrains Mono", "Fira Code", monospace';
 
 function fmtDate(ts: { toMillis: () => number } | undefined): string {
   if (!ts) return '—';
-  return new Date(ts.toMillis()).toLocaleDateString('mn-MN', {
-    year: 'numeric', month: 'short', day: 'numeric',
-  });
+  return new Date(ts.toMillis()).toISOString().slice(0, 10);
 }
 
-function ordinal(n: number): string {
-  return `${n}-р`;
-}
+// ─── Attempt row ──────────────────────────────────────────────────────────────
 
-// ─── Attempt card ─────────────────────────────────────────────────────────────
-
-function AttemptCard({
+function AttemptRow({
   comp,
   attempt,
 }: {
@@ -54,6 +46,8 @@ function AttemptCard({
   attempt: CompetitionAttempt;
 }) {
   const isInProgress = attempt.status === 'in_progress';
+  const attemptDate = fmtDate(attempt.finishedAt ?? attempt.startedAt);
+
   return (
     <div style={{
       background: C.card,
@@ -61,24 +55,34 @@ function AttemptCard({
       borderRadius: 12,
       overflow: 'hidden',
     }}>
-      {/* Attempt header */}
+      {/* Row header */}
       <div style={{
-        padding: '0.85rem 1rem',
-        borderBottom: `1px solid ${C.border}`,
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '0.75rem 1rem 0.6rem',
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+        gap: '0.5rem',
       }}>
-        <div>
-          <div style={{ fontSize: '0.88rem', fontWeight: 700, color: isInProgress ? C.accent : C.text, marginBottom: '0.1rem' }}>
-            {ordinal(attempt.attemptNumber)} оролдлого
+        <div style={{ minWidth: 0 }}>
+          <div style={{
+            fontSize: '0.88rem', fontWeight: 700,
+            color: isInProgress ? C.accent : C.text,
+            marginBottom: '0.2rem',
+          }}>
+            {attempt.attemptNumber}-р оролдлого
           </div>
-          <div style={{ fontSize: '0.72rem', color: C.muted, fontFamily: MONO }}>
-            {isInProgress
-              ? 'Үргэлжилж байна'
-              : fmtDate(attempt.finishedAt ?? attempt.startedAt)} · {attempt.registeredEvents.length} төрөл
+          <div style={{ fontSize: '0.71rem', color: C.muted, fontFamily: MONO, lineHeight: 1.55 }}>
+            {isInProgress ? (
+              'Үргэлжилж байна'
+            ) : (
+              <>Оролцсон: {attemptDate}</>
+            )}
+          </div>
+          <div style={{ fontSize: '0.71rem', color: C.muted, marginTop: '0.1rem' }}>
+            {attempt.registeredEvents.length} төрөл
           </div>
         </div>
         {isInProgress ? (
           <span style={{
+            flexShrink: 0,
             fontSize: '0.62rem', fontWeight: 800, letterSpacing: '0.07em',
             padding: '0.18rem 0.55rem', borderRadius: 999,
             background: 'rgba(167,139,250,0.15)', color: C.accent,
@@ -88,6 +92,7 @@ function AttemptCard({
           </span>
         ) : (
           <span style={{
+            flexShrink: 0,
             fontSize: '0.62rem', fontWeight: 800, letterSpacing: '0.07em',
             padding: '0.18rem 0.55rem', borderRadius: 999,
             background: 'rgba(52,211,153,0.12)', color: C.success,
@@ -98,26 +103,29 @@ function AttemptCard({
         )}
       </div>
 
-      {/* Events summary */}
-      <div style={{ padding: '0.65rem 1rem', display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+      {/* Events chips */}
+      <div style={{
+        padding: '0 1rem 0.55rem',
+        display: 'flex', flexWrap: 'wrap', gap: '0.35rem',
+      }}>
         {attempt.registeredEvents.map((eid) => {
           const ev = getEvent(eid);
           return (
             <div key={eid} style={{
-              display: 'flex', alignItems: 'center', gap: '0.3rem',
+              display: 'flex', alignItems: 'center', gap: '0.28rem',
               background: 'rgba(255,255,255,0.04)', border: `1px solid ${C.border}`,
-              borderRadius: 8, padding: '0.2rem 0.5rem',
+              borderRadius: 7, padding: '0.18rem 0.45rem',
             }}>
-              <WcaEventIcon eventId={eid} size={13} />
-              <span style={{ fontSize: '0.7rem', color: C.muted }}>{ev?.name ?? eid}</span>
+              <WcaEventIcon eventId={eid} size={12} />
+              <span style={{ fontSize: '0.68rem', color: C.muted }}>{ev?.name ?? eid}</span>
             </div>
           );
         })}
       </div>
 
-      {/* Footer */}
+      {/* Footer CTA */}
       <div style={{
-        padding: '0.6rem 1rem',
+        padding: '0.55rem 1rem',
         borderTop: `1px solid ${C.border}`,
         display: 'flex', justifyContent: 'flex-end',
       }}>
@@ -181,7 +189,7 @@ export default function MyAttemptsPage() {
         const entries = await getAllMyAttempts(user!.uid);
         if (cancelled) return;
 
-        // Group by competition, preserving comp order (first occurrence)
+        // Group by competition
         const compOrder: string[] = [];
         const compMap = new Map<string, { comp: VirtualCompetition; attempts: CompetitionAttempt[] }>();
         for (const { comp, attempt } of entries) {
@@ -191,12 +199,30 @@ export default function MyAttemptsPage() {
           }
           compMap.get(comp.id)!.attempts.push(attempt);
         }
-        // Sort attempts within each group: newest first
+
+        // Sort attempts within each group: newest first (by finishedAt then startedAt)
         for (const g of compMap.values()) {
-          g.attempts.sort((a, b) => b.startedAt.toMillis() - a.startedAt.toMillis());
+          g.attempts.sort((a, b) => {
+            const aMs = (a.finishedAt ?? a.startedAt).toMillis();
+            const bMs = (b.finishedAt ?? b.startedAt).toMillis();
+            return bMs - aMs;
+          });
         }
 
-        setGroups(compOrder.map((id) => compMap.get(id)!));
+        // Sort competition groups by most-recent attempt date descending
+        const sorted = compOrder
+          .map((id) => compMap.get(id)!)
+          .sort((a, b) => {
+            const aMs = a.attempts[0]
+              ? (a.attempts[0].finishedAt ?? a.attempts[0].startedAt).toMillis()
+              : 0;
+            const bMs = b.attempts[0]
+              ? (b.attempts[0].finishedAt ?? b.attempts[0].startedAt).toMillis()
+              : 0;
+            return bMs - aMs;
+          });
+
+        setGroups(sorted);
       } catch {
         // show empty state on error
       } finally {
@@ -244,7 +270,6 @@ export default function MyAttemptsPage() {
           </h1>
 
           {groups.length === 0 ? (
-            /* Empty state */
             <div style={{
               textAlign: 'center', padding: '4rem 1rem',
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem',
@@ -262,25 +287,26 @@ export default function MyAttemptsPage() {
               </Link>
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2.25rem' }}>
               {groups.map(({ comp, attempts }) => (
                 <div key={comp.id}>
-                  {/* Competition title */}
-                  <div style={{ marginBottom: '0.75rem' }}>
+                  {/* Competition group header */}
+                  <div style={{ marginBottom: '0.65rem' }}>
                     <Link href={`/timer/competitions/${comp.id}`} style={{
                       fontSize: '1rem', fontWeight: 700, color: C.text, textDecoration: 'none',
                     }}>
                       {comp.name}
                     </Link>
-                    <div style={{ fontSize: '0.72rem', color: C.muted, fontFamily: MONO, marginTop: '0.1rem' }}>
-                      {comp.date}{comp.location ? ` · ${comp.location}` : ''}
+                    <div style={{ fontSize: '0.71rem', color: C.muted, fontFamily: MONO, marginTop: '0.12rem' }}>
+                      Тэмцээний огноо: {comp.date}
+                      {comp.location ? ` · ${comp.location}` : ''}
                     </div>
                   </div>
 
-                  {/* Attempt cards */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                  {/* Attempt rows — one per attempt, newest first */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
                     {attempts.map((attempt) => (
-                      <AttemptCard key={attempt.id} comp={comp} attempt={attempt} />
+                      <AttemptRow key={attempt.id} comp={comp} attempt={attempt} />
                     ))}
                   </div>
                 </div>

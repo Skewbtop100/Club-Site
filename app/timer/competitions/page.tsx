@@ -20,6 +20,19 @@ const C = {
 const FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif';
 const MONO = '"JetBrains Mono", "Fira Code", monospace';
 
+// ─── Icons ───────────────────────────────────────────────────────────────────
+
+function HistoryIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="1 4 1 10 7 10" />
+      <path d="M3.51 15a9 9 0 1 0 .49-4.46" />
+      <polyline points="12 7 12 12 15 14.5" />
+    </svg>
+  );
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function sortComps(comps: VirtualCompetition[]): VirtualCompetition[] {
@@ -221,6 +234,7 @@ export default function CompetitionsPage() {
         borderBottom: `1px solid ${C.border}`,
         padding: '0.75rem 1rem',
         flexShrink: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       }}>
         <Link href="/timer" style={{
           display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
@@ -232,6 +246,34 @@ export default function CompetitionsPage() {
           onMouseLeave={(e) => ((e.currentTarget as HTMLAnchorElement).style.color = C.muted)}
         >
           ← Timer-руу буцах
+        </Link>
+
+        {/* History icon — my attempts */}
+        <Link
+          href="/timer/competitions/me"
+          title="Миний түүх"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            width: 36, height: 36, borderRadius: 9, flexShrink: 0,
+            background: 'rgba(255,255,255,0.05)',
+            border: `1px solid ${C.border}`,
+            color: C.muted, textDecoration: 'none',
+            transition: 'background 0.12s, border-color 0.12s, color 0.12s',
+          }}
+          onMouseEnter={(e) => {
+            const el = e.currentTarget as HTMLAnchorElement;
+            el.style.background = 'rgba(167,139,250,0.12)';
+            el.style.borderColor = 'rgba(167,139,250,0.35)';
+            el.style.color = C.accent;
+          }}
+          onMouseLeave={(e) => {
+            const el = e.currentTarget as HTMLAnchorElement;
+            el.style.background = 'rgba(255,255,255,0.05)';
+            el.style.borderColor = C.border;
+            el.style.color = C.muted;
+          }}
+        >
+          <HistoryIcon />
         </Link>
       </div>
 
