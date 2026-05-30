@@ -8,8 +8,10 @@ import { Timestamp } from 'firebase/firestore';
 import { rtdb } from '@/lib/firebase';
 import {
   getRound,
+  getRounds,
   getMyResult,
   getMyResultForAttempt,
+  getMyResultsForAttempt,
   submitRoundResult,
   computeBest,
   computeAverage,
@@ -232,11 +234,12 @@ function LoadingShell() {
 // ─── Result View ──────────────────────────────────────────────────────────────
 
 function ResultView({
-  compId, round, result,
+  compId, round, result, attemptId,
 }: {
   compId: string;
   round: VirtualRound;
   result: ParticipantRoundResult;
+  attemptId?: string;
 }) {
   const ev = getEvent(round.eventId);
   const hist = round.historicalResults ?? [];
@@ -245,6 +248,28 @@ function ResultView({
   const [expandedRank, setExpandedRank] = useState<number | null>(null);
   const userRowRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // Lazy-load all rounds (next-round nav) and prior attempt results (summary card)
+  const [allRounds, setAllRounds] = useState<VirtualRound[]>([]);
+  const [priorResults, setPriorResults] = useState<ParticipantRoundResult[]>([]);
+
+  useEffect(() => {
+    async function loadExtra() {
+      try {
+        const rounds = await getRounds(compId);
+        setAllRounds(rounds);
+        if (attemptId) {
+          const results = await getMyResultsForAttempt(compId, attemptId);
+          setPriorResults(
+            results.filter(
+              (r) => r.eventId === round.eventId && r.roundNumber < round.roundNumber,
+            ),
+          );
+        }
+      } catch { /* silently ignore — these are purely additive UI enhancements */ }
+    }
+    void loadExtra();
+  }, [compId, attemptId, round.eventId, round.roundNumber]);
 
   // Build combined ranked list (historical athletes + user) including individual solve data
   const effMs = (v: number) => (v === -1 ? Infinity : v);
@@ -284,25 +309,29 @@ function ResultView({
     userRowRef.current?.scrollIntoView({ block: 'center', behavior: 'auto' });
   }, []);
 
-  // Advancement check
+  // Advancement: cut-off rank + user status
   const isFinal = round.advancementType === 'final';
-  let advancedText: string | null = null;
-  let advancedGreen = true;
-  if (!isFinal) {
-    let threshold = 0;
-    if (round.advancementType === 'fixed' && round.advancementValue != null) {
-      threshold = round.advancementValue;
-    } else if (round.advancementType === 'percentage' && round.advancementValue != null) {
-      threshold = Math.ceil(total * round.advancementValue / 100);
-    }
-    if (threshold > 0) {
-      const advanced = rank <= threshold;
-      advancedGreen = advanced;
-      advancedText = advanced
-        ? '✓ Дараагийн раундад шилжих эрхтэй'
-        : '✗ Дараагийн раундад шилжээгүй';
+  let cutOff = 0;
+  if (!isFinal && round.advancementValue != null) {
+    if (round.advancementType === 'fixed') {
+      cutOff = round.advancementValue;
+    } else if (round.advancementType === 'percentage') {
+      cutOff = Math.floor((total * round.advancementValue) / 100);
     }
   }
+  const userAdvances = cutOff > 0 && rank <= cutOff;
+
+  // Next round for this event (loaded lazily — undefined while allRounds is empty)
+  const eventRounds = allRounds
+    .filter((r) => r.eventId === round.eventId)
+    .sort((a, b) => a.roundNumber - b.roundNumber);
+  const nextRound = eventRounds.find((r) => r.roundNumber === round.roundNumber + 1);
+  const nextRoundUrl = nextRound
+    ? `/timer/competitions/${compId}/compete/${nextRound.id}${attemptId ? `?attempt=${attemptId}` : ''}`
+    : undefined;
+
+  // Prior rounds for Change 3 summary card
+  const priorRoundObjects = eventRounds.filter((r) => r.roundNumber < round.roundNumber);
 
   // Render individual solves in WCA bracket format: (best) x x x (worst) for avg5
   function renderExpanded(entry: LBEntry) {
@@ -359,11 +388,58 @@ function ResultView({
       <div style={{ fontSize: '1.2rem', fontWeight: 700, marginTop: '0.4rem' }}>Дууссан!</div>
       <div style={{
         display: 'flex', alignItems: 'center', gap: '0.45rem',
-        fontSize: '0.85rem', color: C.muted, marginTop: '0.25rem', marginBottom: '2rem',
+        fontSize: '0.85rem', color: C.muted, marginTop: '0.25rem',
+        marginBottom: priorRoundObjects.length > 0 ? '1rem' : '2rem',
       }}>
         <WcaEventIcon eventId={round.eventId} size={14} />
         {ev?.name ?? round.eventId} · {round.roundName}
       </div>
+
+      {/* ── CHANGE 3: Prior rounds summary card ── */}
+      {priorRoundObjects.length > 0 && (
+        <div style={{
+          width: '100%', maxWidth: 400, marginBottom: '1.25rem',
+          background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.border}`,
+          borderRadius: 12, padding: '0.7rem 1rem',
+        }}>
+          <div style={{
+            fontSize: '0.58rem', fontWeight: 800, letterSpacing: '0.1em',
+            textTransform: 'uppercase', color: C.muted, marginBottom: '0.5rem',
+          }}>
+            Өмнөх раундууд
+          </div>
+          {priorRoundObjects.map((pr) => {
+            const prResult = priorResults.find((r) => r.roundNumber === pr.roundNumber);
+            if (!prResult) return null;
+            const prRank =
+              (pr.historicalResults ?? []).length > 0
+                ? computeRank(
+                    { best: prResult.best, average: prResult.average, format: pr.format },
+                    pr.historicalResults ?? [],
+                  )
+                : null;
+            return (
+              <div key={pr.roundNumber} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '0.18rem 0',
+              }}>
+                <span style={{ fontSize: '0.75rem', color: C.muted, flex: 1, minWidth: 0 }}>
+                  {pr.roundName}
+                </span>
+                <span style={{ fontSize: '0.75rem', fontFamily: MONO, color: C.text, flexShrink: 0 }}>
+                  {fmtTime(prResult.best)}
+                  {pr.format !== 'bo1' && (
+                    <span style={{ color: C.muted }}> / {fmtTime(prResult.average)}</span>
+                  )}
+                  {prRank !== null && (
+                    <span style={{ color: C.accent }}> #{prRank}</span>
+                  )}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Solves + Best + Average */}
       <div style={{
@@ -418,7 +494,7 @@ function ResultView({
         {' '}/ {total} байрт
       </div>
 
-      {/* Full leaderboard — scrollable, auto-centered on user row */}
+      {/* ── Full leaderboard with CHANGE 1 cut-off line ── */}
       {hist.length > 0 && (
         <div style={{
           width: '100%', maxWidth: 400,
@@ -457,6 +533,8 @@ function ResultView({
           >
             {allEntries.map((entry) => {
               const isExp = expandedRank === entry.rank;
+              const rowAdvances = cutOff > 0 && entry.rank <= cutOff;
+              const isCutLine = cutOff > 0 && entry.rank === cutOff;
               return (
                 <div key={entry.rank} ref={entry.isUser ? userRowRef : undefined}>
                   {/* Main row */}
@@ -464,14 +542,18 @@ function ResultView({
                     display: 'grid', gridTemplateColumns: COLS,
                     alignItems: 'center', gap: '0.3rem',
                     padding: '0.48rem 0.55rem',
-                    background: entry.isUser ? 'rgba(167,139,250,0.12)' : 'transparent',
+                    background: entry.isUser
+                      ? 'rgba(167,139,250,0.12)'
+                      : rowAdvances
+                        ? 'rgba(52,211,153,0.05)'
+                        : 'transparent',
                     border: `1px solid ${entry.isUser ? 'rgba(167,139,250,0.22)' : 'transparent'}`,
                     borderRadius: isExp ? '8px 8px 0 0' : 8,
                   }}>
                     <span style={{
                       fontFamily: MONO, fontSize: '0.76rem',
                       fontWeight: entry.isUser ? 700 : 400,
-                      color: entry.isUser ? C.accent : C.muted,
+                      color: entry.isUser ? C.accent : rowAdvances ? C.success : C.muted,
                     }}>
                       #{entry.rank}
                     </span>
@@ -517,6 +599,34 @@ function ResultView({
                       {renderExpanded(entry)}
                     </div>
                   )}
+
+                  {/* CHANGE 1: Advancement cut-off divider — sits directly below the last advancing row */}
+                  {isCutLine && (
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: '0.35rem',
+                      padding: '0.2rem 0.4rem 0.1rem',
+                    }}>
+                      <div style={{
+                        flex: 1, height: 2,
+                        background: 'rgba(52,211,153,0.5)',
+                        borderRadius: 1,
+                      }} />
+                      <span style={{
+                        fontSize: '0.57rem', fontWeight: 800, color: C.success,
+                        letterSpacing: '0.04em', whiteSpace: 'nowrap',
+                      }}>
+                        ↑ Дараагийн раунд
+                        {round.advancementType === 'fixed'
+                          ? ` · Top ${cutOff}`
+                          : ` · ${cutOff} тамирчин`}
+                      </span>
+                      <div style={{
+                        flex: 1, height: 2,
+                        background: 'rgba(52,211,153,0.5)',
+                        borderRadius: 1,
+                      }} />
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -524,42 +634,120 @@ function ResultView({
         </div>
       )}
 
-      {/* Advancement status */}
+      {/* ── CHANGE 2: CTA — next round button or informational + back ── */}
       {isFinal ? (
-        <div style={{
-          width: '100%', maxWidth: 400,
-          padding: '0.75rem 1rem', borderRadius: 10, marginBottom: '0.75rem',
-          background: 'rgba(255,255,255,0.04)', border: `1px solid ${C.border}`,
-          fontSize: '0.85rem', fontWeight: 600, color: C.muted, textAlign: 'center',
-        }}>
-          Финалын раунд
-        </div>
-      ) : advancedText ? (
-        <div style={{
-          width: '100%', maxWidth: 400,
-          padding: '0.75rem 1rem', borderRadius: 10, marginBottom: '0.75rem',
-          background: advancedGreen ? C.successDim : 'rgba(255,255,255,0.04)',
-          border: `1px solid ${advancedGreen ? 'rgba(52,211,153,0.3)' : C.border}`,
-          fontSize: '0.85rem', fontWeight: 600,
-          color: advancedGreen ? C.success : C.muted,
-          textAlign: 'center',
-        }}>
-          {advancedText}
-        </div>
-      ) : null}
-
-      <Link
-        href={`/timer/competitions/${compId}/compete`}
-        style={{
-          display: 'block', width: '100%', maxWidth: 400, marginTop: '0.5rem',
-          padding: '0.78rem', borderRadius: 10, textAlign: 'center',
-          fontFamily: FONT, fontSize: '0.97rem', fontWeight: 700,
-          background: C.card, border: `1px solid ${C.border}`,
-          color: C.muted, textDecoration: 'none',
-        }}
-      >
-        ← Тэмцээний хуудас руу
-      </Link>
+        <>
+          <div style={{
+            width: '100%', maxWidth: 400,
+            padding: '0.75rem 1rem', borderRadius: 10, marginBottom: '0.65rem',
+            background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.25)',
+            fontSize: '0.88rem', fontWeight: 600, color: C.success, textAlign: 'center',
+          }}>
+            Финал дуусгасан ✓ — Энэ төрөл бүрэн дууссан
+          </div>
+          <Link
+            href={`/timer/competitions/${compId}/compete`}
+            style={{
+              display: 'block', width: '100%', maxWidth: 400,
+              padding: '0.78rem', borderRadius: 10, textAlign: 'center',
+              fontFamily: FONT, fontSize: '0.97rem', fontWeight: 700,
+              background: C.card, border: `1px solid ${C.border}`,
+              color: C.muted, textDecoration: 'none',
+            }}
+          >
+            ← Тэмцээний хуудас руу
+          </Link>
+        </>
+      ) : userAdvances && nextRoundUrl ? (
+        <>
+          <Link
+            href={nextRoundUrl}
+            style={{
+              display: 'block', width: '100%', maxWidth: 400,
+              padding: '0.88rem', borderRadius: 10, textAlign: 'center',
+              fontFamily: FONT, fontSize: '1rem', fontWeight: 700,
+              background: 'rgba(52,211,153,0.15)',
+              border: '1px solid rgba(52,211,153,0.45)',
+              color: C.success, textDecoration: 'none', marginBottom: '0.55rem',
+            }}
+          >
+            Дараагийн раунд эхлүүлэх →
+          </Link>
+          <Link
+            href={`/timer/competitions/${compId}/compete`}
+            style={{
+              display: 'block', width: '100%', maxWidth: 400,
+              padding: '0.62rem', borderRadius: 10, textAlign: 'center',
+              fontFamily: FONT, fontSize: '0.85rem', fontWeight: 600,
+              background: 'transparent', border: `1px solid ${C.border}`,
+              color: C.muted, textDecoration: 'none',
+            }}
+          >
+            ← Тэмцээний хуудас руу
+          </Link>
+        </>
+      ) : userAdvances ? (
+        /* Advanced but next round not configured yet — back to hub where it will appear */
+        <>
+          <div style={{
+            width: '100%', maxWidth: 400,
+            padding: '0.75rem 1rem', borderRadius: 10, marginBottom: '0.65rem',
+            background: C.successDim, border: '1px solid rgba(52,211,153,0.3)',
+            fontSize: '0.85rem', fontWeight: 600, color: C.success, textAlign: 'center',
+          }}>
+            ✓ Дараагийн раундад шилжих эрхтэй
+          </div>
+          <Link
+            href={`/timer/competitions/${compId}/compete`}
+            style={{
+              display: 'block', width: '100%', maxWidth: 400,
+              padding: '0.78rem', borderRadius: 10, textAlign: 'center',
+              fontFamily: FONT, fontSize: '0.97rem', fontWeight: 700,
+              background: C.card, border: `1px solid ${C.border}`,
+              color: C.muted, textDecoration: 'none',
+            }}
+          >
+            ← Тэмцээний хуудас руу
+          </Link>
+        </>
+      ) : cutOff > 0 ? (
+        /* Did not advance */
+        <>
+          <div style={{
+            width: '100%', maxWidth: 400,
+            padding: '0.75rem 1rem', borderRadius: 10, marginBottom: '0.65rem',
+            background: 'rgba(255,255,255,0.04)', border: `1px solid ${C.border}`,
+            fontSize: '0.85rem', fontWeight: 600, color: C.muted, textAlign: 'center',
+          }}>
+            Энэ төрлөөр дууссан
+          </div>
+          <Link
+            href={`/timer/competitions/${compId}/compete`}
+            style={{
+              display: 'block', width: '100%', maxWidth: 400,
+              padding: '0.78rem', borderRadius: 10, textAlign: 'center',
+              fontFamily: FONT, fontSize: '0.97rem', fontWeight: 700,
+              background: C.card, border: `1px solid ${C.border}`,
+              color: C.muted, textDecoration: 'none',
+            }}
+          >
+            ← Тэмцээний хуудас руу
+          </Link>
+        </>
+      ) : (
+        <Link
+          href={`/timer/competitions/${compId}/compete`}
+          style={{
+            display: 'block', width: '100%', maxWidth: 400, marginTop: '0.5rem',
+            padding: '0.78rem', borderRadius: 10, textAlign: 'center',
+            fontFamily: FONT, fontSize: '0.97rem', fontWeight: 700,
+            background: C.card, border: `1px solid ${C.border}`,
+            color: C.muted, textDecoration: 'none',
+          }}
+        >
+          ← Тэмцээний хуудас руу
+        </Link>
+      )}
     </div>
   );
 }
@@ -980,7 +1168,7 @@ function SolvingPage() {
   }
 
   if (view === 'result' && myResult) {
-    return <ResultView compId={compId} round={round} result={myResult} />;
+    return <ResultView compId={compId} round={round} result={myResult} attemptId={attemptId} />;
   }
 
   // ── Solving UI ──────────────────────────────────────────────────────────────
