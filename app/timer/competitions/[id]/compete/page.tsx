@@ -139,57 +139,81 @@ export default function CompeteHubPage() {
   const [showFinishConfirm, setShowFinishConfirm] = useState(false);
   const [finishing, setFinishing] = useState(false);
 
+  // ── TEMP DEBUG: visible on-screen state (remove after iPhone issue is diagnosed) ──
+  const [redirectReason, setRedirectReason] = useState('');
+  const [debugAttemptId, setDebugAttemptId] = useState<string | null | undefined>(undefined);
+  // undefined = not yet checked, null = checked/not found, string = found
+
   useEffect(() => {
     if (authLoading) return;
+
     if (!user) {
-      router.push(`/login?redirect=/timer/competitions/${compId}/compete`);
-      return;
+      setRedirectReason('no_auth');
+      const t = setTimeout(
+        () => router.push(`/login?redirect=/timer/competitions/${compId}/compete`),
+        1500,
+      );
+      return () => clearTimeout(t);
     }
     if (!user.displayName?.trim()) {
-      router.push('/timer/profile');
-      return;
+      setRedirectReason(`no_displayname·"${user.displayName ?? ''}"`);
+      const t = setTimeout(() => router.push('/timer/profile'), 1500);
+      return () => clearTimeout(t);
     }
+
     let cancelled = false;
     async function load() {
       try {
-        // Step 1: load competition, rounds, and participant together.
-        // getActiveAttempt is intentionally excluded here — a failure on the
-        // attempts subcollection (e.g. rules not yet propagated on first iOS
-        // connection) must NOT block or crash the rest of the page load.
+        // Step 1: comp + rounds + participant (well-established collections, should not fail)
         const [compData, roundsData, participantData] = await Promise.all([
           getCompetition(compId),
           getRounds(compId),
           getParticipant(compId, user!.uid),
         ]);
         if (cancelled) return;
+
         if (!compData) { setNotFound(true); setLoading(false); return; }
         if (!participantData) {
-          router.push(`/timer/competitions/${compId}`);
+          setRedirectReason('no_participant');
+          await new Promise<void>((r) => setTimeout(r, 1500));
+          if (!cancelled) router.push(`/timer/competitions/${compId}`);
           return;
         }
 
-        // Step 2: load active attempt separately so a permission/network error
-        // here redirects gracefully instead of showing "Тэмцээн олдсонгүй".
+        // Step 2: active attempt — isolated so a rules/network error here does not
+        // crash the whole page. On mobile Safari the Firestore connection may not be
+        // ready on the first render; we retry once after a pause before giving up.
         let attempt: CompetitionAttempt | null = null;
         try {
           attempt = await getActiveAttempt(compId, user!.uid);
         } catch (err) {
-          console.error('[compete hub] getActiveAttempt failed', err);
+          setRedirectReason(`attempt_err·${String(err).slice(0, 40)}`);
         }
         if (cancelled) return;
-
-        console.log('[compete hub]', { uid: user!.uid, compId, attempt: attempt?.id ?? null });
+        setDebugAttemptId(attempt?.id ?? null);
 
         if (!attempt) {
-          // No active attempt (or failed to load it) → back to detail page
-          router.push(`/timer/competitions/${compId}`);
+          // Retry once — gives mobile Firestore connection time to settle
+          setRedirectReason('attempt_null·retrying…');
+          await new Promise<void>((r) => setTimeout(r, 1500));
+          if (cancelled) return;
+          try {
+            attempt = await getActiveAttempt(compId, user!.uid);
+          } catch (err) {
+            setRedirectReason(`retry_err·${String(err).slice(0, 40)}`);
+          }
+          if (cancelled) return;
+          setDebugAttemptId(attempt?.id ?? null);
+        }
+
+        if (!attempt) {
+          setRedirectReason('no_attempt_final·→detail');
+          await new Promise<void>((r) => setTimeout(r, 1500));
+          if (!cancelled) router.push(`/timer/competitions/${compId}`);
           return;
         }
 
-        // Step 3: load results strictly from THIS attempt's subcollection.
-        // No fallback to the legacy participantResults collection — a new
-        // attempt always starts with empty results even if a previous attempt
-        // wrote to the legacy location.
+        // Step 3: results from THIS attempt only — no legacy fallback
         const resultsData = await getMyResultsForAttempt(compId, attempt.id);
         if (cancelled) return;
 
@@ -200,20 +224,45 @@ export default function CompeteHubPage() {
         setMyResults(resultsData);
         setLoading(false);
       } catch (err) {
+        const msg = `catch·${String(err).slice(0, 50)}`;
         console.error('[compete hub] load failed', err);
-        // On unexpected error redirect rather than showing the error screen.
-        if (!cancelled) router.push(`/timer/competitions/${compId}`);
+        if (!cancelled) {
+          setRedirectReason(msg);
+          setTimeout(() => router.push(`/timer/competitions/${compId}`), 1500);
+        }
       }
     }
     void load();
     return () => { cancelled = true; };
   }, [authLoading, user, compId, router]);
 
+  // TEMP DEBUG overlay — fixed position, visible on all states including loading
+  const debugOverlay = (
+    <div style={{
+      position: 'fixed', top: 8, right: 8, zIndex: 99999,
+      background: 'rgba(0,0,0,0.88)', color: '#00ff88',
+      fontFamily: 'monospace', fontSize: 10, lineHeight: 1.6,
+      padding: '6px 8px', borderRadius: 6, pointerEvents: 'none',
+      maxWidth: 230, wordBreak: 'break-all',
+    }}>
+      auth: {authLoading ? 'loading…' : (user ? user.uid.slice(0, 8) : 'NULL')}<br/>
+      disp: {user?.displayName ? `"${user.displayName.slice(0, 12)}"` : 'NULL'}<br/>
+      comp: {comp ? 'OK' : 'null'}<br/>
+      ptcp: {participant ? 'OK' : 'null'}<br/>
+      atmpt: {debugAttemptId === undefined ? '?' : (debugAttemptId ? debugAttemptId.slice(0, 10) : 'NULL')}<br/>
+      loading: {String(loading)}<br/>
+      redir: {redirectReason || '—'}
+    </div>
+  );
+
   if (authLoading || loading) {
     return (
       <div style={{ minHeight: '100dvh', background: C.bg, fontFamily: FONT, color: C.text,
         display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ fontSize: '0.85rem', color: C.muted }}>Ачааллаж байна...</div>
+        {debugOverlay}
+        <div style={{ fontSize: '0.85rem', color: C.muted }}>
+          {redirectReason ? `${redirectReason}` : 'Ачааллаж байна...'}
+        </div>
       </div>
     );
   }
@@ -223,6 +272,7 @@ export default function CompeteHubPage() {
       <div style={{ minHeight: '100dvh', background: C.bg, fontFamily: FONT, color: C.text,
         display: 'flex', flexDirection: 'column', alignItems: 'center',
         justifyContent: 'center', gap: '1rem', textAlign: 'center', padding: '2rem' }}>
+        {debugOverlay}
         <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>Тэмцээн олдсонгүй</div>
         <Link href="/timer/competitions"
           style={{ fontSize: '0.85rem', color: C.muted, textDecoration: 'none' }}>
@@ -262,6 +312,7 @@ export default function CompeteHubPage() {
       minHeight: '100dvh', background: C.bg, fontFamily: FONT, color: C.text,
       display: 'flex', flexDirection: 'column',
     }}>
+      {debugOverlay}
       {/* Header */}
       <div style={{
         position: 'sticky', top: 0, zIndex: 10,
