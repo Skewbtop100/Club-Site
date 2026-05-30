@@ -72,11 +72,17 @@ service cloud.firestore {
     // ─── Virtual Competitions ─────────────────────────────────────────────────
 
     match /virtualCompetitions/{compId} {
-      allow read: if resource.data.status != 'draft' || isAdmin();
+      // Defensive: allow read for anything that is not explicitly 'draft'.
+      // Old docs may lack the status field; denying them would break the list page.
+      allow read: if isAdmin() ||
+                     !('status' in resource.data) ||
+                     resource.data.status != 'draft';
       allow write: if isAdmin();
 
       match /rounds/{roundId} {
-        allow read: if get(/databases/$(database)/documents/virtualCompetitions/$(compId)).data.status != 'draft' || isAdmin();
+        allow read: if isAdmin() ||
+                       !('status' in get(/databases/$(database)/documents/virtualCompetitions/$(compId)).data) ||
+                       get(/databases/$(database)/documents/virtualCompetitions/$(compId)).data.status != 'draft';
         allow write: if isAdmin();
       }
 
