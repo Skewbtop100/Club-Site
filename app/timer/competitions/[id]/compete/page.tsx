@@ -7,7 +7,6 @@ import {
   getCompetition,
   getRounds,
   getParticipant,
-  getMyResults,
   getActiveAttempt,
   getMyResultsForAttempt,
   finishAttempt,
@@ -153,11 +152,14 @@ export default function CompeteHubPage() {
     let cancelled = false;
     async function load() {
       try {
-        const [compData, roundsData, participantData, attempt] = await Promise.all([
+        // Step 1: load competition, rounds, and participant together.
+        // getActiveAttempt is intentionally excluded here — a failure on the
+        // attempts subcollection (e.g. rules not yet propagated on first iOS
+        // connection) must NOT block or crash the rest of the page load.
+        const [compData, roundsData, participantData] = await Promise.all([
           getCompetition(compId),
           getRounds(compId),
           getParticipant(compId, user!.uid),
-          getActiveAttempt(compId, user!.uid),
         ]);
         if (cancelled) return;
         if (!compData) { setNotFound(true); setLoading(false); return; }
@@ -165,17 +167,31 @@ export default function CompeteHubPage() {
           router.push(`/timer/competitions/${compId}`);
           return;
         }
-        // No active attempt → send back to detail page so they can start/re-enter
+
+        // Step 2: load active attempt separately so a permission/network error
+        // here redirects gracefully instead of showing "Тэмцээн олдсонгүй".
+        let attempt: CompetitionAttempt | null = null;
+        try {
+          attempt = await getActiveAttempt(compId, user!.uid);
+        } catch (err) {
+          console.error('[compete hub] getActiveAttempt failed', err);
+        }
+        if (cancelled) return;
+
+        console.log('[compete hub]', { uid: user!.uid, compId, attempt: attempt?.id ?? null });
+
         if (!attempt) {
+          // No active attempt (or failed to load it) → back to detail page
           router.push(`/timer/competitions/${compId}`);
           return;
         }
 
-        // Load results scoped to this attempt; fall back to legacy location if empty
-        let resultsData = await getMyResultsForAttempt(compId, attempt.id);
-        if (resultsData.length === 0) {
-          resultsData = await getMyResults(compId, user!.uid);
-        }
+        // Step 3: load results strictly from THIS attempt's subcollection.
+        // No fallback to the legacy participantResults collection — a new
+        // attempt always starts with empty results even if a previous attempt
+        // wrote to the legacy location.
+        const resultsData = await getMyResultsForAttempt(compId, attempt.id);
+        if (cancelled) return;
 
         setComp(compData);
         setRounds(roundsData);
@@ -183,8 +199,10 @@ export default function CompeteHubPage() {
         setActiveAttempt(attempt);
         setMyResults(resultsData);
         setLoading(false);
-      } catch {
-        if (!cancelled) setLoading(false);
+      } catch (err) {
+        console.error('[compete hub] load failed', err);
+        // On unexpected error redirect rather than showing the error screen.
+        if (!cancelled) router.push(`/timer/competitions/${compId}`);
       }
     }
     void load();
