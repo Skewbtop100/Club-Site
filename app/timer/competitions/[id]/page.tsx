@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useEffect, useState, Suspense } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   getCompetition,
   getRounds,
   getParticipant,
+  getMyResults,
   registerForCompetition,
   unregisterFromCompetition,
   getActiveAttempt,
@@ -187,19 +188,25 @@ function EventSelector({
   );
 }
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
+// ─── Page (inner — needs useSearchParams) ────────────────────────────────────
 
-export default function CompetitionDetailPage() {
+function CompetitionDetailInner() {
   const params = useParams();
   const id = params.id as string;
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
+
+  // ?from=hub means the compete hub redirected us here because it couldn't
+  // find an active attempt. We use this to avoid showing a stale "continue" CTA.
+  const fromHub = searchParams.get('from') === 'hub';
 
   const [comp, setComp] = useState<VirtualCompetition | null>(null);
   const [rounds, setRounds] = useState<VirtualRound[]>([]);
   const [initialParticipant, setInitialParticipant] = useState<VirtualParticipant | null>(null);
   const [activeAttempt, setActiveAttempt] = useState<CompetitionAttempt | null>(null);
   const [myAttempts, setMyAttempts] = useState<CompetitionAttempt[]>([]);
+  const [hasLegacyResults, setHasLegacyResults] = useState(false);
   const [selectedEvents, setSelectedEvents] = useState<string[]>([]);
   const [showEventSelector, setShowEventSelector] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
@@ -218,21 +225,66 @@ export default function CompetitionDetailPage() {
     }
   }, [authLoading, user, id, router]);
 
-  // Fetch competition, rounds, participant, attempts
+  // Data load — structured in three fault-isolated steps so that a failure in
+  // the new attempts subcollection (missing index, legacy user) never crashes
+  // the page and prevents viewing the competition.
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
     async function load() {
       try {
-        const [compData, roundsData, participantData, activeAttemptData, attemptsData] = await Promise.all([
+        // Step 1: core data — competition, rounds, participant.
+        // If any of these fail the page genuinely can't be shown.
+        const [compData, roundsData, participantData] = await Promise.all([
           getCompetition(id),
           getRounds(id),
           getParticipant(id, user!.uid),
-          getActiveAttempt(id, user!.uid),
-          getMyAttempts(id, user!.uid),
         ]);
         if (cancelled) return;
         if (!compData) { setNotFound(true); setPageLoading(false); return; }
+
+        // Step 2: attempt data — isolated so that a missing Firestore composite
+        // index or a rules propagation delay never blanks the page for legacy users.
+        let activeAttemptData: CompetitionAttempt | null = null;
+        let attemptsData: CompetitionAttempt[] = [];
+        try {
+          [activeAttemptData, attemptsData] = await Promise.all([
+            getActiveAttempt(id, user!.uid),
+            getMyAttempts(id, user!.uid),
+          ]);
+          console.log('[detail] CTA state', {
+            active: activeAttemptData?.id ?? null,
+            total: attemptsData.length,
+            fromHub,
+          });
+        } catch (err) {
+          console.log('[detail] attempt queries failed (legacy user / missing index):', String(err).slice(0, 80));
+        }
+        if (cancelled) return;
+
+        // If ?from=hub is set the compete hub couldn't find an active attempt —
+        // treat as if activeAttempt is null to avoid a stale "continue" CTA.
+        if (fromHub && activeAttemptData) {
+          console.log('[detail] from=hub: ignoring cached activeAttempt, user should re-enter');
+          activeAttemptData = null;
+        }
+
+        // Step 3: legacy results check — if the user is registered but has no
+        // new-model attempt records, they participated before the attempt lifecycle
+        // was introduced. We check the old participantResults collection to detect
+        // this case and show the correct "Дахин оролцох" CTA instead of "Бүртгүүлэх".
+        if (participantData && !activeAttemptData && attemptsData.length === 0) {
+          try {
+            const legacy = await getMyResults(id, user!.uid);
+            const found = legacy.length > 0;
+            console.log('[detail] legacy results:', { count: legacy.length, found });
+            if (!cancelled) setHasLegacyResults(found);
+          } catch {
+            // Non-critical — just means we can't detect legacy state
+          }
+          if (cancelled) return;
+        }
+
         setComp(compData);
         setRounds(roundsData);
         setInitialParticipant(participantData);
@@ -245,13 +297,15 @@ export default function CompetitionDetailPage() {
           [];
         setSelectedEvents(lastEvents);
         setPageLoading(false);
-      } catch {
+      } catch (err) {
+        // Unexpected failure in core load — show empty page rather than blank
+        console.error('[detail] load failed', err);
         if (!cancelled) setPageLoading(false);
       }
     }
     void load();
     return () => { cancelled = true; };
-  }, [user, id]);
+  }, [user, id, fromHub]);
 
   // Toast auto-dismiss
   useEffect(() => {
@@ -274,6 +328,14 @@ export default function CompetitionDetailPage() {
   const isClosed = comp?.status === 'closed';
   const hasFinishedAttempts = myAttempts.some((a) => a.status === 'finished');
   const latestFinished = myAttempts.find((a) => a.status === 'finished');
+
+  // CTA state for debug visibility
+  const ctaType = activeAttempt ? 'continue'
+    : hasFinishedAttempts ? 'reenter_new_model'
+    : hasLegacyResults ? 'reenter_legacy'
+    : registered ? 'start_existing_participant'
+    : 'register';
+  console.log('[detail] showing CTA:', ctaType);
 
   // ── Handlers ─────────────────────────────────────────────────────────────────
 
@@ -502,7 +564,7 @@ export default function CompetitionDetailPage() {
             </div>
           </div>
         ) : hasFinishedAttempts && latestFinished ? (
-          /* Finished attempts summary */
+          /* Finished attempts summary (new model) */
           <div style={{ padding: '1rem 1rem 0.5rem' }}>
             <div style={{
               background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.2)',
@@ -526,12 +588,27 @@ export default function CompetitionDetailPage() {
               </div>
             </div>
           </div>
+        ) : hasLegacyResults ? (
+          /* Legacy user: participated before attempt tracking was added */
+          <div style={{ padding: '1rem 1rem 0.5rem' }}>
+            <div style={{
+              background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.2)',
+              borderRadius: 12, padding: '0.9rem 1rem',
+            }}>
+              <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#fbbf24', marginBottom: '0.25rem' }}>
+                Та өмнө нь оролцсон байна
+              </div>
+              <div style={{ fontSize: '0.72rem', color: C.muted }}>
+                Шинэ оролдлого эхлүүлэх боломжтой
+              </div>
+            </div>
+          </div>
         ) : null}
 
         {/* ── БҮРТГЭЛ — event selector (shown when no in-progress attempt) ── */}
         {!activeAttempt && !isClosed && (
-          <div style={{ padding: showEventSelector || !hasFinishedAttempts ? '1rem 1rem 1rem' : '0.5rem 1rem 1rem' }}>
-            {hasFinishedAttempts && !showEventSelector ? null : (
+          <div style={{ padding: (showEventSelector || (!hasFinishedAttempts && !hasLegacyResults)) ? '1rem 1rem 1rem' : '0.5rem 1rem 1rem' }}>
+            {(hasFinishedAttempts || hasLegacyResults) && !showEventSelector ? null : (
               <>
                 <div style={{
                   fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.12em',
@@ -614,8 +691,8 @@ export default function CompetitionDetailPage() {
           >
             Тэмцээнээ үргэлжлүүлэх →
           </Link>
-        ) : hasFinishedAttempts ? (
-          /* ── Has finished attempts: re-enter flow ── */
+        ) : hasFinishedAttempts || hasLegacyResults ? (
+          /* ── Has finished attempts (new model) OR legacy results: re-enter flow ── */
           <>
             {showEventSelector ? (
               <div style={{ display: 'flex', gap: '0.55rem' }}>
@@ -749,5 +826,15 @@ export default function CompetitionDetailPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Page export (Suspense required for useSearchParams) ──────────────────────
+
+export default function CompetitionDetailPage() {
+  return (
+    <Suspense fallback={<LoadingShell />}>
+      <CompetitionDetailInner />
+    </Suspense>
   );
 }

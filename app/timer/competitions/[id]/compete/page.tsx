@@ -163,7 +163,8 @@ export default function CompeteHubPage() {
 
         if (!compData) { setNotFound(true); setLoading(false); return; }
         if (!participantData) {
-          router.push(`/timer/competitions/${compId}`);
+          console.log('[compete hub] redirect: no_participant');
+          router.replace(`/timer/competitions/${compId}?from=hub`);
           return;
         }
 
@@ -191,7 +192,8 @@ export default function CompeteHubPage() {
         }
 
         if (!attempt) {
-          router.push(`/timer/competitions/${compId}`);
+          console.log('[compete hub] redirect: no_attempt_final');
+          router.replace(`/timer/competitions/${compId}?from=hub`);
           return;
         }
 
@@ -207,7 +209,7 @@ export default function CompeteHubPage() {
         setLoading(false);
       } catch (err) {
         console.error('[compete hub] load failed', err);
-        if (!cancelled) router.push(`/timer/competitions/${compId}`);
+        if (!cancelled) router.replace(`/timer/competitions/${compId}?from=hub`);
       }
     }
     void load();
