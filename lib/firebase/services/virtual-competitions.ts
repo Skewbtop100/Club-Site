@@ -90,6 +90,22 @@ export interface ParticipantRoundResult {
   completedAt: Timestamp;
 }
 
+// NOTE: Legacy results live at virtualCompetitions/{compId}/participantResults/{uid}_{eventId}_{roundNum}.
+// New writes go to attempts/{attemptId}/results/{eventId}_{roundNum} AND the legacy location.
+// Reads on the compete hub use the attempt subcollection; old data falls back to the legacy location.
+export interface CompetitionAttempt {
+  id: string;
+  compId: string;
+  uid: string;
+  displayName: string;
+  photoURL?: string | null;
+  registeredEvents: string[];
+  attemptNumber: number;
+  startedAt: Timestamp;
+  finishedAt?: Timestamp;
+  status: 'in_progress' | 'finished';
+}
+
 export interface CombinedResult {
   type: 'historical' | 'participant';
   name: string;
@@ -116,6 +132,14 @@ const resultsCol = (compId: string) =>
   collection(db, 'virtualCompetitions', compId, 'participantResults');
 const resultDoc = (compId: string, docId: string) =>
   doc(db, 'virtualCompetitions', compId, 'participantResults', docId);
+const attemptsCol = (compId: string) =>
+  collection(db, 'virtualCompetitions', compId, 'attempts');
+const attemptDoc = (compId: string, attemptId: string) =>
+  doc(db, 'virtualCompetitions', compId, 'attempts', attemptId);
+const attemptResultsCol = (compId: string, attemptId: string) =>
+  collection(db, 'virtualCompetitions', compId, 'attempts', attemptId, 'results');
+const attemptResultDoc = (compId: string, attemptId: string, resultId: string) =>
+  doc(db, 'virtualCompetitions', compId, 'attempts', attemptId, 'results', resultId);
 
 // ─── Admin: competition CRUD ──────────────────────────────────────────────────
 
@@ -374,27 +398,43 @@ export function subscribeParticipants(
 export async function submitRoundResult(
   compId: string,
   result: Omit<ParticipantRoundResult, 'rank' | 'advanced'>,
+  attemptId?: string,
 ): Promise<void> {
   try {
     const { uid, eventId, roundNumber, solves } = result;
     const roundSnap = await getDoc(doc(roundsCol(compId), `${eventId}_${roundNumber}`));
-    const format: VirtualRound['format'] =
-      (roundSnap.data() as VirtualRound | undefined)?.format ?? 'avg5';
+    const round = roundSnap.data() as VirtualRound | undefined;
+    const format: VirtualRound['format'] = round?.format ?? 'avg5';
 
     const best = computeBest(solves);
     const average = computeAverage(solves, format);
-    const docId = `${uid}_${eventId}_${roundNumber}`;
 
-    await setDoc(resultDoc(compId, docId), {
-      uid,
-      eventId,
-      roundNumber,
-      solves,
-      best,
-      average,
-      advanced: false,
+    // Compute advancement against historical results
+    let advanced = false;
+    if (round && round.advancementType !== 'final' && round.advancementValue != null) {
+      const hist = round.historicalResults ?? [];
+      const rank = computeRank({ best, average, format }, hist);
+      const total = hist.length + 1;
+      const threshold =
+        round.advancementType === 'fixed'
+          ? round.advancementValue
+          : Math.floor((total * round.advancementValue) / 100);
+      advanced = rank <= threshold;
+    }
+
+    const resultData: ParticipantRoundResult = {
+      uid, eventId, roundNumber, solves, best, average, advanced,
       completedAt: Timestamp.now(),
-    } satisfies ParticipantRoundResult);
+    };
+
+    // Always write to legacy location (backward compat + live leaderboard)
+    const docId = `${uid}_${eventId}_${roundNumber}`;
+    await setDoc(resultDoc(compId, docId), resultData);
+
+    // Also write to attempt subcollection when attemptId is provided
+    if (attemptId) {
+      await setDoc(attemptResultDoc(compId, attemptId, `${eventId}_${roundNumber}`), resultData);
+    }
   } catch (err) {
     console.error('[virtualCompetitions] submitRoundResult failed', err);
     throw err;
@@ -570,6 +610,204 @@ export function computeAverage(
   const sorted = [...effs].sort((a, b) => a - b);
   const middle = sorted.slice(1, 4);
   return Math.round(middle.reduce((a, b) => a + b, 0) / 3);
+}
+
+// ─── Attempt management ───────────────────────────────────────────────────────
+
+export async function createAttempt(
+  compId: string,
+  user: { uid: string; displayName: string; photoURL?: string | null },
+  events: string[],
+): Promise<string> {
+  try {
+    const existingSnap = await getDocs(
+      query(attemptsCol(compId), where('uid', '==', user.uid)),
+    );
+    const attemptNumber = existingSnap.size + 1;
+    const attemptId = `${user.uid}_${compId}_${Date.now().toString(36)}`;
+    await setDoc(attemptDoc(compId, attemptId), {
+      id: attemptId,
+      compId,
+      uid: user.uid,
+      displayName: user.displayName,
+      photoURL: user.photoURL ?? null,
+      registeredEvents: events,
+      attemptNumber,
+      startedAt: Timestamp.now(),
+      status: 'in_progress',
+    } satisfies CompetitionAttempt);
+    return attemptId;
+  } catch (err) {
+    console.error('[virtualCompetitions] createAttempt failed', err);
+    throw err;
+  }
+}
+
+export async function getActiveAttempt(
+  compId: string,
+  uid: string,
+): Promise<CompetitionAttempt | null> {
+  try {
+    const q = query(
+      attemptsCol(compId),
+      where('uid', '==', uid),
+      where('status', '==', 'in_progress'),
+    );
+    const snap = await getDocs(q);
+    if (snap.empty) return null;
+    return { id: snap.docs[0].id, ...snap.docs[0].data() } as CompetitionAttempt;
+  } catch (err) {
+    console.error('[virtualCompetitions] getActiveAttempt failed', err);
+    throw err;
+  }
+}
+
+export async function getMyAttempts(
+  compId: string,
+  uid: string,
+): Promise<CompetitionAttempt[]> {
+  try {
+    const q = query(attemptsCol(compId), where('uid', '==', uid));
+    const snap = await getDocs(q);
+    const attempts = snap.docs.map((d) => ({ id: d.id, ...d.data() } as CompetitionAttempt));
+    return attempts.sort((a, b) => b.startedAt.toMillis() - a.startedAt.toMillis());
+  } catch (err) {
+    console.error('[virtualCompetitions] getMyAttempts failed', err);
+    throw err;
+  }
+}
+
+// Queries across all competitions using collection group.
+// Requires Firestore to allow collectionGroup('attempts') queries (configure in console if needed).
+export async function getAllMyAttempts(
+  uid: string,
+): Promise<{ comp: VirtualCompetition; attempt: CompetitionAttempt }[]> {
+  try {
+    // Get all published/closed competitions, then fetch attempts per competition
+    const compsSnap = await getDocs(
+      query(competitionsCol(), where('status', 'in', ['published', 'closed'])),
+    );
+    const comps = compsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as VirtualCompetition));
+
+    const results: { comp: VirtualCompetition; attempt: CompetitionAttempt }[] = [];
+    await Promise.all(
+      comps.map(async (comp) => {
+        const snap = await getDocs(
+          query(attemptsCol(comp.id), where('uid', '==', uid)),
+        );
+        for (const d of snap.docs) {
+          results.push({ comp, attempt: { id: d.id, ...d.data() } as CompetitionAttempt });
+        }
+      }),
+    );
+
+    return results.sort(
+      (a, b) => b.attempt.startedAt.toMillis() - a.attempt.startedAt.toMillis(),
+    );
+  } catch (err) {
+    console.error('[virtualCompetitions] getAllMyAttempts failed', err);
+    throw err;
+  }
+}
+
+export async function getAttemptById(
+  compId: string,
+  attemptId: string,
+): Promise<CompetitionAttempt | null> {
+  try {
+    const snap = await getDoc(attemptDoc(compId, attemptId));
+    if (!snap.exists()) return null;
+    return { id: snap.id, ...snap.data() } as CompetitionAttempt;
+  } catch (err) {
+    console.error('[virtualCompetitions] getAttemptById failed', err);
+    throw err;
+  }
+}
+
+export async function finishAttempt(compId: string, attemptId: string): Promise<void> {
+  try {
+    await updateDoc(attemptDoc(compId, attemptId), {
+      status: 'finished',
+      finishedAt: Timestamp.now(),
+    });
+  } catch (err) {
+    console.error('[virtualCompetitions] finishAttempt failed', err);
+    throw err;
+  }
+}
+
+export async function canFinishAttempt(
+  compId: string,
+  attemptId: string,
+): Promise<{ canFinish: boolean; missing: { eventId: string; roundNumber: number; roundName: string }[] }> {
+  try {
+    const [attemptSnap, allRounds, resultsSnap] = await Promise.all([
+      getDoc(attemptDoc(compId, attemptId)),
+      getRounds(compId),
+      getDocs(attemptResultsCol(compId, attemptId)),
+    ]);
+
+    if (!attemptSnap.exists()) return { canFinish: false, missing: [] };
+    const attempt = { id: attemptSnap.id, ...attemptSnap.data() } as CompetitionAttempt;
+    const resultMap = new Map(
+      resultsSnap.docs.map((d) => {
+        const r = d.data() as ParticipantRoundResult;
+        return [`${r.eventId}_${r.roundNumber}`, r];
+      }),
+    );
+
+    const missing: { eventId: string; roundNumber: number; roundName: string }[] = [];
+
+    for (const eventId of attempt.registeredEvents) {
+      const eventRounds = allRounds
+        .filter((r) => r.eventId === eventId)
+        .sort((a, b) => a.roundNumber - b.roundNumber);
+
+      for (const round of eventRounds) {
+        const result = resultMap.get(`${eventId}_${round.roundNumber}`);
+        if (!result) {
+          missing.push({ eventId, roundNumber: round.roundNumber, roundName: round.roundName });
+          break;
+        }
+        if (round.advancementType === 'final') break;
+        if (!result.advanced) break;
+      }
+    }
+
+    return { canFinish: missing.length === 0, missing };
+  } catch (err) {
+    console.error('[virtualCompetitions] canFinishAttempt failed', err);
+    throw err;
+  }
+}
+
+export async function getMyResultsForAttempt(
+  compId: string,
+  attemptId: string,
+): Promise<ParticipantRoundResult[]> {
+  try {
+    const snap = await getDocs(attemptResultsCol(compId, attemptId));
+    return snap.docs.map((d) => d.data() as ParticipantRoundResult);
+  } catch (err) {
+    console.error('[virtualCompetitions] getMyResultsForAttempt failed', err);
+    throw err;
+  }
+}
+
+export async function getMyResultForAttempt(
+  compId: string,
+  attemptId: string,
+  eventId: string,
+  roundNumber: number,
+): Promise<ParticipantRoundResult | null> {
+  try {
+    const snap = await getDoc(attemptResultDoc(compId, attemptId, `${eventId}_${roundNumber}`));
+    if (!snap.exists()) return null;
+    return snap.data() as ParticipantRoundResult;
+  } catch (err) {
+    console.error('[virtualCompetitions] getMyResultForAttempt failed', err);
+    throw err;
+  }
 }
 
 export function computeRank(

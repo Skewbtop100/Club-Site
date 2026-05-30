@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback, Suspense } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { ref as rtdbRef, get as rtdbGet, set as rtdbSet, remove as rtdbRemove } from 'firebase/database';
 import { Timestamp } from 'firebase/firestore';
@@ -9,6 +9,7 @@ import { rtdb } from '@/lib/firebase';
 import {
   getRound,
   getMyResult,
+  getMyResultForAttempt,
   submitRoundResult,
   computeBest,
   computeAverage,
@@ -567,11 +568,13 @@ function ResultView({
 
 function SolvingPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
 
   const compId = params.id as string;
   const roundId = params.round as string;
+  const attemptId = searchParams.get('attempt') ?? undefined;
   const { eventId, roundNumber } = parseRoundId(roundId);
 
   const [view, setView] = useState<'loading' | 'solving' | 'result' | 'not_found'>('loading');
@@ -686,7 +689,11 @@ function SolvingPage() {
       try {
         const [roundData, existingResult] = await Promise.all([
           getRound(compId, roundId),
-          getMyResult(compId, user!.uid, eventId, roundNumber),
+          // When attemptId present, check attempt subcollection first so attempt #2
+          // doesn't incorrectly show attempt #1's result from the legacy location.
+          attemptId
+            ? getMyResultForAttempt(compId, attemptId, eventId, roundNumber)
+            : getMyResult(compId, user!.uid, eventId, roundNumber),
         ]);
         if (cancelled) return;
 
@@ -935,9 +942,11 @@ function SolvingPage() {
         await submitRoundResult(compId, {
           uid: user.uid, eventId: r.eventId, roundNumber: r.roundNumber,
           solves: pSolves, best, average, completedAt: Timestamp.now(),
-        });
+        }, attemptId);
         await rtdbRemove(rtdbRef(rtdb, path));
-        const savedResult = await getMyResult(compId, user.uid, r.eventId, r.roundNumber);
+        const savedResult = attemptId
+          ? await getMyResultForAttempt(compId, attemptId, r.eventId, r.roundNumber)
+          : await getMyResult(compId, user.uid, r.eventId, r.roundNumber);
         setMyResult(savedResult);
         setView('result');
       } catch (err) {

@@ -8,6 +8,9 @@ import {
   getRounds,
   getParticipant,
   getMyResults,
+  getActiveAttempt,
+  getMyResultsForAttempt,
+  finishAttempt,
   computeRank,
 } from '@/lib/firebase/services/virtual-competitions';
 import type {
@@ -15,6 +18,7 @@ import type {
   VirtualRound,
   VirtualParticipant,
   ParticipantRoundResult,
+  CompetitionAttempt,
 } from '@/lib/firebase/services/virtual-competitions';
 import { getEvent } from '@/lib/wca-events';
 import { WcaEventIcon } from '@/lib/wca-event-icon';
@@ -48,6 +52,36 @@ function fmtTime(ms: number): string {
 }
 
 type RoundState = 'completed' | 'available' | 'locked' | 'not_advanced';
+
+type CanFinishResult = {
+  canFinish: boolean;
+  missing: { eventId: string; roundNumber: number; roundName: string }[];
+};
+
+function computeCanFinish(
+  registeredEvents: string[],
+  roundsByEvent: Record<string, VirtualRound[]>,
+  myResults: ParticipantRoundResult[],
+): CanFinishResult {
+  const missing: CanFinishResult['missing'] = [];
+  for (const eventId of registeredEvents) {
+    const eventRounds = (roundsByEvent[eventId] ?? [])
+      .slice()
+      .sort((a, b) => a.roundNumber - b.roundNumber);
+    for (const round of eventRounds) {
+      const result = myResults.find(
+        (r) => r.eventId === eventId && r.roundNumber === round.roundNumber,
+      );
+      if (!result) {
+        missing.push({ eventId, roundNumber: round.roundNumber, roundName: round.roundName });
+        break;
+      }
+      if (round.advancementType === 'final') break;
+      if (!result.advanced) break;
+    }
+  }
+  return { canFinish: missing.length === 0, missing };
+}
 
 function getRoundState(
   round: VirtualRound,
@@ -99,9 +133,12 @@ export default function CompeteHubPage() {
   const [participant, setParticipant] = useState<VirtualParticipant | null>(null);
   const [rounds, setRounds] = useState<VirtualRound[]>([]);
   const [myResults, setMyResults] = useState<ParticipantRoundResult[]>([]);
+  const [activeAttempt, setActiveAttempt] = useState<CompetitionAttempt | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [showFinishConfirm, setShowFinishConfirm] = useState(false);
+  const [finishing, setFinishing] = useState(false);
 
   useEffect(() => {
     if (authLoading) return;
@@ -116,11 +153,11 @@ export default function CompeteHubPage() {
     let cancelled = false;
     async function load() {
       try {
-        const [compData, roundsData, participantData, myResultsData] = await Promise.all([
+        const [compData, roundsData, participantData, attempt] = await Promise.all([
           getCompetition(compId),
           getRounds(compId),
           getParticipant(compId, user!.uid),
-          getMyResults(compId, user!.uid),
+          getActiveAttempt(compId, user!.uid),
         ]);
         if (cancelled) return;
         if (!compData) { setNotFound(true); setLoading(false); return; }
@@ -128,10 +165,23 @@ export default function CompeteHubPage() {
           router.push(`/timer/competitions/${compId}`);
           return;
         }
+        // No active attempt → send back to detail page so they can start/re-enter
+        if (!attempt) {
+          router.push(`/timer/competitions/${compId}`);
+          return;
+        }
+
+        // Load results scoped to this attempt; fall back to legacy location if empty
+        let resultsData = await getMyResultsForAttempt(compId, attempt.id);
+        if (resultsData.length === 0) {
+          resultsData = await getMyResults(compId, user!.uid);
+        }
+
         setComp(compData);
         setRounds(roundsData);
         setParticipant(participantData);
-        setMyResults(myResultsData);
+        setActiveAttempt(attempt);
+        setMyResults(resultsData);
         setLoading(false);
       } catch {
         if (!cancelled) setLoading(false);
@@ -165,7 +215,7 @@ export default function CompeteHubPage() {
   }
 
   const isClosed = comp.status === 'closed';
-  const registeredEvents = participant.registeredEvents;
+  const registeredEvents = activeAttempt?.registeredEvents ?? participant.registeredEvents;
 
   // Group rounds by eventId
   const roundsByEvent = rounds.reduce<Record<string, VirtualRound[]>>((acc, r) => {
@@ -174,6 +224,19 @@ export default function CompeteHubPage() {
   }, {});
   for (const ev of Object.keys(roundsByEvent)) {
     roundsByEvent[ev].sort((a, b) => a.roundNumber - b.roundNumber);
+  }
+
+  const canFinishResult = computeCanFinish(registeredEvents, roundsByEvent, myResults);
+
+  async function handleFinish() {
+    if (!activeAttempt || finishing) return;
+    setFinishing(true);
+    try {
+      await finishAttempt(compId, activeAttempt.id);
+      router.push(`/timer/competitions/${compId}`);
+    } catch {
+      setFinishing(false);
+    }
   }
 
   return (
@@ -278,6 +341,7 @@ export default function CompeteHubPage() {
                           round={round}
                           state={state}
                           myResult={myResult}
+                          attemptId={activeAttempt?.id}
                           borderBottom={!isLast}
                         />
                       );
@@ -291,6 +355,89 @@ export default function CompeteHubPage() {
           {registeredEvents.length === 0 && (
             <div style={{ textAlign: 'center', padding: '3rem 0', fontSize: '0.9rem', color: C.muted }}>
               Бүртгүүлсэн төрөл байхгүй
+            </div>
+          )}
+
+          {/* ── Finish attempt CTA ── */}
+          {!isClosed && (
+            <div style={{ marginTop: '2rem', paddingBottom: '1rem' }}>
+              {showFinishConfirm ? (
+                <div style={{
+                  background: C.card, border: `1px solid ${C.border}`,
+                  borderRadius: 12, padding: '1rem',
+                }}>
+                  <div style={{ fontSize: '0.88rem', color: C.text, marginBottom: '0.75rem', lineHeight: 1.5 }}>
+                    Тэмцээнээ дуусгаж байна уу?<br />
+                    <span style={{ fontSize: '0.78rem', color: C.muted }}>
+                      Дахин үргэлжлүүлэх боломжгүй болно.
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowFinishConfirm(false)}
+                      style={{
+                        flex: 1, padding: '0.65rem', borderRadius: 9,
+                        background: 'rgba(255,255,255,0.06)', border: `1px solid ${C.border}`,
+                        color: C.muted, fontFamily: FONT, fontSize: '0.88rem', fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Болих
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleFinish()}
+                      disabled={finishing}
+                      style={{
+                        flex: 2, padding: '0.65rem', borderRadius: 9,
+                        background: finishing ? 'rgba(167,139,250,0.3)' : 'rgba(167,139,250,0.75)',
+                        border: '1px solid rgba(167,139,250,0.9)',
+                        color: '#fff', fontFamily: FONT, fontSize: '0.88rem', fontWeight: 700,
+                        cursor: finishing ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      {finishing ? 'Хадгалж байна...' : 'Тийм, дуусгах'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => canFinishResult.canFinish && setShowFinishConfirm(true)}
+                    disabled={!canFinishResult.canFinish}
+                    title={
+                      !canFinishResult.canFinish
+                        ? canFinishResult.missing.map((m) => m.roundName).join(', ') + ' үлдсэн'
+                        : undefined
+                    }
+                    style={{
+                      width: '100%', padding: '0.82rem', borderRadius: 10,
+                      background: canFinishResult.canFinish
+                        ? 'rgba(52,211,153,0.15)'
+                        : 'rgba(255,255,255,0.04)',
+                      border: `1px solid ${canFinishResult.canFinish ? 'rgba(52,211,153,0.4)' : C.border}`,
+                      color: canFinishResult.canFinish ? C.success : C.muted,
+                      fontFamily: FONT, fontSize: '0.95rem', fontWeight: 700,
+                      cursor: canFinishResult.canFinish ? 'pointer' : 'not-allowed',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    {canFinishResult.canFinish
+                      ? 'Тэмцээн дуусгах ✓'
+                      : `Тэмцээн дуусгах · ${canFinishResult.missing.length} раунд үлдсэн`}
+                  </button>
+                  {!canFinishResult.canFinish && canFinishResult.missing.length > 0 && (
+                    <div style={{
+                      marginTop: '0.4rem', fontSize: '0.72rem', color: C.muted,
+                      textAlign: 'center', lineHeight: 1.5,
+                    }}>
+                      {canFinishResult.missing.map((m) => m.roundName).join(' · ')}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -320,12 +467,13 @@ export default function CompeteHubPage() {
 }
 
 function RoundRow({
-  compId, round, state, myResult, borderBottom,
+  compId, round, state, myResult, attemptId, borderBottom,
 }: {
   compId: string;
   round: VirtualRound;
   state: RoundState;
   myResult?: ParticipantRoundResult;
+  attemptId?: string;
   borderBottom: boolean;
 }) {
   const router = useRouter();
@@ -338,9 +486,13 @@ function RoundRow({
         )
       : null;
 
+  const roundUrl = attemptId
+    ? `/timer/competitions/${compId}/compete/${round.id}?attempt=${attemptId}`
+    : `/timer/competitions/${compId}/compete/${round.id}`;
+
   return (
     <div
-      onClick={() => isAvailable && router.push(`/timer/competitions/${compId}/compete/${round.id}`)}
+      onClick={() => isAvailable && router.push(roundUrl)}
       style={{
         display: 'flex', alignItems: 'center', gap: '0.75rem',
         padding: '0.75rem 1rem',

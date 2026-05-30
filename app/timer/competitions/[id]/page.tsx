@@ -9,11 +9,15 @@ import {
   getParticipant,
   registerForCompetition,
   unregisterFromCompetition,
+  getActiveAttempt,
+  getMyAttempts,
+  createAttempt,
 } from '@/lib/firebase/services/virtual-competitions';
 import type {
   VirtualCompetition,
   VirtualRound,
   VirtualParticipant,
+  CompetitionAttempt,
 } from '@/lib/firebase/services/virtual-competitions';
 import { getEvent } from '@/lib/wca-events';
 import { WcaEventIcon } from '@/lib/wca-event-icon';
@@ -118,6 +122,71 @@ function buildAdvancementChain(sortedRounds: VirtualRound[]): string {
     .join(' → ');
 }
 
+// ─── Event selector grid ──────────────────────────────────────────────────────
+
+function EventSelector({
+  events,
+  selectedEvents,
+  onToggle,
+  disabled,
+}: {
+  events: string[];
+  selectedEvents: string[];
+  onToggle: (eventId: string) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fill, minmax(72px, 1fr))',
+      gap: '0.5rem',
+    }}>
+      {events.map((eventId) => {
+        const selected = selectedEvents.includes(eventId);
+        return (
+          <button
+            key={eventId}
+            type="button"
+            title={getEvent(eventId)?.name ?? eventId}
+            onClick={() => !disabled && onToggle(eventId)}
+            style={{
+              position: 'relative',
+              display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center',
+              height: 76, borderRadius: 12,
+              background: selected ? 'rgba(167,139,250,0.15)' : C.card,
+              border: `1.5px solid ${selected ? 'rgba(167,139,250,0.55)' : C.border}`,
+              cursor: disabled ? 'default' : 'pointer',
+              transition: 'border-color 0.12s, background 0.12s',
+              WebkitTapHighlightColor: 'transparent',
+              gap: '0.3rem', padding: 0,
+              fontFamily: FONT,
+            }}
+          >
+            <span style={{ color: selected ? C.accent : C.muted, display: 'flex' }}>
+              <WcaEventIcon eventId={eventId} size={26} />
+            </span>
+            <span style={{
+              fontSize: '0.58rem', fontWeight: 600, letterSpacing: '0.01em',
+              color: selected ? C.accent : C.muted, lineHeight: 1.25,
+              textAlign: 'center', padding: '0 4px', wordBreak: 'break-word',
+            }}>
+              {getEvent(eventId)?.name ?? eventId}
+            </span>
+            {selected && (
+              <span style={{
+                position: 'absolute', top: 5, right: 6,
+                fontSize: '0.6rem', fontWeight: 900, color: C.accent,
+                lineHeight: 1,
+              }}>✓</span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function CompetitionDetailPage() {
@@ -129,7 +198,10 @@ export default function CompetitionDetailPage() {
   const [comp, setComp] = useState<VirtualCompetition | null>(null);
   const [rounds, setRounds] = useState<VirtualRound[]>([]);
   const [initialParticipant, setInitialParticipant] = useState<VirtualParticipant | null>(null);
+  const [activeAttempt, setActiveAttempt] = useState<CompetitionAttempt | null>(null);
+  const [myAttempts, setMyAttempts] = useState<CompetitionAttempt[]>([]);
   const [selectedEvents, setSelectedEvents] = useState<string[]>([]);
+  const [showEventSelector, setShowEventSelector] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -146,23 +218,32 @@ export default function CompetitionDetailPage() {
     }
   }, [authLoading, user, id, router]);
 
-  // Fetch competition, rounds, participant
+  // Fetch competition, rounds, participant, attempts
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
     async function load() {
       try {
-        const [compData, roundsData, participantData] = await Promise.all([
+        const [compData, roundsData, participantData, activeAttemptData, attemptsData] = await Promise.all([
           getCompetition(id),
           getRounds(id),
           getParticipant(id, user!.uid),
+          getActiveAttempt(id, user!.uid),
+          getMyAttempts(id, user!.uid),
         ]);
         if (cancelled) return;
         if (!compData) { setNotFound(true); setPageLoading(false); return; }
         setComp(compData);
         setRounds(roundsData);
         setInitialParticipant(participantData);
-        setSelectedEvents(participantData?.registeredEvents ?? []);
+        setActiveAttempt(activeAttemptData);
+        setMyAttempts(attemptsData);
+        // Pre-fill event selector from last attempt or participant record
+        const lastEvents =
+          attemptsData[0]?.registeredEvents ??
+          participantData?.registeredEvents ??
+          [];
+        setSelectedEvents(lastEvents);
         setPageLoading(false);
       } catch {
         if (!cancelled) setPageLoading(false);
@@ -191,9 +272,8 @@ export default function CompetitionDetailPage() {
 
   const registered = initialParticipant !== null;
   const isClosed = comp?.status === 'closed';
-  const savedEventsStr = [...(initialParticipant?.registeredEvents ?? [])].sort().join(',');
-  const selectedEventsStr = [...selectedEvents].sort().join(',');
-  const isSameEvents = registered && savedEventsStr === selectedEventsStr;
+  const hasFinishedAttempts = myAttempts.some((a) => a.status === 'finished');
+  const latestFinished = myAttempts.find((a) => a.status === 'finished');
 
   // ── Handlers ─────────────────────────────────────────────────────────────────
 
@@ -203,20 +283,53 @@ export default function CompetitionDetailPage() {
     );
   }
 
+  // First registration: creates participant record + first attempt, then navigates to compete hub
   async function handleRegister() {
     if (!user || !comp || saving) return;
     if (selectedEvents.length === 0) return;
     setSaving(true);
     try {
-      const wasRegistered = registered;
       await registerForCompetition(
         comp.id,
         { uid: user.uid, displayName: user.displayName, photoURL: user.photoURL },
         selectedEvents,
       );
-      const updated = await getParticipant(comp.id, user.uid);
+      await createAttempt(
+        comp.id,
+        { uid: user.uid, displayName: user.displayName!, photoURL: user.photoURL },
+        selectedEvents,
+      );
+      router.push(`/timer/competitions/${comp.id}/compete`);
+    } catch {
+      setSaving(false);
+      setToast('Алдаа гарлаа, дахин оролдоно уу');
+    }
+  }
+
+  // Re-enter: update participant events + create new attempt
+  async function handleReenter() {
+    if (!user || !comp || saving) return;
+    if (selectedEvents.length === 0) return;
+    setSaving(true);
+    try {
+      await registerForCompetition(
+        comp.id,
+        { uid: user.uid, displayName: user.displayName, photoURL: user.photoURL },
+        selectedEvents,
+      );
+      await createAttempt(
+        comp.id,
+        { uid: user.uid, displayName: user.displayName!, photoURL: user.photoURL },
+        selectedEvents,
+      );
+      const [updated, newActive] = await Promise.all([
+        getParticipant(comp.id, user.uid),
+        getActiveAttempt(comp.id, user.uid),
+      ]);
       setInitialParticipant(updated);
-      setToast(wasRegistered ? 'Шинэчлэгдлээ ✓' : 'Бүртгүүллээ ✓');
+      setActiveAttempt(newActive);
+      setToast('Шинэ оролдлого эхэллээ ✓');
+      router.push(`/timer/competitions/${comp.id}/compete`);
     } catch {
       setToast('Алдаа гарлаа, дахин оролдоно уу');
     } finally {
@@ -249,8 +362,10 @@ export default function CompetitionDetailPage() {
   const meta = [comp.date, comp.location].filter(Boolean).join(' · ');
   const participantCount = comp.participantCount ?? 0;
 
-  // CTA bottom height varies: registered → taller (two rows)
-  const ctaHeight = registered && !isClosed ? '7.5rem' : '6rem';
+  // Determine CTA height for scroll padding
+  let ctaHeight = '6rem';
+  if (activeAttempt) ctaHeight = '5.5rem';
+  else if (registered && !isClosed) ctaHeight = showEventSelector ? '9rem' : '7.5rem';
 
   return (
     <div style={{
@@ -322,7 +437,6 @@ export default function CompetitionDetailPage() {
           <div style={{
             border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden',
           }}>
-            {/* Table header */}
             <div style={{
               display: 'grid', gridTemplateColumns: '36px 80px 1fr',
               padding: '0.35rem 0.75rem',
@@ -337,7 +451,6 @@ export default function CompetitionDetailPage() {
                 }}>{h}</span>
               ))}
             </div>
-            {/* Table rows */}
             {comp.events.map((eventId, idx) => {
               const evRounds = roundsByEvent[eventId] ?? [];
               const chain = buildAdvancementChain(evRounds);
@@ -368,69 +481,79 @@ export default function CompetitionDetailPage() {
 
         <div style={{ height: 1, background: C.border, margin: '0 1rem' }} />
 
-        {/* ── БҮРТГЭЛ — icon tile registration grid ── */}
-        <div style={{ padding: '1rem 1rem 1rem' }}>
-          <div style={{
-            fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.12em',
-            textTransform: 'uppercase', color: C.muted, marginBottom: '0.25rem',
-          }}>
-            Бүртгэл
-          </div>
-          {!isClosed && (
-            <div style={{ fontSize: '0.78rem', color: C.muted, marginBottom: '0.85rem' }}>
-              Оролцох төрлөө сонгоно уу
+        {/* ── ATTEMPT STATUS ── */}
+        {activeAttempt ? (
+          /* In-progress attempt banner */
+          <div style={{ padding: '1rem 1rem 1rem' }}>
+            <div style={{
+              background: 'rgba(167,139,250,0.08)', border: '1px solid rgba(167,139,250,0.2)',
+              borderRadius: 12, padding: '0.9rem 1rem',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            }}>
+              <div>
+                <div style={{ fontSize: '0.82rem', fontWeight: 700, color: C.accent, marginBottom: '0.15rem' }}>
+                  {activeAttempt.attemptNumber}-р оролдлого явагдаж байна
+                </div>
+                <div style={{ fontSize: '0.72rem', color: C.muted }}>
+                  {activeAttempt.registeredEvents.length} төрөл · Үргэлжилж байна
+                </div>
+              </div>
+              <span style={{ fontSize: '0.65rem', color: C.accent, fontWeight: 700 }}>●</span>
             </div>
-          )}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(72px, 1fr))',
-            gap: '0.5rem',
-          }}>
-            {comp.events.map((eventId) => {
-              const selected = selectedEvents.includes(eventId);
-              return (
-                <button
-                  key={eventId}
-                  type="button"
-                  title={getEvent(eventId)?.name ?? eventId}
-                  onClick={() => !isClosed && toggleEvent(eventId)}
-                  style={{
-                    position: 'relative',
-                    display: 'flex', flexDirection: 'column',
-                    alignItems: 'center', justifyContent: 'center',
-                    height: 76, borderRadius: 12,
-                    background: selected ? 'rgba(167,139,250,0.15)' : C.card,
-                    border: `1.5px solid ${selected ? 'rgba(167,139,250,0.55)' : C.border}`,
-                    cursor: isClosed ? 'default' : 'pointer',
-                    transition: 'border-color 0.12s, background 0.12s',
-                    WebkitTapHighlightColor: 'transparent',
-                    gap: '0.3rem', padding: 0,
-                    fontFamily: FONT,
-                  }}
-                >
-                  <span style={{ color: selected ? C.accent : C.muted, display: 'flex' }}>
-                    <WcaEventIcon eventId={eventId} size={26} />
-                  </span>
-                  <span style={{
-                    fontSize: '0.58rem', fontWeight: 600, letterSpacing: '0.01em',
-                    color: selected ? C.accent : C.muted, lineHeight: 1.25,
-                    textAlign: 'center', padding: '0 4px', wordBreak: 'break-word',
-                  }}>
-                    {getEvent(eventId)?.name ?? eventId}
-                  </span>
-                  {/* Selection badge */}
-                  {selected && (
-                    <span style={{
-                      position: 'absolute', top: 5, right: 6,
-                      fontSize: '0.6rem', fontWeight: 900, color: C.accent,
-                      lineHeight: 1,
-                    }}>✓</span>
-                  )}
-                </button>
-              );
-            })}
           </div>
-        </div>
+        ) : hasFinishedAttempts && latestFinished ? (
+          /* Finished attempts summary */
+          <div style={{ padding: '1rem 1rem 0.5rem' }}>
+            <div style={{
+              background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.2)',
+              borderRadius: 12, padding: '0.9rem 1rem',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                <div style={{ fontSize: '0.82rem', fontWeight: 700, color: C.success }}>
+                  Тэмцээн дууссан ✓
+                </div>
+                <Link href="/timer/competitions/me" style={{
+                  fontSize: '0.72rem', color: C.muted, textDecoration: 'none',
+                }}
+                  onMouseEnter={(e) => ((e.currentTarget as HTMLAnchorElement).style.color = C.text)}
+                  onMouseLeave={(e) => ((e.currentTarget as HTMLAnchorElement).style.color = C.muted)}
+                >
+                  Түүх →
+                </Link>
+              </div>
+              <div style={{ fontSize: '0.72rem', color: C.muted }}>
+                {myAttempts.length} оролдлого · Сүүлчийнх: {latestFinished.registeredEvents.length} төрөл
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {/* ── БҮРТГЭЛ — event selector (shown when no in-progress attempt) ── */}
+        {!activeAttempt && !isClosed && (
+          <div style={{ padding: showEventSelector || !hasFinishedAttempts ? '1rem 1rem 1rem' : '0.5rem 1rem 1rem' }}>
+            {hasFinishedAttempts && !showEventSelector ? null : (
+              <>
+                <div style={{
+                  fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.12em',
+                  textTransform: 'uppercase', color: C.muted, marginBottom: '0.25rem',
+                }}>
+                  Бүртгэл
+                </div>
+                {!isClosed && (
+                  <div style={{ fontSize: '0.78rem', color: C.muted, marginBottom: '0.85rem' }}>
+                    Оролцох төрлөө сонгоно уу
+                  </div>
+                )}
+                <EventSelector
+                  events={comp.events}
+                  selectedEvents={selectedEvents}
+                  onToggle={toggleEvent}
+                  disabled={isClosed}
+                />
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Sticky bottom CTA */}
@@ -475,44 +598,107 @@ export default function CompetitionDetailPage() {
           }}>
             Хаагдсан
           </button>
-        ) : registered ? (
-          /* ── Registered: two buttons ── */
+        ) : activeAttempt ? (
+          /* ── In-progress attempt: continue CTA ── */
+          <Link
+            href={`/timer/competitions/${id}/compete`}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: '100%', padding: '0.78rem', borderRadius: 10,
+              fontFamily: FONT, fontSize: '0.97rem', fontWeight: 700, textAlign: 'center',
+              background: 'rgba(167,139,250,0.75)',
+              border: '1px solid rgba(167,139,250,0.9)',
+              color: '#fff', textDecoration: 'none',
+              boxSizing: 'border-box',
+            }}
+          >
+            Тэмцээнээ үргэлжлүүлэх →
+          </Link>
+        ) : hasFinishedAttempts ? (
+          /* ── Has finished attempts: re-enter flow ── */
           <>
-            <div style={{ display: 'flex', gap: '0.55rem', marginBottom: '0.5rem' }}>
-              {/* Update button */}
+            {showEventSelector ? (
+              <div style={{ display: 'flex', gap: '0.55rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowEventSelector(false)}
+                  style={{
+                    padding: '0.78rem 0.75rem', borderRadius: 10,
+                    fontFamily: FONT, fontSize: '0.9rem', fontWeight: 600,
+                    background: 'rgba(255,255,255,0.05)', border: `1px solid ${C.border}`,
+                    color: C.muted, cursor: 'pointer',
+                  }}
+                >
+                  ←
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleReenter()}
+                  disabled={selectedEvents.length === 0 || saving}
+                  style={{
+                    flex: 1, padding: '0.78rem 0.5rem', borderRadius: 10,
+                    fontFamily: FONT, fontSize: '0.9rem', fontWeight: 700,
+                    background: selectedEvents.length === 0
+                      ? 'rgba(255,255,255,0.05)' : 'rgba(167,139,250,0.75)',
+                    border: `1px solid ${selectedEvents.length === 0 ? C.border : 'rgba(167,139,250,0.9)'}`,
+                    color: selectedEvents.length === 0 ? C.muted : '#fff',
+                    cursor: (selectedEvents.length === 0 || saving) ? 'default' : 'pointer',
+                  }}
+                >
+                  {saving ? 'Хадгалж байна...'
+                    : selectedEvents.length === 0 ? 'Төрөл сонгоно уу'
+                    : `Дахин оролцох (${selectedEvents.length} төрөл)`}
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: '0.55rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowEventSelector(true)}
+                  style={{
+                    flex: 1, padding: '0.78rem 0.5rem', borderRadius: 10,
+                    fontFamily: FONT, fontSize: '0.9rem', fontWeight: 700,
+                    background: 'rgba(167,139,250,0.2)',
+                    border: '1px solid rgba(167,139,250,0.5)',
+                    color: C.accent, cursor: 'pointer',
+                  }}
+                >
+                  Дахин оролцох
+                </button>
+                {registered && (
+                  <button type="button" onClick={() => setConfirmUnregister(true)}
+                    style={{
+                      padding: '0.78rem 0.75rem', borderRadius: 10,
+                      fontFamily: FONT, fontSize: '0.82rem', fontWeight: 600,
+                      background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)',
+                      color: C.danger, cursor: 'pointer',
+                    }}>
+                    Цуцлах
+                  </button>
+                )}
+              </div>
+            )}
+          </>
+        ) : registered ? (
+          /* ── Registered but no attempts yet (backward compat for old users) ── */
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', gap: '0.55rem' }}>
               <button
                 type="button"
                 onClick={() => void handleRegister()}
-                disabled={isSameEvents || saving || selectedEvents.length === 0}
+                disabled={saving || selectedEvents.length === 0}
                 style={{
                   flex: 1, padding: '0.78rem 0.5rem', borderRadius: 10,
                   fontFamily: FONT, fontSize: '0.9rem', fontWeight: 700,
-                  background: (isSameEvents || selectedEvents.length === 0)
+                  background: selectedEvents.length === 0
                     ? 'rgba(255,255,255,0.04)' : 'rgba(167,139,250,0.2)',
-                  border: `1px solid ${
-                    (isSameEvents || selectedEvents.length === 0)
-                      ? C.border : 'rgba(167,139,250,0.5)'
-                  }`,
-                  color: (isSameEvents || selectedEvents.length === 0) ? C.muted : C.accent,
-                  cursor: (isSameEvents || saving || selectedEvents.length === 0) ? 'default' : 'pointer',
+                  border: `1px solid ${selectedEvents.length === 0 ? C.border : 'rgba(167,139,250,0.5)'}`,
+                  color: selectedEvents.length === 0 ? C.muted : C.accent,
+                  cursor: (saving || selectedEvents.length === 0) ? 'default' : 'pointer',
                 }}
               >
-                {saving ? '...' : 'Шинэчлэх'}
+                {saving ? '...' : 'Эхлүүлэх'}
               </button>
-              {/* Compete button */}
-              <Link
-                href={`/timer/competitions/${id}/compete`}
-                style={{
-                  flex: 2, padding: '0.78rem 0.5rem', borderRadius: 10,
-                  fontFamily: FONT, fontSize: '0.9rem', fontWeight: 700, textAlign: 'center',
-                  background: 'rgba(167,139,250,0.75)',
-                  border: '1px solid rgba(167,139,250,0.9)',
-                  color: '#fff', textDecoration: 'none',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}
-              >
-                Тэмцээнээ эхлүүлэх →
-              </Link>
             </div>
             <div style={{ textAlign: 'center' }}>
               <button type="button" onClick={() => setConfirmUnregister(true)}
@@ -524,7 +710,7 @@ export default function CompetitionDetailPage() {
                 Бүртгэлээ цуцлах
               </button>
             </div>
-          </>
+          </div>
         ) : (
           /* ── Not registered ── */
           <button
