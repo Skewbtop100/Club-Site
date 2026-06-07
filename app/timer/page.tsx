@@ -2433,9 +2433,9 @@ export default function TimerPage() {
             </div>
             {ao5Projection && (timer.state === 'idle' || timer.state === 'stopped') && (
               <div className="pv-ao5-inline" style={{
-                position: 'absolute', right: '1.5rem', top: '50%', transform: 'translateY(-50%)',
+                position: 'absolute', left: '72%', top: '50%', transform: 'translateY(-50%)',
                 display: 'flex', flexDirection: 'column', gap: 5,
-                alignItems: 'flex-end', pointerEvents: 'none',
+                alignItems: 'flex-start', pointerEvents: 'none',
               }}>
                 <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '1.2rem', fontWeight: 700, color: '#34d399', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
                   {fmtMs(ao5Projection.best, false, precision)}
@@ -2892,9 +2892,9 @@ export default function TimerPage() {
                   </div>
                   {ao5Projection && (timer.state === 'idle' || timer.state === 'stopped') && (
                     <div className="pv-ao5-inline" style={{
-                      position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)',
+                      position: 'absolute', left: '72%', top: '50%', transform: 'translateY(-50%)',
                       display: 'flex', flexDirection: 'column', gap: 4,
-                      alignItems: 'flex-end', pointerEvents: 'none',
+                      alignItems: 'flex-start', pointerEvents: 'none',
                     }}>
                       <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '1.15rem', fontWeight: 700, color: '#34d399', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
                         {fmtMs(ao5Projection.best, false, precision)}
