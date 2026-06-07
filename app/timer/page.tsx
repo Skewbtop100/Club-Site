@@ -2586,7 +2586,9 @@ export default function TimerPage() {
         // Extra averages for the Stats tab
         const ao50 = avgOfN(solves, 50);
         const ao100 = avgOfN(solves, 100);
-        const validCount = validSolves.length;
+        // Total solve count includes DNFs — a DNF is still a completed
+        // attempt under WCA rules; only the time itself is invalidated.
+        const totalCount = solves.length;
 
         // Chart series for Stats tab
         const chartSolves = solves;
@@ -3250,7 +3252,7 @@ export default function TimerPage() {
                 }}>
                   <MobileStatMini label="Ao50"  value={ao50  == null ? '—' : fmtMs(ao50,  false, precision)} />
                   <MobileStatMini label="Ao100" value={ao100 == null ? '—' : fmtMs(ao100, false, precision)} />
-                  <MobileStatMini label="Count" value={String(validCount)} />
+                  <MobileStatMini label="Count" value={String(totalCount)} />
                   <MobileStatMini label="σ"     value={stats.stdDev == null ? '—' : (stats.stdDev / 1000).toFixed(2)} />
                 </div>
               </div>
@@ -3260,7 +3262,7 @@ export default function TimerPage() {
             {mobileTab === 'tools' && (
               <ToolsTab
                 onNavigate={(path) => router.push(path)}
-                solveCount={validCount}
+                solveCount={totalCount}
                 currentUserId={user?.uid}
               />
             )}
@@ -3284,7 +3286,7 @@ export default function TimerPage() {
                     <MobileMicroStat label="Dev"   value={stats.stdDev == null ? '—' : (stats.stdDev / 1000).toFixed(2)} />
                     <MobileMicroStat label="Mean"  value={fmtMs(stats.mean, false, precision)} />
                     <MobileMicroStat label="Best"  value={fmtMs(stats.best, false, precision)} accent />
-                    <MobileMicroStat label="Count" value={String(validCount)} />
+                    <MobileMicroStat label="Count" value={String(totalCount)} />
                   </div>
                   <button
                     onClick={() => setCubeFullscreenOpen(true)}
