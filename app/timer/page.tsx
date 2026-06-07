@@ -3295,13 +3295,13 @@ export default function TimerPage() {
               {mobileTab === 'timer' && (
                 <div className="pv-mobile-stats" style={{
                   display: 'grid', gridTemplateColumns: '1fr auto 1fr',
-                  gap: '0.5rem', padding: '0.4rem 0.7rem 0.6rem',
+                  gap: '0.3rem', padding: '0.2rem 0.7rem 0.35rem',
                   alignItems: 'center',
                   background: C.card,
                   borderTop: `1px solid ${C.border}`,
                   backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
                 }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
                     <MobileMicroStat label="Dev"   value={stats.stdDev == null ? '—' : (stats.stdDev / 1000).toFixed(2)} />
                     <MobileMicroStat label="Mean"  value={fmtMs(stats.mean, false, precision)} />
                     <MobileMicroStat label="Best"  value={fmtMs(stats.best, false, precision)} accent />
@@ -3311,7 +3311,7 @@ export default function TimerPage() {
                     onClick={() => setCubeFullscreenOpen(true)}
                     aria-label="Enlarge cube"
                     style={{
-                      width: 92, height: 92, padding: 4,
+                      width: 74, height: 74, padding: 4,
                       background: C.cardAlt, border: `1px solid ${C.border}`,
                       borderRadius: 10,
                       display: 'flex', flexDirection: 'column',
@@ -3325,7 +3325,7 @@ export default function TimerPage() {
                       <CubeViewer eventId={eventId} scramble={scramble} />
                     </div>
                   </button>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
                     <MobileMicroStat label="Ao5"   value={fmtMs(stats.ao5,  false, precision)} accent={stats.ao5 != null} />
                     <MobileMicroStat label="Ao12"  value={fmtMs(stats.ao12, false, precision)} accent={stats.ao12 != null} />
                     <MobileMicroStat label="Ao50"  value={fmtMs(ao50,       false, precision)} accent={ao50 != null} />
@@ -4128,7 +4128,7 @@ function MobileMicroStat({ label, value, accent }: { label: string; value: strin
       </div>
       <div style={{
         fontFamily: '"JetBrains Mono", monospace',
-        fontSize: '0.85rem', fontWeight: 700,
+        fontSize: '0.85rem', fontWeight: 700, lineHeight: 1.3,
         color: accent ? C.accent : C.text,
         fontVariantNumeric: 'tabular-nums',
         textAlign: 'right',
