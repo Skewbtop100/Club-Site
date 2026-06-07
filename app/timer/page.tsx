@@ -2324,6 +2324,7 @@ export default function TimerPage() {
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
               touchAction: 'manipulation',
               cursor: 'pointer', textAlign: 'center',
+              position: 'relative',
             }}
           >
             {connectedTimerName && (
@@ -2349,40 +2350,25 @@ export default function TimerPage() {
                 isMobile={false}
               />
             ) : (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '2.5rem' }}>
-                <div style={{
-                  fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
-                  fontSize: getTimerFontSize(timerDisplay, false),
-                  fontWeight: 700, lineHeight: 0.95,
-                  fontVariantNumeric: 'tabular-nums',
-                  letterSpacing: '-0.01em',
-                  color: timerColor,
-                  // Slower color fade after a stop so the green→white flash
-                  // reads as a confirmation pulse rather than an instant
-                  // snap. Otherwise 0.12s keeps the red↔green arming flip
-                  // feeling responsive.
-                  transition: `color ${timer.state === 'stopped' ? 0.3 : 0.12}s, font-size 0.12s`,
-                  textShadow: timerGlow
-                    ? `0 0 30px ${C.success}55`
-                    : timer.state === 'stopped'
-                      ? '0 0 20px rgba(255,255,255,0.08)'
-                      : 'none',
-                }}>
-                  {timerDisplay}
-                </div>
-                {ao5Projection && (timer.state === 'idle' || timer.state === 'stopped') && (
-                  <div className="pv-ao5-inline" style={{
-                    display: 'flex', flexDirection: 'column', gap: 6,
-                    alignItems: 'flex-end', pointerEvents: 'none',
-                  }}>
-                    <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '1.8rem', fontWeight: 700, color: '#34d399', fontVariantNumeric: 'tabular-nums', lineHeight: 1.2 }}>
-                      {fmtMs(ao5Projection.best, false, precision)}
-                    </span>
-                    <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '1.8rem', fontWeight: 700, color: '#ef4444', fontVariantNumeric: 'tabular-nums', lineHeight: 1.2 }}>
-                      {fmtMs(ao5Projection.worst, false, precision)}
-                    </span>
-                  </div>
-                )}
+              <div style={{
+                fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
+                fontSize: getTimerFontSize(timerDisplay, false),
+                fontWeight: 700, lineHeight: 0.95,
+                fontVariantNumeric: 'tabular-nums',
+                letterSpacing: '-0.01em',
+                color: timerColor,
+                // Slower color fade after a stop so the green→white flash
+                // reads as a confirmation pulse rather than an instant
+                // snap. Otherwise 0.12s keeps the red↔green arming flip
+                // feeling responsive.
+                transition: `color ${timer.state === 'stopped' ? 0.3 : 0.12}s, font-size 0.12s`,
+                textShadow: timerGlow
+                  ? `0 0 30px ${C.success}55`
+                  : timer.state === 'stopped'
+                    ? '0 0 20px rgba(255,255,255,0.08)'
+                    : 'none',
+              }}>
+                {timerDisplay}
               </div>
             )}
             {/* Action row visibility is now opacity-driven so the fade
@@ -2445,6 +2431,20 @@ export default function TimerPage() {
               )}
               {!ganConnected && timer.state === 'running' && 'Press SPACE / tap to stop'}
             </div>
+            {ao5Projection && (timer.state === 'idle' || timer.state === 'stopped') && (
+              <div className="pv-ao5-inline" style={{
+                position: 'absolute', left: '65%', top: '50%', transform: 'translateY(-50%)',
+                display: 'flex', flexDirection: 'column', gap: 6,
+                alignItems: 'flex-end', pointerEvents: 'none',
+              }}>
+                <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '1.2rem', fontWeight: 700, color: '#34d399', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
+                  {fmtMs(ao5Projection.best, false, precision)}
+                </span>
+                <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '1.2rem', fontWeight: 700, color: '#ef4444', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
+                  {fmtMs(ao5Projection.worst, false, precision)}
+                </span>
+              </div>
+            )}
 
           </section>
 
@@ -2806,6 +2806,7 @@ export default function TimerPage() {
                     touchAction: 'manipulation',
                     margin: '0 0.7rem',
                     background: 'transparent',
+                    position: 'relative',
                   }}
                 >
                   {connectedTimerName && (
@@ -2831,31 +2832,16 @@ export default function TimerPage() {
                       isMobile
                     />
                   ) : (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '2rem' }}>
-                      <div style={{
-                        fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
-                        fontSize: getTimerFontSize(timerDisplay, true),
-                        fontWeight: 700, lineHeight: 0.95,
-                        fontVariantNumeric: 'tabular-nums',
-                        color: timerColor,
-                        transition: `color ${timer.state === 'stopped' ? 0.3 : 0.12}s, font-size 0.12s`,
-                        textShadow: timerGlow ? `0 0 30px ${C.success}55` : 'none',
-                      }}>
-                        {timerDisplay}
-                      </div>
-                      {ao5Projection && (timer.state === 'idle' || timer.state === 'stopped') && (
-                        <div className="pv-ao5-inline" style={{
-                          display: 'flex', flexDirection: 'column', gap: 5,
-                          alignItems: 'flex-end', pointerEvents: 'none',
-                        }}>
-                          <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '1.8rem', fontWeight: 700, color: '#34d399', fontVariantNumeric: 'tabular-nums', lineHeight: 1.2 }}>
-                            {fmtMs(ao5Projection.best, false, precision)}
-                          </span>
-                          <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '1.8rem', fontWeight: 700, color: '#ef4444', fontVariantNumeric: 'tabular-nums', lineHeight: 1.2 }}>
-                            {fmtMs(ao5Projection.worst, false, precision)}
-                          </span>
-                        </div>
-                      )}
+                    <div style={{
+                      fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
+                      fontSize: getTimerFontSize(timerDisplay, true),
+                      fontWeight: 700, lineHeight: 0.95,
+                      fontVariantNumeric: 'tabular-nums',
+                      color: timerColor,
+                      transition: `color ${timer.state === 'stopped' ? 0.3 : 0.12}s, font-size 0.12s`,
+                      textShadow: timerGlow ? `0 0 30px ${C.success}55` : 'none',
+                    }}>
+                      {timerDisplay}
                     </div>
                   )}
                   {/* Same opacity/visibility wrapper as the desktop
@@ -2904,6 +2890,20 @@ export default function TimerPage() {
                     )}
                     {!ganConnected && timer.state === 'running' && 'TAP TO STOP'}
                   </div>
+                  {ao5Projection && (timer.state === 'idle' || timer.state === 'stopped') && (
+                    <div className="pv-ao5-inline" style={{
+                      position: 'absolute', left: '65%', top: '50%', transform: 'translateY(-50%)',
+                      display: 'flex', flexDirection: 'column', gap: 6,
+                      alignItems: 'flex-end', pointerEvents: 'none',
+                    }}>
+                      <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '1.2rem', fontWeight: 700, color: '#34d399', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
+                        {fmtMs(ao5Projection.best, false, precision)}
+                      </span>
+                      <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '1.2rem', fontWeight: 700, color: '#ef4444', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
+                        {fmtMs(ao5Projection.worst, false, precision)}
+                      </span>
+                    </div>
+                  )}
                 </section>
               </div>
             )}
