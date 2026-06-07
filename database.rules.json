@@ -1,0 +1,32 @@
+{
+  "rules": {
+    "rooms": {
+      ".read": "auth != null",
+      "$roomCode": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "players": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid"
+          }
+        }
+      }
+    },
+    "presence": {
+      "timer": {
+        ".read": "auth != null",
+        "$uid": {
+          ".write": "auth != null && auth.uid === $uid"
+        }
+      }
+    },
+    "virtualProgress": {
+      "$compId": {
+        "$uid": {
+          ".read": "auth != null && auth.uid === $uid",
+          ".write": "auth != null && auth.uid === $uid"
+        }
+      }
+    }
+  }
+}
