@@ -2433,7 +2433,7 @@ export default function TimerPage() {
             </div>
             {ao5Projection && (timer.state === 'idle' || timer.state === 'stopped') && (
               <div className="pv-ao5-inline" style={{
-                position: 'absolute', left: '65%', top: '50%', transform: 'translateY(-50%)',
+                position: 'absolute', left: 'calc(50% + 5rem)', top: '50%', transform: 'translateY(-50%)',
                 display: 'flex', flexDirection: 'column', gap: 6,
                 alignItems: 'flex-end', pointerEvents: 'none',
               }}>
@@ -2892,7 +2892,7 @@ export default function TimerPage() {
                   </div>
                   {ao5Projection && (timer.state === 'idle' || timer.state === 'stopped') && (
                     <div className="pv-ao5-inline" style={{
-                      position: 'absolute', left: '65%', top: '50%', transform: 'translateY(-50%)',
+                      position: 'absolute', left: 'calc(50% + 5rem)', top: '50%', transform: 'translateY(-50%)',
                       display: 'flex', flexDirection: 'column', gap: 6,
                       alignItems: 'flex-end', pointerEvents: 'none',
                     }}>
