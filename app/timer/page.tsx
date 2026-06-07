@@ -2934,7 +2934,6 @@ export default function TimerPage() {
                     )}
                     {!ganConnected && timer.state === 'running' && 'TAP TO STOP'}
                   </div>
-                  {ao5ProjectionEl}
                 </section>
               </div>
             )}
@@ -3355,6 +3354,37 @@ export default function TimerPage() {
                 <BottomTab label="Community"  icon={<IconUsers size={20} />}     active={mobileTab === 'tools'}  onClick={() => setMobileTab('tools')} C={C} />
               </nav>
             </div>
+
+            {/* Ao5 projection popup — floats above the cube preview */}
+            {mobileTab === 'timer' && ao5Projection && (timer.state === 'idle' || timer.state === 'stopped') && (
+              <div className="pv-ao5-popup" style={{
+                position: 'absolute',
+                bottom: 'calc(144px + env(safe-area-inset-bottom, 0px))',
+                right: 16,
+                zIndex: 5,
+                background: C.card,
+                border: `1px solid ${C.border}`,
+                borderRadius: 10,
+                padding: '0.55rem 0.75rem',
+                backdropFilter: 'blur(10px)',
+                WebkitBackdropFilter: 'blur(10px)',
+                display: 'flex', flexDirection: 'column', gap: '0.25rem',
+                minWidth: 140,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '0.5rem' }}>
+                  <span style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: C.muted, fontWeight: 600 }}>Best</span>
+                  <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '0.92rem', fontWeight: 700, color: C.success, fontVariantNumeric: 'tabular-nums' }}>
+                    {fmtMs(ao5Projection.best, false, precision)}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '0.5rem' }}>
+                  <span style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: C.muted, fontWeight: 600 }}>Worst</span>
+                  <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '0.92rem', fontWeight: 700, color: C.danger, fontVariantNumeric: 'tabular-nums' }}>
+                    {fmtMs(ao5Projection.worst, false, precision)}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         );
       })()}
@@ -3799,7 +3829,8 @@ export default function TimerPage() {
         .timer-page .pv-mobile-nav,
         .timer-page .pv-bt-indicator,
         .timer-page .pv-instruction,
-        .timer-page .pv-projection {
+        .timer-page .pv-projection,
+        .timer-page .pv-ao5-popup {
           transition: opacity 0.18s ease;
         }
         .timer-page.focus-mode .pv-sidebar,
@@ -3810,7 +3841,8 @@ export default function TimerPage() {
         .timer-page.focus-mode .pv-mobile-nav,
         .timer-page.focus-mode .pv-bt-indicator,
         .timer-page.focus-mode .pv-instruction,
-        .timer-page.focus-mode .pv-projection {
+        .timer-page.focus-mode .pv-projection,
+        .timer-page.focus-mode .pv-ao5-popup {
           opacity: 0;
           pointer-events: none;
         }
@@ -3827,6 +3859,13 @@ export default function TimerPage() {
            keyframe the post-stop action row already runs on. */
         .pv-projection {
           animation: pv-actionrow-fade 0.35s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+        }
+        .pv-ao5-popup {
+          animation: ao5proj-slide-in 0.3s ease-out both;
+        }
+        @keyframes ao5proj-slide-in {
+          from { opacity: 0; transform: translateY(8px); }
+          to   { opacity: 1; transform: translateY(0); }
         }
       `}</style>
     </div>
