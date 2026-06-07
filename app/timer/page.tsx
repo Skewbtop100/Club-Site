@@ -1817,65 +1817,6 @@ export default function TimerPage() {
     timer.state === 'armed' ||
     timer.state === 'running';
 
-  // Ao5 projection — minimal "best — worst" line, color coded. Defined
-  // once so desktop and mobile share the same JSX, slotted under the
-  // instruction text in each layout. Hidden mid-solve (running /
-  // inspecting / armed) and during focus mode (.pv-projection in the
-  // focus-mode CSS list).
-  const ao5ProjectionEl = ao5Projection && (timer.state === 'idle' || timer.state === 'stopped') ? (
-    <div className="pv-projection" style={{
-      marginTop: '0.55rem',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      gap: '1.5rem',
-    }}>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.15rem' }}>
-        <span style={{
-          fontSize: '0.78rem',
-          letterSpacing: '0.18em',
-          textTransform: 'uppercase',
-          color: C.muted,
-          fontWeight: 700,
-          fontFamily: '"Inter", -apple-system, system-ui, sans-serif',
-        }}>
-          best
-        </span>
-        <span style={{
-          fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
-          fontSize: '1.15rem', fontWeight: 500,
-          color: C.success,
-          fontVariantNumeric: 'tabular-nums',
-          letterSpacing: '0.01em',
-        }}>
-          {fmtMs(ao5Projection.best, false, precision)}
-        </span>
-      </div>
-      <span style={{
-        width: 1, height: 24,
-        background: C.border,
-      }} />
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.15rem' }}>
-        <span style={{
-          fontSize: '0.78rem',
-          letterSpacing: '0.18em',
-          textTransform: 'uppercase',
-          color: C.muted,
-          fontWeight: 700,
-          fontFamily: '"Inter", -apple-system, system-ui, sans-serif',
-        }}>
-          worst
-        </span>
-        <span style={{
-          fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
-          fontSize: '1.15rem', fontWeight: 500,
-          color: C.danger,
-          fontVariantNumeric: 'tabular-nums',
-          letterSpacing: '0.01em',
-        }}>
-          {fmtMs(ao5Projection.worst, false, precision)}
-        </span>
-      </div>
-    </div>
-  ) : null;
 
   return (
     <div className={`timer-page ${focusMode ? 'focus-mode' : ''}`} style={{
@@ -2383,6 +2324,7 @@ export default function TimerPage() {
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
               touchAction: 'manipulation',
               cursor: 'pointer', textAlign: 'center',
+              position: 'relative',
             }}
           >
             {connectedTimerName && (
@@ -2489,7 +2431,20 @@ export default function TimerPage() {
               )}
               {!ganConnected && timer.state === 'running' && 'Press SPACE / tap to stop'}
             </div>
-            {ao5ProjectionEl}
+            {ao5Projection && (timer.state === 'idle' || timer.state === 'stopped') && (
+              <div className="pv-ao5-inline" style={{
+                position: 'absolute', right: '1.5rem', top: '50%', transform: 'translateY(-50%)',
+                display: 'flex', flexDirection: 'column', gap: 5,
+                alignItems: 'flex-end', pointerEvents: 'none',
+              }}>
+                <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '1.2rem', fontWeight: 700, color: '#34d399', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
+                  {fmtMs(ao5Projection.best, false, precision)}
+                </span>
+                <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '1.2rem', fontWeight: 700, color: '#ef4444', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
+                  {fmtMs(ao5Projection.worst, false, precision)}
+                </span>
+              </div>
+            )}
 
           </section>
 
@@ -2851,6 +2806,7 @@ export default function TimerPage() {
                     touchAction: 'manipulation',
                     margin: '0 0.7rem',
                     background: 'transparent',
+                    position: 'relative',
                   }}
                 >
                   {connectedTimerName && (
@@ -2934,6 +2890,20 @@ export default function TimerPage() {
                     )}
                     {!ganConnected && timer.state === 'running' && 'TAP TO STOP'}
                   </div>
+                  {ao5Projection && (timer.state === 'idle' || timer.state === 'stopped') && (
+                    <div className="pv-ao5-inline" style={{
+                      position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)',
+                      display: 'flex', flexDirection: 'column', gap: 4,
+                      alignItems: 'flex-end', pointerEvents: 'none',
+                    }}>
+                      <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '1.15rem', fontWeight: 700, color: '#34d399', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
+                        {fmtMs(ao5Projection.best, false, precision)}
+                      </span>
+                      <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '1.15rem', fontWeight: 700, color: '#ef4444', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
+                        {fmtMs(ao5Projection.worst, false, precision)}
+                      </span>
+                    </div>
+                  )}
                 </section>
               </div>
             )}
@@ -3355,36 +3325,6 @@ export default function TimerPage() {
               </nav>
             </div>
 
-            {/* Ao5 projection popup — floats above the cube preview */}
-            {mobileTab === 'timer' && ao5Projection && (timer.state === 'idle' || timer.state === 'stopped') && (
-              <div className="pv-ao5-popup" style={{
-                position: 'absolute',
-                bottom: 'calc(144px + env(safe-area-inset-bottom, 0px))',
-                right: 16,
-                zIndex: 5,
-                background: C.card,
-                border: `1px solid ${C.border}`,
-                borderRadius: 10,
-                padding: '0.55rem 0.75rem',
-                backdropFilter: 'blur(10px)',
-                WebkitBackdropFilter: 'blur(10px)',
-                display: 'flex', flexDirection: 'column', gap: '0.25rem',
-                minWidth: 140,
-              }}>
-                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '0.5rem' }}>
-                  <span style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: C.muted, fontWeight: 600 }}>Best</span>
-                  <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '0.92rem', fontWeight: 700, color: C.success, fontVariantNumeric: 'tabular-nums' }}>
-                    {fmtMs(ao5Projection.best, false, precision)}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '0.5rem' }}>
-                  <span style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: C.muted, fontWeight: 600 }}>Worst</span>
-                  <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '0.92rem', fontWeight: 700, color: C.danger, fontVariantNumeric: 'tabular-nums' }}>
-                    {fmtMs(ao5Projection.worst, false, precision)}
-                  </span>
-                </div>
-              </div>
-            )}
           </div>
         );
       })()}
@@ -3829,8 +3769,7 @@ export default function TimerPage() {
         .timer-page .pv-mobile-nav,
         .timer-page .pv-bt-indicator,
         .timer-page .pv-instruction,
-        .timer-page .pv-projection,
-        .timer-page .pv-ao5-popup {
+        .timer-page .pv-ao5-inline {
           transition: opacity 0.18s ease;
         }
         .timer-page.focus-mode .pv-sidebar,
@@ -3841,8 +3780,7 @@ export default function TimerPage() {
         .timer-page.focus-mode .pv-mobile-nav,
         .timer-page.focus-mode .pv-bt-indicator,
         .timer-page.focus-mode .pv-instruction,
-        .timer-page.focus-mode .pv-projection,
-        .timer-page.focus-mode .pv-ao5-popup {
+        .timer-page.focus-mode .pv-ao5-inline {
           opacity: 0;
           pointer-events: none;
         }
@@ -3854,18 +3792,12 @@ export default function TimerPage() {
           background: #000 !important;
         }
 
-        /* Subtle entrance for the Ao5 projection card so it doesn't snap in
-           the moment the trailing-4 window fills. Reuses the same fade
-           keyframe the post-stop action row already runs on. */
-        .pv-projection {
-          animation: pv-actionrow-fade 0.35s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+        .pv-ao5-inline {
+          animation: ao5-fade-in 0.2s ease-out both;
         }
-        .pv-ao5-popup {
-          animation: ao5proj-slide-in 0.3s ease-out both;
-        }
-        @keyframes ao5proj-slide-in {
-          from { opacity: 0; transform: translateY(8px); }
-          to   { opacity: 1; transform: translateY(0); }
+        @keyframes ao5-fade-in {
+          from { opacity: 0; }
+          to   { opacity: 1; }
         }
       `}</style>
     </div>
