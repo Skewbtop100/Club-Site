@@ -1139,6 +1139,7 @@ export default function TimerPage() {
   // fired fireRunning / startRunning could otherwise bubble straight
   // back into the overlay and stop the timer at 0.0s.
   const runStartedAtRef = useRef<number>(0);
+  const mobileTimerRef = useRef<HTMLElement>(null);
   useEffect(() => {
     if (timer.state === 'running') runStartedAtRef.current = Date.now();
   }, [timer.state]);
@@ -1589,9 +1590,10 @@ export default function TimerPage() {
   // Mobile: tap timer area. Disabled while a GAN timer is connected.
   // Also disabled in 'manual' mode — the timer area is an input field
   // there, and the user's tap goes into the input, not into arming.
-  const onTimerTouchStart = useCallback(() => {
+  const onTimerTouchStart = useCallback((e: React.TouchEvent) => {
     if (timeEntryMode === 'manual') return;
     if (ganConnected) return;
+    if (e.touches.length >= 2 && timer.state === 'stopped' && lastSolve) return;
     if (timer.state === 'running') { timer.stop(); return; }
     // Cooldown window after a solve ends: the action row (✕ / DNF / +2
     // / 💬) is now visible and the user is most likely aiming at one
@@ -1615,12 +1617,78 @@ export default function TimerPage() {
       if (holdToStart) timer.startArming();
       else timer.startRunning();
     }
-  }, [timer, inspectionEnabled, holdToStart, ganConnected, timeEntryMode, actionsArmed]);
+  }, [timer, inspectionEnabled, holdToStart, ganConnected, timeEntryMode, actionsArmed, lastSolve]);
 
   const onTimerTouchEnd = useCallback(() => {
     if (timeEntryMode === 'manual') return;
     if (timer.state === 'armed') timer.fireRunning();
   }, [timer, timeEntryMode]);
+
+  // ── Two-finger gesture shortcuts (mobile only) ───────────────────────
+  // Tap = open delete confirm, swipe-up = toggle +2, swipe-down = toggle DNF.
+  // Native listeners with passive:false so preventDefault blocks pinch-zoom.
+  const twoFingerRef = useRef<{
+    startTime: number;
+    startY1: number; startY2: number;
+    lastY1: number; lastY2: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const el = mobileTimerRef.current;
+    if (!el || !isMobile) return;
+    const canGesture = timer.state === 'stopped' && !!lastSolve;
+
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length === 2 && canGesture) {
+        e.preventDefault();
+        twoFingerRef.current = {
+          startTime: Date.now(),
+          startY1: e.touches[0].clientY,
+          startY2: e.touches[1].clientY,
+          lastY1: e.touches[0].clientY,
+          lastY2: e.touches[1].clientY,
+        };
+      }
+    };
+    const onMove = (e: TouchEvent) => {
+      if (!twoFingerRef.current || e.touches.length < 2) return;
+      e.preventDefault();
+      twoFingerRef.current.lastY1 = e.touches[0].clientY;
+      twoFingerRef.current.lastY2 = e.touches[1].clientY;
+    };
+    const onEnd = (e: TouchEvent) => {
+      if (!twoFingerRef.current) return;
+      if (e.touches.length > 0) return;
+      const g = twoFingerRef.current;
+      twoFingerRef.current = null;
+
+      const avgStartY = (g.startY1 + g.startY2) / 2;
+      const avgEndY = (g.lastY1 + g.lastY2) / 2;
+      const deltaY = avgEndY - avgStartY;
+      const duration = Date.now() - g.startTime;
+
+      const SWIPE_THRESHOLD = 50;
+      const TAP_DURATION_MAX = 300;
+      const TAP_MOVEMENT_MAX = 10;
+
+      if (Math.abs(deltaY) < TAP_MOVEMENT_MAX && duration < TAP_DURATION_MAX) {
+        deleteLastSolve();
+      } else if (deltaY < -SWIPE_THRESHOLD) {
+        togglePenaltyOnLast('+2');
+      } else if (deltaY > SWIPE_THRESHOLD) {
+        togglePenaltyOnLast('dnf');
+      }
+    };
+
+    el.addEventListener('touchstart', onStart, { passive: false });
+    el.addEventListener('touchmove', onMove, { passive: false });
+    el.addEventListener('touchend', onEnd);
+    return () => {
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
+    };
+  }, [isMobile, timer.state, lastSolve, deleteLastSolve, togglePenaltyOnLast]);
 
   // Inline-manual-entry commit. Same parser + same `finishExternal`
   // path as the legacy modal — `onSolveCommit` runs as if a real solve
@@ -2798,6 +2866,7 @@ export default function TimerPage() {
                     visually noisy on tablets where the timer area takes
                     a large share of the viewport. */}
                 <section
+                  ref={mobileTimerRef}
                   onTouchStart={onTimerTouchStart}
                   onTouchEnd={onTimerTouchEnd}
                   // Same long-press / context-menu suppression as the
