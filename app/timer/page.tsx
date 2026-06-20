@@ -3370,47 +3370,113 @@ export default function TimerPage() {
                 Both live in normal flow at the column tail with flex-shrink: 0
                 so they never get clipped or covered. */}
             <div style={{ flexShrink: 0 }}>
-              {mobileTab === 'timer' && (
-                <div className="pv-mobile-stats" style={{
-                  display: 'grid', gridTemplateColumns: '1fr auto 1fr',
-                  gap: '0.3rem', padding: '0.2rem 0.7rem 0.35rem',
-                  alignItems: 'center',
-                  background: C.card,
-                  borderTop: `1px solid ${C.border}`,
-                  backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
-                }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
-                    <MobileMicroStat label="Dev"   value={stats.stdDev == null ? '—' : (stats.stdDev / 1000).toFixed(2)} />
-                    <MobileMicroStat label="Mean"  value={fmtMs(stats.mean, false, precision)} />
-                    <MobileMicroStat label="Best"  value={fmtMs(stats.best, false, precision)} accent />
-                    <MobileMicroStat label="Count" value={String(totalCount)} />
-                  </div>
-                  <button
-                    onClick={() => setCubeFullscreenOpen(true)}
-                    aria-label="Enlarge cube"
-                    style={{
-                      width: 74, height: 74, padding: 4,
-                      background: C.cardAlt, border: `1px solid ${C.border}`,
-                      borderRadius: 10,
+              {mobileTab === 'timer' && (() => {
+                const last12 = solves.slice(-12).reverse();
+                return (
+                  <div className="pv-mobile-stats" style={{
+                    display: 'flex', alignItems: 'stretch',
+                    gap: '0.4rem', padding: '0.3rem 0.5rem 0.35rem',
+                    background: C.card,
+                    borderTop: `1px solid ${C.border}`,
+                    backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+                  }}>
+                    {/* Left: last 12 solves, scrollable */}
+                    <div className="pv-last12" style={{
+                      flex: '0 0 32%', minWidth: 0,
+                      maxHeight: 120, overflowY: 'auto',
                       display: 'flex', flexDirection: 'column',
-                      cursor: 'pointer',
-                      fontFamily: 'inherit',
-                      flexShrink: 0,
-                      WebkitTapHighlightColor: 'transparent',
-                    }}
-                  >
-                    <div style={{ flex: 1, minHeight: 0, width: '100%', display: 'flex' }}>
-                      <CubeViewer eventId={eventId} scramble={scramble} />
+                    }}>
+                      {last12.length === 0 ? (
+                        <div style={{
+                          fontSize: '0.72rem', color: C.muted,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          height: '100%',
+                        }}>—</div>
+                      ) : last12.map((s, i) => {
+                        const idx = solves.length - i;
+                        const dnf = isDnf(s);
+                        const timeStr = dnf ? 'DNF' : fmtMs(finalMs(s), false, precision) + (s.penalty === '+2' ? '+' : '');
+                        return (
+                          <div
+                            key={s.id}
+                            onClick={() => setDetailSolveId(s.id)}
+                            style={{
+                              display: 'flex', alignItems: 'baseline', gap: '0.3rem',
+                              padding: '0.08rem 0.15rem',
+                              cursor: 'pointer',
+                              borderRadius: 4,
+                            }}
+                          >
+                            <span style={{
+                              fontSize: '0.65rem', color: C.muted,
+                              fontVariantNumeric: 'tabular-nums',
+                              minWidth: '1.5rem', textAlign: 'right',
+                            }}>{idx}.</span>
+                            <span style={{
+                              fontFamily: '"JetBrains Mono", monospace',
+                              fontSize: '0.78rem', fontWeight: 600,
+                              fontVariantNumeric: 'tabular-nums',
+                              color: dnf ? C.danger : C.text, lineHeight: 1.35,
+                            }}>{timeStr}</span>
+                          </div>
+                        );
+                      })}
                     </div>
-                  </button>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
-                    <MobileMicroStat label="Ao5"   value={fmtMs(stats.ao5,  false, precision)} accent={stats.ao5 != null} />
-                    <MobileMicroStat label="Ao12"  value={fmtMs(stats.ao12, false, precision)} accent={stats.ao12 != null} />
-                    <MobileMicroStat label="Ao50"  value={fmtMs(ao50,       false, precision)} accent={ao50 != null} />
-                    <MobileMicroStat label="Ao100" value={fmtMs(ao100,      false, precision)} accent={ao100 != null} />
+
+                    {/* Center: cube preview */}
+                    <button
+                      onClick={() => setCubeFullscreenOpen(true)}
+                      aria-label="Enlarge cube"
+                      style={{
+                        width: 60, height: 60, padding: 3,
+                        background: C.cardAlt, border: `1px solid ${C.border}`,
+                        borderRadius: 10,
+                        display: 'flex', flexDirection: 'column',
+                        cursor: 'pointer', fontFamily: 'inherit',
+                        flexShrink: 0, alignSelf: 'center',
+                        WebkitTapHighlightColor: 'transparent',
+                      }}
+                    >
+                      <div style={{ flex: 1, minHeight: 0, width: '100%', display: 'flex' }}>
+                        <CubeViewer eventId={eventId} scramble={scramble} />
+                      </div>
+                    </button>
+
+                    {/* Right: compact stats (Twisty Timer style) */}
+                    <div style={{
+                      flex: 1, minWidth: 0,
+                      display: 'flex', flexDirection: 'column',
+                      justifyContent: 'center', gap: '0.05rem',
+                    }}>
+                      {([
+                        ['Mean',  fmtMs(stats.mean, false, precision)],
+                        ['Best',  fmtMs(stats.best, false, precision)],
+                        ['Ao5',   fmtMs(stats.ao5,  false, precision)],
+                        ['Ao12',  fmtMs(stats.ao12, false, precision)],
+                        ['Ao50',  fmtMs(ao50,       false, precision)],
+                        ['Ao100', fmtMs(ao100,      false, precision)],
+                        ['Count', String(totalCount)],
+                      ] as const).map(([label, val]) => (
+                        <div key={label} style={{
+                          display: 'flex', justifyContent: 'space-between',
+                          alignItems: 'baseline', gap: '0.3rem',
+                          lineHeight: 1.3,
+                        }}>
+                          <span style={{
+                            fontSize: '0.65rem', color: C.muted, fontWeight: 600,
+                          }}>{label}</span>
+                          <span style={{
+                            fontFamily: '"JetBrains Mono", monospace',
+                            fontSize: '0.78rem', fontWeight: 700,
+                            fontVariantNumeric: 'tabular-nums',
+                            color: val === '—' ? C.muted : C.text,
+                          }}>{val}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               <nav className="pv-mobile-nav" style={{
                 // iOS: 56 px of tab content plus the home-indicator inset
@@ -3815,11 +3881,12 @@ export default function TimerPage() {
         /* Hide the default scrollbar on the desktop sidebar's solve list
            (the light track clashes with the dark theme). Scroll still
            works — only the visual track/thumb is hidden. */
-        .pv-solves-list {
+        .pv-solves-list, .pv-last12 {
           scrollbar-width: none;
           -ms-overflow-style: none;
         }
-        .pv-solves-list::-webkit-scrollbar {
+        .pv-solves-list::-webkit-scrollbar,
+        .pv-last12::-webkit-scrollbar {
           display: none;
         }
 
