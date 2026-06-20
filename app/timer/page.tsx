@@ -5551,25 +5551,69 @@ function SettingsPanel(props: SettingsPanelProps) {
   };
 
   const renderShortcuts = () => (
-    <div style={{
-      display: 'grid',
-      gridTemplateColumns: '1fr 1fr',
-      gap: '0.5rem 1.25rem',
-      fontSize: '0.84rem',
-    }}>
-      <ShortcutCell label="Start / stop timer"            kbd="SPACE" c={c} />
-      <ShortcutCell label="Clear session (press twice)"   kbd="Alt+D" c={c} />
-      <ShortcutCell label="Square-1"                      kbd="Alt+1" c={c} />
-      <ShortcutCell label="2×2 Cube"                      kbd="Alt+2" c={c} />
-      <ShortcutCell label="3×3 Cube"                      kbd="Alt+3" c={c} />
-      <ShortcutCell label="4×4 Cube"                      kbd="Alt+4" c={c} />
-      <ShortcutCell label="5×5 Cube"                      kbd="Alt+5" c={c} />
-      <ShortcutCell label="6×6 Cube"                      kbd="Alt+6" c={c} />
-      <ShortcutCell label="7×7 Cube"                      kbd="Alt+7" c={c} />
-      <ShortcutCell label="Skewb"                         kbd="Alt+S" c={c} />
-      <ShortcutCell label="Megaminx"                      kbd="Alt+M" c={c} />
-      <ShortcutCell label="Clock"                         kbd="Alt+C" c={c} />
-      <ShortcutCell label="Pyraminx"                      kbd="Alt+P" c={c} />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
+      {/* ── Desktop keyboard shortcuts ── */}
+      <div>
+        <div style={{
+          fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.14em',
+          textTransform: 'uppercase', color: c.muted, marginBottom: '0.6rem',
+          display: 'flex', alignItems: 'center', gap: '0.4rem',
+        }}>
+          <IconKeyboard size={13} /> КОМПЬЮТЕР
+        </div>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: '0.5rem 1.25rem',
+          fontSize: '0.84rem',
+        }}>
+          <ShortcutCell label="Start / stop timer"            kbd="SPACE" c={c} />
+          <ShortcutCell label="Clear session (press twice)"   kbd="Alt+D" c={c} />
+          <ShortcutCell label="Square-1"                      kbd="Alt+1" c={c} />
+          <ShortcutCell label="2×2 Cube"                      kbd="Alt+2" c={c} />
+          <ShortcutCell label="3×3 Cube"                      kbd="Alt+3" c={c} />
+          <ShortcutCell label="4×4 Cube"                      kbd="Alt+4" c={c} />
+          <ShortcutCell label="5×5 Cube"                      kbd="Alt+5" c={c} />
+          <ShortcutCell label="6×6 Cube"                      kbd="Alt+6" c={c} />
+          <ShortcutCell label="7×7 Cube"                      kbd="Alt+7" c={c} />
+          <ShortcutCell label="Skewb"                         kbd="Alt+S" c={c} />
+          <ShortcutCell label="Megaminx"                      kbd="Alt+M" c={c} />
+          <ShortcutCell label="Clock"                         kbd="Alt+C" c={c} />
+          <ShortcutCell label="Pyraminx"                      kbd="Alt+P" c={c} />
+        </div>
+      </div>
+
+      <div style={{ height: 1, background: c.border }} />
+
+      {/* ── Mobile two-finger gestures ── */}
+      <div>
+        <div style={{
+          fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.14em',
+          textTransform: 'uppercase', color: c.muted, marginBottom: '0.6rem',
+          display: 'flex', alignItems: 'center', gap: '0.4rem',
+        }}>
+          <IconPhone size={13} /> УТАС
+        </div>
+        <div style={{
+          fontSize: '0.72rem', color: c.muted, marginBottom: '0.55rem',
+        }}>
+          Хоёр хуруугаар товшилт
+        </div>
+        <div style={{
+          display: 'flex', flexDirection: 'column', gap: '0.4rem',
+          fontSize: '0.84rem',
+        }}>
+          <ShortcutCell label="Сүүлийн эвлүүлэлт устгах"     kbd="Товших"      c={c} />
+          <ShortcutCell label="+2 нэмэх / хасах"             kbd="Дээш чирэх"  c={c} />
+          <ShortcutCell label="DNF тэмдэглэх / хасах"        kbd="Доош чирэх"  c={c} />
+        </div>
+        <div style={{
+          fontSize: '0.68rem', color: c.muted, marginTop: '0.55rem',
+          fontStyle: 'italic',
+        }}>
+          Эвлүүлэлт дууссаны дараа л ажиллана.
+        </div>
+      </div>
     </div>
   );
 
@@ -6874,6 +6918,7 @@ function IconGrid(p: IconProps)       { return <IconBase {...p}><rect x={3} y={3
 function IconArrowRight(p: IconProps) { return <IconBase {...p}><path d="M5 12h14"/><path d="M13 5l7 7-7 7"/></IconBase>; }
 function IconLock(p: IconProps)       { return <IconBase {...p}><rect x={4} y={11} width={16} height={10} rx={2}/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></IconBase>; }
 function IconKeyboard(p: IconProps)   { return <IconBase {...p}><rect x={2}  y={6}  width={20} height={12} rx={2}/><path d="M6 10h0M10 10h0M14 10h0M18 10h0M6 14h0M10 14h4M18 14h0"/></IconBase>; }
+function IconPhone(p: IconProps)     { return <IconBase {...p}><rect x={7} y={2} width={10} height={20} rx={2}/><path d="M11 18h2"/></IconBase>; }
 function IconPalette(p: IconProps)    { return <IconBase {...p}><path d="M12 3a9 9 0 1 0 0 18c1.1 0 2-.9 2-2 0-.5-.2-1-.5-1.4-.3-.4-.5-.9-.5-1.4 0-1.1.9-2 2-2H17a4 4 0 0 0 4-4 8 8 0 0 0-9-7.2"/><circle cx={7.5}  cy={11} r={1}/><circle cx={9.5}  cy={7}  r={1}/><circle cx={14.5} cy={7}  r={1}/><circle cx={17.5} cy={11} r={1}/></IconBase>; }
 function IconBan(p: IconProps)        { return <IconBase {...p}><circle cx={12} cy={12} r={9}/><path d="M5.6 5.6l12.8 12.8"/></IconBase>; }
 function IconFlag(p: IconProps)       { return <IconBase {...p}><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></IconBase>; }
