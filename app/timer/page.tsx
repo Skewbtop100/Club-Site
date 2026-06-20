@@ -3372,81 +3372,85 @@ export default function TimerPage() {
             <div style={{ flexShrink: 0 }}>
               {mobileTab === 'timer' && (() => {
                 const last12 = solves.slice(-12).reverse();
+                const cardStyle: React.CSSProperties = {
+                  background: C.card,
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 12,
+                  padding: '0.5rem 0.75rem',
+                };
                 return (
                   <div className="pv-mobile-stats" style={{
                     display: 'flex', alignItems: 'stretch',
-                    gap: '0.4rem', padding: '0.3rem 0.5rem 0.35rem',
-                    background: C.card,
-                    borderTop: `1px solid ${C.border}`,
-                    backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+                    gap: 7, padding: '0.3rem 0.5rem 0.35rem',
                   }}>
-                    {/* Left: last 12 solves, scrollable */}
-                    <div className="pv-last12" style={{
-                      flex: '0 0 32%', minWidth: 0,
-                      maxHeight: 120, overflowY: 'auto',
-                      display: 'flex', flexDirection: 'column',
-                    }}>
-                      {last12.length === 0 ? (
-                        <div style={{
-                          fontSize: '0.72rem', color: C.muted,
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          height: '100%',
-                        }}>—</div>
-                      ) : last12.map((s, i) => {
-                        const idx = solves.length - i;
-                        const dnf = isDnf(s);
-                        const timeStr = dnf ? 'DNF' : fmtMs(finalMs(s), false, precision) + (s.penalty === '+2' ? '+' : '');
-                        return (
-                          <div
-                            key={s.id}
-                            onClick={() => setDetailSolveId(s.id)}
-                            style={{
-                              display: 'flex', alignItems: 'baseline', gap: '0.3rem',
-                              padding: '0.08rem 0.15rem',
-                              cursor: 'pointer',
-                              borderRadius: 4,
-                            }}
-                          >
-                            <span style={{
-                              fontSize: '0.65rem', color: C.muted,
-                              fontVariantNumeric: 'tabular-nums',
-                              minWidth: '1.5rem', textAlign: 'right',
-                            }}>{idx}.</span>
-                            <span style={{
-                              fontFamily: '"JetBrains Mono", monospace',
-                              fontSize: '0.78rem', fontWeight: 600,
-                              fontVariantNumeric: 'tabular-nums',
-                              color: dnf ? C.danger : C.text, lineHeight: 1.35,
-                            }}>{timeStr}</span>
-                          </div>
-                        );
-                      })}
+                    {/* Left card: last 12 solves, scrollable */}
+                    <div style={{ ...cardStyle, flex: '0 0 32%', minWidth: 0, padding: '0.4rem 0.5rem' }}>
+                      <div className="pv-last12" style={{
+                        maxHeight: 120, overflowY: 'auto',
+                        display: 'flex', flexDirection: 'column',
+                      }}>
+                        {last12.length === 0 ? (
+                          <div style={{
+                            fontSize: '0.72rem', color: C.muted,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            height: '100%',
+                          }}>—</div>
+                        ) : last12.map((s, i) => {
+                          const idx = solves.length - i;
+                          const dnf = isDnf(s);
+                          const timeStr = dnf ? 'DNF' : fmtMs(finalMs(s), false, precision) + (s.penalty === '+2' ? '+' : '');
+                          return (
+                            <div
+                              key={s.id}
+                              onClick={() => setDetailSolveId(s.id)}
+                              style={{
+                                display: 'flex', alignItems: 'baseline', gap: '0.3rem',
+                                padding: '0.06rem 0',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              <span style={{
+                                fontSize: '0.62rem', color: C.muted,
+                                fontVariantNumeric: 'tabular-nums',
+                                minWidth: '1.4rem', textAlign: 'right',
+                              }}>{idx}.</span>
+                              <span style={{
+                                fontFamily: '"JetBrains Mono", monospace',
+                                fontSize: '0.78rem', fontWeight: 600,
+                                fontVariantNumeric: 'tabular-nums',
+                                color: dnf ? C.danger : C.text, lineHeight: 1.35,
+                              }}>{timeStr}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
 
-                    {/* Center: cube preview */}
+                    {/* Center card: cube preview */}
                     <button
                       onClick={() => setCubeFullscreenOpen(true)}
                       aria-label="Enlarge cube"
                       style={{
-                        width: 60, height: 60, padding: 3,
-                        background: C.cardAlt, border: `1px solid ${C.border}`,
-                        borderRadius: 10,
-                        display: 'flex', flexDirection: 'column',
+                        ...cardStyle,
+                        flex: '0 0 auto', width: 96,
+                        padding: 6,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
                         cursor: 'pointer', fontFamily: 'inherit',
-                        flexShrink: 0, alignSelf: 'center',
                         WebkitTapHighlightColor: 'transparent',
                       }}
                     >
-                      <div style={{ flex: 1, minHeight: 0, width: '100%', display: 'flex' }}>
+                      <div style={{ width: 84, height: 84, display: 'flex' }}>
                         <CubeViewer eventId={eventId} scramble={scramble} />
                       </div>
                     </button>
 
-                    {/* Right: compact stats (Twisty Timer style) */}
+                    {/* Right card: compact stats (Twisty Timer style) */}
                     <div style={{
+                      ...cardStyle,
                       flex: 1, minWidth: 0,
                       display: 'flex', flexDirection: 'column',
-                      justifyContent: 'center', gap: '0.05rem',
+                      justifyContent: 'center', alignItems: 'flex-end',
+                      gap: '0.05rem', padding: '0.4rem 0.65rem',
                     }}>
                       {([
                         ['Mean',  fmtMs(stats.mean, false, precision)],
@@ -3458,16 +3462,15 @@ export default function TimerPage() {
                         ['Count', String(totalCount)],
                       ] as const).map(([label, val]) => (
                         <div key={label} style={{
-                          display: 'flex', justifyContent: 'space-between',
-                          alignItems: 'baseline', gap: '0.3rem',
-                          lineHeight: 1.3,
+                          display: 'flex', alignItems: 'baseline',
+                          gap: '0.45rem', lineHeight: 1.3,
                         }}>
                           <span style={{
-                            fontSize: '0.65rem', color: C.muted, fontWeight: 600,
-                          }}>{label}</span>
+                            fontSize: '0.72rem', color: C.muted,
+                          }}>{label}:</span>
                           <span style={{
                             fontFamily: '"JetBrains Mono", monospace',
-                            fontSize: '0.78rem', fontWeight: 700,
+                            fontSize: '0.82rem', fontWeight: 600,
                             fontVariantNumeric: 'tabular-nums',
                             color: val === '—' ? C.muted : C.text,
                           }}>{val}</span>
