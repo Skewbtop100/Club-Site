@@ -3377,14 +3377,16 @@ export default function TimerPage() {
                   border: `1px solid ${C.border}`,
                   borderRadius: 12,
                   minWidth: 0,
+                  aspectRatio: '1 / 1',
+                  overflow: 'hidden',
                 };
                 return (
                   <div className="pv-mobile-stats" style={{
                     display: 'grid', gridTemplateColumns: '1fr 1fr 1fr',
-                    gap: 6, padding: '0.15rem 0.5rem 0.35rem',
+                    gap: 6, padding: '0.15rem 0.5rem 0.3rem',
                   }}>
-                    {/* Left card: last 12 solves, scrollable */}
-                    <div style={{ ...cardStyle, padding: '0.35rem 0.45rem', overflow: 'hidden' }}>
+                    {/* Left card: last solves, scrollable square */}
+                    <div style={{ ...cardStyle, padding: '0.4rem 0.45rem' }}>
                       <div className="pv-last12" style={{
                         height: '100%', overflowY: 'auto',
                         display: 'flex', flexDirection: 'column',
@@ -3404,21 +3406,21 @@ export default function TimerPage() {
                               key={s.id}
                               onClick={() => setDetailSolveId(s.id)}
                               style={{
-                                display: 'flex', alignItems: 'baseline', gap: '0.3rem',
-                                padding: '0.06rem 0',
+                                display: 'flex', alignItems: 'baseline', gap: '0.25rem',
+                                padding: '0.04rem 0',
                                 cursor: 'pointer',
                               }}
                             >
                               <span style={{
-                                fontSize: '0.62rem', color: C.muted,
+                                fontSize: '0.58rem', color: C.muted,
                                 fontVariantNumeric: 'tabular-nums',
-                                minWidth: '1.4rem', textAlign: 'right',
+                                minWidth: '1.2rem', textAlign: 'right',
                               }}>{idx}.</span>
                               <span style={{
                                 fontFamily: '"JetBrains Mono", monospace',
-                                fontSize: '0.78rem', fontWeight: 600,
+                                fontSize: '0.72rem', fontWeight: 600,
                                 fontVariantNumeric: 'tabular-nums',
-                                color: dnf ? C.danger : C.text, lineHeight: 1.35,
+                                color: dnf ? C.danger : C.text, lineHeight: 1.3,
                               }}>{timeStr}</span>
                             </div>
                           );
@@ -3426,7 +3428,7 @@ export default function TimerPage() {
                       </div>
                     </div>
 
-                    {/* Center card: cube preview, centered both axes */}
+                    {/* Center card: cube preview, centered in square */}
                     <button
                       onClick={() => setCubeFullscreenOpen(true)}
                       aria-label="Enlarge cube"
@@ -3438,21 +3440,21 @@ export default function TimerPage() {
                         WebkitTapHighlightColor: 'transparent',
                       }}
                     >
-                      <div style={{ width: 88, height: 88, flexShrink: 0, display: 'flex' }}>
+                      <div style={{ width: '80%', aspectRatio: '1 / 1', display: 'flex' }}>
                         <CubeViewer eventId={eventId} scramble={scramble} />
                       </div>
                     </button>
 
-                    {/* Right card: stats grid (Twisty Timer style) */}
+                    {/* Right card: stats grid in square */}
                     <div style={{
                       ...cardStyle,
-                      padding: '0.35rem 0.5rem',
+                      padding: '0.4rem 0.5rem',
                       display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
                     }}>
                       <div style={{
                         display: 'grid',
                         gridTemplateColumns: 'auto auto',
-                        columnGap: '0.4rem', rowGap: '0.15rem',
+                        columnGap: '0.35rem', rowGap: '0.1rem',
                         justifyContent: 'end',
                       }}>
                         {([
@@ -3466,14 +3468,14 @@ export default function TimerPage() {
                         ] as const).map(([label, val]) => (
                           <Fragment key={label}>
                             <span style={{
-                              fontSize: '0.72rem', color: C.muted,
-                              textAlign: 'right', lineHeight: 1.35,
+                              fontSize: '0.62rem', color: C.muted,
+                              textAlign: 'right', lineHeight: 1.3,
                             }}>{label}:</span>
                             <span style={{
                               fontFamily: '"JetBrains Mono", monospace',
-                              fontSize: '0.82rem', fontWeight: 600,
+                              fontSize: '0.7rem', fontWeight: 600,
                               fontVariantNumeric: 'tabular-nums',
-                              textAlign: 'right', lineHeight: 1.35,
+                              textAlign: 'right', lineHeight: 1.3,
                               color: val === '—' ? C.muted : C.text,
                             }}>{val}</span>
                           </Fragment>
