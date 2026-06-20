@@ -1140,6 +1140,7 @@ export default function TimerPage() {
   // back into the overlay and stop the timer at 0.0s.
   const runStartedAtRef = useRef<number>(0);
   const mobileTimerRef = useRef<HTMLElement>(null);
+  const gestureDelayRef = useRef<number | null>(null);
   useEffect(() => {
     if (timer.state === 'running') runStartedAtRef.current = Date.now();
   }, [timer.state]);
@@ -1593,7 +1594,6 @@ export default function TimerPage() {
   const onTimerTouchStart = useCallback((e: React.TouchEvent) => {
     if (timeEntryMode === 'manual') return;
     if (ganConnected) return;
-    if (e.touches.length >= 2 && timer.state === 'stopped' && lastSolve) return;
     if (timer.state === 'running') { timer.stop(); return; }
     // Cooldown window after a solve ends: the action row (✕ / DNF / +2
     // / 💬) is now visible and the user is most likely aiming at one
@@ -1603,6 +1603,30 @@ export default function TimerPage() {
     // row. After the cooldown, taps on the timer area resume their
     // normal "start a new solve" semantics.
     if (timer.state === 'stopped' && !actionsArmed) return;
+    // When a two-finger gesture is possible (stopped + lastSolve on
+    // mobile), delay the timer transition by 80ms so the second finger
+    // has time to land. If a second finger arrives, the native gesture
+    // handler cancels this timeout. The 80ms sits on top of the 600ms
+    // actionsArmed cooldown so total latency from solve-stop to earliest
+    // possible next start is 680ms — imperceptible to the user who is
+    // already reviewing their time during that window.
+    if (isMobile && timer.state === 'stopped' && lastSolve && actionsArmed) {
+      if (e.touches.length >= 2) {
+        if (gestureDelayRef.current != null) {
+          window.clearTimeout(gestureDelayRef.current);
+          gestureDelayRef.current = null;
+        }
+        return;
+      }
+      if (gestureDelayRef.current != null) window.clearTimeout(gestureDelayRef.current);
+      gestureDelayRef.current = window.setTimeout(() => {
+        gestureDelayRef.current = null;
+        if (inspectionEnabled) timer.beginInspection();
+        else if (holdToStart) timer.startArming();
+        else timer.startRunning();
+      }, 80);
+      return;
+    }
     if (timer.state === 'idle' || timer.state === 'stopped') {
       if (inspectionEnabled) {
         timer.beginInspection();
@@ -1617,7 +1641,7 @@ export default function TimerPage() {
       if (holdToStart) timer.startArming();
       else timer.startRunning();
     }
-  }, [timer, inspectionEnabled, holdToStart, ganConnected, timeEntryMode, actionsArmed, lastSolve]);
+  }, [timer, inspectionEnabled, holdToStart, ganConnected, timeEntryMode, actionsArmed, lastSolve, isMobile]);
 
   const onTimerTouchEnd = useCallback(() => {
     if (timeEntryMode === 'manual') return;
@@ -1627,20 +1651,35 @@ export default function TimerPage() {
   // ── Two-finger gesture shortcuts (mobile only) ───────────────────────
   // Tap = open delete confirm, swipe-up = toggle +2, swipe-down = toggle DNF.
   // Native listeners with passive:false so preventDefault blocks pinch-zoom.
+  //
+  // Refs keep the native handler reading fresh React state without
+  // re-attaching listeners on every render / state change.
   const twoFingerRef = useRef<{
     startTime: number;
     startY1: number; startY2: number;
     lastY1: number; lastY2: number;
   } | null>(null);
+  const timerStateRef = useRef(timer.state);
+  timerStateRef.current = timer.state;
+  const lastSolveRef = useRef(lastSolve);
+  lastSolveRef.current = lastSolve;
+  const deleteLastSolveRef = useRef(deleteLastSolve);
+  deleteLastSolveRef.current = deleteLastSolve;
+  const togglePenaltyRef = useRef(togglePenaltyOnLast);
+  togglePenaltyRef.current = togglePenaltyOnLast;
 
   useEffect(() => {
     const el = mobileTimerRef.current;
     if (!el || !isMobile) return;
-    const canGesture = timer.state === 'stopped' && !!lastSolve;
 
     const onStart = (e: TouchEvent) => {
+      const canGesture = timerStateRef.current === 'stopped' && !!lastSolveRef.current;
       if (e.touches.length === 2 && canGesture) {
         e.preventDefault();
+        if (gestureDelayRef.current != null) {
+          window.clearTimeout(gestureDelayRef.current);
+          gestureDelayRef.current = null;
+        }
         twoFingerRef.current = {
           startTime: Date.now(),
           startY1: e.touches[0].clientY,
@@ -1672,11 +1711,14 @@ export default function TimerPage() {
       const TAP_MOVEMENT_MAX = 10;
 
       if (Math.abs(deltaY) < TAP_MOVEMENT_MAX && duration < TAP_DURATION_MAX) {
-        deleteLastSolve();
+        deleteLastSolveRef.current();
+        showToast({ msg: '✕ Устгах уу?', tone: 'info' });
       } else if (deltaY < -SWIPE_THRESHOLD) {
-        togglePenaltyOnLast('+2');
+        togglePenaltyRef.current('+2');
+        showToast({ msg: '+2 applied', tone: 'info' });
       } else if (deltaY > SWIPE_THRESHOLD) {
-        togglePenaltyOnLast('dnf');
+        togglePenaltyRef.current('dnf');
+        showToast({ msg: 'DNF applied', tone: 'info' });
       }
     };
 
@@ -1688,7 +1730,7 @@ export default function TimerPage() {
       el.removeEventListener('touchmove', onMove);
       el.removeEventListener('touchend', onEnd);
     };
-  }, [isMobile, timer.state, lastSolve, deleteLastSolve, togglePenaltyOnLast]);
+  }, [isMobile, mobileTab]);
 
   // Inline-manual-entry commit. Same parser + same `finishExternal`
   // path as the legacy modal — `onSolveCommit` runs as if a real solve
