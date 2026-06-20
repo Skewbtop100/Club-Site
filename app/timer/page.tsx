@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import TimerProfileMenu from '@/components/timer/TimerProfileMenu';
 import { Scrambow } from 'scrambow';
@@ -3376,15 +3376,16 @@ export default function TimerPage() {
                   background: C.card,
                   border: `1px solid ${C.border}`,
                   borderRadius: 12,
-                  padding: '0.5rem 0.75rem',
+                  padding: '0.5rem 0.6rem',
+                  minWidth: 0,
                 };
                 return (
                   <div className="pv-mobile-stats" style={{
-                    display: 'flex', alignItems: 'stretch',
+                    display: 'grid', gridTemplateColumns: '1fr 1fr 1fr',
                     gap: 7, padding: '0.3rem 0.5rem 0.35rem',
                   }}>
                     {/* Left card: last 12 solves, scrollable */}
-                    <div style={{ ...cardStyle, flex: '0 0 32%', minWidth: 0, padding: '0.4rem 0.5rem' }}>
+                    <div style={{ ...cardStyle }}>
                       <div className="pv-last12" style={{
                         maxHeight: 120, overflowY: 'auto',
                         display: 'flex', flexDirection: 'column',
@@ -3426,56 +3427,58 @@ export default function TimerPage() {
                       </div>
                     </div>
 
-                    {/* Center card: cube preview */}
+                    {/* Center card: cube preview, centered both axes */}
                     <button
                       onClick={() => setCubeFullscreenOpen(true)}
                       aria-label="Enlarge cube"
                       style={{
                         ...cardStyle,
-                        flex: '0 0 auto', width: 96,
                         padding: 6,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         cursor: 'pointer', fontFamily: 'inherit',
                         WebkitTapHighlightColor: 'transparent',
                       }}
                     >
-                      <div style={{ width: 84, height: 84, display: 'flex' }}>
+                      <div style={{ width: 88, height: 88, flexShrink: 0, display: 'flex' }}>
                         <CubeViewer eventId={eventId} scramble={scramble} />
                       </div>
                     </button>
 
-                    {/* Right card: compact stats (Twisty Timer style) */}
+                    {/* Right card: stats grid (Twisty Timer style) */}
                     <div style={{
                       ...cardStyle,
-                      flex: 1, minWidth: 0,
-                      display: 'flex', flexDirection: 'column',
-                      justifyContent: 'center', alignItems: 'flex-end',
-                      gap: '0.05rem', padding: '0.4rem 0.65rem',
+                      display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
                     }}>
-                      {([
-                        ['Mean',  fmtMs(stats.mean, false, precision)],
-                        ['Best',  fmtMs(stats.best, false, precision)],
-                        ['Ao5',   fmtMs(stats.ao5,  false, precision)],
-                        ['Ao12',  fmtMs(stats.ao12, false, precision)],
-                        ['Ao50',  fmtMs(ao50,       false, precision)],
-                        ['Ao100', fmtMs(ao100,      false, precision)],
-                        ['Count', String(totalCount)],
-                      ] as const).map(([label, val]) => (
-                        <div key={label} style={{
-                          display: 'flex', alignItems: 'baseline',
-                          gap: '0.45rem', lineHeight: 1.3,
-                        }}>
-                          <span style={{
-                            fontSize: '0.72rem', color: C.muted,
-                          }}>{label}:</span>
-                          <span style={{
-                            fontFamily: '"JetBrains Mono", monospace',
-                            fontSize: '0.82rem', fontWeight: 600,
-                            fontVariantNumeric: 'tabular-nums',
-                            color: val === '—' ? C.muted : C.text,
-                          }}>{val}</span>
-                        </div>
-                      ))}
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'auto auto',
+                        columnGap: '0.4rem', rowGap: '0.15rem',
+                        justifyContent: 'end',
+                      }}>
+                        {([
+                          ['Mean',  fmtMs(stats.mean, false, precision)],
+                          ['Best',  fmtMs(stats.best, false, precision)],
+                          ['Ao5',   fmtMs(stats.ao5,  false, precision)],
+                          ['Ao12',  fmtMs(stats.ao12, false, precision)],
+                          ['Ao50',  fmtMs(ao50,       false, precision)],
+                          ['Ao100', fmtMs(ao100,      false, precision)],
+                          ['Count', String(totalCount)],
+                        ] as const).map(([label, val]) => (
+                          <Fragment key={label}>
+                            <span style={{
+                              fontSize: '0.72rem', color: C.muted,
+                              textAlign: 'right', lineHeight: 1.35,
+                            }}>{label}:</span>
+                            <span style={{
+                              fontFamily: '"JetBrains Mono", monospace',
+                              fontSize: '0.82rem', fontWeight: 600,
+                              fontVariantNumeric: 'tabular-nums',
+                              textAlign: 'right', lineHeight: 1.35,
+                              color: val === '—' ? C.muted : C.text,
+                            }}>{val}</span>
+                          </Fragment>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 );
