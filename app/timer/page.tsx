@@ -2460,7 +2460,19 @@ export default function TimerPage() {
                 isMobile={false}
               />
             ) : (
-              <div style={{ position: 'relative', display: 'inline-block' }}>
+              <>
+                {ao5Projection && (timer.state === 'idle' || timer.state === 'stopped') && (
+                  <div className="pv-ao5-inline" style={{
+                    display: 'flex', gap: '1.5rem', justifyContent: 'center',
+                    marginBottom: '0.4rem', pointerEvents: 'none',
+                    fontFamily: '"JetBrains Mono", monospace',
+                    fontSize: '1.15rem', fontWeight: 700,
+                    fontVariantNumeric: 'tabular-nums', lineHeight: 1,
+                  }}>
+                    <span style={{ color: '#34d399' }}>{fmtMs(ao5Projection.best, false, precision)}</span>
+                    <span style={{ color: '#ef4444' }}>{fmtMs(ao5Projection.worst, false, precision)}</span>
+                  </div>
+                )}
                 <div style={{
                   fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
                   fontSize: getTimerFontSize(timerDisplay, false),
@@ -2468,10 +2480,6 @@ export default function TimerPage() {
                   fontVariantNumeric: 'tabular-nums',
                   letterSpacing: '-0.01em',
                   color: timerColor,
-                  // Slower color fade after a stop so the green→white flash
-                  // reads as a confirmation pulse rather than an instant
-                  // snap. Otherwise 0.12s keeps the red↔green arming flip
-                  // feeling responsive.
                   transition: `color ${timer.state === 'stopped' ? 0.3 : 0.12}s, font-size 0.12s`,
                   textShadow: timerGlow
                     ? `0 0 30px ${C.success}55`
@@ -2481,24 +2489,7 @@ export default function TimerPage() {
                 }}>
                   {timerDisplay}
                 </div>
-                {ao5Projection && (timer.state === 'idle' || timer.state === 'stopped') && (
-                  <div className="pv-ao5-inline" style={{
-                    position: 'absolute',
-                    left: 'calc(100% + 1.5rem)',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    display: 'flex', flexDirection: 'column', gap: '0.3rem',
-                    alignItems: 'flex-end', pointerEvents: 'none',
-                  }}>
-                    <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '1.2rem', fontWeight: 700, color: '#34d399', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
-                      {fmtMs(ao5Projection.best, false, precision)}
-                    </span>
-                    <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '1.2rem', fontWeight: 700, color: '#ef4444', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
-                      {fmtMs(ao5Projection.worst, false, precision)}
-                    </span>
-                  </div>
-                )}
-              </div>
+              </>
             )}
             {/* Action row visibility is now opacity-driven so the fade
                 between 'stopped' (visible) and 'armed' / 'inspecting'
@@ -2950,7 +2941,19 @@ export default function TimerPage() {
                       isMobile
                     />
                   ) : (
-                    <div style={{ position: 'relative', display: 'inline-block' }}>
+                    <>
+                      {ao5Projection && (timer.state === 'idle' || timer.state === 'stopped') && (
+                        <div className="pv-ao5-inline" style={{
+                          display: 'flex', gap: '1.5rem', justifyContent: 'center',
+                          marginBottom: '0.4rem', pointerEvents: 'none',
+                          fontFamily: '"JetBrains Mono", monospace',
+                          fontSize: '1.15rem', fontWeight: 700,
+                          fontVariantNumeric: 'tabular-nums', lineHeight: 1,
+                        }}>
+                          <span style={{ color: '#34d399' }}>{fmtMs(ao5Projection.best, false, precision)}</span>
+                          <span style={{ color: '#ef4444' }}>{fmtMs(ao5Projection.worst, false, precision)}</span>
+                        </div>
+                      )}
                       <div style={{
                         fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
                         fontSize: getTimerFontSize(timerDisplay, true),
@@ -2962,24 +2965,7 @@ export default function TimerPage() {
                       }}>
                         {timerDisplay}
                       </div>
-                      {ao5Projection && (timer.state === 'idle' || timer.state === 'stopped') && (
-                        <div className="pv-ao5-inline" style={{
-                          position: 'absolute',
-                          left: 'calc(100% + 1.5rem)',
-                          top: '50%',
-                          transform: 'translateY(-50%)',
-                          display: 'flex', flexDirection: 'column', gap: '0.3rem',
-                          alignItems: 'flex-end', pointerEvents: 'none',
-                        }}>
-                          <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '1.2rem', fontWeight: 700, color: '#34d399', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
-                            {fmtMs(ao5Projection.best, false, precision)}
-                          </span>
-                          <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '1.2rem', fontWeight: 700, color: '#ef4444', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
-                            {fmtMs(ao5Projection.worst, false, precision)}
-                          </span>
-                        </div>
-                      )}
-                    </div>
+                    </>
                   )}
                   {/* Same opacity/visibility wrapper as the desktop
                       branch — see the comment there for the rationale. */}
