@@ -3376,18 +3376,17 @@ export default function TimerPage() {
                   background: C.card,
                   border: `1px solid ${C.border}`,
                   borderRadius: 12,
-                  padding: '0.5rem 0.6rem',
                   minWidth: 0,
                 };
                 return (
                   <div className="pv-mobile-stats" style={{
                     display: 'grid', gridTemplateColumns: '1fr 1fr 1fr',
-                    gap: 7, padding: '0.3rem 0.5rem 0.35rem',
+                    gap: 6, padding: '0.15rem 0.5rem 0.35rem',
                   }}>
                     {/* Left card: last 12 solves, scrollable */}
-                    <div style={{ ...cardStyle }}>
+                    <div style={{ ...cardStyle, padding: '0.35rem 0.45rem', overflow: 'hidden' }}>
                       <div className="pv-last12" style={{
-                        maxHeight: 120, overflowY: 'auto',
+                        height: '100%', overflowY: 'auto',
                         display: 'flex', flexDirection: 'column',
                       }}>
                         {last12.length === 0 ? (
@@ -3447,6 +3446,7 @@ export default function TimerPage() {
                     {/* Right card: stats grid (Twisty Timer style) */}
                     <div style={{
                       ...cardStyle,
+                      padding: '0.35rem 0.5rem',
                       display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
                     }}>
                       <div style={{
