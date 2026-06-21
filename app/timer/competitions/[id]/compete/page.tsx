@@ -141,6 +141,10 @@ export default function CompeteHubPage() {
 
   useEffect(() => {
     if (authLoading) return;
+    const bounce = (reason: string) => {
+      console.log('[compete-bounce]', reason, { uid: user?.uid });
+      router.replace(`/timer/competitions/${compId}?bounce=${reason}`);
+    };
     if (!user) {
       router.push(`/login?redirect=/timer/competitions/${compId}/compete`);
       return;
@@ -153,7 +157,6 @@ export default function CompeteHubPage() {
     let cancelled = false;
     async function load() {
       try {
-        // Step 1: comp + rounds + participant (well-established collections)
         const [compData, roundsData, participantData] = await Promise.all([
           getCompetition(compId),
           getRounds(compId),
@@ -163,39 +166,38 @@ export default function CompeteHubPage() {
 
         if (!compData) { setNotFound(true); setLoading(false); return; }
         if (!participantData) {
-          router.replace(`/timer/competitions/${compId}?from=hub`);
+          bounce('no_participant');
           return;
         }
 
-        // Step 2: active attempt isolated — a rules/network error here must not
-        // crash the page. On mobile Safari the Firestore connection may not be
-        // ready immediately; retry once before giving up.
         let attempt: CompetitionAttempt | null = null;
+        let fetchErr1: unknown = null;
         try {
           attempt = await getActiveAttempt(compId, user!.uid);
         } catch (err) {
-          console.error('[compete hub] getActiveAttempt failed', err);
+          fetchErr1 = err;
         }
         if (cancelled) return;
 
         if (!attempt) {
-          // Retry once — gives mobile Firestore connection time to settle
           await new Promise<void>((r) => setTimeout(r, 800));
           if (cancelled) return;
           try {
             attempt = await getActiveAttempt(compId, user!.uid);
           } catch (err) {
-            console.error('[compete hub] getActiveAttempt retry failed', err);
+            fetchErr1 = fetchErr1 || err;
           }
           if (cancelled) return;
         }
 
         if (!attempt) {
-          router.replace(`/timer/competitions/${compId}?from=hub`);
+          const reason = fetchErr1
+            ? 'fetch_error_' + encodeURIComponent(String(fetchErr1).slice(0, 80))
+            : 'no_active_attempt';
+          bounce(reason);
           return;
         }
 
-        // Step 3: results from THIS attempt only — no legacy fallback
         const resultsData = await getMyResultsForAttempt(compId, attempt.id);
         if (cancelled) return;
 
@@ -207,7 +209,7 @@ export default function CompeteHubPage() {
         setLoading(false);
       } catch (err) {
         console.error('[compete hub] load failed', err);
-        if (!cancelled) router.replace(`/timer/competitions/${compId}?from=hub`);
+        if (!cancelled) bounce('load_catch_' + encodeURIComponent(String(err).slice(0, 80)));
       }
     }
     void load();

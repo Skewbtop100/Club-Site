@@ -199,7 +199,8 @@ function CompetitionDetailInner() {
 
   // ?from=hub means the compete hub redirected us here because it couldn't
   // find an active attempt. We use this to avoid showing a stale "continue" CTA.
-  const fromHub = searchParams.get('from') === 'hub';
+  const fromHub = searchParams.get('from') === 'hub' || searchParams.get('bounce') != null;
+  const bounceReason = searchParams.get('bounce');
 
   const [comp, setComp] = useState<VirtualCompetition | null>(null);
   const [rounds, setRounds] = useState<VirtualRound[]>([]);
@@ -447,6 +448,19 @@ function CompetitionDetailInner() {
             style={{ width: '100%', height: 'auto', objectFit: 'contain', display: 'block', background: 'var(--card, #111)', borderRadius: '0 0 12px 12px' }} />
         ) : (
           <CoverPlaceholder name={comp.name} />
+        )}
+
+        {/* Bounce reason banner */}
+        {bounceReason && (
+          <div style={{
+            margin: '0.75rem 1rem 0', padding: '0.75rem 1rem',
+            background: 'rgba(239,68,68,0.12)',
+            border: '1px solid rgba(239,68,68,0.35)',
+            borderRadius: 10, color: '#fca5a5', fontSize: '0.82rem',
+            wordBreak: 'break-all',
+          }}>
+            Bounce: {decodeURIComponent(bounceReason)}
+          </div>
         )}
 
         {/* Hero */}
