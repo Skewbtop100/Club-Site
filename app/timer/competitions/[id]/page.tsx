@@ -197,13 +197,6 @@ function CompetitionDetailInner() {
   const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
 
-  // ── Temporary debug overlay (remove after fix) ──
-  const [debugLog, setDebugLog] = useState<string[]>([]);
-  const dbg = (msg: string) => {
-    const t = new Date().toLocaleTimeString().slice(3);
-    setDebugLog(prev => [...prev.slice(-14), `${t} ${msg}`]);
-  };
-
   // ?from=hub means the compete hub redirected us here because it couldn't
   // find an active attempt. We use this to avoid showing a stale "continue" CTA.
   const fromHub = searchParams.get('from') === 'hub';
@@ -226,13 +219,9 @@ function CompetitionDetailInner() {
   useEffect(() => {
     if (authLoading) return;
     if (!user) {
-      dbg('AUTH redirect → login (no user)');
       router.push(`/login?redirect=/timer/competitions/${id}`);
     } else if (!user.displayName?.trim()) {
-      dbg('AUTH redirect → profile (no name)');
       router.push('/timer/profile');
-    } else {
-      dbg(`AUTH ok uid=${user.uid.slice(0, 8)}`);
     }
   }, [authLoading, user, id, router]);
 
@@ -242,18 +231,19 @@ function CompetitionDetailInner() {
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
-    dbg('load() start fromHub=' + fromHub);
     async function load() {
       try {
+        // Step 1: core data — competition, rounds, participant.
         const [compData, roundsData, participantData] = await Promise.all([
           getCompetition(id),
           getRounds(id),
           getParticipant(id, user!.uid),
         ]);
         if (cancelled) return;
-        dbg(`step1 comp=${!!compData} participant=${!!participantData} rounds=${roundsData.length}`);
         if (!compData) { setNotFound(true); setPageLoading(false); return; }
 
+        // Step 2: attempt data — isolated so that a missing Firestore composite
+        // index or a rules propagation delay never blanks the page for legacy users.
         let activeAttemptData: CompetitionAttempt | null = null;
         let attemptsData: CompetitionAttempt[] = [];
         try {
@@ -261,25 +251,24 @@ function CompetitionDetailInner() {
             getActiveAttempt(id, user!.uid),
             getMyAttempts(id, user!.uid),
           ]);
-          dbg(`step2 active=${activeAttemptData?.id?.slice(0,8) ?? 'null'} attempts=${attemptsData.length}`);
         } catch (err) {
-          dbg('step2 FAIL: ' + String(err).slice(0, 60));
+          console.warn('[detail] attempt queries failed:', err);
         }
         if (cancelled) return;
 
+        // If ?from=hub is set the compete hub couldn't find an active attempt —
+        // treat as if activeAttempt is null to avoid a stale "continue" CTA.
         if (fromHub && activeAttemptData) {
-          dbg('from=hub: clearing activeAttempt');
           activeAttemptData = null;
         }
 
+        // Step 3: legacy results check
         if (participantData && !activeAttemptData && attemptsData.length === 0) {
           try {
             const legacy = await getMyResults(id, user!.uid);
-            const found = legacy.length > 0;
-            dbg('step3 legacy=' + found);
-            if (!cancelled) setHasLegacyResults(found);
+            if (!cancelled) setHasLegacyResults(legacy.length > 0);
           } catch {
-            dbg('step3 legacy check failed');
+            // Non-critical
           }
           if (cancelled) return;
         }
@@ -333,7 +322,6 @@ function CompetitionDetailInner() {
     : hasLegacyResults ? 'reenter_legacy'
     : registered ? 'start_existing_participant'
     : 'register';
-  dbg('CTA=' + ctaType + ' active=' + (activeAttempt?.id?.slice(0,8) ?? 'null'));
 
   // ── Handlers ─────────────────────────────────────────────────────────────────
 
@@ -354,16 +342,13 @@ function CompetitionDetailInner() {
         { uid: user.uid, displayName: user.displayName, photoURL: user.photoURL },
         selectedEvents,
       );
-      dbg('register: createAttempt...');
       await createAttempt(
         comp.id,
         { uid: user.uid, displayName: user.displayName!, photoURL: user.photoURL },
         selectedEvents,
       );
-      dbg('register: OK → /compete');
       router.push(`/timer/competitions/${comp.id}/compete`);
-    } catch (err) {
-      dbg('register: FAIL ' + String(err).slice(0, 60));
+    } catch {
       setSaving(false);
       setToast('Алдаа гарлаа, дахин оролдоно уу');
     }
@@ -373,7 +358,6 @@ function CompetitionDetailInner() {
   async function handleReenter() {
     if (!user || !comp || saving) return;
     if (selectedEvents.length === 0) return;
-    dbg('reenter: start');
     setSaving(true);
     try {
       await registerForCompetition(
@@ -390,13 +374,11 @@ function CompetitionDetailInner() {
         getParticipant(comp.id, user.uid),
         getActiveAttempt(comp.id, user.uid),
       ]);
-      dbg('reenter: newActive=' + (newActive?.id?.slice(0,8) ?? 'null'));
       setInitialParticipant(updated);
       setActiveAttempt(newActive);
       setToast('Шинэ оролдлого эхэллээ ✓');
       router.push(`/timer/competitions/${comp.id}/compete`);
-    } catch (err) {
-      dbg('reenter: FAIL ' + String(err).slice(0, 60));
+    } catch {
       setToast('Алдаа гарлаа, дахин оролдоно уу');
     } finally {
       setSaving(false);
@@ -830,18 +812,6 @@ function CompetitionDetailInner() {
         </div>
       )}
 
-      {/* Debug overlay — TEMPORARY, remove after fix */}
-      {debugLog.length > 0 && (
-        <div style={{
-          position: 'fixed', bottom: 80, left: 8, right: 8,
-          background: 'rgba(0,0,0,0.88)', color: '#0f0',
-          fontFamily: 'monospace', fontSize: 9, padding: 6,
-          borderRadius: 6, zIndex: 99999, maxHeight: 160,
-          overflow: 'auto', whiteSpace: 'pre-wrap', pointerEvents: 'none',
-        }}>
-          {'[DETAIL] ' + debugLog.join('\n')}
-        </div>
-      )}
     </div>
   );
 }

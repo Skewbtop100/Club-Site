@@ -128,13 +128,6 @@ export default function CompeteHubPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
 
-  // ── Temporary debug overlay (remove after fix) ──
-  const [debugLog, setDebugLog] = useState<string[]>([]);
-  const dbg = (msg: string) => {
-    const t = new Date().toLocaleTimeString().slice(3);
-    setDebugLog(prev => [...prev.slice(-14), `${t} ${msg}`]);
-  };
-
   const [comp, setComp] = useState<VirtualCompetition | null>(null);
   const [participant, setParticipant] = useState<VirtualParticipant | null>(null);
   const [rounds, setRounds] = useState<VirtualRound[]>([]);
@@ -149,68 +142,63 @@ export default function CompeteHubPage() {
   useEffect(() => {
     if (authLoading) return;
     if (!user) {
-      dbg('AUTH redirect → login');
       router.push(`/login?redirect=/timer/competitions/${compId}/compete`);
       return;
     }
     if (!user.displayName?.trim()) {
-      dbg('AUTH redirect → profile');
       router.push('/timer/profile');
       return;
     }
-    dbg(`AUTH ok uid=${user.uid.slice(0,8)}`);
 
     let cancelled = false;
     async function load() {
       try {
+        // Step 1: comp + rounds + participant (well-established collections)
         const [compData, roundsData, participantData] = await Promise.all([
           getCompetition(compId),
           getRounds(compId),
           getParticipant(compId, user!.uid),
         ]);
         if (cancelled) return;
-        dbg(`step1 comp=${!!compData} participant=${!!participantData}`);
 
         if (!compData) { setNotFound(true); setLoading(false); return; }
         if (!participantData) {
-          dbg('REDIRECT: no_participant → detail?from=hub');
           router.replace(`/timer/competitions/${compId}?from=hub`);
           return;
         }
 
+        // Step 2: active attempt isolated — a rules/network error here must not
+        // crash the page. On mobile Safari the Firestore connection may not be
+        // ready immediately; retry once before giving up.
         let attempt: CompetitionAttempt | null = null;
         try {
           attempt = await getActiveAttempt(compId, user!.uid);
-          dbg('step2 attempt1=' + (attempt?.id?.slice(0,8) ?? 'null') + ' status=' + (attempt?.status ?? '?'));
         } catch (err) {
-          dbg('step2 FAIL: ' + String(err).slice(0, 60));
+          console.error('[compete hub] getActiveAttempt failed', err);
         }
         if (cancelled) return;
 
         if (!attempt) {
-          dbg('step2 retry after 800ms...');
+          // Retry once — gives mobile Firestore connection time to settle
           await new Promise<void>((r) => setTimeout(r, 800));
           if (cancelled) return;
           try {
             attempt = await getActiveAttempt(compId, user!.uid);
-            dbg('step2 retry=' + (attempt?.id?.slice(0,8) ?? 'null') + ' status=' + (attempt?.status ?? '?'));
           } catch (err) {
-            dbg('step2 retry FAIL: ' + String(err).slice(0, 60));
+            console.error('[compete hub] getActiveAttempt retry failed', err);
           }
           if (cancelled) return;
         }
 
         if (!attempt) {
-          dbg('REDIRECT: no_attempt_final → detail?from=hub');
           router.replace(`/timer/competitions/${compId}?from=hub`);
           return;
         }
 
-        dbg('step3 loading results for attempt=' + attempt.id.slice(0,8));
+        // Step 3: results from THIS attempt only — no legacy fallback
         const resultsData = await getMyResultsForAttempt(compId, attempt.id);
         if (cancelled) return;
 
-        dbg('LOADED OK results=' + resultsData.length);
         setComp(compData);
         setRounds(roundsData);
         setParticipant(participantData);
@@ -218,7 +206,7 @@ export default function CompeteHubPage() {
         setMyResults(resultsData);
         setLoading(false);
       } catch (err) {
-        dbg('REDIRECT: load CATCH ' + String(err).slice(0, 60));
+        console.error('[compete hub] load failed', err);
         if (!cancelled) router.replace(`/timer/competitions/${compId}?from=hub`);
       }
     }
@@ -226,24 +214,11 @@ export default function CompeteHubPage() {
     return () => { cancelled = true; };
   }, [authLoading, user, compId, router]);
 
-  const debugOverlay = debugLog.length > 0 ? (
-    <div style={{
-      position: 'fixed', bottom: 80, left: 8, right: 8,
-      background: 'rgba(0,0,0,0.88)', color: '#0f0',
-      fontFamily: 'monospace', fontSize: 9, padding: 6,
-      borderRadius: 6, zIndex: 99999, maxHeight: 160,
-      overflow: 'auto', whiteSpace: 'pre-wrap', pointerEvents: 'none',
-    }}>
-      {'[HUB] ' + debugLog.join('\n')}
-    </div>
-  ) : null;
-
   if (authLoading || loading) {
     return (
       <div style={{ minHeight: '100dvh', background: C.bg, fontFamily: FONT, color: C.text,
         display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ fontSize: '0.85rem', color: C.muted }}>Ачааллаж байна...</div>
-        {debugOverlay}
       </div>
     );
   }
@@ -511,7 +486,6 @@ export default function CompeteHubPage() {
         .leaderboard-list::-webkit-scrollbar { display: none; }
       `}</style>
 
-      {debugOverlay}
     </div>
   );
 }
