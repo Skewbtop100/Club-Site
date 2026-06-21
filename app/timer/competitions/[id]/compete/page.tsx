@@ -156,12 +156,18 @@ export default function CompeteHubPage() {
 
     let cancelled = false;
     async function load() {
+      let step = 'init';
       try {
-        const [compData, roundsData, participantData] = await Promise.all([
-          getCompetition(compId),
-          getRounds(compId),
-          getParticipant(compId, user!.uid),
-        ]);
+        step = 'getCompetition';
+        const compData = await getCompetition(compId);
+        if (cancelled) return;
+
+        step = 'getRounds';
+        const roundsData = await getRounds(compId);
+        if (cancelled) return;
+
+        step = 'getParticipant';
+        const participantData = await getParticipant(compId, user!.uid);
         if (cancelled) return;
 
         if (!compData) { setNotFound(true); setLoading(false); return; }
@@ -173,6 +179,7 @@ export default function CompeteHubPage() {
         let attempt: CompetitionAttempt | null = null;
         let fetchErr1: unknown = null;
         try {
+          step = 'getActiveAttempt_1';
           attempt = await getActiveAttempt(compId, user!.uid);
         } catch (err) {
           fetchErr1 = err;
@@ -183,6 +190,7 @@ export default function CompeteHubPage() {
           await new Promise<void>((r) => setTimeout(r, 800));
           if (cancelled) return;
           try {
+            step = 'getActiveAttempt_2';
             attempt = await getActiveAttempt(compId, user!.uid);
           } catch (err) {
             fetchErr1 = fetchErr1 || err;
@@ -192,12 +200,13 @@ export default function CompeteHubPage() {
 
         if (!attempt) {
           const reason = fetchErr1
-            ? 'fetch_error_' + encodeURIComponent(String(fetchErr1).slice(0, 80))
+            ? `fetch_error_${step}_` + encodeURIComponent(String(fetchErr1).slice(0, 80))
             : 'no_active_attempt';
           bounce(reason);
           return;
         }
 
+        step = 'getMyResultsForAttempt';
         const resultsData = await getMyResultsForAttempt(compId, attempt.id);
         if (cancelled) return;
 
@@ -208,8 +217,8 @@ export default function CompeteHubPage() {
         setMyResults(resultsData);
         setLoading(false);
       } catch (err) {
-        console.error('[compete hub] load failed', err);
-        if (!cancelled) bounce('load_catch_' + encodeURIComponent(String(err).slice(0, 80)));
+        const code = (err as { code?: string })?.code ?? 'unknown';
+        if (!cancelled) bounce(`${step}_${code}`);
       }
     }
     void load();
