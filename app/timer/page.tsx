@@ -800,7 +800,11 @@ export default function TimerPage() {
           setScramble(generateScramble(oldEvent));
         }
       }
-    } catch { /* ignore */ }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('[solve-load] failed', msg);
+      setSaveError('Load: ' + msg.slice(0, 120));
+    }
     sessionsLoadedRef.current = true;
   }, []);
 
@@ -1944,16 +1948,25 @@ export default function TimerPage() {
       display: 'flex',
       transition: 'background-color 0.25s ease, color 0.25s ease',
     }}>
-      {/* Save error banner */}
+      {/* Storage error banner */}
       {saveError && (
         <div style={{
           position: 'fixed', top: 8, left: 8, right: 8,
-          background: 'rgba(239,68,68,0.92)', color: '#fff',
+          background: 'rgba(245,158,11,0.92)', color: '#1a1300',
           padding: '0.5rem 0.75rem', borderRadius: 8,
           fontSize: '0.75rem', fontFamily: '"JetBrains Mono", monospace',
-          zIndex: 9999, textAlign: 'center',
+          zIndex: 9999, display: 'flex', alignItems: 'center', gap: '0.5rem',
         }}>
-          Хадгалах алдаа: {saveError}
+          <span style={{ flex: 1, textAlign: 'center' }}>Хадгалах алдаа: {saveError}</span>
+          <button
+            onClick={() => setSaveError(null)}
+            style={{
+              background: 'none', border: 'none', color: '#1a1300',
+              fontSize: '1rem', lineHeight: 1, cursor: 'pointer',
+              padding: '0 0.25rem', flexShrink: 0,
+            }}
+            aria-label="Close"
+          >✕</button>
         </div>
       )}
 
