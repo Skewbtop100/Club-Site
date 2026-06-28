@@ -159,28 +159,34 @@ interface SolveProgressData {
 // ─── CubeViewer ───────────────────────────────────────────────────────────────
 
 function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }) {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const twistyRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<TwistyPlayerType | null>(null);
+  const sq1Ref = useRef<HTMLDivElement>(null);
   const puzzleId = PUZZLE_MAP[eventId];
   const usePuzzleGen = puzzleId === 'square1';
 
+  const [rotX, setRotX] = useState(-15);
+  const [rotY, setRotY] = useState(-25);
+  const [sq1Drag, setSq1Drag] = useState(false);
+  const sq1DragStart = useRef({ x: 0, y: 0, rx: 0, ry: 0 });
+  const getP = (e: React.MouseEvent | React.TouchEvent) => 'touches' in e ? e.touches[0] : e;
+  const onDragStart = (e: React.MouseEvent | React.TouchEvent) => { const p = getP(e); sq1DragStart.current = { x: p.clientX, y: p.clientY, rx: rotX, ry: rotY }; setSq1Drag(true); };
+  const onDragMove = (e: React.MouseEvent | React.TouchEvent) => { if (!sq1Drag) return; const p = getP(e); setRotY(sq1DragStart.current.ry + (p.clientX - sq1DragStart.current.x) * 0.6); setRotX(sq1DragStart.current.rx - (p.clientY - sq1DragStart.current.y) * 0.6); };
+  const onDragEnd = () => setSq1Drag(false);
+  useEffect(() => { setRotX(-15); setRotY(-25); }, [scramble]);
+
   useEffect(() => {
-    if (!usePuzzleGen || !containerRef.current) return;
+    if (!usePuzzleGen || !sq1Ref.current) return;
     let cancelled = false;
     (async () => {
       try {
         const { SVG } = await import('sr-puzzlegen');
-        if (cancelled || !containerRef.current) return;
-        containerRef.current.innerHTML = '';
-        SVG(containerRef.current, 'square1' as Parameters<typeof SVG>[1], {
-          width: 200, height: 200,
-          puzzle: { alg: scramble },
-        });
-        const svg = containerRef.current.querySelector('svg');
+        if (cancelled || !sq1Ref.current) return;
+        sq1Ref.current.innerHTML = '';
+        SVG(sq1Ref.current, 'square1' as Parameters<typeof SVG>[1], { width: 200, height: 200, puzzle: { alg: scramble } });
+        const svg = sq1Ref.current.querySelector('svg');
         if (svg) { svg.style.width = '100%'; svg.style.height = '100%'; }
-      } catch (err) {
-        console.warn('[vc-solve] sr-puzzlegen SQ1 failed', err);
-      }
+      } catch (err) { console.warn('[vc] sr-puzzlegen SQ1 failed', err); }
     })();
     return () => { cancelled = true; };
   }, [usePuzzleGen, scramble]);
@@ -191,46 +197,41 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
     (async () => {
       try {
         const mod = await import('cubing/twisty');
-        if (cancelled || !containerRef.current) return;
-        const config = {
+        if (cancelled || !twistyRef.current) return;
+        const player = new mod.TwistyPlayer({
           puzzle: puzzleId, experimentalSetupAlg: scramble, alg: '',
           background: 'none', controlPanel: 'none', viewerLink: 'none',
           hintFacelets: 'none', backView: 'none', visualization: '3D',
-        } as unknown as ConstructorParameters<typeof mod.TwistyPlayer>[0];
-        const player = new mod.TwistyPlayer(config);
+        } as unknown as ConstructorParameters<typeof mod.TwistyPlayer>[0]);
         const el = player as unknown as HTMLElement;
-        el.style.width = '100%'; el.style.height = '100%';
-        el.style.background = 'transparent';
-        containerRef.current.appendChild(el);
+        el.style.width = '100%'; el.style.height = '100%'; el.style.background = 'transparent';
+        twistyRef.current.appendChild(el);
         playerRef.current = player;
-      } catch (err) { console.warn('[vc-solve] TwistyPlayer load failed', err); }
+      } catch (err) { console.warn('[vc] TwistyPlayer load failed', err); }
     })();
-    return () => {
-      cancelled = true;
-      const player = playerRef.current as unknown as HTMLElement | null;
-      const c = containerRef.current;
-      if (player && c && c.contains(player)) c.removeChild(player);
-      playerRef.current = null;
-    };
+    return () => { cancelled = true; const p = playerRef.current as unknown as HTMLElement | null; const c = twistyRef.current; if (p && c && c.contains(p)) c.removeChild(p); playerRef.current = null; };
   }, [puzzleId, usePuzzleGen]);
 
   useEffect(() => {
     if (usePuzzleGen) return;
     const player = playerRef.current;
     if (!player || !puzzleId) return;
-    try {
-      (player as unknown as { experimentalSetupAlg: string }).experimentalSetupAlg = scramble;
-      (player as unknown as { alg: string }).alg = '';
-    } catch {}
+    try { (player as unknown as { experimentalSetupAlg: string }).experimentalSetupAlg = scramble; (player as unknown as { alg: string }).alg = ''; } catch {}
   }, [scramble, puzzleId, usePuzzleGen]);
 
   if (!puzzleId) return null;
-  return (
-    <div ref={containerRef} style={{
-      width: '100%', height: '100%',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-    }} />
+  if (usePuzzleGen) return (
+    <div onMouseDown={onDragStart} onMouseMove={onDragMove} onMouseUp={onDragEnd} onMouseLeave={onDragEnd}
+      onTouchStart={onDragStart} onTouchMove={onDragMove} onTouchEnd={onDragEnd}
+      style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        perspective: 600, cursor: sq1Drag ? 'grabbing' : 'grab', touchAction: 'none' }}>
+      <div style={{ transform: `rotateX(${rotX}deg) rotateY(${rotY}deg)`, transformStyle: 'preserve-3d',
+        transition: sq1Drag ? 'none' : 'transform 0.2s ease-out' }}>
+        <div ref={sq1Ref} />
+      </div>
+    </div>
   );
+  return <div ref={twistyRef} style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }} />;
 }
 
 // ─── Shell ────────────────────────────────────────────────────────────────────
