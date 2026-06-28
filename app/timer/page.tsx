@@ -6937,14 +6937,8 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
         } as unknown as ConstructorParameters<typeof mod.TwistyPlayer>[0];
         const player = new mod.TwistyPlayer(config);
         const el = player as unknown as HTMLElement;
-        if (viz === '2D') {
-          el.style.height = '100%';
-          el.style.width = 'auto';
-          el.style.maxWidth = '100%';
-        } else {
-          el.style.width = '100%';
-          el.style.height = '100%';
-        }
+        el.style.width = '100%';
+        el.style.height = '100%';
         el.style.background = 'transparent';
         containerRef.current.appendChild(el);
         playerRef.current = player;
@@ -6986,13 +6980,22 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
     );
   }
   return (
-    <div
-      ref={containerRef}
-      style={{
-        flex: '1 1 auto', minHeight: 0, width: '100%',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}
-    />
+    <div style={{
+      flex: '1 1 auto', minHeight: 0, width: '100%',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      overflow: 'hidden',
+    }}>
+      <div
+        ref={containerRef}
+        style={{
+          width: viz === '2D' ? 'auto' : '100%',
+          height: '100%',
+          maxWidth: '100%',
+          aspectRatio: viz === '2D' ? '360 / 552' : undefined,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
+      />
+    </div>
   );
 }
 
