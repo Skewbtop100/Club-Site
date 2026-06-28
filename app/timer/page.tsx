@@ -805,15 +805,23 @@ export default function TimerPage() {
   }, []);
 
   // Persist sessions store + active event whenever they change.
+  const [saveError, setSaveError] = useState<string | null>(null);
   useEffect(() => {
     if (!sessionsLoadedRef.current) return;
     try {
-      localStorage.setItem(
-        SESSIONS_KEY,
-        JSON.stringify({ store: sessions, currentEventId: eventId }),
-      );
-    } catch { /* ignore */ }
+      const payload = JSON.stringify({ store: sessions, currentEventId: eventId });
+      localStorage.setItem(SESSIONS_KEY, payload);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('[solve-save] localStorage FAILED', msg);
+      setSaveError('LS: ' + msg.slice(0, 120));
+    }
   }, [sessions, eventId]);
+  useEffect(() => {
+    if (!saveError) return;
+    const t = setTimeout(() => setSaveError(null), 8000);
+    return () => clearTimeout(t);
+  }, [saveError]);
 
   // Load preferences on mount
   const prefsLoadedRef = useRef(false);
@@ -1936,6 +1944,19 @@ export default function TimerPage() {
       display: 'flex',
       transition: 'background-color 0.25s ease, color 0.25s ease',
     }}>
+      {/* Save error banner */}
+      {saveError && (
+        <div style={{
+          position: 'fixed', top: 8, left: 8, right: 8,
+          background: 'rgba(239,68,68,0.92)', color: '#fff',
+          padding: '0.5rem 0.75rem', borderRadius: 8,
+          fontSize: '0.75rem', fontFamily: '"JetBrains Mono", monospace',
+          zIndex: 9999, textAlign: 'center',
+        }}>
+          Хадгалах алдаа: {saveError}
+        </div>
+      )}
+
       {/* Subtle grain background */}
       <div style={{
         position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none',
