@@ -6894,23 +6894,36 @@ function Row({ label, kbd }: { label: string; kbd: string }) {
   );
 }
 
-// 3D cube preview using @cubing/twisty's TwistyPlayer Web Component. Imported
+// Cube preview using @cubing/twisty's TwistyPlayer Web Component. Imported
 // dynamically so HTMLElement access doesn't break Next.js server rendering.
+// Square-1 and Clock use 2D (flat SVG) because their 3D models render poorly;
+// all other puzzles use 3D (WebGL).
+const VIZ_2D_PUZZLES = new Set(['square1', 'clock']);
+
 function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<TwistyPlayerType | null>(null);
+  const prevPuzzleRef = useRef<string | undefined>(undefined);
   const puzzleId = PUZZLE_MAP[eventId];
+  const viz = puzzleId && VIZ_2D_PUZZLES.has(puzzleId) ? '2D' : '3D';
 
-  // Mount: load TwistyPlayer and create the player instance.
   useEffect(() => {
     if (!puzzleId) return;
     let cancelled = false;
+
     (async () => {
       try {
         const mod = await import('cubing/twisty');
         if (cancelled || !containerRef.current) return;
-        // Cast: PuzzleID is a strict literal union; we validated puzzleId via
-        // PUZZLE_MAP so the runtime value is a member of that union.
+
+        // If the puzzle changed in a way that requires a different visualization
+        // mode (e.g. 3x3→Square-1), destroy the old player first.
+        const oldPlayer = playerRef.current as unknown as HTMLElement | null;
+        if (oldPlayer && containerRef.current.contains(oldPlayer)) {
+          containerRef.current.removeChild(oldPlayer);
+          playerRef.current = null;
+        }
+
         const config = {
           puzzle: puzzleId,
           experimentalSetupAlg: scramble,
@@ -6920,7 +6933,7 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
           viewerLink: 'none',
           hintFacelets: 'none',
           backView: 'none',
-          visualization: '3D',
+          visualization: viz,
         } as unknown as ConstructorParameters<typeof mod.TwistyPlayer>[0];
         const player = new mod.TwistyPlayer(config);
         const el = player as unknown as HTMLElement;
@@ -6929,9 +6942,8 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
         el.style.background = 'transparent';
         containerRef.current.appendChild(el);
         playerRef.current = player;
+        prevPuzzleRef.current = puzzleId;
       } catch (err) {
-        // Silent fall-back: container stays empty if the module fails to load.
-        // eslint-disable-next-line no-console
         console.warn('TwistyPlayer load failed', err);
       }
     })();
@@ -6942,22 +6954,17 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
       if (player && c && c.contains(player)) c.removeChild(player);
       playerRef.current = null;
     };
-    // Mount only — subsequent puzzle/scramble changes are handled below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [puzzleId, viz]);
 
-  // Update on scramble or puzzle change.
+  // Update scramble when it changes (same puzzle).
   useEffect(() => {
     const player = playerRef.current;
     if (!player || !puzzleId) return;
+    if (prevPuzzleRef.current !== puzzleId) return;
     try {
-      // Type assertion: PuzzleID is a string-literal union; we validated
-      // membership via PUZZLE_MAP, so the cast is safe at runtime.
-      (player as unknown as { puzzle: string }).puzzle = puzzleId;
       (player as unknown as { experimentalSetupAlg: string }).experimentalSetupAlg = scramble;
       (player as unknown as { alg: string }).alg = '';
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.warn('TwistyPlayer update failed', err);
     }
   }, [scramble, puzzleId]);

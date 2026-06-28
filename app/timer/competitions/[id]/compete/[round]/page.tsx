@@ -158,10 +158,13 @@ interface SolveProgressData {
 
 // ─── CubeViewer ───────────────────────────────────────────────────────────────
 
+const VIZ_2D_PUZZLES = new Set(['square1', 'clock']);
+
 function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<TwistyPlayerType | null>(null);
   const puzzleId = PUZZLE_MAP[eventId];
+  const viz = puzzleId && VIZ_2D_PUZZLES.has(puzzleId) ? '2D' : '3D';
 
   useEffect(() => {
     if (!puzzleId) return;
@@ -170,6 +173,11 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
       try {
         const mod = await import('cubing/twisty');
         if (cancelled || !containerRef.current) return;
+        const oldEl = playerRef.current as unknown as HTMLElement | null;
+        if (oldEl && containerRef.current.contains(oldEl)) {
+          containerRef.current.removeChild(oldEl);
+          playerRef.current = null;
+        }
         const config = {
           puzzle: puzzleId,
           experimentalSetupAlg: scramble,
@@ -179,7 +187,7 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
           viewerLink: 'none',
           hintFacelets: 'none',
           backView: 'none',
-          visualization: '3D',
+          visualization: viz,
         } as unknown as ConstructorParameters<typeof mod.TwistyPlayer>[0];
         const player = new mod.TwistyPlayer(config);
         const el = player as unknown as HTMLElement;
@@ -199,14 +207,12 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
       if (player && c && c.contains(player)) c.removeChild(player);
       playerRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [puzzleId, viz]);
 
   useEffect(() => {
     const player = playerRef.current;
     if (!player || !puzzleId) return;
     try {
-      (player as unknown as { puzzle: string }).puzzle = puzzleId;
       (player as unknown as { experimentalSetupAlg: string }).experimentalSetupAlg = scramble;
       (player as unknown as { alg: string }).alg = '';
     } catch {}
