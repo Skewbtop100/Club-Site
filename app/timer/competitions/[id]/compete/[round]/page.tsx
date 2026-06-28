@@ -799,8 +799,16 @@ function SolvingPage() {
   });
   const [scrambleSizeDraft, setScrambleSizeDraft] = useState<'sm' | 'md' | 'lg'>('md');
   const [inspectionEnabled, setInspectionEnabled] = useState(() => {
-    try { return localStorage.getItem('compete.inspection') !== 'false'; }
-    catch { return true; }
+    try {
+      const own = localStorage.getItem('compete.inspection');
+      if (own !== null) return own !== 'false';
+      const mainRaw = localStorage.getItem('pv.timer.prefs.v1');
+      if (mainRaw) {
+        const main = JSON.parse(mainRaw) as { inspectionEnabled?: boolean };
+        if (typeof main.inspectionEnabled === 'boolean') return main.inspectionEnabled;
+      }
+    } catch {}
+    return true;
   });
   const [inspectionEnabledDraft, setInspectionEnabledDraft] = useState(true);
   const [extraPopupSolveIdx, setExtraPopupSolveIdx] = useState<number | null>(null);
@@ -894,7 +902,10 @@ function SolvingPage() {
           return;
         }
 
-        const path = `virtualProgress/${compId}/${user!.uid}/${roundId}`;
+        const progressSegment = attemptId
+          ? `attempts/${attemptId}/${roundId}`
+          : roundId;
+        const path = `virtualProgress/${compId}/${user!.uid}/${progressSegment}`;
         const snap = await rtdbGet(rtdbRef(rtdb, path));
         if (cancelled) return;
 
@@ -902,6 +913,7 @@ function SolvingPage() {
         let savedSolves: DraftSolve[] = [];
         let savedUsedExtras = 0;
         let savedOverrides: Record<string, string> = {};
+        const hashSeed = user!.uid + roundId + (attemptId ?? '');
 
         if (snap.exists()) {
           const data = snap.val() as Partial<SolveProgressData>;
@@ -911,14 +923,8 @@ function SolvingPage() {
           savedOverrides = (data.scrambleOverrides && typeof data.scrambleOverrides === 'object')
             ? (data.scrambleOverrides as Record<string, string>)
             : {};
-        } else if (roundData.groups && toStringArray(roundData.groups as unknown as unknown[]).length === 0
-            && Array.isArray(roundData.groups) && roundData.groups.length > 1) {
-          gi = hashStringToInt(user!.uid + roundId) % roundData.groups.length;
-          await rtdbSet(rtdbRef(rtdb, path), {
-            groupIndex: gi, solves: [], usedExtras: 0, scrambleOverrides: {},
-          } satisfies SolveProgressData);
         } else if (Array.isArray(roundData.groups) && roundData.groups.length > 1) {
-          gi = hashStringToInt(user!.uid + roundId) % roundData.groups.length;
+          gi = hashStringToInt(hashSeed) % roundData.groups.length;
           await rtdbSet(rtdbRef(rtdb, path), {
             groupIndex: gi, solves: [], usedExtras: 0, scrambleOverrides: {},
           } satisfies SolveProgressData);
@@ -987,8 +993,11 @@ function SolvingPage() {
         timerStopRef.current();
       } else if (s === 'idle' || s === 'stopped') {
         timerResetRef.current();
-        timerBeginInspectionRef.current();
-        if (!inspectionEnabledRef.current) timerStartArmingRef.current();
+        if (inspectionEnabledRef.current) {
+          timerBeginInspectionRef.current();
+        } else {
+          timerStartArmingRef.current();
+        }
       } else if (s === 'inspecting') {
         timerStartArmingRef.current();
       }
@@ -1011,8 +1020,11 @@ function SolvingPage() {
         timerStopRef.current();
       } else if (s === 'idle' || s === 'stopped') {
         timerResetRef.current();
-        timerBeginInspectionRef.current();
-        if (!inspectionEnabledRef.current) timerStartArmingRef.current();
+        if (inspectionEnabledRef.current) {
+          timerBeginInspectionRef.current();
+        } else {
+          timerStartArmingRef.current();
+        }
       } else if (s === 'inspecting') {
         timerStartArmingRef.current();
       }
@@ -1082,7 +1094,8 @@ function SolvingPage() {
     setScrambleOverrides(newOverrides);
     setUsedExtras(newExtras);
 
-    const path = `virtualProgress/${compId}/${user.uid}/${roundId}`;
+    const seg = attemptId ? `attempts/${attemptId}/${roundId}` : roundId;
+    const path = `virtualProgress/${compId}/${user.uid}/${seg}`;
     await rtdbSet(rtdbRef(rtdb, path), {
       groupIndex: gi, solves: newSolves,
       usedExtras: newExtras, scrambleOverrides: newOverrides,
@@ -1097,7 +1110,8 @@ function SolvingPage() {
 
     const newSolves = [...solvesRef.current, ps];
     const total = getSolveCount(r.format);
-    const path = `virtualProgress/${compId}/${user.uid}/${roundId}`;
+    const seg = attemptId ? `attempts/${attemptId}/${roundId}` : roundId;
+    const path = `virtualProgress/${compId}/${user.uid}/${seg}`;
 
     // Advance index BEFORE clearing pendingSolve so the next scramble is ready
     const nextIdx = newSolves.length;
