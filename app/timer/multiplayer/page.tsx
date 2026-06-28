@@ -158,8 +158,14 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
         } as unknown as ConstructorParameters<typeof mod.TwistyPlayer>[0];
         const player = new mod.TwistyPlayer(config);
         const el = player as unknown as HTMLElement;
-        el.style.width = '100%';
-        el.style.height = '100%';
+        if (viz === '2D') {
+          el.style.height = '100%';
+          el.style.width = 'auto';
+          el.style.maxWidth = '100%';
+        } else {
+          el.style.width = '100%';
+          el.style.height = '100%';
+        }
         el.style.background = 'transparent';
         containerRef.current.appendChild(el);
         playerRef.current = player;
