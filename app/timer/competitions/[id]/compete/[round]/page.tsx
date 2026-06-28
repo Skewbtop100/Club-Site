@@ -158,47 +158,52 @@ interface SolveProgressData {
 
 // ─── CubeViewer ───────────────────────────────────────────────────────────────
 
-const VIZ_2D_PUZZLES = new Set(['square1', 'clock']);
-
 function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<TwistyPlayerType | null>(null);
   const puzzleId = PUZZLE_MAP[eventId];
-  const viz = puzzleId && VIZ_2D_PUZZLES.has(puzzleId) ? '2D' : '3D';
+  const usePuzzleGen = puzzleId === 'square1';
 
   useEffect(() => {
-    if (!puzzleId) return;
+    if (!usePuzzleGen || !containerRef.current) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { SVG } = await import('sr-puzzlegen');
+        if (cancelled || !containerRef.current) return;
+        containerRef.current.innerHTML = '';
+        SVG(containerRef.current, 'square1' as Parameters<typeof SVG>[1], {
+          width: 200, height: 200,
+          puzzle: { alg: scramble },
+        });
+        const svg = containerRef.current.querySelector('svg');
+        if (svg) { svg.style.width = '100%'; svg.style.height = '100%'; }
+      } catch (err) {
+        console.warn('[vc-solve] sr-puzzlegen SQ1 failed', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [usePuzzleGen, scramble]);
+
+  useEffect(() => {
+    if (usePuzzleGen || !puzzleId) return;
     let cancelled = false;
     (async () => {
       try {
         const mod = await import('cubing/twisty');
         if (cancelled || !containerRef.current) return;
-        const oldEl = playerRef.current as unknown as HTMLElement | null;
-        if (oldEl && containerRef.current.contains(oldEl)) {
-          containerRef.current.removeChild(oldEl);
-          playerRef.current = null;
-        }
         const config = {
-          puzzle: puzzleId,
-          experimentalSetupAlg: scramble,
-          alg: '',
-          background: 'none',
-          controlPanel: 'none',
-          viewerLink: 'none',
-          hintFacelets: 'none',
-          backView: 'none',
-          visualization: viz,
+          puzzle: puzzleId, experimentalSetupAlg: scramble, alg: '',
+          background: 'none', controlPanel: 'none', viewerLink: 'none',
+          hintFacelets: 'none', backView: 'none', visualization: '3D',
         } as unknown as ConstructorParameters<typeof mod.TwistyPlayer>[0];
         const player = new mod.TwistyPlayer(config);
         const el = player as unknown as HTMLElement;
-        el.style.width = '100%';
-        el.style.height = '100%';
+        el.style.width = '100%'; el.style.height = '100%';
         el.style.background = 'transparent';
         containerRef.current.appendChild(el);
         playerRef.current = player;
-      } catch (err) {
-        console.warn('[vc-solve] TwistyPlayer load failed', err);
-      }
+      } catch (err) { console.warn('[vc-solve] TwistyPlayer load failed', err); }
     })();
     return () => {
       cancelled = true;
@@ -207,32 +212,24 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
       if (player && c && c.contains(player)) c.removeChild(player);
       playerRef.current = null;
     };
-  }, [puzzleId, viz]);
+  }, [puzzleId, usePuzzleGen]);
 
   useEffect(() => {
+    if (usePuzzleGen) return;
     const player = playerRef.current;
     if (!player || !puzzleId) return;
     try {
       (player as unknown as { experimentalSetupAlg: string }).experimentalSetupAlg = scramble;
       (player as unknown as { alg: string }).alg = '';
     } catch {}
-  }, [scramble, puzzleId]);
+  }, [scramble, puzzleId, usePuzzleGen]);
 
   if (!puzzleId) return null;
   return (
-    <div style={{
+    <div ref={containerRef} style={{
       width: '100%', height: '100%',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      overflow: 'hidden',
-    }}>
-      <div ref={containerRef} style={{
-        width: viz === '2D' ? 'auto' : '100%',
-        height: '100%',
-        maxWidth: '100%',
-        aspectRatio: viz === '2D' ? '360 / 552' : undefined,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }} />
-    </div>
+    }} />
   );
 }
 

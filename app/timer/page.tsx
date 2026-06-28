@@ -6894,36 +6894,48 @@ function Row({ label, kbd }: { label: string; kbd: string }) {
   );
 }
 
-// Cube preview using @cubing/twisty's TwistyPlayer Web Component. Imported
-// dynamically so HTMLElement access doesn't break Next.js server rendering.
-// Square-1 and Clock use 2D (flat SVG) because their 3D models render poorly;
-// all other puzzles use 3D (WebGL).
-const VIZ_2D_PUZZLES = new Set(['square1', 'clock']);
-
+// Cube preview. Square-1 uses sr-puzzlegen (clean flat SVG); all other
+// puzzles use @cubing/twisty's TwistyPlayer (3D WebGL). Both are dynamic-
+// imported so HTMLElement access doesn't break Next.js server rendering.
 function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<TwistyPlayerType | null>(null);
-  const prevPuzzleRef = useRef<string | undefined>(undefined);
   const puzzleId = PUZZLE_MAP[eventId];
-  const viz = puzzleId && VIZ_2D_PUZZLES.has(puzzleId) ? '2D' : '3D';
+  const usePuzzleGen = puzzleId === 'square1';
 
+  // sr-puzzlegen path for Square-1
   useEffect(() => {
-    if (!puzzleId) return;
+    if (!usePuzzleGen || !containerRef.current) return;
     let cancelled = false;
+    (async () => {
+      try {
+        const { SVG } = await import('sr-puzzlegen');
+        if (cancelled || !containerRef.current) return;
+        containerRef.current.innerHTML = '';
+        SVG(containerRef.current, 'square1' as Parameters<typeof SVG>[1], {
+          width: 200, height: 200,
+          puzzle: { alg: scramble },
+        });
+        const svg = containerRef.current.querySelector('svg');
+        if (svg) {
+          svg.style.width = '100%';
+          svg.style.height = '100%';
+        }
+      } catch (err) {
+        console.warn('sr-puzzlegen SQ1 render failed', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [usePuzzleGen, scramble]);
 
+  // TwistyPlayer path for all other puzzles
+  useEffect(() => {
+    if (usePuzzleGen || !puzzleId) return;
+    let cancelled = false;
     (async () => {
       try {
         const mod = await import('cubing/twisty');
         if (cancelled || !containerRef.current) return;
-
-        // If the puzzle changed in a way that requires a different visualization
-        // mode (e.g. 3x3→Square-1), destroy the old player first.
-        const oldPlayer = playerRef.current as unknown as HTMLElement | null;
-        if (oldPlayer && containerRef.current.contains(oldPlayer)) {
-          containerRef.current.removeChild(oldPlayer);
-          playerRef.current = null;
-        }
-
         const config = {
           puzzle: puzzleId,
           experimentalSetupAlg: scramble,
@@ -6933,7 +6945,7 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
           viewerLink: 'none',
           hintFacelets: 'none',
           backView: 'none',
-          visualization: viz,
+          visualization: '3D',
         } as unknown as ConstructorParameters<typeof mod.TwistyPlayer>[0];
         const player = new mod.TwistyPlayer(config);
         const el = player as unknown as HTMLElement;
@@ -6942,7 +6954,6 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
         el.style.background = 'transparent';
         containerRef.current.appendChild(el);
         playerRef.current = player;
-        prevPuzzleRef.current = puzzleId;
       } catch (err) {
         console.warn('TwistyPlayer load failed', err);
       }
@@ -6954,20 +6965,20 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
       if (player && c && c.contains(player)) c.removeChild(player);
       playerRef.current = null;
     };
-  }, [puzzleId, viz]);
+  }, [puzzleId, usePuzzleGen]);
 
-  // Update scramble when it changes (same puzzle).
+  // Update scramble for TwistyPlayer (non-SQ1)
   useEffect(() => {
+    if (usePuzzleGen) return;
     const player = playerRef.current;
     if (!player || !puzzleId) return;
-    if (prevPuzzleRef.current !== puzzleId) return;
     try {
       (player as unknown as { experimentalSetupAlg: string }).experimentalSetupAlg = scramble;
       (player as unknown as { alg: string }).alg = '';
     } catch (err) {
       console.warn('TwistyPlayer update failed', err);
     }
-  }, [scramble, puzzleId]);
+  }, [scramble, puzzleId, usePuzzleGen]);
 
   if (!puzzleId) {
     return (
@@ -6980,22 +6991,13 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
     );
   }
   return (
-    <div style={{
-      flex: '1 1 auto', minHeight: 0, width: '100%',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      overflow: 'hidden',
-    }}>
-      <div
-        ref={containerRef}
-        style={{
-          width: viz === '2D' ? 'auto' : '100%',
-          height: '100%',
-          maxWidth: '100%',
-          aspectRatio: viz === '2D' ? '360 / 552' : undefined,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}
-      />
-    </div>
+    <div
+      ref={containerRef}
+      style={{
+        flex: '1 1 auto', minHeight: 0, width: '100%',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+    />
   );
 }
 
