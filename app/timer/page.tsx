@@ -6894,38 +6894,45 @@ function Row({ label, kbd }: { label: string; kbd: string }) {
   );
 }
 
-// Cube preview. Square-1 uses sr-puzzlegen (static flat SVG — the only
-// renderer that draws SQ1 geometry correctly in a small card). All other
-// puzzles use @cubing/twisty TwistyPlayer (3D WebGL with native drag).
-// TODO: interactive 3D rotation for SQ1 deferred — sr-puzzlegen has no
-// WebGL renderer and cubing.js 3D SQ1 renders incorrectly at small sizes.
+// Cube preview. Square-1 uses sr-puzzlegen (static SVG with view-angle
+// buttons); all other puzzles use @cubing/twisty TwistyPlayer (3D WebGL).
+type Sq1View = 'standard' | 'net' | 'top';
+const SQ1_VIEWS: { id: Sq1View; vizType: string; rotations?: { x?: number; y?: number; z?: number }[]; label: string }[] = [
+  { id: 'standard', vizType: 'square1',     label: 'Standard' },
+  { id: 'net',      vizType: 'square1-net', label: 'Net' },
+  { id: 'top',      vizType: 'square1',     rotations: [{ x: 90, y: 0, z: 0 }], label: 'Top' },
+];
+
 function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const sq1MountRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<TwistyPlayerType | null>(null);
   const puzzleId = PUZZLE_MAP[eventId];
   const isSq1 = puzzleId === 'square1';
+  const [sq1View, setSq1View] = useState<Sq1View>('standard');
 
   // Square-1: sr-puzzlegen static SVG
   useEffect(() => {
-    if (!isSq1 || !containerRef.current) return;
+    if (!isSq1 || !sq1MountRef.current) return;
     let cancelled = false;
+    const view = SQ1_VIEWS.find(v => v.id === sq1View) ?? SQ1_VIEWS[0];
     (async () => {
       try {
         const { SVG } = await import('sr-puzzlegen');
-        if (cancelled || !containerRef.current) return;
-        containerRef.current.innerHTML = '';
-        SVG(containerRef.current, 'square1' as Parameters<typeof SVG>[1], {
+        if (cancelled || !sq1MountRef.current) return;
+        sq1MountRef.current.innerHTML = '';
+        SVG(sq1MountRef.current, view.vizType as Parameters<typeof SVG>[1], {
           width: 200, height: 200,
-          puzzle: { alg: scramble },
+          puzzle: { alg: scramble, rotations: view.rotations },
         });
-        const svg = containerRef.current.querySelector('svg');
+        const svg = sq1MountRef.current.querySelector('svg');
         if (svg) { svg.style.width = '100%'; svg.style.height = '100%'; }
       } catch (err) {
         console.warn('sr-puzzlegen SQ1 render failed', err);
       }
     })();
     return () => { cancelled = true; };
-  }, [isSq1, scramble]);
+  }, [isSq1, scramble, sq1View]);
 
   // All other puzzles: TwistyPlayer 3D
   useEffect(() => {
@@ -6936,25 +6943,16 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
         const mod = await import('cubing/twisty');
         if (cancelled || !containerRef.current) return;
         const player = new mod.TwistyPlayer({
-          puzzle: puzzleId,
-          experimentalSetupAlg: scramble,
-          alg: '',
-          background: 'none',
-          controlPanel: 'none',
-          viewerLink: 'none',
-          hintFacelets: 'none',
-          backView: 'none',
-          visualization: '3D',
+          puzzle: puzzleId, experimentalSetupAlg: scramble, alg: '',
+          background: 'none', controlPanel: 'none', viewerLink: 'none',
+          hintFacelets: 'none', backView: 'none', visualization: '3D',
         } as unknown as ConstructorParameters<typeof mod.TwistyPlayer>[0]);
         const el = player as unknown as HTMLElement;
-        el.style.width = '100%';
-        el.style.height = '100%';
+        el.style.width = '100%'; el.style.height = '100%';
         el.style.background = 'transparent';
         containerRef.current.appendChild(el);
         playerRef.current = player;
-      } catch (err) {
-        console.warn('TwistyPlayer load failed', err);
-      }
+      } catch (err) { console.warn('TwistyPlayer load failed', err); }
     })();
     return () => {
       cancelled = true;
@@ -6965,7 +6963,6 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
     };
   }, [puzzleId, isSq1]);
 
-  // Update scramble for TwistyPlayer (non-SQ1)
   useEffect(() => {
     if (isSq1) return;
     const player = playerRef.current;
@@ -6973,9 +6970,7 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
     try {
       (player as unknown as { experimentalSetupAlg: string }).experimentalSetupAlg = scramble;
       (player as unknown as { alg: string }).alg = '';
-    } catch (err) {
-      console.warn('TwistyPlayer update failed', err);
-    }
+    } catch (err) { console.warn('TwistyPlayer update failed', err); }
   }, [scramble, puzzleId, isSq1]);
 
   if (!puzzleId) {
@@ -6988,14 +6983,40 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
       </div>
     );
   }
-  return (
-    <div
-      ref={containerRef}
-      style={{
+
+  if (isSq1) {
+    return (
+      <div style={{
         flex: '1 1 auto', minHeight: 0, width: '100%',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}
-    />
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        position: 'relative',
+      }}>
+        <div ref={sq1MountRef} style={{ flex: '1 1 auto', minHeight: 0, width: '100%',
+          display: 'flex', alignItems: 'center', justifyContent: 'center' }} />
+        <div style={{ display: 'flex', gap: 3, position: 'absolute', bottom: 2, right: 2 }}>
+          {SQ1_VIEWS.map(v => (
+            <button key={v.id} title={v.label}
+              onClick={() => setSq1View(v.id)}
+              style={{
+                width: 18, height: 18, padding: 0, border: 'none', borderRadius: 4,
+                background: sq1View === v.id ? C.accent : 'rgba(255,255,255,0.1)',
+                color: sq1View === v.id ? '#000' : C.muted,
+                cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '0.5rem', fontWeight: 800, fontFamily: 'inherit', lineHeight: 1,
+              }}>
+              {v.id === 'standard' ? '⬡' : v.id === 'net' ? '⊞' : '⬒'}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div ref={containerRef} style={{
+      flex: '1 1 auto', minHeight: 0, width: '100%',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }} />
   );
 }
 
