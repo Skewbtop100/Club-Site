@@ -6894,72 +6894,22 @@ function Row({ label, kbd }: { label: string; kbd: string }) {
   );
 }
 
-// Cube preview. Square-1 uses sr-puzzlegen (flat SVG with CSS 3D drag-
-// rotation); all other puzzles use @cubing/twisty's TwistyPlayer whose
-// 3D mode supports native drag-to-rotate out of the box.
+// Cube preview using @cubing/twisty's TwistyPlayer (3D WebGL with native
+// drag-to-rotate). Dynamic-imported so HTMLElement access doesn't break SSR.
+// All puzzles including Square-1 use the same 3D path.
 function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }) {
-  const twistyRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<TwistyPlayerType | null>(null);
-  const sq1Ref = useRef<HTMLDivElement>(null);
   const puzzleId = PUZZLE_MAP[eventId];
-  const usePuzzleGen = puzzleId === 'square1';
 
-  // ── SQ1 rotation state ──
-  const [rotX, setRotX] = useState(-15);
-  const [rotY, setRotY] = useState(-25);
-  const [dragging, setDragging] = useState(false);
-  const dragStart = useRef({ x: 0, y: 0, rotX: 0, rotY: 0 });
-
-  const getPointer = (e: React.MouseEvent | React.TouchEvent) =>
-    'touches' in e ? e.touches[0] : e;
-
-  const handleStart = (e: React.MouseEvent | React.TouchEvent) => {
-    const p = getPointer(e);
-    dragStart.current = { x: p.clientX, y: p.clientY, rotX, rotY };
-    setDragging(true);
-  };
-  const handleMove = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!dragging) return;
-    const p = getPointer(e);
-    setRotY(dragStart.current.rotY + (p.clientX - dragStart.current.x) * 0.6);
-    setRotX(dragStart.current.rotX - (p.clientY - dragStart.current.y) * 0.6);
-  };
-  const handleEnd = () => setDragging(false);
-
-  // Reset rotation on new scramble
-  useEffect(() => { setRotX(-15); setRotY(-25); }, [scramble]);
-
-  // sr-puzzlegen render for Square-1
   useEffect(() => {
-    if (!usePuzzleGen || !sq1Ref.current) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const { SVG } = await import('sr-puzzlegen');
-        if (cancelled || !sq1Ref.current) return;
-        sq1Ref.current.innerHTML = '';
-        SVG(sq1Ref.current, 'square1' as Parameters<typeof SVG>[1], {
-          width: 200, height: 200,
-          puzzle: { alg: scramble },
-        });
-        const svg = sq1Ref.current.querySelector('svg');
-        if (svg) { svg.style.width = '100%'; svg.style.height = '100%'; }
-      } catch (err) {
-        console.warn('sr-puzzlegen SQ1 render failed', err);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [usePuzzleGen, scramble]);
-
-  // TwistyPlayer for all other puzzles (3D with native drag rotation)
-  useEffect(() => {
-    if (usePuzzleGen || !puzzleId) return;
+    if (!puzzleId) return;
     let cancelled = false;
     (async () => {
       try {
         const mod = await import('cubing/twisty');
-        if (cancelled || !twistyRef.current) return;
-        const config = {
+        if (cancelled || !containerRef.current) return;
+        const player = new mod.TwistyPlayer({
           puzzle: puzzleId,
           experimentalSetupAlg: scramble,
           alg: '',
@@ -6969,13 +6919,12 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
           hintFacelets: 'none',
           backView: 'none',
           visualization: '3D',
-        } as unknown as ConstructorParameters<typeof mod.TwistyPlayer>[0];
-        const player = new mod.TwistyPlayer(config);
+        } as unknown as ConstructorParameters<typeof mod.TwistyPlayer>[0]);
         const el = player as unknown as HTMLElement;
         el.style.width = '100%';
         el.style.height = '100%';
         el.style.background = 'transparent';
-        twistyRef.current.appendChild(el);
+        containerRef.current.appendChild(el);
         playerRef.current = player;
       } catch (err) {
         console.warn('TwistyPlayer load failed', err);
@@ -6984,14 +6933,13 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
     return () => {
       cancelled = true;
       const player = playerRef.current as unknown as HTMLElement | null;
-      const c = twistyRef.current;
+      const c = containerRef.current;
       if (player && c && c.contains(player)) c.removeChild(player);
       playerRef.current = null;
     };
-  }, [puzzleId, usePuzzleGen]);
+  }, [puzzleId]);
 
   useEffect(() => {
-    if (usePuzzleGen) return;
     const player = playerRef.current;
     if (!player || !puzzleId) return;
     try {
@@ -7000,7 +6948,7 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
     } catch (err) {
       console.warn('TwistyPlayer update failed', err);
     }
-  }, [scramble, puzzleId, usePuzzleGen]);
+  }, [scramble, puzzleId]);
 
   if (!puzzleId) {
     return (
@@ -7012,34 +6960,9 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
       </div>
     );
   }
-
-  if (usePuzzleGen) {
-    return (
-      <div
-        onMouseDown={handleStart} onMouseMove={handleMove}
-        onMouseUp={handleEnd} onMouseLeave={handleEnd}
-        onTouchStart={handleStart} onTouchMove={handleMove} onTouchEnd={handleEnd}
-        style={{
-          flex: '1 1 auto', minHeight: 0, width: '100%',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          perspective: 600, cursor: dragging ? 'grabbing' : 'grab',
-          touchAction: 'none',
-        }}
-      >
-        <div style={{
-          transform: `rotateX(${rotX}deg) rotateY(${rotY}deg)`,
-          transformStyle: 'preserve-3d',
-          transition: dragging ? 'none' : 'transform 0.2s ease-out',
-        }}>
-          <div ref={sq1Ref} style={{ width: '100%', height: '100%' }} />
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div
-      ref={twistyRef}
+      ref={containerRef}
       style={{
         flex: '1 1 auto', minHeight: 0, width: '100%',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
