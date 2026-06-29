@@ -6894,45 +6894,35 @@ function Row({ label, kbd }: { label: string; kbd: string }) {
   );
 }
 
-// Cube preview. Square-1 uses sr-puzzlegen (static SVG with view-angle
-// buttons); all other puzzles use @cubing/twisty TwistyPlayer (3D WebGL).
-type Sq1View = 'standard' | 'net' | 'top';
-const SQ1_VIEWS: { id: Sq1View; vizType: string; rotations?: { x?: number; y?: number; z?: number }[]; label: string }[] = [
-  { id: 'standard', vizType: 'square1',     label: 'Standard' },
-  { id: 'net',      vizType: 'square1-net', label: 'Net' },
-  { id: 'top',      vizType: 'square1',     rotations: [{ x: 90, y: 0, z: 0 }], label: 'Top' },
-];
-
+// Cube preview. Square-1 uses sr-puzzlegen (static SVG rendered at a
+// fixed natural size, then scaled to fit the card via CSS). All other
+// puzzles use @cubing/twisty TwistyPlayer (3D WebGL with native drag).
 function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sq1MountRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<TwistyPlayerType | null>(null);
   const puzzleId = PUZZLE_MAP[eventId];
   const isSq1 = puzzleId === 'square1';
-  const [sq1View, setSq1View] = useState<Sq1View>('standard');
 
-  // Square-1: sr-puzzlegen static SVG
+  // Square-1: sr-puzzlegen renders at 400px fixed, CSS scales to fit card
   useEffect(() => {
     if (!isSq1 || !sq1MountRef.current) return;
     let cancelled = false;
-    const view = SQ1_VIEWS.find(v => v.id === sq1View) ?? SQ1_VIEWS[0];
     (async () => {
       try {
         const { SVG } = await import('sr-puzzlegen');
         if (cancelled || !sq1MountRef.current) return;
         sq1MountRef.current.innerHTML = '';
-        SVG(sq1MountRef.current, view.vizType as Parameters<typeof SVG>[1], {
-          width: 200, height: 200,
-          puzzle: { alg: scramble, rotations: view.rotations },
+        SVG(sq1MountRef.current, 'square1' as Parameters<typeof SVG>[1], {
+          width: 400, height: 400,
+          puzzle: { alg: scramble },
         });
-        const svg = sq1MountRef.current.querySelector('svg');
-        if (svg) { svg.style.width = '100%'; svg.style.height = '100%'; }
       } catch (err) {
         console.warn('sr-puzzlegen SQ1 render failed', err);
       }
     })();
     return () => { cancelled = true; };
-  }, [isSq1, scramble, sq1View]);
+  }, [isSq1, scramble]);
 
   // All other puzzles: TwistyPlayer 3D
   useEffect(() => {
@@ -6988,26 +6978,15 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
     return (
       <div style={{
         flex: '1 1 auto', minHeight: 0, width: '100%',
-        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-        position: 'relative',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        overflow: 'hidden',
       }}>
-        <div ref={sq1MountRef} style={{ flex: '1 1 auto', minHeight: 0, width: '100%',
-          display: 'flex', alignItems: 'center', justifyContent: 'center' }} />
-        <div style={{ display: 'flex', gap: 3, position: 'absolute', bottom: 2, right: 2 }}>
-          {SQ1_VIEWS.map(v => (
-            <button key={v.id} title={v.label}
-              onClick={() => setSq1View(v.id)}
-              style={{
-                width: 18, height: 18, padding: 0, border: 'none', borderRadius: 4,
-                background: sq1View === v.id ? C.accent : 'rgba(255,255,255,0.1)',
-                color: sq1View === v.id ? '#000' : C.muted,
-                cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: '0.5rem', fontWeight: 800, fontFamily: 'inherit', lineHeight: 1,
-              }}>
-              {v.id === 'standard' ? '⬡' : v.id === 'net' ? '⊞' : '⬒'}
-            </button>
-          ))}
-        </div>
+        <div ref={sq1MountRef} style={{
+          width: '100%', maxHeight: '100%',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          transform: 'scale(0.85)',
+          transformOrigin: 'center center',
+        }} />
       </div>
     );
   }

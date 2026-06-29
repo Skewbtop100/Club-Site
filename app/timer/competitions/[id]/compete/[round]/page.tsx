@@ -173,10 +173,8 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
         if (cancelled || !containerRef.current) return;
         containerRef.current.innerHTML = '';
         SVG(containerRef.current, 'square1' as Parameters<typeof SVG>[1], {
-          width: 200, height: 200, puzzle: { alg: scramble },
+          width: 400, height: 400, puzzle: { alg: scramble },
         });
-        const svg = containerRef.current.querySelector('svg');
-        if (svg) { svg.style.width = '100%'; svg.style.height = '100%'; }
       } catch (err) { console.warn('[vc] sr-puzzlegen SQ1 failed', err); }
     })();
     return () => { cancelled = true; };
@@ -211,6 +209,11 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
   }, [scramble, puzzleId, isSq1]);
 
   if (!puzzleId) return null;
+  if (isSq1) return (
+    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+      <div ref={containerRef} style={{ width: '100%', maxHeight: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', transform: 'scale(0.85)', transformOrigin: 'center center' }} />
+    </div>
+  );
   return <div ref={containerRef} style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }} />;
 }
 
