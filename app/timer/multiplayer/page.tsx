@@ -122,15 +122,33 @@ const PUZZLE_MAP: Record<string, string> = {
   'minx':  'megaminx',
 };
 
-// Cube preview using @cubing/twisty TwistyPlayer (3D WebGL with native
-// drag-to-rotate). Dynamic-imported for SSR safety.
+// Cube preview. SQ1 uses sr-puzzlegen static SVG; others use TwistyPlayer 3D.
 function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<TwistyPlayerType | null>(null);
   const puzzleId = PUZZLE_MAP[eventId];
+  const isSq1 = puzzleId === 'square1';
 
   useEffect(() => {
-    if (!puzzleId) return;
+    if (!isSq1 || !containerRef.current) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { SVG } = await import('sr-puzzlegen');
+        if (cancelled || !containerRef.current) return;
+        containerRef.current.innerHTML = '';
+        SVG(containerRef.current, 'square1' as Parameters<typeof SVG>[1], {
+          width: 200, height: 200, puzzle: { alg: scramble },
+        });
+        const svg = containerRef.current.querySelector('svg');
+        if (svg) { svg.style.width = '100%'; svg.style.height = '100%'; }
+      } catch (err) { console.warn('[mp] sr-puzzlegen SQ1 failed', err); }
+    })();
+    return () => { cancelled = true; };
+  }, [isSq1, scramble]);
+
+  useEffect(() => {
+    if (isSq1 || !puzzleId) return;
     let cancelled = false;
     (async () => {
       try {
@@ -148,14 +166,15 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
       } catch (err) { console.warn('[mp] TwistyPlayer load failed', err); }
     })();
     return () => { cancelled = true; const p = playerRef.current as unknown as HTMLElement | null; const c = containerRef.current; if (p && c && c.contains(p)) c.removeChild(p); playerRef.current = null; };
-  }, [puzzleId]);
+  }, [puzzleId, isSq1]);
 
   useEffect(() => {
+    if (isSq1) return;
     const player = playerRef.current;
     if (!player || !puzzleId) return;
     try { (player as unknown as { experimentalSetupAlg: string }).experimentalSetupAlg = scramble; (player as unknown as { alg: string }).alg = ''; }
     catch (err) { console.warn('[mp] TwistyPlayer update failed', err); }
-  }, [scramble, puzzleId]);
+  }, [scramble, puzzleId, isSq1]);
 
   if (!puzzleId) {
     return (

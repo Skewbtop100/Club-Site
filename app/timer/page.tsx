@@ -6894,16 +6894,42 @@ function Row({ label, kbd }: { label: string; kbd: string }) {
   );
 }
 
-// Cube preview using @cubing/twisty's TwistyPlayer (3D WebGL with native
-// drag-to-rotate). Dynamic-imported so HTMLElement access doesn't break SSR.
-// All puzzles including Square-1 use the same 3D path.
+// Cube preview. Square-1 uses sr-puzzlegen (static flat SVG — the only
+// renderer that draws SQ1 geometry correctly in a small card). All other
+// puzzles use @cubing/twisty TwistyPlayer (3D WebGL with native drag).
+// TODO: interactive 3D rotation for SQ1 deferred — sr-puzzlegen has no
+// WebGL renderer and cubing.js 3D SQ1 renders incorrectly at small sizes.
 function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<TwistyPlayerType | null>(null);
   const puzzleId = PUZZLE_MAP[eventId];
+  const isSq1 = puzzleId === 'square1';
 
+  // Square-1: sr-puzzlegen static SVG
   useEffect(() => {
-    if (!puzzleId) return;
+    if (!isSq1 || !containerRef.current) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { SVG } = await import('sr-puzzlegen');
+        if (cancelled || !containerRef.current) return;
+        containerRef.current.innerHTML = '';
+        SVG(containerRef.current, 'square1' as Parameters<typeof SVG>[1], {
+          width: 200, height: 200,
+          puzzle: { alg: scramble },
+        });
+        const svg = containerRef.current.querySelector('svg');
+        if (svg) { svg.style.width = '100%'; svg.style.height = '100%'; }
+      } catch (err) {
+        console.warn('sr-puzzlegen SQ1 render failed', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isSq1, scramble]);
+
+  // All other puzzles: TwistyPlayer 3D
+  useEffect(() => {
+    if (isSq1 || !puzzleId) return;
     let cancelled = false;
     (async () => {
       try {
@@ -6937,9 +6963,11 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
       if (player && c && c.contains(player)) c.removeChild(player);
       playerRef.current = null;
     };
-  }, [puzzleId]);
+  }, [puzzleId, isSq1]);
 
+  // Update scramble for TwistyPlayer (non-SQ1)
   useEffect(() => {
+    if (isSq1) return;
     const player = playerRef.current;
     if (!player || !puzzleId) return;
     try {
@@ -6948,7 +6976,7 @@ function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }
     } catch (err) {
       console.warn('TwistyPlayer update failed', err);
     }
-  }, [scramble, puzzleId]);
+  }, [scramble, puzzleId, isSq1]);
 
   if (!puzzleId) {
     return (
