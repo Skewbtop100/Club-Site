@@ -7221,11 +7221,53 @@ function EventPickerSheet({
   );
 }
 
-// Desktop counterpart to EventPickerSheet — same content (primary grid +
-// collapsible BLD/FMC special events) but rendered as a dropdown panel
-// anchored beneath the picker pill rather than a bottom sheet. The
-// caller wraps it in a `position: relative` element; the panel pins
-// itself to that wrapper's left edge with `top: calc(100% + 8px)`.
+// Canonical display order for the desktop dropdown list (differs from
+// EVENTS' declaration order, which groups BLD/MBF/FMC together for the
+// mobile sheet's "special events" accordion).
+const EVENT_DROPDOWN_ORDER = [
+  '333', '222', '444', '555', '666', '777',
+  '333oh', '333bld', '333fm', '444bld', '555bld', '333mbf',
+  'clock', 'minx', 'pyram', 'skewb', 'sq1',
+];
+
+function EventListRow({
+  event, active, onClick,
+}: {
+  event: EventDef;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        width: '100%', minHeight: 38,
+        display: 'flex', alignItems: 'center', gap: '0.6rem',
+        padding: '0 0.75rem',
+        background: active ? C.accentDim : 'transparent',
+        border: 'none', borderBottom: `1px solid ${C.border}`,
+        color: active ? C.accent : C.text,
+        fontSize: '0.85rem', fontWeight: active ? 700 : 500,
+        fontFamily: 'inherit', textAlign: 'left',
+        cursor: 'pointer', transition: 'background 0.12s',
+      }}
+      onMouseEnter={e => { if (!active) e.currentTarget.style.background = C.cardAlt; }}
+      onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+    >
+      <WcaEventIcon eventId={event.id} size={18} />
+      <span style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {event.name}
+      </span>
+      {active && <IconCheck size={14} />}
+    </button>
+  );
+}
+
+// Desktop counterpart to EventPickerSheet — a single-column vertical list
+// of all 17 events (no grouping/accordion) anchored beneath the picker
+// pill rather than a bottom sheet. The caller wraps it in a
+// `position: relative` element; the panel pins itself to that wrapper's
+// left edge with `top: calc(100% + 8px)`.
 function EventPickerDropdown({
   currentEventId, onSelect, onClose,
 }: {
@@ -7233,12 +7275,6 @@ function EventPickerDropdown({
   onSelect: (id: string) => void;
   onClose: () => void;
 }) {
-  const [specialOpen, setSpecialOpen] = useState(
-    SPECIAL_EVENT_IDS.includes(currentEventId),
-  );
-  const primaryEvents = EVENTS.filter(e => !SPECIAL_EVENT_IDS.includes(e.id));
-  const specialEvents = EVENTS.filter(e => SPECIAL_EVENT_IDS.includes(e.id));
-
   // Capture-phase ESC so the dropdown closes ahead of any other key
   // listener (matches EventPickerSheet's behaviour).
   useEffect(() => {
@@ -7248,6 +7284,10 @@ function EventPickerDropdown({
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, [onClose]);
+
+  const orderedEvents = EVENT_DROPDOWN_ORDER
+    .map(id => EVENTS.find(e => e.id === id))
+    .filter((e): e is EventDef => !!e);
 
   return (
     <>
@@ -7260,78 +7300,37 @@ function EventPickerDropdown({
       <div
         role="dialog"
         aria-label="Pick event"
+        className="event-dropdown-list"
         style={{
           position: 'absolute',
           top: 'calc(100% + 8px)',
           left: 0,
-          width: 320,
-          zIndex: 100,
+          width: 240,
+          maxHeight: 380,
+          overflow: 'hidden',
+          overflowY: 'auto',
+          zIndex: 1000,
           background: C.card,
           border: `1px solid ${C.border}`,
           borderRadius: 12,
-          padding: '0.5rem',
           boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
         }}
       >
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: '0.5rem',
-        }}>
-          {primaryEvents.map(ev => (
-            <EventTile
-              key={ev.id}
-              event={ev}
-              active={ev.id === currentEventId}
-              onClick={() => { onSelect(ev.id); onClose(); }}
-            />
-          ))}
-        </div>
-
-        <div style={{ borderTop: `1px solid ${C.border}`, marginTop: '0.5rem' }}>
-          <button
-            onClick={() => setSpecialOpen(o => !o)}
-            aria-expanded={specialOpen}
-            style={{
-              width: '100%',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '0.6rem 0.2rem',
-              background: 'transparent', border: 'none', cursor: 'pointer',
-              color: C.text, fontFamily: 'inherit',
-            }}
-          >
-            <span style={{
-              fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.06em',
-              color: specialOpen ? C.accent : C.muted,
-              textTransform: 'uppercase',
-            }}>
-              Тусгай төрлүүд (BLD / FMC)
-            </span>
-            <span style={{
-              color: specialOpen ? C.accent : C.muted,
-              fontSize: '0.7rem',
-              transform: specialOpen ? 'rotate(180deg)' : 'none',
-              transition: 'transform 0.18s',
-            }}>▾</span>
-          </button>
-          {specialOpen && (
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
-              gap: '0.5rem',
-              paddingBottom: '0.25rem',
-            }}>
-              {specialEvents.map(ev => (
-                <EventTile
-                  key={ev.id}
-                  event={ev}
-                  active={ev.id === currentEventId}
-                  onClick={() => { onSelect(ev.id); onClose(); }}
-                />
-              ))}
-            </div>
-          )}
-        </div>
+        {orderedEvents.map(ev => (
+          <EventListRow
+            key={ev.id}
+            event={ev}
+            active={ev.id === currentEventId}
+            onClick={() => { onSelect(ev.id); onClose(); }}
+          />
+        ))}
+        <style>{`
+          .event-dropdown-list { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+          .event-dropdown-list::-webkit-scrollbar { width: 6px; }
+          .event-dropdown-list::-webkit-scrollbar-track { background: transparent; }
+          .event-dropdown-list::-webkit-scrollbar-thumb { background: transparent; }
+          .event-dropdown-list:hover::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
+        `}</style>
       </div>
     </>
   );
