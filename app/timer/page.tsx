@@ -7241,13 +7241,13 @@ function EventListRow({
     <button
       onClick={onClick}
       style={{
-        width: '100%', minHeight: 38,
+        width: '100%', minHeight: 32,
         display: 'flex', alignItems: 'center', gap: '0.6rem',
-        padding: '0 0.75rem',
+        padding: '0 0.7rem',
         background: active ? C.accentDim : 'transparent',
         border: 'none', borderBottom: `1px solid ${C.border}`,
         color: active ? C.accent : C.text,
-        fontSize: '0.85rem', fontWeight: active ? 700 : 500,
+        fontSize: '0.82rem', fontWeight: active ? 700 : 500,
         fontFamily: 'inherit', textAlign: 'left',
         cursor: 'pointer', transition: 'background 0.12s',
       }}
@@ -7306,9 +7306,7 @@ function EventPickerDropdown({
           top: 'calc(100% + 8px)',
           left: 0,
           width: 240,
-          maxHeight: 380,
           overflow: 'hidden',
-          overflowY: 'auto',
           zIndex: 1000,
           background: C.card,
           border: `1px solid ${C.border}`,
@@ -7324,13 +7322,6 @@ function EventPickerDropdown({
             onClick={() => { onSelect(ev.id); onClose(); }}
           />
         ))}
-        <style>{`
-          .event-dropdown-list { scrollbar-width: thin; scrollbar-color: transparent transparent; }
-          .event-dropdown-list::-webkit-scrollbar { width: 6px; }
-          .event-dropdown-list::-webkit-scrollbar-track { background: transparent; }
-          .event-dropdown-list::-webkit-scrollbar-thumb { background: transparent; }
-          .event-dropdown-list:hover::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
-        `}</style>
       </div>
     </>
   );
