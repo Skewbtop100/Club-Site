@@ -1,6 +1,7 @@
 'use client';
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import TimerProfileMenu from '@/components/timer/TimerProfileMenu';
 import { Scrambow } from 'scrambow';
@@ -547,6 +548,12 @@ export default function TimerPage() {
   // the other (never both) and never end up with a dangling open flag if
   // the viewport changes mid-interaction.
   const [desktopEventPickerOpen, setDesktopEventPickerOpen] = useState(false);
+  // Trigger button ref + its measured rect, captured at open time so the
+  // portal-rendered dropdown (mounted at document.body, escaping any
+  // parent stacking context / overflow clipping) can position itself
+  // with `position: fixed` against the pill's actual screen location.
+  const eventPickerTriggerRef = useRef<HTMLButtonElement>(null);
+  const [eventPickerTriggerRect, setEventPickerTriggerRect] = useState<DOMRect | null>(null);
   const [detailSolveId, setDetailSolveId] = useState<string | null>(null);
   // Solve Detail modal — inline comment editor toggle + draft text.
   // Reset whenever the modal closes so a fresh open seeds cleanly from
@@ -2376,7 +2383,13 @@ export default function TimerPage() {
               }}>
                 <div style={{ position: 'relative' }}>
                   <button
-                    onClick={() => setDesktopEventPickerOpen(o => !o)}
+                    ref={eventPickerTriggerRef}
+                    onClick={() => {
+                      if (!desktopEventPickerOpen && eventPickerTriggerRef.current) {
+                        setEventPickerTriggerRect(eventPickerTriggerRef.current.getBoundingClientRect());
+                      }
+                      setDesktopEventPickerOpen(o => !o);
+                    }}
                     aria-haspopup="dialog"
                     aria-expanded={desktopEventPickerOpen}
                     aria-label="Pick event"
@@ -2402,11 +2415,12 @@ export default function TimerPage() {
                       transition: 'transform 0.18s ease',
                     }}>▾</span>
                   </button>
-                  {desktopEventPickerOpen && (
+                  {desktopEventPickerOpen && eventPickerTriggerRect && (
                     <EventPickerDropdown
                       currentEventId={eventId}
                       onSelect={setEventId}
                       onClose={() => setDesktopEventPickerOpen(false)}
+                      triggerRect={eventPickerTriggerRect}
                     />
                   )}
                 </div>
@@ -7264,17 +7278,24 @@ function EventListRow({
 }
 
 // Desktop counterpart to EventPickerSheet — a single-column vertical list
-// of all 17 events (no grouping/accordion) anchored beneath the picker
-// pill rather than a bottom sheet. The caller wraps it in a
-// `position: relative` element; the panel pins itself to that wrapper's
-// left edge with `top: calc(100% + 8px)`.
+// of all 17 events (no grouping/accordion), rendered via a portal to
+// document.body so it escapes the scramble card's stacking context
+// (its blur/backdrop-filter creates one that traps a nested z-index)
+// and any ancestor's overflow clipping. Positioned with `position: fixed`
+// against the trigger's measured getBoundingClientRect().
 function EventPickerDropdown({
-  currentEventId, onSelect, onClose,
+  currentEventId, onSelect, onClose, triggerRect,
 }: {
   currentEventId: string;
   onSelect: (id: string) => void;
   onClose: () => void;
+  triggerRect: DOMRect;
 }) {
+  // Portals need a client-side document.body target; bail out of the
+  // very first (SSR/pre-hydration) render.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   // Capture-phase ESC so the dropdown closes ahead of any other key
   // listener (matches EventPickerSheet's behaviour).
   useEffect(() => {
@@ -7285,29 +7306,39 @@ function EventPickerDropdown({
     return () => window.removeEventListener('keydown', onKey, true);
   }, [onClose]);
 
+  // The trigger's rect is captured once at open time and doesn't track
+  // layout changes; closing on resize (rather than repositioning) keeps
+  // this simple and avoids ever showing a stale/misaligned panel.
+  useEffect(() => {
+    window.addEventListener('resize', onClose);
+    return () => window.removeEventListener('resize', onClose);
+  }, [onClose]);
+
   const orderedEvents = EVENT_DROPDOWN_ORDER
     .map(id => EVENTS.find(e => e.id === id))
     .filter((e): e is EventDef => !!e);
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <>
       {/* Click-outside catcher — transparent fixed-inset backdrop sitting
           one z-layer beneath the panel itself. */}
       <div
         onClick={onClose}
-        style={{ position: 'fixed', inset: 0, zIndex: 99, background: 'transparent' }}
+        style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'transparent' }}
       />
       <div
         role="dialog"
         aria-label="Pick event"
         className="event-dropdown-list"
         style={{
-          position: 'absolute',
-          top: 'calc(100% + 8px)',
-          left: 0,
+          position: 'fixed',
+          top: triggerRect.bottom + 8,
+          left: triggerRect.left,
           width: 240,
           overflow: 'hidden',
-          zIndex: 1000,
+          zIndex: 9999,
           background: C.card,
           border: `1px solid ${C.border}`,
           borderRadius: 12,
@@ -7323,6 +7354,7 @@ function EventPickerDropdown({
           />
         ))}
       </div>
-    </>
+    </>,
+    document.body,
   );
 }
