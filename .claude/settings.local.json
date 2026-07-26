@@ -10,7 +10,11 @@
       "Bash(mkdir -p \"c:\\\\Users\\\\Uuganaa\\\\cube-mn\\\\lib\\\\firebase\")",
       "Bash(mkdir -p \"c:\\\\Users\\\\Uuganaa\\\\cube-mn\\\\types\")",
       "Bash(where gcloud *)",
-      "Bash(gcloud --version)"
+      "Bash(gcloud --version)",
+      "Bash(node investigate-records-mismatch.mjs)",
+      "Bash(node investigate-orphans-scope.mjs)",
+      "Bash(node dryrun-orphan-check.mjs)",
+      "Bash(node --check scripts/cleanup-orphaned-results.mjs)"
     ]
   }
 }

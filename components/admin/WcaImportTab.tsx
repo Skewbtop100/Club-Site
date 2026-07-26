@@ -6,10 +6,11 @@ import { db } from '@/lib/firebase';
 import { COL } from '@/lib/firebase/collections';
 import { getAllResults } from '@/lib/firebase/services/results';
 import { getAthletes } from '@/lib/firebase/services/athletes';
+import { getCompetitions } from '@/lib/firebase/services/competitions';
 import { fmtTime, MIN_PLAUSIBLE_SOLVE_CS } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { useLang } from '@/lib/i18n';
-import type { Athlete, Result } from '@/lib/types';
+import type { Athlete, Competition, Result } from '@/lib/types';
 
 const ACTIVE_EVENTS = new Set([
   '333','222','444','555','666','777',
@@ -49,10 +50,12 @@ export default function WcaImportTab() {
 
   const [clubResults, setClubResults] = useState<Result[]>([]);
   const [athletes, setAthletes] = useState<Athlete[]>([]);
+  const [competitions, setCompetitions] = useState<Competition[]>([]);
 
   useEffect(() => {
     getAllResults().then(all => setClubResults(all.filter(r => r.status === 'published' && r.source !== 'imported' && r.source !== 'import')));
     getAthletes().then(setAthletes);
+    getCompetitions().then(setCompetitions);
   }, []);
 
   const athleteNameMap = useMemo(() => {
@@ -63,11 +66,23 @@ export default function WcaImportTab() {
 
   const clubAthleteIds = useMemo(() => new Set(athletes.map(a => a.id)), [athletes]);
 
+  // Same guard as lib/hooks/useResults.ts (the public site's source of
+  // truth): a result only counts toward "Our Best" if its competition
+  // still exists AND is finished. Without this, a result orphaned by a
+  // deleted/test competition can silently win the comparison here while
+  // never appearing on the public Club Records section — see the
+  // "Ariunkhand Saruul 0.04s" / "Gegeenbileg 5.01s" investigations.
+  const finishedCompetitionIds = useMemo(
+    () => new Set(competitions.filter(c => c.status === 'finished').map(c => c.id)),
+    [competitions],
+  );
+
   // Club best (TR) per event
   const clubBests = useMemo(() => {
     const m: Record<string, ClubBest> = {};
     clubResults.forEach(r => {
       if (!clubAthleteIds.has(r.athleteId)) return;
+      if (!r.competitionId || !finishedCompetitionIds.has(r.competitionId)) return;
       if (!m[r.eventId]) m[r.eventId] = { single: null, average: null, singleAthlete: '', singleAthleteId: '', averageAthlete: '', averageAthleteId: '' };
       const e = m[r.eventId];
       // >= MIN_PLAUSIBLE_SOLVE_CS guards against implausibly fast entries
@@ -85,7 +100,7 @@ export default function WcaImportTab() {
       }
     });
     return m;
-  }, [clubResults, clubAthleteIds, athleteNameMap]);
+  }, [clubResults, clubAthleteIds, athleteNameMap, finishedCompetitionIds]);
 
   // TR rows for the Club Records tab
   const trRows = useMemo(() => {

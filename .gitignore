@@ -67,6 +67,10 @@ node_modules/
 .env.local
 .env*.local
 
+# Firebase Admin service account keys — never commit these
+serviceAccountKey.json
+*serviceAccountKey*.json
+
 # Next.js build output
 .next/
 
