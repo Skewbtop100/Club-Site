@@ -147,7 +147,6 @@ const en = {
   'admin.tab.users': '👥 Users',
   'admin.tab.wca-records': '🌍 WCA Records',
   'admin.tab.events': '⚙ Events',
-  'admin.tab.assignments': '👥 Assignments',
   'admin.tab.navigation':  '🧭 Navigation',
   'admin.tab.virtual-competitions': '🥇 Virtual Competitions',
 
@@ -396,21 +395,6 @@ const en = {
   'admin.wca.col.avg-tab': 'Average',
   'admin.wca.record-holder': '🏆 Record holder!',
 
-  // ADMIN — ASSIGNMENTS
-  'admin.asg.title': 'Assignments',
-  'admin.asg.competition': 'Competition',
-  'admin.asg.select-comp': '— Select competition —',
-  'admin.asg.all-events': 'All Events',
-  'admin.asg.registered': 'Registered Athletes',
-  'admin.asg.registered-for': 'Registered for',
-  'admin.asg.no-event-athletes': 'No athletes registered for this event.',
-  'admin.asg.empty-comp': 'Select a competition to view assignments.',
-  'admin.asg.empty': 'No assignments configured for this competition.',
-  'admin.asg.heat': 'Heat',
-  'admin.asg.role.competitor': 'competitor',
-  'admin.asg.role.judge': 'judge',
-  'admin.asg.role.scrambler': 'scrambler',
-  'admin.asg.role.standby': 'standby',
 
   // TIMER — SETTINGS PANEL
   'timer.settings': 'Settings',

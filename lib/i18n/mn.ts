@@ -208,7 +208,6 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'admin.tab.users': '👥 Хэрэглэгчид',
   'admin.tab.wca-records': '🌍 WCA Рекорд',
   'admin.tab.events': '⚙ Үйл явдал',
-  'admin.tab.assignments': '👥 Хуваарь',
   'admin.tab.navigation':  '🧭 Цэс',
   'admin.tab.virtual-competitions': '🥇 Виртуал тэмцээн',
 
@@ -457,21 +456,6 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'admin.wca.col.avg-tab': 'Дундаж',
   'admin.wca.record-holder': '🏆 Рекорд эзэмшигч!',
 
-  // ADMIN — ASSIGNMENTS
-  'admin.asg.title': 'Хуваарь',
-  'admin.asg.competition': 'Тэмцээн',
-  'admin.asg.select-comp': '— Тэмцээн сонгох —',
-  'admin.asg.all-events': 'Бүх төрөл',
-  'admin.asg.registered': 'Бүртгэгдсэн тамирчид',
-  'admin.asg.registered-for': 'Бүртгэгдсэн төрөл',
-  'admin.asg.no-event-athletes': 'Энэ төрөлд тамирчин бүртгэгдээгүй байна.',
-  'admin.asg.empty-comp': 'Хуваарь харахын тулд тэмцээн сонгоно уу.',
-  'admin.asg.empty': 'Энэ тэмцээний хуваарь тохируулагдаагүй байна.',
-  'admin.asg.heat': 'Урьдчилсан',
-  'admin.asg.role.competitor': 'тамирчин',
-  'admin.asg.role.judge': 'шүүгч',
-  'admin.asg.role.scrambler': 'хольцгоч',
-  'admin.asg.role.standby': 'нөөц',
 
   // ADMIN — EVENTS
   'admin.ev.title': 'Төрлийн харагдалтын тохиргоо',
