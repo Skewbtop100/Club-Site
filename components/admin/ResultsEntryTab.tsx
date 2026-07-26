@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { subscribeCompetitions } from '@/lib/firebase/services/competitions';
 import { getAthletes } from '@/lib/firebase/services/athletes';
 import { saveResult, getResultsByComp, subscribeResultsByComp } from '@/lib/firebase/services/results';
-import { fmtTime, parseTime, MIN_PLAUSIBLE_SOLVE_CS } from '@/lib/time-utils';
+import { fmtTime, parseTime, getMinPlausibleSolveCs } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { useLang, type TranslationKey } from '@/lib/i18n';
 import type { Athlete, Competition, Result } from '@/lib/types';
@@ -231,8 +231,11 @@ export default function ResultsEntryTab() {
 
     // Any solve entered under the practical minimum (dropped-digit typos
     // like "0.55" instead of "5.55") gets a warning + a required second
-    // confirmation instead of silently being saved as a new "best".
-    const hasImplausibleSolve = parsed.some(v => v !== null && v > 0 && v < MIN_PLAUSIBLE_SOLVE_CS);
+    // confirmation instead of silently being saved as a new "best". The
+    // floor is per-event — 2x2x2/Pyraminx/Skewb/Square-1/Clock have real
+    // WRs well under 3s, so they use a lower floor than 3x3x3-scale events.
+    const minCs = getMinPlausibleSolveCs(panel.eventId);
+    const hasImplausibleSolve = parsed.some(v => v !== null && v > 0 && v < minCs);
     if (!force && hasImplausibleSolve) {
       updatePanel(panelId, { msg: t('admin.results.msg.implausible'), msgType: 'warn', needsConfirm: true });
       return;

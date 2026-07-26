@@ -14,7 +14,9 @@
       "Bash(node investigate-records-mismatch.mjs)",
       "Bash(node investigate-orphans-scope.mjs)",
       "Bash(node dryrun-orphan-check.mjs)",
-      "Bash(node --check scripts/cleanup-orphaned-results.mjs)"
+      "Bash(node --check scripts/cleanup-orphaned-results.mjs)",
+      "Bash(node investigate-2x2-mismatch.mjs)",
+      "WebSearch"
     ]
   }
 }

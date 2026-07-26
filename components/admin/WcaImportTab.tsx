@@ -7,7 +7,7 @@ import { COL } from '@/lib/firebase/collections';
 import { getAllResults } from '@/lib/firebase/services/results';
 import { getAthletes } from '@/lib/firebase/services/athletes';
 import { getCompetitions } from '@/lib/firebase/services/competitions';
-import { fmtTime, MIN_PLAUSIBLE_SOLVE_CS } from '@/lib/time-utils';
+import { fmtTime, getMinPlausibleSolveCs } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { useLang } from '@/lib/i18n';
 import type { Athlete, Competition, Result } from '@/lib/types';
@@ -85,15 +85,17 @@ export default function WcaImportTab() {
       if (!r.competitionId || !finishedCompetitionIds.has(r.competitionId)) return;
       if (!m[r.eventId]) m[r.eventId] = { single: null, average: null, singleAthlete: '', singleAthleteId: '', averageAthlete: '', averageAthleteId: '' };
       const e = m[r.eventId];
-      // >= MIN_PLAUSIBLE_SOLVE_CS guards against implausibly fast entries
-      // (dropped-digit typos) winning "Our Best" purely by being numerically
-      // lowest — see lib/time-utils.ts for the floor's rationale.
-      if (r.single != null && r.single >= MIN_PLAUSIBLE_SOLVE_CS && (e.single === null || r.single < e.single)) {
+      // Per-event floor guards against implausibly fast entries (dropped-
+      // digit typos) winning "Our Best" purely by being numerically lowest
+      // — see lib/time-utils.ts for the per-event rationale (2x2x2 etc.
+      // have real WRs well under the 3x3x3-scale 300cs floor).
+      const minCs = getMinPlausibleSolveCs(r.eventId);
+      if (r.single != null && r.single >= minCs && (e.single === null || r.single < e.single)) {
         e.single = r.single;
         e.singleAthlete = athleteNameMap[r.athleteId] || r.athleteName || r.athleteId;
         e.singleAthleteId = r.athleteId;
       }
-      if (r.average != null && r.average >= MIN_PLAUSIBLE_SOLVE_CS && (e.average === null || r.average < e.average)) {
+      if (r.average != null && r.average >= minCs && (e.average === null || r.average < e.average)) {
         e.average = r.average;
         e.averageAthlete = athleteNameMap[r.athleteId] || r.athleteName || r.athleteId;
         e.averageAthleteId = r.athleteId;

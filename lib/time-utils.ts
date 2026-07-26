@@ -1,9 +1,36 @@
-/** Practical floor for a single WCA solve, in centiseconds. Anything positive
- * but below this is almost certainly a data-entry error (dropped digit),
- * not a real solve — the fastest official WR single on record is 276cs
- * (2.76s). No per-event minimums are defined in lib/wca-events.ts yet, so
- * this is used as a flat floor across all events. */
+/** Practical floor for a single WCA solve, in centiseconds, for 3x3x3-scale
+ * events (3x3x3 and up, OH, BLD, FMC) — anything positive but below this is
+ * almost certainly a data-entry error (dropped digit), not a real solve.
+ * The fastest official WR single on record for this group is 276cs (2.76s).
+ * Used as the fallback for any event not listed in
+ * MIN_PLAUSIBLE_SOLVE_CS_BY_EVENT below. */
 export const MIN_PLAUSIBLE_SOLVE_CS = 300;
+
+/** Per-event floors, in centiseconds, for events fast enough that the flat
+ * MIN_PLAUSIBLE_SOLVE_CS above would reject genuine results. Each floor
+ * sits a bit below that event's current WCA WR single, leaving headroom
+ * for future record breaks while still catching obvious typos. WRs as of
+ * mid-2026:
+ *   2x2x2    WR 39cs  (0.39s, Ziyu Ye)         -> floor 30cs
+ *   Pyraminx WR 73cs  (0.73s, Simon Kellum)    -> floor 50cs
+ *   Skewb    WR 73cs  (0.73s, Vojtěch Grohmann) -> floor 50cs
+ *   Square-1 WR 285cs (2.85s, Brian Johnson)   -> floor 200cs (wider margin — parity-dependent variance)
+ *   Clock    WR 153cs (1.53s, Lachlan Gibson)  -> floor 100cs
+ * Every other event (Megaminx, 4BLD, 5BLD, MBLD included) falls back to
+ * MIN_PLAUSIBLE_SOLVE_CS via getMinPlausibleSolveCs() — none of them have
+ * a WR anywhere near fast enough for 300cs to be wrong. */
+export const MIN_PLAUSIBLE_SOLVE_CS_BY_EVENT: Record<string, number> = {
+  '222':   30,
+  'pyram': 50,
+  'skewb': 50,
+  'sq1':   200,
+  'clock': 100,
+};
+
+/** Practical per-solve floor for a given event, in centiseconds. */
+export function getMinPlausibleSolveCs(eventId: string): number {
+  return MIN_PLAUSIBLE_SOLVE_CS_BY_EVENT[eventId] ?? MIN_PLAUSIBLE_SOLVE_CS;
+}
 
 /** Format centiseconds to display string. -1=DNF, -2=DNS, null/undefined=— */
 export function fmtTime(cs: number | null | undefined): string {
