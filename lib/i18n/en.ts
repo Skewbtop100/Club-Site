@@ -147,7 +147,6 @@ const en = {
   'admin.tab.users': '👥 Users',
   'admin.tab.wca-records': '🌍 WCA Records',
   'admin.tab.events': '⚙ Events',
-  'admin.tab.analytics': '📊 Analytics',
   'admin.tab.assignments': '👥 Assignments',
   'admin.tab.navigation':  '🧭 Navigation',
   'admin.tab.virtual-competitions': '🥇 Virtual Competitions',
@@ -412,20 +411,6 @@ const en = {
   'admin.asg.role.judge': 'judge',
   'admin.asg.role.scrambler': 'scrambler',
   'admin.asg.role.standby': 'standby',
-
-  // ADMIN — ANALYTICS
-  'admin.an.loading': 'Loading analytics',
-  'admin.an.total-athletes': 'Total Athletes',
-  'admin.an.total-comps': 'Total Competitions',
-  'admin.an.total-results': 'Total Results',
-  'admin.an.valid-results': 'Valid Results',
-  'admin.an.live-comps': 'Live Competitions',
-  'admin.an.currently-live': 'currently live',
-  'admin.an.unique-athletes': 'Unique Athletes (results)',
-  'admin.an.results-by-event': 'Results by Event',
-  'admin.an.col.event': 'Event',
-  'admin.an.col.results': 'Results',
-  'admin.an.col.best-single': 'Best Single',
 
   // TIMER — SETTINGS PANEL
   'timer.settings': 'Settings',

@@ -208,7 +208,6 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'admin.tab.users': '👥 Хэрэглэгчид',
   'admin.tab.wca-records': '🌍 WCA Рекорд',
   'admin.tab.events': '⚙ Үйл явдал',
-  'admin.tab.analytics': '📊 Шинжилгээ',
   'admin.tab.assignments': '👥 Хуваарь',
   'admin.tab.navigation':  '🧭 Цэс',
   'admin.tab.virtual-competitions': '🥇 Виртуал тэмцээн',
@@ -473,20 +472,6 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'admin.asg.role.judge': 'шүүгч',
   'admin.asg.role.scrambler': 'хольцгоч',
   'admin.asg.role.standby': 'нөөц',
-
-  // ADMIN — ANALYTICS
-  'admin.an.loading': 'Шинжилгээ ачааллаж байна',
-  'admin.an.total-athletes': 'Нийт тамирчид',
-  'admin.an.total-comps': 'Нийт тэмцээн',
-  'admin.an.total-results': 'Нийт үр дүн',
-  'admin.an.valid-results': 'Хүчинтэй үр дүн',
-  'admin.an.live-comps': 'Шууд тэмцээн',
-  'admin.an.currently-live': 'одоо шууд',
-  'admin.an.unique-athletes': 'Цорын ганц тамирчид (үр дүнтэй)',
-  'admin.an.results-by-event': 'Төрлөөр үр дүн',
-  'admin.an.col.event': 'Төрөл',
-  'admin.an.col.results': 'Үр дүн',
-  'admin.an.col.best-single': 'Шилдэг нэг',
 
   // ADMIN — EVENTS
   'admin.ev.title': 'Төрлийн харагдалтын тохиргоо',

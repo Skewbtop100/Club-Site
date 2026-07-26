@@ -11,7 +11,6 @@ const CompResultsTab  = dynamic(() => import('@/components/admin/CompResultsTab'
 const AssignmentsTab  = dynamic(() => import('@/components/admin/AssignmentsTab'),  { ssr: false });
 const HistoryTab      = dynamic(() => import('@/components/admin/HistoryTab'),      { ssr: false });
 const WcaImportTab    = dynamic(() => import('@/components/admin/WcaImportTab'),    { ssr: false });
-const AnalyticsTab    = dynamic(() => import('@/components/admin/AnalyticsTab'),    { ssr: false });
 
 const TABS: SectionTab[] = [
   { id: 'competitions', labelKey: 'admin.tab.competitions', render: () => <CompetitionsTab /> },
@@ -20,7 +19,6 @@ const TABS: SectionTab[] = [
   { id: 'assignments',  labelKey: 'admin.tab.assignments',  render: () => <AssignmentsTab /> },
   { id: 'history',      labelKey: 'admin.tab.history',      render: () => <HistoryTab /> },
   { id: 'wcaImport',    labelKey: 'admin.tab.wca-records',  render: () => <WcaImportTab /> },
-  { id: 'analytics',    labelKey: 'admin.tab.analytics',    render: () => <AnalyticsTab /> },
 ];
 
 export default function AdminCompetitionsPage() {
