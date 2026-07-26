@@ -8,7 +8,9 @@
       "Bash(npx shadcn@latest init --defaults)",
       "Bash(npm install:*)",
       "Bash(mkdir -p \"c:\\\\Users\\\\Uuganaa\\\\cube-mn\\\\lib\\\\firebase\")",
-      "Bash(mkdir -p \"c:\\\\Users\\\\Uuganaa\\\\cube-mn\\\\types\")"
+      "Bash(mkdir -p \"c:\\\\Users\\\\Uuganaa\\\\cube-mn\\\\types\")",
+      "Bash(where gcloud *)",
+      "Bash(gcloud --version)"
     ]
   }
 }

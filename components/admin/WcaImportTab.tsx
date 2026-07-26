@@ -6,7 +6,7 @@ import { db } from '@/lib/firebase';
 import { COL } from '@/lib/firebase/collections';
 import { getAllResults } from '@/lib/firebase/services/results';
 import { getAthletes } from '@/lib/firebase/services/athletes';
-import { fmtTime } from '@/lib/time-utils';
+import { fmtTime, MIN_PLAUSIBLE_SOLVE_CS } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { useLang } from '@/lib/i18n';
 import type { Athlete, Result } from '@/lib/types';
@@ -70,12 +70,15 @@ export default function WcaImportTab() {
       if (!clubAthleteIds.has(r.athleteId)) return;
       if (!m[r.eventId]) m[r.eventId] = { single: null, average: null, singleAthlete: '', singleAthleteId: '', averageAthlete: '', averageAthleteId: '' };
       const e = m[r.eventId];
-      if (r.single != null && r.single > 0 && (e.single === null || r.single < e.single)) {
+      // >= MIN_PLAUSIBLE_SOLVE_CS guards against implausibly fast entries
+      // (dropped-digit typos) winning "Our Best" purely by being numerically
+      // lowest — see lib/time-utils.ts for the floor's rationale.
+      if (r.single != null && r.single >= MIN_PLAUSIBLE_SOLVE_CS && (e.single === null || r.single < e.single)) {
         e.single = r.single;
         e.singleAthlete = athleteNameMap[r.athleteId] || r.athleteName || r.athleteId;
         e.singleAthleteId = r.athleteId;
       }
-      if (r.average != null && r.average > 0 && (e.average === null || r.average < e.average)) {
+      if (r.average != null && r.average >= MIN_PLAUSIBLE_SOLVE_CS && (e.average === null || r.average < e.average)) {
         e.average = r.average;
         e.averageAthlete = athleteNameMap[r.athleteId] || r.athleteName || r.athleteId;
         e.averageAthleteId = r.athleteId;

@@ -346,6 +346,8 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'admin.results.import.remove': 'Хасах',
   'admin.results.msg.fill': 'Тамирчин, төрөл, үе шатыг бөглөнө үү.',
   'admin.results.msg.updated-for': 'Үр дүн шинэчлэгдлээ —',
+  'admin.results.msg.implausible': '⚠️ Энэ цаг хэт хурдан байна — дахин шалгана уу',
+  'admin.results.btn.confirm-anyway': 'Баталгаажуулаад хадгалах',
 
   // ADMIN — COMPETITION RESULTS
   'admin.cr.select-comp': '— Тэмцээн сонгох —',

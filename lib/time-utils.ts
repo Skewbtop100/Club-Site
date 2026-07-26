@@ -1,3 +1,10 @@
+/** Practical floor for a single WCA solve, in centiseconds. Anything positive
+ * but below this is almost certainly a data-entry error (dropped digit),
+ * not a real solve — the fastest official WR single on record is 276cs
+ * (2.76s). No per-event minimums are defined in lib/wca-events.ts yet, so
+ * this is used as a flat floor across all events. */
+export const MIN_PLAUSIBLE_SOLVE_CS = 300;
+
 /** Format centiseconds to display string. -1=DNF, -2=DNS, null/undefined=— */
 export function fmtTime(cs: number | null | undefined): string {
   if (cs === -1) return 'DNF';

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { subscribeCompetitions } from '@/lib/firebase/services/competitions';
 import { getAthletes } from '@/lib/firebase/services/athletes';
 import { saveResult, getResultsByComp, subscribeResultsByComp } from '@/lib/firebase/services/results';
-import { fmtTime, parseTime } from '@/lib/time-utils';
+import { fmtTime, parseTime, MIN_PLAUSIBLE_SOLVE_CS } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { useLang, type TranslationKey } from '@/lib/i18n';
 import type { Athlete, Competition, Result } from '@/lib/types';
@@ -32,6 +32,9 @@ interface PanelState {
   editReturnIdx: number | null;  // where to return after editing a prior solve
   postEditMode: boolean;         // in all-entered view: chips are directly tappable to edit
   msg: string; msgType: string;
+  /** True once submit() has flagged an implausibly fast solve and is
+   *  waiting on a second, explicit "confirm anyway" click before saving. */
+  needsConfirm: boolean;
 }
 interface ImportRow {
   idx: number;
@@ -88,7 +91,7 @@ function emptyPanel(id: number): PanelState {
     solves: ['', '', '', '', ''], penalties: ['none', 'none', 'none', 'none', 'none'],
     currentSolveIdx: 0, rawInput: '',
     selectedChip: null, editReturnIdx: null, postEditMode: false,
-    msg: '', msgType: '',
+    msg: '', msgType: '', needsConfirm: false,
   };
 }
 
@@ -192,7 +195,7 @@ export default function ResultsEntryTab() {
       newSolves[idx] = p.penalties[idx] === 'dnf' ? '' : formatRawDigits(p.rawInput);
       // If we were editing a prior solve, return to the original position
       const nextIdx = p.editReturnIdx !== null ? p.editReturnIdx : idx + 1;
-      return { ...p, solves: newSolves, currentSolveIdx: nextIdx, rawInput: '', editReturnIdx: null, selectedChip: null };
+      return { ...p, solves: newSolves, currentSolveIdx: nextIdx, rawInput: '', editReturnIdx: null, selectedChip: null, needsConfirm: false };
     }));
   }
 
@@ -219,12 +222,22 @@ export default function ResultsEntryTab() {
     return { single: bestOf(parsed), average: calcAo5(parsed), parsed };
   }
 
-  async function submit(panelId: number) {
+  async function submit(panelId: number, force = false) {
     const panel = panels.find(p => p.id === panelId)!;
     if (!panel.athleteId || !compId || !panel.eventId) {
       updatePanel(panelId, { msg: t('admin.results.msg.fill'), msgType: 'error' }); return;
     }
     const { single, average, parsed } = computeResult(panel);
+
+    // Any solve entered under the practical minimum (dropped-digit typos
+    // like "0.55" instead of "5.55") gets a warning + a required second
+    // confirmation instead of silently being saved as a new "best".
+    const hasImplausibleSolve = parsed.some(v => v !== null && v > 0 && v < MIN_PLAUSIBLE_SOLVE_CS);
+    if (!force && hasImplausibleSolve) {
+      updatePanel(panelId, { msg: t('admin.results.msg.implausible'), msgType: 'warn', needsConfirm: true });
+      return;
+    }
+
     const comp = comps.find(c => c.id === compId);
     const ath  = athletes.find(a => a.id === panel.athleteId);
     const docId = `${compId}_${panel.eventId}_r${panel.round}_${panel.athleteId}`;
@@ -252,9 +265,9 @@ export default function ResultsEntryTab() {
       const msg = existing
         ? `✓ ${t('admin.results.msg.updated-for')} ${fullName} — ${t('admin.results.single')}: ${fmtTime(single)} Ao5: ${fmtTime(average)}`
         : `✓ ${t('result.saved')}! ${t('admin.results.single')}: ${fmtTime(single)} Ao5: ${fmtTime(average)}`;
-      updatePanel(panelId, { msg, msgType: 'success' });
+      updatePanel(panelId, { msg, msgType: 'success', needsConfirm: false });
     } catch (e: unknown) {
-      updatePanel(panelId, { msg: t('admin.msg.error-prefix') + (e instanceof Error ? e.message : String(e)), msgType: 'error' });
+      updatePanel(panelId, { msg: t('admin.msg.error-prefix') + (e instanceof Error ? e.message : String(e)), msgType: 'error', needsConfirm: false });
     }
   }
 
@@ -985,6 +998,22 @@ export default function ResultsEntryTab() {
                           {t('admin.btn.edit')}
                         </button>
                       </div>
+                    )}
+
+                    {panel.needsConfirm && (
+                      <button
+                        onClick={() => submit(panel.id, true)}
+                        style={{
+                          width: '100%', minHeight: '44px', borderRadius: '10px',
+                          fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer',
+                          fontFamily: 'inherit', marginTop: '0.4rem',
+                          background: 'rgba(251,191,36,0.15)',
+                          border: '1px solid rgba(251,191,36,0.5)',
+                          color: '#fbbf24',
+                        }}
+                      >
+                        {t('admin.results.btn.confirm-anyway')}
+                      </button>
                     )}
                   </div>
                 )}

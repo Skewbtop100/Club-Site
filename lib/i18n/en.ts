@@ -285,6 +285,8 @@ const en = {
   'admin.results.import.remove': 'Remove',
   'admin.results.msg.fill': 'Please fill athlete, event and round.',
   'admin.results.msg.updated-for': 'Result updated for',
+  'admin.results.msg.implausible': '⚠️ This time looks impossibly fast — please double-check',
+  'admin.results.btn.confirm-anyway': 'Confirm & Save Anyway',
 
   // ADMIN — COMPETITION RESULTS
   'admin.cr.select-comp': '— Select competition —',
