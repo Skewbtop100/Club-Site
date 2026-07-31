@@ -1,87 +1,46 @@
 'use client';
 
-// Self-entry Practice Log — a logged-in athlete records their own daily Ao5.
-// Guard pattern mirrors app/profile/page.tsx: useAuth() + `?redirect=` bounce
-// through /login (not a `returnTo` param — this codebase's login page reads
-// `redirect`, see app/login/page.tsx).
+// Club-wide monthly Practice Log overview — one card per WCA event, each
+// showing this month's top-3 "most improved / most active / most PRs".
+//
+// This replaced the self-entry form + comparison widget from Phase 2/3
+// (PracticeEntryPanel / PracticeComparisonWidget / PracticeLeaderboardWidget
+// are untouched and still used from components/admin/PracticeEntryTab —
+// entry now lives there only; those component files are kept for reuse in
+// a later phase, just not imported here anymore).
+//
+// Content is club-wide and already publicly readable (practiceSessions
+// Firestore rule is `allow read: if true`), so this page has no auth guard
+// — only the nav link to it is login-gated (see Navbar.tsx).
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { useAuth } from '@/lib/auth-context';
-import { getAthlete } from '@/lib/firebase/services/athletes';
-import { getPracticeStreak } from '@/lib/firebase/services/practiceSessions';
-import { useLang } from '@/lib/i18n';
-import PracticeEntryPanel from '@/components/practice/PracticeEntryPanel';
-import PracticeComparisonWidget from '@/components/practice/PracticeComparisonWidget';
-import PracticeLeaderboardWidget from '@/components/practice/PracticeLeaderboardWidget';
-import type { PracticeSession } from '@/lib/types/practice';
+import { WCA_EVENTS, type WcaEvent } from '@/lib/wca-events';
+import { WcaEventIcon } from '@/lib/wca-event-icon';
+import { getMonthlyEventStats, todayInClubTz } from '@/lib/firebase/services/practiceSessions';
+import { useLang, type TranslationKey } from '@/lib/i18n';
+
+type MonthlyStats = Awaited<ReturnType<typeof getMonthlyEventStats>>;
+type EventStats = MonthlyStats[string];
 
 export default function PracticePage() {
-  const router = useRouter();
-  const { user, loading } = useAuth();
   const { t } = useLang();
-
-  const [athleteName, setAthleteName] = useState<string | null>(null);
-  const [athleteLoading, setAthleteLoading] = useState(true);
-
-  // Lifted from PracticeEntryPanel so the comparison + leaderboard widgets
-  // below it can track "which event is active" and "did a save just
-  // happen" without duplicating the event picker.
-  const [activeEvent, setActiveEvent] = useState('');
-  const [todaySession, setTodaySession] = useState<PracticeSession | null>(null);
-  const [currentStreak, setCurrentStreak] = useState(0);
+  const [stats, setStats] = useState<MonthlyStats>({});
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!loading && !user) {
-      router.replace('/login?redirect=/practice');
-    }
-  }, [loading, user, router]);
-
-  useEffect(() => {
-    if (!user?.athleteId) {
-      setAthleteName(null);
-      setAthleteLoading(false);
-      return;
-    }
     let cancelled = false;
-    setAthleteLoading(true);
-    getAthlete(user.athleteId)
-      .then((a) => {
-        if (cancelled) return;
-        setAthleteName(a ? `${a.name}${a.lastName ? ' ' + a.lastName : ''}` : null);
-      })
-      .catch(() => { if (!cancelled) setAthleteName(null); })
-      .finally(() => { if (!cancelled) setAthleteLoading(false); });
+    const monthStr = todayInClubTz().slice(0, 7); // "YYYY-MM"
+    getMonthlyEventStats(monthStr)
+      .then((s) => { if (!cancelled) setStats(s); })
+      .catch(() => { if (!cancelled) setStats({}); })
+      .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [user?.athleteId]);
-
-  // Cross-event streak — re-fetched whenever today's session changes (a new
-  // save can extend the streak by one).
-  useEffect(() => {
-    if (!user?.athleteId) { setCurrentStreak(0); return; }
-    let cancelled = false;
-    getPracticeStreak(user.athleteId)
-      .then((s) => { if (!cancelled) setCurrentStreak(s.currentStreak); })
-      .catch(() => { if (!cancelled) setCurrentStreak(0); });
-    return () => { cancelled = true; };
-  }, [user?.athleteId, todaySession?.id]);
-
-  if (loading || !user) {
-    return (
-      <div style={{ minHeight: 'calc(100vh - 60px)', background: 'var(--bg)' }} />
-    );
-  }
+  }, []);
 
   return (
-    <div style={{
-      minHeight: 'calc(100vh - 60px)',
-      background: 'var(--bg)', color: 'var(--text)',
-      fontFamily: "'Segoe UI', system-ui, sans-serif",
-      padding: '1.5rem 1rem',
-    }}>
-      <div style={{ maxWidth: 480, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        <div>
+    <div style={{ minHeight: 'calc(100vh - 60px)', background: 'var(--bg)', color: 'var(--text)', padding: '1.5rem 1rem 3rem' }}>
+      <div style={{ maxWidth: 1400, margin: '0 auto' }}>
+        <div style={{ marginBottom: '1.6rem' }}>
           <h1 style={{
             fontSize: '1.5rem', fontWeight: 800, margin: 0,
             background: 'linear-gradient(135deg, var(--accent), var(--accent2))',
@@ -92,44 +51,116 @@ export default function PracticePage() {
           <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginTop: '0.3rem' }}>
             {t('practice.page-subtitle')}
           </p>
-          {currentStreak > 0 && (
-            <p style={{ fontSize: '0.9rem', fontWeight: 700, color: '#fbbf24', marginTop: '0.5rem' }}>
-              🔥 {currentStreak} {t('practice.streak.days-suffix')}
-            </p>
-          )}
         </div>
 
-        {athleteLoading ? null : !user.athleteId || !athleteName ? (
-          <div className="card">
-            <div style={{ color: 'var(--muted)', fontSize: '0.9rem', marginBottom: '0.8rem' }}>
-              {t('practice.not-linked')}
-            </div>
-            <Link href="/profile" style={{ color: 'var(--accent)', fontWeight: 600, fontSize: '0.88rem', textDecoration: 'none' }}>
-              {t('practice.not-linked-cta')} →
-            </Link>
-          </div>
+        {loading ? (
+          <div className="spinner-row"><span className="spinner-ring" /></div>
         ) : (
-          <>
-            <PracticeEntryPanel
-              athleteId={user.athleteId}
-              athleteName={athleteName}
-              mode="self"
-              onEventChange={(e) => { setActiveEvent(e); setTodaySession(null); }}
-              onTodayChange={setTodaySession}
-            />
-            {activeEvent && todaySession && (
-              <PracticeComparisonWidget
-                athleteId={user.athleteId}
-                event={activeEvent}
-                todayId={todaySession.id}
-              />
-            )}
-            {activeEvent && (
-              <PracticeLeaderboardWidget event={activeEvent} />
-            )}
-          </>
+          <div className="me-grid">
+            {WCA_EVENTS.map((ev) => (
+              <EventStatCard key={ev.id} event={ev} stats={stats[ev.id]} />
+            ))}
+          </div>
         )}
       </div>
+
+      <style>{`
+        .me-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+          gap: 1.1rem;
+        }
+        .me-card {
+          background: var(--card); border: 1px solid rgba(255,255,255,0.06);
+          border-radius: 14px; padding: 1.2rem;
+          transition: border-color 0.25s;
+        }
+        .me-card:hover { border-color: rgba(124,58,237,0.25); }
+        .me-card-header {
+          display: flex; align-items: center; gap: 0.5rem;
+          margin-bottom: 0.9rem; padding-bottom: 0.7rem;
+          border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .me-card-title { font-size: 0.95rem; font-weight: 700; color: var(--text-primary); }
+        .me-list { margin-bottom: 0.8rem; }
+        .me-list:last-child { margin-bottom: 0; }
+        .me-list-label {
+          font-size: 0.65rem; font-weight: 700; color: var(--muted);
+          text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.35rem;
+        }
+        .me-list-empty { font-size: 0.78rem; color: var(--muted); opacity: 0.7; padding: 0.1rem 0; }
+        .me-list-row {
+          display: flex; align-items: center; gap: 0.5rem;
+          padding: 0.2rem 0; font-size: 0.82rem;
+        }
+        .me-list-rank {
+          width: 16px; flex-shrink: 0; text-align: center;
+          font-weight: 700; font-size: 0.72rem; color: #a78bfa;
+        }
+        .me-list-name {
+          flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+          white-space: nowrap; color: var(--text);
+        }
+        .me-list-value {
+          flex-shrink: 0; font-family: monospace; font-weight: 700;
+          color: #a78bfa; font-size: 0.8rem;
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function EventStatCard({ event, stats }: { event: WcaEvent; stats: EventStats | undefined }) {
+  const { t } = useLang();
+  const improvement = stats?.improvement ?? [];
+  const participation = stats?.participation ?? [];
+  const prCount = stats?.prCount ?? [];
+
+  return (
+    <div className="me-card">
+      <div className="me-card-header">
+        <WcaEventIcon eventId={event.id} size={22} />
+        <span className="me-card-title">{event.name}</span>
+      </div>
+
+      <MiniLeaderboard
+        labelKey="practice.grid.improvement"
+        rows={improvement.map((r) => ({ name: r.athleteName, value: `-${r.improvementSeconds.toFixed(2)}s` }))}
+      />
+      <MiniLeaderboard
+        labelKey="practice.grid.participation"
+        rows={participation.map((r) => ({ name: r.athleteName, value: `${r.count} ${t('practice.grid.times-suffix')}` }))}
+      />
+      <MiniLeaderboard
+        labelKey="practice.grid.pr-count"
+        rows={prCount.map((r) => ({ name: r.athleteName, value: `${r.count} ${t('practice.grid.times-suffix')}` }))}
+      />
+    </div>
+  );
+}
+
+function MiniLeaderboard({
+  labelKey,
+  rows,
+}: {
+  labelKey: TranslationKey;
+  rows: { name: string; value: string }[];
+}) {
+  const { t } = useLang();
+  return (
+    <div className="me-list">
+      <div className="me-list-label">{t(labelKey)}</div>
+      {rows.length === 0 ? (
+        <div className="me-list-empty">{t('practice.grid.empty')}</div>
+      ) : (
+        rows.map((r, i) => (
+          <div key={i} className="me-list-row">
+            <span className="me-list-rank">{i + 1}</span>
+            <span className="me-list-name">{r.name}</span>
+            <span className="me-list-value">{r.value}</span>
+          </div>
+        ))
+      )}
     </div>
   );
 }

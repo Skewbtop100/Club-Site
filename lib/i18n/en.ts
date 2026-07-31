@@ -469,11 +469,11 @@ const en = {
   'admin.ev.msg.saved': 'Event visibility saved.',
 
   // NAV — PRACTICE
-  'nav.practice': 'Practice Log',
+  'nav.practice': 'Practice',
 
   // PRACTICE LOG (self-entry + shared panel)
-  'practice.page-title': 'Practice Log',
-  'practice.page-subtitle': 'Record your daily Ao5 practice attempt — one per event, per day.',
+  'practice.page-title': 'Practice Overview',
+  'practice.page-subtitle': "This month's club activity, improvement, and PRs — by event.",
   'practice.not-linked': 'Your account isn’t linked to an athlete profile yet, so practice sessions can’t be recorded under your name.',
   'practice.not-linked-cta': 'Link your athlete profile',
   'practice.title': 'Practice Log',
@@ -525,6 +525,13 @@ const en = {
   'practice.badge.new_pr': '🏆 New PR!',
   'practice.badge.streak_7': '🔥 7-day streak!',
   'practice.badge.streak_30': '🔥 30-day streak!',
+
+  // PRACTICE LOG — MONTHLY OVERVIEW GRID
+  'practice.grid.improvement': 'Most Improved This Month',
+  'practice.grid.participation': 'Most Active This Month',
+  'practice.grid.pr-count': 'Most PRs This Month',
+  'practice.grid.times-suffix': 'times',
+  'practice.grid.empty': 'No data yet',
 } as const;
 
 export type TranslationKey = keyof typeof en;

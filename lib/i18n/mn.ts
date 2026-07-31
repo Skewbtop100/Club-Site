@@ -469,11 +469,11 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'admin.ev.msg.saved': 'Төрлийн харагдалт хадгалагдлаа.',
 
   // NAV — PRACTICE
-  'nav.practice': 'Дасгалын бүртгэл',
+  'nav.practice': 'Бэлтгэл',
 
   // PRACTICE LOG (self-entry + shared panel)
-  'practice.page-title': 'Дасгалын бүртгэл',
-  'practice.page-subtitle': 'Өдөр тутмын дасгалын Ao5-аа бүртгэ — нэг төрөлд өдөрт нэг удаа.',
+  'practice.page-title': 'Бэлтгэл',
+  'practice.page-subtitle': 'Энэ сарын клубын идэвх, ахиц, PR-ууд — төрөл тус бүрээр.',
   'practice.not-linked': 'Таны бүртгэл тамирчны профайлтай холбогдоогүй тул дасгалын үр дүнг таны нэрээр бүртгэх боломжгүй.',
   'practice.not-linked-cta': 'Тамирчны профайлтай холбох',
   'practice.title': 'Дасгалын бүртгэл',
@@ -525,6 +525,13 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'practice.badge.new_pr': '🏆 Шинэ дархан илэрсэн!',
   'practice.badge.streak_7': '🔥 7 өдрийн дараалал!',
   'practice.badge.streak_30': '🔥 30 өдрийн дараалал!',
+
+  // PRACTICE LOG — MONTHLY OVERVIEW GRID
+  'practice.grid.improvement': 'Сарын шилдэг ахиц',
+  'practice.grid.participation': 'Хамгийн олон удаа оролцсон',
+  'practice.grid.pr-count': 'Хамгийн олон PR',
+  'practice.grid.times-suffix': 'удаа',
+  'practice.grid.empty': 'Одоогоор мэдээлэл алга',
 };
 
 export default mn;

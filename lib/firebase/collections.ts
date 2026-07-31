@@ -177,6 +177,7 @@ export function pointTransactionDoc(id: string): DocumentReference<PointTransact
 //   practiceSessions: athleteId (asc) + event (asc) + date (asc)    — getPracticeComparison's 30-day trend
 //   practiceSessions: athleteId (asc) + date (desc)                 — full-profile history
 //   practiceSessions: event (asc) + date (asc)                      — leaderboard window
+//   practiceSessions: event (asc) + athleteId (asc) + date (asc)    — getMonthlyEventStats' pre-month PR baseline
 export const practiceSessionsCol = collection(db, COL.PRACTICE_SESSIONS).withConverter(
   makeConverter<PracticeSession>(),
 ) as CollectionReference<PracticeSession>;

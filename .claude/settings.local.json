@@ -18,7 +18,11 @@
       "Bash(node investigate-2x2-mismatch.mjs)",
       "WebSearch",
       "Bash(npx eslint *)",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(firebase firestore:rules:get --project club-site-f1a0a)",
+      "Bash(firebase --help)",
+      "Bash(firebase deploy *)",
+      "Bash(env)"
     ]
   }
 }

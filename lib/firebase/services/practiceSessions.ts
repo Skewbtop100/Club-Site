@@ -116,6 +116,148 @@ export async function getPracticeLeaderboard(
     .sort((a, b) => a.bestAo5 - b.bestAo5);
 }
 
+interface MonthlyLeaderboardRow { athleteId: string; athleteName: string }
+
+/**
+ * Club-wide monthly overview for /practice's event grid — 3 small
+ * leaderboards (most improved / most active / most PRs) per WCA event,
+ * for one calendar month.
+ *
+ * QUERY STRATEGY (read this before changing the implementation):
+ *   1. ONE query fetches every practiceSessions doc in the month
+ *      (date >= monthStart, date < nextMonthStart), ordered by date asc.
+ *      This is the only query that scales with total sessions; it does NOT
+ *      fan out per event or per athlete.
+ *   2. "Most PRs" needs to know whether each session was a new all-time
+ *      best, which requires each athlete's best ao5 from BEFORE this month
+ *      — data the month query doesn't have. Rather than a second
+ *      full-collection query (or one query per athlete, which would be
+ *      N reads), we only ask for history on the (event, athleteId) pairs
+ *      that actually appear in this month's data: group step 1's results
+ *      by event, then for each event issue `where('athleteId','in', chunk)`
+ *      queries in chunks of 10 athleteIds (Firestore's `in` cap) with
+ *      `where('date','<', monthStart)`. Worst case is
+ *      ceil(athletesForEvent / 10) queries per event that had activity —
+ *      for a ~25-athlete club practicing most events, that's roughly
+ *      17 events × ~3 chunks ≈ 50 small queries, each returning only one
+ *      athlete's pre-month history for one event (typically a handful of
+ *      docs). This is still far cheaper than a full-collection scan and
+ *      scales with (active events × athletes), not total historical rows.
+ *   3. Everything else (grouping, first/best/PR-at-the-time, sort, top 3)
+ *      is done in memory over what's already fetched.
+ *
+ * Required composite index: practiceSessions: event (asc) + athleteId (asc) + date (asc)
+ */
+export async function getMonthlyEventStats(
+  monthStr: string,
+): Promise<Record<string, {
+  improvement: (MonthlyLeaderboardRow & { improvementSeconds: number })[];
+  participation: (MonthlyLeaderboardRow & { count: number })[];
+  prCount: (MonthlyLeaderboardRow & { count: number })[];
+}>> {
+  const ATHLETE_CHUNK = 10;
+  const [y, m] = monthStr.split('-').map(Number);
+  const monthStart = `${monthStr}-01`;
+  const nextMonthStart = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10); // m is 1-indexed → Date.UTC's 0-indexed month arg lands on the 1st of the *next* month
+
+  // ── 1. One query for the whole month ──────────────────────────────────
+  const monthSnap = await getDocs(query(
+    practiceSessionsCol,
+    where('date', '>=', monthStart),
+    where('date', '<', nextMonthStart),
+    orderBy('date', 'asc'),
+  ));
+  const monthSessions = monthSnap.docs.map((d) => d.data());
+  if (monthSessions.length === 0) return {};
+
+  // event -> athleteId -> that athlete's sessions this month, date-ascending
+  // (order inherited from the query above).
+  const byEvent = new Map<string, Map<string, PracticeSession[]>>();
+  for (const s of monthSessions) {
+    let byAthlete = byEvent.get(s.event);
+    if (!byAthlete) { byAthlete = new Map(); byEvent.set(s.event, byAthlete); }
+    const list = byAthlete.get(s.athleteId);
+    if (list) list.push(s); else byAthlete.set(s.athleteId, [s]);
+  }
+
+  // ── 2. Pre-month "best ao5" baseline, scoped to (event, athlete) pairs
+  //      that appear this month only — see strategy comment above.
+  const baseline = new Map<string, number | null>(); // `${event}|${athleteId}` -> best ao5 before monthStart, or null
+  for (const [eventId, byAthlete] of byEvent) {
+    const athleteIds = Array.from(byAthlete.keys());
+    for (let i = 0; i < athleteIds.length; i += ATHLETE_CHUNK) {
+      const idsChunk = athleteIds.slice(i, i + ATHLETE_CHUNK);
+      idsChunk.forEach((id) => baseline.set(`${eventId}|${id}`, null)); // explicit "no prior history" until proven otherwise
+      const priorSnap = await getDocs(query(
+        practiceSessionsCol,
+        where('event', '==', eventId),
+        where('athleteId', 'in', idsChunk),
+        where('date', '<', monthStart),
+      ));
+      for (const d of priorSnap.docs) {
+        const s = d.data();
+        if (s.ao5 === null) continue;
+        const key = `${eventId}|${s.athleteId}`;
+        const cur = baseline.get(key) ?? null;
+        if (cur === null || s.ao5 < cur) baseline.set(key, s.ao5);
+      }
+    }
+  }
+
+  // ── 3. Compute the 3 leaderboards per event, in memory ────────────────
+  const result: Record<string, {
+    improvement: (MonthlyLeaderboardRow & { improvementSeconds: number })[];
+    participation: (MonthlyLeaderboardRow & { count: number })[];
+    prCount: (MonthlyLeaderboardRow & { count: number })[];
+  }> = {};
+
+  for (const [eventId, byAthlete] of byEvent) {
+    const improvement: (MonthlyLeaderboardRow & { improvementSeconds: number })[] = [];
+    const participation: (MonthlyLeaderboardRow & { count: number })[] = [];
+    const prCount: (MonthlyLeaderboardRow & { count: number })[] = [];
+
+    for (const [athleteId, sessions] of byAthlete) {
+      const athleteName = sessions[0].athleteName;
+
+      // "Хамгийн олон удаа оролцсон" — every session this month counts as
+      // a day practiced, regardless of whether ao5 came out null.
+      participation.push({ athleteId, athleteName, count: sessions.length });
+
+      // "Сарын шилдэг ахиц" — first vs best ao5 this month; needs 2+
+      // ao5-bearing sessions to mean anything (a single sitting can't show
+      // improvement). best <= first always, so this is never negative.
+      const withAo5 = sessions.filter((s): s is PracticeSession & { ao5: number } => s.ao5 !== null);
+      if (withAo5.length >= 2) {
+        const first = withAo5[0].ao5;
+        const best = Math.min(...withAo5.map((s) => s.ao5));
+        improvement.push({ athleteId, athleteName, improvementSeconds: (first - best) / 1000 });
+      }
+
+      // "Хамгийн олон PR" — walk chronologically from the pre-month
+      // baseline, counting every session that beat the running best.
+      let running = baseline.get(`${eventId}|${athleteId}`) ?? null;
+      let prs = 0;
+      for (const s of sessions) {
+        if (s.ao5 === null) continue;
+        if (running === null || s.ao5 < running) { running = s.ao5; prs += 1; }
+      }
+      if (prs > 0) prCount.push({ athleteId, athleteName, count: prs });
+    }
+
+    improvement.sort((a, b) => b.improvementSeconds - a.improvementSeconds);
+    participation.sort((a, b) => b.count - a.count);
+    prCount.sort((a, b) => b.count - a.count);
+
+    result[eventId] = {
+      improvement: improvement.slice(0, 3),
+      participation: participation.slice(0, 3),
+      prCount: prCount.slice(0, 3),
+    };
+  }
+
+  return result;
+}
+
 /**
  * Most recent session for one athlete+event with date <= targetDate.
  * Backing helper for getPracticeComparison's fixed reference points —
