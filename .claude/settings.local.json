@@ -22,7 +22,13 @@
       "Bash(firebase firestore:rules:get --project club-site-f1a0a)",
       "Bash(firebase --help)",
       "Bash(firebase deploy *)",
-      "Bash(env)"
+      "Bash(env)",
+      "Bash(node --experimental-vm-modules \"C:\\\\Users\\\\Uuganaa\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Uuganaa-Club-Site\\\\345ccc3a-c800-4d1c-a6db-545a3b9f9e67\\\\scratchpad\\\\debug-monthly-stats.mjs\")",
+      "Bash(node __debug_monthly_stats.mjs)",
+      "Bash(rm -f __debug_monthly_stats.mjs)",
+      "Bash(awk '{print length\\($0\\), substr\\($0,1,20\\)}' .env)",
+      "Bash(firebase firestore:indexes --project club-site-f1a0a)",
+      "Bash(node __debug_verify_fix.mjs)"
     ]
   }
 }
