@@ -23,6 +23,7 @@ import type {
   WcaRecordDoc,
   EventVisibility,
 } from '@/lib/types';
+import type { PracticeSession } from '@/lib/types/practice';
 
 // ── Collection name constants ────────────────────────────────────────────────
 
@@ -37,6 +38,7 @@ export const COL = {
   ATHLETE_REQUESTS: 'athleteRequests',
   MATCH_HISTORY:    'matchHistory',
   POINT_TRANSACTIONS: 'pointTransactions',
+  PRACTICE_SESSIONS: 'practiceSessions',
 } as const;
 
 export const DOC = {
@@ -160,4 +162,27 @@ export function pointTransactionDoc(id: string): DocumentReference<PointTransact
   return doc(db, COL.POINT_TRANSACTIONS, id).withConverter(
     makeConverter<PointTransaction>(),
   ) as DocumentReference<PointTransaction>;
+}
+
+// ── practiceSessions ─────────────────────────────────────────────────────
+//
+// One informal daily Ao5 attempt per athlete per WCA event. Written by
+// lib/firebase/services/practiceSessions.ts, which enforces the "1 per
+// athlete per event per day" rule in-service (see that file's header).
+//
+// Required composite indexes:
+//   practiceSessions: athleteId (asc) + event (asc) + date (desc)   — history for one athlete+event;
+//                                                                      also serves getPracticeComparison's
+//                                                                      "most recent on or before" lookups
+//   practiceSessions: athleteId (asc) + event (asc) + date (asc)    — getPracticeComparison's 30-day trend
+//   practiceSessions: athleteId (asc) + date (desc)                 — full-profile history
+//   practiceSessions: event (asc) + date (asc)                      — leaderboard window
+export const practiceSessionsCol = collection(db, COL.PRACTICE_SESSIONS).withConverter(
+  makeConverter<PracticeSession>(),
+) as CollectionReference<PracticeSession>;
+
+export function practiceSessionDoc(id: string): DocumentReference<PracticeSession> {
+  return doc(db, COL.PRACTICE_SESSIONS, id).withConverter(
+    makeConverter<PracticeSession>(),
+  ) as DocumentReference<PracticeSession>;
 }

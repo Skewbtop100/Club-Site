@@ -4,7 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import TimerProfileMenu from '@/components/timer/TimerProfileMenu';
-import { Scrambow } from 'scrambow';
+import { generateScramble } from '@/lib/scramble';
 // Type-only import; runtime is dynamic-imported below to avoid HTMLElement
 // access during Next.js server rendering.
 import type { TwistyPlayer as TwistyPlayerType } from 'cubing/twisty';
@@ -252,28 +252,9 @@ const EVENTS: EventDef[] = [
   { id: 'minx',    name: 'Megaminx',         short: 'Mega'  },
 ];
 
-// ── Scramble generation (via scrambow) ───────────────────────────────────────
-// scrambow supports: 222, 333, 444, 555, 666, 777, 333fm, pyram, skewb, sq1,
-// clock, minx. OH/BLD/MBF use the same scramble as their base puzzle.
-const SCRAMBOW_TYPE: Record<string, string> = {
-  '333':    '333',
-  '222':    '222',
-  '444':    '444',
-  '555':    '555',
-  '666':    '666',
-  '777':    '777',
-  '333oh':  '333',
-  '333bld': '333',
-  '444bld': '444',
-  '555bld': '555',
-  '333mbf': '333',
-  '333fm':  '333fm',
-  'pyram':  'pyram',
-  'skewb':  'skewb',
-  'sq1':    'sq1',
-  'clock':  'clock',
-  'minx':   'minx',
-};
+// generateScramble/SCRAMBOW_TYPE live in @/lib/scramble (shared with the
+// Practice Log feature). Only the TwistyPlayer puzzle-id map stays local —
+// nothing outside the Timer's 3D preview needs it.
 
 // Map our event ids → TwistyPlayer puzzle ids. Events not in this map (e.g.
 // 333mbf, 333fm) fall back to their underlying puzzle.
@@ -296,18 +277,6 @@ const PUZZLE_MAP: Record<string, string> = {
   'clock':  'clock',
   'minx':   'megaminx',
 };
-
-function generateScramble(eventId: string): string {
-  const type = SCRAMBOW_TYPE[eventId] ?? '333';
-  try {
-    const result = new Scrambow().setType(type).get(1);
-    const s = result[0]?.scramble_string ?? '';
-    // Collapse runs of whitespace and trim — scrambow pads cells in NxN output.
-    return s.replace(/[ \t]+/g, ' ').trim();
-  } catch {
-    return '';
-  }
-}
 
 // Solve types, fmtMs, isDnf, finalMs, avgOfN, calcStats, useTimer, and the
 // Penalty / Precision / Stats / TimerState types all live in

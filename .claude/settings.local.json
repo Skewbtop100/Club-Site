@@ -16,7 +16,9 @@
       "Bash(node dryrun-orphan-check.mjs)",
       "Bash(node --check scripts/cleanup-orphaned-results.mjs)",
       "Bash(node investigate-2x2-mismatch.mjs)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(npx eslint *)",
+      "Bash(node -e ' *)"
     ]
   }
 }

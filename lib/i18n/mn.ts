@@ -467,6 +467,64 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'admin.ev.hide': 'Үргэлж нуух',
   'admin.ev.btn.save': 'Тохиргоо хадгалах',
   'admin.ev.msg.saved': 'Төрлийн харагдалт хадгалагдлаа.',
+
+  // NAV — PRACTICE
+  'nav.practice': 'Дасгалын бүртгэл',
+
+  // PRACTICE LOG (self-entry + shared panel)
+  'practice.page-title': 'Дасгалын бүртгэл',
+  'practice.page-subtitle': 'Өдөр тутмын дасгалын Ao5-аа бүртгэ — нэг төрөлд өдөрт нэг удаа.',
+  'practice.not-linked': 'Таны бүртгэл тамирчны профайлтай холбогдоогүй тул дасгалын үр дүнг таны нэрээр бүртгэх боломжгүй.',
+  'practice.not-linked-cta': 'Тамирчны профайлтай холбох',
+  'practice.title': 'Дасгалын бүртгэл',
+  'practice.event-label': 'Төрөл',
+  'practice.select-event': '— Төрөл —',
+  'practice.select-event-prompt': 'Эхлэхийн тулд төрөл сонгоно уу.',
+  'practice.checking': 'Өнөөдрийн бүртгэлийг шалгаж байна…',
+  'practice.already-recorded-title': 'Энэ төрлөөр өнөөдөр аль хэдийн бүртгэгдсэн байна',
+  'practice.entered-by-admin': 'админ бүртгэсэн',
+  'practice.scramble': 'Холилт',
+  'practice.ao5': 'Ao5',
+  'practice.solve': 'Эвлүүлэлт',
+  'practice.solve-of': '/ 5',
+  'practice.editing-solve': 'Засварлаж буй эвлүүлэлт',
+  'practice.update': '✓ Шинэчлэх',
+  'practice.done': 'Дууссан →',
+  'practice.next': '→ Дараах',
+  'practice.judge-label': 'Шүүгч',
+  'practice.judge-placeholder': 'Шүүгчийн нэрийг сонгох эсвэл бичих…',
+  'practice.judge-required': 'Хадгалахын тулд шүүгчийн нэр шаардлагатай.',
+  'practice.already-recorded-error': 'Энэ төрлөөр өнөөдөр аль хэдийн бүртгэгдсэн байна.',
+  'practice.error-prefix': 'Алдаа: ',
+  'practice.saving': 'Хадгалж байна…',
+  'practice.btn-save': 'Дасгалын үр дүн хадгалах',
+
+  // ADMIN — PRACTICE LOG
+  'admin.tab.practice': '📝 Практикийн бүртгэл',
+  'admin.practice.title': 'Практикийн бүртгэл оруулах',
+  'admin.practice.athlete-label': 'Тамирчин',
+  'admin.practice.select-athlete': '— Тамирчин сонгох —',
+  'admin.practice.select-athlete-prompt': 'Тамирчны нэрийн өмнөөс дасгалын үр дүн бүртгэхийн тулд тамирчин сонгоно уу.',
+
+  // PRACTICE LOG — COMPARISON WIDGET
+  'practice.cmp.title': 'Ахиц дэвшил',
+  'practice.cmp.today': 'Өнөөдрийн Ao5',
+  'practice.cmp.yesterday': 'Өчигдөр',
+  'practice.cmp.7d': '7 хоногийн өмнө',
+  'practice.cmp.30d': '30 хоногийн өмнө',
+  'practice.cmp.no-data': 'Одоогоор мэдээлэл алга',
+
+  // PRACTICE LOG — LEADERBOARD
+  'practice.lb.title': 'Клубын эрэмбэ (сүүлийн 30 хоног)',
+  'practice.lb.empty': 'Энэ төрлөөр одоогоор дасгалын бүртгэл алга байна.',
+
+  // PRACTICE LOG — STREAK
+  'practice.streak.days-suffix': 'өдрийн дараалал',
+
+  // PRACTICE LOG — BADGES
+  'practice.badge.new_pr': '🏆 Шинэ дархан илэрсэн!',
+  'practice.badge.streak_7': '🔥 7 өдрийн дараалал!',
+  'practice.badge.streak_30': '🔥 30 өдрийн дараалал!',
 };
 
 export default mn;

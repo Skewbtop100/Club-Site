@@ -69,6 +69,16 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Daily Ao5 practice attempts (athlete self-entry or admin-on-behalf-of).
+    // The "1 attempt per athlete per event per day" rule is enforced in
+    // lib/firebase/services/practiceSessions.ts, not here — avoiding a
+    // fragile get()-based rule per our established pattern.
+    match /practiceSessions/{doc} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
     // ─── Virtual Competitions ─────────────────────────────────────────────────
 
     match /virtualCompetitions/{compId} {

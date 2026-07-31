@@ -248,6 +248,19 @@ export default function Navbar() {
                       </svg>
                       Profile
                     </a>
+                    {user.athleteId && (
+                      <a
+                        href="/practice"
+                        className="nd-link"
+                        style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.58rem 0.65rem', borderRadius: '9px', fontSize: '0.86rem', fontWeight: 600, color: 'var(--text)', textDecoration: 'none' }}
+                        onClick={() => setOpen(false)}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
+                          <path d="M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
+                        </svg>
+                        {t('nav.practice')}
+                      </a>
+                    )}
                     {user.role === 'admin' && (
                       <a
                         href="/admin/dashboard"

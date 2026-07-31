@@ -467,6 +467,64 @@ const en = {
   'admin.ev.hide': 'Always Hide',
   'admin.ev.btn.save': 'Save Settings',
   'admin.ev.msg.saved': 'Event visibility saved.',
+
+  // NAV — PRACTICE
+  'nav.practice': 'Practice Log',
+
+  // PRACTICE LOG (self-entry + shared panel)
+  'practice.page-title': 'Practice Log',
+  'practice.page-subtitle': 'Record your daily Ao5 practice attempt — one per event, per day.',
+  'practice.not-linked': 'Your account isn’t linked to an athlete profile yet, so practice sessions can’t be recorded under your name.',
+  'practice.not-linked-cta': 'Link your athlete profile',
+  'practice.title': 'Practice Log',
+  'practice.event-label': 'Event',
+  'practice.select-event': '— Event —',
+  'practice.select-event-prompt': 'Select an event to begin.',
+  'practice.checking': 'Checking today’s record…',
+  'practice.already-recorded-title': 'Already recorded today for this event',
+  'practice.entered-by-admin': 'entered by admin',
+  'practice.scramble': 'Scramble',
+  'practice.ao5': 'Ao5',
+  'practice.solve': 'Solve',
+  'practice.solve-of': 'of 5',
+  'practice.editing-solve': 'Editing Solve',
+  'practice.update': '✓ Update',
+  'practice.done': 'Done →',
+  'practice.next': '→ Next',
+  'practice.judge-label': 'Judge',
+  'practice.judge-placeholder': 'Type or select judge name…',
+  'practice.judge-required': 'Judge name is required to save.',
+  'practice.already-recorded-error': 'Already recorded today for this event.',
+  'practice.error-prefix': 'Error: ',
+  'practice.saving': 'Saving…',
+  'practice.btn-save': 'Save Practice Session',
+
+  // ADMIN — PRACTICE LOG
+  'admin.tab.practice': '📝 Practice Log',
+  'admin.practice.title': 'Practice Log Entry',
+  'admin.practice.athlete-label': 'Athlete',
+  'admin.practice.select-athlete': '— Select athlete —',
+  'admin.practice.select-athlete-prompt': 'Select an athlete to record a practice session on their behalf.',
+
+  // PRACTICE LOG — COMPARISON WIDGET
+  'practice.cmp.title': 'Progress',
+  'practice.cmp.today': "Today's Ao5",
+  'practice.cmp.yesterday': 'Yesterday',
+  'practice.cmp.7d': '7 days ago',
+  'practice.cmp.30d': '30 days ago',
+  'practice.cmp.no-data': 'No data yet',
+
+  // PRACTICE LOG — LEADERBOARD
+  'practice.lb.title': 'Club Leaderboard (last 30 days)',
+  'practice.lb.empty': 'No practice sessions recorded for this event yet.',
+
+  // PRACTICE LOG — STREAK
+  'practice.streak.days-suffix': 'day streak',
+
+  // PRACTICE LOG — BADGES
+  'practice.badge.new_pr': '🏆 New PR!',
+  'practice.badge.streak_7': '🔥 7-day streak!',
+  'practice.badge.streak_30': '🔥 30-day streak!',
 } as const;
 
 export type TranslationKey = keyof typeof en;
