@@ -472,8 +472,6 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'nav.practice': 'Бэлтгэл',
 
   // PRACTICE LOG (self-entry + shared panel)
-  'practice.page-title': 'Бэлтгэл',
-  'practice.page-subtitle': 'Энэ сарын клубын идэвх, ахиц, PR-ууд — төрөл тус бүрээр.',
   'practice.not-linked': 'Таны бүртгэл тамирчны профайлтай холбогдоогүй тул дасгалын үр дүнг таны нэрээр бүртгэх боломжгүй.',
   'practice.not-linked-cta': 'Тамирчны профайлтай холбох',
   'practice.title': 'Дасгалын бүртгэл',

@@ -472,8 +472,6 @@ const en = {
   'nav.practice': 'Practice',
 
   // PRACTICE LOG (self-entry + shared panel)
-  'practice.page-title': 'Practice Overview',
-  'practice.page-subtitle': "This month's club activity, improvement, and PRs — by event.",
   'practice.not-linked': 'Your account isn’t linked to an athlete profile yet, so practice sessions can’t be recorded under your name.',
   'practice.not-linked-cta': 'Link your athlete profile',
   'practice.title': 'Practice Log',

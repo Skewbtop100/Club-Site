@@ -22,8 +22,12 @@ import { useLang, type TranslationKey } from '@/lib/i18n';
 type MonthlyStats = Awaited<ReturnType<typeof getMonthlyEventStats>>;
 type EventStats = MonthlyStats[string];
 
+// Hidden from this grid only — not removed from WCA_EVENTS, so Timer,
+// Competition, and admin's PracticeEntryTab are unaffected.
+const HIDDEN_GRID_EVENTS = new Set(['333mbf', '555bf', '444bf', '333fm']);
+const GRID_EVENTS = WCA_EVENTS.filter((ev) => !HIDDEN_GRID_EVENTS.has(ev.id));
+
 export default function PracticePage() {
-  const { t } = useLang();
   const [stats, setStats] = useState<MonthlyStats>({});
   const [loading, setLoading] = useState(true);
 
@@ -38,26 +42,13 @@ export default function PracticePage() {
   }, []);
 
   return (
-    <div style={{ minHeight: 'calc(100vh - 60px)', background: 'var(--bg)', color: 'var(--text)', padding: '1.5rem 1rem 3rem' }}>
+    <div style={{ minHeight: 'calc(100vh - 60px)', background: 'var(--bg)', color: 'var(--text)', padding: '1rem 1rem 3rem' }}>
       <div style={{ maxWidth: 1400, margin: '0 auto' }}>
-        <div style={{ marginBottom: '1.6rem' }}>
-          <h1 style={{
-            fontSize: '1.5rem', fontWeight: 800, margin: 0,
-            background: 'linear-gradient(135deg, var(--accent), var(--accent2))',
-            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
-          }}>
-            {t('practice.page-title')}
-          </h1>
-          <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginTop: '0.3rem' }}>
-            {t('practice.page-subtitle')}
-          </p>
-        </div>
-
         {loading ? (
           <div className="spinner-row"><span className="spinner-ring" /></div>
         ) : (
           <div className="me-grid">
-            {WCA_EVENTS.map((ev) => (
+            {GRID_EVENTS.map((ev) => (
               <EventStatCard key={ev.id} event={ev} stats={stats[ev.id]} />
             ))}
           </div>
