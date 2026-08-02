@@ -283,10 +283,33 @@ async function mostRecentOnOrBefore(
 }
 
 /**
+ * Athlete's best-ever ao5 for one event — no date bound, so this is a true
+ * all-time best, not just "best within the trend window". Two plain
+ * equality filters (athleteId, event) with no orderBy/range, so it needs
+ * no composite index beyond Firestore's automatic single-field indexes —
+ * same reason getTodaysSessionForAthleteEvent's 3-equality query has never
+ * needed one either.
+ */
+async function bestAo5ForAthleteEvent(athleteId: string, event: string): Promise<number | null> {
+  const snap = await getDocs(query(
+    practiceSessionsCol,
+    where('athleteId', '==', athleteId),
+    where('event', '==', event),
+  ));
+  let best: number | null = null;
+  for (const d of snap.docs) {
+    const ao5 = d.data().ao5;
+    if (ao5 !== null && (best === null || ao5 < best)) best = ao5;
+  }
+  return best;
+}
+
+/**
  * Progress comparison for one athlete+event: today's session plus the
  * closest prior session on or before yesterday / 7 days ago / 30 days ago
- * (NOT exact-date matches — see mostRecentOnOrBefore), plus up to the last
- * 30 days of sessions ascending by date for charting.
+ * (NOT exact-date matches — see mostRecentOnOrBefore), the athlete's
+ * all-time best ao5 for this event, plus up to the last 30 days of
+ * sessions ascending by date for charting.
  */
 export async function getPracticeComparison(
   athleteId: string,
@@ -296,6 +319,7 @@ export async function getPracticeComparison(
   yesterday: PracticeSession | null;
   sevenDaysAgo: PracticeSession | null;
   thirtyDaysAgo: PracticeSession | null;
+  allTimeBest: number | null;
   trend: PracticeSession[];
 }> {
   const trendQuery = query(
@@ -306,11 +330,12 @@ export async function getPracticeComparison(
     orderBy('date', 'asc'),
   );
 
-  const [today, yesterday, sevenDaysAgo, thirtyDaysAgo, trendSnap] = await Promise.all([
+  const [today, yesterday, sevenDaysAgo, thirtyDaysAgo, allTimeBest, trendSnap] = await Promise.all([
     getTodaysSessionForAthleteEvent(athleteId, event),
     mostRecentOnOrBefore(athleteId, event, daysAgoInClubTz(1)),
     mostRecentOnOrBefore(athleteId, event, daysAgoInClubTz(7)),
     mostRecentOnOrBefore(athleteId, event, daysAgoInClubTz(30)),
+    bestAo5ForAthleteEvent(athleteId, event),
     getDocs(trendQuery),
   ]);
 
@@ -319,6 +344,7 @@ export async function getPracticeComparison(
     yesterday,
     sevenDaysAgo,
     thirtyDaysAgo,
+    allTimeBest,
     trend: trendSnap.docs.map((d) => d.data()),
   };
 }

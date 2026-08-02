@@ -15,6 +15,8 @@ import {
 } from '@/lib/firebase/services/practiceSessions';
 import { getPracticeBadges } from '@/lib/practiceBadges';
 import PracticeTrendChart from '@/components/practice/PracticeTrendChart';
+import ProgressTimeline from '@/components/practice/ProgressTimeline';
+import PracticeHeatMap from '@/components/practice/PracticeHeatMap';
 import type { Athlete, Result, Competition } from '@/lib/types';
 import type { RecordBadge } from '@/lib/record-badges';
 import type { PracticeSession } from '@/lib/types/practice';
@@ -943,6 +945,8 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
                         ))}
                       </div>
 
+                      {practiceEvent && <ProgressTimeline athleteId={athlete.id} event={practiceEvent} />}
+
                       <div style={{
                         margin: '1rem 0', padding: '1rem 0.75rem',
                         background: 'var(--card)', border: '1px solid rgba(255,255,255,0.06)',
@@ -958,6 +962,8 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
                           />
                         )}
                       </div>
+
+                      <PracticeHeatMap athleteId={athlete.id} />
 
                       {practiceEventSessions.length === 0 ? (
                         <div className="apo-empty">No practice sessions for this event</div>
