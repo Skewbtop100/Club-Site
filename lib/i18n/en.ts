@@ -525,6 +525,7 @@ const en = {
   'practice.badge.streak_30': '🔥 30-day streak!',
 
   // PRACTICE LOG — MONTHLY OVERVIEW GRID
+  'practice.rank.title': 'Featured Ranking',
   'practice.grid.improvement': 'Most Improved This Month',
   'practice.grid.participation': 'Most Active This Month',
   'practice.grid.pr-count': 'Most PRs This Month',

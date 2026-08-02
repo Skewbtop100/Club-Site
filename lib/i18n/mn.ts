@@ -525,6 +525,7 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'practice.badge.streak_30': '🔥 30 өдрийн дараалал!',
 
   // PRACTICE LOG — MONTHLY OVERVIEW GRID
+  'practice.rank.title': 'Онцгой Ранк',
   'practice.grid.improvement': 'Сарын шилдэг ахиц',
   'practice.grid.participation': 'Хамгийн олон удаа оролцсон',
   'practice.grid.pr-count': 'Хамгийн олон PR',
