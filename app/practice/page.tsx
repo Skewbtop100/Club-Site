@@ -164,7 +164,6 @@ export default function PracticePage() {
 
       <style>{`
         .pr-page {
-          min-height: calc(100vh - 60px);
           background: var(--bg);
           color: var(--text);
           padding: 1.25rem 1rem 3rem;

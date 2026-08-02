@@ -39,7 +39,8 @@
       "Bash(xargs -r kill)",
       "Bash(taskkill //F //IM node.exe //FI \"WINDOWTITLE eq *3000*\")",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" --max-time 2 http://localhost:3000)",
-      "PowerShell(Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { \\(Invoke-WebRequest -Uri http://localhost:3000 -TimeoutSec 2 -UseBasicParsing\\).StatusCode } catch { \"server down \\(good\\)\" })"
+      "PowerShell(Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { \\(Invoke-WebRequest -Uri http://localhost:3000 -TimeoutSec 2 -UseBasicParsing\\).StatusCode } catch { \"server down \\(good\\)\" })",
+      "Bash(curl -sf http://localhost:3000/practice -o /tmp/practice2.html)"
     ]
   }
 }
