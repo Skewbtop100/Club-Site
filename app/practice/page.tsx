@@ -153,7 +153,7 @@ export default function PracticePage() {
                     onClick={() => setSelectedEvent(ev.id)}
                   >
                     <WcaEventIcon eventId={ev.id} size={19} />
-                    <span>{ev.short}</span>
+                    <span>{ev.name}</span>
                   </button>
                 ))}
               </div>
@@ -226,7 +226,9 @@ export default function PracticePage() {
           font-size: 0.82rem; font-weight: 600; letter-spacing: -0.01em;
           cursor: pointer; font-family: inherit;
           transition: background 0.2s ease, color 0.2s ease, transform 0.15s ease;
-          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+          /* Mongolian labels run longer than the English originals — wrap
+             to a 2nd line rather than clipping with an ellipsis. */
+          white-space: normal; text-align: center; line-height: 1.25;
         }
         .pr-tab:hover { color: var(--text); background: rgba(255,255,255,0.06); }
         .pr-tab.active {
@@ -297,8 +299,8 @@ export default function PracticePage() {
 
         .es-pill {
           flex-shrink: 0;
-          display: inline-flex; align-items: center; gap: 0.5rem;
-          padding: 0.62rem 1.05rem; border-radius: 999px;
+          display: inline-flex; align-items: center; gap: 0.55rem;
+          padding: 0.68rem 1.3rem; border-radius: 999px;
           border: 1px solid rgba(255,255,255,0.09); background: rgba(255,255,255,0.03);
           color: var(--muted); font-size: 0.86rem; font-weight: 600;
           cursor: pointer; font-family: inherit;

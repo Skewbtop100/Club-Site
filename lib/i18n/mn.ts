@@ -527,8 +527,8 @@ const mn: Partial<Record<TranslationKey, string>> = {
   // PRACTICE LOG — MONTHLY OVERVIEW GRID
   'practice.rank.title': 'Онцгой Ранк',
   'practice.grid.improvement': 'Сарын шилдэг ахиц',
-  'practice.grid.participation': 'Хамгийн олон удаа оролцсон',
-  'practice.grid.pr-count': 'Хамгийн олон PR',
+  'practice.grid.participation': 'Сарын хамгийн идэвхтэй',
+  'practice.grid.pr-count': 'Сарын хамгийн олон PR',
   'practice.grid.times-suffix': 'удаа',
   'practice.grid.empty': 'Одоогоор мэдээлэл алга',
 };
