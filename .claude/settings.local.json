@@ -28,7 +28,18 @@
       "Bash(rm -f __debug_monthly_stats.mjs)",
       "Bash(awk '{print length\\($0\\), substr\\($0,1,20\\)}' .env)",
       "Bash(firebase firestore:indexes --project club-site-f1a0a)",
-      "Bash(node __debug_verify_fix.mjs)"
+      "Bash(node __debug_verify_fix.mjs)",
+      "Read(//mnt/skills/public/frontend-design/**)",
+      "Bash(chromium-cli --help)",
+      "Bash(timeout 40 bash -c 'until curl -sf http://localhost:3000 >/dev/null 2>&1; do sleep 1; done')",
+      "Bash(curl -sf http://localhost:3000/practice -o /tmp/practice.html)",
+      "Read(//tmp/**)",
+      "Bash(grep -i \"error\\\\|Cannot read\\\\|TypeError\\\\|Unhandled\" /tmp/nextdev.log | grep -v \"webpackHotUpdate\\\\|ExperimentalWarning\" | head -30)",
+      "Bash(lsof -ti:3000 -sTCP:LISTEN)",
+      "Bash(xargs -r kill)",
+      "Bash(taskkill //F //IM node.exe //FI \"WINDOWTITLE eq *3000*\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" --max-time 2 http://localhost:3000)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; try { \\(Invoke-WebRequest -Uri http://localhost:3000 -TimeoutSec 2 -UseBasicParsing\\).StatusCode } catch { \"server down \\(good\\)\" })"
     ]
   }
 }

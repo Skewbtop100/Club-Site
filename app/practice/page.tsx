@@ -9,6 +9,11 @@
 // leaderboards at once) — same underlying data, just one event/metric shown
 // at a time instead of all 17 cards rendered simultaneously.
 //
+// Phase 7 note: this file's data/state logic (getMonthlyEventStats fetch,
+// HIDDEN_GRID_EVENTS exclusion, selectedEvent/selectedMetric state) is
+// unchanged from Phase 5d — only the JSX/CSS below it was redone for a
+// denser, glassier, more "premium" look. No new queries were added.
+//
 // This replaced the self-entry form + comparison widget from Phase 2/3
 // (PracticeEntryPanel / PracticeComparisonWidget / PracticeLeaderboardWidget
 // are untouched and still used from components/admin/PracticeEntryTab —
@@ -37,6 +42,14 @@ const METRIC_TABS: { id: MetricTab; labelKey: TranslationKey }[] = [
   { id: 'improvement', labelKey: 'practice.grid.improvement' },
   { id: 'participation', labelKey: 'practice.grid.participation' },
   { id: 'prCount', labelKey: 'practice.grid.pr-count' },
+];
+
+// Medal-tinted rank badge — only ranks 1-3 are ever shown (top 3), so this
+// covers every case; the 4th fallback color is defensive only.
+const RANK_BADGE = [
+  { bg: 'rgba(251,191,36,0.16)', border: 'rgba(251,191,36,0.45)', fg: '#fbbf24' }, // gold
+  { bg: 'rgba(203,213,225,0.14)', border: 'rgba(203,213,225,0.4)', fg: '#e2e8f0' }, // silver
+  { bg: 'rgba(251,146,60,0.16)', border: 'rgba(251,146,60,0.45)', fg: '#fb923c' }, // bronze
 ];
 
 export default function PracticePage() {
@@ -68,22 +81,27 @@ export default function PracticePage() {
     return list.map((r) => ({ name: r.athleteName, value: `${r.count} ${t('practice.grid.times-suffix')}` }));
   }, [stats, selectedEvent, selectedMetric, t]);
 
+  const selectedEventMeta = GRID_EVENTS.find((ev) => ev.id === selectedEvent);
+
   return (
-    <div style={{ minHeight: 'calc(100vh - 60px)', background: 'var(--bg)', color: 'var(--text)', padding: '1rem 1rem 3rem' }}>
-      <div style={{ maxWidth: 900, margin: '0 auto' }}>
+    <div className="pr-page">
+      <div className="pr-container">
         {loading ? (
           <div className="spinner-row"><span className="spinner-ring" /></div>
         ) : (
           <>
             {/* A. Featured Ranking panel */}
-            <div className="card">
-              <div className="card-title"><span className="title-accent" />{t('practice.rank.title')}</div>
+            <div className="pr-card">
+              <div className="pr-card-title">
+                <span className="pr-title-accent" />
+                {t('practice.rank.title')}
+              </div>
 
-              <div className="tab-nav">
+              <div className="pr-tabs">
                 {METRIC_TABS.map((tab) => (
                   <button
                     key={tab.id}
-                    className={`tab-btn${selectedMetric === tab.id ? ' active' : ''}`}
+                    className={`pr-tab${selectedMetric === tab.id ? ' active' : ''}`}
                     onClick={() => setSelectedMetric(tab.id)}
                   >
                     {t(tab.labelKey)}
@@ -91,81 +109,207 @@ export default function PracticePage() {
                 ))}
               </div>
 
-              {rows.length === 0 ? (
-                <div className="pr-empty">{t('practice.grid.empty')}</div>
-              ) : (
-                <div className="pr-list">
-                  {rows.map((r, i) => (
-                    <div key={i} className="pr-row">
-                      <span className="pr-rank">{i + 1}</span>
-                      <span className="pr-name">{r.name}</span>
-                      <span className="pr-value">{r.value}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {/* Keying on event+metric replays the entrance animation on
+                  every switch — pure CSS, no extra render logic. */}
+              <div key={`${selectedEvent}-${selectedMetric}`} className="pr-panel-body">
+                {rows.length === 0 ? (
+                  <div className="pr-empty">
+                    <span className="pr-empty-icon" aria-hidden>
+                      {selectedEventMeta && <WcaEventIcon eventId={selectedEventMeta.id} size={26} />}
+                    </span>
+                    <span>{t('practice.grid.empty')}</span>
+                  </div>
+                ) : (
+                  <div className="pr-list">
+                    {rows.map((r, i) => {
+                      const badge = RANK_BADGE[i] ?? RANK_BADGE[2];
+                      return (
+                        <div key={i} className="pr-row">
+                          <span
+                            className="pr-rank"
+                            style={{ background: badge.bg, borderColor: badge.border, color: badge.fg }}
+                          >
+                            {i + 1}
+                          </span>
+                          <span className="pr-name">{r.name}</span>
+                          <span className="pr-value">{r.value}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* B. Horizontal event strip — selector only, no embedded data */}
-            <div className="me-strip">
-              {GRID_EVENTS.map((ev) => (
-                <button
-                  key={ev.id}
-                  className={`me-pill${selectedEvent === ev.id ? ' active' : ''}`}
-                  onClick={() => setSelectedEvent(ev.id)}
-                >
-                  <WcaEventIcon eventId={ev.id} size={16} />
-                  <span>{ev.short}</span>
-                </button>
-              ))}
+            <div className="es-wrap">
+              <div className="es-fade es-fade-left" aria-hidden />
+              <div className="es-fade es-fade-right" aria-hidden />
+              <div className="es-strip">
+                {GRID_EVENTS.map((ev) => (
+                  <button
+                    key={ev.id}
+                    className={`es-pill${selectedEvent === ev.id ? ' active' : ''}`}
+                    onClick={() => setSelectedEvent(ev.id)}
+                  >
+                    <WcaEventIcon eventId={ev.id} size={19} />
+                    <span>{ev.short}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           </>
         )}
       </div>
 
       <style>{`
-        .pr-empty { font-size: 0.85rem; color: var(--muted); opacity: 0.7; padding: 1.5rem 0.2rem; text-align: center; }
+        .pr-page {
+          min-height: calc(100vh - 60px);
+          background: var(--bg);
+          color: var(--text);
+          padding: 1.25rem 1rem 3rem;
+        }
+        .pr-container {
+          max-width: 640px;
+          margin: 0 auto;
+        }
+
+        /* ── Featured Ranking card — glassmorphism, same recipe as the
+           login card / navbar (rgba surface + backdrop-blur), just tuned
+           to this page's dark surface token instead of inventing a new
+           palette. ────────────────────────────────────────────────── */
+        .pr-card {
+          background: rgba(19, 19, 37, 0.62);
+          -webkit-backdrop-filter: blur(20px);
+          backdrop-filter: blur(20px);
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 20px;
+          padding: 1.35rem 1.35rem 1rem;
+          box-shadow: 0 20px 50px rgba(0,0,0,0.35);
+        }
+        html[data-theme="soft-light"] .pr-card,
+        html[data-theme="purple-light"] .pr-card {
+          background: rgba(255,255,255,0.6);
+          border-color: rgba(0,0,0,0.06);
+        }
+        .pr-card-title {
+          display: flex; align-items: center; gap: 0.55rem;
+          font-size: 1.05rem; font-weight: 800; color: var(--text-primary);
+          margin-bottom: 1.1rem;
+        }
+        .pr-title-accent {
+          width: 4px; height: 1.1em; border-radius: 2px;
+          background: linear-gradient(180deg, var(--accent), var(--accent2));
+          flex-shrink: 0;
+        }
+
+        /* Tab bar — same gradient-fill-active idea as the site's global
+           .tab-nav/.tab-btn, sized up locally for this page rather than
+           editing the shared admin classes (those are reused across every
+           admin SectionTabs screen). */
+        .pr-tabs {
+          display: flex; gap: 0.3rem;
+          background: rgba(255,255,255,0.03);
+          border: 1px solid rgba(255,255,255,0.06);
+          border-radius: 13px; padding: 0.3rem;
+          margin-bottom: 0.9rem;
+        }
+        .pr-tab {
+          flex: 1; min-width: 0;
+          padding: 0.6rem 0.5rem; border: none; border-radius: 10px;
+          background: transparent; color: var(--muted);
+          font-size: 0.82rem; font-weight: 600; letter-spacing: -0.01em;
+          cursor: pointer; font-family: inherit;
+          transition: background 0.2s ease, color 0.2s ease, transform 0.15s ease;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .pr-tab:hover { color: var(--text); background: rgba(255,255,255,0.06); }
+        .pr-tab.active {
+          background: linear-gradient(135deg, var(--accent), var(--accent2));
+          color: #fff; font-weight: 700;
+          box-shadow: 0 6px 16px rgba(124,58,237,0.35);
+        }
+
+        .pr-panel-body { min-height: 168px; display: flex; flex-direction: column; justify-content: center; }
+        @keyframes prFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+        .pr-panel-body { animation: prFadeIn 200ms ease-out; }
+
+        .pr-empty {
+          display: flex; flex-direction: column; align-items: center; gap: 0.6rem;
+          padding: 1.6rem 1rem; text-align: center;
+          color: var(--muted); font-size: 0.86rem;
+        }
+        .pr-empty-icon {
+          width: 44px; height: 44px; border-radius: 50%;
+          display: inline-flex; align-items: center; justify-content: center;
+          background: rgba(255,255,255,0.04); opacity: 0.7;
+        }
+
         .pr-list { display: flex; flex-direction: column; }
         .pr-row {
-          display: flex; align-items: center; gap: 0.8rem;
-          padding: 0.65rem 0.2rem;
+          display: flex; align-items: center; gap: 0.85rem;
+          padding: 0.6rem 0.15rem;
           border-bottom: 1px solid rgba(255,255,255,0.06);
         }
         .pr-row:last-child { border-bottom: none; }
         .pr-rank {
-          width: 28px; height: 28px; flex-shrink: 0;
+          width: 34px; height: 34px; flex-shrink: 0;
           display: inline-flex; align-items: center; justify-content: center;
-          border-radius: 50%; background: rgba(124,58,237,0.12);
-          font-weight: 800; font-size: 0.9rem; color: #a78bfa;
+          border-radius: 50%; border: 1px solid;
+          font-weight: 800; font-size: 0.95rem;
         }
         .pr-name {
           flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
-          white-space: nowrap; font-size: 1rem; font-weight: 600; color: var(--text);
+          white-space: nowrap; font-size: 0.98rem; font-weight: 600; color: var(--text);
         }
         .pr-value {
           flex-shrink: 0; font-family: monospace; font-weight: 800;
-          color: #a78bfa; font-size: 1.05rem;
+          background: linear-gradient(135deg, var(--accent), var(--accent2));
+          -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+          font-size: 1.05rem;
         }
 
-        .me-strip {
-          display: flex; flex-wrap: nowrap; gap: 0.5rem;
+        /* ── Event strip ──────────────────────────────────────────────── */
+        .es-wrap { position: relative; margin-top: 1rem; }
+        .es-strip {
+          display: flex; flex-wrap: nowrap; gap: 0.55rem;
           overflow-x: auto; -webkit-overflow-scrolling: touch;
-          padding: 0.2rem 0.1rem 0.6rem;
+          padding: 0.25rem 0.15rem 0.7rem;
           scrollbar-width: thin;
         }
-        .me-pill {
+        .es-fade {
+          position: absolute; top: 0; bottom: 0.7rem; width: 28px;
+          pointer-events: none; z-index: 2;
+        }
+        .es-fade-left { left: 0; background: linear-gradient(to right, var(--bg), transparent); }
+        .es-fade-right { right: 0; background: linear-gradient(to left, var(--bg), transparent); }
+
+        .es-pill {
           flex-shrink: 0;
-          display: inline-flex; align-items: center; gap: 0.4rem;
-          padding: 0.5rem 0.9rem; border-radius: 999px;
-          border: 1px solid rgba(255,255,255,0.1); background: transparent;
-          color: var(--muted); font-size: 0.85rem; font-weight: 600;
-          cursor: pointer; font-family: inherit; transition: all 0.2s;
+          display: inline-flex; align-items: center; gap: 0.5rem;
+          padding: 0.62rem 1.05rem; border-radius: 999px;
+          border: 1px solid rgba(255,255,255,0.09); background: rgba(255,255,255,0.03);
+          color: var(--muted); font-size: 0.86rem; font-weight: 600;
+          cursor: pointer; font-family: inherit;
+          transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.15s ease;
           white-space: nowrap;
         }
-        .me-pill:hover { color: var(--text); border-color: rgba(124,58,237,0.4); }
-        .me-pill.active {
+        .es-pill:hover { color: var(--text); border-color: rgba(124,58,237,0.4); transform: translateY(-1px); }
+        .es-pill.active {
           background: linear-gradient(135deg, var(--accent), var(--accent2));
           color: #fff; border-color: transparent;
+          box-shadow: 0 6px 16px rgba(124,58,237,0.35);
+        }
+
+        @media (max-width: 480px) {
+          .pr-page { padding: 1rem 0.7rem 2.5rem; }
+          .pr-card { padding: 1.05rem 1rem 0.85rem; border-radius: 16px; }
+          .pr-card-title { font-size: 0.98rem; }
+          .pr-tab { font-size: 0.74rem; padding: 0.55rem 0.35rem; }
+          .pr-rank { width: 30px; height: 30px; font-size: 0.85rem; }
+          .pr-name { font-size: 0.9rem; }
+          .pr-value { font-size: 0.95rem; }
+          .es-pill { padding: 0.55rem 0.85rem; font-size: 0.8rem; }
         }
       `}</style>
     </div>
