@@ -166,10 +166,13 @@ export default function PracticePage() {
         .pr-page {
           background: var(--bg);
           color: var(--text);
-          padding: 1.25rem 1rem 3rem;
+          padding: 1.25rem 2rem 3rem;
         }
+        /* Dashboard-width container — matches app/admin/dashboard's
+           maxWidth: 1380 rather than the narrow single-column measure
+           used on text-heavy pages (e.g. /profile's 600px). */
         .pr-container {
-          max-width: 640px;
+          max-width: 1380px;
           margin: 0 auto;
         }
 
@@ -205,17 +208,20 @@ export default function PracticePage() {
         /* Tab bar — same gradient-fill-active idea as the site's global
            .tab-nav/.tab-btn, sized up locally for this page rather than
            editing the shared admin classes (those are reused across every
-           admin SectionTabs screen). */
+           admin SectionTabs screen). inline-flex so the 3 tabs keep a
+           natural, comfortable width instead of stretching edge-to-edge
+           now that the card itself spans the wide container. */
         .pr-tabs {
-          display: flex; gap: 0.3rem;
+          display: inline-flex; gap: 0.3rem;
           background: rgba(255,255,255,0.03);
           border: 1px solid rgba(255,255,255,0.06);
           border-radius: 13px; padding: 0.3rem;
           margin-bottom: 0.9rem;
+          max-width: 100%;
         }
         .pr-tab {
           flex: 1; min-width: 0;
-          padding: 0.6rem 0.5rem; border: none; border-radius: 10px;
+          padding: 0.65rem 1.4rem; border: none; border-radius: 10px;
           background: transparent; color: var(--muted);
           font-size: 0.82rem; font-weight: 600; letter-spacing: -0.01em;
           cursor: pointer; font-family: inherit;
@@ -229,7 +235,10 @@ export default function PracticePage() {
           box-shadow: 0 6px 16px rgba(124,58,237,0.35);
         }
 
-        .pr-panel-body { min-height: 168px; display: flex; flex-direction: column; justify-content: center; }
+        /* Card frame spans the wide container, but the actual rank list
+           stays capped at a comfortable reading measure — a name/value
+           pair stretched across 1300px+ reads as broken, not spacious. */
+        .pr-panel-body { min-height: 168px; max-width: 640px; display: flex; flex-direction: column; justify-content: center; }
         @keyframes prFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
         .pr-panel-body { animation: prFadeIn 200ms ease-out; }
 
@@ -247,9 +256,12 @@ export default function PracticePage() {
         .pr-list { display: flex; flex-direction: column; }
         .pr-row {
           display: flex; align-items: center; gap: 0.85rem;
-          padding: 0.6rem 0.15rem;
+          padding: 0.65rem 0.5rem;
+          border-radius: 10px;
           border-bottom: 1px solid rgba(255,255,255,0.06);
+          transition: background 0.15s ease;
         }
+        .pr-row:hover { background: rgba(124,58,237,0.06); }
         .pr-row:last-child { border-bottom: none; }
         .pr-rank {
           width: 34px; height: 34px; flex-shrink: 0;
@@ -304,6 +316,9 @@ export default function PracticePage() {
           .pr-page { padding: 1rem 0.7rem 2.5rem; }
           .pr-card { padding: 1.05rem 1rem 0.85rem; border-radius: 16px; }
           .pr-card-title { font-size: 0.98rem; }
+          /* Narrow viewport: back to full-width equal-fill tabs — natural
+             sizing risks cramping/overflow at this width. */
+          .pr-tabs { display: flex; width: 100%; }
           .pr-tab { font-size: 0.74rem; padding: 0.55rem 0.35rem; }
           .pr-rank { width: 30px; height: 30px; font-size: 0.85rem; }
           .pr-name { font-size: 0.9rem; }
