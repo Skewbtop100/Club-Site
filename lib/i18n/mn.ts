@@ -544,6 +544,9 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'practice.activity.title': 'Энэ сарын идэвх',
   'practice.activity.caption': 'Клубын хэмжээнд, бүх тамирчид — хувийн үзүүлэлт биш',
   'practice.activity.sessions-suffix': 'удаа дасгал хийсэн (энэ сард)',
+  'practice.activity.stat-sessions': 'Дасгал',
+  'practice.activity.stat-active-days': 'Идэвхтэй өдөр',
+  'practice.activity.stat-best-streak': 'Шилдэг дараалал',
 
   // PRACTICE LOG — TODAY'S PRACTICE
   'practice.today.title': 'Өнөөдрийн дасгал',

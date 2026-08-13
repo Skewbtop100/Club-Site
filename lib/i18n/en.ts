@@ -544,6 +544,9 @@ const en = {
   'practice.activity.title': "This Month's Activity",
   'practice.activity.caption': 'Club-wide, all athletes — not a personal stat',
   'practice.activity.sessions-suffix': 'sessions this month',
+  'practice.activity.stat-sessions': 'Sessions',
+  'practice.activity.stat-active-days': 'Active Days',
+  'practice.activity.stat-best-streak': 'Best Streak',
 
   // PRACTICE LOG — TODAY'S PRACTICE
   'practice.today.title': "Today's Practice",

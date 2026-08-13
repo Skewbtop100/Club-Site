@@ -9,6 +9,11 @@
 // carries meaning regardless of how sparse the data is, unlike a mostly-
 // empty bar chart implying "nothing to see."
 //
+// Renders the calendar beside a small stats column (sessions / active
+// days / best streak) rather than centering the calendar alone in a
+// wide card — all three numbers are derived from the same `points`
+// prop already passed in, no new data source.
+//
 // Presentational only, same as PracticeTrendChart — the page already
 // fetches { date, count }[] via getMonthlyActivityTrend; this just needs
 // `monthStr` alongside it to know the full month's shape (that function
@@ -32,6 +37,15 @@ function daysInMonth(monthStr: string): number {
   return new Date(Date.UTC(y, m, 0)).getUTCDate();
 }
 
+function StatTile({ value, label }: { value: number; label: string }) {
+  return (
+    <div>
+      <div className="calc-label">{label}</div>
+      <div className="calc-value accent">{value}</div>
+    </div>
+  );
+}
+
 export default function MonthlyActivityGrid({
   monthStr,
   points,
@@ -42,6 +56,17 @@ export default function MonthlyActivityGrid({
   const { t } = useLang();
   const countByDate = new Map(points.map((p) => [p.date, p.count]));
   const total = points.reduce((sum, p) => sum + p.count, 0);
+  const activeDays = points.filter((p) => p.count > 0).length;
+
+  // Longest run of consecutive days with count > 0 this month — `points`
+  // is already date-ascending (getMonthlyActivityTrend's own output
+  // order), so a single forward walk is enough.
+  let bestStreak = 0;
+  let run = 0;
+  for (const p of points) {
+    if (p.count > 0) { run += 1; if (run > bestStreak) bestStreak = run; } else run = 0;
+  }
+
   const lastDay = daysInMonth(monthStr);
   const leadingBlanks = weekdayOfMonthStart(monthStr);
 
@@ -49,11 +74,7 @@ export default function MonthlyActivityGrid({
   for (let d = 1; d <= lastDay; d++) cells.push(d);
 
   return (
-    <div>
-      <div style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '0.8rem' }}>
-        <strong style={{ color: 'var(--text)', fontWeight: 800 }}>{total}</strong> {t('practice.activity.sessions-suffix')}
-      </div>
-
+    <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
       <div style={{ display: 'grid', gridTemplateColumns: `repeat(7, ${CELL}px)`, gap: `${GAP}px` }}>
         {WEEKDAY_LABELS.map((w, i) => (
           <div key={`h${i}`} style={{
@@ -71,9 +92,9 @@ export default function MonthlyActivityGrid({
               key={date}
               title={practiced ? `${date} — ${count} session(s)` : date}
               style={{
-                width: CELL, height: CELL, borderRadius: 7,
+                width: CELL, height: CELL, borderRadius: 6,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: '0.68rem', fontWeight: 600,
+                fontSize: '0.62rem', fontWeight: 600,
                 background: practiced ? 'var(--accent)' : 'rgba(255,255,255,0.05)',
                 color: practiced ? '#fff' : 'var(--muted)',
               }}
@@ -82,6 +103,12 @@ export default function MonthlyActivityGrid({
             </div>
           );
         })}
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', flex: 1, minWidth: 110 }}>
+        <StatTile value={total} label={t('practice.activity.stat-sessions')} />
+        <StatTile value={activeDays} label={t('practice.activity.stat-active-days')} />
+        <StatTile value={bestStreak} label={t('practice.activity.stat-best-streak')} />
       </div>
     </div>
   );

@@ -242,69 +242,75 @@ export default function PracticePage() {
           <div className="spinner-row"><span className="spinner-ring" /></div>
         ) : (
           <>
-            {/* A. Featured Ranking panel */}
-            <div className="pr-card">
-              <div className="pr-card-title">
-                <span className="pr-title-accent" />
-                {t('practice.rank.title')}
-                {selectedEventMeta && <span className="pr-card-subtitle">· {selectedEventMeta.name}</span>}
+            {/* Unified 12-column dashboard grid — replaces the old
+                .pr-below-grid + .pr-activity-col nesting with direct grid
+                children, each carrying its own .pd-span-N. Row 2
+                (Leaderboard/Activity) shares height via .pd-stretch; Row 3
+                (Today's Practice/Personal Stats) deliberately doesn't, so
+                Personal Stats' compact no-selection state never gets
+                stretched into a tall empty card. */}
+            <div className="pd-grid">
+              {/* Featured Ranking — hero, full width */}
+              <div className="pr-card pd-span-12">
+                <div className="pr-card-title">
+                  <span className="pr-title-accent" />
+                  {t('practice.rank.title')}
+                  {selectedEventMeta && <span className="pr-card-subtitle">· {selectedEventMeta.name}</span>}
+                </div>
+
+                <div className="pr-tabs">
+                  {METRIC_TABS.map((tab) => (
+                    <button
+                      key={tab.id}
+                      className={`pr-tab${selectedMetric === tab.id ? ' active' : ''}`}
+                      onClick={() => setSelectedMetric(tab.id)}
+                    >
+                      {t(tab.labelKey)}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Keying on event+metric replays the entrance animation on
+                    every switch — pure CSS, no extra render logic. */}
+                <div key={`${selectedEvent}-${selectedMetric}`} className="pr-panel-body">
+                  {rows.length === 0 ? (
+                    <div className="pr-empty">
+                      <span className="pr-empty-icon" aria-hidden>
+                        {selectedEventMeta && <WcaEventIcon eventId={selectedEventMeta.id} size={26} />}
+                      </span>
+                      <span>{t('practice.grid.empty')}</span>
+                    </div>
+                  ) : (
+                    <div className="pr-list">
+                      {rows.map((r, i) => {
+                        const badge = RANK_BADGE[i] ?? RANK_BADGE[2];
+                        return (
+                          <div key={i} className="pr-row">
+                            <span
+                              className="pr-rank"
+                              style={{ background: badge.bg, borderColor: badge.border, color: badge.fg }}
+                            >
+                              {i + 1}
+                            </span>
+                            <span className="pr-name">{r.name}</span>
+                            {r.isPR && (
+                              <span style={{
+                                flexShrink: 0, fontSize: '0.6rem', fontWeight: 900,
+                                padding: '1px 5px', borderRadius: 4, letterSpacing: '0.03em',
+                                background: '#b45309', color: '#fef3c7', border: '1px solid #f59e0b',
+                              }}>PR</span>
+                            )}
+                            <span className="pr-value">{r.value}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <div className="pr-tabs">
-                {METRIC_TABS.map((tab) => (
-                  <button
-                    key={tab.id}
-                    className={`pr-tab${selectedMetric === tab.id ? ' active' : ''}`}
-                    onClick={() => setSelectedMetric(tab.id)}
-                  >
-                    {t(tab.labelKey)}
-                  </button>
-                ))}
-              </div>
-
-              {/* Keying on event+metric replays the entrance animation on
-                  every switch — pure CSS, no extra render logic. */}
-              <div key={`${selectedEvent}-${selectedMetric}`} className="pr-panel-body">
-                {rows.length === 0 ? (
-                  <div className="pr-empty">
-                    <span className="pr-empty-icon" aria-hidden>
-                      {selectedEventMeta && <WcaEventIcon eventId={selectedEventMeta.id} size={26} />}
-                    </span>
-                    <span>{t('practice.grid.empty')}</span>
-                  </div>
-                ) : (
-                  <div className="pr-list">
-                    {rows.map((r, i) => {
-                      const badge = RANK_BADGE[i] ?? RANK_BADGE[2];
-                      return (
-                        <div key={i} className="pr-row">
-                          <span
-                            className="pr-rank"
-                            style={{ background: badge.bg, borderColor: badge.border, color: badge.fg }}
-                          >
-                            {i + 1}
-                          </span>
-                          <span className="pr-name">{r.name}</span>
-                          {r.isPR && (
-                            <span style={{
-                              flexShrink: 0, fontSize: '0.6rem', fontWeight: 900,
-                              padding: '1px 5px', borderRadius: 4, letterSpacing: '0.03em',
-                              background: '#b45309', color: '#fef3c7', border: '1px solid #f59e0b',
-                            }}>PR</span>
-                          )}
-                          <span className="pr-value">{r.value}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* B. Leaderboard + a right column stacking this month's activity
-                above today's roster, side by side with Leaderboard on desktop */}
-            <div className="pr-below-grid">
-              <div className="pr-card">
+              {/* Row 2: Club Leaderboard (5) + This Month's Activity (7), stretched to equal height */}
+              <div className="pr-card pd-span-5 pd-stretch">
                 <div className="pr-card-title">
                   <span className="pr-title-accent" />
                   {t('practice.lb.title')}
@@ -313,7 +319,7 @@ export default function PracticePage() {
                   </span>
                 </div>
 
-                <div className="pr-tabs" style={{ marginBottom: '0.9rem' }}>
+                <div className="pr-tabs" style={{ marginBottom: '1rem' }}>
                   <button
                     className={`pr-tab${leaderboardTab === 'times' ? ' active' : ''}`}
                     onClick={() => setLeaderboardTab('times')}
@@ -391,83 +397,84 @@ export default function PracticePage() {
                 )}
               </div>
 
-              <div className="pr-activity-col">
-                <div className="pr-card pr-activity-card">
-                  <div className="pr-card-title">
-                    <span className="pr-title-accent" />
-                    {t('practice.activity.title')}
-                    <span className="pr-card-subtitle">{t('practice.activity.caption')}</span>
-                  </div>
-                  {activityLoading ? (
-                    <div className="spinner-row"><span className="spinner-ring" /></div>
-                  ) : (
-                    <MonthlyActivityGrid monthStr={todayInClubTz().slice(0, 7)} points={activity} />
-                  )}
+              <div className="pr-card pr-activity-card pd-span-7 pd-stretch">
+                <div className="pr-card-title">
+                  <span className="pr-title-accent" />
+                  {t('practice.activity.title')}
+                  <span className="pr-card-subtitle">{t('practice.activity.caption')}</span>
                 </div>
-
-                <div className="pr-card pr-today-card">
-                  <div className="pr-card-title">
-                    <span className="pr-title-accent" />
-                    {t('practice.today.title')}
-                  </div>
-                  {todaysLoading ? (
-                    <div className="spinner-row"><span className="spinner-ring" /></div>
-                  ) : todaysSessions.length === 0 ? (
-                    <div className="pr-empty">
-                      <span>{t('practice.today.empty')}</span>
-                    </div>
-                  ) : (
-                    <div className="pr-list">
-                      {todaysSessions.map((s) => (
-                        <div key={s.id} className="pr-row">
-                          <span className="pr-name">{s.athleteName}</span>
-                          {s.isPR && (
-                            <span style={{
-                              flexShrink: 0, fontSize: '0.6rem', fontWeight: 900,
-                              padding: '1px 5px', borderRadius: 4, letterSpacing: '0.03em',
-                              background: '#b45309', color: '#fef3c7', border: '1px solid #f59e0b',
-                            }}>PR</span>
-                          )}
-                          <span style={{ flexShrink: 0, fontSize: '0.7rem', color: 'var(--muted)' }}>{s.judgeName ?? '—'}</span>
-                          <span className="pr-value">{fmtMs(s.ao5 ?? 0, s.ao5 === null)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* C. Athlete View — picker stays inline (tiny, ~one row);
-                the actual stats combo now lives in a modal, not normal
-                document flow, so nothing here adds page height. */}
-            <div className="pr-card" style={{ marginTop: '1rem' }}>
-              <div className="pr-card-title">
-                <span className="pr-title-accent" />
-                {t('practice.athlete.section-title')}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.75rem', flexWrap: 'wrap' }}>
-                <div className="form-group" style={{ maxWidth: 340, marginBottom: 0, flex: 1, minWidth: 220 }}>
-                  <label>{t('practice.athlete.select-label')}</label>
-                  <select
-                    value={selectedAthleteId}
-                    onChange={(e) => {
-                      const id = e.target.value;
-                      setSelectedAthleteId(id);
-                      setIsStatsModalOpen(!!id);
-                    }}
-                  >
-                    <option value="">{t('practice.athlete.select-placeholder')}</option>
-                    {[...athletes].sort((a, b) => a.name.localeCompare(b.name)).map((a) => (
-                      <option key={a.id} value={a.id}>{`${a.name || ''}${a.lastName ? ' ' + a.lastName : ''}`}</option>
-                    ))}
-                  </select>
-                </div>
-                {selectedAthleteId && !isStatsModalOpen && (
-                  <button className="pr-tab active" style={{ flex: '0 0 auto' }} onClick={() => setIsStatsModalOpen(true)}>
-                    {t('practice.athlete.view-stats')}
-                  </button>
+                {activityLoading ? (
+                  <div className="spinner-row"><span className="spinner-ring" /></div>
+                ) : (
+                  <MonthlyActivityGrid monthStr={todayInClubTz().slice(0, 7)} points={activity} />
                 )}
+              </div>
+
+              {/* Row 3: Today's Practice (7) + Personal Stats (5) — natural
+                  height, not stretched, so Personal Stats' compact
+                  no-selection state stays compact. */}
+              <div className="pr-card pr-today-card pd-span-7">
+                <div className="pr-card-title">
+                  <span className="pr-title-accent" />
+                  {t('practice.today.title')}
+                </div>
+                {todaysLoading ? (
+                  <div className="spinner-row"><span className="spinner-ring" /></div>
+                ) : todaysSessions.length === 0 ? (
+                  <div className="pr-empty">
+                    <span className="pr-empty-icon" aria-hidden>
+                      {selectedEventMeta && <WcaEventIcon eventId={selectedEventMeta.id} size={26} />}
+                    </span>
+                    <span>{t('practice.today.empty')}</span>
+                  </div>
+                ) : (
+                  <div className="pr-list">
+                    {todaysSessions.map((s) => (
+                      <div key={s.id} className="pr-row">
+                        <span className="pr-name">{s.athleteName}</span>
+                        {s.isPR && (
+                          <span style={{
+                            flexShrink: 0, fontSize: '0.6rem', fontWeight: 900,
+                            padding: '1px 5px', borderRadius: 4, letterSpacing: '0.03em',
+                            background: '#b45309', color: '#fef3c7', border: '1px solid #f59e0b',
+                          }}>PR</span>
+                        )}
+                        <span style={{ flexShrink: 0, fontSize: '0.7rem', color: 'var(--muted)' }}>{s.judgeName ?? '—'}</span>
+                        <span className="pr-value">{fmtMs(s.ao5 ?? 0, s.ao5 === null)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="pr-card pd-span-5">
+                <div className="pr-card-title">
+                  <span className="pr-title-accent" />
+                  {t('practice.athlete.section-title')}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  <div className="form-group" style={{ maxWidth: 340, marginBottom: 0, flex: 1, minWidth: 180 }}>
+                    <label>{t('practice.athlete.select-label')}</label>
+                    <select
+                      value={selectedAthleteId}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        setSelectedAthleteId(id);
+                        setIsStatsModalOpen(!!id);
+                      }}
+                    >
+                      <option value="">{t('practice.athlete.select-placeholder')}</option>
+                      {[...athletes].sort((a, b) => a.name.localeCompare(b.name)).map((a) => (
+                        <option key={a.id} value={a.id}>{`${a.name || ''}${a.lastName ? ' ' + a.lastName : ''}`}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {selectedAthleteId && !isStatsModalOpen && (
+                    <button className="pr-tab active" style={{ flex: '0 0 auto' }} onClick={() => setIsStatsModalOpen(true)}>
+                      {t('practice.athlete.view-stats')}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -504,17 +511,16 @@ export default function PracticePage() {
         .pr-page {
           background: var(--bg);
           color: var(--text);
-          padding: 1.25rem 1rem 1rem;
+          padding: 1rem 0;
         }
-        /* Fluid width instead of a flat max-width — a fixed cap either
-           wastes ~30-40% of the screen on a 1920px monitor or feels tight
-           on a 1366px laptop; 92vw tracks the viewport so both ends of
-           that range get a reasonable margin, capped at 1300px so it
-           doesn't stretch indefinitely on ultra-wide screens (this page's
-           widest deliberate content, .pr-panel-body, is self-capped at
-           640px anyway). */
+        /* Fluid width, fixed 16px side margin (32px total) up to a 1280px
+           cap — .pr-container is now the sole source of horizontal margin
+           (.pr-page carries no horizontal padding of its own, to avoid
+           double-counting). A flat max-width would waste ~30-40% of the
+           screen on a 1920px monitor; this keeps a comfortable, constant
+           margin instead of a proportional one. */
         .pr-container {
-          width: min(92vw, 1300px);
+          width: min(100% - 32px, 1280px);
           margin: 0 auto;
         }
 
@@ -528,7 +534,7 @@ export default function PracticePage() {
           backdrop-filter: blur(20px);
           border: 1px solid rgba(255,255,255,0.08);
           border-radius: 20px;
-          padding: 1.35rem 1.35rem 1rem;
+          padding: 1.25rem;
           box-shadow: 0 20px 50px rgba(0,0,0,0.35);
         }
         html[data-theme="soft-light"] .pr-card,
@@ -539,7 +545,7 @@ export default function PracticePage() {
         .pr-card-title {
           display: flex; align-items: center; gap: 0.55rem;
           font-size: 1.05rem; font-weight: 800; color: var(--text-primary);
-          margin-bottom: 0.8rem;
+          margin-bottom: 0.75rem;
         }
         .pr-card-subtitle {
           font-size: 0.7rem; font-weight: 500; color: var(--muted);
@@ -558,16 +564,16 @@ export default function PracticePage() {
            natural, comfortable width instead of stretching edge-to-edge
            now that the card itself spans the wide container. */
         .pr-tabs {
-          display: inline-flex; gap: 0.3rem;
+          display: inline-flex; gap: 0.25rem;
           background: rgba(255,255,255,0.03);
           border: 1px solid rgba(255,255,255,0.06);
-          border-radius: 13px; padding: 0.3rem;
-          margin-bottom: 0.9rem;
+          border-radius: 13px; padding: 0.25rem;
+          margin-bottom: 1rem;
           max-width: 100%;
         }
         .pr-tab {
           flex: 1; min-width: 0;
-          padding: 0.65rem 1.4rem; border: none; border-radius: 10px;
+          padding: 0.75rem 1.5rem; border: none; border-radius: 10px;
           background: transparent; color: var(--muted);
           font-size: 0.82rem; font-weight: 600; letter-spacing: -0.01em;
           cursor: pointer; font-family: inherit;
@@ -585,14 +591,18 @@ export default function PracticePage() {
 
         /* Card frame spans the wide container, but the actual rank list
            stays capped at a comfortable reading measure — a name/value
-           pair stretched across 1300px+ reads as broken, not spacious. */
-        .pr-panel-body { min-height: 140px; max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; justify-content: center; }
+           pair stretched across 1300px+ reads as broken, not spacious.
+           The min-height is a deliberate, kept exception to "avoid fixed
+           heights": without it, switching between Featured Ranking's 3
+           tabs (different row-counts each) visibly jumps the card's
+           height on every click. */
+        .pr-panel-body { min-height: 120px; max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; justify-content: center; }
         @keyframes prFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
         .pr-panel-body { animation: prFadeIn 200ms ease-out; }
 
         .pr-empty {
-          display: flex; flex-direction: column; align-items: center; gap: 0.6rem;
-          padding: 1.6rem 1rem; text-align: center;
+          display: flex; flex-direction: column; align-items: center; gap: 0.5rem;
+          padding: 1.5rem 1rem; text-align: center;
           color: var(--muted); font-size: 0.86rem;
         }
         .pr-empty-icon {
@@ -603,8 +613,8 @@ export default function PracticePage() {
 
         .pr-list { display: flex; flex-direction: column; }
         .pr-row {
-          display: flex; align-items: center; gap: 0.85rem;
-          padding: 0.65rem 0.5rem;
+          display: flex; align-items: center; gap: 0.75rem;
+          padding: 0.75rem 0.5rem;
           border-radius: 10px;
           border-bottom: 1px solid rgba(255,255,255,0.06);
           transition: background 0.15s ease;
@@ -631,15 +641,15 @@ export default function PracticePage() {
         /* ── Event strip ──────────────────────────────────────────────── */
         .es-wrap { position: relative; margin-top: 1rem; }
         .es-strip {
-          display: flex; flex-wrap: nowrap; gap: 0.55rem;
+          display: flex; flex-wrap: nowrap; gap: 0.5rem;
           overflow-x: auto; -webkit-overflow-scrolling: touch;
-          padding: 0.25rem 0.15rem 0.25rem;
+          padding: 0.25rem;
           scrollbar-width: none;
           -ms-overflow-style: none;
         }
         .es-strip::-webkit-scrollbar { display: none; }
         .es-fade {
-          position: absolute; top: 0; bottom: 0.7rem; width: 28px;
+          position: absolute; top: 0; bottom: 0.75rem; width: 28px;
           pointer-events: none; z-index: 2;
         }
         .es-fade-left { left: 0; background: linear-gradient(to right, var(--bg), transparent); }
@@ -661,9 +671,10 @@ export default function PracticePage() {
           box-shadow: 0 6px 16px rgba(124,58,237,0.35);
         }
 
-        /* ── Leaderboard + Activity row — asymmetric split, same idiom as
-           /profile's .profile-stats-row/-side (fixed narrow column for the
-           list-shaped widget, flexible wide column for the chart). ────── */
+        /* Personal Stats modal's internal 2-column layout (Comparison+
+           Heatmap / Trend) — unrelated to the main page's dashboard grid
+           below, kept as its own asymmetric split since the modal is a
+           separate, narrower surface. */
         .pr-below-grid {
           display: grid;
           grid-template-columns: minmax(300px, 420px) 1fr;
@@ -671,8 +682,30 @@ export default function PracticePage() {
           margin-top: 1rem;
           align-items: start;
         }
-        .pr-activity-col { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
         .pr-athlete-col { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+
+        /* ── Main dashboard grid ──────────────────────────────────────────
+           12 columns desktop, collapsing to full-width-per-card (visually
+           equivalent to a 6-column grid where every card spans all 6) at
+           tablet width, then a true single column at mobile. Row 2
+           (Leaderboard/Activity) opts into equal height via .pd-stretch;
+           row 3 (Today's Practice/Personal Stats) intentionally doesn't —
+           see the JSX comment above where these are used. */
+        .pd-grid {
+          display: grid;
+          grid-template-columns: repeat(12, minmax(0, 1fr));
+          gap: 1rem;
+          align-items: start;
+          margin-top: 1rem;
+        }
+        .pd-span-12 { grid-column: span 12; }
+        .pd-span-7 { grid-column: span 7; }
+        .pd-span-5 { grid-column: span 5; }
+        .pd-stretch { align-self: stretch; }
+
+        @media (max-width: 900px) {
+          .pd-span-7, .pd-span-5 { grid-column: span 12; }
+        }
 
         /* Personal Stats modal — reuses the global .wca-modal-backdrop
            (dimmed background, click-outside-to-close via stopPropagation
@@ -702,15 +735,9 @@ export default function PracticePage() {
         }
         .pas-close:hover { border-color: rgba(124,58,237,0.4); color: var(--text); }
 
-        /* Today's Practice empty state only — .pr-empty's default padding
-           (1.6rem) is sized for Featured Ranking's icon+text empty state;
-           this shell is just one line of muted text, so it doesn't need
-           as much air. Scoped to this card so Featured Ranking is untouched. */
-        .pr-today-card .pr-empty { padding: 0.9rem 1rem; }
-
         @media (max-width: 480px) {
-          .pr-page { padding: 1rem 0.7rem 2.5rem; }
-          .pr-card { padding: 1.05rem 1rem 0.85rem; border-radius: 16px; }
+          .pr-page { padding: 1rem 0 2rem; }
+          .pr-card { padding: 1rem; border-radius: 16px; }
           .pr-card-title { font-size: 0.98rem; }
           /* Narrow viewport: back to full-width equal-fill tabs — natural
              sizing risks cramping/overflow at this width. */
