@@ -8,14 +8,19 @@
 // every event for this athlete in one query; dates/sessions are just
 // grouped client-side, no new query.
 //
-// Only ever mounted inside AthleteProfileOverlay's "Дасгал" tab, which
-// stays hardcoded (no i18n) per the Phase 3 exception — this component
-// matches that convention.
+// Originally only mounted inside AthleteProfileOverlay's "Дасгал" tab
+// (hardcoded, no i18n, per the Phase 3 exception); now also reused on the
+// public /practice page's Athlete View, which IS fully bilingual, so the
+// title is i18n'd. `showScopeLabel` (default off) appends a "cross-event"
+// clarifier next to the title — only useful on /practice, where it sits
+// next to other event-filtered cards; AthleteProfileOverlay doesn't pass
+// it, so its rendering is unchanged.
 
 import { useEffect, useMemo, useState } from 'react';
 import { getPracticeHistoryForAthlete, todayInClubTz } from '@/lib/firebase/services/practiceSessions';
 import { getEvent } from '@/lib/wca-events';
 import { fmtMs } from '@/lib/timer-engine';
+import { useLang } from '@/lib/i18n';
 import type { PracticeSession } from '@/lib/types/practice';
 
 const WEEKS = 12;
@@ -37,7 +42,14 @@ function dateNDaysBefore(dateStr: string, n: number): string {
   return dt.toISOString().slice(0, 10);
 }
 
-export default function PracticeHeatMap({ athleteId }: { athleteId: string }) {
+export default function PracticeHeatMap({
+  athleteId,
+  showScopeLabel = false,
+}: {
+  athleteId: string;
+  showScopeLabel?: boolean;
+}) {
+  const { t } = useLang();
   const [sessions, setSessions] = useState<PracticeSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -88,7 +100,7 @@ export default function PracticeHeatMap({ athleteId }: { athleteId: string }) {
         fontSize: '0.7rem', fontWeight: 700, color: 'var(--muted)',
         textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.7rem',
       }}>
-        Идэвхийн зураглал
+        {t('practice.heatmap.title')}{showScopeLabel && ` · ${t('practice.heatmap.scope')}`}
       </div>
 
       <div style={{ overflowX: 'auto' }}>

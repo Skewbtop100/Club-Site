@@ -1,15 +1,23 @@
 'use client';
 
-// Hand-rolled inline SVG line chart — same technique as the Timer's Stats
-// tab (app/timer/page.tsx, `MobileLineChart`): this codebase has no chart
-// library dependency, so this mirrors that established pattern (manual
-// M/L path string, viewBox scaling) rather than introducing one, scoped
-// down to a single Ao5 series instead of Timer's four-series overlay.
+// Hand-rolled inline SVG line chart for a continuous Ao5 trend — same
+// technique as the Timer's Stats tab (app/timer/page.tsx,
+// `MobileLineChart`): no chart library in this codebase, manual M/L path
+// string + viewBox scaling.
+//
+// aspect-ratio (not a fixed pixel height) keeps the viewBox's proportions
+// wherever this is mounted, so a wide container doesn't distort slope —
+// slope carries meaning for a trajectory ("is this athlete trending
+// faster"). A `mode="count"` bar variant briefly lived here for
+// /practice's Activity card; that card has since moved to a calendar-
+// heatmap-style grid (components/practice/MonthlyActivityGrid.tsx) since
+// a bar chart didn't read well with only 1-2 non-zero days in a typical
+// month. This component is back to its original single purpose: Ao5.
 
 export default function PracticeTrendChart({
   points,
 }: {
-  points: { date: string; ao5: number }[];
+  points: { date: string; value: number }[];
 }) {
   const n = points.length;
   if (n < 2) {
@@ -23,7 +31,7 @@ export default function PracticeTrendChart({
     );
   }
 
-  const values = points.map((p) => p.ao5);
+  const values = points.map((p) => p.value);
   const minMs = Math.min(...values);
   const maxMs = Math.max(...values);
   const pad = (maxMs - minMs) * 0.12 || 200;
@@ -34,18 +42,22 @@ export default function PracticeTrendChart({
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
   const xAt = (i: number) => padL + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
-  const yAt = (ms: number) => padT + (yMax === yMin ? innerH / 2 : (1 - (ms - yMin) / (yMax - yMin)) * innerH);
+  const yAt = (v: number) => padT + (yMax === yMin ? innerH / 2 : (1 - (v - yMin) / (yMax - yMin)) * innerH);
 
   let d = '';
   points.forEach((p, i) => {
-    d += `${i === 0 ? 'M' : 'L'} ${xAt(i).toFixed(1)} ${yAt(p.ao5).toFixed(1)} `;
+    d += `${i === 0 ? 'M' : 'L'} ${xAt(i).toFixed(1)} ${yAt(p.value).toFixed(1)} `;
   });
 
   const ticks = [yMin, (yMin + yMax) / 2, yMax];
   const fmtTick = (ms: number) => (ms / 1000).toFixed(1) + 's';
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: '100%', height: 180, display: 'block' }}>
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="xMidYMid meet"
+      style={{ width: '100%', aspectRatio: `${W} / ${H}`, minHeight: 140, display: 'block' }}
+    >
       {ticks.map((t, i) => (
         <g key={i}>
           <line x1={padL} x2={W - padR} y1={yAt(t)} y2={yAt(t)} stroke="rgba(255,255,255,0.08)" strokeWidth={1} />
@@ -54,7 +66,7 @@ export default function PracticeTrendChart({
       ))}
       <path d={d} fill="none" stroke="#a78bfa" strokeWidth={1.6} strokeLinejoin="round" strokeLinecap="round" />
       {points.map((p, i) => (
-        <circle key={i} cx={xAt(i)} cy={yAt(p.ao5)} r={2.2} fill="#a78bfa" />
+        <circle key={i} cx={xAt(i)} cy={yAt(p.value)} r={2.2} fill="#a78bfa" />
       ))}
     </svg>
   );

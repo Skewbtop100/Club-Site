@@ -513,11 +513,19 @@ const en = {
   'practice.cmp.no-data': 'No data yet',
 
   // PRACTICE LOG — LEADERBOARD
-  'practice.lb.title': 'Club Leaderboard (last 30 days)',
+  'practice.lb.title': 'Club Leaderboard',
   'practice.lb.empty': 'No practice sessions recorded for this event yet.',
+  'practice.lb.tab-times': 'Best Times',
+  'practice.lb.tab-streaks': 'Streaks',
+  'practice.lb.subtitle-times': 'Last 30 days',
 
   // PRACTICE LOG — STREAK
   'practice.streak.days-suffix': 'day streak',
+
+  // PRACTICE LOG — STREAK LEADERBOARD
+  'practice.streaklb.title': '🔥 Streak Leaderboard',
+  'practice.streaklb.subtitle': 'All events · last 90 days',
+  'practice.streaklb.empty': 'No active streaks right now',
 
   // PRACTICE LOG — BADGES
   'practice.badge.new_pr': '🏆 New PR!',
@@ -531,6 +539,24 @@ const en = {
   'practice.grid.pr-count': 'Most PRs This Month',
   'practice.grid.times-suffix': 'times',
   'practice.grid.empty': 'No data yet',
+
+  // PRACTICE LOG — MONTHLY ACTIVITY TREND
+  'practice.activity.title': "This Month's Activity",
+  'practice.activity.caption': 'Club-wide, all athletes — not a personal stat',
+  'practice.activity.sessions-suffix': 'sessions this month',
+
+  // PRACTICE LOG — TODAY'S PRACTICE
+  'practice.today.title': "Today's Practice",
+  'practice.today.empty': 'No one has practiced this event today yet.',
+
+  // PRACTICE LOG — ATHLETE VIEW
+  'practice.athlete.section-title': 'Personal Stats',
+  'practice.athlete.select-label': 'Athlete',
+  'practice.athlete.select-placeholder': 'Select an athlete to view their stats',
+  'practice.athlete.view-stats': 'View Stats',
+  'practice.trend.title': 'Ao5 Trend',
+  'practice.heatmap.title': 'Activity Map',
+  'practice.heatmap.scope': 'All events',
 } as const;
 
 export type TranslationKey = keyof typeof en;

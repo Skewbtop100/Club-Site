@@ -16,7 +16,7 @@ const RANK_COLOR = ['#fbbf24', '#d1d5db', '#fb923c'];
 
 export default function PracticeLeaderboardWidget({ event }: { event: string }) {
   const { t } = useLang();
-  const [rows, setRows] = useState<{ athleteId: string; athleteName: string; bestAo5: number; date: string }[]>([]);
+  const [rows, setRows] = useState<{ athleteId: string; athleteName: string; bestAo5: number; date: string; isPR: boolean }[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -59,6 +59,13 @@ export default function PracticeLeaderboardWidget({ event }: { event: string }) 
                 flex: 1, fontSize: '0.86rem', color: 'var(--text)',
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               }}>{r.athleteName}</span>
+              {r.isPR && (
+                <span style={{
+                  flexShrink: 0, fontSize: '0.6rem', fontWeight: 900,
+                  padding: '1px 5px', borderRadius: 4, letterSpacing: '0.03em',
+                  background: '#b45309', color: '#fef3c7', border: '1px solid #f59e0b',
+                }}>PR</span>
+              )}
               <span style={{ fontSize: '0.7rem', color: 'var(--muted)' }}>{r.date}</span>
               <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#a78bfa', fontSize: '0.88rem', minWidth: 60, textAlign: 'right' }}>
                 {fmtMs(r.bestAo5)}

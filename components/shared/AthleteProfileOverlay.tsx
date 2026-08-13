@@ -958,7 +958,7 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
                           <PracticeTrendChart
                             points={practiceTrend
                               .filter((s): s is PracticeSession & { ao5: number } => s.ao5 !== null)
-                              .map(s => ({ date: s.date, ao5: s.ao5 }))}
+                              .map(s => ({ date: s.date, value: s.ao5 }))}
                           />
                         )}
                       </div>

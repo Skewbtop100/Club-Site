@@ -513,11 +513,19 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'practice.cmp.no-data': 'Одоогоор мэдээлэл алга',
 
   // PRACTICE LOG — LEADERBOARD
-  'practice.lb.title': 'Клубын эрэмбэ (сүүлийн 30 хоног)',
+  'practice.lb.title': 'Клубын эрэмбэ',
   'practice.lb.empty': 'Энэ төрлөөр одоогоор дасгалын бүртгэл алга байна.',
+  'practice.lb.tab-times': 'Шилдэг цаг',
+  'practice.lb.tab-streaks': 'Дараалал',
+  'practice.lb.subtitle-times': 'Сүүлийн 30 хоног',
 
   // PRACTICE LOG — STREAK
   'practice.streak.days-suffix': 'өдрийн дараалал',
+
+  // PRACTICE LOG — STREAK LEADERBOARD
+  'practice.streaklb.title': '🔥 Дараалалын эрэмбэ',
+  'practice.streaklb.subtitle': 'Бүх төрлөөр · сүүлийн 90 хоног',
+  'practice.streaklb.empty': 'Одоогоор идэвхтэй дараалал алга',
 
   // PRACTICE LOG — BADGES
   'practice.badge.new_pr': '🏆 Шинэ дархан илэрсэн!',
@@ -531,6 +539,24 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'practice.grid.pr-count': 'Сарын хамгийн олон PR',
   'practice.grid.times-suffix': 'удаа',
   'practice.grid.empty': 'Одоогоор мэдээлэл алга',
+
+  // PRACTICE LOG — MONTHLY ACTIVITY TREND
+  'practice.activity.title': 'Энэ сарын идэвх',
+  'practice.activity.caption': 'Клубын хэмжээнд, бүх тамирчид — хувийн үзүүлэлт биш',
+  'practice.activity.sessions-suffix': 'удаа дасгал хийсэн (энэ сард)',
+
+  // PRACTICE LOG — TODAY'S PRACTICE
+  'practice.today.title': 'Өнөөдрийн дасгал',
+  'practice.today.empty': 'Өнөөдөр энэ төрлөөр хараахан хэн ч дасгал хийгээгүй байна.',
+
+  // PRACTICE LOG — ATHLETE VIEW
+  'practice.athlete.section-title': 'Хувийн үзүүлэлт',
+  'practice.athlete.select-label': 'Тамирчин',
+  'practice.athlete.select-placeholder': 'Үзүүлэлтийг харах тамирчнаа сонгоно уу',
+  'practice.athlete.view-stats': 'Үзүүлэлт харах',
+  'practice.trend.title': 'Ao5-ийн чиг хандлага',
+  'practice.heatmap.title': 'Идэвхийн зураглал',
+  'practice.heatmap.scope': 'Бүх төрлөөр',
 };
 
 export default mn;

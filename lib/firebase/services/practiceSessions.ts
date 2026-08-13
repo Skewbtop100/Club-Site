@@ -93,11 +93,13 @@ export async function getPracticeHistoryForAthlete(
 export async function getPracticeLeaderboard(
   event: string,
   days: number,
-): Promise<{ athleteId: string; athleteName: string; bestAo5: number; date: string }[]> {
+): Promise<{ athleteId: string; athleteName: string; bestAo5: number; date: string; isPR: boolean }[]> {
+  const ATHLETE_CHUNK = 10;
+  const windowStart = daysAgoInClubTz(days);
   const q = query(
     practiceSessionsCol,
     where('event', '==', event),
-    where('date', '>=', daysAgoInClubTz(days)),
+    where('date', '>=', windowStart),
   );
   const snap = await getDocs(q);
 
@@ -111,8 +113,37 @@ export async function getPracticeLeaderboard(
     }
   }
 
+  // Pre-window "best ao5" baseline, scoped to just the athletes who made
+  // this leaderboard — same chunked athleteId-in pattern getMonthlyEventStats
+  // uses for its PR baseline, reusing the same (event, athleteId, date)
+  // composite index. bestAo5 above is only "best within the window" — an
+  // athlete's true all-time PR could sit just outside it, so this is what
+  // actually confirms an all-time PR.
+  const athleteIds = Array.from(bestByAthlete.keys());
+  const baseline = new Map<string, number | null>();
+  for (let i = 0; i < athleteIds.length; i += ATHLETE_CHUNK) {
+    const idsChunk = athleteIds.slice(i, i + ATHLETE_CHUNK);
+    idsChunk.forEach((id) => baseline.set(id, null));
+    const priorSnap = await getDocs(query(
+      practiceSessionsCol,
+      where('event', '==', event),
+      where('athleteId', 'in', idsChunk),
+      where('date', '<', windowStart),
+    ));
+    for (const d of priorSnap.docs) {
+      const s = d.data();
+      if (s.ao5 === null) continue;
+      const cur = baseline.get(s.athleteId) ?? null;
+      if (cur === null || s.ao5 < cur) baseline.set(s.athleteId, s.ao5);
+    }
+  }
+
   return Array.from(bestByAthlete.entries())
-    .map(([athleteId, v]) => ({ athleteId, athleteName: v.athleteName, bestAo5: v.bestAo5, date: v.date }))
+    .map(([athleteId, v]) => {
+      const baselineVal = baseline.get(athleteId) ?? null;
+      const isPR = baselineVal === null || v.bestAo5 < baselineVal;
+      return { athleteId, athleteName: v.athleteName, bestAo5: v.bestAo5, date: v.date, isPR };
+    })
     .sort((a, b) => a.bestAo5 - b.bestAo5);
 }
 
@@ -151,9 +182,9 @@ interface MonthlyLeaderboardRow { athleteId: string; athleteName: string }
 export async function getMonthlyEventStats(
   monthStr: string,
 ): Promise<Record<string, {
-  improvement: (MonthlyLeaderboardRow & { improvementSeconds: number })[];
-  participation: (MonthlyLeaderboardRow & { count: number })[];
-  prCount: (MonthlyLeaderboardRow & { count: number })[];
+  improvement: (MonthlyLeaderboardRow & { improvementSeconds: number; isPR: boolean })[];
+  participation: (MonthlyLeaderboardRow & { count: number; isPR: boolean })[];
+  prCount: (MonthlyLeaderboardRow & { count: number; isPR: boolean })[];
 }>> {
   const ATHLETE_CHUNK = 10;
   const [y, m] = monthStr.split('-').map(Number);
@@ -206,22 +237,35 @@ export async function getMonthlyEventStats(
 
   // ── 3. Compute the 3 leaderboards per event, in memory ────────────────
   const result: Record<string, {
-    improvement: (MonthlyLeaderboardRow & { improvementSeconds: number })[];
-    participation: (MonthlyLeaderboardRow & { count: number })[];
-    prCount: (MonthlyLeaderboardRow & { count: number })[];
+    improvement: (MonthlyLeaderboardRow & { improvementSeconds: number; isPR: boolean })[];
+    participation: (MonthlyLeaderboardRow & { count: number; isPR: boolean })[];
+    prCount: (MonthlyLeaderboardRow & { count: number; isPR: boolean })[];
   }> = {};
 
   for (const [eventId, byAthlete] of byEvent) {
-    const improvement: (MonthlyLeaderboardRow & { improvementSeconds: number })[] = [];
-    const participation: (MonthlyLeaderboardRow & { count: number })[] = [];
-    const prCount: (MonthlyLeaderboardRow & { count: number })[] = [];
+    const improvement: (MonthlyLeaderboardRow & { improvementSeconds: number; isPR: boolean })[] = [];
+    const participation: (MonthlyLeaderboardRow & { count: number; isPR: boolean })[] = [];
+    const prCount: (MonthlyLeaderboardRow & { count: number; isPR: boolean })[] = [];
 
     for (const [athleteId, sessions] of byAthlete) {
       const athleteName = sessions[0].athleteName;
 
+      // "Хамгийн олон PR" — walk chronologically from the pre-month
+      // baseline, counting every session that beat the running best.
+      // isPR (== prs > 0) is reused below for improvement/participation
+      // too — "beat pre-month baseline at least once this month" is the
+      // same fact whichever list the athlete shows up in.
+      let running = baseline.get(`${eventId}|${athleteId}`) ?? null;
+      let prs = 0;
+      for (const s of sessions) {
+        if (s.ao5 === null) continue;
+        if (running === null || s.ao5 < running) { running = s.ao5; prs += 1; }
+      }
+      const isPR = prs > 0;
+
       // "Хамгийн олон удаа оролцсон" — every session this month counts as
       // a day practiced, regardless of whether ao5 came out null.
-      participation.push({ athleteId, athleteName, count: sessions.length });
+      participation.push({ athleteId, athleteName, count: sessions.length, isPR });
 
       // "Сарын шилдэг ахиц" — first vs best ao5 this month; needs 2+
       // ao5-bearing sessions to mean anything (a single sitting can't show
@@ -230,18 +274,10 @@ export async function getMonthlyEventStats(
       if (withAo5.length >= 2) {
         const first = withAo5[0].ao5;
         const best = Math.min(...withAo5.map((s) => s.ao5));
-        improvement.push({ athleteId, athleteName, improvementSeconds: (first - best) / 1000 });
+        improvement.push({ athleteId, athleteName, improvementSeconds: (first - best) / 1000, isPR });
       }
 
-      // "Хамгийн олон PR" — walk chronologically from the pre-month
-      // baseline, counting every session that beat the running best.
-      let running = baseline.get(`${eventId}|${athleteId}`) ?? null;
-      let prs = 0;
-      for (const s of sessions) {
-        if (s.ao5 === null) continue;
-        if (running === null || s.ao5 < running) { running = s.ao5; prs += 1; }
-      }
-      if (prs > 0) prCount.push({ athleteId, athleteName, count: prs });
+      if (prs > 0) prCount.push({ athleteId, athleteName, count: prs, isPR });
     }
 
     improvement.sort((a, b) => b.improvementSeconds - a.improvementSeconds);
@@ -256,6 +292,113 @@ export async function getMonthlyEventStats(
   }
 
   return result;
+}
+
+/**
+ * Club-wide day-by-day session counts for one calendar month, optionally
+ * scoped to a single event — same date-range query shape as
+ * getMonthlyEventStats' step 1, just re-aggregated by day instead of by
+ * athlete, and with no PR-baseline fan-out since this doesn't need one.
+ *
+ * Every day in the month gets an entry (0 if nothing was logged) so gaps
+ * in practice show as a dip to zero rather than a skipped point. For the
+ * current month, stops at today rather than padding out future days.
+ *
+ * The `event` filter reuses the existing (event asc, date asc) composite
+ * index — see firestore.indexes.json — so no new index is required.
+ */
+export async function getMonthlyActivityTrend(
+  monthStr: string,
+  event?: string,
+): Promise<{ date: string; count: number }[]> {
+  const [y, m] = monthStr.split('-').map(Number);
+  const monthStart = `${monthStr}-01`;
+  const nextMonthStart = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10);
+
+  const snap = await getDocs(event
+    ? query(
+        practiceSessionsCol,
+        where('event', '==', event),
+        where('date', '>=', monthStart),
+        where('date', '<', nextMonthStart),
+        orderBy('date', 'asc'),
+      )
+    : query(
+        practiceSessionsCol,
+        where('date', '>=', monthStart),
+        where('date', '<', nextMonthStart),
+        orderBy('date', 'asc'),
+      ));
+
+  const counts = new Map<string, number>();
+  for (const doc of snap.docs) {
+    const date = doc.data().date;
+    counts.set(date, (counts.get(date) ?? 0) + 1);
+  }
+
+  const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const isCurrentMonth = todayInClubTz().slice(0, 7) === monthStr;
+  const lastDay = isCurrentMonth ? Number(todayInClubTz().slice(8, 10)) : daysInMonth;
+
+  const series: { date: string; count: number }[] = [];
+  for (let d = 1; d <= lastDay; d++) {
+    const date = `${monthStr}-${String(d).padStart(2, '0')}`;
+    series.push({ date, count: counts.get(date) ?? 0 });
+  }
+  return series;
+}
+
+/**
+ * All sessions for one event on today's date, across every athlete — the
+ * flat "who practiced this today" roster for /practice's Today's Practice
+ * card. Each athlete has at most one session per event per day (enforced
+ * in createPracticeSession), so this is a plain roster, not an
+ * aggregation like getPracticeLeaderboard's "best across N days".
+ *
+ * isPR uses the exact same chunked athleteId-in baseline pattern as
+ * getPracticeLeaderboard, just with "today" as the cutoff instead of a
+ * rolling window start — reuses the same (event, athleteId, date)
+ * composite index, no new index required.
+ */
+export async function getTodaysSessionsForEvent(
+  event: string,
+): Promise<(PracticeSession & { isPR: boolean })[]> {
+  const ATHLETE_CHUNK = 10;
+  const today = todayInClubTz();
+  const snap = await getDocs(query(
+    practiceSessionsCol,
+    where('event', '==', event),
+    where('date', '==', today),
+  ));
+  const sessions = snap.docs.map((d) => d.data());
+  if (sessions.length === 0) return [];
+
+  const athleteIds = Array.from(new Set(sessions.map((s) => s.athleteId)));
+  const baseline = new Map<string, number | null>();
+  for (let i = 0; i < athleteIds.length; i += ATHLETE_CHUNK) {
+    const idsChunk = athleteIds.slice(i, i + ATHLETE_CHUNK);
+    idsChunk.forEach((id) => baseline.set(id, null));
+    const priorSnap = await getDocs(query(
+      practiceSessionsCol,
+      where('event', '==', event),
+      where('athleteId', 'in', idsChunk),
+      where('date', '<', today),
+    ));
+    for (const d of priorSnap.docs) {
+      const s = d.data();
+      if (s.ao5 === null) continue;
+      const cur = baseline.get(s.athleteId) ?? null;
+      if (cur === null || s.ao5 < cur) baseline.set(s.athleteId, s.ao5);
+    }
+  }
+
+  return sessions
+    .map((s) => {
+      const baselineVal = baseline.get(s.athleteId) ?? null;
+      const isPR = s.ao5 !== null && (baselineVal === null || s.ao5 < baselineVal);
+      return { ...s, isPR };
+    })
+    .sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis());
 }
 
 /**
@@ -387,6 +530,58 @@ export async function getPracticeStreak(
   }
 
   return { currentStreak, longestStreak, lastPracticeDate };
+}
+
+/**
+ * Current cross-event practice streak per athlete, club-wide, ranked
+ * descending — the "who's most consistent" leaderboard for /practice.
+ * Ignores selectedEvent entirely (same semantics as getPracticeStreak:
+ * any event practiced on a given day keeps the streak alive).
+ *
+ * One bounded-window query across the whole collection (no athleteId
+ * filter) instead of one getPracticeStreak() call per roster athlete —
+ * same "single query, group in memory" strategy as getMonthlyEventStats/
+ * getMonthlyActivityTrend, avoiding N unbounded per-athlete history
+ * fetches. Trade-off: a streak longer than `days` reads as truncated to
+ * `days` — 90 is generous given how little history this feature has so
+ * far; revisit if the club ever produces a longer unbroken streak.
+ * currentStreak-only (no longestStreak-ever) is intentional — that field
+ * genuinely needs unbounded history and isn't cheap to compute in bulk.
+ */
+export async function getStreakLeaderboard(
+  days = 90,
+): Promise<{ athleteId: string; athleteName: string; currentStreak: number; lastPracticeDate: string }[]> {
+  const today = todayInClubTz();
+  const snap = await getDocs(query(
+    practiceSessionsCol,
+    where('date', '>=', daysAgoInClubTz(days)),
+  ));
+
+  // athleteId -> { athleteName, dates } — any event on a given day counts,
+  // so dedupe by date only, not date+event.
+  const byAthlete = new Map<string, { athleteName: string; dates: Set<string> }>();
+  for (const doc of snap.docs) {
+    const s = doc.data();
+    let entry = byAthlete.get(s.athleteId);
+    if (!entry) { entry = { athleteName: s.athleteName, dates: new Set() }; byAthlete.set(s.athleteId, entry); }
+    entry.dates.add(s.date);
+  }
+
+  const rows: { athleteId: string; athleteName: string; currentStreak: number; lastPracticeDate: string }[] = [];
+  for (const [athleteId, { athleteName, dates }] of byAthlete) {
+    const uniqueDates = Array.from(dates).sort();
+    const lastPracticeDate = uniqueDates[uniqueDates.length - 1];
+    if (daysBetween(lastPracticeDate, today) > 1) continue; // streak already broken
+
+    let currentStreak = 1;
+    for (let i = uniqueDates.length - 1; i > 0; i--) {
+      if (daysBetween(uniqueDates[i - 1], uniqueDates[i]) === 1) currentStreak += 1;
+      else break;
+    }
+    rows.push({ athleteId, athleteName, currentStreak, lastPracticeDate });
+  }
+
+  return rows.sort((a, b) => b.currentStreak - a.currentStreak);
 }
 
 // ── Ao5 computation ──────────────────────────────────────────────────────
