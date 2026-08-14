@@ -119,17 +119,6 @@ export default function Navbar() {
             );
           })}
 
-        {/* Practice Log — top-level like Timer/Competition (not CMS-driven
-            via settings/navigation, hardcoded here per its own nav item),
-            same "featured" gradient + pulsing dot treatment as Timer.
-            Visible only when signed in. */}
-        {user && (
-          <Link href="/practice" className="nav-link nav-featured">
-            {t('nav.practice')}
-            <span className="nav-featured-dot" aria-hidden />
-          </Link>
-        )}
-
         {/* Auth dropdown */}
         <div style={{ position: 'relative' }}>
           <button

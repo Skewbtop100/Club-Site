@@ -8,18 +8,8 @@ import { useWcaRecords } from '@/lib/hooks/useWcaRecords';
 import { fmtTime, formatDate } from '@/lib/time-utils';
 import { fmtMs } from '@/lib/timer-engine';
 import { WCA_EVENTS } from '@/lib/wca-events';
-import {
-  getPracticeHistoryForAthlete,
-  getPracticeComparison,
-  getPracticeStreak,
-} from '@/lib/firebase/services/practiceSessions';
-import { getPracticeBadges } from '@/lib/practiceBadges';
-import PracticeTrendChart from '@/components/practice/PracticeTrendChart';
-import ProgressTimeline from '@/components/practice/ProgressTimeline';
-import PracticeHeatMap from '@/components/practice/PracticeHeatMap';
 import type { Athlete, Result, Competition } from '@/lib/types';
 import type { RecordBadge } from '@/lib/record-badges';
-import type { PracticeSession } from '@/lib/types/practice';
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -66,7 +56,7 @@ interface Props {
   onClose: () => void;
 }
 
-type Tab = 'history' | 'records' | 'medals' | 'practice';
+type Tab = 'history' | 'records' | 'medals';
 
 export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
   const [tab, setTab] = useState<Tab>('history');
@@ -503,90 +493,6 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
     return { historyBadgeMap: map, currentPBs: pbs };
   }, [allResults, historyEvent, compMap, globalResults, wcaRecords]);
 
-  // ── Practice Log tab ────────────────────────────────────────────────────
-  // Independent of the results/competitions fetch above — a separate
-  // collection, so it gets its own effect rather than folding into the
-  // existing Promise.all (keeps this additive, doesn't touch the
-  // Competition-History/Records/Medals data flow at all).
-  const [practiceSessions, setPracticeSessions] = useState<PracticeSession[]>([]);
-  const [practiceLoading, setPracticeLoading] = useState(true);
-  const [practiceEvent, setPracticeEvent] = useState<string | null>(null);
-  const [practiceTrend, setPracticeTrend] = useState<PracticeSession[]>([]);
-  const [practiceTrendLoading, setPracticeTrendLoading] = useState(false);
-  const [expandedPracticeId, setExpandedPracticeId] = useState<string | null>(null);
-  const [practiceStreak, setPracticeStreak] = useState<{ currentStreak: number; longestStreak: number } | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setPracticeLoading(true);
-    getPracticeHistoryForAthlete(athlete.id)
-      .then((sessions) => { if (!cancelled) setPracticeSessions(sessions); })
-      .catch(() => { if (!cancelled) setPracticeSessions([]); })
-      .finally(() => { if (!cancelled) setPracticeLoading(false); });
-    return () => { cancelled = true; };
-  }, [athlete.id]);
-
-  useEffect(() => {
-    let cancelled = false;
-    getPracticeStreak(athlete.id)
-      .then((s) => { if (!cancelled) setPracticeStreak(s); })
-      .catch(() => { if (!cancelled) setPracticeStreak(null); });
-    return () => { cancelled = true; };
-  }, [athlete.id]);
-
-  // Events this athlete has practice sessions for — same derivation shape
-  // as `athleteEvents` above, for a matching event-pill picker.
-  const practiceEvents = useMemo(() => {
-    const ids = new Set(practiceSessions.map((s) => s.event));
-    const evts = WCA_EVENTS.filter((e) => ids.has(e.id));
-    evts.sort((a, b) => {
-      const ai = EVENT_ORDER.indexOf(a.id);
-      const bi = EVENT_ORDER.indexOf(b.id);
-      return (ai >= 0 ? ai : 100) - (bi >= 0 ? bi : 100);
-    });
-    return evts;
-  }, [practiceSessions]);
-
-  useEffect(() => {
-    if (practiceEvents.length > 0 && !practiceEvent) {
-      setPracticeEvent(practiceEvents[0].id);
-    }
-  }, [practiceEvents, practiceEvent]);
-
-  // 30-day trend for the chart — reuses Phase 1/3's getPracticeComparison
-  // rather than re-deriving a date cutoff here.
-  useEffect(() => {
-    if (!practiceEvent) { setPracticeTrend([]); return; }
-    let cancelled = false;
-    setPracticeTrendLoading(true);
-    getPracticeComparison(athlete.id, practiceEvent)
-      .then((c) => { if (!cancelled) setPracticeTrend(c.trend); })
-      .catch(() => { if (!cancelled) setPracticeTrend([]); })
-      .finally(() => { if (!cancelled) setPracticeTrendLoading(false); });
-    return () => { cancelled = true; };
-  }, [athlete.id, practiceEvent]);
-
-  // Full (not 30-day-limited) history for the selected event, newest first —
-  // already ordered that way by getPracticeHistoryForAthlete's query.
-  const practiceEventSessions = useMemo(() => {
-    if (!practiceEvent) return [];
-    return practiceSessions.filter((s) => s.event === practiceEvent);
-  }, [practiceSessions, practiceEvent]);
-
-  // Which sessions were a new PR *at the time* — recomputed from the
-  // sessions strictly before each one (chronologically), not stored on the
-  // document. Badges stay a pure, on-the-fly derivation everywhere they're
-  // shown (see lib/practiceBadges.ts).
-  const practiceNewPrIds = useMemo(() => {
-    const ascending = [...practiceEventSessions].sort((a, b) => a.date.localeCompare(b.date));
-    const ids = new Set<string>();
-    ascending.forEach((s, idx) => {
-      const priorHistory = ascending.slice(0, idx);
-      if (getPracticeBadges(s, priorHistory).includes('new_pr')) ids.add(s.id);
-    });
-    return ids;
-  }, [practiceEventSessions]);
-
   const openSolves = (e: React.MouseEvent, solves: (number | null)[]) => {
     if (!solves || solves.length === 0) return;
     e.stopPropagation();
@@ -727,7 +633,6 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
             { key: 'history' as Tab, label: 'Competition History' },
             { key: 'records' as Tab, label: 'Records' },
             { key: 'medals' as Tab, label: 'Medals' },
-            { key: 'practice' as Tab, label: 'Дасгал' },
           ]).map(t => (
             <button
               key={t.key}
@@ -911,122 +816,6 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
                           </div>
                         ));
                       })()}
-                    </>
-                  )}
-                </div>
-              )}
-
-              {/* TAB 4: Practice Log */}
-              {tab === 'practice' && (
-                <div className="apo-tab-content">
-                  {practiceLoading ? (
-                    <div className="apo-loading"><div className="apo-spinner" /></div>
-                  ) : practiceSessions.length === 0 ? (
-                    <div className="apo-empty">Одоогоор дасгалын бүртгэл алга</div>
-                  ) : (
-                    <>
-                      {practiceStreak && (practiceStreak.currentStreak > 0 || practiceStreak.longestStreak > 0) && (
-                        <div style={{
-                          display: 'flex', gap: '1.2rem', justifyContent: 'center',
-                          marginBottom: '1rem', fontSize: '0.9rem', fontWeight: 700,
-                        }}>
-                          <span style={{ color: '#fbbf24' }}>🔥 Current streak: {practiceStreak.currentStreak}d</span>
-                          <span style={{ color: 'var(--muted)' }}>Longest: {practiceStreak.longestStreak}d</span>
-                        </div>
-                      )}
-
-                      <div className="apo-event-pills" style={{ justifyContent: 'center' }}>
-                        {practiceEvents.map(ev => (
-                          <button
-                            key={ev.id}
-                            className={`apo-ep${practiceEvent === ev.id ? ' active' : ''}`}
-                            onClick={() => { setPracticeEvent(ev.id); setExpandedPracticeId(null); }}
-                          >{ev.name}</button>
-                        ))}
-                      </div>
-
-                      {practiceEvent && <ProgressTimeline athleteId={athlete.id} event={practiceEvent} />}
-
-                      <div style={{
-                        margin: '1rem 0', padding: '1rem 0.75rem',
-                        background: 'var(--card)', border: '1px solid rgba(255,255,255,0.06)',
-                        borderRadius: 12,
-                      }}>
-                        {practiceTrendLoading ? (
-                          <div className="apo-loading"><div className="apo-spinner" /></div>
-                        ) : (
-                          <PracticeTrendChart
-                            points={practiceTrend
-                              .filter((s): s is PracticeSession & { ao5: number } => s.ao5 !== null)
-                              .map(s => ({ date: s.date, value: s.ao5 }))}
-                          />
-                        )}
-                      </div>
-
-                      <PracticeHeatMap athleteId={athlete.id} />
-
-                      {practiceEventSessions.length === 0 ? (
-                        <div className="apo-empty">No practice sessions for this event</div>
-                      ) : (
-                        <div className="apo-table-wrap">
-                          <table className="apo-table apo-history-table">
-                            <thead>
-                              <tr>
-                                <th>Date</th>
-                                <th className="r">Ao5</th>
-                                <th>Judge</th>
-                                <th className="r"></th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {practiceEventSessions.map(s => {
-                                const isExpanded = expandedPracticeId === s.id;
-                                return (
-                                  <Fragment key={s.id}>
-                                    <tr
-                                      onClick={() => setExpandedPracticeId(isExpanded ? null : s.id)}
-                                      style={{ cursor: 'pointer' }}
-                                    >
-                                      <td className="apo-td-round">
-                                        {s.date}
-                                        {practiceNewPrIds.has(s.id) && (
-                                          <span style={{
-                                            marginLeft: '0.4rem', fontSize: '0.6rem', fontWeight: 900,
-                                            padding: '1px 5px', borderRadius: 4, letterSpacing: '0.03em',
-                                            background: '#b45309', color: '#fef3c7', border: '1px solid #f59e0b',
-                                          }}>PR</span>
-                                        )}
-                                      </td>
-                                      <td className={`r mono bold${s.ao5 === null ? ' dnf' : ''}`}>
-                                        {fmtMs(s.ao5 ?? 0, s.ao5 === null)}
-                                      </td>
-                                      <td>{s.judgeName ?? '—'}</td>
-                                      <td className="r" style={{ color: 'var(--muted)' }}>{isExpanded ? '▲' : '▼'}</td>
-                                    </tr>
-                                    {isExpanded && (
-                                      <tr>
-                                        <td colSpan={4} style={{ background: 'rgba(124,58,237,0.04)' }}>
-                                          <div style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--muted)', marginBottom: '0.5rem', lineHeight: 1.5 }}>
-                                            {s.scramble}
-                                          </div>
-                                          <div className="apo-solves-row">
-                                            {s.solves.map((v, i) => (
-                                              <span key={i} className={`apo-solve-cell${v === -1 ? ' dnf' : ''}`}>
-                                                <span className="apo-solve-label">S{i + 1}</span>
-                                                <span className="apo-solve-val">{fmtMs(v, v === -1)}</span>
-                                              </span>
-                                            ))}
-                                          </div>
-                                        </td>
-                                      </tr>
-                                    )}
-                                  </Fragment>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
                     </>
                   )}
                 </div>
