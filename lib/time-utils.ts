@@ -116,3 +116,15 @@ export function formatDate(ts: unknown): string {
   if (isNaN(d.getTime())) return '—';
   return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
+
+/** Today's date in the browser's local timezone, as YYYY-MM-DD.
+ *  Deliberately local (not UTC) so a Daily Practice session logged late in
+ *  the evening doesn't roll over to "tomorrow" for the person entering it.
+ */
+export function todayDateStr(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}

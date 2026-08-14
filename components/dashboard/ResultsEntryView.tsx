@@ -193,9 +193,12 @@ export default function ResultsEntryView({ session }: { session: Session }) {
               <label>Тэмцээн</label>
               <select value={entryCompId} onChange={e => setEntryCompId(e.target.value)}>
                 <option value="">— Select competition —</option>
-                {comps.filter(c => c.status === 'live' || c.status === 'upcoming').map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
+                {comps
+                  // Daily Practice is admin-only (see ResultsEntryTab) — not offered here.
+                  .filter(c => (c.status === 'live' || c.status === 'upcoming') && !c.isDailyPractice)
+                  .map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
               </select>
             </div>
             {entryCompId && (

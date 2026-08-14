@@ -39,9 +39,12 @@ export default function AdminDashboardPage() {
       if (!cancelled) setStats(prev => ({ ...prev, ...patch }));
     };
 
+    // totalCompetitions intentionally still includes the Daily Practice pseudo-competition —
+    // getCompetitionCount() is a cheap server-side count with no filter support, and being off
+    // by exactly one forever isn't worth a second, more expensive fetch-and-filter query here.
     getCompetitionCount().then(n => set({ totalCompetitions: n })).catch(() => {});
     getCompetitions().then(comps => {
-      const active = comps.filter(c => c.status === 'live' || c.status === 'upcoming').length;
+      const active = comps.filter(c => (c.status === 'live' || c.status === 'upcoming') && !c.isDailyPractice).length;
       set({ activeCompetitions: active });
     }).catch(() => {});
     getAthleteCount().then(n => set({ totalAthletes: n })).catch(() => {});

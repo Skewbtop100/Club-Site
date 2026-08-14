@@ -46,6 +46,10 @@ const en = {
   'section-title.competitions': 'Competition Schedule',
   'section-tag.live': 'LIVE',
   'section-title.live': 'Live Results',
+  'section-tag.daily-practice': 'DAILY PRACTICE',
+  'section-title.daily-practice': 'Daily Practice',
+  'section-desc.daily-practice': "Today's Ao5 practice attempts from the club, logged live by admins during sessions.",
+  'daily-practice.empty': 'No records set today yet.',
   'section-tag.athletes': 'ATHLETES',
   'section-title.athletes': 'Club Athletes',
   'section-desc.athletes': 'Our competitive speedcubers.',
@@ -143,6 +147,7 @@ const en = {
   'admin.tab.competitions': '🏆 Competitions',
   'admin.tab.results': '✎ Results Entry',
   'admin.tab.comp-results': '📋 Competition Results',
+  'admin.tab.daily-practice': '⭐ Daily Practice',
   'admin.tab.history': '📄 History',
   'admin.tab.users': '👥 Users',
   'admin.tab.wca-records': '🌍 WCA Records',
@@ -243,6 +248,7 @@ const en = {
   'admin.results.round': 'Round',
   'admin.results.group': 'Group',
   'admin.results.select-comp': '— Select competition —',
+  'admin.results.daily-practice-label': 'Daily Practice',
   'admin.results.select-event': '— Event —',
   'admin.results.select-athlete': '— Athlete —',
   'admin.results.select-prompt': 'Select a competition to start entering results.',
@@ -286,6 +292,10 @@ const en = {
   'admin.results.msg.fill': 'Please fill athlete, event and round.',
   'admin.results.msg.updated-for': 'Result updated for',
   'admin.results.msg.implausible': '⚠️ This time looks impossibly fast — please double-check',
+  'admin.results.msg.practice-already-recorded': 'This athlete already has today’s Daily Practice result for this event — edit it from the Daily Practice tab instead.',
+  'admin.results.already-logged-today': 'already logged today',
+  'admin.results.scramble-loading': 'Generating scramble…',
+  'admin.results.scramble-unavailable': 'Scramble unavailable',
   'admin.results.btn.confirm-anyway': 'Confirm & Save Anyway',
 
   // ADMIN — COMPETITION RESULTS
@@ -458,6 +468,17 @@ const en = {
   'mp.rematch.needPlayers': 'Need 2 or more players to rematch',
   'mp.rematch.startingMatch': 'New match starting…',
   'mp.rematch.players': 'Players',
+
+  // ADMIN — DAILY PRACTICE MANAGEMENT
+  'admin.dpm.search-label': 'Search athlete',
+  'admin.dpm.search-placeholder': 'Type a name…',
+  'admin.dpm.date-from': 'From',
+  'admin.dpm.date-to': 'To',
+  'admin.dpm.clear-filters': 'Clear filters',
+  'admin.dpm.empty': 'No Daily Practice entries match your filters.',
+  'admin.dpm.col.date': 'Date',
+  'admin.dpm.col.athlete': 'Athlete',
+  'admin.dpm.col.event': 'Event',
 
   // ADMIN — EVENTS
   'admin.ev.title': 'Event Visibility Settings',

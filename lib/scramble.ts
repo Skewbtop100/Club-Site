@@ -37,3 +37,31 @@ export function generateScramble(eventId: string): string {
     return '';
   }
 }
+
+// ── Server-side WCA-quality scramble generation (via cstimer_module) ────────
+//
+// Same source as csTimer's own scrambler (cs0x7f, csTimer's author, publishes
+// this npm package directly from csTimer's codebase). Plain synchronous JS —
+// no Web Worker involved, unlike cubing/scramble, which fails to instantiate
+// its worker under Next.js's client-side bundler (see app/api/scramble/route.ts
+// for the server-side call site; this mapping is server-only, never imported
+// client-side). Types/lengths per cs0x7f/cstimer's README event list.
+export const CSTIMER_SCRAMBLE_TYPE: Record<string, { type: string; len?: number }> = {
+  '333':    { type: '333' },
+  '222':    { type: '222so' },
+  '444':    { type: '444wca' },
+  '555':    { type: '555wca', len: 60 },
+  '666':    { type: '666wca', len: 80 },
+  '777':    { type: '777wca', len: 100 },
+  '333oh':  { type: '333' },
+  '333bld': { type: '333' },
+  '444bld': { type: '444bld', len: 40 },
+  '555bld': { type: '555bld', len: 60 },
+  '333mbf': { type: '333' },
+  '333fm':  { type: '333fm' },
+  'pyram':  { type: 'pyrso', len: 10 },
+  'skewb':  { type: 'skbso' },
+  'sq1':    { type: 'sqrs' },
+  'clock':  { type: 'clkwca' },
+  'minx':   { type: 'mgmp', len: 70 },
+};

@@ -10,10 +10,12 @@ const BADGE_STYLES: Record<BadgeType, { bg: string; color: string; border: strin
 
 interface BadgeProps {
   type: BadgeType;
+  /** Overrides the displayed text (e.g. "S PR" / "Avg PR") while `type` still drives the color. */
+  label?: string;
   className?: string;
 }
 
-export default function Badge({ type, className }: BadgeProps) {
+export default function Badge({ type, label, className }: BadgeProps) {
   const s = BADGE_STYLES[type];
   return (
     <span
@@ -34,7 +36,7 @@ export default function Badge({ type, className }: BadgeProps) {
         flexShrink: 0,
       }}
     >
-      {type}
+      {label ?? type}
     </span>
   );
 }

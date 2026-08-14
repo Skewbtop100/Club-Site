@@ -1,4 +1,5 @@
 import {
+  getDoc,
   getDocs,
   setDoc,
   updateDoc,
@@ -9,6 +10,11 @@ import {
 } from 'firebase/firestore';
 import { competitionsCol, competitionDoc } from '@/lib/firebase/collections';
 import type { Competition } from '@/lib/types';
+
+/** Fixed id of the singleton Daily Practice pseudo-competition (see
+ *  ensureDailyPracticeCompetition below). One evergreen doc, not one per
+ *  day — per-day uniqueness is enforced on the Result docId instead. */
+export const DAILY_PRACTICE_COMPETITION_ID = 'daily-practice';
 
 /** One-time fetch of all competitions. */
 export async function getCompetitions(): Promise<Competition[]> {
@@ -64,4 +70,24 @@ export async function finishCompetition(id: string): Promise<void> {
     finishedAt: now,
     updatedAt: now,
   });
+}
+
+/**
+ * Create the Daily Practice pseudo-competition doc if it doesn't exist yet.
+ * Idempotent — safe to call on every ResultsEntryTab mount. Status stays
+ * 'live' forever so it never enters `useResults`' finished-only feed (kept
+ * out of Rankings/Records/public Athlete history), and `isDailyPractice`
+ * lets every "list real competitions" call site filter it out.
+ */
+export async function ensureDailyPracticeCompetition(): Promise<void> {
+  const ref = competitionDoc(DAILY_PRACTICE_COMPETITION_ID);
+  const snap = await getDoc(ref);
+  if (snap.exists()) return;
+  await setDoc(ref, {
+    id: DAILY_PRACTICE_COMPETITION_ID,
+    name: 'Daily Practice',
+    status: 'live',
+    isDailyPractice: true,
+    createdAt: Timestamp.now(),
+  } as Competition);
 }

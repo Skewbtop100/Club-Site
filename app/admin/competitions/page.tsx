@@ -10,11 +10,13 @@ const ResultsEntryTab = dynamic(() => import('@/components/admin/ResultsEntryTab
 const CompResultsTab  = dynamic(() => import('@/components/admin/CompResultsTab'),  { ssr: false });
 const HistoryTab      = dynamic(() => import('@/components/admin/HistoryTab'),      { ssr: false });
 const WcaImportTab    = dynamic(() => import('@/components/admin/WcaImportTab'),    { ssr: false });
+const DailyPracticeManageTab = dynamic(() => import('@/components/admin/DailyPracticeManageTab'), { ssr: false });
 
 const TABS: SectionTab[] = [
   { id: 'competitions', labelKey: 'admin.tab.competitions', render: () => <CompetitionsTab /> },
   { id: 'results',      labelKey: 'admin.tab.results',      render: () => <ResultsEntryTab /> },
   { id: 'compResults',  labelKey: 'admin.tab.comp-results', render: () => <CompResultsTab /> },
+  { id: 'dailyPractice', labelKey: 'admin.tab.daily-practice', render: () => <DailyPracticeManageTab /> },
   { id: 'history',      labelKey: 'admin.tab.history',      render: () => <HistoryTab /> },
   { id: 'wcaImport',    labelKey: 'admin.tab.wca-records',  render: () => <WcaImportTab /> },
 ];

@@ -46,6 +46,10 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'section-title.competitions': 'Тэмцээний хуваарь',
   'section-tag.live': 'ШУУД',
   'section-title.live': 'Шууд үр дүн',
+  'section-tag.daily-practice': 'ӨДӨР ТУТМЫН',
+  'section-title.daily-practice': 'Өдөр тутмын бэлтгэл',
+  'section-desc.daily-practice': 'Клубын гишүүдийн өнөөдрийн Ao5 дасгалын үр дүнгүүд, шууд бүртгэгдсэн.',
+  'daily-practice.empty': 'Өнөөдөр рекорд тогтоогоогүй байна.',
   'section-tag.athletes': 'ТАМИРЧИД',
   'section-title.athletes': 'Клубын тамирчид',
   'section-desc.athletes': 'Манай өрсөлдөгч speedcuber-ууд.',
@@ -204,6 +208,7 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'admin.tab.competitions': '🏆 Тэмцээнүүд',
   'admin.tab.results': '✎ Үр дүн оруулах',
   'admin.tab.comp-results': '📋 Тэмцээний үр дүн',
+  'admin.tab.daily-practice': '⭐ Өдөр тутмын бэлтгэл',
   'admin.tab.history': '📄 Түүх',
   'admin.tab.users': '👥 Хэрэглэгчид',
   'admin.tab.wca-records': '🌍 WCA Рекорд',
@@ -304,6 +309,7 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'admin.results.round': 'Үе',
   'admin.results.group': 'Бүлэг',
   'admin.results.select-comp': '— Тэмцээн сонгох —',
+  'admin.results.daily-practice-label': 'Өдөр тутмын бэлтгэл',
   'admin.results.select-event': '— Төрөл —',
   'admin.results.select-athlete': '— Тамирчин —',
   'admin.results.select-prompt': 'Үр дүн оруулахын тулд тэмцээн сонгоно уу.',
@@ -347,6 +353,10 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'admin.results.msg.fill': 'Тамирчин, төрөл, үе шатыг бөглөнө үү.',
   'admin.results.msg.updated-for': 'Үр дүн шинэчлэгдлээ —',
   'admin.results.msg.implausible': '⚠️ Энэ цаг хэт хурдан байна — дахин шалгана уу',
+  'admin.results.msg.practice-already-recorded': 'Энэ тамирчин өнөөдөр энэ төрлөөр Өдөр тутмын бэлтгэлийн үр дүнгээ аль хэдийн бүртгүүлсэн байна — Өдөр тутмын бэлтгэл таб-аас засварлана уу.',
+  'admin.results.already-logged-today': 'өнөөдөр бүртгэсэн',
+  'admin.results.scramble-loading': 'Холилт үүсгэж байна…',
+  'admin.results.scramble-unavailable': 'Холилт боломжгүй',
   'admin.results.btn.confirm-anyway': 'Баталгаажуулаад хадгалах',
 
   // ADMIN — COMPETITION RESULTS
@@ -458,6 +468,16 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'admin.wca.col.avg-tab': 'Дундаж',
   'admin.wca.record-holder': '🏆 Рекорд эзэмшигч!',
 
+  // ADMIN — DAILY PRACTICE MANAGEMENT
+  'admin.dpm.search-label': 'Тамирчин хайх',
+  'admin.dpm.search-placeholder': 'Нэр бичих…',
+  'admin.dpm.date-from': 'Эхлэх',
+  'admin.dpm.date-to': 'Дуусах',
+  'admin.dpm.clear-filters': 'Шүүлтүүр цэвэрлэх',
+  'admin.dpm.empty': 'Шүүлтүүрт тохирох дасгалын бүртгэл алга.',
+  'admin.dpm.col.date': 'Огноо',
+  'admin.dpm.col.athlete': 'Тамирчин',
+  'admin.dpm.col.event': 'Төрөл',
 
   // ADMIN — EVENTS
   'admin.ev.title': 'Төрлийн харагдалтын тохиргоо',

@@ -23,7 +23,10 @@ export default function HistoryTab() {
 
   useEffect(() => {
     const unsub = subscribeCompetitions((comps) => {
-      const sorted = [...comps].sort((a, b) => (String(b.date) || '').localeCompare(String(a.date) || ''));
+      // Daily Practice is a pseudo-competition — it never gets a history card here.
+      const sorted = comps
+        .filter(c => !c.isDailyPractice)
+        .sort((a, b) => (String(b.date) || '').localeCompare(String(a.date) || ''));
       setCards(prev => {
         const map = new Map(prev.map(c => [c.comp.id, c]));
         return sorted.map(comp => map.get(comp.id) || { comp, open: false, loading: false, results: [], evId: '' });

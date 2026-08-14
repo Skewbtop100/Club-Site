@@ -34,7 +34,9 @@ export default function CompetitionsSection({ competitions, athletes, loading }:
 
   const [tab, setTab] = useState<Status | null>(null);
   const activeTab = tab ?? defaultTab;
-  const filtered = competitions.filter((c) => c.status === activeTab);
+  // Daily Practice is a pseudo-competition (see lib/firebase/services/competitions.ts)
+  // used only by the admin Results Entry tab — never a real listed competition here.
+  const filtered = competitions.filter((c) => c.status === activeTab && !c.isDailyPractice);
 
   const [overlay, setOverlay] = useState<{ comp: Competition; type: OverlayType } | null>(null);
 

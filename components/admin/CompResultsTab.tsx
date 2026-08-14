@@ -326,7 +326,8 @@ export default function CompResultsTab() {
 
   // ── derived data ─────────────────────────────────────────────────────────────
 
-  const visibleComps = comps.filter(c => c.status === 'live' || c.status === 'upcoming');
+  // Daily Practice is a pseudo-competition — not meaningful in this WCA-Live-style viewer.
+  const visibleComps = comps.filter(c => (c.status === 'live' || c.status === 'upcoming') && !c.isDailyPractice);
   const selComp      = comps.find(c => c.id === compId);
   // Club athletes = full club roster from the athletes collection.
   const clubAthleteIds = useMemo(() => new Set(allAthletes.map(a => a.id)), [allAthletes]);

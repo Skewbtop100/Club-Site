@@ -6,6 +6,7 @@ import Autoplay from 'embla-carousel-autoplay';
 import { useLang } from '@/lib/i18n';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { fmtTime, betterTime, formatDate } from '@/lib/time-utils';
+import { DAILY_PRACTICE_COMPETITION_ID } from '@/lib/firebase/services/competitions';
 import CompetitionHistory from '@/components/shared/CompetitionHistory';
 import type { Result, Athlete, Competition, EventVisibility } from '@/lib/types';
 import type { TranslationKey } from '@/lib/i18n';
@@ -241,9 +242,10 @@ export default function RecordsSection({ results, athletes, competitions, eventV
                       <span className="rh-row-time">{fmtTime(history[0].time)}</span>
                       <span className="rh-row-name">{history[0].name}</span>
                     </div>
+                    {/* Daily Practice has no round/podium structure to show — not a link. */}
                     <div
-                      className="rh-row-comp rh-row-comp-link"
-                      onClick={() => {
+                      className={history[0].competitionId === DAILY_PRACTICE_COMPETITION_ID ? 'rh-row-comp' : 'rh-row-comp rh-row-comp-link'}
+                      onClick={history[0].competitionId === DAILY_PRACTICE_COMPETITION_ID ? undefined : () => {
                         const c = competitions.find(comp => comp.id === history[0].competitionId);
                         if (c) setHistoryComp(c);
                       }}
@@ -264,9 +266,10 @@ export default function RecordsSection({ results, athletes, competitions, eventV
                         <span className="rh-row-time">{fmtTime(entry.time)}</span>
                         <span className="rh-row-name">{entry.name}</span>
                       </div>
+                      {/* Daily Practice has no round/podium structure to show — not a link. */}
                       <div
-                        className="rh-row-comp rh-row-comp-link"
-                        onClick={() => {
+                        className={entry.competitionId === DAILY_PRACTICE_COMPETITION_ID ? 'rh-row-comp' : 'rh-row-comp rh-row-comp-link'}
+                        onClick={entry.competitionId === DAILY_PRACTICE_COMPETITION_ID ? undefined : () => {
                           const c = competitions.find(comp => comp.id === entry.competitionId);
                           if (c) setHistoryComp(c);
                         }}

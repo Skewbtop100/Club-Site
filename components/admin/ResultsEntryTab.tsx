@@ -1,28 +1,14 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { subscribeCompetitions } from '@/lib/firebase/services/competitions';
+import { subscribeCompetitions, ensureDailyPracticeCompetition, DAILY_PRACTICE_COMPETITION_ID } from '@/lib/firebase/services/competitions';
 import { getAthletes } from '@/lib/firebase/services/athletes';
 import { saveResult, getResultsByComp, subscribeResultsByComp } from '@/lib/firebase/services/results';
-import { fmtTime, parseTime, getMinPlausibleSolveCs } from '@/lib/time-utils';
+import { fmtTime, parseTime, getMinPlausibleSolveCs, todayDateStr } from '@/lib/time-utils';
+import { calcAo5, bestOf, timeToRawDigits, formatRawDigits } from '@/lib/results-entry-helpers';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { useLang, type TranslationKey } from '@/lib/i18n';
 import type { Athlete, Competition, Result } from '@/lib/types';
-
-function calcAo5(solves: (number | null)[]): number | null {
-  const vals = solves.filter(v => v !== null) as number[];
-  if (vals.length < 5) return null;
-  const dnfCount = vals.filter(v => v < 0).length;
-  if (dnfCount >= 2) return -1;
-  const sorted = [...vals].sort((a, b) => { if (a < 0 && b < 0) return 0; if (a < 0) return 1; if (b < 0) return -1; return a - b; });
-  const mid = sorted.slice(1, 4);
-  if (mid.some(v => v < 0)) return -1;
-  return Math.round(mid.reduce((s, v) => s + v, 0) / 3);
-}
-function bestOf(solves: (number | null)[]): number {
-  const v = solves.filter(x => x !== null && Number(x) > 0) as number[];
-  return v.length ? Math.min(...v) : -1;
-}
 
 interface PanelState {
   id: number; athleteId: string; eventId: string; round: number; group: number;
@@ -35,6 +21,11 @@ interface PanelState {
   /** True once submit() has flagged an implausibly fast solve and is
    *  waiting on a second, explicit "confirm anyway" click before saving. */
   needsConfirm: boolean;
+  /** WCA-quality scramble per solve slot (Daily Practice only), parallel to
+   *  `solves`. Populated lazily as the admin reaches each slot. */
+  scrambles: string[];
+  /** True while a scramble is being generated for the current solve slot. */
+  scrambleLoading: boolean;
 }
 interface ImportRow {
   idx: number;
@@ -92,14 +83,8 @@ function emptyPanel(id: number): PanelState {
     currentSolveIdx: 0, rawInput: '',
     selectedChip: null, editReturnIdx: null, postEditMode: false,
     msg: '', msgType: '', needsConfirm: false,
+    scrambles: ['', '', '', '', ''], scrambleLoading: false,
   };
-}
-
-/** Strip formatting to get back the raw digit string for re-editing.
- *  "8.11" → "811", "1:11.11" → "11111", "11:11.11" → "111111"
- */
-function timeToRawDigits(timeStr: string): string {
-  return timeStr.replace(/[^0-9]/g, '');
 }
 
 function getRoundNames(totalRounds: number, t: (k: TranslationKey) => string): string[] {
@@ -107,23 +92,6 @@ function getRoundNames(totalRounds: number, t: (k: TranslationKey) => string): s
   if (totalRounds === 2) return [t('admin.round.first'), t('admin.round.final')];
   if (totalRounds === 3) return [t('admin.round.first'), t('admin.round.second'), t('admin.round.final')];
   return [t('admin.round.first'), t('admin.round.second'), t('admin.round.semi'), t('admin.round.final')];
-}
-
-/** Convert raw digit string to parseable time string.
- *  "11" → "0.11", "111" → "1.11", "1111" → "11.11",
- *  "11111" → "1:11.11", "111111" → "11:11.11"
- */
-function formatRawDigits(raw: string): string {
-  const d = raw.replace(/\D/g, '');
-  if (!d) return '';
-  const padded = d.length < 2 ? d.padStart(2, '0') : d;
-  const cs = padded.slice(-2);
-  const rest = padded.slice(0, -2);
-  if (!rest || parseInt(rest, 10) === 0) return `0.${cs}`;
-  const secsStr = rest.slice(-2).padStart(2, '0');
-  const minsStr = rest.slice(0, -2);
-  if (!minsStr || parseInt(minsStr, 10) === 0) return `${parseInt(secsStr, 10)}.${cs}`;
-  return `${parseInt(minsStr, 10)}:${secsStr}.${cs}`;
 }
 
 export default function ResultsEntryTab() {
@@ -158,6 +126,7 @@ export default function ResultsEntryTab() {
 
   useEffect(() => {
     getAthletes().then(setAthletes);
+    ensureDailyPracticeCompetition().catch(() => {});
     const unsub = subscribeCompetitions((data) => setComps(data));
     return unsub;
   }, []);
@@ -170,6 +139,57 @@ export default function ResultsEntryTab() {
   useEffect(() => {
     return () => { if (timerIntervalRef.current) clearInterval(timerIntervalRef.current); };
   }, []);
+
+  // Daily Practice: generate a WCA-quality scramble for whichever solve slot
+  // is currently active, per panel. Fetched from /api/scramble (server-side,
+  // via cstimer_module — the actual csTimer scrambler) rather than generated
+  // client-side: cubing/scramble's client-side Web Worker instantiation fails
+  // under Next.js's bundler (a known, unresolved cubing.js/Next.js issue —
+  // see the route for details), and cstimer_module has no worker involved.
+  // Guarded by `scrambles[idx]` already being set, so this is safe to re-run
+  // on every panels change (re-typing a solve doesn't re-trigger it) — it
+  // only fires for genuinely new, not-yet-scrambled slots.
+  const isDailyPracticeCompId = compId === DAILY_PRACTICE_COMPETITION_ID;
+  // Tracks (panelId:eventId:slotIdx) combos already attempted (in flight or
+  // failed) — a ref, not state, so it can't itself trigger a re-run. Without
+  // this, a failed generation reset `scrambleLoading` to false, which changed
+  // `panels` and re-ran this effect, which saw the exact same "eligible for a
+  // scramble" state and retried immediately — an infinite fail/retry loop
+  // that tripped React's "Maximum update depth exceeded" guard.
+  const scrambleAttemptedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!isDailyPracticeCompId) return;
+    panels.forEach(p => {
+      const idx = p.currentSolveIdx;
+      if (!p.athleteId || !p.eventId || idx >= 5) return;
+      if (p.scrambles[idx]) return;
+      const key = `${p.id}:${p.eventId}:${idx}`;
+      if (scrambleAttemptedRef.current.has(key)) return;
+      scrambleAttemptedRef.current.add(key);
+      updatePanel(p.id, { scrambleLoading: true });
+      const eventIdAtFetch = p.eventId;
+      fetch(`/api/scramble?event=${encodeURIComponent(eventIdAtFetch)}`)
+        .then(res => {
+          if (!res.ok) throw new Error(`scramble API returned ${res.status}`);
+          return res.json() as Promise<{ scramble?: string; error?: string }>;
+        })
+        .then(data => {
+          if (!data.scramble) throw new Error(data.error || 'empty scramble response');
+          setPanels(prev => prev.map(pp => {
+            // Bail if the panel moved on (different event/slot) while this was in flight.
+            if (pp.id !== p.id || pp.eventId !== eventIdAtFetch || pp.currentSolveIdx !== idx) return pp;
+            const scrs = [...pp.scrambles];
+            scrs[idx] = data.scramble!;
+            return { ...pp, scrambles: scrs, scrambleLoading: false };
+          }));
+        })
+        .catch((err) => {
+          console.error('[ResultsEntryTab] scramble generation failed', err);
+          updatePanel(p.id, { scrambleLoading: false });
+        });
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panels, isDailyPracticeCompId]);
 
   function updatePanel(id: number, patch: Partial<PanelState>) {
     setPanels(prev => prev.map(p => p.id === id ? { ...p, ...patch } : p));
@@ -227,6 +247,29 @@ export default function ResultsEntryTab() {
     if (!panel.athleteId || !compId || !panel.eventId) {
       updatePanel(panelId, { msg: t('admin.results.msg.fill'), msgType: 'error' }); return;
     }
+
+    const isDailyPractice = compId === DAILY_PRACTICE_COMPETITION_ID;
+    const today = todayDateStr();
+
+    // Daily Practice: a second same-day Ao5 for this athlete+event is a hard
+    // block, not a silent overwrite. Corrections now happen only through the
+    // Daily Practice management tab's Edit flow — re-submitting here used to
+    // quietly overwrite the existing entry, which made it too easy to lose
+    // the original without meaning to.
+    if (isDailyPractice) {
+      const alreadyToday = compResults.some(r =>
+        r.competitionId === compId &&
+        r.eventId === panel.eventId &&
+        r.athleteId === panel.athleteId &&
+        !r.isPlaceholder &&
+        r.practiceDate === today,
+      );
+      if (alreadyToday) {
+        updatePanel(panelId, { msg: t('admin.results.msg.practice-already-recorded'), msgType: 'error', needsConfirm: false });
+        return;
+      }
+    }
+
     const { single, average, parsed } = computeResult(panel);
 
     // Any solve entered under the practical minimum (dropped-digit typos
@@ -243,26 +286,47 @@ export default function ResultsEntryTab() {
 
     const comp = comps.find(c => c.id === compId);
     const ath  = athletes.find(a => a.id === panel.athleteId);
-    const docId = `${compId}_${panel.eventId}_r${panel.round}_${panel.athleteId}`;
+    // Daily Practice always writes round 1, date-stamped in the docId — that's
+    // what enforces "one Ao5 per athlete per event per day". A same-day
+    // resubmission is blocked above now, so this path only ever creates a
+    // fresh doc (today's) or a real competition's round doc.
+    const docId = isDailyPractice
+      ? `${DAILY_PRACTICE_COMPETITION_ID}_${panel.eventId}_r1_${panel.athleteId}_${today}`
+      : `${compId}_${panel.eventId}_r${panel.round}_${panel.athleteId}`;
 
     // Detect whether a non-placeholder result already exists for this
     // (comp, event, round, athlete) — that means we're updating, not creating.
-    // Placeholder rows are auto-generated and don't count as a "real" prior result.
+    // Placeholder rows are auto-generated and don't count as a "real" prior
+    // result. For Daily Practice this can now only ever be false (a same-day
+    // match is blocked above, and the practiceDate check excludes past days),
+    // so the "Updated" message below is effectively real-competition-only.
     const existing = compResults.find(r =>
       r.competitionId === compId &&
       r.eventId === panel.eventId &&
       (r.round || 1) === panel.round &&
       r.athleteId === panel.athleteId &&
-      !r.isPlaceholder,
+      !r.isPlaceholder &&
+      (!isDailyPractice || r.practiceDate === today),
     );
+
+    // Daily Practice's competition doc has one generic name ("Daily Practice")
+    // shared across every day — the result itself gets a date-stamped name
+    // instead, so it reads as a specific day's practice everywhere it's
+    // displayed (Rankings/Records just render whatever's stored here, no
+    // separate competition-name lookup that would override it).
+    const competitionName = isDailyPractice
+      ? `${t('admin.results.daily-practice-label')} - ${today}`
+      : comp?.name || '';
 
     try {
       await saveResult(docId, {
         athleteId: panel.athleteId, athleteName: ath?.name || '',
-        competitionId: compId, competitionName: comp?.name || '',
+        competitionId: compId, competitionName,
         eventId: panel.eventId, round: panel.round,
         single: single < 0 ? single : single, average,
         solves: parsed, status: 'published', source: 'entry',
+        penalties: panel.penalties,
+        ...(isDailyPractice ? { practiceDate: today, scrambles: panel.scrambles } : {}),
       });
       const fullName = `${ath?.name || ''}${ath?.lastName ? ' ' + ath.lastName : ''}`.trim() || panel.athleteId;
       const msg = existing
@@ -512,10 +576,18 @@ export default function ResultsEntryTab() {
   // ─────────────────────────────────────────────────────────────────────────────
 
   const selComp     = comps.find(c => c.id === compId);
+  const isDailyPracticeSelected = !!selComp?.isDailyPractice;
   const evList      = selComp?.events ? WCA_EVENTS.filter(e => (selComp.events as Record<string,boolean>)?.[e.id]) : WCA_EVENTS;
-  const liveComps   = comps.filter(c => c.status === 'live' || c.status === 'upcoming');
+  // Daily Practice is pinned first and given a date-stamped label below —
+  // everywhere else it sorts/reads like any other live competition.
+  const liveComps   = [...comps.filter(c => c.status === 'live' || c.status === 'upcoming')]
+    .sort((a, b) => (a.isDailyPractice ? -1 : b.isDailyPractice ? 1 : 0));
+  // Bulk-paste import assumes a real competition's round/group/source shape —
+  // not offered for Daily Practice.
+  const importableComps = liveComps.filter(c => !c.isDailyPractice);
   const compAthletes = selComp?.athletes;
   const eventConfig = selComp?.eventConfig || {};
+  const todayLabel = todayDateStr();
 
   return (
     <div className="card">
@@ -527,7 +599,11 @@ export default function ResultsEntryTab() {
           <label>{t('admin.results.competition')}</label>
           <select value={compId} onChange={e => { setCompId(e.target.value); setPanels([emptyPanel(0)]); resetTimer(); setShowTimer(false); }}>
             <option value="">{t('admin.results.select-comp')}</option>
-            {liveComps.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {liveComps.map(c => (
+              <option key={c.id} value={c.id}>
+                {c.isDailyPractice ? `⭐ ${t('admin.results.daily-practice-label')} - ${todayLabel}` : c.name}
+              </option>
+            ))}
           </select>
         </div>
         {compId && (
@@ -583,6 +659,8 @@ export default function ResultsEntryTab() {
 
             // Rounds where this athlete already has a real (non-placeholder)
             // result for this comp+event. Used to disable those round options.
+            // Not used for Daily Practice (Round/Group are hidden there), but
+            // still date-scoped for correctness if that ever changes.
             const completedRounds = new Set<number>(
               panel.athleteId && panel.eventId
                 ? compResults
@@ -590,9 +668,25 @@ export default function ResultsEntryTab() {
                       r.competitionId === compId &&
                       r.athleteId === panel.athleteId &&
                       r.eventId === panel.eventId &&
-                      !r.isPlaceholder,
+                      !r.isPlaceholder &&
+                      (!isDailyPracticeSelected || r.practiceDate === todayLabel),
                     )
                     .map(r => r.round || 1)
+                : [],
+            );
+
+            // Events this athlete already has a Daily Practice entry for today —
+            // disabled in the dropdown so a duplicate can't even be selected.
+            // submit()'s hard block is the backstop; this is the discoverable UX.
+            const practiceLoggedEventIds = new Set<string>(
+              isDailyPracticeSelected && panel.athleteId
+                ? compResults
+                    .filter(r =>
+                      r.athleteId === panel.athleteId &&
+                      !r.isPlaceholder &&
+                      r.practiceDate === todayLabel,
+                    )
+                    .map(r => r.eventId)
                 : [],
             );
 
@@ -607,13 +701,37 @@ export default function ResultsEntryTab() {
                 <div className="compact-panel-header">
                   <span className="compact-panel-title">{t('admin.results.panel')} {panel.id + 1}</span>
                   <div className="compact-panel-actions">
-                    <button className="btn-xs" onClick={() => updatePanel(panel.id, { ...emptyPanel(panel.id) })}>{t('admin.results.clear')}</button>
+                    <button className="btn-xs" onClick={() => {
+                      // Forget any prior scramble attempts for this panel so Clear
+                      // is a genuine retry path, not a permanent dead end after a
+                      // one-off generation failure.
+                      for (const key of [...scrambleAttemptedRef.current]) {
+                        if (key.startsWith(`${panel.id}:`)) scrambleAttemptedRef.current.delete(key);
+                      }
+                      updatePanel(panel.id, { ...emptyPanel(panel.id) });
+                    }}>{t('admin.results.clear')}</button>
                   </div>
                 </div>
 
                 {/* Athlete */}
                 <select className="compact-select" value={panel.athleteId}
-                  onChange={e => updatePanel(panel.id, { athleteId: e.target.value })}>
+                  onChange={e => {
+                    const newAthleteId = e.target.value;
+                    const patch: Partial<PanelState> = { athleteId: newAthleteId };
+                    // Switching athletes can make the currently-selected event invalid
+                    // (the new athlete may already have today's Daily Practice entry
+                    // for it) — clear it rather than leave a now-disabled option selected.
+                    if (isDailyPracticeSelected && panel.eventId) {
+                      const alreadyLogged = compResults.some(r =>
+                        r.athleteId === newAthleteId &&
+                        r.eventId === panel.eventId &&
+                        !r.isPlaceholder &&
+                        r.practiceDate === todayLabel,
+                      );
+                      if (alreadyLogged) patch.eventId = '';
+                    }
+                    updatePanel(panel.id, patch);
+                  }}>
                   <option value="">{t('admin.results.select-athlete')}</option>
                   {[...panelAthletes].sort((a,b) => a.name.localeCompare(b.name)).map(a => (
                     <option key={a.id} value={a.id}>{`${a.name || ''}${a.lastName ? ' ' + a.lastName : ''}`}</option>
@@ -622,38 +740,52 @@ export default function ResultsEntryTab() {
 
                 {/* Event */}
                 <select className="compact-select" value={panel.eventId}
-                  onChange={e => updatePanel(panel.id, { eventId: e.target.value, round: 1, group: 1 })}>
+                  onChange={e => updatePanel(panel.id, {
+                    eventId: e.target.value, round: 1, group: 1,
+                    // A new event needs a fresh scramble — don't leave the
+                    // previous event's scramble showing for solve 1.
+                    scrambles: ['', '', '', '', ''], scrambleLoading: false,
+                  })}>
                   <option value="">{t('admin.results.select-event')}</option>
-                  {evList.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                  {evList.map(e => {
+                    const isLogged = practiceLoggedEventIds.has(e.id);
+                    return (
+                      <option key={e.id} value={e.id} disabled={isLogged}>
+                        {e.name}{isLogged ? ` (${t('admin.results.already-logged-today')})` : ''}
+                      </option>
+                    );
+                  })}
                 </select>
 
-                {/* Round + Group */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '0.3rem' }}>
-                  <div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.2rem', paddingLeft: '0.1rem' }}>{t('admin.results.round')}</div>
-                    <select className="compact-select" value={panel.round} style={{ marginBottom: 0 }}
-                      onChange={e => updatePanel(panel.id, { round: Number(e.target.value) })}>
-                      {roundNames.map((name, idx) => {
-                        const roundNum = idx + 1;
-                        const isLocked = completedRounds.has(roundNum);
-                        return (
-                          <option key={idx} value={roundNum} disabled={isLocked}>
-                            {name}{isLocked ? ' 🔒' : ''}
-                          </option>
-                        );
-                      })}
-                    </select>
+                {/* Round + Group — not meaningful for Daily Practice (always round 1, no groups) */}
+                {!isDailyPracticeSelected && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '0.3rem' }}>
+                    <div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.2rem', paddingLeft: '0.1rem' }}>{t('admin.results.round')}</div>
+                      <select className="compact-select" value={panel.round} style={{ marginBottom: 0 }}
+                        onChange={e => updatePanel(panel.id, { round: Number(e.target.value) })}>
+                        {roundNames.map((name, idx) => {
+                          const roundNum = idx + 1;
+                          const isLocked = completedRounds.has(roundNum);
+                          return (
+                            <option key={idx} value={roundNum} disabled={isLocked}>
+                              {name}{isLocked ? ' 🔒' : ''}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.2rem', paddingLeft: '0.1rem' }}>{t('admin.results.group')}</div>
+                      <select className="compact-select" value={panel.group} style={{ marginBottom: 0 }}
+                        onChange={e => updatePanel(panel.id, { group: Number(e.target.value) })}>
+                        {Array.from({ length: Math.max(1, groupCount) }, (_, i) => (
+                          <option key={i} value={i + 1}>{t('admin.results.group')} {String.fromCharCode(65 + i)}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
-                  <div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.2rem', paddingLeft: '0.1rem' }}>{t('admin.results.group')}</div>
-                    <select className="compact-select" value={panel.group} style={{ marginBottom: 0 }}
-                      onChange={e => updatePanel(panel.id, { group: Number(e.target.value) })}>
-                      {Array.from({ length: Math.max(1, groupCount) }, (_, i) => (
-                        <option key={i} value={i + 1}>{t('admin.results.group')} {String.fromCharCode(65 + i)}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
+                )}
 
                 {/* ── Inspection Timer (shown when toggled from toolbar) ────── */}
                 <div style={{ marginBottom: showTimer ? '0.4rem' : 0 }}>
@@ -718,6 +850,26 @@ export default function ResultsEntryTab() {
                     }}>
                       {isEditMode ? `${t('admin.results.editing-solve')} ${curIdx + 1}` : `${t('admin.results.solve-prefix')} ${curIdx + 1} ${t('admin.results.solve-of')}`}
                     </div>
+
+                    {/* Scramble — Daily Practice only; read aloud to the athlete before they solve */}
+                    {isDailyPracticeSelected && panel.eventId && (
+                      <div style={{
+                        marginBottom: '0.6rem', padding: '0.55rem 0.8rem', borderRadius: '10px',
+                        background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.18)',
+                        textAlign: 'center', minHeight: '2.3rem',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        {panel.scrambleLoading ? (
+                          <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>{t('admin.results.scramble-loading')}</span>
+                        ) : panel.scrambles[curIdx] ? (
+                          <span style={{ fontFamily: 'monospace', fontSize: '0.9rem', color: 'var(--text)', letterSpacing: '0.02em', lineHeight: 1.5 }}>
+                            {panel.scrambles[curIdx]}
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>{t('admin.results.scramble-unavailable')}</span>
+                        )}
+                      </div>
+                    )}
 
                     {/* Large input */}
                     <input
@@ -1056,7 +1208,7 @@ export default function ResultsEntryTab() {
                 <label>{t('admin.results.competition')}</label>
                 <select value={compId} onChange={e => { setCompId(e.target.value); setPanels([emptyPanel(0)]); resetTimer(); setShowTimer(false); }}>
                   <option value="">{t('admin.results.select-comp')}</option>
-                  {liveComps.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {importableComps.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
               <div className="form-group" style={{ marginBottom: 0 }}>

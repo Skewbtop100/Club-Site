@@ -2,8 +2,8 @@
 
 import { Fragment, useEffect, useState, useMemo } from 'react';
 import { getResultsByAthlete } from '@/lib/firebase/services/results';
-import { getCompetitions } from '@/lib/firebase/services/competitions';
-import { getResultRecordBadges, getResultBadgesPair, getHighestBadge } from '@/lib/record-badges';
+import { getCompetitions, DAILY_PRACTICE_COMPETITION_ID } from '@/lib/firebase/services/competitions';
+import { getResultBadgesPair, getHighestBadge, BADGE_STYLES as RECORD_BADGE_STYLES } from '@/lib/record-badges';
 import { useWcaRecords } from '@/lib/hooks/useWcaRecords';
 import { fmtTime, formatDate } from '@/lib/time-utils';
 import { fmtMs } from '@/lib/timer-engine';
@@ -56,14 +56,16 @@ interface Props {
   onClose: () => void;
 }
 
-type Tab = 'history' | 'records' | 'medals';
+type Tab = 'history' | 'records' | 'medals' | 'practice';
 
 export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
   const [tab, setTab] = useState<Tab>('history');
   const [allResults, setAllResults] = useState<Result[]>([]);
+  const [practiceResults, setPracticeResults] = useState<Result[]>([]);
   const [allComps, setAllComps] = useState<Competition[]>([]);
   const [loading, setLoading] = useState(true);
   const [historyEvent, setHistoryEvent] = useState<string | null>(null);
+  const [practiceEvent, setPracticeEvent] = useState<string | null>(null);
   const [solvesPopup, setSolvesPopup] = useState<{ solves: (number | null)[]; x: number; y: number } | null>(null);
   const [badgePopup, setBadgePopup] = useState<string | null>(null);
   const [highlightResultId, setHighlightResultId] = useState<string | null>(null);
@@ -72,15 +74,21 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
   const fullName = (athlete.name || '') + (athlete.lastName ? ' ' + athlete.lastName : '');
   const initials = fullName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
 
-  // Fetch all results for this athlete + all competitions
+  // Fetch all results for this athlete + all competitions, once — then split
+  // into two views. `allResults` (Competition History/Records/Medals tabs)
+  // stays Daily-Practice-free: those tabs are about real placements/medals,
+  // which practice doesn't have. `practiceResults` (the Дасгал tab) is the
+  // mirror image — Daily Practice only.
   useEffect(() => {
     setLoading(true);
     Promise.all([
       getResultsByAthlete(athlete.id),
       getCompetitions(),
     ]).then(([res, comps]) => {
-      setAllResults(res.filter(r => r.status === 'published'));
-      setAllComps(comps);
+      const published = res.filter(r => r.status === 'published');
+      setAllResults(published.filter(r => r.competitionId !== DAILY_PRACTICE_COMPETITION_ID));
+      setPracticeResults(published.filter(r => r.competitionId === DAILY_PRACTICE_COMPETITION_ID));
+      setAllComps(comps.filter(c => !c.isDailyPractice));
       setLoading(false);
     });
   }, [athlete.id]);
@@ -493,6 +501,44 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
     return { historyBadgeMap: map, currentPBs: pbs };
   }, [allResults, historyEvent, compMap, globalResults, wcaRecords]);
 
+  // ── Дасгал (Daily Practice) tab ─────────────────────────────────────────
+  // Newest first. PR is judged against this athlete's ENTIRE history —
+  // competitions + practice combined — matching how the public Daily
+  // Practice feed and Rankings/Records now treat practice results as
+  // fully counting toward the athlete's real personal bests.
+  const sortedPracticeResults = useMemo(
+    () => [...practiceResults].sort((a, b) => (b.practiceDate || '').localeCompare(a.practiceDate || '')),
+    [practiceResults],
+  );
+  const practiceHistoryPool = useMemo(
+    () => [...allResults, ...practiceResults],
+    [allResults, practiceResults],
+  );
+
+  // Events this athlete has practice sessions for — same derivation/sort as
+  // `athleteEvents` (Competition History tab's pills), for a matching picker.
+  const practiceEvents = useMemo(() => {
+    const ids = new Set(practiceResults.map(r => r.eventId));
+    const evts = WCA_EVENTS.filter(e => ids.has(e.id));
+    evts.sort((a, b) => {
+      const ai = EVENT_ORDER.indexOf(a.id);
+      const bi = EVENT_ORDER.indexOf(b.id);
+      return (ai >= 0 ? ai : 100) - (bi >= 0 ? bi : 100);
+    });
+    return evts;
+  }, [practiceResults]);
+
+  useEffect(() => {
+    if (practiceEvents.length > 0 && !practiceEvent) {
+      setPracticeEvent(practiceEvents[0].id);
+    }
+  }, [practiceEvents, practiceEvent]);
+
+  const filteredPracticeResults = useMemo(
+    () => practiceEvent ? sortedPracticeResults.filter(r => r.eventId === practiceEvent) : [],
+    [sortedPracticeResults, practiceEvent],
+  );
+
   const openSolves = (e: React.MouseEvent, solves: (number | null)[]) => {
     if (!solves || solves.length === 0) return;
     e.stopPropagation();
@@ -633,6 +679,7 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
             { key: 'history' as Tab, label: 'Competition History' },
             { key: 'records' as Tab, label: 'Records' },
             { key: 'medals' as Tab, label: 'Medals' },
+            { key: 'practice' as Tab, label: 'Дасгал' },
           ]).map(t => (
             <button
               key={t.key}
@@ -817,6 +864,76 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
                         ));
                       })()}
                     </>
+                  )}
+                </div>
+              )}
+
+              {/* TAB 4: Дасгал (Daily Practice) */}
+              {tab === 'practice' && (
+                <div className="apo-tab-content">
+                  {/* Event pills - centered, same pattern as Competition History */}
+                  <div className="apo-event-pills" style={{ justifyContent: 'center' }}>
+                    {practiceEvents.map(ev => (
+                      <button
+                        key={ev.id}
+                        className={`apo-ep${practiceEvent === ev.id ? ' active' : ''}`}
+                        onClick={() => setPracticeEvent(ev.id)}
+                      >{ev.name}</button>
+                    ))}
+                  </div>
+
+                  {filteredPracticeResults.length === 0 ? (
+                    <div className="apo-empty">No practice sessions yet</div>
+                  ) : (
+                    <div className="apo-table-wrap">
+                      <table className="apo-table apo-history-table">
+                        <thead>
+                          <tr>
+                            <th style={{ paddingRight: '0.5rem' }}>Date</th>
+                            <th className="r">Single</th>
+                            <th className="r">Average</th>
+                            <th className="r">1</th><th className="r">2</th><th className="r">3</th><th className="r">4</th><th className="r">5</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredPracticeResults.map(r => {
+                            // Single and average are separate records — check both independently,
+                            // and show whatever tier was actually earned (WR/CR/NR/TR/PR), same as
+                            // RankingsSection/DailyPracticeSection, not just a generic "PR" flag.
+                            const badges = getResultBadgesPair(r, practiceHistoryPool, wcaRecords);
+                            const singleTier = getHighestBadge(badges.single);
+                            const avgTier = getHighestBadge(badges.average);
+                            const badgeStyle = (tier: RecordBadge): React.CSSProperties => ({
+                              fontSize: '0.58rem', fontWeight: 900, letterSpacing: '0.04em', lineHeight: 1,
+                              padding: '2px 4px', borderRadius: 4, ...RECORD_BADGE_STYLES[tier],
+                            });
+                            // Same padding pattern as the Competition History tab above.
+                            const solves = [...(r.solves ?? [])];
+                            while (solves.length < 5) solves.push(null);
+                            return (
+                              <tr key={r.id}>
+                                <td className="apo-td-round" style={{ paddingRight: '0.5rem' }}>{r.practiceDate || '—'}</td>
+                                <td className={`r mono${r.single != null && r.single < 0 ? ' dnf' : ''}`}>
+                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', justifyContent: 'flex-end' }}>
+                                    {fmtTime(r.single)}
+                                    {singleTier && <span style={badgeStyle(singleTier)}>{singleTier}</span>}
+                                  </span>
+                                </td>
+                                <td className={`r mono${r.average != null && r.average < 0 ? ' dnf' : ''}`}>
+                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', justifyContent: 'flex-end' }}>
+                                    {fmtTime(r.average)}
+                                    {avgTier && <span style={badgeStyle(avgTier)}>{avgTier}</span>}
+                                  </span>
+                                </td>
+                                {solves.slice(0, 5).map((s, i) => (
+                                  <td key={i} className={`r mono solve${s !== null && s < 0 ? ' dnf' : ''}`}>{fmtTime(s)}</td>
+                                ))}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   )}
                 </div>
               )}

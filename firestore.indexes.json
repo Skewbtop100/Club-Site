@@ -40,49 +40,6 @@
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "date", "order": "DESCENDING" }
       ]
-    },
-    {
-      "collectionGroup": "practiceSessions",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "athleteId", "order": "ASCENDING" },
-        { "fieldPath": "event", "order": "ASCENDING" },
-        { "fieldPath": "date", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "practiceSessions",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "athleteId", "order": "ASCENDING" },
-        { "fieldPath": "event", "order": "ASCENDING" },
-        { "fieldPath": "date", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "practiceSessions",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "athleteId", "order": "ASCENDING" },
-        { "fieldPath": "date", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "practiceSessions",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "event", "order": "ASCENDING" },
-        { "fieldPath": "date", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "practiceSessions",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "event", "order": "ASCENDING" },
-        { "fieldPath": "athleteId", "order": "ASCENDING" },
-        { "fieldPath": "date", "order": "ASCENDING" }
-      ]
     }
   ],
   "fieldOverrides": []

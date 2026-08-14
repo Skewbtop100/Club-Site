@@ -5,6 +5,7 @@ import { useLang } from '@/lib/i18n';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { fmtTime, compareTime, formatDate } from '@/lib/time-utils';
 import { getResultRecordBadges, getHighestBadge, BADGE_STYLES } from '@/lib/record-badges';
+import { DAILY_PRACTICE_COMPETITION_ID } from '@/lib/firebase/services/competitions';
 import CompetitionHistory from '@/components/shared/CompetitionHistory';
 import type { Result, Athlete, Competition, WcaRecords, EventVisibility } from '@/lib/types';
 
@@ -169,9 +170,10 @@ export default function RankingsSection({ results, athletes, competitions, wcaRe
                         </span>
                       </td>
                       <td>
+                        {/* Daily Practice has no round/podium structure to show — not a link. */}
                         <span
-                          className="comp-name comp-name-link"
-                          onClick={() => {
+                          className={r.competitionId === DAILY_PRACTICE_COMPETITION_ID ? 'comp-name' : 'comp-name comp-name-link'}
+                          onClick={r.competitionId === DAILY_PRACTICE_COMPETITION_ID ? undefined : () => {
                             const comp = competitions.find((c) => c.id === r.competitionId);
                             if (comp) setOverlayComp(comp);
                           }}

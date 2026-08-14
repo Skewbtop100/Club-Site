@@ -10,6 +10,7 @@ import HeroSection from '@/components/sections/HeroSection';
 import RankingsSection from '@/components/sections/RankingsSection';
 import RecordsSection from '@/components/sections/RecordsSection';
 import CompetitionsSection from '@/components/sections/CompetitionsSection';
+import DailyPracticeSection from '@/components/sections/DailyPracticeSection';
 import AthletesSection from '@/components/sections/AthletesSection';
 import Footer from '@/components/layout/Footer';
 
@@ -44,6 +45,12 @@ export default function CompetitionPage() {
         competitions={competitions}
         athletes={athletes}
         loading={compsLoading}
+      />
+      <DailyPracticeSection
+        results={results}
+        athletes={athletes}
+        wcaRecords={wcaRecords}
+        loading={resultsLoading}
       />
       <AthletesSection
         athletes={athletes}

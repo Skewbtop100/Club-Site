@@ -474,7 +474,7 @@ export default function CompetitionsTab() {
         <div className="card-title"><span className="title-accent" />{t('admin.comp.list-title')}</div>
         {loading
           ? <div className="spinner-row">{t('admin.loading')}<span className="spinner-ring" /></div>
-          : comps.length === 0
+          : comps.filter(c => !c.isDailyPractice).length === 0
             ? <div className="empty-state">{t('admin.comp.empty')}</div>
             : (
               <div className="table-wrap">
@@ -493,6 +493,9 @@ export default function CompetitionsTab() {
                   </thead>
                   <tbody>
                     {comps
+                      // Daily Practice is a pseudo-competition managed by the app, not
+                      // this table — hide it so it can't be edited/deleted here.
+                      .filter(c => !c.isDailyPractice)
                       .sort((a, b) => (String(b.date) || '').localeCompare(String(a.date) || ''))
                       .map(c => (
                         <tr key={c.id}>

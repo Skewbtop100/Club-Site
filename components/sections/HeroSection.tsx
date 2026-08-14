@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useMemo } from 'react';
 import { useLang } from '@/lib/i18n';
 import { useAthletes } from '@/lib/hooks/useAthletes';
 import { useCompetitions } from '@/lib/hooks/useCompetitions';
@@ -9,6 +10,11 @@ export default function HeroSection() {
   const { t } = useLang();
   const { athletes, loading: athletesLoading } = useAthletes();
   const { competitions, loading: compsLoading } = useCompetitions();
+  // Exclude the Daily Practice pseudo-competition from the headline count.
+  const realCompCount = useMemo(
+    () => competitions.filter((c) => !c.isDailyPractice).length,
+    [competitions],
+  );
 
   return (
     <section className="hero-section" style={{
@@ -99,7 +105,7 @@ export default function HeroSection() {
           borderRadius: 14, backdropFilter: 'blur(12px)',
         }}>
           <StatItem value={athletesLoading ? '...' : athletes.length} label={t('stats.athletes')} />
-          <StatItem value={compsLoading ? '...' : competitions.length} label={t('stats.competitions')} />
+          <StatItem value={compsLoading ? '...' : realCompCount} label={t('stats.competitions')} />
           <StatItem value={17} label={t('stats.events-supported')} />
         </div>
       </div>
