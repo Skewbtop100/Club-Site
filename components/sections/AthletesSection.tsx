@@ -1,6 +1,8 @@
 'use client';
 
-import { useMemo, useState, useEffect, useRef } from 'react';
+import { useMemo, useState, useEffect, useCallback } from 'react';
+import useEmblaCarousel from 'embla-carousel-react';
+import Autoplay from 'embla-carousel-autoplay';
 import { useLang } from '@/lib/i18n';
 import { fmtTime } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
@@ -142,6 +144,20 @@ export default function AthletesSection({ athletes, results, loading }: Props) {
         @media (max-width: 768px) {
           .athletes-grid-desktop { grid-template-columns: repeat(2, 1fr); }
         }
+        .embla { overflow: hidden; }
+        .embla__container { display: flex; }
+        .embla__slide {
+          flex: 0 0 100%; min-width: 0;
+          display: flex; flex-direction: column; gap: 0.75rem;
+        }
+        .athlete-dot {
+          height: 8px; border-radius: 999px; border: none; padding: 0; cursor: pointer;
+          background: rgba(255,255,255,0.2); width: 8px;
+          transition: width 0.3s ease, background 0.3s ease;
+        }
+        .athlete-dot-active {
+          width: 20px; background: var(--accent);
+        }
       `}</style>
     </section>
   );
@@ -179,8 +195,14 @@ function AthleteCard({
 }
 
 // ── Mobile carousel ──────────────────────────────────────────────────────────
+// Matches RecordsSection's MobileRecordsCarousel pattern exactly (same Embla
+// setup, same autoplay timing/behavior, cards stacked vertically per slide
+// instead of a 2-column grid) — this was previously a hand-rolled swipe
+// handler with an instant array-slice swap and no transition at all, which
+// felt jerky next to Records' smooth carousel on the same page.
 
-const PAGE_SIZE = 6;
+const CARDS_PER_SLIDE = 2;
+const AUTO_INTERVAL = 6000;
 
 function MobileCarousel({
   athletes,
@@ -191,56 +213,64 @@ function MobileCarousel({
   best333: Record<string, number>;
   onSelect: (id: string) => void;
 }) {
-  const [page, setPage] = useState(0);
-  const trackRef = useRef<HTMLDivElement>(null);
-  const startX = useRef(0);
-  const totalPages = Math.ceil(athletes.length / PAGE_SIZE);
+  const [selectedSnap, setSelectedSnap] = useState(0);
+
+  // Build slides: array of 2-card groups
+  const slides = useMemo(() => {
+    const s: Athlete[][] = [];
+    for (let i = 0; i < athletes.length; i += CARDS_PER_SLIDE) {
+      s.push(athletes.slice(i, i + CARDS_PER_SLIDE));
+    }
+    return s;
+  }, [athletes]);
+
+  const [emblaRef, emblaApi] = useEmblaCarousel(
+    { loop: true, duration: 30 },
+    [Autoplay({ delay: AUTO_INTERVAL, stopOnInteraction: false, stopOnMouseEnter: true })],
+  );
+
+  const onEmblaSelect = useCallback(() => {
+    if (!emblaApi) return;
+    setSelectedSnap(emblaApi.selectedScrollSnap());
+  }, [emblaApi]);
 
   useEffect(() => {
-    if (totalPages <= 1) return;
-    const id = setInterval(() => setPage((p) => (p + 1) % totalPages), 4000);
-    return () => clearInterval(id);
-  }, [totalPages]);
+    if (!emblaApi) return;
+    onEmblaSelect();
+    emblaApi.on('select', onEmblaSelect);
+    return () => { emblaApi.off('select', onEmblaSelect); };
+  }, [emblaApi, onEmblaSelect]);
 
-  const pageAthletes = athletes.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-
-  function onTouchStart(e: React.TouchEvent) { startX.current = e.touches[0].clientX; }
-  function onTouchEnd(e: React.TouchEvent) {
-    const diff = startX.current - e.changedTouches[0].clientX;
-    if (Math.abs(diff) < 40) return;
-    if (diff > 0) setPage((p) => Math.min(p + 1, totalPages - 1));
-    else setPage((p) => Math.max(p - 1, 0));
-  }
+  const scrollTo = useCallback((idx: number) => {
+    emblaApi?.scrollTo(idx);
+  }, [emblaApi]);
 
   return (
     <div className="mobile-carousel">
-      <div
-        ref={trackRef}
-        onTouchStart={onTouchStart}
-        onTouchEnd={onTouchEnd}
-        style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}
-      >
-        {pageAthletes.map((a) => (
-          <AthleteCard
-            key={a.id}
-            athlete={a}
-            best333={best333[a.athleteId || a.id]}
-            onClick={() => onSelect(a.athleteId || a.id)}
-          />
-        ))}
+      <div className="embla" ref={emblaRef}>
+        <div className="embla__container">
+          {slides.map((group, si) => (
+            <div key={si} className="embla__slide">
+              {group.map((a) => (
+                <AthleteCard
+                  key={a.id}
+                  athlete={a}
+                  best333={best333[a.athleteId || a.id]}
+                  onClick={() => onSelect(a.athleteId || a.id)}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
 
-      {totalPages > 1 && (
+      {slides.length > 1 && (
         <div style={{ display: 'flex', justifyContent: 'center', gap: '0.4rem', marginTop: '1.2rem' }}>
-          {Array.from({ length: totalPages }).map((_, i) => (
+          {slides.map((_, i) => (
             <button
               key={i}
-              onClick={() => setPage(i)}
-              style={{
-                width: i === page ? 20 : 8, height: 8, borderRadius: 999, border: 'none', padding: 0,
-                background: i === page ? 'var(--accent)' : 'rgba(255,255,255,0.2)',
-                cursor: 'pointer', transition: 'all 0.25s',
-              }}
+              onClick={() => scrollTo(i)}
+              className={`athlete-dot${i === selectedSnap ? ' athlete-dot-active' : ''}`}
             />
           ))}
         </div>

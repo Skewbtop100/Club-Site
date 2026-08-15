@@ -195,33 +195,47 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
     return { items: list, gold: 0, silver: 0, bronze: 0 };
   }, []);
 
-  // Fetch all published results for placement/medal/record calculations.
-  // Excludes source==='imported' — those are external competitors' results
-  // (e.g. other athletes at a real WCA competition our club members also
-  // attended) pulled in for historical/round context, not this club's own
-  // roster. Without this filter, TR ("club record") gets computed against
-  // everyone who ever competed alongside a club member, not just the club —
-  // matches the same filter useResults() already applies for the public
-  // Rankings/Records/Daily Practice feed.
-  const [globalResults, setGlobalResults] = useState<Result[] | null>(null);
+  // Fetch all published results once, then derive TWO different pools from
+  // it — record-badge/TR computation and medal/placement computation need
+  // opposite scoping, and sharing one pool between them was the bug behind
+  // Tergel Batzorig's false Clock "gold" at Dębica Cubing Winter 2026:
+  //
+  // - `globalResults` (source !== 'imported'): for TR ("club record") and
+  //   the WR/CR/NR/TR/PR badges — those must only compare this club's own
+  //   results, or an external competitor's time gets credited as a "club"
+  //   record.
+  // - `allPublishedResults` (everything, imported included): for medal/
+  //   placement detection (medalData, placementMap) — those need the real,
+  //   full competitive field. Filtering out imported results can make an
+  //   entire round vanish from view if every competitor who reached it was
+  //   an unlinked/imported entry, which is exactly what happened here: with
+  //   the club-only pool, Round 1 looked like the Final (the real Final was
+  //   100% imported competitors), and Tergel outranked the two other club
+  //   members left in that shrunk pool instead of being placed 21st of 52.
+  const [allPublishedResults, setAllPublishedResults] = useState<Result[] | null>(null);
   useEffect(() => {
     import('@/lib/firebase/services/results').then(mod => {
       mod.getAllResults().then(all => {
-        setGlobalResults(all.filter(r => r.status === 'published' && r.source !== 'imported'));
+        setAllPublishedResults(all.filter(r => r.status === 'published'));
       });
     });
   }, []);
+  const globalResults = useMemo(
+    () => allPublishedResults ? allPublishedResults.filter(r => r.source !== 'imported') : null,
+    [allPublishedResults],
+  );
 
-  // Compute medals from global results
+  // Compute medals from the full field (imported competitors included —
+  // see the comment on allPublishedResults above for why).
   const medalData = useMemo(() => {
-    if (!globalResults) return { items: [] as { type: 'gold' | 'silver' | 'bronze'; eventId: string; eventName: string; compId: string; compName: string; compDate: unknown; roundLabel: string; time: number | null; solves: (number | null)[] }[], gold: 0, silver: 0, bronze: 0 };
+    if (!allPublishedResults) return { items: [] as { type: 'gold' | 'silver' | 'bronze'; eventId: string; eventName: string; compId: string; compName: string; compDate: unknown; roundLabel: string; time: number | null; solves: (number | null)[] }[], gold: 0, silver: 0, bronze: 0 };
     type MedalItem = { type: 'gold' | 'silver' | 'bronze'; eventId: string; eventName: string; compId: string; compName: string; compDate: unknown; roundLabel: string; time: number | null; solves: (number | null)[] };
     const items: MedalItem[] = [];
     // Get all competitions this athlete participated in
     const myCompIds = new Set(allResults.map(r => r.competitionId));
     myCompIds.forEach(compId => {
       const comp = compMap[compId];
-      const compResults = globalResults.filter(r => r.competitionId === compId);
+      const compResults = allPublishedResults.filter(r => r.competitionId === compId);
       const eventIds = new Set(compResults.map(r => r.eventId));
       eventIds.forEach(eventId => {
         const evResults = compResults.filter(r => r.eventId === eventId);
@@ -250,7 +264,7 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
     let gold = 0, silver = 0, bronze = 0;
     items.forEach(m => { if (m.type === 'gold') gold++; else if (m.type === 'silver') silver++; else bronze++; });
     return { items, gold, silver, bronze };
-  }, [globalResults, allResults, compMap, athlete.id]);
+  }, [allPublishedResults, allResults, compMap, athlete.id]);
 
   // Records: TR/NR/CR/WR for this athlete
   const recordData = useMemo(() => {
@@ -362,10 +376,11 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
     if (!historyEvent) return [];
     const eventResults = allResults.filter(r => r.eventId === historyEvent);
 
-    // Find max round per competition for this event (from ALL results, not just this athlete)
+    // Find max round per competition for this event (from ALL results, not just this athlete).
+    // Uses the full field (imported included) — the real Final round can be
+    // 100% non-club competitors, and excluding them would make it invisible.
     const maxRoundPerComp: Record<string, number> = {};
-    // Use global results if available for accurate max round, else use athlete's own
-    const sourceForMax = globalResults ?? allResults;
+    const sourceForMax = allPublishedResults ?? allResults;
     sourceForMax.forEach(r => {
       if (r.eventId !== historyEvent) return;
       const rd = r.round || 1;
@@ -411,22 +426,23 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
       g.rows.sort((a, b) => b.roundNum - a.roundNum);
     });
     return groups;
-  }, [allResults, historyEvent, compMap, globalResults, allComps]);
+  }, [allResults, historyEvent, compMap, allPublishedResults, allComps]);
 
-  // Placement for history rows
+  // Placement for history rows — full field (imported included), same
+  // reasoning as historyGroups' sourceForMax and medalData above.
   const placementMap = useMemo(() => {
     const m: Record<string, number> = {};
-    if (!globalResults) return m;
+    if (!allPublishedResults) return m;
     allResults.forEach(r => {
       if (r.eventId !== historyEvent) return;
-      const roundResults = globalResults
+      const roundResults = allPublishedResults
         .filter(gr => gr.competitionId === r.competitionId && gr.eventId === r.eventId && (gr.round || 1) === (r.round || 1))
         .sort(wcaSort);
       const idx = roundResults.findIndex(gr => gr.athleteId === r.athleteId);
       if (idx >= 0) m[r.id] = idx + 1;
     });
     return m;
-  }, [globalResults, allResults, historyEvent]);
+  }, [allPublishedResults, allResults, historyEvent]);
 
   // Historical record badges: what badge each result earned WHEN it was set (TR/NR/CR/WR only, no PR)
   // Also tracks current personal bests for highlighting
