@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import '@cubing/icons/css';
 import { LangProvider } from '@/lib/i18n';
@@ -11,6 +11,15 @@ export const metadata: Metadata = {
   title: 'Mongolian Speedcubers',
   description:
     "Mongolia's competitive speedcubing community — competitions, live results, rankings, timer, algorithms, and more.",
+  // Site-wide install manifest — distinct from /timer's own scoped manifest
+  // (app/timer/layout.tsx sets its own `manifest`, which overrides this for
+  // that subtree). Favicon + apple-touch-icon come from the app/icon.png and
+  // app/apple-icon.png file conventions instead of being declared here.
+  manifest: '/site-manifest.json',
+};
+
+export const viewport: Viewport = {
+  themeColor: '#080810',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
