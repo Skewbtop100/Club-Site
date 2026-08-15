@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useLang } from '@/lib/i18n';
 import { DAILY_PRACTICE_COMPETITION_ID } from '@/lib/firebase/services/competitions';
 import { getResultBadgesPair, getHighestBadge, BADGE_STYLES, type RecordBadge } from '@/lib/record-badges';
@@ -26,6 +26,18 @@ interface RecordRow {
   value: number;
   athleteName: string;
   submittedAt: unknown;
+  result: Result;
+}
+
+/** Index of the solve that produced the recorded single — same "lowest valid
+ *  time" logic RankingsSection uses to highlight a result's best solve. */
+function findBestSolveIdx(solves: (number | null)[] | undefined): number {
+  if (!solves) return -1;
+  return solves.reduce<number>((bi, s, idx) => {
+    if (s === null || s <= 0 || s === -1 || s === -2) return bi;
+    if (bi === -1) return idx;
+    return s < (solves[bi] as number) ? idx : bi;
+  }, -1);
 }
 
 /** Best-effort read of a Firestore Timestamp | Date | string | number into ms. */
@@ -52,6 +64,7 @@ function fmtClock(ts: unknown): string {
 
 export default function DailyPracticeSection({ results, athletes, wcaRecords, loading }: Props) {
   const { t } = useLang();
+  const [scrambleModal, setScrambleModal] = useState<Result | null>(null);
 
   const athleteNameMap = useMemo(() => {
     const m: Record<string, string> = {};
@@ -86,12 +99,12 @@ export default function DailyPracticeSection({ results, athletes, wcaRecords, lo
 
       const singleTier = getHighestBadge(badges.single);
       if (singleTier && r.single !== null) {
-        rows.push({ key: `${r.id}-single`, tier: singleTier, type: 'single', eventName, value: r.single, athleteName, submittedAt: r.submittedAt });
+        rows.push({ key: `${r.id}-single`, tier: singleTier, type: 'single', eventName, value: r.single, athleteName, submittedAt: r.submittedAt, result: r });
       }
 
       const avgTier = getHighestBadge(badges.average);
       if (avgTier && r.average !== null) {
-        rows.push({ key: `${r.id}-average`, tier: avgTier, type: 'average', eventName, value: r.average, athleteName, submittedAt: r.submittedAt });
+        rows.push({ key: `${r.id}-average`, tier: avgTier, type: 'average', eventName, value: r.average, athleteName, submittedAt: r.submittedAt, result: r });
       }
     }
     return rows;
@@ -121,7 +134,7 @@ export default function DailyPracticeSection({ results, athletes, wcaRecords, lo
         ) : (
           <div className="dp-feed">
             {recordRows.map((row) => (
-              <div className="dp-row" key={row.key}>
+              <div className="dp-row" key={row.key} onClick={() => setScrambleModal(row.result)}>
                 <span
                   className="dp-tier-badge"
                   style={{
@@ -143,6 +156,49 @@ export default function DailyPracticeSection({ results, athletes, wcaRecords, lo
           </div>
         )}
       </div>
+
+      {/* Scramble transparency modal — all 5 scrambles for the clicked entry */}
+      {scrambleModal && (() => {
+        const bestIdx = findBestSolveIdx(scrambleModal.solves);
+        const scrambles = scrambleModal.scrambles ?? [];
+        const hasAny = scrambles.some((s) => s);
+        return (
+          <div className="wca-modal-backdrop" onClick={() => setScrambleModal(null)}>
+            <div
+              className="wca-modal"
+              style={{ maxWidth: '520px', borderColor: 'rgba(124,58,237,0.35)' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="wca-modal-title">
+                {eventNameMap[scrambleModal.eventId] || scrambleModal.eventId}
+              </div>
+              <div className="wca-modal-sub">
+                {(athleteNameMap[scrambleModal.athleteId] || scrambleModal.athleteName || scrambleModal.athleteId)}
+                {' · '}{scrambleModal.practiceDate}
+                {' · Ao5 '}{fmtTime(scrambleModal.average)}
+              </div>
+              {hasAny ? (
+                <div className="dp-scramble-list">
+                  {scrambles.map((s, i) => (
+                    <div key={i} className={`dp-scramble-row${i === bestIdx ? ' dp-scramble-best' : ''}`}>
+                      <div className="dp-scramble-head">
+                        <span className="dp-scramble-idx">S{i + 1}{i === bestIdx ? ` — ${t('rankings.single')}` : ''}</span>
+                        <span className="dp-scramble-time">{fmtTime(scrambleModal.solves?.[i] ?? null)}</span>
+                      </div>
+                      <div className="dp-scramble-text">{s || '—'}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="dp-scramble-empty">{t('daily-practice.no-scrambles')}</div>
+              )}
+              <div className="wca-modal-actions">
+                <button className="wca-modal-btn" onClick={() => setScrambleModal(null)}>{t('daily-practice.close')}</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       <style>{`
         .section-tag {
@@ -172,12 +228,32 @@ export default function DailyPracticeSection({ results, athletes, wcaRecords, lo
           display: flex; align-items: center; gap: 0.75rem;
           padding: 0.65rem 0.75rem; border-radius: 10px;
           background: rgba(255,255,255,0.02);
+          cursor: pointer; transition: background 0.15s, border-color 0.15s;
+          border: 1px solid transparent;
         }
+        .dp-row:hover { background: rgba(124,58,237,0.07); border-color: rgba(124,58,237,0.2); }
         .dp-tier-badge { flex-shrink: 0; font-family: monospace; }
         .dp-row-main { flex: 1; min-width: 0; }
         .dp-row-headline { font-size: 0.9rem; font-weight: 600; color: var(--text-primary); }
         .dp-row-athlete { font-size: 0.78rem; color: var(--muted); margin-top: 0.15rem; }
         .dp-clock { flex-shrink: 0; font-size: 0.72rem; color: var(--muted); min-width: 7.5rem; text-align: right; white-space: nowrap; }
+
+        .dp-scramble-list { max-height: 55vh; overflow-y: auto; margin: 0.9rem 0 1.1rem; }
+        .dp-scramble-row {
+          padding: 0.55rem 0.6rem; border-radius: 8px; margin-bottom: 0.4rem;
+          background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+        }
+        .dp-scramble-row:last-child { margin-bottom: 0; }
+        .dp-scramble-row.dp-scramble-best {
+          background: rgba(124,58,237,0.1); border-color: rgba(124,58,237,0.35);
+        }
+        .dp-scramble-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.3rem; }
+        .dp-scramble-idx { font-size: 0.7rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+        .dp-scramble-best .dp-scramble-idx { color: #a78bfa; }
+        .dp-scramble-time { font-family: monospace; font-weight: 700; font-size: 0.85rem; color: var(--text); }
+        .dp-scramble-text { font-family: monospace; font-size: 0.8rem; color: var(--muted); line-height: 1.5; }
+        .dp-scramble-best .dp-scramble-text { color: var(--text); }
+        .dp-scramble-empty { text-align: center; color: var(--muted); font-size: 0.85rem; padding: 1.5rem 0; }
 
         .spinner { width:32px;height:32px;border-radius:50%;border:3px solid rgba(124,58,237,0.2);border-top-color:var(--accent);animation:spin .8s linear infinite; }
         @keyframes spin { to { transform:rotate(360deg); } }

@@ -50,6 +50,8 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'section-title.daily-practice': 'Өдөр тутмын бэлтгэл',
   'section-desc.daily-practice': 'Клубын гишүүдийн өнөөдрийн Ao5 дасгалын үр дүнгүүд, шууд бүртгэгдсэн.',
   'daily-practice.empty': 'Өнөөдөр рекорд тогтоогоогүй байна.',
+  'daily-practice.no-scrambles': 'Энэ бүртгэлд холилт хадгалагдаагүй байна.',
+  'daily-practice.close': 'Хаах',
   'section-tag.athletes': 'ТАМИРЧИД',
   'section-title.athletes': 'Клубын тамирчид',
   'section-desc.athletes': 'Манай өрсөлдөгч speedcuber-ууд.',

@@ -195,12 +195,19 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
     return { items: list, gold: 0, silver: 0, bronze: 0 };
   }, []);
 
-  // Fetch all published results for placement/medal/record calculations
+  // Fetch all published results for placement/medal/record calculations.
+  // Excludes source==='imported' — those are external competitors' results
+  // (e.g. other athletes at a real WCA competition our club members also
+  // attended) pulled in for historical/round context, not this club's own
+  // roster. Without this filter, TR ("club record") gets computed against
+  // everyone who ever competed alongside a club member, not just the club —
+  // matches the same filter useResults() already applies for the public
+  // Rankings/Records/Daily Practice feed.
   const [globalResults, setGlobalResults] = useState<Result[] | null>(null);
   useEffect(() => {
     import('@/lib/firebase/services/results').then(mod => {
       mod.getAllResults().then(all => {
-        setGlobalResults(all.filter(r => r.status === 'published'));
+        setGlobalResults(all.filter(r => r.status === 'published' && r.source !== 'imported'));
       });
     });
   }, []);
@@ -502,18 +509,20 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
   }, [allResults, historyEvent, compMap, globalResults, wcaRecords]);
 
   // ── Дасгал (Daily Practice) tab ─────────────────────────────────────────
-  // Newest first. PR is judged against this athlete's ENTIRE history —
-  // competitions + practice combined — matching how the public Daily
-  // Practice feed and Rankings/Records now treat practice results as
-  // fully counting toward the athlete's real personal bests.
+  // Newest first. Badges are judged against the whole CLUB's results, not
+  // just this athlete's own — same reasoning as the Records/History tabs
+  // above (see the `globalResults ?? allResults` pattern and its comment):
+  // TR is computed as "the best value anywhere in the pool passed in", with
+  // no athlete filtering inside computeBadges. A pool scoped to one athlete
+  // makes their own personal best trivially "the best in the pool", which
+  // wrongly cascades into a false TR/NR/CR badge. `globalResults` comes from
+  // getAllResults() with no competitionId filter, so it already includes
+  // this athlete's Daily Practice results too — no separate merge needed.
   const sortedPracticeResults = useMemo(
     () => [...practiceResults].sort((a, b) => (b.practiceDate || '').localeCompare(a.practiceDate || '')),
     [practiceResults],
   );
-  const practiceHistoryPool = useMemo(
-    () => [...allResults, ...practiceResults],
-    [allResults, practiceResults],
-  );
+  const practiceHistoryPool = globalResults ?? allResults;
 
   // Events this athlete has practice sessions for — same derivation/sort as
   // `athleteEvents` (Competition History tab's pills), for a matching picker.

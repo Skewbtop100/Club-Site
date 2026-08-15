@@ -50,6 +50,8 @@ const en = {
   'section-title.daily-practice': 'Daily Practice',
   'section-desc.daily-practice': "Today's Ao5 practice attempts from the club, logged live by admins during sessions.",
   'daily-practice.empty': 'No records set today yet.',
+  'daily-practice.no-scrambles': 'No scrambles recorded for this entry.',
+  'daily-practice.close': 'Close',
   'section-tag.athletes': 'ATHLETES',
   'section-title.athletes': 'Club Athletes',
   'section-desc.athletes': 'Our competitive speedcubers.',
