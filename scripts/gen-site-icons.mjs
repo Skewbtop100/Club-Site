@@ -1,16 +1,13 @@
 // Generate site-wide PWA/favicon icons from the club's real logo.
 // Unlike gen-pwa-icons.mjs (which draws a stopwatch procedurally for the
-// Timer-scoped manifest), this crops the actual "Mongol Shoochid" emblem
-// out of the source artwork and composites it onto each target size —
-// requires `sharp` (declared as a devDependency).
+// Timer-scoped manifest), this composites the actual "Mongol Shoochid"
+// artwork onto each target size — requires `sharp` (devDependency).
 //
 // Usage:  node scripts/gen-site-icons.mjs
 //
-// Source: public/Mongol Shoochid Har Fongui.png (3543x3543, transparent).
-// The emblem-only crop below (x:1044-2498, y:680-2131) was located via a
-// row/column alpha scan that found the transparent gap separating the
-// emblem from the "МОНГОЛ ШОЧИД" wordmark beneath it — the wordmark is
-// deliberately excluded since it's illegible at app-icon sizes.
+// Source: public/Mongol Shoochid Har Fongui.png (3543x3543, transparent) —
+// used as the full canvas (emblem + the "МОНГОЛ ШОЧИД" wordmark below it),
+// not cropped to the emblem alone.
 //
 // Outputs (all composited onto #080810, the site's --bg dark value):
 //   public/icon-192.png            — rounded square, transparent corners (purpose: any)
@@ -28,10 +25,9 @@ import { existsSync, mkdirSync } from 'node:fs';
 
 const SRC = 'public/Mongol Shoochid Har Fongui.png';
 const BG = '#080810';
-const EMBLEM_BOX = { left: 1044, top: 680, width: 2498 - 1044, height: 2131 - 680 };
 
 async function loadEmblem() {
-  return sharp(SRC).extract(EMBLEM_BOX).toBuffer();
+  return sharp(SRC).toBuffer();
 }
 
 function roundedRectSvg(size, radius, color) {
