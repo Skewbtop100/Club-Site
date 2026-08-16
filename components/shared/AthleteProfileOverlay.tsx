@@ -151,11 +151,12 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
   // Stats
   const stats = useMemo(() => {
     const compIds = new Set(allResults.map(r => r.competitionId));
-    const eventIds = new Set(allResults.map(r => r.eventId));
+    const practiceDays = new Set(practiceResults.map(r => r.practiceDate).filter(Boolean));
     let totalSolves = 0;
     allResults.forEach(r => { totalSolves += (r.solves?.length || 0); });
-    return { comps: compIds.size, events: eventIds.size, solves: totalSolves };
-  }, [allResults]);
+    practiceResults.forEach(r => { totalSolves += (r.solves?.length || 0); });
+    return { comps: compIds.size, practiceDays: practiceDays.size, solves: totalSolves };
+  }, [allResults, practiceResults]);
 
   // Medals (across all competitions)
   const medals = useMemo(() => {
@@ -224,6 +225,106 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
     () => allPublishedResults ? allPublishedResults.filter(r => r.source !== 'imported') : null,
     [allPublishedResults],
   );
+
+  // Club rank — this athlete's position among ALL club members' personal
+  // bests for each event, computed locally from globalResults (no external
+  // data needed for this part, unlike national/continental/world rank below).
+  const clubRankMap = useMemo(() => {
+    const m: Record<string, { single: number | null; average: number | null }> = {};
+    if (!globalResults) return m;
+    const bestByAthleteEvent: Record<string, Record<string, { single: number | null; average: number | null }>> = {};
+    globalResults.forEach(r => {
+      if (!r.athleteId) return;
+      if (!bestByAthleteEvent[r.eventId]) bestByAthleteEvent[r.eventId] = {};
+      const byAthlete = bestByAthleteEvent[r.eventId];
+      if (!byAthlete[r.athleteId]) byAthlete[r.athleteId] = { single: null, average: null };
+      const e = byAthlete[r.athleteId];
+      if (r.single != null && r.single > 0 && (e.single === null || r.single < e.single)) e.single = r.single;
+      if (r.average != null && r.average > 0 && (e.average === null || r.average < e.average)) e.average = r.average;
+    });
+    Object.entries(bestByAthleteEvent).forEach(([eventId, byAthlete]) => {
+      const singles = Object.entries(byAthlete)
+        .filter(([, v]) => v.single !== null)
+        .sort((a, b) => (a[1].single as number) - (b[1].single as number));
+      const averages = Object.entries(byAthlete)
+        .filter(([, v]) => v.average !== null)
+        .sort((a, b) => (a[1].average as number) - (b[1].average as number));
+      const singleIdx = singles.findIndex(([id]) => id === athlete.id);
+      const avgIdx = averages.findIndex(([id]) => id === athlete.id);
+      m[eventId] = {
+        single: singleIdx >= 0 ? singleIdx + 1 : null,
+        average: avgIdx >= 0 ? avgIdx + 1 : null,
+      };
+    });
+    return m;
+  }, [globalResults, athlete.id]);
+
+  // National/world rank — needs WCA's own data, fetched once per profile via
+  // our cached proxy route (see app/api/wca-person). Skipped entirely for
+  // athletes with no linked WCA ID (informal/practice-only members) — the
+  // table falls back to club rank only for them.
+  interface WcaRankEntry { best: number; world_rank: number; continent_rank: number; country_rank: number }
+  const [wcaPersonalRecords, setWcaPersonalRecords] = useState<Record<string, { single?: WcaRankEntry; average?: WcaRankEntry }> | null>(null);
+  useEffect(() => {
+    if (!athlete.wcaId) { setWcaPersonalRecords(null); return; }
+    let cancelled = false;
+    fetch(`/api/wca-person?wcaId=${encodeURIComponent(athlete.wcaId)}`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => { if (!cancelled) setWcaPersonalRecords(data?.personalRecords ?? {}); })
+      .catch(() => { if (!cancelled) setWcaPersonalRecords({}); });
+    return () => { cancelled = true; };
+  }, [athlete.wcaId]);
+
+  // Current Personal Records — one row per event, best single/average across
+  // competitions AND Daily Practice (consistent with every other "practice
+  // counts as real" decision this session). Column layout mirrors WCA's own
+  // persons page: Club | NR | CR | WR flanking each of Single/Average, Club
+  // being our own addition sitting outermost on each side. Club rank is
+  // always computed locally; NR/CR/WR only populate when this athlete has a
+  // linked WCA ID and an official result for that event — otherwise those
+  // cells show a dash.
+  interface CurrentPrEntry {
+    eventId: string; eventName: string;
+    single: number | null; average: number | null;
+    singleClubRank: number | null; avgClubRank: number | null;
+    singleCountryRank: number | null; avgCountryRank: number | null;
+    singleContinentRank: number | null; avgContinentRank: number | null;
+    singleWorldRank: number | null; avgWorldRank: number | null;
+  }
+  const currentPRs = useMemo((): CurrentPrEntry[] => {
+    const pool = [...allResults, ...practiceResults];
+    const byEvent: Record<string, { single: number | null; average: number | null }> = {};
+    pool.forEach(r => {
+      if (!byEvent[r.eventId]) byEvent[r.eventId] = { single: null, average: null };
+      const e = byEvent[r.eventId];
+      if (r.single != null && r.single > 0 && (e.single === null || r.single < e.single)) e.single = r.single;
+      if (r.average != null && r.average > 0 && (e.average === null || r.average < e.average)) e.average = r.average;
+    });
+    const eventIds = Object.keys(byEvent);
+    eventIds.sort((a, b) => {
+      const ai = EVENT_ORDER.indexOf(a);
+      const bi = EVENT_ORDER.indexOf(b);
+      return (ai >= 0 ? ai : 100) - (bi >= 0 ? bi : 100);
+    });
+    return eventIds.map(eventId => {
+      const { single, average } = byEvent[eventId];
+      const clubRank = clubRankMap[eventId];
+      const wcaRecord = wcaPersonalRecords?.[eventId];
+      return {
+        eventId,
+        eventName: WCA_EVENTS.find(e => e.id === eventId)?.name || eventId,
+        single, average,
+        singleClubRank: clubRank?.single ?? null,
+        avgClubRank: clubRank?.average ?? null,
+        singleCountryRank: wcaRecord?.single?.country_rank ?? null,
+        avgCountryRank: wcaRecord?.average?.country_rank ?? null,
+        singleContinentRank: wcaRecord?.single?.continent_rank ?? null,
+        avgContinentRank: wcaRecord?.average?.continent_rank ?? null,
+        singleWorldRank: wcaRecord?.single?.world_rank ?? null,
+        avgWorldRank: wcaRecord?.average?.world_rank ?? null,
+      };
+    });
+  }, [allResults, practiceResults, athlete.id, clubRankMap, wcaPersonalRecords]);
 
   // Compute medals from the full field (imported competitors included —
   // see the comment on allPublishedResults above for why).
@@ -321,7 +422,11 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
     const refResults = globalResults ?? allResults;
     if (refResults.length === 0) return byBadge;
     const seen = new Set<string>();
-    allResults.forEach(r => {
+    // Daily Practice entries count toward these totals too — practice PRs
+    // are real personal records site-wide (Rankings/Records/the public feed
+    // already treat them that way); this was only ever scanning competition
+    // results, undercounting the summary panel's PR tally.
+    [...allResults, ...practiceResults].forEach(r => {
       const pair = getResultBadgesPair(r, refResults, wcaRecords);
       const comp = compMap[r.competitionId];
       const maxRd = refResults.filter(gr => gr.competitionId === r.competitionId && gr.eventId === r.eventId)
@@ -345,7 +450,7 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
       });
     });
     return byBadge;
-  }, [allResults, globalResults, wcaRecords, compMap]);
+  }, [allResults, practiceResults, globalResults, wcaRecords, compMap]);
 
   // Per-result badge map: resultId → { single: highest badge, average: highest badge }
   // Use allResults (athlete's own) as fallback for PR when globalResults hasn't loaded yet.
@@ -355,14 +460,18 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
     // Use globalResults if available (for TR accuracy), otherwise athlete's own results for PR
     const refResults = globalResults ?? allResults;
     if (refResults.length === 0) return m;
-    allResults.forEach(r => {
+    // Covers practice results too — this map is what the badge popup's event
+    // pills use to find which result to jump to (see the pill onClick below);
+    // without practice results here, a practice-only PR pill would switch
+    // tabs and silently find nothing to highlight.
+    [...allResults, ...practiceResults].forEach(r => {
       const pair = getResultBadgesPair(r, refResults, wcaRecords);
       const s = getHighestBadge(pair.single);
       const a = getHighestBadge(pair.average);
       if (s || a) m[r.id] = { single: s, average: a };
     });
     return m;
-  }, [allResults, globalResults, wcaRecords]);
+  }, [allResults, practiceResults, globalResults, wcaRecords]);
 
   // Competition history for selected event, grouped by competition
   interface HistoryRow extends Result {
@@ -601,8 +710,8 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
                 <div className="apo-stat-label">Comps</div>
               </div>
               <div className="apo-stat">
-                <div className="apo-stat-num">{stats.events}</div>
-                <div className="apo-stat-label">Events</div>
+                <div className="apo-stat-num">{stats.practiceDays}</div>
+                <div className="apo-stat-label">Practice Days</div>
               </div>
               <div className="apo-stat">
                 <div className="apo-stat-num">{stats.solves}</div>
@@ -670,21 +779,28 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
                           onClick={(e) => {
                             e.stopPropagation();
                             const selectedBadge = badgePopup;
-                            setHistoryEvent(eid);
-                            setTab('history');
                             setBadgePopup(null);
-                            // Find matching result(s) for this event+badge
-                            const matches = allResults.filter(r => {
+                            // Find the matching result across both competitions and
+                            // Daily Practice — a badge can now be earned on either, so
+                            // which tab we jump to depends on where the match actually is.
+                            const match = [...allResults, ...practiceResults].find(r => {
                               if (r.eventId !== eid) return false;
                               const rb = resultBadgesMap[r.id];
                               if (!rb) return false;
                               return rb.single === selectedBadge || rb.average === selectedBadge;
                             });
-                            if (matches.length > 0) {
-                              setHighlightResultId(matches[0].id);
+                            if (match?.competitionId === DAILY_PRACTICE_COMPETITION_ID) {
+                              setPracticeEvent(eid);
+                              setTab('practice');
+                              return;
+                            }
+                            setHistoryEvent(eid);
+                            setTab('history');
+                            if (match) {
+                              setHighlightResultId(match.id);
                               setTimeout(() => setHighlightResultId(null), 3000);
                               setTimeout(() => {
-                                document.getElementById(`apo-row-${matches[0].id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                document.getElementById(`apo-row-${match.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                               }, 150);
                             }
                           }}
@@ -697,6 +813,75 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
             );
           })()}
         </div>
+
+        {/* Current Personal Records — mirrors worldcubeassociation.org/persons/{id}'s
+            column layout exactly: Club sits outermost on each side (before NR on
+            the left, after NR on the right) since it's our own addition beyond
+            WCA's own World/Continent/Country columns. NR/CR/WR only populate for
+            athletes with a linked WCA ID and an official result for that event —
+            everyone else (or events never done at a real competition) just shows
+            a dash there, while Club rank still shows since it's computed locally. */}
+        {currentPRs.length > 0 && (
+          <div className="apo-pr-section">
+            <div className="apo-pr-title">Current Personal Records</div>
+            <div className="apo-table-wrap">
+              <table className="apo-table apo-pr-table">
+                <colgroup>
+                  <col style={{ width: '16%' }} />
+                  <col style={{ width: '8%' }} />
+                  <col style={{ width: '8%' }} />
+                  <col style={{ width: '8%' }} />
+                  <col style={{ width: '8%' }} />
+                  <col style={{ width: '10%' }} />
+                  <col style={{ width: '10%' }} />
+                  <col style={{ width: '8%' }} />
+                  <col style={{ width: '8%' }} />
+                  <col style={{ width: '8%' }} />
+                  <col style={{ width: '8%' }} />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>Event</th>
+                    <th className="apo-pr-rank-cell">Club</th>
+                    <th className="apo-pr-rank-cell">NR</th>
+                    <th className="apo-pr-rank-cell">CR</th>
+                    <th className="apo-pr-rank-cell">WR</th>
+                    <th className="r">Single</th>
+                    <th className="r">Average</th>
+                    <th className="apo-pr-rank-cell">WR</th>
+                    <th className="apo-pr-rank-cell">CR</th>
+                    <th className="apo-pr-rank-cell">NR</th>
+                    <th className="apo-pr-rank-cell">Club</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {currentPRs.map(pr => {
+                    const rank = (n: number | null) => n != null ? n : '—';
+                    return (
+                      <tr key={pr.eventId}>
+                        <td>{pr.eventName}</td>
+                        <td className="mono apo-pr-rank-cell">{rank(pr.singleClubRank)}</td>
+                        <td className="mono apo-pr-rank-cell">{rank(pr.singleCountryRank)}</td>
+                        <td className="mono apo-pr-rank-cell">{rank(pr.singleContinentRank)}</td>
+                        <td className="mono apo-pr-rank-cell">{rank(pr.singleWorldRank)}</td>
+                        <td className={`r mono${pr.single != null && pr.single < 0 ? ' dnf' : ''}`}>
+                          {pr.single != null ? fmtTime(pr.single) : '—'}
+                        </td>
+                        <td className={`r mono${pr.average != null && pr.average < 0 ? ' dnf' : ''}`}>
+                          {pr.average != null ? fmtTime(pr.average) : '—'}
+                        </td>
+                        <td className="mono apo-pr-rank-cell">{rank(pr.avgWorldRank)}</td>
+                        <td className="mono apo-pr-rank-cell">{rank(pr.avgContinentRank)}</td>
+                        <td className="mono apo-pr-rank-cell">{rank(pr.avgCountryRank)}</td>
+                        <td className="mono apo-pr-rank-cell">{rank(pr.avgClubRank)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="apo-tabs">
@@ -1055,6 +1240,7 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
         .apo-stat {
           flex: 1; padding: 1.2rem 1.5rem; text-align: center;
           border-right: 1px solid rgba(255,255,255,0.06);
+          display: flex; flex-direction: column; justify-content: center; align-items: center;
         }
         .apo-stat:last-child { border-right: none; }
         .apo-stats-gold .apo-stat { border-right-color: rgba(250,204,21,0.1); }
@@ -1173,7 +1359,44 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
         .apo-table th.r, .apo-table td.r { text-align: right; }
         .apo-table td { padding: 0.8rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.04); vertical-align: middle; }
         .apo-table tr:hover td { background: rgba(124,58,237,0.05); }
+        /* Matches .apo-tab-content's exact box model (max-width + horizontal
+           padding) so this table's wrapper resolves to the SAME real pixel
+           width as Competition History's table below it — .apo-tab-content
+           is what constrains History's table, and this section sits outside
+           that (above the tab bar), so without this it inherited the full,
+           unconstrained overlay width instead. */
+        .apo-pr-section { max-width: 1000px; margin: 0 auto 1.5rem; padding: 0 1.5rem; }
+        .apo-pr-title {
+          font-size: 0.72rem; font-weight: 700; color: var(--muted);
+          text-transform: uppercase; letter-spacing: 0.08em; text-align: center;
+          margin-bottom: 0.6rem;
+        }
         .apo-table .mono { font-family: monospace; font-size: 1.05rem; }
+        /* table-layout: fixed (scoped to just this table, not the generic
+           .apo-table used by History/Records/Дасгал) makes the browser honor
+           width: 100% strictly instead of growing past it to fit content —
+           that's what was still making this table wider than Competition
+           History's below it. Paired with the <colgroup> above, it also
+           guarantees the 8 rank columns are pixel-identical on both sides,
+           so Single/Average land in the table's true horizontal center
+           instead of drifting per row based on how wide each number happens
+           to render. */
+        .apo-pr-table { table-layout: fixed; }
+        .apo-pr-table th, .apo-pr-table td {
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        /* Same horizontal padding on every column (Event, ranks, Single,
+           Average) — different padding per column type was producing
+           different visual gaps between adjacent columns (tight between two
+           rank columns, wide between a rank column and Single/Average). */
+        .apo-pr-table th, .apo-pr-table td { padding-left: 0.6rem; padding-right: 0.6rem; }
+        /* Rank columns hold short 1-5 digit numbers — right-aligning them
+           (like Single/Average) bunches all the empty space on one side of
+           each narrow column, which is what actually read as "uneven" rather
+           than any real gap-size difference. Centering distributes it evenly
+           on both sides, matching WCA's own rank-column rhythm. */
+        .apo-pr-table th.apo-pr-rank-cell, .apo-pr-table td.apo-pr-rank-cell { text-align: center; }
+        .apo-pr-table td.apo-pr-rank-cell { font-size: 0.85rem; }
         .apo-table .bold { font-weight: 700; color: #a78bfa; }
         .apo-table .dnf { color: #f87171; }
         .apo-table .solve { color: var(--muted); font-size: 0.92rem; }
@@ -1313,11 +1536,15 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
           .apo-stat-label { font-size: 0.62rem; }
           .apo-tab { font-size: 0.9rem; padding: 0.7rem 0.3rem; }
           .apo-tab-content { padding: 1rem 0.75rem; }
+          .apo-pr-section { padding: 0 0.75rem; }
           .apo-ep { font-size: 0.78rem; padding: 0.35rem 0.8rem; }
           .apo-table { min-width: 700px; font-size: 0.85rem; }
           .apo-table th { padding: 0.5rem 0.5rem; font-size: 0.68rem; }
           .apo-table td { padding: 0.55rem 0.5rem; }
           .apo-table .mono { font-size: 0.88rem; }
+          /* Tightened rank-column padding above brings this back in line with
+             the history table's own 700px — no need for a wider min-width. */
+          .apo-pr-table { min-width: 700px; }
           .apo-table .solve { font-size: 0.78rem; }
           .apo-td-place { font-size: 0.88rem; }
           .apo-comp-label-name { font-size: 0.8rem; }
