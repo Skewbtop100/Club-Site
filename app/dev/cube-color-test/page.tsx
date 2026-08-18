@@ -35,7 +35,7 @@ interface SampleResult {
   y: number;
 }
 
-type CameraStatus = 'idle' | 'requesting' | 'ready' | 'denied' | 'unavailable';
+type CameraStatus = 'idle' | 'requesting' | 'ready' | 'denied' | 'unavailable' | 'timeout';
 
 // Two-face capture sequence: capture one face, immediately capture a second
 // (no re-init needed — the camera stream stays mounted throughout), then
@@ -81,6 +81,7 @@ const GRID_SIZE = 3;
 const SAMPLE_PATCH_PX = 10;
 const GUIDE_BOX_FRACTION = 0.8; // must match the CSS overlay's `width: 80%` below
 const DEBUG_DOT_MIN_RADIUS_PX = 4;
+const CAMERA_INIT_TIMEOUT_MS = 10_000;
 
 const ACCENT = '#A78BFA';
 const BG = '#0a0a0a';
@@ -277,6 +278,17 @@ export default function CubeColorTestPage() {
   const debugCanvasRef1 = useRef<HTMLCanvasElement>(null);
   const debugCanvasRef2 = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  // Bumped on every new startCamera() call (mount, retry, or visibility
+  // regain) and on unmount. A pending getUserMedia() call captures its own
+  // id and checks it against this ref when it resolves — if another call
+  // has since taken over, the resolution is stale and its stream is stopped
+  // immediately instead of being kept alive. Without this, a call that's
+  // still in flight when the page is left (nav away, or the effect's own
+  // cleanup running) would, on eventually resolving, assign its stream to
+  // a ref no cleanup will ever run for again — a leaked live stream that
+  // keeps holding the camera hardware and can hang the next getUserMedia().
+  const startCameraRequestIdRef = useRef(0);
+  const cameraTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [cameraStatus, setCameraStatus] = useState<CameraStatus>('idle');
   const [cameraError, setCameraError] = useState<string>('');
@@ -302,13 +314,44 @@ export default function CubeColorTestPage() {
   }, []);
 
   const startCamera = useCallback(async () => {
+    // Superseding any earlier in-flight call is the whole point of the
+    // token: bumping it here means a still-pending previous getUserMedia()
+    // (e.g. one left over from before a quick nav-away-and-back, or one
+    // that's simply taking a long time) will recognize itself as stale when
+    // it eventually resolves and stop its stream instead of leaking it.
+    const requestId = ++startCameraRequestIdRef.current;
+
     setCameraStatus('requesting');
     setCameraError('');
+
+    if (cameraTimeoutRef.current) clearTimeout(cameraTimeoutRef.current);
+    cameraTimeoutRef.current = setTimeout(() => {
+      if (startCameraRequestIdRef.current === requestId) {
+        setCameraStatus('timeout');
+        setCameraError('Камер холбогдоход удаж байна. Дахин оролдоно уу.');
+      }
+    }, CAMERA_INIT_TIMEOUT_MS);
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: { ideal: 'environment' } },
         audio: false,
       });
+
+      if (startCameraRequestIdRef.current !== requestId) {
+        // A newer request has since taken over (retry, visibility-regain
+        // retry, or this component already unmounted) — this stream is
+        // stale. Stop it immediately so it doesn't sit there holding the
+        // camera hardware.
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
+      if (cameraTimeoutRef.current) {
+        clearTimeout(cameraTimeoutRef.current);
+        cameraTimeoutRef.current = null;
+      }
+
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -316,6 +359,11 @@ export default function CubeColorTestPage() {
       }
       setCameraStatus('ready');
     } catch (err) {
+      if (startCameraRequestIdRef.current !== requestId) return;
+      if (cameraTimeoutRef.current) {
+        clearTimeout(cameraTimeoutRef.current);
+        cameraTimeoutRef.current = null;
+      }
       const name = err instanceof Error ? err.name : '';
       if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
         setCameraStatus('denied');
@@ -332,9 +380,38 @@ export default function CubeColorTestPage() {
 
   useEffect(() => {
     startCamera();
-    return () => stopCamera();
+    return () => {
+      // Invalidate this mount's request so a getUserMedia() call that's
+      // still pending when the user navigates away (client-side routing
+      // unmounts this component immediately, but the promise itself can't
+      // be cancelled) stops its stream on arrival instead of leaking it —
+      // see the comment on startCameraRequestIdRef above.
+      startCameraRequestIdRef.current += 1;
+      if (cameraTimeoutRef.current) {
+        clearTimeout(cameraTimeoutRef.current);
+        cameraTimeoutRef.current = null;
+      }
+      stopCamera();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Mobile browsers (confirmed pattern on Android Chrome) can suspend an
+  // in-flight getUserMedia() call while the tab/app is backgrounded and
+  // only let it resolve once foregrounded again — which reads as "stuck on
+  // 'requesting' for minutes, then suddenly connects." If we're still
+  // stuck in 'requesting' by the time the page becomes visible again, fire
+  // a fresh attempt; the token above makes this safe even if the original
+  // call eventually resolves too.
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && cameraStatus === 'requesting') {
+        startCamera();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [cameraStatus, startCamera]);
 
   // Captures the current video frame, samples all 9 grid cells, and draws
   // the debug-dot overlay into whichever debug canvas is passed in. This is
@@ -650,7 +727,9 @@ export default function CubeColorTestPage() {
             </div>
           )}
 
-          {(cameraStatus === 'denied' || cameraStatus === 'unavailable') && (
+          {(cameraStatus === 'denied' ||
+            cameraStatus === 'unavailable' ||
+            cameraStatus === 'timeout') && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/80 p-6 text-center">
               <p className="text-sm text-white/70">{cameraError}</p>
               <button
