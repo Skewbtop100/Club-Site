@@ -154,9 +154,9 @@ function sampleAverageRgb(
   centerY: number,
   patch: number
 ): RGB {
-  // Clamp so the patch never reads outside the canvas — with `object-fit:
-  // contain`, a sample point near the guide box's edge on a letterboxed
-  // video could otherwise land off-canvas and throw in getImageData.
+  // Clamp so the patch never reads outside the canvas — guards against
+  // rounding error pushing an edge sample a fraction of a pixel out of
+  // bounds, which would otherwise throw in getImageData.
   const maxX = Math.max(0, ctx.canvas.width - patch);
   const maxY = Math.max(0, ctx.canvas.height - patch);
   const half = Math.floor(patch / 2);
@@ -185,11 +185,12 @@ function rgbToCss(rgb: RGB): string {
   return `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
 }
 
-// The <video> element is styled with `object-fit: contain`, so the full
-// native frame is always visible, scaled down uniformly to fit inside the
-// display box and letterboxed (not cropped) on whichever axis has slack.
-// That makes the display→native mapping a plain scale + letterbox offset —
-// no crop-region math needed, unlike `cover`.
+// The <video> element is styled with `object-fit: cover`, so the native
+// frame is scaled up (using the LARGER of the two axis ratios) until it
+// fully covers the display box, then the overflow is cropped equally from
+// both sides on whichever axis has slack. A point in display space has to
+// be pushed back through that scale-then-crop transform to land on the
+// right native pixel.
 function mapDisplayPointToNativeVideo(
   displayX: number,
   displayY: number,
@@ -198,15 +199,15 @@ function mapDisplayPointToNativeVideo(
   nativeW: number,
   nativeH: number
 ): { x: number; y: number } {
-  const scale = Math.min(displayW / nativeW, displayH / nativeH);
+  const scale = Math.max(displayW / nativeW, displayH / nativeH);
   const renderedW = nativeW * scale;
   const renderedH = nativeH * scale;
-  const letterboxX = (displayW - renderedW) / 2;
-  const letterboxY = (displayH - renderedH) / 2;
+  const cropX = (renderedW - displayW) / 2;
+  const cropY = (renderedH - displayH) / 2;
 
   return {
-    x: (displayX - letterboxX) / scale,
-    y: (displayY - letterboxY) / scale,
+    x: (displayX + cropX) / scale,
+    y: (displayY + cropY) / scale,
   };
 }
 
@@ -284,9 +285,9 @@ export default function CubeColorTestPage() {
 
     // The grid overlay is drawn in on-screen CSS pixels over the video's
     // rendered box, not over its native resolution. Since the video is
-    // `object-fit: contain`, that box shows the full frame letterboxed — so
-    // the guide box has to be computed in display space first, then each
-    // cell center mapped back to native pixels via
+    // `object-fit: cover`, that box is a cropped, scaled view of the native
+    // frame — so the guide box has to be computed in display space first,
+    // then each cell center mapped back to native pixels via
     // mapDisplayPointToNativeVideo before sampling.
     const displayRect = video.getBoundingClientRect();
     const displayW = displayRect.width;
@@ -298,12 +299,12 @@ export default function CubeColorTestPage() {
     const cellSizeDisplay = guideSizeDisplay / GRID_SIZE;
 
     // eslint-disable-next-line no-console
-    console.log('[cube-color-test] contain-fit mapping', {
+    console.log('[cube-color-test] cover-fit mapping', {
       displayW,
       displayH,
       nativeW: vw,
       nativeH: vh,
-      scale: Math.min(displayW / vw, displayH / vh),
+      scale: Math.max(displayW / vw, displayH / vh),
     });
 
     const results: SampleResult[] = [];
@@ -414,7 +415,7 @@ export default function CubeColorTestPage() {
             playsInline
             muted
             autoPlay
-            className="absolute inset-0 h-full w-full object-contain"
+            className="absolute inset-0 h-full w-full object-cover"
           />
 
           {cameraStatus === 'ready' && (
