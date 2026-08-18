@@ -300,6 +300,10 @@ export default function CubeColorTestPage() {
 
   const [cameraStatus, setCameraStatus] = useState<CameraStatus>('idle');
   const [cameraError, setCameraError] = useState<string>('');
+  // Raw getUserMedia() failure, kept separately from the (Mongolian,
+  // user-facing) cameraError string so the diagnostics panel can show it
+  // verbatim regardless of how cameraError gets phrased per status branch.
+  const [lastCameraError, setLastCameraError] = useState<{ name: string; message: string } | null>(null);
   const [captureStep, setCaptureStep] = useState<CaptureStep>('first');
   const [firstFaceSamples, setFirstFaceSamples] = useState<SampleResult[] | null>(null);
   const [secondFaceSamples, setSecondFaceSamples] = useState<SampleResult[] | null>(null);
@@ -373,15 +377,18 @@ export default function CubeColorTestPage() {
         cameraTimeoutRef.current = null;
       }
       const name = err instanceof Error ? err.name : '';
+      const message = err instanceof Error ? err.message : String(err);
+      setLastCameraError({ name: name || 'UnknownError', message });
+      const suffix = `(${name}: ${message})`;
       if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
         setCameraStatus('denied');
-        setCameraError('Камерын зөвшөөрөл өгөгдөөгүй байна. Тохиргооноос зөвшөөрнө үү.');
+        setCameraError(`Камерын зөвшөөрөл өгөгдөөгүй байна. Тохиргооноос зөвшөөрнө үү. ${suffix}`);
       } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
         setCameraStatus('unavailable');
-        setCameraError('Камер олдсонгүй.');
+        setCameraError(`Камер олдсонгүй. ${suffix}`);
       } else {
         setCameraStatus('unavailable');
-        setCameraError('Камерт хандах үед алдаа гарлаа.');
+        setCameraError(`Камерт хандах үед алдаа гарлаа. ${suffix}`);
       }
     }
   }, []);
@@ -625,6 +632,7 @@ export default function CubeColorTestPage() {
     `captureStep: ${captureStep}`,
     `firstFaceSamples: ${firstFaceSamples ? `${firstFaceSamples.length} samples` : 'null'}`,
     `secondFaceSamples: ${secondFaceSamples ? `${secondFaceSamples.length} samples` : 'null'}`,
+    `lastCameraError: ${lastCameraError ? `${lastCameraError.name} — ${lastCameraError.message}` : 'none'}`,
   ].join('\n');
 
   return (
