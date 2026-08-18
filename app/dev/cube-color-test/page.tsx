@@ -1,6 +1,6 @@
 'use client';
 
-import type { CSSProperties } from 'react';
+import type { CSSProperties, RefObject } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -36,6 +36,12 @@ interface SampleResult {
 }
 
 type CameraStatus = 'idle' | 'requesting' | 'ready' | 'denied' | 'unavailable';
+
+// Two-face capture sequence: capture one face, immediately capture a second
+// (no re-init needed — the camera stream stays mounted throughout), then
+// show both results together. Deliberately generic ("first"/"second") since
+// this page doesn't hardcode which physical face the user shows first.
+type CaptureStep = 'first' | 'second' | 'done';
 
 // ── Reference HSV ranges (tunable) ──────────────────────────────────────────
 // These are the "centers" each sample is compared against. Hue distance is
@@ -213,17 +219,70 @@ function mapDisplayPointToNativeVideo(
   };
 }
 
+// ── Small presentational pieces (reused once per face) ─────────────────────
+
+function FaceResultsGrid({ samples }: { samples: SampleResult[] }) {
+  return (
+    <div className="grid grid-cols-3 gap-2">
+      {samples.map((s, i) => (
+        <div
+          key={i}
+          className="flex flex-col items-center gap-1 rounded-lg border p-2"
+          style={{ borderColor: 'rgba(255,255,255,0.1)', backgroundColor: '#1a1a1a' }}
+        >
+          <div
+            className="h-12 w-12 rounded border border-white/20"
+            style={{ backgroundColor: rgbToCss(s.rgb) }}
+          />
+          <span className="text-xs font-semibold">{COLOR_LABELS_MN[s.classified]}</span>
+          <span className="text-center text-[10px] leading-tight text-white/40">
+            RGB {s.rgb.r},{s.rgb.g},{s.rgb.b}
+            <br />
+            HSV {Math.round(s.hsv.h)}°,{Math.round(s.hsv.s)}%,{Math.round(s.hsv.v)}%
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function FaceDebugCanvas({
+  canvasRef,
+  label,
+}: {
+  canvasRef: RefObject<HTMLCanvasElement | null>;
+  label: string;
+}) {
+  return (
+    <div>
+      <p className="mb-1 text-xs text-white/50">{label}</p>
+      <canvas
+        ref={canvasRef}
+        style={{
+          display: 'block',
+          width: '100%',
+          borderRadius: 8,
+          border: '1px solid rgba(255,255,255,0.1)',
+        }}
+      />
+    </div>
+  );
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function CubeColorTestPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const debugCanvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null); // shared offscreen scratch buffer, reused for both captures
+  const debugCanvasRef1 = useRef<HTMLCanvasElement>(null);
+  const debugCanvasRef2 = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
   const [cameraStatus, setCameraStatus] = useState<CameraStatus>('idle');
   const [cameraError, setCameraError] = useState<string>('');
-  const [samples, setSamples] = useState<SampleResult[] | null>(null);
+  const [captureStep, setCaptureStep] = useState<CaptureStep>('first');
+  const [firstFaceSamples, setFirstFaceSamples] = useState<SampleResult[] | null>(null);
+  const [secondFaceSamples, setSecondFaceSamples] = useState<SampleResult[] | null>(null);
   const [showDebugPanel, setShowDebugPanel] = useState(false);
   const [hsvReference, setHsvReference] =
     useState<Record<CubeColorName, HsvRange>>(CUBE_COLOR_HSV_REFERENCE);
@@ -277,105 +336,136 @@ export default function CubeColorTestPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleCapture = useCallback(() => {
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    const debugCanvas = debugCanvasRef.current;
-    if (!video || !canvas || !debugCanvas || cameraStatus !== 'ready') return;
+  // Captures the current video frame, samples all 9 grid cells, and draws
+  // the debug-dot overlay into whichever debug canvas is passed in. This is
+  // the exact single-face capture logic from before — coordinate mapping,
+  // sampling, and classification are untouched; only the caller now decides
+  // which face's debug canvas and state slot the result goes into.
+  const captureFaceIntoDebugCanvas = useCallback(
+    (debugCanvas: HTMLCanvasElement): SampleResult[] | null => {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      if (!video || !canvas || cameraStatus !== 'ready') return null;
 
-    const vw = video.videoWidth;
-    const vh = video.videoHeight;
-    if (!vw || !vh) return;
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (!vw || !vh) return null;
 
-    canvas.width = vw;
-    canvas.height = vh;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return;
+      canvas.width = vw;
+      canvas.height = vh;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return null;
 
-    ctx.drawImage(video, 0, 0, vw, vh);
+      ctx.drawImage(video, 0, 0, vw, vh);
 
-    // The grid overlay is drawn in on-screen CSS pixels over the video's
-    // rendered box, not over its native resolution. Since the video is
-    // `object-fit: cover`, that box is a cropped, scaled view of the native
-    // frame — so the guide box has to be computed in display space first,
-    // then each cell center mapped back to native pixels via
-    // mapDisplayPointToNativeVideo before sampling.
-    const displayRect = video.getBoundingClientRect();
-    const displayW = displayRect.width;
-    const displayH = displayRect.height;
+      // The grid overlay is drawn in on-screen CSS pixels over the video's
+      // rendered box, not over its native resolution. Since the video is
+      // `object-fit: cover`, that box is a cropped, scaled view of the native
+      // frame — so the guide box has to be computed in display space first,
+      // then each cell center mapped back to native pixels via
+      // mapDisplayPointToNativeVideo before sampling.
+      const displayRect = video.getBoundingClientRect();
+      const displayW = displayRect.width;
+      const displayH = displayRect.height;
 
-    const guideSizeDisplay = Math.min(displayW, displayH) * GUIDE_BOX_FRACTION;
-    const guideLeftDisplay = (displayW - guideSizeDisplay) / 2;
-    const guideTopDisplay = (displayH - guideSizeDisplay) / 2;
-    const cellSizeDisplay = guideSizeDisplay / GRID_SIZE;
+      const guideSizeDisplay = Math.min(displayW, displayH) * GUIDE_BOX_FRACTION;
+      const guideLeftDisplay = (displayW - guideSizeDisplay) / 2;
+      const guideTopDisplay = (displayH - guideSizeDisplay) / 2;
+      const cellSizeDisplay = guideSizeDisplay / GRID_SIZE;
 
-    // eslint-disable-next-line no-console
-    console.log('[cube-color-test] cover-fit mapping', {
-      displayW,
-      displayH,
-      nativeW: vw,
-      nativeH: vh,
-      scale: Math.max(displayW / vw, displayH / vh),
-    });
-
-    const results: SampleResult[] = [];
-    for (let row = 0; row < GRID_SIZE; row++) {
-      for (let col = 0; col < GRID_SIZE; col++) {
-        const centerXDisplay = guideLeftDisplay + cellSizeDisplay * col + cellSizeDisplay / 2;
-        const centerYDisplay = guideTopDisplay + cellSizeDisplay * row + cellSizeDisplay / 2;
-        const { x, y } = mapDisplayPointToNativeVideo(
-          centerXDisplay,
-          centerYDisplay,
-          displayW,
-          displayH,
-          vw,
-          vh
-        );
-        const rgb = sampleAverageRgb(ctx, x, y, SAMPLE_PATCH_PX);
-        const hsv = rgbToHsv(rgb);
-        const classified = classifyHsv(hsv, hsvReference);
-        results.push({ rgb, hsv, classified, x, y });
-      }
-    }
-
-    // eslint-disable-next-line no-console
-    console.table(
-      results.map((s, i) => ({
-        cell: i,
-        nativeX: Math.round(s.x),
-        nativeY: Math.round(s.y),
-        rgb: `${s.rgb.r},${s.rgb.g},${s.rgb.b}`,
-        classified: s.classified,
-      }))
-    );
-
-    // Debug view: the captured frame with a dot burned in at each exact
-    // native-pixel sample point, so misalignment is visible at a glance.
-    // Setting width/height already resets the bitmap per spec, but we also
-    // clearRect explicitly so a stale frame can never show through.
-    debugCanvas.width = vw;
-    debugCanvas.height = vh;
-    const debugCtx = debugCanvas.getContext('2d');
-    if (debugCtx) {
-      debugCtx.clearRect(0, 0, vw, vh);
-      debugCtx.drawImage(canvas, 0, 0);
-      const dotRadius = Math.max(DEBUG_DOT_MIN_RADIUS_PX, Math.min(vw, vh) * 0.012);
-      results.forEach((s) => {
-        debugCtx.beginPath();
-        debugCtx.arc(s.x, s.y, dotRadius, 0, Math.PI * 2);
-        debugCtx.fillStyle = '#ff0000';
-        debugCtx.fill();
-        debugCtx.lineWidth = Math.max(1, dotRadius * 0.25);
-        debugCtx.strokeStyle = '#ffffff';
-        debugCtx.stroke();
+      // eslint-disable-next-line no-console
+      console.log('[cube-color-test] cover-fit mapping', {
+        displayW,
+        displayH,
+        nativeW: vw,
+        nativeH: vh,
+        scale: Math.max(displayW / vw, displayH / vh),
       });
+
+      const results: SampleResult[] = [];
+      for (let row = 0; row < GRID_SIZE; row++) {
+        for (let col = 0; col < GRID_SIZE; col++) {
+          const centerXDisplay = guideLeftDisplay + cellSizeDisplay * col + cellSizeDisplay / 2;
+          const centerYDisplay = guideTopDisplay + cellSizeDisplay * row + cellSizeDisplay / 2;
+          const { x, y } = mapDisplayPointToNativeVideo(
+            centerXDisplay,
+            centerYDisplay,
+            displayW,
+            displayH,
+            vw,
+            vh
+          );
+          const rgb = sampleAverageRgb(ctx, x, y, SAMPLE_PATCH_PX);
+          const hsv = rgbToHsv(rgb);
+          const classified = classifyHsv(hsv, hsvReference);
+          results.push({ rgb, hsv, classified, x, y });
+        }
+      }
+
+      // eslint-disable-next-line no-console
+      console.table(
+        results.map((s, i) => ({
+          cell: i,
+          nativeX: Math.round(s.x),
+          nativeY: Math.round(s.y),
+          rgb: `${s.rgb.r},${s.rgb.g},${s.rgb.b}`,
+          classified: s.classified,
+        }))
+      );
+
+      // Debug view: the captured frame with a dot burned in at each exact
+      // native-pixel sample point, so misalignment is visible at a glance.
+      // Setting width/height already resets the bitmap per spec, but we also
+      // clearRect explicitly so a stale frame can never show through.
+      debugCanvas.width = vw;
+      debugCanvas.height = vh;
+      const debugCtx = debugCanvas.getContext('2d');
+      if (debugCtx) {
+        debugCtx.clearRect(0, 0, vw, vh);
+        debugCtx.drawImage(canvas, 0, 0);
+        const dotRadius = Math.max(DEBUG_DOT_MIN_RADIUS_PX, Math.min(vw, vh) * 0.012);
+        results.forEach((s) => {
+          debugCtx.beginPath();
+          debugCtx.arc(s.x, s.y, dotRadius, 0, Math.PI * 2);
+          debugCtx.fillStyle = '#ff0000';
+          debugCtx.fill();
+          debugCtx.lineWidth = Math.max(1, dotRadius * 0.25);
+          debugCtx.strokeStyle = '#ffffff';
+          debugCtx.stroke();
+        });
+      }
+
+      return results;
+    },
+    [cameraStatus, hsvReference]
+  );
+
+  // Thin dispatcher: routes a capture to the right face's debug canvas and
+  // state slot, then advances the sequence. All the actual capture work
+  // (mapping, sampling, classification) lives in captureFaceIntoDebugCanvas
+  // above, unchanged from the single-face version.
+  const handleCapture = useCallback(() => {
+    if (captureStep === 'first') {
+      const debugCanvas = debugCanvasRef1.current;
+      if (!debugCanvas) return;
+      const results = captureFaceIntoDebugCanvas(debugCanvas);
+      if (!results) return;
+      setFirstFaceSamples(results);
+      setCaptureStep('second');
+    } else if (captureStep === 'second') {
+      const debugCanvas = debugCanvasRef2.current;
+      if (!debugCanvas) return;
+      const results = captureFaceIntoDebugCanvas(debugCanvas);
+      if (!results) return;
+      setSecondFaceSamples(results);
+      setCaptureStep('done');
     }
+  }, [captureStep, captureFaceIntoDebugCanvas]);
 
-    setSamples(results);
-  }, [cameraStatus, hsvReference]);
-
-  const handleRetake = useCallback(() => {
-    setSamples(null);
+  const handleRestart = useCallback(() => {
+    setFirstFaceSamples(null);
+    setSecondFaceSamples(null);
+    setCaptureStep('first');
   }, []);
 
   const updateReferenceField = useCallback(
@@ -391,10 +481,11 @@ export default function CubeColorTestPage() {
   // Re-classify existing samples live when the reference values are tuned,
   // without needing a new capture.
   useEffect(() => {
-    setSamples((prev) =>
-      prev
-        ? prev.map((s) => ({ ...s, classified: classifyHsv(s.hsv, hsvReference) }))
-        : prev
+    setFirstFaceSamples((prev) =>
+      prev ? prev.map((s) => ({ ...s, classified: classifyHsv(s.hsv, hsvReference) })) : prev
+    );
+    setSecondFaceSamples((prev) =>
+      prev ? prev.map((s) => ({ ...s, classified: classifyHsv(s.hsv, hsvReference) })) : prev
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hsvReference]);
@@ -408,7 +499,9 @@ export default function CubeColorTestPage() {
     `video display rect: ${videoRect ? `${Math.round(videoRect.width)} x ${Math.round(videoRect.height)}` : 'n/a'}`,
     `video native res: ${videoEl ? `${videoEl.videoWidth} x ${videoEl.videoHeight}` : 'n/a'}`,
     `guide overlay active (cameraStatus === 'ready'): ${guideOverlayActive}`,
-    `samples: ${samples ? `${samples.length} samples` : 'null'}`,
+    `captureStep: ${captureStep}`,
+    `firstFaceSamples: ${firstFaceSamples ? `${firstFaceSamples.length} samples` : 'null'}`,
+    `secondFaceSamples: ${secondFaceSamples ? `${secondFaceSamples.length} samples` : 'null'}`,
   ].join('\n');
 
   return (
@@ -446,18 +539,23 @@ export default function CubeColorTestPage() {
         <header>
           <h1 className="text-lg font-semibold">Куб өнгө таних тест</h1>
           <p className="text-sm text-white/50">
-            Кубын нэг талыг рамкан дотор байрлуулаад зураг ав.
+            {captureStep === 'first' &&
+              'Эхний талаа (жишээ нь цагаан) рамканд тааруулаад зураг ав'}
+            {captureStep === 'second' &&
+              'Одоо хоёр дахь талаа (жишээ нь ногоон) харуулаад зураг ав'}
+            {captureStep === 'done' && 'Хоёр тал амжилттай бүртгэгдлээ'}
           </p>
         </header>
 
         {/* ── Camera / capture view ─────────────────────────────────────────
             Always mounted (never unmounted) so `videoRef` and its
-            `srcObject` stay attached to the same DOM node across capture /
-            retake cycles. Visibility, border, radius, overflow, and aspect
-            ratio are all inline style (not Tailwind `hidden`/`border`/
-            `rounded-xl`/`overflow-hidden`) so this box is guaranteed to size,
-            border, and hide/show correctly even if Tailwind utilities are
-            not applying for this route. */}
+            `srcObject` stay attached to the same DOM node across both
+            captures — no re-initialization between the first and second
+            face. Visibility, border, radius, overflow, and aspect ratio are
+            all inline style (not Tailwind `hidden`/`border`/`rounded-xl`/
+            `overflow-hidden`) so this box is guaranteed to size, border, and
+            hide/show correctly even if Tailwind utilities are not applying
+            for this route. */}
         <div
           style={{
             position: 'relative',
@@ -466,7 +564,7 @@ export default function CubeColorTestPage() {
             border: '1px solid rgba(255,255,255,0.1)',
             borderRadius: 12,
             overflow: 'hidden',
-            display: samples ? 'none' : 'block',
+            display: captureStep === 'done' ? 'none' : 'block',
           }}
         >
           <video
@@ -568,25 +666,7 @@ export default function CubeColorTestPage() {
 
         <canvas ref={canvasRef} style={{ display: 'none' }} />
 
-        {/* ── Debug: captured frame with sample-point dots ────────────────
-            Always mounted (so the ref exists at capture time); visibility
-            toggles via inline `display`, not Tailwind `hidden`. */}
-        <div style={{ display: samples ? 'block' : 'none' }}>
-          <p className="mb-1 text-xs text-white/50">
-            Дээж авсан цэгүүд (улаан цэгүүд куб талан дээр байх ёстой)
-          </p>
-          <canvas
-            ref={debugCanvasRef}
-            style={{
-              display: 'block',
-              width: '100%',
-              borderRadius: 8,
-              border: '1px solid rgba(255,255,255,0.1)',
-            }}
-          />
-        </div>
-
-        {!samples ? (
+        {captureStep !== 'done' && (
           <button
             onClick={handleCapture}
             disabled={cameraStatus !== 'ready'}
@@ -595,43 +675,46 @@ export default function CubeColorTestPage() {
           >
             Зураг авах
           </button>
-        ) : (
-          <>
-            {/* ── Results grid ─────────────────────────────────────────── */}
-            <div className="grid grid-cols-3 gap-2">
-              {samples.map((s, i) => (
-                <div
-                  key={i}
-                  className="flex flex-col items-center gap-1 rounded-lg border p-2"
-                  style={{ borderColor: 'rgba(255,255,255,0.1)', backgroundColor: '#1a1a1a' }}
-                >
-                  <div
-                    className="h-12 w-12 rounded border border-white/20"
-                    style={{ backgroundColor: rgbToCss(s.rgb) }}
-                  />
-                  <span className="text-xs font-semibold">{COLOR_LABELS_MN[s.classified]}</span>
-                  <span className="text-center text-[10px] leading-tight text-white/40">
-                    RGB {s.rgb.r},{s.rgb.g},{s.rgb.b}
-                    <br />
-                    HSV {Math.round(s.hsv.h)}°,{Math.round(s.hsv.s)}%,{Math.round(s.hsv.v)}%
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            <button
-              onClick={handleRetake}
-              className="w-full rounded-lg py-3 text-sm font-semibold"
-              style={{
-                backgroundColor: 'transparent',
-                border: `1px solid ${ACCENT}`,
-                color: ACCENT,
-              }}
-            >
-              Дахин авах
-            </button>
-          </>
         )}
+
+        {/* ── Two-face results ─────────────────────────────────────────────
+            Only visible once both captures are done, but each debug canvas
+            below is always mounted (display-toggled, not unmounted) so its
+            ref exists when its own capture happens mid-sequence, in step
+            'first'/'second' — well before this section becomes visible. */}
+        <div
+          style={{ display: captureStep === 'done' ? 'flex' : 'none', flexDirection: 'column', gap: 16 }}
+        >
+          <div>
+            <h2 className="mb-2 text-sm font-semibold">1-р тал</h2>
+            {firstFaceSamples && <FaceResultsGrid samples={firstFaceSamples} />}
+          </div>
+          <FaceDebugCanvas
+            canvasRef={debugCanvasRef1}
+            label="Дээж авсан цэгүүд — 1-р тал (улаан цэгүүд куб талан дээр байх ёстой)"
+          />
+
+          <div>
+            <h2 className="mb-2 text-sm font-semibold">2-р тал</h2>
+            {secondFaceSamples && <FaceResultsGrid samples={secondFaceSamples} />}
+          </div>
+          <FaceDebugCanvas
+            canvasRef={debugCanvasRef2}
+            label="Дээж авсан цэгүүд — 2-р тал (улаан цэгүүд куб талан дээр байх ёстой)"
+          />
+
+          <button
+            onClick={handleRestart}
+            className="w-full rounded-lg py-3 text-sm font-semibold"
+            style={{
+              backgroundColor: 'transparent',
+              border: `1px solid ${ACCENT}`,
+              color: ACCENT,
+            }}
+          >
+            Дахин эхлэх
+          </button>
+        </div>
 
         {/* ── Debug / calibration panel ─────────────────────────────────── */}
         <div className="rounded-lg border" style={{ borderColor: 'rgba(255,255,255,0.1)' }}>
