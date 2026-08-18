@@ -81,12 +81,14 @@ const BG = '#0a0a0a';
 
 // Four L-shaped viewfinder brackets, one per corner of the guide box —
 // drawn as plain border-pairs (no image assets) so the guide reads as an
-// unmistakable "camera viewfinder" rather than a faint rectangle.
+// unmistakable "camera viewfinder" rather than a faint rectangle. Position
+// and size are inline here (not Tailwind `absolute h-6 w-6`) so the guide
+// box renders correctly even if Tailwind utilities aren't applying.
 const CORNER_MARKER_STYLES: CSSProperties[] = [
-  { top: -3, left: -3, borderTop: `3px solid ${ACCENT}`, borderLeft: `3px solid ${ACCENT}` },
-  { top: -3, right: -3, borderTop: `3px solid ${ACCENT}`, borderRight: `3px solid ${ACCENT}` },
-  { bottom: -3, left: -3, borderBottom: `3px solid ${ACCENT}`, borderLeft: `3px solid ${ACCENT}` },
-  { bottom: -3, right: -3, borderBottom: `3px solid ${ACCENT}`, borderRight: `3px solid ${ACCENT}` },
+  { position: 'absolute', height: 24, width: 24, top: -3, left: -3, borderTop: `3px solid ${ACCENT}`, borderLeft: `3px solid ${ACCENT}` },
+  { position: 'absolute', height: 24, width: 24, top: -3, right: -3, borderTop: `3px solid ${ACCENT}`, borderRight: `3px solid ${ACCENT}` },
+  { position: 'absolute', height: 24, width: 24, bottom: -3, left: -3, borderBottom: `3px solid ${ACCENT}`, borderLeft: `3px solid ${ACCENT}` },
+  { position: 'absolute', height: 24, width: 24, bottom: -3, right: -3, borderBottom: `3px solid ${ACCENT}`, borderRight: `3px solid ${ACCENT}` },
 ];
 
 // ── Color math ───────────────────────────────────────────────────────────────
@@ -225,6 +227,15 @@ export default function CubeColorTestPage() {
   const [showDebugPanel, setShowDebugPanel] = useState(false);
   const [hsvReference, setHsvReference] =
     useState<Record<CubeColorName, HsvRange>>(CUBE_COLOR_HSV_REFERENCE);
+  // Forces the on-screen diagnostics block to re-read videoRef's live
+  // getBoundingClientRect()/videoWidth/videoHeight periodically — those
+  // aren't otherwise reactive, so a plain render only shows a stale snapshot.
+  const [diagTick, setDiagTick] = useState(0);
+
+  useEffect(() => {
+    const id = setInterval(() => setDiagTick((t) => t + 1), 500);
+    return () => clearInterval(id);
+  }, []);
 
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -388,9 +399,50 @@ export default function CubeColorTestPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hsvReference]);
 
+  const videoEl = videoRef.current;
+  const videoRect = videoEl?.getBoundingClientRect();
+  const guideOverlayActive = cameraStatus === 'ready';
+  const diagnosticsText = [
+    `diagTick: ${diagTick}`,
+    `cameraStatus: ${cameraStatus}`,
+    `video display rect: ${videoRect ? `${Math.round(videoRect.width)} x ${Math.round(videoRect.height)}` : 'n/a'}`,
+    `video native res: ${videoEl ? `${videoEl.videoWidth} x ${videoEl.videoHeight}` : 'n/a'}`,
+    `guide overlay active (cameraStatus === 'ready'): ${guideOverlayActive}`,
+    `samples: ${samples ? `${samples.length} samples` : 'null'}`,
+  ].join('\n');
+
   return (
     <div className="min-h-screen w-full" style={{ backgroundColor: BG, color: '#ffffff' }}>
       <div className="mx-auto flex max-w-md flex-col gap-4 px-4 py-6">
+        {/* ── Tailwind sanity check ─────────────────────────────────────────
+            If this box does NOT render solid red with white text, Tailwind
+            utility classes are not applying for this route/build — every
+            className-based style below should be treated as suspect and the
+            inline-style versions are load-bearing, not just defensive. */}
+        <div className="bg-red-500 text-white p-4 font-bold">
+          TAILWIND TEST — should be solid red with white text
+        </div>
+
+        {/* ── Live diagnostics ──────────────────────────────────────────────
+            Pure inline style (no Tailwind dependency) so this stays readable
+            even if the sanity check above fails. */}
+        <pre
+          style={{
+            margin: 0,
+            padding: 12,
+            fontFamily: 'monospace',
+            fontSize: 12,
+            lineHeight: 1.6,
+            color: '#00ff88',
+            backgroundColor: '#000000',
+            border: '1px solid #333333',
+            borderRadius: 8,
+            whiteSpace: 'pre-wrap',
+          }}
+        >
+          {diagnosticsText}
+        </pre>
+
         <header>
           <h1 className="text-lg font-semibold">Куб өнгө таних тест</h1>
           <p className="text-sm text-white/50">
@@ -401,43 +453,94 @@ export default function CubeColorTestPage() {
         {/* ── Camera / capture view ─────────────────────────────────────────
             Always mounted (never unmounted) so `videoRef` and its
             `srcObject` stay attached to the same DOM node across capture /
-            retake cycles — unmounting here previously meant a fresh <video>
-            replaced the old one on retake with no stream reattached (blank
-            feed), and the mount/unmount churn is the likely source of the
-            "doubled image" flash right after capture. Visibility toggles
-            with a CSS class instead. */}
+            retake cycles. Visibility, border, radius, overflow, and aspect
+            ratio are all inline style (not Tailwind `hidden`/`border`/
+            `rounded-xl`/`overflow-hidden`) so this box is guaranteed to size,
+            border, and hide/show correctly even if Tailwind utilities are
+            not applying for this route. */}
         <div
-          className={`relative w-full overflow-hidden rounded-xl border ${samples ? 'hidden' : ''}`}
-          style={{ borderColor: 'rgba(255,255,255,0.1)', aspectRatio: '1 / 1' }}
+          style={{
+            position: 'relative',
+            width: '100%',
+            aspectRatio: '1 / 1',
+            border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: 12,
+            overflow: 'hidden',
+            display: samples ? 'none' : 'block',
+          }}
         >
           <video
             ref={videoRef}
             playsInline
             muted
             autoPlay
-            className="absolute inset-0 h-full w-full object-cover"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              height: '100%',
+              width: '100%',
+              objectFit: 'cover',
+            }}
           />
 
-          {cameraStatus === 'ready' && (
-            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+          {guideOverlayActive && (
+            <div
+              style={{
+                pointerEvents: 'none',
+                position: 'absolute',
+                inset: 0,
+                zIndex: 10,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
               <div
-                className="relative"
-                style={{ width: `${GUIDE_BOX_FRACTION * 100}%`, aspectRatio: '1 / 1' }}
+                style={{
+                  position: 'relative',
+                  width: `${GUIDE_BOX_FRACTION * 100}%`,
+                  aspectRatio: '1 / 1',
+                }}
               >
                 {/* Outer guide box — solid, high-contrast border */}
                 <div
-                  className="absolute inset-0 rounded"
-                  style={{ border: `3px solid ${ACCENT}` }}
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    borderRadius: 4,
+                    border: `3px solid ${ACCENT}`,
+                  }}
                 />
-                {/* Internal 3x3 grid lines */}
-                <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 divide-x divide-y divide-white/60">
-                  {Array.from({ length: 9 }).map((_, i) => (
-                    <div key={i} />
-                  ))}
+                {/* Internal 3x3 grid lines — explicit divs with inline
+                    borderTop/borderLeft (not Tailwind's divide-x/divide-y)
+                    so the lines render even if Tailwind utilities aren't
+                    applying for this route. */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(3, 1fr)',
+                    gridTemplateRows: 'repeat(3, 1fr)',
+                  }}
+                >
+                  {Array.from({ length: 9 }).map((_, i) => {
+                    const col = i % GRID_SIZE;
+                    const row = Math.floor(i / GRID_SIZE);
+                    return (
+                      <div
+                        key={i}
+                        style={{
+                          borderTop: row > 0 ? '1px solid rgba(255,255,255,0.6)' : undefined,
+                          borderLeft: col > 0 ? '1px solid rgba(255,255,255,0.6)' : undefined,
+                        }}
+                      />
+                    );
+                  })}
                 </div>
                 {/* Viewfinder-style corner markers */}
                 {CORNER_MARKER_STYLES.map((style, i) => (
-                  <div key={i} className="absolute h-6 w-6" style={style} />
+                  <div key={i} style={style} />
                 ))}
               </div>
             </div>
@@ -463,19 +566,23 @@ export default function CubeColorTestPage() {
           )}
         </div>
 
-        <canvas ref={canvasRef} className="hidden" />
+        <canvas ref={canvasRef} style={{ display: 'none' }} />
 
         {/* ── Debug: captured frame with sample-point dots ────────────────
             Always mounted (so the ref exists at capture time); visibility
-            toggles with `samples` instead of the canvas mounting/unmounting. */}
-        <div className={samples ? '' : 'hidden'}>
+            toggles via inline `display`, not Tailwind `hidden`. */}
+        <div style={{ display: samples ? 'block' : 'none' }}>
           <p className="mb-1 text-xs text-white/50">
             Дээж авсан цэгүүд (улаан цэгүүд куб талан дээр байх ёстой)
           </p>
           <canvas
             ref={debugCanvasRef}
-            className="w-full rounded-lg border"
-            style={{ borderColor: 'rgba(255,255,255,0.1)' }}
+            style={{
+              display: 'block',
+              width: '100%',
+              borderRadius: 8,
+              border: '1px solid rgba(255,255,255,0.1)',
+            }}
           />
         </div>
 
