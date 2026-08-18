@@ -33,6 +33,10 @@ interface SampleResult {
   // the debug overlay can draw a dot at the exact point that was read.
   x: number;
   y: number;
+  // True for the center cell, whose color is assumed from which capture
+  // step this is (never sampled from the camera) — see captureFaceIntoDebugCanvas.
+  // rgb/hsv are meaningless placeholders in that case.
+  isFixed: boolean;
 }
 
 type CameraStatus = 'idle' | 'requesting' | 'ready' | 'denied' | 'unavailable' | 'timeout';
@@ -233,14 +237,18 @@ function FaceResultsGrid({ samples }: { samples: SampleResult[] }) {
         >
           <div
             className="h-12 w-12 rounded border border-white/20"
-            style={{ backgroundColor: rgbToCss(s.rgb) }}
+            style={{ backgroundColor: s.isFixed ? COLOR_SWATCH_HEX[s.classified] : rgbToCss(s.rgb) }}
           />
           <span className="text-xs font-semibold">{COLOR_LABELS_MN[s.classified]}</span>
-          <span className="text-center text-[10px] leading-tight text-white/40">
-            RGB {s.rgb.r},{s.rgb.g},{s.rgb.b}
-            <br />
-            HSV {Math.round(s.hsv.h)}°,{Math.round(s.hsv.s)}%,{Math.round(s.hsv.v)}%
-          </span>
+          {s.isFixed ? (
+            <span className="text-center text-[10px] leading-tight text-white/40">(тогтмол)</span>
+          ) : (
+            <span className="text-center text-[10px] leading-tight text-white/40">
+              RGB {s.rgb.r},{s.rgb.g},{s.rgb.b}
+              <br />
+              HSV {Math.round(s.hsv.h)}°,{Math.round(s.hsv.s)}%,{Math.round(s.hsv.v)}%
+            </span>
+          )}
         </div>
       ))}
     </div>
@@ -413,13 +421,15 @@ export default function CubeColorTestPage() {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [cameraStatus, startCamera]);
 
-  // Captures the current video frame, samples all 9 grid cells, and draws
-  // the debug-dot overlay into whichever debug canvas is passed in. This is
-  // the exact single-face capture logic from before — coordinate mapping,
-  // sampling, and classification are untouched; only the caller now decides
-  // which face's debug canvas and state slot the result goes into.
+  // Captures the current video frame, samples the 8 outer grid cells, and
+  // draws the debug-dot overlay into whichever debug canvas is passed in.
+  // Coordinate mapping, sampling, and classification for those 8 cells are
+  // the exact single-face capture logic from before; only the caller now
+  // decides which face's debug canvas and state slot the result goes into,
+  // plus what fixed color the center cell should be assumed to be (see
+  // fixedCenterColor below — the center piece never actually gets sampled).
   const captureFaceIntoDebugCanvas = useCallback(
-    (debugCanvas: HTMLCanvasElement): SampleResult[] | null => {
+    (debugCanvas: HTMLCanvasElement, fixedCenterColor: CubeColorName): SampleResult[] | null => {
       const video = videoRef.current;
       const canvas = canvasRef.current;
       if (!video || !canvas || cameraStatus !== 'ready') return null;
@@ -472,10 +482,27 @@ export default function CubeColorTestPage() {
             vw,
             vh
           );
-          const rgb = sampleAverageRgb(ctx, x, y, SAMPLE_PATCH_PX);
-          const hsv = rgbToHsv(rgb);
-          const classified = classifyHsv(hsv, hsvReference);
-          results.push({ rgb, hsv, classified, x, y });
+          const isCenterCell = row === 1 && col === 1;
+          if (isCenterCell) {
+            // The center piece's color is fixed by cube geometry — it's the
+            // same physical sticker regardless of scramble/solve state, so
+            // classifying it via CV only risks a misread from any printed
+            // center-cap logo skewing the averaged pixels. We already know
+            // which face this capture is for, so just record that directly.
+            results.push({
+              rgb: { r: 0, g: 0, b: 0 },
+              hsv: { h: 0, s: 0, v: 0 },
+              classified: fixedCenterColor,
+              x,
+              y,
+              isFixed: true,
+            });
+          } else {
+            const rgb = sampleAverageRgb(ctx, x, y, SAMPLE_PATCH_PX);
+            const hsv = rgbToHsv(rgb);
+            const classified = classifyHsv(hsv, hsvReference);
+            results.push({ rgb, hsv, classified, x, y, isFixed: false });
+          }
         }
       }
 
@@ -504,11 +531,22 @@ export default function CubeColorTestPage() {
         results.forEach((s) => {
           debugCtx.beginPath();
           debugCtx.arc(s.x, s.y, dotRadius, 0, Math.PI * 2);
-          debugCtx.fillStyle = '#ff0000';
+          // Fixed (unsampled) center dot renders yellow instead of the usual
+          // red, so it's obvious at a glance that this point wasn't actually
+          // read from the camera — it's an assumed value.
+          debugCtx.fillStyle = s.isFixed ? '#facc15' : '#ff0000';
           debugCtx.fill();
           debugCtx.lineWidth = Math.max(1, dotRadius * 0.25);
           debugCtx.strokeStyle = '#ffffff';
           debugCtx.stroke();
+
+          if (s.isFixed) {
+            const fontSize = Math.max(12, dotRadius * 1.4);
+            debugCtx.font = `bold ${fontSize}px sans-serif`;
+            debugCtx.textAlign = 'center';
+            debugCtx.fillStyle = '#facc15';
+            debugCtx.fillText('FIX', s.x, s.y - dotRadius - fontSize * 0.4);
+          }
         });
       }
 
@@ -525,14 +563,16 @@ export default function CubeColorTestPage() {
     if (captureStep === 'first') {
       const debugCanvas = debugCanvasRef1.current;
       if (!debugCanvas) return;
-      const results = captureFaceIntoDebugCanvas(debugCanvas);
+      // First face's instruction text already tells the user to show white.
+      const results = captureFaceIntoDebugCanvas(debugCanvas, 'white');
       if (!results) return;
       setFirstFaceSamples(results);
       setCaptureStep('second');
     } else if (captureStep === 'second') {
       const debugCanvas = debugCanvasRef2.current;
       if (!debugCanvas) return;
-      const results = captureFaceIntoDebugCanvas(debugCanvas);
+      // Second face's instruction text already tells the user to show green.
+      const results = captureFaceIntoDebugCanvas(debugCanvas, 'green');
       if (!results) return;
       setSecondFaceSamples(results);
       setCaptureStep('done');
@@ -556,13 +596,19 @@ export default function CubeColorTestPage() {
   );
 
   // Re-classify existing samples live when the reference values are tuned,
-  // without needing a new capture.
+  // without needing a new capture. The fixed center cell is skipped — its
+  // hsv is a meaningless placeholder, so running it through classifyHsv
+  // would stomp its known-correct 'white'/'green' with a bogus reading.
   useEffect(() => {
     setFirstFaceSamples((prev) =>
-      prev ? prev.map((s) => ({ ...s, classified: classifyHsv(s.hsv, hsvReference) })) : prev
+      prev
+        ? prev.map((s) => (s.isFixed ? s : { ...s, classified: classifyHsv(s.hsv, hsvReference) }))
+        : prev
     );
     setSecondFaceSamples((prev) =>
-      prev ? prev.map((s) => ({ ...s, classified: classifyHsv(s.hsv, hsvReference) })) : prev
+      prev
+        ? prev.map((s) => (s.isFixed ? s : { ...s, classified: classifyHsv(s.hsv, hsvReference) }))
+        : prev
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hsvReference]);
