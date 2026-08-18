@@ -1,5 +1,6 @@
 'use client';
 
+import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -78,6 +79,16 @@ const DEBUG_DOT_MIN_RADIUS_PX = 4;
 const ACCENT = '#A78BFA';
 const BG = '#0a0a0a';
 
+// Four L-shaped viewfinder brackets, one per corner of the guide box —
+// drawn as plain border-pairs (no image assets) so the guide reads as an
+// unmistakable "camera viewfinder" rather than a faint rectangle.
+const CORNER_MARKER_STYLES: CSSProperties[] = [
+  { top: -3, left: -3, borderTop: `3px solid ${ACCENT}`, borderLeft: `3px solid ${ACCENT}` },
+  { top: -3, right: -3, borderTop: `3px solid ${ACCENT}`, borderRight: `3px solid ${ACCENT}` },
+  { bottom: -3, left: -3, borderBottom: `3px solid ${ACCENT}`, borderLeft: `3px solid ${ACCENT}` },
+  { bottom: -3, right: -3, borderBottom: `3px solid ${ACCENT}`, borderRight: `3px solid ${ACCENT}` },
+];
+
 // ── Color math ───────────────────────────────────────────────────────────────
 
 function rgbToHsv(rgb: RGB): HSV {
@@ -143,9 +154,14 @@ function sampleAverageRgb(
   centerY: number,
   patch: number
 ): RGB {
+  // Clamp so the patch never reads outside the canvas — with `object-fit:
+  // contain`, a sample point near the guide box's edge on a letterboxed
+  // video could otherwise land off-canvas and throw in getImageData.
+  const maxX = Math.max(0, ctx.canvas.width - patch);
+  const maxY = Math.max(0, ctx.canvas.height - patch);
   const half = Math.floor(patch / 2);
-  const x = Math.max(0, Math.round(centerX - half));
-  const y = Math.max(0, Math.round(centerY - half));
+  const x = Math.min(Math.max(0, Math.round(centerX - half)), maxX);
+  const y = Math.min(Math.max(0, Math.round(centerY - half)), maxY);
   const { data } = ctx.getImageData(x, y, patch, patch);
 
   let r = 0;
@@ -169,13 +185,11 @@ function rgbToCss(rgb: RGB): string {
   return `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
 }
 
-// The <video> element is styled with `object-fit: cover`, so its displayed
-// content is the native frame scaled up until it fills the box, then cropped
-// symmetrically on whichever axis overflows. A point measured in on-screen
-// display pixels (e.g. the grid overlay's cell centers) therefore does NOT
-// correspond to the same fraction of video.videoWidth/videoHeight — it has
-// to be pushed back through that scale-then-crop transform to land on the
-// right native pixel. This mirrors the browser's own cover-fit math.
+// The <video> element is styled with `object-fit: contain`, so the full
+// native frame is always visible, scaled down uniformly to fit inside the
+// display box and letterboxed (not cropped) on whichever axis has slack.
+// That makes the display→native mapping a plain scale + letterbox offset —
+// no crop-region math needed, unlike `cover`.
 function mapDisplayPointToNativeVideo(
   displayX: number,
   displayY: number,
@@ -184,15 +198,15 @@ function mapDisplayPointToNativeVideo(
   nativeW: number,
   nativeH: number
 ): { x: number; y: number } {
-  const coverScale = Math.max(displayW / nativeW, displayH / nativeH);
-  const scaledW = nativeW * coverScale;
-  const scaledH = nativeH * coverScale;
-  const cropX = (scaledW - displayW) / 2;
-  const cropY = (scaledH - displayH) / 2;
+  const scale = Math.min(displayW / nativeW, displayH / nativeH);
+  const renderedW = nativeW * scale;
+  const renderedH = nativeH * scale;
+  const letterboxX = (displayW - renderedW) / 2;
+  const letterboxY = (displayH - renderedH) / 2;
 
   return {
-    x: (cropX + displayX) / coverScale,
-    y: (cropY + displayY) / coverScale,
+    x: (displayX - letterboxX) / scale,
+    y: (displayY - letterboxY) / scale,
   };
 }
 
@@ -270,9 +284,9 @@ export default function CubeColorTestPage() {
 
     // The grid overlay is drawn in on-screen CSS pixels over the video's
     // rendered box, not over its native resolution. Since the video is
-    // `object-fit: cover`, that box is usually a cropped, scaled view of the
-    // native frame — so the guide box has to be computed in display space
-    // first, then each cell center mapped back to native pixels via
+    // `object-fit: contain`, that box shows the full frame letterboxed — so
+    // the guide box has to be computed in display space first, then each
+    // cell center mapped back to native pixels via
     // mapDisplayPointToNativeVideo before sampling.
     const displayRect = video.getBoundingClientRect();
     const displayW = displayRect.width;
@@ -282,6 +296,15 @@ export default function CubeColorTestPage() {
     const guideLeftDisplay = (displayW - guideSizeDisplay) / 2;
     const guideTopDisplay = (displayH - guideSizeDisplay) / 2;
     const cellSizeDisplay = guideSizeDisplay / GRID_SIZE;
+
+    // eslint-disable-next-line no-console
+    console.log('[cube-color-test] contain-fit mapping', {
+      displayW,
+      displayH,
+      nativeW: vw,
+      nativeH: vh,
+      scale: Math.min(displayW / vw, displayH / vh),
+    });
 
     const results: SampleResult[] = [];
     for (let row = 0; row < GRID_SIZE; row++) {
@@ -303,12 +326,26 @@ export default function CubeColorTestPage() {
       }
     }
 
+    // eslint-disable-next-line no-console
+    console.table(
+      results.map((s, i) => ({
+        cell: i,
+        nativeX: Math.round(s.x),
+        nativeY: Math.round(s.y),
+        rgb: `${s.rgb.r},${s.rgb.g},${s.rgb.b}`,
+        classified: s.classified,
+      }))
+    );
+
     // Debug view: the captured frame with a dot burned in at each exact
     // native-pixel sample point, so misalignment is visible at a glance.
+    // Setting width/height already resets the bitmap per spec, but we also
+    // clearRect explicitly so a stale frame can never show through.
     debugCanvas.width = vw;
     debugCanvas.height = vh;
     const debugCtx = debugCanvas.getContext('2d');
     if (debugCtx) {
+      debugCtx.clearRect(0, 0, vw, vh);
       debugCtx.drawImage(canvas, 0, 0);
       const dotRadius = Math.max(DEBUG_DOT_MIN_RADIUS_PX, Math.min(vw, vh) * 0.012);
       results.forEach((s) => {
@@ -360,53 +397,70 @@ export default function CubeColorTestPage() {
           </p>
         </header>
 
-        {/* ── Camera / capture view ─────────────────────────────────────── */}
-        {!samples && (
-          <div
-            className="relative w-full overflow-hidden rounded-xl border"
-            style={{ borderColor: 'rgba(255,255,255,0.1)', aspectRatio: '1 / 1' }}
-          >
-            <video
-              ref={videoRef}
-              playsInline
-              muted
-              autoPlay
-              className="absolute inset-0 h-full w-full object-cover"
-            />
+        {/* ── Camera / capture view ─────────────────────────────────────────
+            Always mounted (never unmounted) so `videoRef` and its
+            `srcObject` stay attached to the same DOM node across capture /
+            retake cycles — unmounting here previously meant a fresh <video>
+            replaced the old one on retake with no stream reattached (blank
+            feed), and the mount/unmount churn is the likely source of the
+            "doubled image" flash right after capture. Visibility toggles
+            with a CSS class instead. */}
+        <div
+          className={`relative w-full overflow-hidden rounded-xl border ${samples ? 'hidden' : ''}`}
+          style={{ borderColor: 'rgba(255,255,255,0.1)', aspectRatio: '1 / 1' }}
+        >
+          <video
+            ref={videoRef}
+            playsInline
+            muted
+            autoPlay
+            className="absolute inset-0 h-full w-full object-contain"
+          />
 
-            {cameraStatus === 'ready' && (
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          {cameraStatus === 'ready' && (
+            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+              <div
+                className="relative"
+                style={{ width: `${GUIDE_BOX_FRACTION * 100}%`, aspectRatio: '1 / 1' }}
+              >
+                {/* Outer guide box — solid, high-contrast border */}
                 <div
-                  className="grid grid-cols-3 grid-rows-3"
-                  style={{ width: '80%', aspectRatio: '1 / 1' }}
-                >
+                  className="absolute inset-0 rounded"
+                  style={{ border: `3px solid ${ACCENT}` }}
+                />
+                {/* Internal 3x3 grid lines */}
+                <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 divide-x divide-y divide-white/60">
                   {Array.from({ length: 9 }).map((_, i) => (
-                    <div key={i} className="border border-white/60" />
+                    <div key={i} />
                   ))}
                 </div>
+                {/* Viewfinder-style corner markers */}
+                {CORNER_MARKER_STYLES.map((style, i) => (
+                  <div key={i} className="absolute h-6 w-6" style={style} />
+                ))}
               </div>
-            )}
+            </div>
+          )}
 
-            {cameraStatus === 'requesting' && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/60 text-sm text-white/70">
-                Камер асааж байна...
-              </div>
-            )}
+          {cameraStatus === 'requesting' && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/60 text-sm text-white/70">
+              Камер асааж байна...
+            </div>
+          )}
 
-            {(cameraStatus === 'denied' || cameraStatus === 'unavailable') && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/80 p-6 text-center">
-                <p className="text-sm text-white/70">{cameraError}</p>
-                <button
-                  onClick={startCamera}
-                  className="rounded-lg px-4 py-2 text-sm font-medium text-black"
-                  style={{ backgroundColor: ACCENT }}
-                >
-                  Дахин оролдох
-                </button>
-              </div>
-            )}
-          </div>
-        )}
+          {(cameraStatus === 'denied' || cameraStatus === 'unavailable') && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/80 p-6 text-center">
+              <p className="text-sm text-white/70">{cameraError}</p>
+              <button
+                onClick={startCamera}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-black"
+                style={{ backgroundColor: ACCENT }}
+              >
+                Дахин оролдох
+              </button>
+            </div>
+          )}
+        </div>
 
         <canvas ref={canvasRef} className="hidden" />
 
