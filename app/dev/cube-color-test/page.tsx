@@ -34,7 +34,7 @@ interface SampleResult {
   x: number;
   y: number;
   // True for the center cell, whose color is assumed from which capture
-  // step this is (never sampled from the camera) — see captureFaceIntoDebugCanvas.
+  // step this is (never sampled from the camera) — see sampleNineCells.
   // rgb/hsv are meaningless placeholders in that case.
   isFixed: boolean;
 }
@@ -86,9 +86,17 @@ const COLOR_SWATCH_HEX: Record<CubeColorName, string> = {
 
 const GRID_SIZE = 3;
 const SAMPLE_PATCH_PX = 10;
-const GUIDE_BOX_FRACTION = 0.8; // must match the CSS overlay's `width: 80%` below
+// Loose framing reference, not a precision requirement — continuous sampling
+// means the user just needs the cube roughly centered, not filling the box
+// edge-to-edge like the old single-shot capture required.
+const GUIDE_BOX_FRACTION = 0.65;
 const DEBUG_DOT_MIN_RADIUS_PX = 4;
 const CAMERA_INIT_TIMEOUT_MS = 10_000;
+
+// ── Continuous sampling / auto-lock tuning ──────────────────────────────────
+const SAMPLE_INTERVAL_MS = 300;
+const STABILITY_WINDOW = 4; // consecutive identical ticks required to lock (~1.2s at 300ms/tick)
+const LOCK_FLASH_MS = 800; // how long the "✓ Танигдлаа!" confirmation shows before advancing
 
 const ACCENT = '#A78BFA';
 const BG = '#0a0a0a';
@@ -233,6 +241,146 @@ function mapDisplayPointToNativeVideo(
   };
 }
 
+function arraysEqual<T>(a: T[], b: T[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+// Samples the current video frame's 9 grid cells (skipping the fixed
+// center) into a SampleResult[]. This is the exact single-face sampling
+// logic from the old manual-capture flow — coordinate mapping and
+// classification are untouched — split out so the continuous sampling loop
+// can call it every tick WITHOUT also redrawing the debug canvas each time
+// (that only needs to happen once, when a face actually locks in).
+function sampleNineCells(
+  video: HTMLVideoElement,
+  canvas: HTMLCanvasElement,
+  fixedCenterColor: CubeColorName,
+  hsvReference: Record<CubeColorName, HsvRange>
+): SampleResult[] | null {
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  if (!vw || !vh) return null;
+
+  canvas.width = vw;
+  canvas.height = vh;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return null;
+
+  ctx.drawImage(video, 0, 0, vw, vh);
+
+  // The grid overlay is drawn in on-screen CSS pixels over the video's
+  // rendered box, not over its native resolution. Since the video is
+  // `object-fit: cover`, that box is a cropped, scaled view of the native
+  // frame — so the guide box has to be computed in display space first,
+  // then each cell center mapped back to native pixels via
+  // mapDisplayPointToNativeVideo before sampling.
+  const displayRect = video.getBoundingClientRect();
+  const displayW = displayRect.width;
+  const displayH = displayRect.height;
+
+  const guideSizeDisplay = Math.min(displayW, displayH) * GUIDE_BOX_FRACTION;
+  const guideLeftDisplay = (displayW - guideSizeDisplay) / 2;
+  const guideTopDisplay = (displayH - guideSizeDisplay) / 2;
+  const cellSizeDisplay = guideSizeDisplay / GRID_SIZE;
+
+  const results: SampleResult[] = [];
+  for (let row = 0; row < GRID_SIZE; row++) {
+    for (let col = 0; col < GRID_SIZE; col++) {
+      const centerXDisplay = guideLeftDisplay + cellSizeDisplay * col + cellSizeDisplay / 2;
+      const centerYDisplay = guideTopDisplay + cellSizeDisplay * row + cellSizeDisplay / 2;
+      const { x, y } = mapDisplayPointToNativeVideo(
+        centerXDisplay,
+        centerYDisplay,
+        displayW,
+        displayH,
+        vw,
+        vh
+      );
+      const isCenterCell = row === 1 && col === 1;
+      if (isCenterCell) {
+        // The center piece's color is fixed by cube geometry — it's the
+        // same physical sticker regardless of scramble/solve state, so
+        // classifying it via CV only risks a misread from any printed
+        // center-cap logo skewing the averaged pixels. We already know
+        // which face this capture is for, so just record that directly.
+        results.push({
+          rgb: { r: 0, g: 0, b: 0 },
+          hsv: { h: 0, s: 0, v: 0 },
+          classified: fixedCenterColor,
+          x,
+          y,
+          isFixed: true,
+        });
+      } else {
+        const rgb = sampleAverageRgb(ctx, x, y, SAMPLE_PATCH_PX);
+        const hsv = rgbToHsv(rgb);
+        const classified = classifyHsv(hsv, hsvReference);
+        results.push({ rgb, hsv, classified, x, y, isFixed: false });
+      }
+    }
+  }
+
+  return results;
+}
+
+// Draws the already-sampled frame (from `sourceCanvas`, populated by the
+// sampleNineCells call that produced `results`) plus a dot at each exact
+// native-pixel sample point into `debugCanvas`. Only called once per face,
+// when a reading locks in — not on every sampling tick.
+function drawDebugOverlay(
+  sourceCanvas: HTMLCanvasElement,
+  debugCanvas: HTMLCanvasElement,
+  results: SampleResult[]
+) {
+  const vw = sourceCanvas.width;
+  const vh = sourceCanvas.height;
+  debugCanvas.width = vw;
+  debugCanvas.height = vh;
+  const debugCtx = debugCanvas.getContext('2d');
+  if (!debugCtx) return;
+
+  // Setting width/height already resets the bitmap per spec, but we also
+  // clearRect explicitly so a stale frame can never show through.
+  debugCtx.clearRect(0, 0, vw, vh);
+  debugCtx.drawImage(sourceCanvas, 0, 0);
+  const dotRadius = Math.max(DEBUG_DOT_MIN_RADIUS_PX, Math.min(vw, vh) * 0.012);
+  results.forEach((s) => {
+    debugCtx.beginPath();
+    debugCtx.arc(s.x, s.y, dotRadius, 0, Math.PI * 2);
+    // Fixed (unsampled) center dot renders yellow instead of the usual
+    // red, so it's obvious at a glance that this point wasn't actually
+    // read from the camera — it's an assumed value.
+    debugCtx.fillStyle = s.isFixed ? '#facc15' : '#ff0000';
+    debugCtx.fill();
+    debugCtx.lineWidth = Math.max(1, dotRadius * 0.25);
+    debugCtx.strokeStyle = '#ffffff';
+    debugCtx.stroke();
+
+    if (s.isFixed) {
+      const fontSize = Math.max(12, dotRadius * 1.4);
+      debugCtx.font = `bold ${fontSize}px sans-serif`;
+      debugCtx.textAlign = 'center';
+      debugCtx.fillStyle = '#facc15';
+      debugCtx.fillText('FIX', s.x, s.y - dotRadius - fontSize * 0.4);
+    }
+  });
+}
+
+function logLockedSample(label: string, results: SampleResult[]) {
+  // eslint-disable-next-line no-console
+  console.log(`[cube-color-test] locked in: ${label}`);
+  // eslint-disable-next-line no-console
+  console.table(
+    results.map((s, i) => ({
+      cell: i,
+      nativeX: Math.round(s.x),
+      nativeY: Math.round(s.y),
+      rgb: `${s.rgb.r},${s.rgb.g},${s.rgb.b}`,
+      classified: s.classified,
+    }))
+  );
+}
+
 // ── Small presentational pieces (reused once per face) ─────────────────────
 
 function FaceResultsGrid({ samples }: { samples: SampleResult[] }) {
@@ -260,6 +408,49 @@ function FaceResultsGrid({ samples }: { samples: SampleResult[] }) {
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+// Compact live preview of the current tick's reading, shown continuously
+// while sampling so the user can see the reading settle as they hold the
+// cube steady. The center cell always shows the known fixed color; the
+// other 8 come from the latest tick's classification (liveReading), in the
+// same row-major-skip-center order sampleNineCells produces them.
+function LivePreviewGrid({
+  liveReading,
+  fixedCenterColor,
+}: {
+  liveReading: CubeColorName[] | null;
+  fixedCenterColor: CubeColorName;
+}) {
+  return (
+    <div>
+      <p className="mb-1 text-xs text-white/50">Уншиж байна...</p>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, 1fr)',
+          gap: 4,
+          width: 96,
+        }}
+      >
+        {Array.from({ length: 9 }).map((_, i) => {
+          const isCenter = i === 4;
+          const color = isCenter ? fixedCenterColor : (liveReading?.[i < 4 ? i : i - 1] ?? null);
+          return (
+            <div
+              key={i}
+              style={{
+                aspectRatio: '1 / 1',
+                borderRadius: 4,
+                border: '1px solid rgba(255,255,255,0.25)',
+                backgroundColor: color ? COLOR_SWATCH_HEX[color] : '#2a2a2a',
+              }}
+            />
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -306,6 +497,16 @@ export default function CubeColorTestPage() {
   // keeps holding the camera hardware and can hang the next getUserMedia().
   const startCameraRequestIdRef = useRef(0);
   const cameraTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Rolling history of the last STABILITY_WINDOW ticks' 8-color readings,
+  // for the current face only — cleared on lock, on advancing to the next
+  // face, and on restart. Kept as a ref (not state) since it's consulted
+  // and mutated every 300ms tick and doesn't need to itself trigger renders.
+  const historyRef = useRef<CubeColorName[][]>([]);
+  // Guards against re-entrant locks and pauses sampling entirely during the
+  // ~800ms lock-confirmation flash window (the interval effect keeps
+  // ticking during that window since captureStep hasn't advanced yet).
+  const lockingRef = useRef(false);
+  const lockFlashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [cameraStatus, setCameraStatus] = useState<CameraStatus>('idle');
   const [cameraError, setCameraError] = useState<string>('');
@@ -316,6 +517,11 @@ export default function CubeColorTestPage() {
   const [captureStep, setCaptureStep] = useState<CaptureStep>('first');
   const [firstFaceSamples, setFirstFaceSamples] = useState<SampleResult[] | null>(null);
   const [secondFaceSamples, setSecondFaceSamples] = useState<SampleResult[] | null>(null);
+  // Latest tick's 8 outer-cell classifications, for the live preview grid.
+  const [liveReading, setLiveReading] = useState<CubeColorName[] | null>(null);
+  // Briefly true right after a face locks in, showing "✓ Танигдлаа!" in
+  // place of the normal instruction text before the next face is prompted.
+  const [lockFlashVisible, setLockFlashVisible] = useState(false);
   const [showDebugPanel, setShowDebugPanel] = useState(false);
   const [hsvReference, setHsvReference] =
     useState<Record<CubeColorName, HsvRange>>(CUBE_COLOR_HSV_REFERENCE);
@@ -437,165 +643,82 @@ export default function CubeColorTestPage() {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [cameraStatus, startCamera]);
 
-  // Captures the current video frame, samples the 8 outer grid cells, and
-  // draws the debug-dot overlay into whichever debug canvas is passed in.
-  // Coordinate mapping, sampling, and classification for those 8 cells are
-  // the exact single-face capture logic from before; only the caller now
-  // decides which face's debug canvas and state slot the result goes into,
-  // plus what fixed color the center cell should be assumed to be (see
-  // fixedCenterColor below — the center piece never actually gets sampled).
-  const captureFaceIntoDebugCanvas = useCallback(
-    (debugCanvas: HTMLCanvasElement, fixedCenterColor: CubeColorName): SampleResult[] | null => {
+  // Continuous sampling loop: while a face is being captured, every tick
+  // samples the 9 cells (via sampleNineCells — the exact same coordinate
+  // mapping and classification as the old manual-capture flow, just without
+  // redrawing the debug canvas each time) and checks whether the last
+  // STABILITY_WINDOW ticks agree exactly. Once they do, that reading is
+  // treated as locked in: the debug overlay is drawn once, the results are
+  // stored, and after a brief confirmation flash the sequence advances.
+  useEffect(() => {
+    if (cameraStatus !== 'ready' || captureStep === 'done') return;
+
+    historyRef.current = [];
+    setLiveReading(null);
+
+    const fixedCenterColor: CubeColorName = captureStep === 'first' ? 'white' : 'green';
+
+    const id = setInterval(() => {
+      if (lockingRef.current) return; // paused during the lock-confirmation flash
+
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      if (!video || !canvas || cameraStatus !== 'ready') return null;
+      if (!video || !canvas) return;
 
-      const vw = video.videoWidth;
-      const vh = video.videoHeight;
-      if (!vw || !vh) return null;
+      const results = sampleNineCells(video, canvas, fixedCenterColor, hsvReference);
+      if (!results) return;
 
-      canvas.width = vw;
-      canvas.height = vh;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      if (!ctx) return null;
+      const liveColors = results.filter((s) => !s.isFixed).map((s) => s.classified);
+      setLiveReading(liveColors);
 
-      ctx.drawImage(video, 0, 0, vw, vh);
+      historyRef.current = [...historyRef.current, liveColors].slice(-STABILITY_WINDOW);
+      const isStable =
+        historyRef.current.length === STABILITY_WINDOW &&
+        historyRef.current.every((h) => arraysEqual(h, liveColors));
 
-      // The grid overlay is drawn in on-screen CSS pixels over the video's
-      // rendered box, not over its native resolution. Since the video is
-      // `object-fit: cover`, that box is a cropped, scaled view of the native
-      // frame — so the guide box has to be computed in display space first,
-      // then each cell center mapped back to native pixels via
-      // mapDisplayPointToNativeVideo before sampling.
-      const displayRect = video.getBoundingClientRect();
-      const displayW = displayRect.width;
-      const displayH = displayRect.height;
+      if (!isStable) return;
 
-      const guideSizeDisplay = Math.min(displayW, displayH) * GUIDE_BOX_FRACTION;
-      const guideLeftDisplay = (displayW - guideSizeDisplay) / 2;
-      const guideTopDisplay = (displayH - guideSizeDisplay) / 2;
-      const cellSizeDisplay = guideSizeDisplay / GRID_SIZE;
+      // Lock in.
+      lockingRef.current = true;
+      const debugCanvas = captureStep === 'first' ? debugCanvasRef1.current : debugCanvasRef2.current;
+      if (debugCanvas) drawDebugOverlay(canvas, debugCanvas, results);
+      logLockedSample(captureStep, results);
 
-      // eslint-disable-next-line no-console
-      console.log('[cube-color-test] cover-fit mapping', {
-        displayW,
-        displayH,
-        nativeW: vw,
-        nativeH: vh,
-        scale: Math.max(displayW / vw, displayH / vh),
-      });
-
-      const results: SampleResult[] = [];
-      for (let row = 0; row < GRID_SIZE; row++) {
-        for (let col = 0; col < GRID_SIZE; col++) {
-          const centerXDisplay = guideLeftDisplay + cellSizeDisplay * col + cellSizeDisplay / 2;
-          const centerYDisplay = guideTopDisplay + cellSizeDisplay * row + cellSizeDisplay / 2;
-          const { x, y } = mapDisplayPointToNativeVideo(
-            centerXDisplay,
-            centerYDisplay,
-            displayW,
-            displayH,
-            vw,
-            vh
-          );
-          const isCenterCell = row === 1 && col === 1;
-          if (isCenterCell) {
-            // The center piece's color is fixed by cube geometry — it's the
-            // same physical sticker regardless of scramble/solve state, so
-            // classifying it via CV only risks a misread from any printed
-            // center-cap logo skewing the averaged pixels. We already know
-            // which face this capture is for, so just record that directly.
-            results.push({
-              rgb: { r: 0, g: 0, b: 0 },
-              hsv: { h: 0, s: 0, v: 0 },
-              classified: fixedCenterColor,
-              x,
-              y,
-              isFixed: true,
-            });
-          } else {
-            const rgb = sampleAverageRgb(ctx, x, y, SAMPLE_PATCH_PX);
-            const hsv = rgbToHsv(rgb);
-            const classified = classifyHsv(hsv, hsvReference);
-            results.push({ rgb, hsv, classified, x, y, isFixed: false });
-          }
-        }
+      if (captureStep === 'first') {
+        setFirstFaceSamples(results);
+      } else {
+        setSecondFaceSamples(results);
       }
 
-      // eslint-disable-next-line no-console
-      console.table(
-        results.map((s, i) => ({
-          cell: i,
-          nativeX: Math.round(s.x),
-          nativeY: Math.round(s.y),
-          rgb: `${s.rgb.r},${s.rgb.g},${s.rgb.b}`,
-          classified: s.classified,
-        }))
-      );
+      historyRef.current = [];
+      setLockFlashVisible(true);
+      lockFlashTimeoutRef.current = setTimeout(() => {
+        setLockFlashVisible(false);
+        lockingRef.current = false;
+        setCaptureStep((prev) => (prev === 'first' ? 'second' : 'done'));
+      }, LOCK_FLASH_MS);
+    }, SAMPLE_INTERVAL_MS);
 
-      // Debug view: the captured frame with a dot burned in at each exact
-      // native-pixel sample point, so misalignment is visible at a glance.
-      // Setting width/height already resets the bitmap per spec, but we also
-      // clearRect explicitly so a stale frame can never show through.
-      debugCanvas.width = vw;
-      debugCanvas.height = vh;
-      const debugCtx = debugCanvas.getContext('2d');
-      if (debugCtx) {
-        debugCtx.clearRect(0, 0, vw, vh);
-        debugCtx.drawImage(canvas, 0, 0);
-        const dotRadius = Math.max(DEBUG_DOT_MIN_RADIUS_PX, Math.min(vw, vh) * 0.012);
-        results.forEach((s) => {
-          debugCtx.beginPath();
-          debugCtx.arc(s.x, s.y, dotRadius, 0, Math.PI * 2);
-          // Fixed (unsampled) center dot renders yellow instead of the usual
-          // red, so it's obvious at a glance that this point wasn't actually
-          // read from the camera — it's an assumed value.
-          debugCtx.fillStyle = s.isFixed ? '#facc15' : '#ff0000';
-          debugCtx.fill();
-          debugCtx.lineWidth = Math.max(1, dotRadius * 0.25);
-          debugCtx.strokeStyle = '#ffffff';
-          debugCtx.stroke();
+    return () => clearInterval(id);
+  }, [cameraStatus, captureStep, hsvReference]);
 
-          if (s.isFixed) {
-            const fontSize = Math.max(12, dotRadius * 1.4);
-            debugCtx.font = `bold ${fontSize}px sans-serif`;
-            debugCtx.textAlign = 'center';
-            debugCtx.fillStyle = '#facc15';
-            debugCtx.fillText('FIX', s.x, s.y - dotRadius - fontSize * 0.4);
-          }
-        });
-      }
-
-      return results;
-    },
-    [cameraStatus, hsvReference]
-  );
-
-  // Thin dispatcher: routes a capture to the right face's debug canvas and
-  // state slot, then advances the sequence. All the actual capture work
-  // (mapping, sampling, classification) lives in captureFaceIntoDebugCanvas
-  // above, unchanged from the single-face version.
-  const handleCapture = useCallback(() => {
-    if (captureStep === 'first') {
-      const debugCanvas = debugCanvasRef1.current;
-      if (!debugCanvas) return;
-      // First face's instruction text already tells the user to show white.
-      const results = captureFaceIntoDebugCanvas(debugCanvas, 'white');
-      if (!results) return;
-      setFirstFaceSamples(results);
-      setCaptureStep('second');
-    } else if (captureStep === 'second') {
-      const debugCanvas = debugCanvasRef2.current;
-      if (!debugCanvas) return;
-      // Second face's instruction text already tells the user to show green.
-      const results = captureFaceIntoDebugCanvas(debugCanvas, 'green');
-      if (!results) return;
-      setSecondFaceSamples(results);
-      setCaptureStep('done');
-    }
-  }, [captureStep, captureFaceIntoDebugCanvas]);
+  // Clear the lock-flash timeout on unmount so it can't fire setState after
+  // the component's gone.
+  useEffect(() => {
+    return () => {
+      if (lockFlashTimeoutRef.current) clearTimeout(lockFlashTimeoutRef.current);
+    };
+  }, []);
 
   const handleRestart = useCallback(() => {
+    if (lockFlashTimeoutRef.current) {
+      clearTimeout(lockFlashTimeoutRef.current);
+      lockFlashTimeoutRef.current = null;
+    }
+    lockingRef.current = false;
+    historyRef.current = [];
+    setLiveReading(null);
+    setLockFlashVisible(false);
     setFirstFaceSamples(null);
     setSecondFaceSamples(null);
     setCaptureStep('first');
@@ -678,12 +801,13 @@ export default function CubeColorTestPage() {
 
         <header>
           <h1 className="text-lg font-semibold">Куб өнгө таних тест</h1>
-          <p className="text-sm text-white/50">
-            {captureStep === 'first' &&
-              'Эхний талаа (жишээ нь цагаан) рамканд тааруулаад зураг ав'}
-            {captureStep === 'second' &&
-              'Одоо хоёр дахь талаа (жишээ нь ногоон) харуулаад зураг ав'}
-            {captureStep === 'done' && 'Хоёр тал амжилттай бүртгэгдлээ'}
+          <p className="text-sm" style={{ color: lockFlashVisible ? '#4ade80' : 'rgba(255,255,255,0.5)' }}>
+            {lockFlashVisible && '✓ Танигдлаа!'}
+            {!lockFlashVisible && captureStep === 'first' &&
+              'Эхний талаа (жишээ нь цагаан) рамканд тааруулаад барьж бай'}
+            {!lockFlashVisible && captureStep === 'second' &&
+              'Одоо хоёр дахь талаа (жишээ нь ногоон) харуулаад барьж бай'}
+            {!lockFlashVisible && captureStep === 'done' && 'Хоёр тал амжилттай бүртгэгдлээ'}
           </p>
         </header>
 
@@ -808,15 +932,15 @@ export default function CubeColorTestPage() {
 
         <canvas ref={canvasRef} style={{ display: 'none' }} />
 
+        {/* ── Live preview ──────────────────────────────────────────────────
+            Continuous sampling replaces the old manual capture button —
+            this shows the current tick's reading updating in real time so
+            the user can see it settle as they hold the cube steady. */}
         {captureStep !== 'done' && (
-          <button
-            onClick={handleCapture}
-            disabled={cameraStatus !== 'ready'}
-            className="w-full rounded-lg py-3 text-sm font-semibold text-black transition-opacity disabled:opacity-40"
-            style={{ backgroundColor: ACCENT }}
-          >
-            Зураг авах
-          </button>
+          <LivePreviewGrid
+            liveReading={liveReading}
+            fixedCenterColor={captureStep === 'first' ? 'white' : 'green'}
+          />
         )}
 
         {/* ── Two-face results ─────────────────────────────────────────────
