@@ -55,8 +55,11 @@ type CaptureStep = 'first' | 'second' | 'done';
 const CUBE_COLOR_HSV_REFERENCE: Record<CubeColorName, HsvRange> = {
   white: { h: 0, s: 10, v: 90 },
   yellow: { h: 55, s: 70, v: 85 },
-  red: { h: 5, s: 75, v: 70 },
-  orange: { h: 25, s: 80, v: 90 },
+  // red/orange retuned from on-device calibration data — their hues sit only
+  // ~15° apart under real lighting, so value is what actually separates them
+  // (see the higher value weight for these two in classifyHsv below).
+  red: { h: 355, s: 80, v: 60 },
+  orange: { h: 10, s: 82, v: 90 },
   blue: { h: 215, s: 65, v: 65 },
   green: { h: 140, s: 60, v: 60 },
 };
@@ -149,8 +152,14 @@ function classifyHsv(
       // White is defined by low saturation + high value; hue is unreliable.
       score = Math.abs(sample.s - ref.s) * 1.5 + Math.abs(sample.v - ref.v) * 1.0;
     } else {
+      // Red and orange sit only ~15° apart in hue under real lighting
+      // (calibration data: reds ~350-355°, oranges ~10°), so hue alone
+      // can't reliably separate them — value carries most of the signal
+      // there (reds V49-71%, oranges V80-100%), hence the heavier weight
+      // for just these two.
+      const valueWeight = name === 'red' || name === 'orange' ? 0.8 : 0.3;
       const hDist = hueDistance(sample.h, ref.h);
-      score = hDist * 2.0 + Math.abs(sample.s - ref.s) * 0.5 + Math.abs(sample.v - ref.v) * 0.3;
+      score = hDist * 2.0 + Math.abs(sample.s - ref.s) * 0.5 + Math.abs(sample.v - ref.v) * valueWeight;
     }
     if (score < bestScore) {
       bestScore = score;
