@@ -28,6 +28,10 @@ interface SampleResult {
   rgb: RGB;
   hsv: HSV;
   classified: CubeColorName;
+  // Native-resolution canvas coordinates the sample was taken from — kept so
+  // the debug overlay can draw a dot at the exact point that was read.
+  x: number;
+  y: number;
 }
 
 type CameraStatus = 'idle' | 'requesting' | 'ready' | 'denied' | 'unavailable';
@@ -68,6 +72,8 @@ const COLOR_SWATCH_HEX: Record<CubeColorName, string> = {
 
 const GRID_SIZE = 3;
 const SAMPLE_PATCH_PX = 10;
+const GUIDE_BOX_FRACTION = 0.8; // must match the CSS overlay's `width: 80%` below
+const DEBUG_DOT_MIN_RADIUS_PX = 4;
 
 const ACCENT = '#A78BFA';
 const BG = '#0a0a0a';
@@ -163,11 +169,39 @@ function rgbToCss(rgb: RGB): string {
   return `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
 }
 
+// The <video> element is styled with `object-fit: cover`, so its displayed
+// content is the native frame scaled up until it fills the box, then cropped
+// symmetrically on whichever axis overflows. A point measured in on-screen
+// display pixels (e.g. the grid overlay's cell centers) therefore does NOT
+// correspond to the same fraction of video.videoWidth/videoHeight — it has
+// to be pushed back through that scale-then-crop transform to land on the
+// right native pixel. This mirrors the browser's own cover-fit math.
+function mapDisplayPointToNativeVideo(
+  displayX: number,
+  displayY: number,
+  displayW: number,
+  displayH: number,
+  nativeW: number,
+  nativeH: number
+): { x: number; y: number } {
+  const coverScale = Math.max(displayW / nativeW, displayH / nativeH);
+  const scaledW = nativeW * coverScale;
+  const scaledH = nativeH * coverScale;
+  const cropX = (scaledW - displayW) / 2;
+  const cropY = (scaledH - displayH) / 2;
+
+  return {
+    x: (cropX + displayX) / coverScale,
+    y: (cropY + displayY) / coverScale,
+  };
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function CubeColorTestPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const debugCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
   const [cameraStatus, setCameraStatus] = useState<CameraStatus>('idle');
@@ -220,7 +254,8 @@ export default function CubeColorTestPage() {
   const handleCapture = useCallback(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    if (!video || !canvas || cameraStatus !== 'ready') return;
+    const debugCanvas = debugCanvasRef.current;
+    if (!video || !canvas || !debugCanvas || cameraStatus !== 'ready') return;
 
     const vw = video.videoWidth;
     const vh = video.videoHeight;
@@ -233,23 +268,58 @@ export default function CubeColorTestPage() {
 
     ctx.drawImage(video, 0, 0, vw, vh);
 
-    // The overlay guide box is a centered square that's 80% of the shorter
-    // video dimension — must match the CSS overlay's proportions below.
-    const guideSize = Math.min(vw, vh) * 0.8;
-    const guideLeft = (vw - guideSize) / 2;
-    const guideTop = (vh - guideSize) / 2;
-    const cellSize = guideSize / GRID_SIZE;
+    // The grid overlay is drawn in on-screen CSS pixels over the video's
+    // rendered box, not over its native resolution. Since the video is
+    // `object-fit: cover`, that box is usually a cropped, scaled view of the
+    // native frame — so the guide box has to be computed in display space
+    // first, then each cell center mapped back to native pixels via
+    // mapDisplayPointToNativeVideo before sampling.
+    const displayRect = video.getBoundingClientRect();
+    const displayW = displayRect.width;
+    const displayH = displayRect.height;
+
+    const guideSizeDisplay = Math.min(displayW, displayH) * GUIDE_BOX_FRACTION;
+    const guideLeftDisplay = (displayW - guideSizeDisplay) / 2;
+    const guideTopDisplay = (displayH - guideSizeDisplay) / 2;
+    const cellSizeDisplay = guideSizeDisplay / GRID_SIZE;
 
     const results: SampleResult[] = [];
     for (let row = 0; row < GRID_SIZE; row++) {
       for (let col = 0; col < GRID_SIZE; col++) {
-        const centerX = guideLeft + cellSize * col + cellSize / 2;
-        const centerY = guideTop + cellSize * row + cellSize / 2;
-        const rgb = sampleAverageRgb(ctx, centerX, centerY, SAMPLE_PATCH_PX);
+        const centerXDisplay = guideLeftDisplay + cellSizeDisplay * col + cellSizeDisplay / 2;
+        const centerYDisplay = guideTopDisplay + cellSizeDisplay * row + cellSizeDisplay / 2;
+        const { x, y } = mapDisplayPointToNativeVideo(
+          centerXDisplay,
+          centerYDisplay,
+          displayW,
+          displayH,
+          vw,
+          vh
+        );
+        const rgb = sampleAverageRgb(ctx, x, y, SAMPLE_PATCH_PX);
         const hsv = rgbToHsv(rgb);
         const classified = classifyHsv(hsv, hsvReference);
-        results.push({ rgb, hsv, classified });
+        results.push({ rgb, hsv, classified, x, y });
       }
+    }
+
+    // Debug view: the captured frame with a dot burned in at each exact
+    // native-pixel sample point, so misalignment is visible at a glance.
+    debugCanvas.width = vw;
+    debugCanvas.height = vh;
+    const debugCtx = debugCanvas.getContext('2d');
+    if (debugCtx) {
+      debugCtx.drawImage(canvas, 0, 0);
+      const dotRadius = Math.max(DEBUG_DOT_MIN_RADIUS_PX, Math.min(vw, vh) * 0.012);
+      results.forEach((s) => {
+        debugCtx.beginPath();
+        debugCtx.arc(s.x, s.y, dotRadius, 0, Math.PI * 2);
+        debugCtx.fillStyle = '#ff0000';
+        debugCtx.fill();
+        debugCtx.lineWidth = Math.max(1, dotRadius * 0.25);
+        debugCtx.strokeStyle = '#ffffff';
+        debugCtx.stroke();
+      });
     }
 
     setSamples(results);
@@ -339,6 +409,20 @@ export default function CubeColorTestPage() {
         )}
 
         <canvas ref={canvasRef} className="hidden" />
+
+        {/* ── Debug: captured frame with sample-point dots ────────────────
+            Always mounted (so the ref exists at capture time); visibility
+            toggles with `samples` instead of the canvas mounting/unmounting. */}
+        <div className={samples ? '' : 'hidden'}>
+          <p className="mb-1 text-xs text-white/50">
+            Дээж авсан цэгүүд (улаан цэгүүд куб талан дээр байх ёстой)
+          </p>
+          <canvas
+            ref={debugCanvasRef}
+            className="w-full rounded-lg border"
+            style={{ borderColor: 'rgba(255,255,255,0.1)' }}
+          />
+        </div>
 
         {!samples ? (
           <button
