@@ -43,8 +43,10 @@ interface DetectionResult {
   // convexity/side-length/corner-angle quality filters — lets the
   // diagnostics panel show how aggressively those filters are rejecting
   // candidates (too strict if stickers ≈ 0 while this stays high; too
-  // loose if this barely drops after filtering).
-  rawQuadCount: number;
+  // loose if this barely drops after filtering). Kept as full points (not
+  // just a count) so they can also be drawn on the edge-preview debug
+  // overlay — rawQuadCount is just rawQuads.length.
+  rawQuads: QuadCandidate[];
   // Raw per-contour sticker candidates surviving ALL filters, pre-grouping
   // — kept separate from `faces` so the diagnostics panel can show whether
   // the pipeline is finding shapes at all vs. finding shapes but failing
@@ -275,7 +277,11 @@ function groupToFaceIfGrid(group: readonly StickerCandidate[]): QuadCandidate | 
 // OpenCV.js allocates on the WASM heap, which the JS garbage collector does
 // not manage, so skipping this would leak memory every tick and eventually
 // crash the tab in a continuous loop like this one.
-function detectQuads(cv: CvModule, canvas: HTMLCanvasElement): DetectionResult {
+function detectQuads(
+  cv: CvModule,
+  canvas: HTMLCanvasElement,
+  edgePreviewCanvas: HTMLCanvasElement | null
+): DetectionResult {
   const src = cv.imread(canvas);
   const gray = new cv.Mat();
   const blurred = new cv.Mat();
@@ -284,8 +290,8 @@ function detectQuads(cv: CvModule, canvas: HTMLCanvasElement): DetectionResult {
   const kernel = cv.Mat.ones(3, 3, cv.CV_8U);
   const contours = new cv.MatVector();
   const hierarchy = new cv.Mat();
+  const rawQuads: QuadCandidate[] = [];
   const stickers: StickerCandidate[] = [];
-  let rawQuadCount = 0;
 
   try {
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
@@ -296,6 +302,20 @@ function detectQuads(cv: CvModule, canvas: HTMLCanvasElement): DetectionResult {
     // broken segments. Without this, real-world (non-synthetic) edges
     // produce almost no usable 4-vertex contours at all.
     cv.dilate(edges, dilated, kernel);
+
+    // DEBUG ONLY — renders the post-dilate edge map (exactly what
+    // findContours below actually consumes, not the raw pre-dilate Canny
+    // output) to a small preview canvas, if one was provided. Answers "are
+    // sticker-groove edges continuous/closed by the time contour-finding
+    // runs, or broken/gappy" — must happen here, before `dilated` is
+    // deleted below, since the caller never gets to touch the live Mat.
+    // The raw-quad overlay (yellow) is drawn separately by the caller,
+    // using the plain-JS `rawQuads` points returned below — no Mat access
+    // needed for that part, so it doesn't need to happen in here too.
+    if (edgePreviewCanvas) {
+      cv.imshow(edgePreviewCanvas, dilated);
+    }
+
     // RETR_TREE (not RETR_LIST) — we need the parent/child hierarchy to
     // group individual sticker-quad contours by shared enclosing parent,
     // not just a flat list of shapes with no structural relationship.
@@ -318,11 +338,11 @@ function detectQuads(cv: CvModule, canvas: HTMLCanvasElement): DetectionResult {
         if (approx.rows === 4) {
           const area = Math.abs(cv.contourArea(approx));
           if (area >= minArea && area <= maxArea) {
-            rawQuadCount++;
-
             const points = [0, 1, 2, 3].map(
               (p): Point => ({ x: approx.data32S[p * 2], y: approx.data32S[p * 2 + 1] })
             ) as [Point, Point, Point, Point];
+
+            rawQuads.push({ points, area });
 
             // Three quad-quality filters — reject contours that are
             // technically 4-vertex quads (noise, sticker highlights/
@@ -381,7 +401,7 @@ function detectQuads(cv: CvModule, canvas: HTMLCanvasElement): DetectionResult {
   });
   faces.sort((a, b) => b.area - a.area);
 
-  return { rawQuadCount, stickers, faces };
+  return { rawQuads, stickers, faces };
 }
 
 function strokeQuad(ctx: CanvasRenderingContext2D, points: readonly Point[]) {
@@ -413,11 +433,36 @@ function drawQuads(canvas: HTMLCanvasElement, stickers: readonly QuadCandidate[]
   faces.forEach(({ points }) => strokeQuad(ctx, points));
 }
 
+// DEBUG ONLY — draws every raw 4-vertex contour (before the convexity/
+// side-length/corner-angle quality filters) in one color, on top of the
+// edge-preview canvas that detectQuads already painted with the post-dilate
+// Canny output. `rawQuads`' points are in the same native coordinate space
+// cv.imshow drew the preview at (both come from the same processing-
+// resolution `canvas`/`dilated` Mat), so no scaling is needed — plain 1:1
+// overlay. Answers, visually: are grooves producing continuous closed
+// lines that findContours turns into 4-vertex shapes at all (yellow quads
+// visible, however messy) vs. Canny/dilate not finding usable edges in the
+// first place (no yellow quads at all)?
+function drawRawQuadOverlay(canvas: HTMLCanvasElement, rawQuads: readonly QuadCandidate[]) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(250, 204, 21, 0.9)'; // dim yellow
+  rawQuads.forEach(({ points }) => strokeQuad(ctx, points));
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function CubeEdgeDetectTestPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // DEBUG ONLY — small preview showing the post-dilate Canny edge map plus
+  // raw 4-vertex contour outlines, so we can see whether sticker grooves
+  // are being detected as continuous closed edges at all vs. found but
+  // failing to become clean quads afterward. See detectQuads/
+  // drawRawQuadOverlay above.
+  const edgePreviewCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const cvRef = useRef<CvModule | null>(null);
   const startCameraRequestIdRef = useRef(0);
@@ -632,9 +677,9 @@ export default function CubeEdgeDetectTestPage() {
           ctx.drawImage(video, 0, 0, w, h);
 
           const start = performance.now();
-          let result: DetectionResult = { rawQuadCount: 0, stickers: [], faces: [] };
+          let result: DetectionResult = { rawQuads: [], stickers: [], faces: [] };
           try {
-            result = detectQuads(cv, canvas);
+            result = detectQuads(cv, canvas, edgePreviewCanvasRef.current);
           } catch (err) {
             // eslint-disable-next-line no-console
             console.error('[cube-edge-detect-test] detection error', err);
@@ -642,8 +687,15 @@ export default function CubeEdgeDetectTestPage() {
           const elapsed = performance.now() - start;
 
           drawQuads(canvas, result.stickers, result.faces);
+          // DEBUG ONLY — overlay raw-quad outlines on top of the edge
+          // preview detectQuads already painted via cv.imshow. Must happen
+          // after detectQuads returns, since it draws using the plain-JS
+          // points (no Mat access needed), same split as drawQuads above.
+          if (edgePreviewCanvasRef.current) {
+            drawRawQuadOverlay(edgePreviewCanvasRef.current, result.rawQuads);
+          }
           setLastFrameMs(elapsed);
-          setRawQuadCount(result.rawQuadCount);
+          setRawQuadCount(result.rawQuads.length);
           setStickerCandidateCount(result.stickers.length);
           setCandidateCount(result.faces.length);
           setLargestCandidate(result.faces[0] ?? null);
@@ -852,6 +904,35 @@ export default function CubeEdgeDetectTestPage() {
               OpenCV ачаалахад алдаа гарлаа: {opencvError}
             </div>
           )}
+        </div>
+
+        {/* ── DEBUG: edge preview ─────────────────────────────────────────
+            Temporary diagnostic-only addition — not part of the actual
+            detection UI. White lines = post-dilate Canny edge map (exactly
+            what findContours consumes below); dim yellow outlines = every
+            raw 4-vertex contour BEFORE the convexity/side/angle quality
+            filters. Answers: are sticker-groove edges even coming through
+            as continuous/closed lines Canny+dilate can produce quads from,
+            or is that the actual bottleneck (vs. quads existing but the
+            quality filters rejecting them, which rawQuadCount vs.
+            stickerCandidateCount in the diagnostics panel already shows)? */}
+        <div>
+          <p className="mb-1 text-xs text-white/50">
+            Ирмэгийн зураг (Canny+dilate, findContours-д ордог өгөгдөл) — шар зураас: чанарын
+            шүүлтүүрээс өмнөх дөрвөн өнцөгт бүгд
+          </p>
+          <canvas
+            ref={edgePreviewCanvasRef}
+            style={{
+              display: 'block',
+              width: 200,
+              height: 150,
+              borderRadius: 8,
+              border: '1px solid rgba(255,255,255,0.1)',
+              backgroundColor: '#000000',
+              imageRendering: 'pixelated',
+            }}
+          />
         </div>
 
         <p className="text-xs text-white/40">
