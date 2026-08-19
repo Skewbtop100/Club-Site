@@ -974,6 +974,21 @@ export default function CubeEdgeDetectTestPage() {
             content still isn't. Shrink back down once the black-preview
             bug is confirmed fixed. */}
         <div>
+          {/* TEMPORARY — unconditional, cv-independent marker. If this lime
+              box is NOT visible on-device, the whole edge-preview section
+              isn't reaching the DOM at all (a mounting/deployment problem,
+              not a canvas/cv.imshow problem) — remove once that's settled. */}
+          <div
+            style={{
+              backgroundColor: 'lime',
+              color: 'black',
+              padding: '12px',
+              fontWeight: 'bold',
+              fontSize: '16px',
+            }}
+          >
+            MARKER: If you see this lime box, this section of the page IS mounting correctly.
+          </div>
           <p className="mb-1 text-xs text-white/50">
             Ирмэгийн зураг (Canny+dilate, findContours-д ордог өгөгдөл) — шар зураас: чанарын
             шүүлтүүрээс өмнөх дөрвөн өнцөгт бүгд
