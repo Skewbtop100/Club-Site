@@ -55,6 +55,13 @@ interface DetectionResult {
   // Groups of exactly 9 sticker candidates confirmed to form a clean 3x3
   // spatial grid — this is the actual detected-face output.
   faces: QuadCandidate[];
+  // cv.countNonZero on the post-dilate edge map — the single clearest
+  // signal for "is Canny finding edges at all" vs. "edges exist but
+  // findContours/approxPolyDP aren't turning them into clean quads". Near
+  // 0 means the Canny thresholds (or the pre-blur) are too strict for the
+  // actual scene contrast; a healthy-looking count with rawQuads still low
+  // means the problem is downstream of Canny instead.
+  nonZeroEdgePixels: number;
 }
 
 // OpenCV.js attaches its entire API dynamically onto the loaded module at
@@ -293,15 +300,32 @@ function detectQuads(
   const rawQuads: QuadCandidate[] = [];
   const stickers: StickerCandidate[] = [];
 
+  let nonZeroEdgePixels = 0;
+
   try {
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
     cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0);
-    cv.Canny(blurred, edges, 50, 150);
+    // Lowered from (50, 150) — real-world sticker grooves under normal
+    // indoor lighting have noticeably lower contrast than a synthetic test
+    // image (no strong directional light to throw a hard shadow into the
+    // groove), and the old thresholds were producing near-zero edge pixels
+    // on real footage (confirmed via nonZeroEdgePixels below, added
+    // specifically to check this) even though the pipeline logic itself
+    // was sound. These are a starting point, not final — retune from here
+    // based on the actual nonZeroEdgePixels/rawQuadCount readings.
+    cv.Canny(blurred, edges, 20, 60);
     // Canny output is rarely a fully closed outline — a light dilate closes
     // small gaps so findContours sees continuous boundaries instead of
     // broken segments. Without this, real-world (non-synthetic) edges
     // produce almost no usable 4-vertex contours at all.
     cv.dilate(edges, dilated, kernel);
+
+    // DEBUG ONLY — the clearest single signal for "is Canny finding edges
+    // at all" (near 0 here means yes, the threshold/blur is the problem)
+    // vs. "edges exist but aren't becoming clean quads downstream" (a
+    // healthy count here with rawQuads still low points at
+    // findContours/approxPolyDP/the quality filters instead).
+    nonZeroEdgePixels = cv.countNonZero(dilated);
 
     // DEBUG ONLY — renders the post-dilate edge map (exactly what
     // findContours below actually consumes, not the raw pre-dilate Canny
@@ -312,8 +336,17 @@ function detectQuads(
     // The raw-quad overlay (yellow) is drawn separately by the caller,
     // using the plain-JS `rawQuads` points returned below — no Mat access
     // needed for that part, so it doesn't need to happen in here too.
+    // Wrapped defensively: a silent imshow failure would otherwise look
+    // identical (all-black preview) to "Canny found nothing", which is
+    // exactly the ambiguity nonZeroEdgePixels above is meant to resolve —
+    // don't let the two failure modes get confused with each other.
     if (edgePreviewCanvas) {
-      cv.imshow(edgePreviewCanvas, dilated);
+      try {
+        cv.imshow(edgePreviewCanvas, dilated);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[cube-edge-detect-test] cv.imshow failed', err);
+      }
     }
 
     // RETR_TREE (not RETR_LIST) — we need the parent/child hierarchy to
@@ -401,7 +434,7 @@ function detectQuads(
   });
   faces.sort((a, b) => b.area - a.area);
 
-  return { rawQuads, stickers, faces };
+  return { rawQuads, stickers, faces, nonZeroEdgePixels };
 }
 
 function strokeQuad(ctx: CanvasRenderingContext2D, points: readonly Point[]) {
@@ -493,6 +526,11 @@ export default function CubeEdgeDetectTestPage() {
   // stickerCandidateCount (AFTER those filters) to see how aggressively
   // they're rejecting candidates.
   const [rawQuadCount, setRawQuadCount] = useState<number>(0);
+  // cv.countNonZero on the post-dilate edge map — near 0 means Canny/blur
+  // are too strict for the actual scene contrast (the fix lever); a
+  // healthy count with rawQuadCount still low means the problem is
+  // downstream (findContours/approxPolyDP/quality filters instead).
+  const [nonZeroEdgePixels, setNonZeroEdgePixels] = useState<number>(0);
   // Raw per-contour sticker candidates found this tick, before grouping —
   // separate from candidateCount (confirmed 3x3-grid faces) so it's clear
   // whether the pipeline is finding shapes at all vs. finding shapes but
@@ -677,7 +715,7 @@ export default function CubeEdgeDetectTestPage() {
           ctx.drawImage(video, 0, 0, w, h);
 
           const start = performance.now();
-          let result: DetectionResult = { rawQuads: [], stickers: [], faces: [] };
+          let result: DetectionResult = { rawQuads: [], stickers: [], faces: [], nonZeroEdgePixels: 0 };
           try {
             result = detectQuads(cv, canvas, edgePreviewCanvasRef.current);
           } catch (err) {
@@ -696,6 +734,7 @@ export default function CubeEdgeDetectTestPage() {
           }
           setLastFrameMs(elapsed);
           setRawQuadCount(result.rawQuads.length);
+          setNonZeroEdgePixels(result.nonZeroEdgePixels);
           setStickerCandidateCount(result.stickers.length);
           setCandidateCount(result.faces.length);
           setLargestCandidate(result.faces[0] ?? null);
@@ -780,6 +819,7 @@ export default function CubeEdgeDetectTestPage() {
         ? `${wasmHeapMB.toFixed(1)} (started at ${wasmHeapAtStart.toFixed(1)}, ${wasmHeapDelta >= 0 ? '+' : ''}${wasmHeapDelta.toFixed(1)})`
         : 'n/a (waiting for first 20-tick sample)'
     }`,
+    `nonZeroEdgePixels (post-dilate; near-0 = Canny/blur too strict): ${nonZeroEdgePixels}`,
     `rawQuadCount (4-vertex+area, before quality filters): ${rawQuadCount}`,
     `stickerCandidateCount (after convexity/side/angle filters): ${stickerCandidateCount}`,
     `candidateCount (confirmed 3x3-grid faces): ${candidateCount}`,
