@@ -36,6 +36,24 @@ interface QuadCandidate {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type CvModule = any;
 
+// OpenCV.js is loaded via a classic <script src="/opencv.js"> tag (see the
+// load effect below), not an npm package + bundler import — that package's
+// module.exports is a bare native Promise, and Turbopack's CJS→ESM
+// namespace-builder walks its prototype chain and auto-exposes
+// Promise.prototype's then/catch/finally as fake named exports on the
+// synthesized module namespace object; Turbopack's own dynamic-import
+// dependency-resolution code then duck-types that namespace as thenable and
+// calls .then() on it directly, throwing "incompatible receiver [object
+// Module]" entirely inside Turbopack's runtime before any of our code runs.
+// A classic script tag sidesteps ESM/CJS bundler interop entirely — the
+// script sets `window.cv` as an ordinary global, exactly as opencv.js's own
+// upstream distribution is designed to be used.
+declare global {
+  interface Window {
+    cv: CvModule;
+  }
+}
+
 const ACCENT = '#A78BFA';
 const BG = '#0a0a0a';
 
@@ -181,73 +199,42 @@ export default function CubeEdgeDetectTestPage() {
   }, []);
 
   // ── OpenCV.js load ─────────────────────────────────────────────────────────
-  // Dynamically imported (not a static top-level import) so its WASM-loading
-  // module body never runs during SSR/build — this page is client-only, and
-  // deferring the import to an effect keeps that guaranteed regardless of
-  // whether the package itself is SSR-safe.
+  // Classic <script> tag, not an npm import — see the header comment on the
+  // `declare global { interface Window { cv } }` block above for why. The
+  // script sets `window.cv` itself; once ready, we mirror it into cvRef so
+  // the detection loop below reads a stable ref rather than the global on
+  // every tick.
   useEffect(() => {
-    let cancelled = false;
+    if (window.cv?.calledRun) {
+      cvRef.current = window.cv;
+      setOpencvStatus('ready');
+      return;
+    }
 
-    import('@techstark/opencv-js')
-      .then(async (mod) => {
-        if (cancelled) return;
-
-        // `mod` here is an ES module namespace object (that's what
-        // dynamic import() always resolves to), NOT the cv value itself
-        // — @techstark/opencv-js's actual export (its CJS module.exports)
-        // is available as `mod.default`. Calling `.then` on `mod` directly
-        // is exactly what throws "TypeError: Method Promise.prototype.then
-        // called on incompatible receiver [object Module]": a namespace
-        // object has no internal Promise slots, so native Promise.prototype
-        // methods reject it as an incompatible receiver even though the
-        // package's own `module.exports.default = cv` self-assignment can
-        // make it look thenable-ish at a glance. Every subsequent access
-        // below is on the unwrapped value, never on `mod`.
-        let cvModule: CvModule = mod.default;
-        let unwrapPath = 'mod.default';
-        if (cvModule === undefined || cvModule === null) {
-          // Defensive fallback in case this package's export shape ever
-          // differs from what's assumed above (e.g. a version bump that
-          // stops populating `.default`) — fall back to the namespace
-          // object itself and log it, so a future regression is visible
-          // instead of silently failing a different way.
-          cvModule = mod as CvModule;
-          unwrapPath = 'mod (fallback — mod.default was undefined/null)';
-        }
-        // eslint-disable-next-line no-console
-        console.log(`[cube-edge-detect-test] opencv-js unwrap path: ${unwrapPath}`);
-
-        // The unwrapped value is either the already-initialized Module
-        // (cv.calledRun true — e.g. a previous mount already triggered
-        // WASM init and the module instance is cached), a thenable/Promise
-        // that resolves once WASM init completes (the common case; duck-
-        // typed via `.then` rather than `instanceof Promise` since the
-        // realm/bundler transform isn't guaranteed to preserve Promise
-        // identity), or — for older/alternate Emscripten builds — a plain
-        // object that only becomes ready once onRuntimeInitialized fires.
-        const cv: CvModule = await new Promise<CvModule>((resolve) => {
-          if (cvModule.calledRun || typeof cvModule.Mat === 'function') {
-            resolve(cvModule);
-          } else if (typeof cvModule.then === 'function') {
-            cvModule.then((ready: CvModule) => resolve(ready));
-          } else {
-            cvModule.onRuntimeInitialized = () => resolve(cvModule);
-          }
-        });
-
-        if (cancelled) return;
+    const script = document.createElement('script');
+    script.src = '/opencv.js';
+    script.async = true;
+    script.onload = () => {
+      const cv = window.cv;
+      if (cv.calledRun) {
         cvRef.current = cv;
         setOpencvStatus('ready');
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setOpencvStatus('error');
-        setOpencvError(err instanceof Error ? `${err.name}: ${err.message}` : String(err));
-      });
-
-    return () => {
-      cancelled = true;
+      } else {
+        cv.onRuntimeInitialized = () => {
+          cvRef.current = cv;
+          setOpencvStatus('ready');
+        };
+      }
     };
+    script.onerror = () => {
+      setOpencvStatus('error');
+      setOpencvError('Failed to load /opencv.js script');
+    };
+    document.body.appendChild(script);
+    // Deliberately not removing the script/resetting window.cv on cleanup
+    // — OpenCV.js's WASM runtime isn't cleanly re-initializable, and this
+    // is a dev-only test page where leaving it cached globally across
+    // remounts (e.g. React Strict Mode's double-invoke) is fine.
   }, []);
 
   // ── Camera lifecycle (copied pattern from cube-color-test/page.tsx) ────────
