@@ -191,24 +191,50 @@ export default function CubeEdgeDetectTestPage() {
     import('@techstark/opencv-js')
       .then(async (mod) => {
         if (cancelled) return;
-        const cvModule: CvModule = mod.default ?? mod;
-        // The package's own README documents all three shapes its export
-        // can take depending on version/environment — a Promise, an
-        // already-initialized module (cv.Mat already exists, e.g. if a
-        // previous mount already triggered init and the module is cached),
-        // or a pending module that only becomes usable once
-        // onRuntimeInitialized fires. Handling only one of these would work
-        // today and silently break on a version bump.
-        let cv: CvModule;
-        if (cvModule instanceof Promise) {
-          cv = await cvModule;
-        } else if (typeof cvModule.Mat === 'function') {
-          cv = cvModule;
-        } else {
-          cv = await new Promise<CvModule>((resolve) => {
-            cvModule.onRuntimeInitialized = () => resolve(cvModule);
-          });
+
+        // `mod` here is an ES module namespace object (that's what
+        // dynamic import() always resolves to), NOT the cv value itself
+        // — @techstark/opencv-js's actual export (its CJS module.exports)
+        // is available as `mod.default`. Calling `.then` on `mod` directly
+        // is exactly what throws "TypeError: Method Promise.prototype.then
+        // called on incompatible receiver [object Module]": a namespace
+        // object has no internal Promise slots, so native Promise.prototype
+        // methods reject it as an incompatible receiver even though the
+        // package's own `module.exports.default = cv` self-assignment can
+        // make it look thenable-ish at a glance. Every subsequent access
+        // below is on the unwrapped value, never on `mod`.
+        let cvModule: CvModule = mod.default;
+        let unwrapPath = 'mod.default';
+        if (cvModule === undefined || cvModule === null) {
+          // Defensive fallback in case this package's export shape ever
+          // differs from what's assumed above (e.g. a version bump that
+          // stops populating `.default`) — fall back to the namespace
+          // object itself and log it, so a future regression is visible
+          // instead of silently failing a different way.
+          cvModule = mod as CvModule;
+          unwrapPath = 'mod (fallback — mod.default was undefined/null)';
         }
+        // eslint-disable-next-line no-console
+        console.log(`[cube-edge-detect-test] opencv-js unwrap path: ${unwrapPath}`);
+
+        // The unwrapped value is either the already-initialized Module
+        // (cv.calledRun true — e.g. a previous mount already triggered
+        // WASM init and the module instance is cached), a thenable/Promise
+        // that resolves once WASM init completes (the common case; duck-
+        // typed via `.then` rather than `instanceof Promise` since the
+        // realm/bundler transform isn't guaranteed to preserve Promise
+        // identity), or — for older/alternate Emscripten builds — a plain
+        // object that only becomes ready once onRuntimeInitialized fires.
+        const cv: CvModule = await new Promise<CvModule>((resolve) => {
+          if (cvModule.calledRun || typeof cvModule.Mat === 'function') {
+            resolve(cvModule);
+          } else if (typeof cvModule.then === 'function') {
+            cvModule.then((ready: CvModule) => resolve(ready));
+          } else {
+            cvModule.onRuntimeInitialized = () => resolve(cvModule);
+          }
+        });
+
         if (cancelled) return;
         cvRef.current = cv;
         setOpencvStatus('ready');
