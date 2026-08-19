@@ -424,6 +424,10 @@ export default function CubeEdgeDetectTestPage() {
   const cameraTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loopRunIdRef = useRef(0);
+  // TEMPORARY diagnostic-only counter for the progressive-degradation
+  // investigation — not part of detection logic, safe to remove once the
+  // investigation concludes. Counts ticks so every 20th one gets logged.
+  const diagnosticTickCounterRef = useRef(0);
 
   const [cameraStatus, setCameraStatus] = useState<CameraStatus>('idle');
   const [cameraError, setCameraError] = useState<string>('');
@@ -628,6 +632,23 @@ export default function CubeEdgeDetectTestPage() {
           setStickerCandidateCount(result.stickers.length);
           setCandidateCount(result.faces.length);
           setLargestCandidate(result.faces[0] ?? null);
+
+          // TEMPORARY — progressive-degradation investigation. Logs
+          // lastFrameMs and the WASM heap's current byte length
+          // (cv.HEAPU8.length — Emscripten's ALLOW_MEMORY_GROWTH heap only
+          // grows, never shrinks, so an unbounded upward trend here over a
+          // few minutes of continuous running is direct, hard evidence of
+          // a real leak; a quick plateau is normal working-set growth).
+          // Remove once the investigation concludes.
+          diagnosticTickCounterRef.current++;
+          if (diagnosticTickCounterRef.current % 20 === 0) {
+            // eslint-disable-next-line no-console
+            console.log('[cube-edge-detect-test][diag]', {
+              tick: diagnosticTickCounterRef.current,
+              lastFrameMs: Math.round(elapsed),
+              wasmHeapBytes: cv.HEAPU8?.length ?? 'n/a',
+            });
+          }
 
           const nextDelay =
             elapsed > SAMPLE_INTERVAL_MS
