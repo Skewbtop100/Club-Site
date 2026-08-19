@@ -955,7 +955,24 @@ export default function CubeEdgeDetectTestPage() {
             as continuous/closed lines Canny+dilate can produce quads from,
             or is that the actual bottleneck (vs. quads existing but the
             quality filters rejecting them, which rawQuadCount vs.
-            stickerCandidateCount in the diagnostics panel already shows)? */}
+            stickerCandidateCount in the diagnostics panel already shows)?
+
+            Was rendering entirely black on-device despite nonZeroEdgePixels
+            confirming real edge content — investigated cv.imshow's actual
+            implementation (pulled straight from public/opencv.js, not
+            guessed) and confirmed it correctly sets canvas.width/height to
+            match the Mat every call and paints via putImageData, so a
+            resolution mismatch alone can't produce solid black (only
+            distorted scaling). Couldn't fully confirm the root cause
+            without a live device, so per the investigation's own fallback:
+            enlarged significantly (width:'100%', matching the main video
+            preview above, height omitted so the canvas scales by its own
+            intrinsic aspect ratio instead of a hardcoded 200x150 box that
+            may not match the camera's actual aspect) and added a bright
+            red border so the element's real presence/size in the layout is
+            visually unmistakable in a screenshot even if cv.imshow's
+            content still isn't. Shrink back down once the black-preview
+            bug is confirmed fixed. */}
         <div>
           <p className="mb-1 text-xs text-white/50">
             Ирмэгийн зураг (Canny+dilate, findContours-д ордог өгөгдөл) — шар зураас: чанарын
@@ -965,10 +982,14 @@ export default function CubeEdgeDetectTestPage() {
             ref={edgePreviewCanvasRef}
             style={{
               display: 'block',
-              width: 200,
-              height: 150,
+              width: '100%',
               borderRadius: 8,
-              border: '1px solid rgba(255,255,255,0.1)',
+              // TEMPORARY — bright red 2px border to visually confirm this
+              // canvas element itself is present/sized in the layout,
+              // independent of whether cv.imshow's content is visible
+              // inside it. Revert to the subtle
+              // `1px solid rgba(255,255,255,0.1)` border once resolved.
+              border: '2px solid red',
               backgroundColor: '#000000',
               imageRendering: 'pixelated',
             }}
