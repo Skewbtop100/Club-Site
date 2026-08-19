@@ -424,10 +424,18 @@ export default function CubeEdgeDetectTestPage() {
   const cameraTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loopRunIdRef = useRef(0);
-  // TEMPORARY diagnostic-only counter for the progressive-degradation
+  // TEMPORARY diagnostic-only state for the progressive-degradation
   // investigation — not part of detection logic, safe to remove once the
-  // investigation concludes. Counts ticks so every 20th one gets logged.
+  // investigation concludes. Counts ticks so every 20th one gets sampled.
   const diagnosticTickCounterRef = useRef(0);
+  // Rolling window of the last ~20 ticks' raw elapsed times, for
+  // avgFrameMsRecent below — a single tick's lastFrameMs bounces around too
+  // much to compare reliably across screenshots taken minutes apart.
+  const recentFrameMsRef = useRef<number[]>([]);
+  // Captured once, on the first 20-tick sample — lets the panel show the
+  // delta from session start, which is the actually meaningful signal, not
+  // the absolute heap size.
+  const wasmHeapMBAtStartRef = useRef<number | null>(null);
 
   const [cameraStatus, setCameraStatus] = useState<CameraStatus>('idle');
   const [cameraError, setCameraError] = useState<string>('');
@@ -448,6 +456,13 @@ export default function CubeEdgeDetectTestPage() {
   const [candidateCount, setCandidateCount] = useState<number>(0);
   const [largestCandidate, setLargestCandidate] = useState<QuadCandidate | null>(null);
   const [diagTick, setDiagTick] = useState(0);
+  // TEMPORARY — progressive-degradation investigation (see the tick handler
+  // below). Surfaced in the on-screen diagnostics panel, not just
+  // console.log, so this can be checked via a phone screenshot without USB
+  // debugging: take one screenshot at session start, another a few minutes
+  // later, and compare wasmHeapMB / avgFrameMsRecent between the two.
+  const [wasmHeapMB, setWasmHeapMB] = useState<number | null>(null);
+  const [avgFrameMsRecent, setAvgFrameMsRecent] = useState<number | null>(null);
 
   useEffect(() => {
     const id = setInterval(() => setDiagTick((t) => t + 1), 500);
@@ -633,20 +648,38 @@ export default function CubeEdgeDetectTestPage() {
           setCandidateCount(result.faces.length);
           setLargestCandidate(result.faces[0] ?? null);
 
-          // TEMPORARY — progressive-degradation investigation. Logs
+          // TEMPORARY — progressive-degradation investigation. Tracks
           // lastFrameMs and the WASM heap's current byte length
           // (cv.HEAPU8.length — Emscripten's ALLOW_MEMORY_GROWTH heap only
           // grows, never shrinks, so an unbounded upward trend here over a
           // few minutes of continuous running is direct, hard evidence of
           // a real leak; a quick plateau is normal working-set growth).
-          // Remove once the investigation concludes.
+          // Surfaced in the on-screen diagnostics panel (see wasmHeapMB /
+          // avgFrameMsRecent below) as well as the console, since checking
+          // devtools on a phone is impractical — a screenshot at session
+          // start and another a few minutes later is enough to compare.
+          // Remove all of this once the investigation concludes.
+          recentFrameMsRef.current.push(elapsed);
+          if (recentFrameMsRef.current.length > 20) recentFrameMsRef.current.shift();
+
           diagnosticTickCounterRef.current++;
           if (diagnosticTickCounterRef.current % 20 === 0) {
+            const avgRecent =
+              recentFrameMsRef.current.reduce((sum, v) => sum + v, 0) / recentFrameMsRef.current.length;
+            const heapBytes: number | undefined = cv.HEAPU8?.length;
+            const heapMB = typeof heapBytes === 'number' ? heapBytes / (1024 * 1024) : null;
+            if (heapMB !== null && wasmHeapMBAtStartRef.current === null) {
+              wasmHeapMBAtStartRef.current = heapMB;
+            }
+            setAvgFrameMsRecent(avgRecent);
+            setWasmHeapMB(heapMB);
+
             // eslint-disable-next-line no-console
             console.log('[cube-edge-detect-test][diag]', {
               tick: diagnosticTickCounterRef.current,
               lastFrameMs: Math.round(elapsed),
-              wasmHeapBytes: cv.HEAPU8?.length ?? 'n/a',
+              avgFrameMsRecent: Math.round(avgRecent),
+              wasmHeapMB: heapMB !== null ? heapMB.toFixed(1) : 'n/a',
             });
           }
 
@@ -675,6 +708,11 @@ export default function CubeEdgeDetectTestPage() {
 
   const videoEl = videoRef.current;
   const videoRect = videoEl?.getBoundingClientRect();
+  // TEMPORARY — progressive-degradation investigation. See the tick handler
+  // above for how these are sampled (every 20 ticks) and what they mean.
+  const wasmHeapAtStart = wasmHeapMBAtStartRef.current;
+  const wasmHeapDelta =
+    wasmHeapMB !== null && wasmHeapAtStart !== null ? wasmHeapMB - wasmHeapAtStart : null;
   const diagnosticsText = [
     `diagTick: ${diagTick}`,
     `cameraStatus: ${cameraStatus}`,
@@ -684,6 +722,12 @@ export default function CubeEdgeDetectTestPage() {
     `opencvStatus: ${opencvStatus}${opencvError ? ` (${opencvError})` : ''}`,
     `processing res: ${canvasRef.current ? `${canvasRef.current.width} x ${canvasRef.current.height}` : 'n/a'}`,
     `lastFrameMs: ${lastFrameMs !== null ? lastFrameMs.toFixed(1) : 'n/a'}`,
+    `avgFrameMsRecent (rolling avg, last ~20 ticks): ${avgFrameMsRecent !== null ? avgFrameMsRecent.toFixed(1) : 'n/a'}`,
+    `wasmHeapMB: ${
+      wasmHeapMB !== null && wasmHeapAtStart !== null && wasmHeapDelta !== null
+        ? `${wasmHeapMB.toFixed(1)} (started at ${wasmHeapAtStart.toFixed(1)}, ${wasmHeapDelta >= 0 ? '+' : ''}${wasmHeapDelta.toFixed(1)})`
+        : 'n/a (waiting for first 20-tick sample)'
+    }`,
     `rawQuadCount (4-vertex+area, before quality filters): ${rawQuadCount}`,
     `stickerCandidateCount (after convexity/side/angle filters): ${stickerCandidateCount}`,
     `candidateCount (confirmed 3x3-grid faces): ${candidateCount}`,
