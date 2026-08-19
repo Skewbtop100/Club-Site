@@ -39,9 +39,16 @@ interface StickerCandidate extends QuadCandidate {
 }
 
 interface DetectionResult {
-  // Raw per-contour sticker candidates, pre-grouping — kept separate from
-  // `faces` so the diagnostics panel can show whether the pipeline is
-  // finding shapes at all vs. finding shapes but failing to group them.
+  // 4-vertex contours passing only the 4-vertex + area checks, BEFORE the
+  // convexity/side-length/corner-angle quality filters — lets the
+  // diagnostics panel show how aggressively those filters are rejecting
+  // candidates (too strict if stickers ≈ 0 while this stays high; too
+  // loose if this barely drops after filtering).
+  rawQuadCount: number;
+  // Raw per-contour sticker candidates surviving ALL filters, pre-grouping
+  // — kept separate from `faces` so the diagnostics panel can show whether
+  // the pipeline is finding shapes at all vs. finding shapes but failing
+  // to group them.
   stickers: StickerCandidate[];
   // Groups of exactly 9 sticker candidates confirmed to form a clean 3x3
   // spatial grid — this is the actual detected-face output.
@@ -104,7 +111,28 @@ const MIN_TICK_GAP_MS = 100;
 // list (and the grouping pass) smaller.
 const MIN_STICKER_AREA_FRACTION = 0.004;
 const MAX_STICKER_AREA_FRACTION = 0.2;
-const MAX_SIDE_RATIO = 2.2; // longest side / shortest side of a sticker quad — rejects thin slivers
+// Quad-quality filters, applied per-candidate after the 4-vertex + area
+// checks — concepts (convexity / side-length consistency / corner-angle)
+// reimplemented in TypeScript from the validated approach in the
+// open-source tentone/rubix-solver project's vision.cpp (that project uses
+// OpenCV C++; this is OpenCV.js), added because unstable flicker (2-3
+// corners detected inconsistently) traced back to 4-vertex approximations
+// from noise/highlights/groove shadows that are technically quads but
+// geometrically nothing like a real square sticker.
+//
+// Max pairwise side-length difference, as a FRACTION of the average side
+// length (not an absolute pixel value) — stickers appear at varying sizes
+// depending on distance from camera, so a fixed-pixel threshold would be
+// wrong at every distance except the one it was tuned at. This replaces
+// the old longest/shortest-side ratio check (same underlying property,
+// equal-sidedness, checked more precisely).
+const SIDE_LENGTH_TOLERANCE = 0.35;
+// Corner-angle tolerance band around 90°, in degrees — generous enough to
+// allow moderate camera tilt/perspective skew, tight enough to reject
+// clearly non-square shapes. Starting value; likely needs retuning once
+// checked against real device footage (real lighting/lens distortion may
+// call for a looser or tighter band than this guess).
+const ANGLE_TOLERANCE = 25;
 const REQUIRED_STICKER_COUNT = 9; // a face is exactly 9 stickers — no more, no less
 // How tightly a 3x3 grid's rows/columns must cluster, as a fraction of the
 // full spread across all 9 points on that axis — generous, since real
@@ -118,6 +146,54 @@ function sideLengths(points: readonly Point[]): number[] {
   return points.map((p, i) => {
     const q = points[(i + 1) % points.length];
     return Math.hypot(q.x - p.x, q.y - p.y);
+  });
+}
+
+// True if the 4 side lengths are consistent with each other (a real
+// sticker's sides should all be roughly equal) — false if the largest
+// pairwise difference exceeds SIDE_LENGTH_TOLERANCE of the average side
+// length, or if the average is ~zero (a degenerate quad — guards the
+// division that would otherwise make everything "pass").
+function sideLengthsAreConsistent(sides: readonly number[]): boolean {
+  const avg = sides.reduce((sum, s) => sum + s, 0) / sides.length;
+  if (avg < 1e-6) return false;
+  let maxDiff = 0;
+  for (let i = 0; i < sides.length; i++) {
+    for (let j = i + 1; j < sides.length; j++) {
+      maxDiff = Math.max(maxDiff, Math.abs(sides[i] - sides[j]));
+    }
+  }
+  return maxDiff <= SIDE_LENGTH_TOLERANCE * avg;
+}
+
+// Interior angle in degrees at `corner`, between edges corner→prev and
+// corner→next, via the standard dot-product formula
+// (acos(dot(v1,v2) / (|v1|*|v2|))). Returns NaN if either edge has ~zero
+// length (a degenerate vertex) — callers must check for that rather than
+// let a meaningless angle silently pass.
+function cornerAngleDegrees(prev: Point, corner: Point, next: Point): number {
+  const v1 = { x: prev.x - corner.x, y: prev.y - corner.y };
+  const v2 = { x: next.x - corner.x, y: next.y - corner.y };
+  const mag1 = Math.hypot(v1.x, v1.y);
+  const mag2 = Math.hypot(v2.x, v2.y);
+  if (mag1 < 1e-6 || mag2 < 1e-6) return NaN;
+  const dot = v1.x * v2.x + v1.y * v2.y;
+  // Floating-point error can push cos(θ) a hair outside [-1, 1], which
+  // would otherwise make acos return NaN for an angle that's really just
+  // ~0° or ~180° — clamp before the inverse-cosine call.
+  const cos = Math.min(1, Math.max(-1, dot / (mag1 * mag2)));
+  return (Math.acos(cos) * 180) / Math.PI;
+}
+
+// True only if every one of the quad's 4 corners has an interior angle
+// within [90 - ANGLE_TOLERANCE, 90 + ANGLE_TOLERANCE] — false if any angle
+// is out of band, or degenerate (NaN, from a near-zero-length edge).
+function cornerAnglesAreSquareish(points: readonly Point[]): boolean {
+  return points.every((corner, i) => {
+    const prev = points[(i - 1 + points.length) % points.length];
+    const next = points[(i + 1) % points.length];
+    const angle = cornerAngleDegrees(prev, corner, next);
+    return Number.isFinite(angle) && Math.abs(angle - 90) <= ANGLE_TOLERANCE;
   });
 }
 
@@ -209,6 +285,7 @@ function detectQuads(cv: CvModule, canvas: HTMLCanvasElement): DetectionResult {
   const contours = new cv.MatVector();
   const hierarchy = new cv.Mat();
   const stickers: StickerCandidate[] = [];
+  let rawQuadCount = 0;
 
   try {
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
@@ -241,18 +318,27 @@ function detectQuads(cv: CvModule, canvas: HTMLCanvasElement): DetectionResult {
         if (approx.rows === 4) {
           const area = Math.abs(cv.contourArea(approx));
           if (area >= minArea && area <= maxArea) {
+            rawQuadCount++;
+
             const points = [0, 1, 2, 3].map(
               (p): Point => ({ x: approx.data32S[p * 2], y: approx.data32S[p * 2 + 1] })
             ) as [Point, Point, Point, Point];
 
-            // "Square-ish" is checked on actual side lengths, not the
-            // axis-aligned bounding box — a square viewed at an angle has a
-            // skewed bounding-box aspect ratio even though its own sides
-            // are still all roughly equal, so bounding-box aspect would
-            // reject exactly the tilted-but-valid views we want to keep.
+            // Three quad-quality filters — reject contours that are
+            // technically 4-vertex quads (noise, sticker highlights/
+            // reflections, partial groove shadows) but geometrically
+            // nothing like a real square sticker:
+            //  1. Convex — a self-intersecting/concave "quad" is never a
+            //     real sticker.
+            //  2. Side-length consistency — all 4 sides roughly equal,
+            //     checked as a fraction of average length so it works at
+            //     any distance from camera, not just one tuned pixel size.
+            //  3. Corner angles — all 4 corners close to 90°, tolerant of
+            //     moderate camera tilt/perspective skew.
+            const isConvex: boolean = cv.isContourConvex(approx);
             const sides = sideLengths(points);
-            const ratio = Math.max(...sides) / Math.min(...sides);
-            if (ratio <= MAX_SIDE_RATIO) {
+
+            if (isConvex && sideLengthsAreConsistent(sides) && cornerAnglesAreSquareish(points)) {
               const parent = hierarchyData[i * 4 + 3];
               const center: Point = {
                 x: (points[0].x + points[1].x + points[2].x + points[3].x) / 4,
@@ -295,7 +381,7 @@ function detectQuads(cv: CvModule, canvas: HTMLCanvasElement): DetectionResult {
   });
   faces.sort((a, b) => b.area - a.area);
 
-  return { stickers, faces };
+  return { rawQuadCount, stickers, faces };
 }
 
 function strokeQuad(ctx: CanvasRenderingContext2D, points: readonly Point[]) {
@@ -345,6 +431,11 @@ export default function CubeEdgeDetectTestPage() {
   const [opencvStatus, setOpencvStatus] = useState<OpenCvStatus>('loading');
   const [opencvError, setOpencvError] = useState<string>('');
   const [lastFrameMs, setLastFrameMs] = useState<number | null>(null);
+  // 4-vertex quads passing only the 4-vertex + area checks, BEFORE the
+  // convexity/side-length/corner-angle quality filters — compared against
+  // stickerCandidateCount (AFTER those filters) to see how aggressively
+  // they're rejecting candidates.
+  const [rawQuadCount, setRawQuadCount] = useState<number>(0);
   // Raw per-contour sticker candidates found this tick, before grouping —
   // separate from candidateCount (confirmed 3x3-grid faces) so it's clear
   // whether the pipeline is finding shapes at all vs. finding shapes but
@@ -522,7 +613,7 @@ export default function CubeEdgeDetectTestPage() {
           ctx.drawImage(video, 0, 0, w, h);
 
           const start = performance.now();
-          let result: DetectionResult = { stickers: [], faces: [] };
+          let result: DetectionResult = { rawQuadCount: 0, stickers: [], faces: [] };
           try {
             result = detectQuads(cv, canvas);
           } catch (err) {
@@ -533,6 +624,7 @@ export default function CubeEdgeDetectTestPage() {
 
           drawQuads(canvas, result.stickers, result.faces);
           setLastFrameMs(elapsed);
+          setRawQuadCount(result.rawQuadCount);
           setStickerCandidateCount(result.stickers.length);
           setCandidateCount(result.faces.length);
           setLargestCandidate(result.faces[0] ?? null);
@@ -571,7 +663,8 @@ export default function CubeEdgeDetectTestPage() {
     `opencvStatus: ${opencvStatus}${opencvError ? ` (${opencvError})` : ''}`,
     `processing res: ${canvasRef.current ? `${canvasRef.current.width} x ${canvasRef.current.height}` : 'n/a'}`,
     `lastFrameMs: ${lastFrameMs !== null ? lastFrameMs.toFixed(1) : 'n/a'}`,
-    `stickerCandidateCount (raw quads, pre-grouping): ${stickerCandidateCount}`,
+    `rawQuadCount (4-vertex+area, before quality filters): ${rawQuadCount}`,
+    `stickerCandidateCount (after convexity/side/angle filters): ${stickerCandidateCount}`,
     `candidateCount (confirmed 3x3-grid faces): ${candidateCount}`,
     `largestCandidate corners: ${
       largestCandidate
