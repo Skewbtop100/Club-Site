@@ -28,6 +28,26 @@ interface QuadCandidate {
   area: number;
 }
 
+// A single 4-vertex quad surviving the per-contour filters — a candidate
+// STICKER, not a candidate face (see the header comment on detectQuads).
+// `parent` is that contour's parent index from the hierarchy output
+// (-1 = top level), used to group siblings; `center` is used for the 3x3
+// spatial-grid check.
+interface StickerCandidate extends QuadCandidate {
+  parent: number;
+  center: Point;
+}
+
+interface DetectionResult {
+  // Raw per-contour sticker candidates, pre-grouping — kept separate from
+  // `faces` so the diagnostics panel can show whether the pipeline is
+  // finding shapes at all vs. finding shapes but failing to group them.
+  stickers: StickerCandidate[];
+  // Groups of exactly 9 sticker candidates confirmed to form a clean 3x3
+  // spatial grid — this is the actual detected-face output.
+  faces: QuadCandidate[];
+}
+
 // OpenCV.js attaches its entire API dynamically onto the loaded module at
 // WASM-init time; there's no dependable, version-matched TypeScript surface
 // for it (the community .d.ts files lag behind and don't cover everything
@@ -62,11 +82,34 @@ const BG = '#0a0a0a';
 // resolution — Canny + findContours cost scales with pixel count, and a
 // phone's native frame (often 1280x720+) is far more detail than a coarse
 // "is there a quad here" check needs. This is the main lever for keeping
-// per-tick processing time bounded on real hardware.
-const PROCESSING_MAX_DIM = 480;
+// per-tick processing time bounded on real hardware. Dropped from 480 to
+// 320 (56% fewer pixels: 320²/480² ≈ 0.44) after a scrambled cube's many
+// sticker-groove edges pushed lastFrameMs high enough at 480 to visibly
+// lag video rendering — this is a coarse presence-detection pass, not
+// final color sampling, so the precision tradeoff is acceptable here.
+const PROCESSING_MAX_DIM = 320;
 const SAMPLE_INTERVAL_MS = 250; // target spacing between ticks; see the self-scheduling loop below
-const MIN_AREA_FRACTION = 0.05; // candidate quad must cover at least 5% of the frame
-const MAX_SIDE_RATIO = 2.2; // longest side / shortest side of the quad — rejects thin slivers
+// Floor on the gap between ticks, even on a fast frame — guarantees the
+// main thread gets real idle time to decode/paint video between synchronous
+// OpenCV calls, rather than the previous 50ms floor which let heavy frames
+// re-fire almost immediately and run back-to-back. See the adaptive
+// nextDelay logic in the detection loop for the "slow frame" case.
+const MIN_TICK_GAP_MS = 100;
+// Per-sticker area bounds, as a fraction of frame area — a single sticker
+// is roughly 1/9th of a face, so this range sits well below the old
+// whole-face threshold (0.05) that this replaces. Min filters out grooves/
+// noise; max rejects a lone large contour (e.g. the face's own outer
+// boundary) from being miscounted as one sticker — it wouldn't cluster
+// into a 9-piece grid anyway, but excluding it early keeps the candidate
+// list (and the grouping pass) smaller.
+const MIN_STICKER_AREA_FRACTION = 0.004;
+const MAX_STICKER_AREA_FRACTION = 0.2;
+const MAX_SIDE_RATIO = 2.2; // longest side / shortest side of a sticker quad — rejects thin slivers
+const REQUIRED_STICKER_COUNT = 9; // a face is exactly 9 stickers — no more, no less
+// How tightly a 3x3 grid's rows/columns must cluster, as a fraction of the
+// full spread across all 9 points on that axis — generous, since real
+// camera angle/lens distortion skews grid spacing noticeably.
+const GRID_CLUSTER_TOLERANCE = 0.4;
 const CAMERA_INIT_TIMEOUT_MS = 10_000;
 
 // ── Camera math (copied pattern from cube-color-test) ───────────────────────
@@ -78,13 +121,85 @@ function sideLengths(points: readonly Point[]): number[] {
   });
 }
 
+// Clusters exactly 9 scalar values (one axis — x or y — of 9 sticker-quad
+// centers) into 3 groups of 3 by sorted position, then returns each value's
+// cluster id (0/1/2) IN ORIGINAL ORDER — or null if the values don't split
+// into 3 reasonably tight, well-separated groups (i.e. this axis isn't
+// actually grid-aligned, so whatever produced these 9 shapes probably
+// isn't a real 3x3 face).
+function clusterInto3(values: readonly number[]): number[] | null {
+  if (values.length !== REQUIRED_STICKER_COUNT) return null;
+
+  const order = values.map((_, i) => i).sort((a, b) => values[a] - values[b]);
+  const sorted = order.map((i) => values[i]);
+  const range = sorted[8] - sorted[0];
+  if (range <= 1e-6) return null; // degenerate — all 9 at (roughly) the same position
+
+  const groups = [sorted.slice(0, 3), sorted.slice(3, 6), sorted.slice(6, 9)];
+  const maxIntraSpread = Math.max(...groups.map((g) => g[2] - g[0]));
+  if (maxIntraSpread > range * GRID_CLUSTER_TOLERANCE) return null;
+
+  const clusterIdByOriginalIndex = new Array<number>(REQUIRED_STICKER_COUNT);
+  order.forEach((originalIndex, sortedPos) => {
+    clusterIdByOriginalIndex[originalIndex] = Math.floor(sortedPos / 3);
+  });
+  return clusterIdByOriginalIndex;
+}
+
+// Given a group of sticker candidates that share a parent contour, checks
+// whether they're exactly 9 and arranged in a clean 3x3 spatial grid (row
+// AND column clustering must both succeed, and together must produce all
+// 9 distinct (col,row) pairs — this rejects degenerate cases like all 9
+// points clustering into a single column, which row/column clustering
+// alone wouldn't catch). Returns the combined bounding region as the
+// detected face, or null if this group isn't a valid grid.
+function groupToFaceIfGrid(group: readonly StickerCandidate[]): QuadCandidate | null {
+  if (group.length !== REQUIRED_STICKER_COUNT) return null;
+
+  const colIds = clusterInto3(group.map((s) => s.center.x));
+  const rowIds = clusterInto3(group.map((s) => s.center.y));
+  if (!colIds || !rowIds) return null;
+
+  const seenCells = new Set<string>();
+  for (let i = 0; i < REQUIRED_STICKER_COUNT; i++) {
+    seenCells.add(`${colIds[i]},${rowIds[i]}`);
+  }
+  if (seenCells.size !== REQUIRED_STICKER_COUNT) return null; // not a clean bijection onto the 3x3 grid
+
+  const allPoints = group.flatMap((s) => s.points);
+  const xs = allPoints.map((p) => p.x);
+  const ys = allPoints.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+
+  return {
+    points: [
+      { x: minX, y: minY },
+      { x: maxX, y: minY },
+      { x: maxX, y: maxY },
+      { x: minX, y: maxY },
+    ],
+    area: (maxX - minX) * (maxY - minY),
+  };
+}
+
 // Runs the Canny + contour + polygon-approximation pipeline once on whatever
-// is currently drawn onto `canvas`, returning surviving quad candidates.
-// Every intermediate cv.Mat/MatVector is explicitly `.delete()`d — OpenCV.js
-// allocates on the WASM heap, which the JS garbage collector does not manage,
-// so skipping this would leak memory every single tick and eventually crash
-// the tab in a continuous loop like this one.
-function detectQuads(cv: CvModule, canvas: HTMLCanvasElement): QuadCandidate[] {
+// is currently drawn onto `canvas`. Finds candidate STICKER quads (any
+// 4-vertex, square-ish, appropriately-sized contour), then groups siblings
+// under the same hierarchy parent and checks each group for a clean 3x3
+// grid — only a confirmed 9-sticker grid counts as a detected FACE. A lone
+// quad, however clean, is deliberately never reported as a face: that was
+// the previous approach's core ambiguity (it couldn't tell "one sticker"
+// from "the whole face"), and a scrambled cube's many sticker-to-sticker
+// grooves produce lots of small competing quads instead of one clean
+// whole-face boundary, so nothing reliably passed the old single-quad
+// filters. Every intermediate cv.Mat/MatVector is explicitly `.delete()`d —
+// OpenCV.js allocates on the WASM heap, which the JS garbage collector does
+// not manage, so skipping this would leak memory every tick and eventually
+// crash the tab in a continuous loop like this one.
+function detectQuads(cv: CvModule, canvas: HTMLCanvasElement): DetectionResult {
   const src = cv.imread(canvas);
   const gray = new cv.Mat();
   const blurred = new cv.Mat();
@@ -93,7 +208,7 @@ function detectQuads(cv: CvModule, canvas: HTMLCanvasElement): QuadCandidate[] {
   const kernel = cv.Mat.ones(3, 3, cv.CV_8U);
   const contours = new cv.MatVector();
   const hierarchy = new cv.Mat();
-  const candidates: QuadCandidate[] = [];
+  const stickers: StickerCandidate[] = [];
 
   try {
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
@@ -104,10 +219,17 @@ function detectQuads(cv: CvModule, canvas: HTMLCanvasElement): QuadCandidate[] {
     // broken segments. Without this, real-world (non-synthetic) edges
     // produce almost no usable 4-vertex contours at all.
     cv.dilate(edges, dilated, kernel);
-    cv.findContours(dilated, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+    // RETR_TREE (not RETR_LIST) — we need the parent/child hierarchy to
+    // group individual sticker-quad contours by shared enclosing parent,
+    // not just a flat list of shapes with no structural relationship.
+    cv.findContours(dilated, contours, hierarchy, cv.RETR_TREE, cv.CHAIN_APPROX_SIMPLE);
 
     const frameArea = canvas.width * canvas.height;
-    const minArea = frameArea * MIN_AREA_FRACTION;
+    const minArea = frameArea * MIN_STICKER_AREA_FRACTION;
+    const maxArea = frameArea * MAX_STICKER_AREA_FRACTION;
+    // hierarchy is a single-row Mat, 4 int32 per contour: [next, prev,
+    // firstChild, parent] — flat-indexed as hierarchyData[i*4 + 3] below.
+    const hierarchyData = hierarchy.data32S;
 
     for (let i = 0; i < contours.size(); i++) {
       const contour = contours.get(i);
@@ -118,7 +240,7 @@ function detectQuads(cv: CvModule, canvas: HTMLCanvasElement): QuadCandidate[] {
 
         if (approx.rows === 4) {
           const area = Math.abs(cv.contourArea(approx));
-          if (area >= minArea) {
+          if (area >= minArea && area <= maxArea) {
             const points = [0, 1, 2, 3].map(
               (p): Point => ({ x: approx.data32S[p * 2], y: approx.data32S[p * 2 + 1] })
             ) as [Point, Point, Point, Point];
@@ -131,7 +253,12 @@ function detectQuads(cv: CvModule, canvas: HTMLCanvasElement): QuadCandidate[] {
             const sides = sideLengths(points);
             const ratio = Math.max(...sides) / Math.min(...sides);
             if (ratio <= MAX_SIDE_RATIO) {
-              candidates.push({ points, area });
+              const parent = hierarchyData[i * 4 + 3];
+              const center: Point = {
+                x: (points[0].x + points[1].x + points[2].x + points[3].x) / 4,
+                y: (points[0].y + points[1].y + points[2].y + points[3].y) / 4,
+              };
+              stickers.push({ points, area, parent, center });
             }
           }
         }
@@ -151,24 +278,53 @@ function detectQuads(cv: CvModule, canvas: HTMLCanvasElement): QuadCandidate[] {
     hierarchy.delete();
   }
 
-  candidates.sort((a, b) => b.area - a.area);
-  return candidates;
+  // Group surviving sticker candidates by shared parent contour — siblings
+  // under the same enclosing boundary are the ones that could plausibly be
+  // the 9 stickers of a single physical face.
+  const byParent = new Map<number, StickerCandidate[]>();
+  stickers.forEach((s) => {
+    const list = byParent.get(s.parent);
+    if (list) list.push(s);
+    else byParent.set(s.parent, [s]);
+  });
+
+  const faces: QuadCandidate[] = [];
+  byParent.forEach((group) => {
+    const face = groupToFaceIfGrid(group);
+    if (face) faces.push(face);
+  });
+  faces.sort((a, b) => b.area - a.area);
+
+  return { stickers, faces };
 }
 
-function drawQuads(canvas: HTMLCanvasElement, candidates: QuadCandidate[]) {
+function strokeQuad(ctx: CanvasRenderingContext2D, points: readonly Point[]) {
+  ctx.beginPath();
+  points.forEach((p, i) => {
+    if (i === 0) ctx.moveTo(p.x, p.y);
+    else ctx.lineTo(p.x, p.y);
+  });
+  ctx.closePath();
+  ctx.stroke();
+}
+
+// Draws raw sticker candidates (dim amber, thin) underneath confirmed
+// whole-face detections (bright cyan, thick) — the two-tier styling is a
+// direct visual version of the stickerCandidateCount/candidateCount split
+// in the diagnostics panel: at a glance, are we finding shapes at all
+// (amber outlines present) vs. finding shapes but failing to group them
+// into a 3x3 grid (amber present, no cyan)?
+function drawQuads(canvas: HTMLCanvasElement, stickers: readonly QuadCandidate[], faces: readonly QuadCandidate[]) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
+
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = 'rgba(250, 204, 21, 0.5)'; // dim amber
+  stickers.forEach(({ points }) => strokeQuad(ctx, points));
+
   ctx.lineWidth = 3;
   ctx.strokeStyle = '#22d3ee'; // bright cyan
-  candidates.forEach(({ points }) => {
-    ctx.beginPath();
-    points.forEach((p, i) => {
-      if (i === 0) ctx.moveTo(p.x, p.y);
-      else ctx.lineTo(p.x, p.y);
-    });
-    ctx.closePath();
-    ctx.stroke();
-  });
+  faces.forEach(({ points }) => strokeQuad(ctx, points));
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -189,6 +345,11 @@ export default function CubeEdgeDetectTestPage() {
   const [opencvStatus, setOpencvStatus] = useState<OpenCvStatus>('loading');
   const [opencvError, setOpencvError] = useState<string>('');
   const [lastFrameMs, setLastFrameMs] = useState<number | null>(null);
+  // Raw per-contour sticker candidates found this tick, before grouping —
+  // separate from candidateCount (confirmed 3x3-grid faces) so it's clear
+  // whether the pipeline is finding shapes at all vs. finding shapes but
+  // failing to group them into a face.
+  const [stickerCandidateCount, setStickerCandidateCount] = useState<number>(0);
   const [candidateCount, setCandidateCount] = useState<number>(0);
   const [largestCandidate, setLargestCandidate] = useState<QuadCandidate | null>(null);
   const [diagTick, setDiagTick] = useState(0);
@@ -331,7 +492,14 @@ export default function CubeEdgeDetectTestPage() {
   // one finished, so if OpenCV processing ever takes longer than
   // SAMPLE_INTERVAL_MS on a given device, runs never queue up or overlap —
   // the loop naturally settles to whatever cadence the hardware can sustain
-  // instead of falling behind indefinitely.
+  // instead of falling behind indefinitely. On a slow frame (e.g. a
+  // scrambled cube's many sticker-groove edges vs. a solved face's near-
+  // uniform surface), the next tick backs off to at least as long as the
+  // frame just took (not just the MIN_TICK_GAP_MS floor) — this was the
+  // actual cause of "severe lag": synchronous OpenCV work re-firing almost
+  // immediately after a slow frame left the main thread no room to
+  // decode/paint video between ticks, a near-100%-duty-cycle loop rather
+  // than a genuinely periodic one.
   useEffect(() => {
     if (cameraStatus !== 'ready' || opencvStatus !== 'ready') return;
 
@@ -354,21 +522,26 @@ export default function CubeEdgeDetectTestPage() {
           ctx.drawImage(video, 0, 0, w, h);
 
           const start = performance.now();
-          let candidates: QuadCandidate[] = [];
+          let result: DetectionResult = { stickers: [], faces: [] };
           try {
-            candidates = detectQuads(cv, canvas);
+            result = detectQuads(cv, canvas);
           } catch (err) {
             // eslint-disable-next-line no-console
             console.error('[cube-edge-detect-test] detection error', err);
           }
           const elapsed = performance.now() - start;
 
-          drawQuads(canvas, candidates);
+          drawQuads(canvas, result.stickers, result.faces);
           setLastFrameMs(elapsed);
-          setCandidateCount(candidates.length);
-          setLargestCandidate(candidates[0] ?? null);
+          setStickerCandidateCount(result.stickers.length);
+          setCandidateCount(result.faces.length);
+          setLargestCandidate(result.faces[0] ?? null);
 
-          loopTimeoutRef.current = setTimeout(tick, Math.max(50, SAMPLE_INTERVAL_MS - elapsed));
+          const nextDelay =
+            elapsed > SAMPLE_INTERVAL_MS
+              ? Math.max(MIN_TICK_GAP_MS, elapsed)
+              : Math.max(MIN_TICK_GAP_MS, SAMPLE_INTERVAL_MS - elapsed);
+          loopTimeoutRef.current = setTimeout(tick, nextDelay);
           return;
         }
       }
@@ -398,7 +571,8 @@ export default function CubeEdgeDetectTestPage() {
     `opencvStatus: ${opencvStatus}${opencvError ? ` (${opencvError})` : ''}`,
     `processing res: ${canvasRef.current ? `${canvasRef.current.width} x ${canvasRef.current.height}` : 'n/a'}`,
     `lastFrameMs: ${lastFrameMs !== null ? lastFrameMs.toFixed(1) : 'n/a'}`,
-    `candidateCount: ${candidateCount}`,
+    `stickerCandidateCount (raw quads, pre-grouping): ${stickerCandidateCount}`,
+    `candidateCount (confirmed 3x3-grid faces): ${candidateCount}`,
     `largestCandidate corners: ${
       largestCandidate
         ? largestCandidate.points.map((p) => `(${Math.round(p.x)},${Math.round(p.y)})`).join(' ')
@@ -523,7 +697,8 @@ export default function CubeEdgeDetectTestPage() {
         </div>
 
         <p className="text-xs text-white/40">
-          Хөх контур бол илрүүлсэн дөрвөн өнцөгт нэр дэвшигчид. Куб талыг өөр өнцөг, зайнаас барьж
+          Бүдэг шар контур бол ганц наалт (стикер) нэр дэвшигч; тод хөх контур бол 9 наалт 3x3
+          тор хэлбэрээр бүлэглэгдэж баталгаажсан бүхэл тал. Куб талыг өөр өнцөг, зайнаас барьж
           үзээд контур хэр тогтвортой, зөв бүрхэж байгааг ажигла.
         </p>
       </div>
