@@ -88,7 +88,6 @@ export default function Navbar() {
 
       {/* Desktop nav links */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '1.6rem' }} className="nav-links">
-        <Link href="/" className="nav-link hide-mobile">{t('nav.home')}</Link>
         {navLinks
           .filter((l) => l.visible && l.status !== 'hidden' && l.href !== '/community' && l.href !== '/algorithms')
           .map((l) => {
