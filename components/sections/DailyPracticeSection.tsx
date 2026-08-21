@@ -94,7 +94,7 @@ export default function DailyPracticeSection({ results, athletes, wcaRecords, lo
   const windowStart = windowStartDateStr(FEED_WINDOW_DAYS);
   const recentEntries = useMemo(() => {
     return results
-      .filter((r) => r.competitionId === DAILY_PRACTICE_COMPETITION_ID && r.practiceDate >= windowStart)
+      .filter((r) => r.competitionId === DAILY_PRACTICE_COMPETITION_ID && !!r.practiceDate && r.practiceDate >= windowStart)
       .sort((a, b) => toMillis(b.submittedAt) - toMillis(a.submittedAt));
   }, [results, windowStart]);
 
