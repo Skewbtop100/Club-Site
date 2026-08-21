@@ -3,8 +3,8 @@
 import { useMemo, useState } from 'react';
 import { useLang } from '@/lib/i18n';
 import { DAILY_PRACTICE_COMPETITION_ID } from '@/lib/firebase/services/competitions';
-import { getResultBadgesPair, getHighestBadge, BADGE_STYLES, type RecordBadge } from '@/lib/record-badges';
-import { fmtTime, todayDateStr } from '@/lib/time-utils';
+import { getResultBadgesPair, getHighestBadge, BADGE_STYLES, BADGE_PRIORITY, type RecordBadge } from '@/lib/record-badges';
+import { fmtTime } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import type { Athlete, Result, WcaRecords } from '@/lib/types';
 
@@ -62,6 +62,19 @@ function fmtClock(ts: unknown): string {
   return `${y}-${m}-${day} ${time}`;
 }
 
+const FEED_WINDOW_DAYS = 14;
+
+/** Start-of-window date (YYYY-MM-DD, local time), inclusive of today —
+ *  matches practiceDate's local-timezone convention (see todayDateStr). */
+function windowStartDateStr(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - (days - 1));
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 export default function DailyPracticeSection({ results, athletes, wcaRecords, loading }: Props) {
   const { t } = useLang();
   const [scrambleModal, setScrambleModal] = useState<Result | null>(null);
@@ -78,12 +91,12 @@ export default function DailyPracticeSection({ results, athletes, wcaRecords, lo
     return m;
   }, []);
 
-  const todayLabel = todayDateStr();
-  const todayEntries = useMemo(() => {
+  const windowStart = windowStartDateStr(FEED_WINDOW_DAYS);
+  const recentEntries = useMemo(() => {
     return results
-      .filter((r) => r.competitionId === DAILY_PRACTICE_COMPETITION_ID && r.practiceDate === todayLabel)
+      .filter((r) => r.competitionId === DAILY_PRACTICE_COMPETITION_ID && r.practiceDate >= windowStart)
       .sort((a, b) => toMillis(b.submittedAt) - toMillis(a.submittedAt));
-  }, [results, todayLabel]);
+  }, [results, windowStart]);
 
   // WCA-Live "Recent records" style: only entries that actually set a record
   // appear, and single/average are judged independently — an entry that PRs
@@ -92,7 +105,7 @@ export default function DailyPracticeSection({ results, athletes, wcaRecords, lo
   // practice Ao5 beating an official competition record shows the same tier.
   const recordRows = useMemo(() => {
     const rows: RecordRow[] = [];
-    for (const r of todayEntries) {
+    for (const r of recentEntries) {
       const eventName = eventNameMap[r.eventId] || r.eventId;
       const athleteName = athleteNameMap[r.athleteId] || r.athleteName || r.athleteId;
       const badges = getResultBadgesPair(r, results, wcaRecords);
@@ -107,8 +120,14 @@ export default function DailyPracticeSection({ results, athletes, wcaRecords, lo
         rows.push({ key: `${r.id}-average`, tier: avgTier, type: 'average', eventName, value: r.average, athleteName, submittedAt: r.submittedAt, result: r });
       }
     }
+    // Group by tier (WR > CR > NR > TR > PR), most recent first within each tier.
+    rows.sort((a, b) => {
+      const tierDiff = BADGE_PRIORITY.indexOf(a.tier) - BADGE_PRIORITY.indexOf(b.tier);
+      if (tierDiff !== 0) return tierDiff;
+      return toMillis(b.submittedAt) - toMillis(a.submittedAt);
+    });
     return rows;
-  }, [todayEntries, results, wcaRecords, eventNameMap, athleteNameMap]);
+  }, [recentEntries, results, wcaRecords, eventNameMap, athleteNameMap]);
 
   return (
     <section id="daily-practice" style={{ padding: '6rem 2rem', background: 'var(--bg)' }}>
@@ -223,7 +242,15 @@ export default function DailyPracticeSection({ results, athletes, wcaRecords, lo
           max-height: 480px; overflow-y: auto;
           background: var(--card); border: 1px solid rgba(255,255,255,0.06);
           border-radius: 14px; padding: 0.6rem;
+          scrollbar-width: thin; scrollbar-color: var(--accent) transparent;
         }
+        .dp-feed::-webkit-scrollbar { width: 8px; }
+        .dp-feed::-webkit-scrollbar-track { background: transparent; }
+        .dp-feed::-webkit-scrollbar-thumb {
+          background: rgba(124,58,237,0.35); border-radius: 999px;
+          border: 2px solid transparent; background-clip: padding-box;
+        }
+        .dp-feed::-webkit-scrollbar-thumb:hover { background: rgba(124,58,237,0.55); background-clip: padding-box; }
         .dp-row {
           display: flex; align-items: center; gap: 0.75rem;
           padding: 0.65rem 0.75rem; border-radius: 10px;

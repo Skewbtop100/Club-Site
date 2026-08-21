@@ -18,9 +18,9 @@ export default function HeroSection() {
 
   return (
     <section className="hero-section" style={{
-      minHeight: '100vh', position: 'relative',
-      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      textAlign: 'center', padding: '6rem 2rem 4rem', overflow: 'hidden',
+      position: 'relative',
+      display: 'flex', flexDirection: 'column', alignItems: 'center',
+      textAlign: 'center', padding: '5.5rem 2rem 2.75rem', overflow: 'hidden',
     }}>
       {/* Background */}
       <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0 }}>
@@ -108,28 +108,27 @@ export default function HeroSection() {
           <StatItem value={compsLoading ? '...' : realCompCount} label={t('stats.competitions')} />
           <StatItem value={17} label={t('stats.events-supported')} />
         </div>
-      </div>
 
-      {/* Scroll indicator */}
-      <div style={{
-        position: 'absolute', bottom: '2rem', left: '50%', transform: 'translateX(-50%)',
-        zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem',
-        color: 'var(--muted)', fontSize: '0.72rem', letterSpacing: '0.1em', textTransform: 'uppercase',
-        animation: 'scrollBounce 2s ease-in-out infinite',
-      }}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-          <path d="M12 5v14M5 12l7 7 7-7" />
-        </svg>
-        {t('hero.scroll')}
+        {/* Scroll indicator */}
+        <div style={{
+          marginTop: '2rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem',
+          color: 'var(--muted)', fontSize: '0.72rem', letterSpacing: '0.1em', textTransform: 'uppercase',
+          animation: 'scrollBounce 2s ease-in-out infinite',
+        }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path d="M12 5v14M5 12l7 7 7-7" />
+          </svg>
+          {t('hero.scroll')}
+        </div>
       </div>
 
       <style>{`
         @keyframes scrollBounce {
-          0%, 100% { transform: translateX(-50%) translateY(0); }
-          50%       { transform: translateX(-50%) translateY(6px); }
+          0%, 100% { transform: translateY(0); }
+          50%       { transform: translateY(6px); }
         }
         @media (max-width: 700px) {
-          .hero-section { padding: 4rem 0.75rem 3rem !important; }
+          .hero-section { padding: 4rem 0.75rem 2rem !important; }
         }
       `}</style>
     </section>

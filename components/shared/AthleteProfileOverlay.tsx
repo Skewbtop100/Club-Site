@@ -49,6 +49,30 @@ const BADGE_STYLES: Record<string, React.CSSProperties> = {
 
 const EVENT_ORDER = ['333', '222', 'pyram', 'skewb'];
 
+/** Signed gap in seconds between our site's value and a reference (WCA-PR/
+ *  CR/WR) time, both in centiseconds — negative means we're faster than the
+ *  reference (only possible since our value can include Daily Practice). */
+function gapStr(ourCs: number | null, refCs: number | null): string {
+  if (ourCs == null || refCs == null) return '';
+  const diff = (ourCs - refCs) / 100;
+  if (diff === 0) return '0.00';
+  return `${diff > 0 ? '+' : '-'}${Math.abs(diff).toFixed(2)}`;
+}
+
+/** Current Personal Records table cell: record/PR time value on top, our
+ *  gap vs. it in smaller text below — green when we're ahead of it. */
+function PrValueCell({ ourCs, refCs }: { ourCs: number | null; refCs: number | null }) {
+  if (refCs == null) return <td className="apo-pr-value-cell">—</td>;
+  const gap = gapStr(ourCs, refCs);
+  const ahead = ourCs != null && ourCs < refCs;
+  return (
+    <td className="apo-pr-value-cell">
+      <div className="mono">{fmtTime(refCs)}</div>
+      {gap && <div className={`apo-pr-gap${ahead ? ' apo-pr-gap-ahead' : ''}`}>{gap}</div>}
+    </td>
+  );
+}
+
 // ── component ───────────────────────────────────────────────────────────────
 
 interface Props {
@@ -263,7 +287,7 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
   // our cached proxy route (see app/api/wca-person). Skipped entirely for
   // athletes with no linked WCA ID (informal/practice-only members) — the
   // table falls back to club rank only for them.
-  interface WcaRankEntry { best: number; world_rank: number; continent_rank: number; country_rank: number }
+  interface WcaRankEntry { best: number }
   const [wcaPersonalRecords, setWcaPersonalRecords] = useState<Record<string, { single?: WcaRankEntry; average?: WcaRankEntry }> | null>(null);
   useEffect(() => {
     if (!athlete.wcaId) { setWcaPersonalRecords(null); return; }
@@ -278,18 +302,24 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
   // Current Personal Records — one row per event, best single/average across
   // competitions AND Daily Practice (consistent with every other "practice
   // counts as real" decision this session). Column layout mirrors WCA's own
-  // persons page: Club | NR | CR | WR flanking each of Single/Average, Club
-  // being our own addition sitting outermost on each side. Club rank is
-  // always computed locally; NR/CR/WR only populate when this athlete has a
-  // linked WCA ID and an official result for that event — otherwise those
+  // persons page: TR | WCA-PR | NR | CR | WR flanking each of Single/
+  // Average, TR (club/team record rank) being our own addition sitting
+  // outermost on each side. TR stays a rank POSITION (computed locally via
+  // clubRankMap); WCA-PR/NR/CR/WR all show the actual time value alongside
+  // how far our site's value (which can beat the athlete's official WCA PR
+  // via Daily Practice) sits from it — NR/CR/WR come from the wcaRecords
+  // Firestore collection (Mongolia/Asian/World record, imported via
+  // WcaImportTab, stored in SECONDS — converted to centiseconds here to
+  // match everything else). WCA-PR/NR/CR/WR only populate when this athlete
+  // has a linked WCA ID / a record exists for that event — otherwise those
   // cells show a dash.
   interface CurrentPrEntry {
     eventId: string; eventName: string;
     single: number | null; average: number | null;
     singleClubRank: number | null; avgClubRank: number | null;
-    singleCountryRank: number | null; avgCountryRank: number | null;
-    singleContinentRank: number | null; avgContinentRank: number | null;
-    singleWorldRank: number | null; avgWorldRank: number | null;
+    singleWcaPrCs: number | null; avgWcaPrCs: number | null;
+    singleNrCs: number | null; singleCrCs: number | null; singleWrCs: number | null;
+    avgNrCs: number | null; avgCrCs: number | null; avgWrCs: number | null;
   }
   const currentPRs = useMemo((): CurrentPrEntry[] => {
     const pool = [...allResults, ...practiceResults];
@@ -306,25 +336,31 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
       const bi = EVENT_ORDER.indexOf(b);
       return (ai >= 0 ? ai : 100) - (bi >= 0 ? bi : 100);
     });
+    // wcaRecords values are stored in seconds (see WcaImportTab); everything
+    // else in this table (results, WCA person API's `best`) is centiseconds.
+    const toCs = (sec: number | null | undefined): number | null => sec != null ? Math.round(sec * 100) : null;
     return eventIds.map(eventId => {
       const { single, average } = byEvent[eventId];
       const clubRank = clubRankMap[eventId];
       const wcaRecord = wcaPersonalRecords?.[eventId];
+      const rec = wcaRecords[eventId];
       return {
         eventId,
         eventName: WCA_EVENTS.find(e => e.id === eventId)?.name || eventId,
         single, average,
         singleClubRank: clubRank?.single ?? null,
         avgClubRank: clubRank?.average ?? null,
-        singleCountryRank: wcaRecord?.single?.country_rank ?? null,
-        avgCountryRank: wcaRecord?.average?.country_rank ?? null,
-        singleContinentRank: wcaRecord?.single?.continent_rank ?? null,
-        avgContinentRank: wcaRecord?.average?.continent_rank ?? null,
-        singleWorldRank: wcaRecord?.single?.world_rank ?? null,
-        avgWorldRank: wcaRecord?.average?.world_rank ?? null,
+        singleWcaPrCs: wcaRecord?.single?.best ?? null,
+        avgWcaPrCs: wcaRecord?.average?.best ?? null,
+        singleNrCs: toCs(rec?.single?.NR?.value),
+        singleCrCs: toCs(rec?.single?.CR?.value),
+        singleWrCs: toCs(rec?.single?.WR?.value),
+        avgNrCs: toCs(rec?.average?.NR?.value),
+        avgCrCs: toCs(rec?.average?.CR?.value),
+        avgWrCs: toCs(rec?.average?.WR?.value),
       };
     });
-  }, [allResults, practiceResults, athlete.id, clubRankMap, wcaPersonalRecords]);
+  }, [allResults, practiceResults, athlete.id, clubRankMap, wcaPersonalRecords, wcaRecords]);
 
   // Compute medals from the full field (imported competitors included —
   // see the comment on allPublishedResults above for why).
@@ -711,7 +747,7 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
               </div>
               <div className="apo-stat">
                 <div className="apo-stat-num">{stats.practiceDays}</div>
-                <div className="apo-stat-label">Practice Days</div>
+                <div className="apo-stat-label apo-stat-label-tight">Practice Days</div>
               </div>
               <div className="apo-stat">
                 <div className="apo-stat-num">{stats.solves}</div>
@@ -824,34 +860,38 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
         {currentPRs.length > 0 && (
           <div className="apo-pr-section">
             <div className="apo-pr-title">Current Personal Records</div>
-            <div className="apo-table-wrap">
+            <div className="apo-table-wrap apo-pr-table-wrap">
               <table className="apo-table apo-pr-table">
                 <colgroup>
-                  <col style={{ width: '16%' }} />
-                  <col style={{ width: '8%' }} />
-                  <col style={{ width: '8%' }} />
-                  <col style={{ width: '8%' }} />
-                  <col style={{ width: '8%' }} />
+                  <col style={{ width: '11%' }} />
+                  <col style={{ width: '4.5%' }} />
+                  <col style={{ width: '7.5%' }} />
+                  <col style={{ width: '7.5%' }} />
+                  <col style={{ width: '7.5%' }} />
+                  <col style={{ width: '7.5%' }} />
                   <col style={{ width: '10%' }} />
                   <col style={{ width: '10%' }} />
-                  <col style={{ width: '8%' }} />
-                  <col style={{ width: '8%' }} />
-                  <col style={{ width: '8%' }} />
-                  <col style={{ width: '8%' }} />
+                  <col style={{ width: '7.5%' }} />
+                  <col style={{ width: '7.5%' }} />
+                  <col style={{ width: '7.5%' }} />
+                  <col style={{ width: '7.5%' }} />
+                  <col style={{ width: '4.5%' }} />
                 </colgroup>
                 <thead>
                   <tr>
-                    <th>Event</th>
-                    <th className="apo-pr-rank-cell">Club</th>
-                    <th className="apo-pr-rank-cell">NR</th>
-                    <th className="apo-pr-rank-cell">CR</th>
-                    <th className="apo-pr-rank-cell">WR</th>
-                    <th className="r">Single</th>
-                    <th className="r">Average</th>
-                    <th className="apo-pr-rank-cell">WR</th>
-                    <th className="apo-pr-rank-cell">CR</th>
-                    <th className="apo-pr-rank-cell">NR</th>
-                    <th className="apo-pr-rank-cell">Club</th>
+                    <th className="apo-pr-event-cell">Event</th>
+                    <th className="apo-pr-rank-cell">TR</th>
+                    <th className="apo-pr-value-cell">WCA-PR</th>
+                    <th className="apo-pr-value-cell">NR</th>
+                    <th className="apo-pr-value-cell">CR</th>
+                    <th className="apo-pr-value-cell">WR</th>
+                    <th className="apo-pr-focal apo-pr-divider">Single</th>
+                    <th className="apo-pr-focal">Average</th>
+                    <th className="apo-pr-value-cell">WR</th>
+                    <th className="apo-pr-value-cell">CR</th>
+                    <th className="apo-pr-value-cell">NR</th>
+                    <th className="apo-pr-value-cell">WCA-PR</th>
+                    <th className="apo-pr-rank-cell">TR</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -859,20 +899,22 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
                     const rank = (n: number | null) => n != null ? n : '—';
                     return (
                       <tr key={pr.eventId}>
-                        <td>{pr.eventName}</td>
+                        <td className="apo-pr-event-cell">{pr.eventName}</td>
                         <td className="mono apo-pr-rank-cell">{rank(pr.singleClubRank)}</td>
-                        <td className="mono apo-pr-rank-cell">{rank(pr.singleCountryRank)}</td>
-                        <td className="mono apo-pr-rank-cell">{rank(pr.singleContinentRank)}</td>
-                        <td className="mono apo-pr-rank-cell">{rank(pr.singleWorldRank)}</td>
-                        <td className={`r mono${pr.single != null && pr.single < 0 ? ' dnf' : ''}`}>
+                        <PrValueCell ourCs={pr.single} refCs={pr.singleWcaPrCs} />
+                        <PrValueCell ourCs={pr.single} refCs={pr.singleNrCs} />
+                        <PrValueCell ourCs={pr.single} refCs={pr.singleCrCs} />
+                        <PrValueCell ourCs={pr.single} refCs={pr.singleWrCs} />
+                        <td className={`apo-pr-focal mono apo-pr-divider${pr.single != null && pr.single < 0 ? ' dnf' : ''}`}>
                           {pr.single != null ? fmtTime(pr.single) : '—'}
                         </td>
-                        <td className={`r mono${pr.average != null && pr.average < 0 ? ' dnf' : ''}`}>
+                        <td className={`apo-pr-focal mono${pr.average != null && pr.average < 0 ? ' dnf' : ''}`}>
                           {pr.average != null ? fmtTime(pr.average) : '—'}
                         </td>
-                        <td className="mono apo-pr-rank-cell">{rank(pr.avgWorldRank)}</td>
-                        <td className="mono apo-pr-rank-cell">{rank(pr.avgContinentRank)}</td>
-                        <td className="mono apo-pr-rank-cell">{rank(pr.avgCountryRank)}</td>
+                        <PrValueCell ourCs={pr.average} refCs={pr.avgWrCs} />
+                        <PrValueCell ourCs={pr.average} refCs={pr.avgCrCs} />
+                        <PrValueCell ourCs={pr.average} refCs={pr.avgNrCs} />
+                        <PrValueCell ourCs={pr.average} refCs={pr.avgWcaPrCs} />
                         <td className="mono apo-pr-rank-cell">{rank(pr.avgClubRank)}</td>
                       </tr>
                     );
@@ -1238,7 +1280,10 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
           background: rgba(250,204,21,0.04);
         }
         .apo-stat {
-          flex: 1; padding: 1.2rem 1.5rem; text-align: center;
+          /* Matches .apo-bc's padding (the WR/CR/NR/TR/PR record boxes right
+             below this row) so the two stay the same height/density instead
+             of this row reading as an oversized header above a compact grid. */
+          flex: 1; padding: 1rem 0.5rem; text-align: center;
           border-right: 1px solid rgba(255,255,255,0.06);
           display: flex; flex-direction: column; justify-content: center; align-items: center;
         }
@@ -1246,6 +1291,10 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
         .apo-stats-gold .apo-stat { border-right-color: rgba(250,204,21,0.1); }
         .apo-stat-num { font-size: 1.8rem; font-weight: 800; color: var(--text); font-family: monospace; }
         .apo-stat-label { font-size: 0.8rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 0.15rem; }
+        /* "Practice Days" is the one label in this row long enough to wrap
+           at the box's width — shrink just this one instead of the whole
+           row, so "Comps"/"Solves"/"Gold" etc. keep their normal size. */
+        .apo-stat-label-tight { font-size: 0.66rem; letter-spacing: 0.01em; white-space: nowrap; }
 
         /* Record badge cards */
         .apo-bc-grid {
@@ -1371,16 +1420,26 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
           text-transform: uppercase; letter-spacing: 0.08em; text-align: center;
           margin-bottom: 0.6rem;
         }
+        /* Card treatment so the dense rank grid reads as a distinct surface
+           instead of floating directly on the page background. */
+        .apo-pr-table-wrap {
+          background: rgba(19,19,37,0.62); backdrop-filter: blur(12px);
+          border: 1px solid rgba(255,255,255,0.06); border-radius: 14px; padding: 0.5rem;
+        }
+        /* Zebra striping on the row (not the cell) so table background-layering
+           rules paint the hover highlight (set on td) over the tint for free,
+           without fighting it on specificity. */
+        .apo-pr-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.025); }
         .apo-table .mono { font-family: monospace; font-size: 1.05rem; }
         /* table-layout: fixed (scoped to just this table, not the generic
            .apo-table used by History/Records/Дасгал) makes the browser honor
            width: 100% strictly instead of growing past it to fit content —
            that's what was still making this table wider than Competition
            History's below it. Paired with the <colgroup> above, it also
-           guarantees the 8 rank columns are pixel-identical on both sides,
-           so Single/Average land in the table's true horizontal center
-           instead of drifting per row based on how wide each number happens
-           to render. */
+           guarantees the mirrored rank/value columns are pixel-identical on
+           both sides, so Single/Average land in the table's true horizontal
+           center instead of drifting per row based on how wide each number
+           happens to render. */
         .apo-pr-table { table-layout: fixed; }
         .apo-pr-table th, .apo-pr-table td {
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -1397,6 +1456,33 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
            on both sides, matching WCA's own rank-column rhythm. */
         .apo-pr-table th.apo-pr-rank-cell, .apo-pr-table td.apo-pr-rank-cell { text-align: center; }
         .apo-pr-table td.apo-pr-rank-cell { font-size: 0.85rem; }
+        /* WCA-PR/CR/WR cells: record (or the athlete's own official WCA PR)
+           time on top, our gap vs. it beneath — same "value, smaller line
+           below" convention as WcaImportTab's TimeCell. white-space: normal
+           overrides the table-wide nowrap so the two lines can stack. */
+        .apo-pr-table th.apo-pr-value-cell, .apo-pr-table td.apo-pr-value-cell { text-align: center; white-space: normal; }
+        .apo-pr-table td.apo-pr-value-cell { font-size: 0.85rem; }
+        .apo-pr-table td.apo-pr-value-cell .mono { font-size: 0.85rem; }
+        /* "WCA-PR" is the widest header label in the group (vs. the 2-char
+           NR/CR/WR) — shrinking the whole value-cell header group keeps it
+           on one line without a mismatched font-size standing out among its
+           mirrored neighbors. */
+        .apo-pr-table th.apo-pr-value-cell { font-size: 0.66rem; letter-spacing: 0.02em; }
+        .apo-pr-gap { font-size: 0.65rem; color: var(--muted); margin-top: 0.1rem; }
+        .apo-pr-gap-ahead { color: #4ade80; }
+        /* Event names (e.g. "3x3x3 Fewest Moves") can run longer than the
+           column's share of this already-13-column table — wrap onto a
+           second line instead of ellipsis-truncating, rather than stealing
+           width from every other column to fit the longest one on one line. */
+        .apo-pr-table td.apo-pr-event-cell, .apo-pr-table th.apo-pr-event-cell { white-space: normal; }
+        /* Single/Average — center like WR/CR/NR/WCA-PR (rather than the
+           .r right-align used elsewhere) so both sit balanced in their own
+           column instead of hugging the divider between them. */
+        .apo-pr-table th.apo-pr-focal, .apo-pr-table td.apo-pr-focal { text-align: center; }
+        /* Divider between Single/Average — the table's two focal columns —
+           so they read as visually distinct from each other, not just from
+           the rank/value columns flanking them. */
+        .apo-pr-table th.apo-pr-divider, .apo-pr-table td.apo-pr-divider { border-right: 1px solid rgba(255,255,255,0.1); }
         .apo-table .bold { font-weight: 700; color: #a78bfa; }
         .apo-table .dnf { color: #f87171; }
         .apo-table .solve { color: var(--muted); font-size: 0.92rem; }

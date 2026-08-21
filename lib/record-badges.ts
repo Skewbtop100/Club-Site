@@ -6,7 +6,7 @@ import type React from 'react';
 export type RecordBadge = 'WR' | 'CR' | 'NR' | 'TR' | 'PR';
 
 /** Priority order: WR > CR > NR > TR > PR (index 0 = highest) */
-const BADGE_PRIORITY: RecordBadge[] = ['WR', 'CR', 'NR', 'TR', 'PR'];
+export const BADGE_PRIORITY: RecordBadge[] = ['WR', 'CR', 'NR', 'TR', 'PR'];
 
 export const BADGE_STYLES: Record<RecordBadge, React.CSSProperties> = {
   WR: { background: '#b45309', color: '#fef3c7', border: '1px solid #f59e0b', boxShadow: '0 0 5px rgba(245,158,11,0.55)' },
