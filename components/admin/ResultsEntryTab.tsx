@@ -7,6 +7,7 @@ import { saveResult, getResultsByComp, subscribeResultsByComp } from '@/lib/fire
 import { fmtTime, parseTime, getMinPlausibleSolveCs, todayDateStr } from '@/lib/time-utils';
 import { calcAo5, bestOf, timeToRawDigits, formatRawDigits } from '@/lib/results-entry-helpers';
 import { WCA_EVENTS } from '@/lib/wca-events';
+import ScramblePreview from '@/components/shared/ScramblePreview';
 import { useLang, type TranslationKey } from '@/lib/i18n';
 import type { Athlete, Competition, Result } from '@/lib/types';
 
@@ -992,6 +993,23 @@ export default function ResultsEntryTab() {
                         ) : (
                           <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>{t('admin.results.scramble-unavailable')}</span>
                         )}
+                      </div>
+                    )}
+
+                    {/* Cube-state diagram for the scramble above — lets the judge
+                        visually verify the cube was scrambled correctly, rather
+                        than reading raw notation. Only mounted once a scramble
+                        string actually exists (skipped during loading/failure,
+                        same guard as the text above), and unmounts along with the
+                        text once the admin moves off this solve slot. */}
+                    {isDailyPracticeSelected && panel.eventId && panel.scrambles[curIdx] && (
+                      <div style={{
+                        marginBottom: '0.6rem', height: '140px',
+                        borderRadius: '10px', overflow: 'hidden',
+                        background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.18)',
+                        display: 'flex',
+                      }}>
+                        <ScramblePreview eventId={panel.eventId} scramble={panel.scrambles[curIdx]} />
                       </div>
                     )}
 

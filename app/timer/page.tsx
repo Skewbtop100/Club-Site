@@ -4,10 +4,8 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import TimerProfileMenu from '@/components/timer/TimerProfileMenu';
+import ScramblePreview from '@/components/shared/ScramblePreview';
 import { generateScramble } from '@/lib/scramble';
-// Type-only import; runtime is dynamic-imported below to avoid HTMLElement
-// access during Next.js server rendering.
-import type { TwistyPlayer as TwistyPlayerType } from 'cubing/twisty';
 import { useSmartTimer } from './useSmartTimer';
 import { type QiyiPacket } from './useQiyiTimer';
 import { useWakeLock } from './useWakeLock';
@@ -253,30 +251,10 @@ const EVENTS: EventDef[] = [
 ];
 
 // generateScramble/SCRAMBOW_TYPE live in @/lib/scramble (shared with the
-// Practice Log feature). Only the TwistyPlayer puzzle-id map stays local —
-// nothing outside the Timer's 3D preview needs it.
-
-// Map our event ids → TwistyPlayer puzzle ids. Events not in this map (e.g.
-// 333mbf, 333fm) fall back to their underlying puzzle.
-const PUZZLE_MAP: Record<string, string> = {
-  '333':    '3x3x3',
-  '333oh':  '3x3x3',
-  '333bld': '3x3x3',
-  '333mbf': '3x3x3',
-  '333fm':  '3x3x3',
-  '222':    '2x2x2',
-  '444':    '4x4x4',
-  '444bld': '4x4x4',
-  '555':    '5x5x5',
-  '555bld': '5x5x5',
-  '666':    '6x6x6',
-  '777':    '7x7x7',
-  'pyram':  'pyraminx',
-  'skewb':  'skewb',
-  'sq1':    'square1',
-  'clock':  'clock',
-  'minx':   'megaminx',
-};
+// Practice Log feature). The TwistyPlayer puzzle-id map now lives in
+// components/shared/ScramblePreview.tsx — ResultsEntryTab's Daily Practice
+// flow needs the same cube-state preview, keyed off lib/wca-events.ts's
+// ids rather than this page's own local EVENTS ids above.
 
 // Solve types, fmtMs, isDnf, finalMs, avgOfN, calcStats, useTimer, and the
 // Penalty / Precision / Stats / TimerState types all live in
@@ -2671,7 +2649,7 @@ export default function TimerPage() {
               Scramble Preview
             </div>
             <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-              <CubeViewer eventId={eventId} scramble={scramble} />
+              <ScramblePreview eventId={eventId} scramble={scramble} />
             </div>
           </div>
 
@@ -3458,7 +3436,7 @@ export default function TimerPage() {
                       }}
                     >
                       <div style={{ width: '80%', aspectRatio: '1 / 1', display: 'flex' }}>
-                        <CubeViewer eventId={eventId} scramble={scramble} />
+                        <ScramblePreview eventId={eventId} scramble={scramble} />
                       </div>
                     </button>
 
@@ -3590,7 +3568,7 @@ export default function TimerPage() {
               display: 'flex',
             }}
           >
-            <CubeViewer eventId={eventId} scramble={scramble} />
+            <ScramblePreview eventId={eventId} scramble={scramble} />
           </div>
         </div>
       )}
@@ -6874,111 +6852,6 @@ function Row({ label, kbd }: { label: string; kbd: string }) {
         color: C.text,
       }}>{kbd}</kbd>
     </div>
-  );
-}
-
-// Cube preview. Square-1 uses sr-puzzlegen (static SVG rendered at a
-// fixed natural size, then scaled to fit the card via CSS). All other
-// puzzles use @cubing/twisty TwistyPlayer (3D WebGL with native drag).
-function CubeViewer({ eventId, scramble }: { eventId: string; scramble: string }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const sq1MountRef = useRef<HTMLDivElement>(null);
-  const playerRef = useRef<TwistyPlayerType | null>(null);
-  const puzzleId = PUZZLE_MAP[eventId];
-  const isSq1 = puzzleId === 'square1';
-
-  // Square-1: sr-puzzlegen renders at 400px fixed, CSS scales to fit card
-  useEffect(() => {
-    if (!isSq1 || !sq1MountRef.current) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const { SVG } = await import('sr-puzzlegen');
-        if (cancelled || !sq1MountRef.current) return;
-        sq1MountRef.current.innerHTML = '';
-        SVG(sq1MountRef.current, 'square1' as Parameters<typeof SVG>[1], {
-          width: 400, height: 400,
-          puzzle: { alg: scramble },
-        });
-      } catch (err) {
-        console.warn('sr-puzzlegen SQ1 render failed', err);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [isSq1, scramble]);
-
-  // All other puzzles: TwistyPlayer 3D
-  useEffect(() => {
-    if (isSq1 || !puzzleId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const mod = await import('cubing/twisty');
-        if (cancelled || !containerRef.current) return;
-        const player = new mod.TwistyPlayer({
-          puzzle: puzzleId, experimentalSetupAlg: scramble, alg: '',
-          background: 'none', controlPanel: 'none', viewerLink: 'none',
-          hintFacelets: 'none', backView: 'none', visualization: '3D',
-        } as unknown as ConstructorParameters<typeof mod.TwistyPlayer>[0]);
-        const el = player as unknown as HTMLElement;
-        el.style.width = '100%'; el.style.height = '100%';
-        el.style.background = 'transparent';
-        containerRef.current.appendChild(el);
-        playerRef.current = player;
-      } catch (err) { console.warn('TwistyPlayer load failed', err); }
-    })();
-    return () => {
-      cancelled = true;
-      const player = playerRef.current as unknown as HTMLElement | null;
-      const c = containerRef.current;
-      if (player && c && c.contains(player)) c.removeChild(player);
-      playerRef.current = null;
-    };
-  }, [puzzleId, isSq1]);
-
-  useEffect(() => {
-    if (isSq1) return;
-    const player = playerRef.current;
-    if (!player || !puzzleId) return;
-    try {
-      (player as unknown as { experimentalSetupAlg: string }).experimentalSetupAlg = scramble;
-      (player as unknown as { alg: string }).alg = '';
-    } catch (err) { console.warn('TwistyPlayer update failed', err); }
-  }, [scramble, puzzleId, isSq1]);
-
-  if (!puzzleId) {
-    return (
-      <div style={{
-        flex: '1 1 auto', minHeight: 0, width: '100%', fontSize: '0.72rem', color: C.mutedDim,
-        display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '0 0.5rem',
-      }}>
-        Preview not available for this puzzle.
-      </div>
-    );
-  }
-
-  if (isSq1) {
-    return (
-      <div style={{
-        flex: '1 1 auto', minHeight: 0, width: '100%',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        overflow: 'hidden',
-      }}>
-        <div ref={sq1MountRef} style={{
-          width: '100%', maxHeight: '100%',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          transform: 'scale(0.85)',
-          transformOrigin: 'center center',
-        }} />
-      </div>
-    );
-  }
-
-  return (
-    <div ref={containerRef} style={{
-      flex: '1 1 auto', minHeight: 0, width: '100%',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-    }} />
   );
 }
 
