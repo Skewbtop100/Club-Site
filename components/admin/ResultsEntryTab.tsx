@@ -26,6 +26,18 @@ interface PanelState {
   scrambles: string[];
   /** True while a scramble is being generated for the current solve slot. */
   scrambleLoading: boolean;
+  /** Inspection timer, kept per-panel so starting it on one panel can't
+   *  affect another's — each panel renders and drives its own timer. */
+  timerMs: number; timerRunning: boolean; timerStopped: boolean;
+}
+
+/** A discard/switch action gated behind the confirm modal below — set
+ *  whenever the targeted panel has entered-but-unsaved progress. */
+interface PendingConfirm {
+  kind: 'clear-panel' | 'remove-panel' | 'switch-event' | 'switch-athlete';
+  panelId: number;
+  /** New eventId/athleteId to apply once confirmed (switch-* kinds only). */
+  nextValue?: string;
 }
 interface ImportRow {
   idx: number;
@@ -76,15 +88,29 @@ function reComputeAdvancingNames(
   return names;
 }
 
-function emptyPanel(id: number): PanelState {
+/** The solve-entry portion of a panel's state — everything that needs to
+ *  reset when the admin starts a fresh attempt (a new panel, or an existing
+ *  panel's athlete/event changing mid-flow). Athlete/event/round/group are
+ *  deliberately excluded: callers decide what to do with those separately. */
+function freshSolveState(): Omit<PanelState, 'id' | 'athleteId' | 'eventId' | 'round' | 'group'> {
   return {
-    id, athleteId: '', eventId: '', round: 1, group: 1,
     solves: ['', '', '', '', ''], penalties: ['none', 'none', 'none', 'none', 'none'],
     currentSolveIdx: 0, rawInput: '',
     selectedChip: null, editReturnIdx: null, postEditMode: false,
     msg: '', msgType: '', needsConfirm: false,
     scrambles: ['', '', '', '', ''], scrambleLoading: false,
+    timerMs: 0, timerRunning: false, timerStopped: false,
   };
+}
+
+function emptyPanel(id: number): PanelState {
+  return { id, athleteId: '', eventId: '', round: 1, group: 1, ...freshSolveState() };
+}
+
+/** True once the admin has entered at least one solve (or is mid-edit on
+ *  one) — the signal for "discarding this needs a confirmation." */
+function panelHasProgress(p: PanelState): boolean {
+  return p.currentSolveIdx > 0 || p.solves.some(s => s !== '');
 }
 
 function getRoundNames(totalRounds: number, t: (k: TranslationKey) => string): string[] {
@@ -100,7 +126,13 @@ export default function ResultsEntryTab() {
   const [comps, setComps]         = useState<Competition[]>([]);
   const [compId, setCompId]       = useState('');
   const [panels, setPanels]       = useState<PanelState[]>([emptyPanel(0)]);
+  // Panel 0 already exists at mount, so the next fresh id starts at 1. A
+  // counter (not panels.length) so ids stay unique even after removing a
+  // panel from the middle of the array — reusing .length could collide with
+  // a still-live panel's id.
+  const nextPanelIdRef = useRef(1);
   const [compResults, setCompResults] = useState<Result[]>([]);
+  const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
 
   // Import section state
   const [importOpen,    setImportOpen]    = useState(false);
@@ -114,15 +146,18 @@ export default function ResultsEntryTab() {
   const [importLoading, setImportLoading] = useState(false);
   const [checkLoading,  setCheckLoading]  = useState(false);
 
-  // Inspection timer state
+  // Inspection timer state. showTimer is the one genuinely global bit — a
+  // toolbar toggle for whether every panel shows its timer widget at all.
+  // The ticking itself is per-panel: timerMs/timerRunning/timerStopped live
+  // on PanelState, and these refs are keyed by panel id so each panel's
+  // interval/accumulator/beep-milestone tracking is fully independent —
+  // starting Panel 1's timer used to also tick Panel 2's because all of this
+  // used to be single top-level state shared by every panel's widget.
   const [showTimer, setShowTimer]       = useState(false);
-  const [timerMs, setTimerMs]           = useState(0);
-  const [timerRunning, setTimerRunning] = useState(false);
-  const [timerStopped, setTimerStopped] = useState(false);
-  const timerIntervalRef  = useRef<ReturnType<typeof setInterval> | null>(null);
-  const timerStartRef     = useRef<number>(0);
-  const timerAccRef       = useRef<number>(0);
-  const lastMilestoneRef  = useRef<number>(0);
+  const timerIntervalRefs = useRef<Record<number, ReturnType<typeof setInterval> | null>>({});
+  const timerStartRefs    = useRef<Record<number, number>>({});
+  const timerAccRefs      = useRef<Record<number, number>>({});
+  const lastMilestoneRefs = useRef<Record<number, number>>({});
 
   useEffect(() => {
     getAthletes().then(setAthletes);
@@ -137,7 +172,7 @@ export default function ResultsEntryTab() {
     return unsub;
   }, [compId]);
   useEffect(() => {
-    return () => { if (timerIntervalRef.current) clearInterval(timerIntervalRef.current); };
+    return () => { Object.values(timerIntervalRefs.current).forEach(id => { if (id) clearInterval(id); }); };
   }, []);
 
   // Daily Practice: generate a WCA-quality scramble for whichever solve slot
@@ -193,6 +228,26 @@ export default function ResultsEntryTab() {
 
   function updatePanel(id: number, patch: Partial<PanelState>) {
     setPanels(prev => prev.map(p => p.id === id ? { ...p, ...patch } : p));
+  }
+
+  // Discard/remove a panel — used by both the "Clear"/"×" per-panel controls
+  // and the top toolbar's "Remove" button, after panelHasProgress() has
+  // already been confirmed (or found nothing to confirm).
+  function doClearPanel(panelId: number) {
+    for (const key of [...scrambleAttemptedRef.current]) {
+      if (key.startsWith(`${panelId}:`)) scrambleAttemptedRef.current.delete(key);
+    }
+    resetTimer(panelId);
+    updatePanel(panelId, { ...emptyPanel(panelId) });
+  }
+
+  function doRemovePanel(panelId: number) {
+    if (panels.length <= 1) return;
+    for (const key of [...scrambleAttemptedRef.current]) {
+      if (key.startsWith(`${panelId}:`)) scrambleAttemptedRef.current.delete(key);
+    }
+    resetTimer(panelId);
+    setPanels(prev => prev.filter(p => p.id !== panelId));
   }
 
   function setPenaltyCurrent(panelId: number, pen: 'none' | '+2' | 'dnf') {
@@ -357,39 +412,53 @@ export default function ResultsEntryTab() {
     } catch { /* audio unavailable */ }
   }
 
-  function tapTimer() {
-    if (timerRunning) {
-      if (timerIntervalRef.current) { clearInterval(timerIntervalRef.current); timerIntervalRef.current = null; }
-      setTimerRunning(false);
-      setTimerStopped(true);
+  function tapTimer(panelId: number) {
+    const panel = panels.find(p => p.id === panelId);
+    if (!panel) return;
+    if (panel.timerRunning) {
+      const ref = timerIntervalRefs.current[panelId];
+      if (ref) { clearInterval(ref); timerIntervalRefs.current[panelId] = null; }
+      updatePanel(panelId, { timerRunning: false, timerStopped: true });
     } else {
-      timerStartRef.current = Date.now() - timerAccRef.current;
-      setTimerRunning(true);
-      setTimerStopped(false);
-      timerIntervalRef.current = setInterval(() => {
-        const elapsed = Date.now() - timerStartRef.current;
-        timerAccRef.current = elapsed;
-        setTimerMs(elapsed);
+      timerStartRefs.current[panelId] = Date.now() - (timerAccRefs.current[panelId] || 0);
+      updatePanel(panelId, { timerRunning: true, timerStopped: false });
+      timerIntervalRefs.current[panelId] = setInterval(() => {
+        const elapsed = Date.now() - timerStartRefs.current[panelId];
+        timerAccRefs.current[panelId] = elapsed;
+        updatePanel(panelId, { timerMs: elapsed });
         const s = elapsed / 1000;
-        if (s >= 8  && lastMilestoneRef.current < 8)  { lastMilestoneRef.current = 8;  playBeep(880,  0.18); }
-        if (s >= 12 && lastMilestoneRef.current < 12) { lastMilestoneRef.current = 12; playBeep(1100, 0.18); }
+        const lastMilestone = lastMilestoneRefs.current[panelId] || 0;
+        if (s >= 8  && lastMilestone < 8)  { lastMilestoneRefs.current[panelId] = 8;  playBeep(880,  0.18); }
+        if (s >= 12 && lastMilestone < 12) { lastMilestoneRefs.current[panelId] = 12; playBeep(1100, 0.18); }
         if (s >= 17) {
-          clearInterval(timerIntervalRef.current!);
-          timerIntervalRef.current = null;
-          setTimerRunning(false);
-          setTimerStopped(true);
+          const ref = timerIntervalRefs.current[panelId];
+          if (ref) clearInterval(ref);
+          timerIntervalRefs.current[panelId] = null;
+          updatePanel(panelId, { timerRunning: false, timerStopped: true });
         }
       }, 30);
     }
   }
 
-  function resetTimer() {
-    if (timerIntervalRef.current) { clearInterval(timerIntervalRef.current); timerIntervalRef.current = null; }
-    setTimerRunning(false);
-    setTimerStopped(false);
-    timerAccRef.current    = 0;
-    lastMilestoneRef.current = 0;
-    setTimerMs(0);
+  function resetTimer(panelId: number) {
+    const ref = timerIntervalRefs.current[panelId];
+    if (ref) clearInterval(ref);
+    delete timerIntervalRefs.current[panelId];
+    delete timerStartRefs.current[panelId];
+    delete timerAccRefs.current[panelId];
+    delete lastMilestoneRefs.current[panelId];
+    updatePanel(panelId, { timerMs: 0, timerRunning: false, timerStopped: false });
+  }
+
+  // Stops every panel's timer without touching panel state — used when the
+  // whole `panels` array is being thrown away (competition switch), so
+  // there's no single panel left to updatePanel() against.
+  function resetAllTimers() {
+    Object.values(timerIntervalRefs.current).forEach(id => { if (id) clearInterval(id); });
+    timerIntervalRefs.current = {};
+    timerStartRefs.current = {};
+    timerAccRefs.current = {};
+    lastMilestoneRefs.current = {};
   }
 
   function fmtInspection(ms: number) { return (ms / 1000).toFixed(1) + 's'; }
@@ -589,6 +658,46 @@ export default function ResultsEntryTab() {
   const eventConfig = selComp?.eventConfig || {};
   const todayLabel = todayDateStr();
 
+  // Apply an event/athlete switch, resetting the panel's solve-entry state
+  // so a finished event's solves can't linger under the new selection —
+  // callers (the dropdowns below, and resolvePendingConfirm) decide whether
+  // that reset needs confirming first via panelHasProgress().
+  function doSwitchEvent(panelId: number, newEventId: string) {
+    resetTimer(panelId);
+    updatePanel(panelId, { eventId: newEventId, round: 1, group: 1, ...freshSolveState() });
+  }
+
+  function doSwitchAthlete(panelId: number, newAthleteId: string, panel: PanelState) {
+    resetTimer(panelId);
+    const patch: Partial<PanelState> = { athleteId: newAthleteId, ...freshSolveState() };
+    // Switching athletes can make the currently-selected event invalid (the
+    // new athlete may already have today's Daily Practice entry for it) —
+    // clear it rather than leave a now-disabled option selected.
+    if (isDailyPracticeSelected && panel.eventId) {
+      const alreadyLogged = compResults.some(r =>
+        r.athleteId === newAthleteId &&
+        r.eventId === panel.eventId &&
+        !r.isPlaceholder &&
+        r.practiceDate === todayLabel,
+      );
+      if (alreadyLogged) patch.eventId = '';
+    }
+    updatePanel(panelId, patch);
+  }
+
+  function resolvePendingConfirm() {
+    if (!pendingConfirm) return;
+    const { kind, panelId, nextValue } = pendingConfirm;
+    if (kind === 'clear-panel') doClearPanel(panelId);
+    else if (kind === 'remove-panel') doRemovePanel(panelId);
+    else if (nextValue !== undefined) {
+      const panel = panels.find(p => p.id === panelId);
+      if (panel && kind === 'switch-event') doSwitchEvent(panelId, nextValue);
+      else if (panel && kind === 'switch-athlete') doSwitchAthlete(panelId, nextValue, panel);
+    }
+    setPendingConfirm(null);
+  }
+
   return (
     <div className="card">
       <div className="card-title"><span className="title-accent" />{t('admin.results.title')}</div>
@@ -597,7 +706,7 @@ export default function ResultsEntryTab() {
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.8rem', flexWrap: 'wrap' }}>
         <div className="form-group" style={{ maxWidth: '340px', marginBottom: 0, flex: 1, minWidth: '200px' }}>
           <label>{t('admin.results.competition')}</label>
-          <select value={compId} onChange={e => { setCompId(e.target.value); setPanels([emptyPanel(0)]); resetTimer(); setShowTimer(false); }}>
+          <select value={compId} onChange={e => { setCompId(e.target.value); setPanels([emptyPanel(0)]); nextPanelIdRef.current = 1; resetAllTimers(); setShowTimer(false); }}>
             <option value="">{t('admin.results.select-comp')}</option>
             {liveComps.map(c => (
               <option key={c.id} value={c.id}>
@@ -609,11 +718,16 @@ export default function ResultsEntryTab() {
         {compId && (
           <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', paddingTop: '1.5rem', flexWrap: 'wrap' }}>
             <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>{t('admin.results.panels')} <strong>{panels.length}</strong></span>
-            <button className="btn-xs" onClick={() => setPanels(p => [...p, emptyPanel(p.length)])}>{t('admin.results.add-panel')}</button>
-            <button className="btn-xs" onClick={() => { if (panels.length <= 1) return; setPanels(p => p.slice(0, -1)); }}>{t('admin.results.remove-panel')}</button>
+            <button className="btn-xs" onClick={() => setPanels(p => [...p, emptyPanel(nextPanelIdRef.current++)])}>{t('admin.results.add-panel')}</button>
+            <button className="btn-xs" onClick={() => {
+              if (panels.length <= 1) return;
+              const last = panels[panels.length - 1];
+              if (panelHasProgress(last)) setPendingConfirm({ kind: 'remove-panel', panelId: last.id });
+              else doRemovePanel(last.id);
+            }}>{t('admin.results.remove-panel')}</button>
             <button
               className="btn-xs"
-              onClick={() => { if (showTimer) { resetTimer(); setShowTimer(false); } else setShowTimer(true); }}
+              onClick={() => { if (showTimer) { panels.forEach(p => resetTimer(p.id)); setShowTimer(false); } else setShowTimer(true); }}
               style={{
                 background: showTimer
                   ? 'linear-gradient(135deg, rgba(45,212,191,0.35), rgba(6,182,212,0.35))'
@@ -638,7 +752,7 @@ export default function ResultsEntryTab() {
       {/* ── Entry Panels ─────────────────────────────────────────────────────── */}
       {compId && (
         <div className="multi-entry-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
-          {panels.map(panel => {
+          {panels.map((panel, panelIdx) => {
             const cfg        = eventConfig[panel.eventId] || { rounds: 1, groups: 1 };
             const roundNames = getRoundNames(cfg.rounds, t);
             const groupCount = cfg.groups;
@@ -699,38 +813,44 @@ export default function ResultsEntryTab() {
             return (
               <div className="compact-panel" key={panel.id}>
                 <div className="compact-panel-header">
-                  <span className="compact-panel-title">{t('admin.results.panel')} {panel.id + 1}</span>
+                  <span className="compact-panel-title">{t('admin.results.panel')} {panelIdx + 1}</span>
                   <div className="compact-panel-actions">
                     <button className="btn-xs" onClick={() => {
-                      // Forget any prior scramble attempts for this panel so Clear
-                      // is a genuine retry path, not a permanent dead end after a
-                      // one-off generation failure.
-                      for (const key of [...scrambleAttemptedRef.current]) {
-                        if (key.startsWith(`${panel.id}:`)) scrambleAttemptedRef.current.delete(key);
-                      }
-                      updatePanel(panel.id, { ...emptyPanel(panel.id) });
+                      if (panelHasProgress(panel)) setPendingConfirm({ kind: 'clear-panel', panelId: panel.id });
+                      else doClearPanel(panel.id);
                     }}>{t('admin.results.clear')}</button>
+                    <button
+                      className="btn-xs"
+                      disabled={panels.length <= 1}
+                      aria-label={t('admin.results.panel.close')}
+                      title={t('admin.results.panel.close')}
+                      onClick={() => {
+                        if (panels.length <= 1) return;
+                        if (panelHasProgress(panel)) setPendingConfirm({ kind: 'remove-panel', panelId: panel.id });
+                        else doRemovePanel(panel.id);
+                      }}
+                      style={{
+                        color: panels.length <= 1 ? undefined : '#f87171',
+                        borderColor: panels.length <= 1 ? undefined : 'rgba(239,68,68,0.35)',
+                        background: panels.length <= 1 ? undefined : 'rgba(239,68,68,0.08)',
+                        lineHeight: 1, fontWeight: 700,
+                      }}
+                    >×</button>
                   </div>
                 </div>
 
-                {/* Athlete */}
+                {/* Athlete — switching mid-entry (progress made, not all 5 solves
+                    done) discards those solves, so it's gated the same as the
+                    Event dropdown below; switching after a completed entry (or
+                    with nothing entered yet) applies immediately. */}
                 <select className="compact-select" value={panel.athleteId}
                   onChange={e => {
                     const newAthleteId = e.target.value;
-                    const patch: Partial<PanelState> = { athleteId: newAthleteId };
-                    // Switching athletes can make the currently-selected event invalid
-                    // (the new athlete may already have today's Daily Practice entry
-                    // for it) — clear it rather than leave a now-disabled option selected.
-                    if (isDailyPracticeSelected && panel.eventId) {
-                      const alreadyLogged = compResults.some(r =>
-                        r.athleteId === newAthleteId &&
-                        r.eventId === panel.eventId &&
-                        !r.isPlaceholder &&
-                        r.practiceDate === todayLabel,
-                      );
-                      if (alreadyLogged) patch.eventId = '';
+                    if (panelHasProgress(panel) && !allEntered) {
+                      setPendingConfirm({ kind: 'switch-athlete', panelId: panel.id, nextValue: newAthleteId });
+                    } else {
+                      doSwitchAthlete(panel.id, newAthleteId, panel);
                     }
-                    updatePanel(panel.id, patch);
                   }}>
                   <option value="">{t('admin.results.select-athlete')}</option>
                   {[...panelAthletes].sort((a,b) => a.name.localeCompare(b.name)).map(a => (
@@ -738,14 +858,18 @@ export default function ResultsEntryTab() {
                   ))}
                 </select>
 
-                {/* Event */}
+                {/* Event — same mid-entry confirmation as Athlete above. A
+                    completed entry (allEntered) switches straight through, since
+                    that's the normal "move to the next event" flow. */}
                 <select className="compact-select" value={panel.eventId}
-                  onChange={e => updatePanel(panel.id, {
-                    eventId: e.target.value, round: 1, group: 1,
-                    // A new event needs a fresh scramble — don't leave the
-                    // previous event's scramble showing for solve 1.
-                    scrambles: ['', '', '', '', ''], scrambleLoading: false,
-                  })}>
+                  onChange={e => {
+                    const newEventId = e.target.value;
+                    if (panelHasProgress(panel) && !allEntered) {
+                      setPendingConfirm({ kind: 'switch-event', panelId: panel.id, nextValue: newEventId });
+                    } else {
+                      doSwitchEvent(panel.id, newEventId);
+                    }
+                  }}>
                   <option value="">{t('admin.results.select-event')}</option>
                   {evList.map(e => {
                     const isLogged = practiceLoggedEventIds.has(e.id);
@@ -790,16 +914,16 @@ export default function ResultsEntryTab() {
                 {/* ── Inspection Timer (shown when toggled from toolbar) ────── */}
                 <div style={{ marginBottom: showTimer ? '0.4rem' : 0 }}>
                   {showTimer && (() => {
-                    const color  = timerColor(timerMs);
-                    const isDnf  = timerMs / 1000 >= 17;
-                    const isPlus2 = timerMs / 1000 >= 15 && !isDnf;
+                    const color  = timerColor(panel.timerMs);
+                    const isDnf  = panel.timerMs / 1000 >= 17;
+                    const isPlus2 = panel.timerMs / 1000 >= 15 && !isDnf;
                     return (
                       <div
-                        onClick={() => !timerStopped && tapTimer()}
+                        onClick={() => !panel.timerStopped && tapTimer(panel.id)}
                         style={{
                           borderRadius: '10px', overflow: 'hidden',
                           border: `1px solid ${color === '#f8fafc' ? 'rgba(255,255,255,0.1)' : color + '55'}`,
-                          cursor: timerStopped ? 'default' : 'pointer',
+                          cursor: panel.timerStopped ? 'default' : 'pointer',
                           userSelect: 'none', WebkitUserSelect: 'none',
                         }}
                       >
@@ -811,20 +935,20 @@ export default function ResultsEntryTab() {
                             fontSize: '3rem', fontWeight: 800, lineHeight: 1,
                             color, transition: 'color 0.25s', fontVariantNumeric: 'tabular-nums',
                           }}>
-                            {fmtInspection(timerMs)}
+                            {fmtInspection(panel.timerMs)}
                           </div>
                           {isDnf && <div style={{ fontSize: '0.95rem', fontWeight: 700, color, marginTop: '0.4rem' }}>{t('admin.results.dnf-label')}</div>}
                           {isPlus2 && <div style={{ fontSize: '0.95rem', fontWeight: 700, color, marginTop: '0.4rem' }}>{t('admin.results.plus2-label')}</div>}
-                          {!timerStopped && (
+                          {!panel.timerStopped && (
                             <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.35)', marginTop: '0.5rem' }}>
-                              {timerRunning ? t('admin.results.tap-to-stop') : t('admin.results.tap-to-start')}
+                              {panel.timerRunning ? t('admin.results.tap-to-stop') : t('admin.results.tap-to-start')}
                             </div>
                           )}
                         </div>
-                        {timerStopped && (
+                        {panel.timerStopped && (
                           <div style={{ display: 'flex', justifyContent: 'center', padding: '0.45rem', background: 'rgba(0,0,0,0.25)' }}>
                             <button
-                              onClick={e => { e.stopPropagation(); resetTimer(); }}
+                              onClick={e => { e.stopPropagation(); resetTimer(panel.id); }}
                               style={{
                                 padding: '0.3rem 1.2rem', borderRadius: '7px', fontSize: '0.8rem',
                                 background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)',
@@ -1206,7 +1330,7 @@ export default function ResultsEntryTab() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: '0.5rem', marginBottom: '1rem' }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label>{t('admin.results.competition')}</label>
-                <select value={compId} onChange={e => { setCompId(e.target.value); setPanels([emptyPanel(0)]); resetTimer(); setShowTimer(false); }}>
+                <select value={compId} onChange={e => { setCompId(e.target.value); setPanels([emptyPanel(0)]); nextPanelIdRef.current = 1; resetAllTimers(); setShowTimer(false); }}>
                   <option value="">{t('admin.results.select-comp')}</option>
                   {importableComps.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
@@ -1465,6 +1589,35 @@ export default function ResultsEntryTab() {
           </div>
         )}
       </div>
+
+      {/* Discard/switch confirmation — shared by "Clear", the per-panel "×",
+          the top toolbar's "Remove", and switching Athlete/Event mid-entry. */}
+      {pendingConfirm && (() => {
+        const isSwitch = pendingConfirm.kind === 'switch-event' || pendingConfirm.kind === 'switch-athlete';
+        return (
+          <div onClick={() => setPendingConfirm(null)} className="wca-modal-backdrop">
+            <div onClick={e => e.stopPropagation()} className="wca-modal" style={{ borderColor: 'rgba(239,68,68,0.35)' }}>
+              <div className="wca-modal-title">
+                {isSwitch ? t('admin.results.confirm.switch-title') : t('admin.results.confirm.discard-title')}
+              </div>
+              <div className="wca-modal-sub" style={{ marginBottom: '1.25rem' }}>
+                {isSwitch ? t('admin.results.confirm.switch-body') : t('admin.results.confirm.discard-body')}
+              </div>
+              <div className="wca-modal-actions">
+                <button onClick={() => setPendingConfirm(null)} className="wca-modal-btn">
+                  {t('admin.btn.cancel')}
+                </button>
+                <button
+                  onClick={resolvePendingConfirm} className="wca-modal-btn danger"
+                  style={{ background: 'rgba(239,68,68,0.75)', borderColor: 'rgba(239,68,68,0.6)' }}
+                >
+                  {t('admin.results.confirm.discard-btn')}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
