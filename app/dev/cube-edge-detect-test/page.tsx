@@ -64,6 +64,25 @@ interface DetectionResult {
   nonZeroEdgePixels: number;
 }
 
+// Result of the ALTERNATIVE saturation-blob detection strategy (see
+// detectColorBlob below) — deliberately separate from DetectionResult since
+// this is a diagnostic-only second code path, not a replacement.
+interface BlobResult {
+  // cv.countNonZero on the post-morphological-close mask — the blob
+  // analogue of nonZeroEdgePixels above: near 0 means the HSV thresholds
+  // are too strict for the actual scene (nothing is registering as
+  // "saturated" or "bright/white"), which is the fix lever.
+  maskNonZeroPixels: number;
+  // Area of the single largest contour found in the closed mask, BEFORE the
+  // BLOB_MIN_AREA_FRACTION rejection — shown regardless of whether it was
+  // big enough to count as a real detection, so the diagnostics panel can
+  // distinguish "found a blob but too small" from "found nothing at all".
+  largestContourArea: number;
+  // Bounding rect of that largest contour, or null if its area fell below
+  // BLOB_MIN_AREA_FRACTION of the frame (nothing cube-sized was found).
+  boundingRect: { x: number; y: number; width: number; height: number } | null;
+}
+
 // OpenCV.js attaches its entire API dynamically onto the loaded module at
 // WASM-init time; there's no dependable, version-matched TypeScript surface
 // for it (the community .d.ts files lag behind and don't cover everything
@@ -148,6 +167,32 @@ const REQUIRED_STICKER_COUNT = 9; // a face is exactly 9 stickers — no more, n
 // camera angle/lens distortion skews grid spacing noticeably.
 const GRID_CLUSTER_TOLERANCE = 0.4;
 const CAMERA_INIT_TIMEOUT_MS = 10_000;
+
+// ── Saturation-blob detection tuning (alternative, diagnostic-only path) ────
+// A fundamentally different strategy from detectQuads above: instead of
+// finding edges/grooves BETWEEN stickers, find one large connected region of
+// "vivid cube color" (the whole face at once) by thresholding HSV
+// saturation+value — background surfaces (walls, ceilings) are typically
+// low-saturation/gray, while cube stickers are highly saturated (colored
+// stickers) or high-value/low-saturation (white stickers). See
+// detectColorBlob below. Runs alongside detectQuads, not instead of it.
+const BLOB_SAT_MIN = 80; // S floor for the "saturated colored sticker" range, out of 255
+const BLOB_SAT_VALUE_MIN = 50; // V floor for that range — excludes near-black noise/shadow
+const BLOB_WHITE_SAT_MAX = 60; // S ceiling for the "white sticker" range
+const BLOB_WHITE_VALUE_MIN = 180; // V floor for that range
+// Morphological closing kernel, square, in pixels at the current
+// PROCESSING_MAX_DIM (320) processing resolution — the key step that
+// bridges the thin dark grooves between adjacent stickers, merging what
+// would otherwise be 9 separate colored regions into one connected blob
+// findContours can pick up as a single shape. Starting point (roughly half
+// a sticker's width at 320px processing res, per REQUIRED_STICKER_COUNT's
+// 3x3 layout); retune from blobMaskNonZeroPixels/blobLargestContourArea
+// against real footage.
+const BLOB_MORPH_KERNEL_SIZE = 15;
+// Reject the largest blob if it's smaller than this fraction of the frame —
+// nothing cube-sized was found (background noise, or a stray small
+// saturated object).
+const BLOB_MIN_AREA_FRACTION = 0.05;
 
 // ── Camera math (copied pattern from cube-color-test) ───────────────────────
 
@@ -437,6 +482,127 @@ function detectQuads(
   return { rawQuads, stickers, faces, nonZeroEdgePixels };
 }
 
+// ALTERNATIVE, diagnostic-only detection strategy — runs alongside (not
+// instead of) detectQuads above. Where detectQuads looks for thin edges
+// BETWEEN stickers, this looks for one large connected blob OF cube-like
+// color: threshold HSV saturation+value to isolate "vivid" pixels (colored
+// stickers) OR "bright, low-saturation" pixels (white stickers), then
+// morphologically close the result to bridge the thin dark grooves between
+// adjacent stickers into a single connected region. Tests whether a
+// cluttered background (ceiling lines, doorframes — which produce more/
+// stronger Canny edges than the cube's own grooves) is easier to reject via
+// color than via edges. Same Mat-deletion discipline as detectQuads — every
+// intermediate Mat is explicitly `.delete()`d in a finally block.
+function detectColorBlob(
+  cv: CvModule,
+  canvas: HTMLCanvasElement,
+  blobPreviewCanvas: HTMLCanvasElement | null
+): BlobResult {
+  const src = cv.imread(canvas); // RGBA, per cv.imread-from-canvas convention (see detectQuads' RGBA2GRAY above)
+  const rgb = new cv.Mat();
+  const hsv = new cv.Mat();
+  const maskSaturated = new cv.Mat();
+  const maskWhite = new cv.Mat();
+  const combined = new cv.Mat();
+  const closed = new cv.Mat();
+  const morphKernel = cv.Mat.ones(BLOB_MORPH_KERNEL_SIZE, BLOB_MORPH_KERNEL_SIZE, cv.CV_8U);
+  const contours = new cv.MatVector();
+  const hierarchy = new cv.Mat();
+  // cv.inRange's lower/upper bounds must be full-frame-size Mats matching
+  // hsv's dimensions/type in this OpenCV.js build, NOT a bare cv.Scalar or
+  // plain array the way the native C++ API accepts them — a quirk of the
+  // WASM binding worth knowing before reaching for inRange again. Declared
+  // here (rather than only in the try block) so the finally block below can
+  // always reach them, even if hsv-dependent construction throws partway
+  // through.
+  let lowSaturated: CvModule | null = null;
+  let highSaturated: CvModule | null = null;
+  let lowWhite: CvModule | null = null;
+  let highWhite: CvModule | null = null;
+
+  let maskNonZeroPixels = 0;
+  let largestContourArea = 0;
+  let boundingRect: BlobResult['boundingRect'] = null;
+
+  try {
+    cv.cvtColor(src, rgb, cv.COLOR_RGBA2RGB);
+    cv.cvtColor(rgb, hsv, cv.COLOR_RGB2HSV);
+
+    // Hue left unrestricted (0-179, OpenCV's 8-bit hue range) in both bands
+    // — a colored cube sticker can be any hue, and the white-sticker band
+    // is defined by low saturation, not by hue at all.
+    lowSaturated = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [0, BLOB_SAT_MIN, BLOB_SAT_VALUE_MIN, 0]);
+    highSaturated = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [179, 255, 255, 255]);
+    cv.inRange(hsv, lowSaturated, highSaturated, maskSaturated);
+
+    lowWhite = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [0, 0, BLOB_WHITE_VALUE_MIN, 0]);
+    highWhite = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [179, BLOB_WHITE_SAT_MAX, 255, 255]);
+    cv.inRange(hsv, lowWhite, highWhite, maskWhite);
+
+    cv.bitwise_or(maskSaturated, maskWhite, combined);
+
+    // The key step: bridges the thin dark grooves between adjacent stickers
+    // so what would otherwise be 9 separate colored regions merge into one
+    // connected blob.
+    cv.morphologyEx(combined, closed, cv.MORPH_CLOSE, morphKernel);
+
+    maskNonZeroPixels = cv.countNonZero(closed);
+
+    // DEBUG ONLY — post-close binary mask preview, mirrors the edge-preview
+    // pattern in detectQuads above (must happen here, before `closed` is
+    // deleted — the caller never gets to touch the live Mat).
+    if (blobPreviewCanvas) {
+      try {
+        cv.imshow(blobPreviewCanvas, closed);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[cube-edge-detect-test] blob cv.imshow failed', err);
+      }
+    }
+
+    // RETR_EXTERNAL, not RETR_TREE — this strategy wants only the outer
+    // boundary of the single largest blob, no parent/child grouping needed
+    // (unlike detectQuads, which groups sticker siblings by hierarchy).
+    cv.findContours(closed, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+    for (let i = 0; i < contours.size(); i++) {
+      const contour = contours.get(i);
+      try {
+        const area = cv.contourArea(contour);
+        if (area > largestContourArea) {
+          largestContourArea = area;
+          const rect = cv.boundingRect(contour);
+          boundingRect = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+        }
+      } finally {
+        contour.delete();
+      }
+    }
+
+    const frameArea = canvas.width * canvas.height;
+    if (largestContourArea < frameArea * BLOB_MIN_AREA_FRACTION) {
+      boundingRect = null;
+    }
+  } finally {
+    src.delete();
+    rgb.delete();
+    hsv.delete();
+    maskSaturated.delete();
+    maskWhite.delete();
+    combined.delete();
+    closed.delete();
+    morphKernel.delete();
+    contours.delete();
+    hierarchy.delete();
+    lowSaturated?.delete();
+    highSaturated?.delete();
+    lowWhite?.delete();
+    highWhite?.delete();
+  }
+
+  return { maskNonZeroPixels, largestContourArea, boundingRect };
+}
+
 function strokeQuad(ctx: CanvasRenderingContext2D, points: readonly Point[]) {
   ctx.beginPath();
   points.forEach((p, i) => {
@@ -485,6 +651,22 @@ function drawRawQuadOverlay(canvas: HTMLCanvasElement, rawQuads: readonly QuadCa
   rawQuads.forEach(({ points }) => strokeQuad(ctx, points));
 }
 
+// DEBUG ONLY — draws the saturation-blob strategy's detected bounding rect
+// directly on the main camera view, in bright magenta — deliberately
+// distinct from the existing cyan (confirmed face)/amber (raw sticker
+// candidate)/yellow (raw quad overlay) Canny-based colors, so the two
+// independent detection strategies can be visually compared on the same
+// frame at a glance.
+function drawBlobRect(canvas: HTMLCanvasElement, rect: BlobResult['boundingRect']) {
+  if (!rect) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = '#ff00ff'; // bright magenta
+  ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function CubeEdgeDetectTestPage() {
@@ -496,6 +678,12 @@ export default function CubeEdgeDetectTestPage() {
   // failing to become clean quads afterward. See detectQuads/
   // drawRawQuadOverlay above.
   const edgePreviewCanvasRef = useRef<HTMLCanvasElement>(null);
+  // DEBUG ONLY — small preview showing the post-morphological-close
+  // saturation/value mask from the ALTERNATIVE detectColorBlob strategy
+  // below (a separate, diagnostic-only code path from detectQuads/
+  // edgePreviewCanvasRef above — both run every tick for side-by-side
+  // comparison).
+  const blobPreviewCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const cvRef = useRef<CvModule | null>(null);
   const startCameraRequestIdRef = useRef(0);
@@ -546,6 +734,12 @@ export default function CubeEdgeDetectTestPage() {
   // later, and compare wasmHeapMB / avgFrameMsRecent between the two.
   const [wasmHeapMB, setWasmHeapMB] = useState<number | null>(null);
   const [avgFrameMsRecent, setAvgFrameMsRecent] = useState<number | null>(null);
+  // ALTERNATIVE saturation-blob strategy diagnostics — see BlobResult/
+  // detectColorBlob above. Separate state from the Canny-path fields above
+  // so both strategies' results are visible simultaneously for comparison.
+  const [blobMaskNonZeroPixels, setBlobMaskNonZeroPixels] = useState<number>(0);
+  const [blobLargestContourArea, setBlobLargestContourArea] = useState<number>(0);
+  const [blobBoundingRect, setBlobBoundingRect] = useState<BlobResult['boundingRect']>(null);
 
   useEffect(() => {
     const id = setInterval(() => setDiagTick((t) => t + 1), 500);
@@ -739,6 +933,24 @@ export default function CubeEdgeDetectTestPage() {
           setCandidateCount(result.faces.length);
           setLargestCandidate(result.faces[0] ?? null);
 
+          // ALTERNATIVE saturation-blob strategy — runs as an ADDITIONAL
+          // computation alongside the Canny path above, not instead of it,
+          // so both results are visible simultaneously for comparison. Its
+          // own try/catch mirrors detectQuads' above: a failure here must
+          // not prevent the Canny-path results already computed from being
+          // applied.
+          let blobResult: BlobResult = { maskNonZeroPixels: 0, largestContourArea: 0, boundingRect: null };
+          try {
+            blobResult = detectColorBlob(cv, canvas, blobPreviewCanvasRef.current);
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.error('[cube-edge-detect-test] blob detection error', err);
+          }
+          drawBlobRect(canvas, blobResult.boundingRect);
+          setBlobMaskNonZeroPixels(blobResult.maskNonZeroPixels);
+          setBlobLargestContourArea(blobResult.largestContourArea);
+          setBlobBoundingRect(blobResult.boundingRect);
+
           // TEMPORARY — progressive-degradation investigation. Tracks
           // lastFrameMs and the WASM heap's current byte length
           // (cv.HEAPU8.length — Emscripten's ALLOW_MEMORY_GROWTH heap only
@@ -826,6 +1038,14 @@ export default function CubeEdgeDetectTestPage() {
     `largestCandidate corners: ${
       largestCandidate
         ? largestCandidate.points.map((p) => `(${Math.round(p.x)},${Math.round(p.y)})`).join(' ')
+        : 'none'
+    }`,
+    `--- саарал/өнгөний blob (alt strategy) ---`,
+    `blobMaskNonZeroPixels (post-close mask; near-0 = HSV thresholds too strict): ${blobMaskNonZeroPixels}`,
+    `blobLargestContourArea (before min-area rejection): ${Math.round(blobLargestContourArea)}`,
+    `blobBoundingRect: ${
+      blobBoundingRect
+        ? `x=${blobBoundingRect.x} y=${blobBoundingRect.y} w=${blobBoundingRect.width} h=${blobBoundingRect.height}`
         : 'none'
     }`,
   ].join('\n');
@@ -1011,10 +1231,38 @@ export default function CubeEdgeDetectTestPage() {
           />
         </div>
 
+        {/* ── DEBUG: saturation-blob preview (ALTERNATIVE strategy) ────────
+            Diagnostic-only, separate code path from the Canny/contour
+            approach above — does not replace it. White = pixels that passed
+            the saturated-OR-white HSV threshold and survived the
+            morphological close (see detectColorBlob); the main camera view
+            above overlays this strategy's detected bounding rect in bright
+            magenta, distinct from the cyan/amber/yellow Canny-based
+            overlays, so both strategies can be compared on the same
+            frame. */}
+        <div>
+          <p className="mb-1 text-xs text-white/50">
+            Өнгөний ханд blob (саарал дэвсгэр, тод шоо) — цагаан: ханд+гэрэлтэлт босго давсан ба
+            morphological close-оор нэгдсэн пиксел
+          </p>
+          <canvas
+            ref={blobPreviewCanvasRef}
+            style={{
+              display: 'block',
+              width: '100%',
+              borderRadius: 8,
+              border: '2px solid magenta',
+              backgroundColor: '#000000',
+              imageRendering: 'pixelated',
+            }}
+          />
+        </div>
+
         <p className="text-xs text-white/40">
           Бүдэг шар контур бол ганц наалт (стикер) нэр дэвшигч; тод хөх контур бол 9 наалт 3x3
-          тор хэлбэрээр бүлэглэгдэж баталгаажсан бүхэл тал. Куб талыг өөр өнцөг, зайнаас барьж
-          үзээд контур хэр тогтвортой, зөв бүрхэж байгааг ажигла.
+          тор хэлбэрээр бүлэглэгдэж баталгаажсан бүхэл тал. Ягаан (magenta) тэгш өнцөгт бол
+          өнгөний ханд blob стратегийн илрүүлсэн бүс. Куб талыг өөр өнцөг, зайнаас барьж үзээд
+          контур хэр тогтвортой, зөв бүрхэж байгааг ажигла.
         </p>
       </div>
     </div>
