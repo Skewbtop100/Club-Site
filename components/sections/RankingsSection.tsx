@@ -58,8 +58,18 @@ export default function RankingsSection({ results, athletes, competitions, wcaRe
     return m;
   }, [athletes]);
 
+  // Event Rankings only ranks/badges results from athletes still on the
+  // roster — same reasoning as RecordsSection/AthleteProfileOverlay/
+  // DailyPracticeSection: an Athlete doc getting deleted shouldn't leave
+  // their old times occupying a leaderboard rank or blocking a TR badge
+  // nobody currently on the roster can ever beat.
+  const rosterResults = useMemo(() => {
+    const rosterIds = new Set(athletes.map((a) => a.id));
+    return results.filter((r) => rosterIds.has(r.athleteId));
+  }, [results, athletes]);
+
   const rows = useMemo(() => {
-    const eventResults = results.filter((r) => r.eventId === safeEvent);
+    const eventResults = rosterResults.filter((r) => r.eventId === safeEvent);
     if (rankType === 'single') {
       const best: Record<string, Result> = {};
       eventResults.forEach((r) => {
@@ -79,7 +89,7 @@ export default function RankingsSection({ results, athletes, competitions, wcaRe
       });
       return Object.values(best).sort((a, b) => compareTime(a.average, b.average));
     }
-  }, [results, safeEvent, rankType]);
+  }, [rosterResults, safeEvent, rankType]);
 
   return (
     <section id="rankings" className="rankings-section" style={{ background: 'var(--surface)' }}>
@@ -138,7 +148,7 @@ export default function RankingsSection({ results, athletes, competitions, wcaRe
                   const rank = i + 1;
                   const rankCls = rank === 1 ? 'rank-1' : rank === 2 ? 'rank-2' : rank === 3 ? 'rank-3' : 'rank-other';
                   const value = rankType === 'single' ? r.single : r.average;
-                  const badges = getResultRecordBadges(safeEvent, rankType, value!, r.athleteId, results, wcaRecords);
+                  const badges = getResultRecordBadges(safeEvent, rankType, value!, r.athleteId, rosterResults, wcaRecords);
                   const badge = getHighestBadge(badges);
                   const isDnf = value === -1 || value === -2;
                   const wcaId = wcaIdMap[r.athleteId];

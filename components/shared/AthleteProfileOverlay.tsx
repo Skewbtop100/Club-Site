@@ -77,12 +77,17 @@ function PrValueCell({ ourCs, refCs }: { ourCs: number | null; refCs: number | n
 
 interface Props {
   athlete: Athlete;
+  /** Current roster — used to keep TR/clubRankMap/badge computations (via
+   *  globalResults below) from crediting results whose athleteId no longer
+   *  resolves to a listed athlete (e.g. the athlete was removed from the
+   *  club). Not used for this athlete's own history/medals/practice tabs. */
+  athletes: Athlete[];
   onClose: () => void;
 }
 
 type Tab = 'history' | 'records' | 'medals' | 'practice';
 
-export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
+export default function AthleteProfileOverlay({ athlete, athletes, onClose }: Props) {
   const [tab, setTab] = useState<Tab>('history');
   const [allResults, setAllResults] = useState<Result[]>([]);
   const [practiceResults, setPracticeResults] = useState<Result[]>([]);
@@ -225,10 +230,12 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
   // opposite scoping, and sharing one pool between them was the bug behind
   // Tergel Batzorig's false Clock "gold" at Dębica Cubing Winter 2026:
   //
-  // - `globalResults` (source !== 'imported'): for TR ("club record") and
-  //   the WR/CR/NR/TR/PR badges — those must only compare this club's own
-  //   results, or an external competitor's time gets credited as a "club"
-  //   record.
+  // - `globalResults` (source !== 'imported', athleteId still on the
+  //   roster): for TR ("club record") and the WR/CR/NR/TR/PR badges —
+  //   those must only compare this club's own *current* results, or an
+  //   external competitor's time gets credited as a "club" record, or a
+  //   removed athlete's old result permanently "holds" a club record that
+  //   nobody currently on the roster can ever beat.
   // - `allPublishedResults` (everything, imported included): for medal/
   //   placement detection (medalData, placementMap) — those need the real,
   //   full competitive field. Filtering out imported results can make an
@@ -245,10 +252,11 @@ export default function AthleteProfileOverlay({ athlete, onClose }: Props) {
       });
     });
   }, []);
-  const globalResults = useMemo(
-    () => allPublishedResults ? allPublishedResults.filter(r => r.source !== 'imported') : null,
-    [allPublishedResults],
-  );
+  const globalResults = useMemo(() => {
+    if (!allPublishedResults) return null;
+    const rosterIds = new Set(athletes.map(a => a.id));
+    return allPublishedResults.filter(r => r.source !== 'imported' && rosterIds.has(r.athleteId));
+  }, [allPublishedResults, athletes]);
 
   // Club rank — this athlete's position among ALL club members' personal
   // bests for each event, computed locally from globalResults (no external

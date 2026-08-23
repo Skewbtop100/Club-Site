@@ -91,6 +91,15 @@ export default function DailyPracticeSection({ results, athletes, wcaRecords, lo
     return m;
   }, []);
 
+  // TR badge comparison pool: only results from athletes still on the
+  // roster count toward "club record" — otherwise a removed athlete's old
+  // time permanently blocks anyone else from ever earning a TR badge for
+  // that event (they'd need to beat a "record" nobody currently holds).
+  const rosterResults = useMemo(() => {
+    const rosterIds = new Set(athletes.map((a) => a.id));
+    return results.filter((r) => rosterIds.has(r.athleteId));
+  }, [results, athletes]);
+
   const windowStart = windowStartDateStr(FEED_WINDOW_DAYS);
   const recentEntries = useMemo(() => {
     return results
@@ -108,7 +117,7 @@ export default function DailyPracticeSection({ results, athletes, wcaRecords, lo
     for (const r of recentEntries) {
       const eventName = eventNameMap[r.eventId] || r.eventId;
       const athleteName = athleteNameMap[r.athleteId] || r.athleteName || r.athleteId;
-      const badges = getResultBadgesPair(r, results, wcaRecords);
+      const badges = getResultBadgesPair(r, rosterResults, wcaRecords);
 
       const singleTier = getHighestBadge(badges.single);
       if (singleTier && r.single !== null) {
@@ -127,7 +136,7 @@ export default function DailyPracticeSection({ results, athletes, wcaRecords, lo
       return toMillis(b.submittedAt) - toMillis(a.submittedAt);
     });
     return rows;
-  }, [recentEntries, results, wcaRecords, eventNameMap, athleteNameMap]);
+  }, [recentEntries, rosterResults, wcaRecords, eventNameMap, athleteNameMap]);
 
   return (
     <section id="daily-practice" style={{ padding: '6rem 2rem', background: 'var(--bg)' }}>

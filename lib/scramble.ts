@@ -57,6 +57,13 @@ export const CSTIMER_SCRAMBLE_TYPE: Record<string, { type: string; len?: number 
   '333bld': { type: '333' },
   '444bld': { type: '444bld', len: 40 },
   '555bld': { type: '555bld', len: 60 },
+  // WCA-standard ids (lib/wca-events.ts) for the same three BLD events —
+  // ResultsEntryTab/admin pages use these spellings, the Timer page uses
+  // the 'bld' spellings above; both need to resolve here since this map is
+  // keyed by whatever eventId the caller passes to /api/scramble.
+  '333bf':  { type: '333' },
+  '444bf':  { type: '444bld', len: 40 },
+  '555bf':  { type: '555bld', len: 60 },
   '333mbf': { type: '333' },
   '333fm':  { type: '333fm' },
   'pyram':  { type: 'pyrso', len: 10 },

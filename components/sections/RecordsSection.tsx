@@ -103,10 +103,21 @@ export default function RecordsSection({ results, athletes, competitions, eventV
     return m;
   }, [athletes]);
 
+  // Club records (grid + history modal) only count results from athletes
+  // still on the roster — an Athlete doc getting deleted (e.g. the athlete
+  // left the club) shouldn't leave their old times permanently "holding"
+  // a TR that nobody can ever beat. This does NOT touch competition
+  // history/podium displays elsewhere, which should still show that the
+  // athlete competed — only "who currently holds this club record."
+  const rosterResults = useMemo(() => {
+    const rosterIds = new Set(athletes.map((a) => a.id));
+    return results.filter((r) => rosterIds.has(r.athleteId));
+  }, [results, athletes]);
+
   const { bestSingle, bestAverage } = useMemo(() => {
     const s: Record<string, RecordEntry> = {};
     const a: Record<string, RecordEntry> = {};
-    results.forEach((r) => {
+    rosterResults.forEach((r) => {
       const name = nameMap[r.athleteId] || r.athleteName || r.athleteId;
       if (r.single !== null && r.single !== undefined) {
         if (!s[r.eventId] || betterTime(r.single, s[r.eventId].time)) {
@@ -120,7 +131,7 @@ export default function RecordsSection({ results, athletes, competitions, eventV
       }
     });
     return { bestSingle: s, bestAverage: a };
-  }, [results, nameMap]);
+  }, [rosterResults, nameMap]);
 
   const visibleEvents = WCA_EVENTS.filter((ev) => isEventVisible(ev.id, eventVisibility, results));
 
@@ -145,8 +156,8 @@ export default function RecordsSection({ results, athletes, competitions, eventV
 
   const history = useMemo(() => {
     if (!selectedEvent) return [];
-    return buildRecordHistory(results, selectedEvent, historyTab, nameMap);
-  }, [results, selectedEvent, historyTab, nameMap]);
+    return buildRecordHistory(rosterResults, selectedEvent, historyTab, nameMap);
+  }, [rosterResults, selectedEvent, historyTab, nameMap]);
 
   // Reset tab when opening a new event
   useEffect(() => { setHistoryTab('single'); }, [selectedEvent]);

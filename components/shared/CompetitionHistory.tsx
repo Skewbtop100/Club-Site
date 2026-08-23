@@ -639,6 +639,7 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
             {athleteProfile && (
               <AthleteProfileOverlay
                 athlete={athleteProfile}
+                athletes={athletes}
                 onClose={() => setAthleteProfile(null)}
               />
             )}

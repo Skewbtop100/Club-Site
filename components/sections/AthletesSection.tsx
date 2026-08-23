@@ -96,6 +96,7 @@ export default function AthletesSection({ athletes, results, loading }: Props) {
       {selectedAthlete && (
         <AthleteProfileOverlay
           athlete={selectedAthlete}
+          athletes={athletes}
           onClose={() => setSelectedId(null)}
         />
       )}
