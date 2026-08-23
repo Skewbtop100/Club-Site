@@ -16,11 +16,34 @@ export const BADGE_STYLES: Record<RecordBadge, React.CSSProperties> = {
   PR: { background: '#0e7490', color: '#cffafe', border: '1px solid #22d3ee', boxShadow: '0 0 3px rgba(34,211,238,0.3)' },
 };
 
-// ── Internal helper ─────────────────────────────────────────────────────────
+// ── Internal helpers ────────────────────────────────────────────────────────
 
 /** Check if a value is a valid positive time (not null, DNF, DNS, zero). */
 function isValidTime(v: unknown): v is number {
   return typeof v === 'number' && v > 0 && v !== -1 && v !== -2;
+}
+
+/** Coerce a Firestore Timestamp | Date | string | number into epoch ms.
+ *  0 for missing/unparseable — sorts first, a defensive fallback. */
+function toMillis(ts: unknown): number {
+  if (!ts) return 0;
+  if (typeof ts === 'object' && ts !== null && 'toDate' in ts && typeof (ts as { toDate: () => Date }).toDate === 'function') {
+    return (ts as { toDate: () => Date }).toDate().getTime();
+  }
+  if (typeof ts === 'string') return new Date(ts).getTime() || 0;
+  if (typeof ts === 'number') return ts;
+  return 0;
+}
+
+/** Local YYYY-MM-DD for an arbitrary timestamp — same local-timezone
+ *  convention as lib/time-utils.ts's todayDateStr(), generalized to any
+ *  instant instead of just "now". */
+function dayKey(ts: unknown): string {
+  const d = new Date(toMillis(ts));
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function computeBadges(
@@ -120,6 +143,66 @@ export function getResultBadgesPair(
     ? computeBadges(result.eventId, 'average', result.average, result.athleteId, allResults, wcaRecords)
     : [];
   return { single, average };
+}
+
+// ── Point-in-time (Rule 1) ───────────────────────────────────────────────────
+//
+// computeBadges/getResultBadgesPair/getResultRecordBadges above always
+// compare against whatever pool they're handed "as of now" — fine for a
+// live leaderboard, but wrong for a feed/history that's supposed to show
+// what was true AT THE TIME a result was submitted. A result that WAS the
+// club record when set shouldn't silently downgrade from TR to PR later
+// just because someone else beat it afterward and the pool now includes
+// that later result too.
+
+/** Restricts `pool` to results submitted at or before `result`'s own
+ *  submittedAt. `<=` (not `<`) so `result` is compared against itself too —
+ *  the same "pool includes the candidate" idiom computeBadges already uses. */
+export function poolAsOf(pool: Result[], result: Result): Result[] {
+  const cutoff = toMillis(result.submittedAt);
+  return pool.filter(r => toMillis(r.submittedAt) <= cutoff);
+}
+
+/** Point-in-time version of getResultBadgesPair — scopes `pool` to what
+ *  existed at `result.submittedAt` before computing badges, so a badge
+ *  reflects what was true when the result was submitted instead of
+ *  fluctuating later based on whatever else has since been submitted. */
+export function getResultBadgesPairAtTime(
+  result: Result,
+  pool: Result[],
+  wcaRecords: WcaRecords,
+): { single: RecordBadge[]; average: RecordBadge[] } {
+  return getResultBadgesPair(result, poolAsOf(pool, result), wcaRecords);
+}
+
+// ── Day survival (Rule 2) ────────────────────────────────────────────────────
+
+/** True unless some OTHER result in `pool` — same eventId, same local
+ *  calendar day as `result`, submitted STRICTLY LATER — beats `result`'s
+ *  value for `type`. Used to decide whether a badge a result earned (per
+ *  getResultBadgesPairAtTime above) should count toward a summary total:
+ *  a record that got broken later the same day it was set doesn't count,
+ *  one that held up for the rest of that day does. Pass a club-wide pool
+ *  for WR/CR/NR/TR scope, or just the athlete's own results for PR scope.
+ *  This is a plain value comparison — it does NOT re-run badge computation
+ *  on the candidates, so it's cheap and independent of Rule 1 above. */
+export function survivesDay(
+  result: Result,
+  type: 'single' | 'average',
+  pool: Result[],
+): boolean {
+  const value = result[type];
+  if (!isValidTime(value)) return false;
+  const day = dayKey(result.submittedAt);
+  const cutoff = toMillis(result.submittedAt);
+  return !pool.some(other => {
+    if (other.id === result.id) return false;
+    if (other.eventId !== result.eventId) return false;
+    if (toMillis(other.submittedAt) <= cutoff) return false; // must be strictly later
+    if (dayKey(other.submittedAt) !== day) return false;
+    const v = other[type];
+    return isValidTime(v) && v < value;
+  });
 }
 
 /** Returns only the highest (most prominent) badge for display. */

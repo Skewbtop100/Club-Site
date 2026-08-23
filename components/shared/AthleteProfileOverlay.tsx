@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useState, useMemo } from 'react';
 import { getResultsByAthlete } from '@/lib/firebase/services/results';
 import { getCompetitions, DAILY_PRACTICE_COMPETITION_ID } from '@/lib/firebase/services/competitions';
-import { getResultBadgesPair, getHighestBadge, BADGE_STYLES as RECORD_BADGE_STYLES } from '@/lib/record-badges';
+import { getResultBadgesPairAtTime, survivesDay, getHighestBadge, BADGE_STYLES as RECORD_BADGE_STYLES } from '@/lib/record-badges';
 import { useWcaRecords } from '@/lib/hooks/useWcaRecords';
 import { fmtTime, formatDate } from '@/lib/time-utils';
 import { fmtMs } from '@/lib/timer-engine';
@@ -411,7 +411,9 @@ export default function AthleteProfileOverlay({ athlete, athletes, onClose }: Pr
     return { items, gold, silver, bronze };
   }, [allPublishedResults, allResults, compMap, athlete.id]);
 
-  // Records: TR/NR/CR/WR for this athlete
+  // Records: TR/NR/CR/WR for this athlete. Point-in-time (getResultBadgesPairAtTime)
+  // so a listed record reflects what was true when it was set, not a live
+  // recompute that could downgrade it after someone else's later result.
   const recordData = useMemo(() => {
     interface RecItem {
       eventId: string; eventName: string; type: 'single' | 'average';
@@ -422,7 +424,7 @@ export default function AthleteProfileOverlay({ athlete, athletes, onClose }: Pr
     if (!globalResults) return items;
     const seen = new Set<string>();
     allResults.forEach(r => {
-      const pair = getResultBadgesPair(r, globalResults, wcaRecords);
+      const pair = getResultBadgesPairAtTime(r, globalResults, wcaRecords);
       const comp = compMap[r.competitionId];
       (['single', 'average'] as const).forEach(type => {
         const val = r[type];
@@ -465,13 +467,24 @@ export default function AthleteProfileOverlay({ athlete, athletes, onClose }: Pr
     const byBadge: Record<string, BadgeDetail[]> = { WR: [], CR: [], NR: [], TR: [], PR: [] };
     const refResults = globalResults ?? allResults;
     if (refResults.length === 0) return byBadge;
-    const seen = new Set<string>();
     // Daily Practice entries count toward these totals too — practice PRs
     // are real personal records site-wide (Rankings/Records/the public feed
     // already treat them that way); this was only ever scanning competition
     // results, undercounting the summary panel's PR tally.
-    [...allResults, ...practiceResults].forEach(r => {
-      const pair = getResultBadgesPair(r, refResults, wcaRecords);
+    const ownResults = [...allResults, ...practiceResults];
+    // Rule 1: point-in-time — a badge reflects what was true when the
+    // result was submitted, not a live recompute against everything since.
+    // Rule 2: day survival — a badge only counts toward the total if no
+    // later-that-day result beat this specific value (club-wide scope for
+    // WR/CR/NR/TR, this athlete's own results only for PR — a national
+    // record isn't "broken" by someone beating your personal best, but a
+    // club record can be broken by anyone on the roster). No dedup by
+    // event+type here (unlike recordData above) — each distinct result
+    // that earned and survived its day is its own counted achievement, so
+    // a Monday TR and a later Friday TR both count even after Monday's was
+    // superseded.
+    ownResults.forEach(r => {
+      const pair = getResultBadgesPairAtTime(r, refResults, wcaRecords);
       const comp = compMap[r.competitionId];
       const maxRd = refResults.filter(gr => gr.competitionId === r.competitionId && gr.eventId === r.eventId)
         .reduce((m, gr) => Math.max(m, gr.round || 1), 1);
@@ -482,9 +495,8 @@ export default function AthleteProfileOverlay({ athlete, athletes, onClose }: Pr
         const val = r[type];
         if (!val || val <= 0 || val === -1 || val === -2) return;
         badges.forEach(b => {
-          const key = `${b}-${r.eventId}-${type}`;
-          if (seen.has(key)) return;
-          seen.add(key);
+          const survivalPool = b === 'PR' ? ownResults : refResults;
+          if (!survivesDay(r, type, survivalPool)) return;
           byBadge[b]?.push({
             badge: b, eventId: r.eventId, eventName: evName, type, time: val,
             compName: comp?.name || r.competitionName || r.competitionId || '—',
@@ -499,6 +511,9 @@ export default function AthleteProfileOverlay({ athlete, athletes, onClose }: Pr
   // Per-result badge map: resultId → { single: highest badge, average: highest badge }
   // Use allResults (athlete's own) as fallback for PR when globalResults hasn't loaded yet.
   // TR/NR/CR/WR need globalResults, but PR only needs the athlete's own results.
+  // Point-in-time (getResultBadgesPairAtTime) — same reasoning as recordData
+  // above: a result's badge shouldn't flicker later based on what else gets
+  // submitted after it.
   const resultBadgesMap = useMemo(() => {
     const m: Record<string, { single: RecordBadge | null; average: RecordBadge | null }> = {};
     // Use globalResults if available (for TR accuracy), otherwise athlete's own results for PR
@@ -509,7 +524,7 @@ export default function AthleteProfileOverlay({ athlete, athletes, onClose }: Pr
     // without practice results here, a practice-only PR pill would switch
     // tabs and silently find nothing to highlight.
     [...allResults, ...practiceResults].forEach(r => {
-      const pair = getResultBadgesPair(r, refResults, wcaRecords);
+      const pair = getResultBadgesPairAtTime(r, refResults, wcaRecords);
       const s = getHighestBadge(pair.single);
       const a = getHighestBadge(pair.average);
       if (s || a) m[r.id] = { single: s, average: a };
@@ -598,7 +613,12 @@ export default function AthleteProfileOverlay({ athlete, athletes, onClose }: Pr
   }, [allPublishedResults, allResults, historyEvent]);
 
   // Historical record badges: what badge each result earned WHEN it was set (TR/NR/CR/WR only, no PR)
-  // Also tracks current personal bests for highlighting
+  // Also tracks current personal bests for highlighting. Badge tier comes
+  // from getResultBadgesPairAtTime — point-in-time, so it reflects what was
+  // true at that result's submittedAt rather than a live recompute that
+  // could downgrade an earlier row after a later one supersedes it. Only
+  // checked on isNewPB moments (unchanged from before): a badge only shows
+  // on rows that were themselves a new personal best in this event.
   const { historyBadgeMap, currentPBs } = useMemo(() => {
     const map: Record<string, { single: RecordBadge | null; average: RecordBadge | null }> = {};
     const pbs: { single: number | null; average: number | null } = { single: null, average: null };
@@ -614,56 +634,29 @@ export default function AthleteProfileOverlay({ athlete, athletes, onClose }: Pr
       toSortableDate(compMap[b.competitionId]?.date || b.submittedAt)
     );
 
-    // WR/CR/NR thresholds from wcaRecords (in seconds)
-    const rec = wcaRecords[historyEvent];
-    const wrS = rec?.single?.WR?.value; const wrA = rec?.average?.WR?.value;
-    const crS = rec?.single?.CR?.value; const crA = rec?.average?.CR?.value;
-    const nrS = rec?.single?.NR?.value; const nrA = rec?.average?.NR?.value;
-
-    // TR = best across ALL athletes for this event
-    let trBestSingle: number | null = null;
-    let trBestAverage: number | null = null;
-    refResults.forEach(r => {
-      if (r.eventId !== historyEvent) return;
-      if (r.single != null && r.single > 0 && r.single !== -1 && r.single !== -2) {
-        if (trBestSingle === null || r.single < trBestSingle) trBestSingle = r.single;
-      }
-      if (r.average != null && r.average > 0 && r.average !== -1 && r.average !== -2) {
-        if (trBestAverage === null || r.average < trBestAverage) trBestAverage = r.average;
-      }
-    });
-
     // Track running best to detect when records were set
     let runBestSingle: number | null = null;
     let runBestAverage: number | null = null;
 
     sorted.forEach(r => {
       const entry: { single: RecordBadge | null; average: RecordBadge | null } = { single: null, average: null };
+      const isNewSinglePB = r.single != null && r.single > 0 && r.single !== -1 && r.single !== -2
+        && (runBestSingle === null || r.single < runBestSingle);
+      const isNewAveragePB = r.average != null && r.average > 0 && r.average !== -1 && r.average !== -2
+        && (runBestAverage === null || r.average < runBestAverage);
 
-      // Check single
-      if (r.single != null && r.single > 0 && r.single !== -1 && r.single !== -2) {
-        const isNewPB = runBestSingle === null || r.single < runBestSingle;
-        if (isNewPB) {
-          runBestSingle = r.single;
-          const valSec = r.single / 100;
-          // Check from highest to lowest, assign only highest
-          if (wrS != null && valSec <= wrS) entry.single = 'WR';
-          else if (crS != null && valSec <= crS) entry.single = 'CR';
-          else if (nrS != null && valSec <= nrS) entry.single = 'NR';
-          else if (trBestSingle !== null && r.single <= trBestSingle) entry.single = 'TR';
+      if (isNewSinglePB) runBestSingle = r.single;
+      if (isNewAveragePB) runBestAverage = r.average;
+
+      if (isNewSinglePB || isNewAveragePB) {
+        const pair = getResultBadgesPairAtTime(r, refResults, wcaRecords);
+        if (isNewSinglePB) {
+          const significant = pair.single.filter(b => b !== 'PR');
+          if (significant.length > 0) entry.single = significant[0];
         }
-      }
-
-      // Check average
-      if (r.average != null && r.average > 0 && r.average !== -1 && r.average !== -2) {
-        const isNewPB = runBestAverage === null || r.average < runBestAverage;
-        if (isNewPB) {
-          runBestAverage = r.average;
-          const valSec = r.average / 100;
-          if (wrA != null && valSec <= wrA) entry.average = 'WR';
-          else if (crA != null && valSec <= crA) entry.average = 'CR';
-          else if (nrA != null && valSec <= nrA) entry.average = 'NR';
-          else if (trBestAverage !== null && r.average <= trBestAverage) entry.average = 'TR';
+        if (isNewAveragePB) {
+          const significant = pair.average.filter(b => b !== 'PR');
+          if (significant.length > 0) entry.average = significant[0];
         }
       }
 
@@ -1160,7 +1153,9 @@ export default function AthleteProfileOverlay({ athlete, athletes, onClose }: Pr
                             // Single and average are separate records — check both independently,
                             // and show whatever tier was actually earned (WR/CR/NR/TR/PR), same as
                             // RankingsSection/DailyPracticeSection, not just a generic "PR" flag.
-                            const badges = getResultBadgesPair(r, practiceHistoryPool, wcaRecords);
+                            // Point-in-time (getResultBadgesPairAtTime) — same reasoning as every
+                            // other per-result badge computation in this file.
+                            const badges = getResultBadgesPairAtTime(r, practiceHistoryPool, wcaRecords);
                             const singleTier = getHighestBadge(badges.single);
                             const avgTier = getHighestBadge(badges.average);
                             const badgeStyle = (tier: RecordBadge): React.CSSProperties => ({

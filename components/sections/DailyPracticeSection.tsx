@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useLang } from '@/lib/i18n';
 import { DAILY_PRACTICE_COMPETITION_ID } from '@/lib/firebase/services/competitions';
-import { getResultBadgesPair, getHighestBadge, BADGE_STYLES, BADGE_PRIORITY, type RecordBadge } from '@/lib/record-badges';
+import { getResultBadgesPairAtTime, getHighestBadge, BADGE_STYLES, BADGE_PRIORITY, type RecordBadge } from '@/lib/record-badges';
 import { fmtTime } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import type { Athlete, Result, WcaRecords } from '@/lib/types';
@@ -110,14 +110,19 @@ export default function DailyPracticeSection({ results, athletes, wcaRecords, lo
   // WCA-Live "Recent records" style: only entries that actually set a record
   // appear, and single/average are judged independently — an entry that PRs
   // on both produces two rows, one on neither produces zero. Judged against
-  // the full merged list (competitions + all Daily Practice history), so a
-  // practice Ao5 beating an official competition record shows the same tier.
+  // the full merged pool (competitions + all Daily Practice history) AS IT
+  // STOOD AT THAT ENTRY'S submittedAt (getResultBadgesPairAtTime) — a
+  // point-in-time comparison, not a live one. Without this, an entry that
+  // set a TR in the morning would silently downgrade to PR once someone
+  // else's later-that-day result entered the pool and became the new
+  // live-best; a feed entry should permanently reflect what was true when
+  // it was submitted, not fluctuate on every re-render.
   const recordRows = useMemo(() => {
     const rows: RecordRow[] = [];
     for (const r of recentEntries) {
       const eventName = eventNameMap[r.eventId] || r.eventId;
       const athleteName = athleteNameMap[r.athleteId] || r.athleteName || r.athleteId;
-      const badges = getResultBadgesPair(r, rosterResults, wcaRecords);
+      const badges = getResultBadgesPairAtTime(r, rosterResults, wcaRecords);
 
       const singleTier = getHighestBadge(badges.single);
       if (singleTier && r.single !== null) {
