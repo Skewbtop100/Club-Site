@@ -185,7 +185,8 @@ export default function SolvePage() {
 
       recorder.releaseCamera();
       setStage('sent');
-    } catch {
+    } catch (err) {
+      console.error('Submit failed:', err);
       setSubmitError('Илгээхэд алдаа гарлаа. Дахин оролдоно уу.');
     } finally {
       setSubmitting(false);
