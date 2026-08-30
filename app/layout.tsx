@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { headers } from 'next/headers';
 import './globals.css';
 import '@cubing/icons/css';
 import { LangProvider } from '@/lib/i18n';
@@ -22,7 +23,10 @@ export const viewport: Viewport = {
   themeColor: '#080810',
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const headerList = await headers();
+  const isOnlineCompetitionHost = headerList.get('x-online-competition-host') === '1';
+
   return (
     <html lang="en" data-theme="dark" suppressHydrationWarning>
       <head>
@@ -37,7 +41,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ThemeProvider />
         <AuthProvider>
           <LangProvider>
-            <ConditionalNavbar />
+            <ConditionalNavbar forceHidden={isOnlineCompetitionHost} />
             <main>{children}</main>
             <ToastHost />
           </LangProvider>

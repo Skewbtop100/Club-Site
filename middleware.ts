@@ -20,9 +20,17 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // usePathname() on the client still reports the pre-rewrite URL (the
+  // browser bar never changes), so anything deciding UI based on "are we
+  // in the online-competition feature" from a client component can't rely
+  // on pathname alone here — this header lets server components detect the
+  // subdomain directly. See ConditionalNavbar/app/layout.tsx.
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set('x-online-competition-host', '1');
+
   const url = request.nextUrl.clone();
   url.pathname = pathname === '/' ? COMPETITION_PREFIX : `${COMPETITION_PREFIX}${pathname}`;
-  return NextResponse.rewrite(url);
+  return NextResponse.rewrite(url, { request: { headers: requestHeaders } });
 }
 
 export const config = {
