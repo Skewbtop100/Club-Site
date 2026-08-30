@@ -1,0 +1,1363 @@
+/* Design tokens for the public online-competition feature — scoped to the
+   `.oc-theme` wrapper in app/online-competition/layout.tsx so nothing here
+   leaks into (or is influenced by) the club site's own theme variables in
+   app/globals.css. This file is only ever imported by that layout, so it's
+   only bundled for routes under /online-competition. */
+.oc-theme {
+  /* ── v2 design system (2026) — warm paper / ink / volt ────────────────
+     Used by the admin dashboard (app/online-competition/admin/**). This
+     is the current design system going forward. */
+  --color-paper: #FFFDF8;
+  --color-paper-2: #F4F1EA;
+  --color-paper-3: #FBF9F4;
+  --color-border: #DCD6C8;
+  --color-border-soft: #EFEBE0;
+  --color-ink: #16140F;
+  --color-ink-soft: #4C473C;
+  --color-ink-faint: #8A8474;
+  --color-ink-mute: #A9A392;
+
+  --color-stage: #0D0C0A;
+  --color-stage-2: #191713;
+  --color-stage-3: #141210;
+  --color-stage-line: #2A2721;
+
+  --color-volt: #DFFF4F;
+  --color-volt-hi: #E9FF7A;
+
+  --color-ok: #2E9E5B;
+  --color-ok-bg: #E9F6EE;
+  --color-ok-hover: #25864C;
+  --color-ok-active: #1D6E3E;
+
+  --color-warn: #E08A00;
+  --color-warn-text: #8A5400;
+  --color-warn-bg: #FFF3DB;
+
+  --color-dnf: #D8402C;
+  --color-dnf-text: #B22E1D;
+  --color-dnf-bg: #FDE8E4;
+
+  /* ── v1 design system (legacy) ─────────────────────────────────────────
+     Dark-violet/StickerChip system. Still used by
+     app/online-competition/[competitionId]/page.tsx, which hasn't been
+     migrated to v2 yet (a later phase) — kept here so that page keeps
+     rendering exactly as before. Do not build new UI against these;
+     remove once that page is migrated. */
+  --oc-bg: #0D0E1A;
+  --oc-surface: #161829;
+  --oc-surface-raised: #1E2138;
+  --oc-accent: #FFB020;
+  --oc-success: #4FD1C5;
+  --oc-warning: #FFB020;
+  --oc-danger: #FB5B5B;
+  --oc-text-primary: #F5F5F7;
+  --oc-text-muted: #9CA3B4;
+  --oc-border: #262A45;
+  --oc-danger-bg: rgba(251, 91, 91, 0.12);
+  --oc-danger-border: rgba(251, 91, 91, 0.4);
+}
+
+/* [competitionId]/page.tsx's root <main> — the one spot in the v1 system
+   that needs a real breakpoint (px-3 py-8 -> sm:px-4 sm:py-10), which an
+   inline style can't express. A plain, unlayered class beats
+   app/globals.css's `* { margin: 0; padding: 0; }` reset the same way
+   every other .oc-* class here does (real class specificity vs. a bare
+   universal selector, and unlayered vs. Tailwind's layered utilities). */
+.oc-v1-main-padding {
+  padding: 32px 12px;
+}
+@media (min-width: 640px) {
+  .oc-v1-main-padding {
+    padding: 40px 16px;
+  }
+}
+
+/* ── v2 admin dashboard — EXACT literal port of the approved Claude Design
+   mockup (2026). Every color/size/spacing value below is copied verbatim
+   from the mockup spec, not derived from the token block above — this is
+   deliberate: the mockup was reviewed and approved with these literal
+   values, and re-deriving them from --color-* tokens risks silent drift
+   if a token is ever tuned for some other purpose. The font-family
+   *bindings* (var(--oc-font-heading)/var(--oc-font-mono)) are the one
+   exception: they still point at next/font's self-hosted Geologica/
+   JetBrains Mono loads (see layout.tsx) rather than the literal family
+   name string, because writing `font-family: Geologica` directly would
+   silently fall back to the visitor's system sans-serif on any machine
+   without Geologica actually installed — next/font's generated variable
+   is what makes the self-hosted font file actually apply.
+   Plain CSS classes (not Tailwind utilities) throughout, since several of
+   these need real `:hover`/`:focus` pseudo-classes that inline React
+   styles can't express, and hand-authored classes have zero dependency on
+   Tailwind's scanner recognizing a dynamically-assembled class string. */
+
+/* Button */
+.oc-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.oc-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.oc-btn:focus-visible {
+  outline: 2px solid #16140F;
+  outline-offset: 2px;
+}
+.oc-btn-primary {
+  border: none;
+  background: #DFFF4F;
+  color: #16140F;
+  padding: 10px 14px;
+  font: 600 13px var(--oc-font-heading), sans-serif;
+}
+.oc-btn-primary:hover:not(:disabled) {
+  background: #E9FF7A;
+}
+/* Full-width dark variant — e.g. the login "Нэвтрэх" button. */
+.oc-btn-primary-dark {
+  display: flex;
+  width: 100%;
+  border: none;
+  background: #16140F;
+  color: #F4F1EA;
+  padding: 16px;
+  font: 600 14px var(--oc-font-heading), sans-serif;
+}
+.oc-btn-primary-dark:hover:not(:disabled) {
+  background: #33302A;
+}
+.oc-btn-primary-dark:active:not(:disabled) {
+  background: #000;
+}
+.oc-btn-outline {
+  border: 1px solid #DCD6C8;
+  background: transparent;
+  color: #4C473C;
+  padding: 9px 12px;
+  font: 500 10px var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+}
+.oc-btn-outline:hover:not(:disabled) {
+  border-color: #16140F;
+  color: #16140F;
+}
+/* Small size modifier (e.g. the "Засах" table-row action button). */
+.oc-btn-sm {
+  padding: 7px 10px;
+}
+
+/* Form input / select / textarea */
+.oc-input {
+  width: 100%;
+  border: 1px solid #DCD6C8;
+  background: #F4F1EA;
+  border-radius: 2px;
+  padding: 12px;
+  color: #16140F;
+  outline: none;
+  font: 400 13px var(--oc-font-heading), sans-serif;
+}
+.oc-input:focus {
+  border-color: #16140F;
+  background: #FFFDF8;
+}
+/* Numeric/date fields — mono per the exact spec. */
+.oc-input-mono {
+  font: 400 13px var(--oc-font-mono), monospace;
+}
+/* Selects get 11px padding instead of 12px per the exact spec. */
+.oc-input-select {
+  padding: 11px;
+}
+
+/* Form label */
+.oc-field-label {
+  display: block;
+  font: 500 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.16em;
+  color: #8A8474;
+  text-transform: uppercase;
+}
+
+/* Square toggle (e.g. "Хязгааргүй") */
+.oc-square-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #DCD6C8;
+  background: transparent;
+  padding: 11px 12px;
+  border-radius: 2px;
+  font: 500 12px var(--oc-font-heading), sans-serif;
+  color: #4C473C;
+  cursor: pointer;
+}
+.oc-square-toggle:hover {
+  border-color: #16140F;
+}
+.oc-square-toggle:focus-visible {
+  outline: 2px solid #16140F;
+  outline-offset: 2px;
+}
+
+/* Admin tab switcher */
+.oc-tabs {
+  display: flex;
+  gap: 1px;
+  padding: 0 24px;
+  background: #FFFDF8;
+  border-bottom: 1px solid #DCD6C8;
+}
+.oc-tab {
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #8A8474;
+  padding: 13px 16px;
+  font: 600 13px var(--oc-font-heading), sans-serif;
+  cursor: pointer;
+}
+.oc-tab:hover {
+  color: #16140F;
+}
+.oc-tab-active {
+  color: #16140F;
+  border-bottom-color: #16140F;
+}
+.oc-tab:focus-visible {
+  outline: 2px solid #16140F;
+  outline-offset: 2px;
+}
+
+/* CompetitionsTab table */
+.oc-table {
+  border: 1px solid #DCD6C8;
+  background: #FFFDF8;
+}
+.oc-table-header {
+  display: grid;
+  grid-template-columns: 2.2fr 1.2fr 1fr .8fr 80px;
+  gap: 12px;
+  padding: 11px 14px;
+  border-bottom: 1px solid #DCD6C8;
+  background: #F4F1EA;
+  font: 500 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.14em;
+  color: #8A8474;
+  text-transform: uppercase;
+}
+.oc-table-row {
+  display: grid;
+  grid-template-columns: 2.2fr 1.2fr 1fr .8fr 80px;
+  gap: 12px;
+  align-items: center;
+  padding: 13px 14px;
+  border-bottom: 1px solid #EFEBE0;
+}
+.oc-table-row:hover {
+  background: #FBF9F4;
+}
+.oc-table-name {
+  font: 500 13px var(--oc-font-heading), sans-serif;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oc-table-date {
+  font: 400 11px var(--oc-font-mono), monospace;
+  color: #4C473C;
+}
+.oc-table-count {
+  font: 500 12px var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Empty state */
+.oc-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 72px 20px;
+  border: 1px dashed #DCD6C8;
+}
+.oc-empty-icon {
+  display: grid;
+  grid-template-columns: repeat(3, 11px);
+  gap: 3px;
+  opacity: 0.3;
+}
+.oc-empty-icon-cell {
+  width: 11px;
+  height: 11px;
+  border: 1px solid #8A8474;
+}
+.oc-empty-text {
+  font: 500 15px var(--oc-font-heading), sans-serif;
+  color: #8A8474;
+}
+
+/* ── Phase 2 — public hub (app/online-competition/page.tsx) and
+   competition detail (app/online-competition/[competitionId]/details)
+   pages. Same exact-literal-port approach as the admin build: colors/
+   sizes are hardcoded, not derived from the --color-* token block, and
+   anything needing a real :hover/:focus/@keyframes/@media rule is a
+   plain unlayered class here rather than a Tailwind utility — Tailwind's
+   utilities layer always loses to app/globals.css's unlayered
+   `* { margin: 0; padding: 0; }` reset regardless of specificity (CSS
+   Cascade Layers), so spacing must be inline style or a real class. */
+
+.oc-mono-label {
+  font: 500 10px var(--oc-font-mono), monospace;
+  letter-spacing: 0.18em;
+  color: #8A8474;
+  text-transform: uppercase;
+}
+
+/* Responsive breakpoint used throughout: ~900px, matching the spec's
+   "desktop ≥ ~900px" / "mobile < ~900px" split. Both trees are always in
+   the DOM; only one is ever visible, so there's no JS layout-detection
+   flash on first paint. */
+.oc-hub-desktop-only {
+  display: block;
+}
+.oc-hub-mobile-only {
+  display: none;
+}
+@media (max-width: 899px) {
+  .oc-hub-desktop-only {
+    display: none;
+  }
+  .oc-hub-mobile-only {
+    display: block;
+  }
+  /* Higher specificity (two classes) than any single-class rule that also
+     sets `display` on an .oc-hub-desktop-only element (e.g. .oc-hub-nav-
+     links' `display: flex`) — makes the mobile hide win deterministically
+     regardless of which rule happens to come later in this file, rather
+     than relying on source-order alone. */
+  .oc-hub-desktop-only.oc-hub-nav-links {
+    display: none;
+  }
+}
+
+/* Nav bar */
+.oc-hub-nav {
+  border: 1px solid #DCD6C8;
+  background: #FFFDF8;
+  padding: 16px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.oc-hub-logo-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 5px);
+  gap: 2px;
+}
+/* Separate from .oc-hub-desktop-only on purpose: that class only toggles
+   display:block/none for the responsive breakpoint. An inline
+   `style={{ display: 'flex' }}` on the SAME element would always win over
+   the class's mobile `display: none` (inline style beats any class,
+   media-query or not), silently defeating the hide-on-mobile behavior —
+   confirmed live: the nav links stayed visible at a 400px viewport until
+   this was split into its own class instead of an inline style. */
+.oc-hub-nav-links {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+.oc-hub-nav-link {
+  font: 400 13px var(--oc-font-heading), sans-serif;
+  color: #8A8474;
+  border-bottom: 2px solid transparent;
+  padding-bottom: 2px;
+}
+.oc-hub-nav-link-active {
+  font-weight: 500;
+  color: #16140F;
+  border-bottom-color: #16140F;
+}
+.oc-hub-user-badge {
+  border: 1px solid #DCD6C8;
+  border-radius: 2px;
+  padding: 6px 10px 6px 6px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+/* Nav-bar-scale "Нэвтрэх" button — the admin dashboard's .oc-btn-outline
+   uses a dense 10px mono label meant for table rows, which reads oddly
+   next to the nav bar's 13-15px Geologica text; this matches the nav
+   bar's own type scale instead. */
+.oc-hub-signin-btn {
+  border: 1px solid #DCD6C8;
+  background: transparent;
+  color: #16140F;
+  padding: 8px 14px;
+  border-radius: 2px;
+  font: 500 13px var(--oc-font-heading), sans-serif;
+  cursor: pointer;
+}
+.oc-hub-signin-btn:hover {
+  border-color: #16140F;
+  background: #F4F1EA;
+}
+
+/* Live banner */
+.oc-hub-live-banner {
+  background: #0D0C0A;
+  padding: 24px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 16px;
+}
+.oc-hub-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #DFFF4F;
+  animation: oc-pulse 1.4s ease-in-out infinite;
+}
+@keyframes oc-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.oc-btn-live-cta {
+  border: none;
+  border-radius: 2px;
+  background: #DFFF4F;
+  color: #0D0C0A;
+  padding: 15px 24px;
+  font: 600 14px var(--oc-font-heading), sans-serif;
+  cursor: pointer;
+}
+.oc-btn-live-cta:hover {
+  background: #E9FF7A;
+}
+
+/* Main grid (desktop) — 1px gap + colored background = hairline dividers */
+.oc-hub-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 1.7fr) minmax(260px, 1fr);
+  gap: 1px;
+  background: #DCD6C8;
+}
+.oc-hub-left {
+  background: #FBF9F4;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+}
+.oc-hub-right {
+  background: #FBF9F4;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+.oc-hub-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.oc-hub-row-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Competition rows — live / upcoming / finished */
+.oc-hub-row-live {
+  border: 1px solid #16140F;
+  background: #FFFDF8;
+  padding: 15px 16px;
+  border-radius: 2px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+}
+.oc-hub-row-live:hover {
+  background: #F4F1EA;
+}
+.oc-hub-row-upcoming {
+  border: 1px solid #DCD6C8;
+  background: #FFFDF8;
+  padding: 15px 16px;
+  border-radius: 2px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+}
+.oc-hub-row-upcoming:hover {
+  border-color: #16140F;
+}
+.oc-hub-row-finished {
+  border-bottom: 1px solid #EFEBE0;
+  padding: 13px 2px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+}
+.oc-hub-badge-live {
+  border: 1px solid #DFFF4F;
+  background: #DFFF4F;
+  color: #0D0C0A;
+  padding: 6px 8px;
+  border-radius: 2px;
+  font: 700 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.14em;
+  white-space: nowrap;
+  align-self: flex-start;
+}
+.oc-hub-badge-outline {
+  border: 1px solid #DCD6C8;
+  color: #4C473C;
+  padding: 6px 8px;
+  border-radius: 2px;
+  font: 500 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+}
+.oc-hub-badge-finished {
+  background: #EFEBE0;
+  color: #8A8474;
+  padding: 6px 8px;
+  border-radius: 2px;
+  font: 500 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+  align-self: flex-start;
+}
+.oc-hub-list {
+  border: 1px solid #DCD6C8;
+  background: #FFFDF8;
+}
+
+/* Leaderboard rows (ОНООНЫ ХҮСНЭГТ) — the exact literal styles from the
+   original Phase 2 spec, only ever rendered as an empty state until the
+   season-points recompute existed to actually produce rows. */
+.oc-hub-lb-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 13px;
+  border-bottom: 1px solid #EFEBE0;
+}
+.oc-hub-lb-rank {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #F4F1EA;
+  color: #16140F;
+  font: 700 11px var(--oc-font-mono), monospace;
+}
+.oc-hub-lb-name {
+  flex: 1;
+  font: 500 13px var(--oc-font-heading), sans-serif;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oc-hub-lb-points {
+  font: 700 15px var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Mobile status tabs + card list */
+.oc-hub-mobile-tabs {
+  display: flex;
+  gap: 8px;
+}
+.oc-hub-mobile-tab {
+  flex: 1;
+  border: 1px solid #DCD6C8;
+  background: transparent;
+  color: #4C473C;
+  padding: 9px 4px;
+  border-radius: 2px;
+  font: 500 10px var(--oc-font-heading), sans-serif;
+  cursor: pointer;
+}
+.oc-hub-mobile-tab-active {
+  border-color: #16140F;
+  background: #16140F;
+  color: #FFFDF8;
+}
+.oc-hub-mobile-card {
+  border: 1px solid #DCD6C8;
+  background: #FBF9F4;
+  padding: 13px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.oc-hub-mobile-card-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* ── Competition detail page ─────────────────────────────────────────── */
+
+.oc-detail-header {
+  background: #0D0C0A;
+  padding: 26px 26px 24px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+}
+.oc-detail-status-badge {
+  display: inline-block;
+  border: 1px solid #2A2721;
+  color: #8A8474;
+  padding: 5px 8px;
+  border-radius: 2px;
+  font: 500 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.oc-detail-info-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1px;
+  background: #DCD6C8;
+}
+.oc-detail-info-cell {
+  background: #FFFDF8;
+  padding: 18px 20px;
+}
+.oc-detail-progress-track {
+  height: 5px;
+  background: #EFEBE0;
+}
+.oc-detail-progress-fill {
+  height: 100%;
+  background: #16140F;
+}
+.oc-event-chip-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 9px;
+}
+.oc-event-chip {
+  border: 1px solid #DCD6C8;
+  background: #FFFDF8;
+  padding: 13px 14px;
+  border-radius: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Registration panel — idle / picking / registered */
+.oc-reg-idle {
+  border-top: 1px solid #DCD6C8;
+  padding-top: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.oc-btn-register {
+  border: none;
+  border-radius: 2px;
+  background: #DFFF4F;
+  color: #0D0C0A;
+  padding: 16px 26px;
+  font: 600 15px var(--oc-font-heading), sans-serif;
+  cursor: pointer;
+}
+.oc-btn-register:hover {
+  background: #E9FF7A;
+}
+.oc-btn-register:active {
+  background: #C8E93C;
+}
+
+.oc-reg-picking {
+  border: 1px solid #16140F;
+  background: #FFFDF8;
+  margin-top: 6px;
+}
+.oc-reg-picking-header {
+  padding: 18px 20px;
+  border-bottom: 1px solid #DCD6C8;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.oc-reg-picking-body {
+  padding: 14px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.oc-reg-toggle-row {
+  border: 1px solid #DCD6C8;
+  background: transparent;
+  padding: 13px 14px;
+  border-radius: 2px;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+.oc-reg-toggle-row:hover {
+  border-color: #16140F;
+}
+.oc-reg-picking-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 20px;
+  border-top: 1px solid #DCD6C8;
+  background: #F4F1EA;
+}
+.oc-btn-cancel {
+  border: 1px solid #4C473C;
+  background: transparent;
+  color: #16140F;
+  padding: 13px 18px;
+  border-radius: 2px;
+  font: 500 13px var(--oc-font-heading), sans-serif;
+  cursor: pointer;
+}
+.oc-btn-cancel:hover {
+  background: #EFEBE0;
+}
+.oc-btn-register-confirm {
+  border: none;
+  background: #DFFF4F;
+  color: #0D0C0A;
+  padding: 13px 22px;
+  border-radius: 2px;
+  font: 600 14px var(--oc-font-heading), sans-serif;
+  cursor: pointer;
+}
+.oc-btn-register-confirm:hover {
+  background: #E9FF7A;
+}
+
+.oc-reg-registered {
+  border: 1px solid #2E9E5B;
+  background: #E9F6EE;
+  padding: 20px;
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+.oc-reg-chip {
+  display: inline-block;
+  border: 1px solid #2E9E5B;
+  background: #FFFDF8;
+  color: #1D6E3E;
+  padding: 8px 10px;
+  border-radius: 2px;
+  font: 600 12px var(--oc-font-mono), monospace;
+}
+.oc-btn-edit-registration {
+  border: 1px solid #4C473C;
+  background: transparent;
+  color: #16140F;
+  padding: 11px 16px;
+  border-radius: 2px;
+  font: 500 12px var(--oc-font-heading), sans-serif;
+  cursor: pointer;
+}
+.oc-btn-edit-registration:hover {
+  background: #FFFDF8;
+}
+
+/* ── Phase 4 — "Миний тэмцээнүүд" dashboard
+   (app/online-competition/dashboard/page.tsx). Same exact-literal-port
+   approach as every prior phase. */
+
+.oc-dash-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 20px 14px;
+  border-bottom: 1px solid #DCD6C8;
+}
+
+/* Live competition card */
+.oc-dash-live-card {
+  border: 1px solid #16140F;
+  background: #FBF9F4;
+}
+.oc-dash-live-top {
+  padding: 14px;
+  border-bottom: 1px solid #DCD6C8;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+.oc-dash-badge-live {
+  display: inline-block;
+  border: 1px solid #DFFF4F;
+  background: #DFFF4F;
+  color: #0D0C0A;
+  padding: 5px 6px;
+  border-radius: 2px;
+  font: 700 8px var(--oc-font-mono), monospace;
+  letter-spacing: 0.14em;
+  white-space: nowrap;
+}
+.oc-dash-event-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #EFEBE0;
+}
+.oc-dash-btn-start {
+  border: none;
+  background: #DFFF4F;
+  color: #0D0C0A;
+  padding: 11px 14px;
+  border-radius: 2px;
+  font: 600 12px var(--oc-font-heading), sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.oc-dash-btn-start:hover {
+  background: #E9FF7A;
+}
+.oc-dash-btn-start-disabled {
+  border: 1px solid #DCD6C8;
+  background: #EFEBE0;
+  color: #A9A392;
+  padding: 11px 14px;
+  border-radius: 2px;
+  font: 600 12px var(--oc-font-heading), sans-serif;
+  cursor: not-allowed;
+  white-space: nowrap;
+}
+.oc-dash-status-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #2E9E5B;
+  background: #E9F6EE;
+  padding: 6px 8px;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+.oc-dash-status-dns {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #D8402C;
+  background: #FDE8E4;
+  padding: 6px 8px;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+
+/* Upcoming competition card */
+.oc-dash-upcoming-card {
+  border: 1px solid #DCD6C8;
+  background: #FBF9F4;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.oc-dash-badge-outline {
+  display: inline-block;
+  border: 1px solid #DCD6C8;
+  color: #4C473C;
+  padding: 5px 6px;
+  border-radius: 2px;
+  font: 500 8px var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+
+/* Empty state (dashboard-scale — smaller than the shared .oc-empty) */
+.oc-dash-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  border: 1px dashed #DCD6C8;
+  padding: 26px 14px;
+}
+.oc-dash-empty-icon {
+  display: grid;
+  grid-template-columns: repeat(3, 9px);
+  gap: 2px;
+  opacity: 0.3;
+}
+.oc-dash-empty-icon-cell {
+  width: 9px;
+  height: 9px;
+  border: 1px solid #8A8474;
+}
+
+/* ── Phase 5 — the real solve flow
+   (app/online-competition/[competitionId]/solve/[eventId]/page.tsx). Dark
+   "stage" theme — distinct from every other page's warm paper theme, this
+   is the one screen meant to be used one-handed, camera up, in a dim
+   room. Same exact-literal-port approach as every prior phase. */
+
+.oc-solve-page {
+  min-height: 100vh;
+  background: #0D0C0A;
+  color: #F4F1EA;
+}
+.oc-solve-shell {
+  max-width: 480px;
+  margin: 0 auto;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 18px;
+  position: relative;
+}
+
+/* Persistent header + attempt pips + divider */
+.oc-solve-header {
+  display: flex;
+  justify-content: space-between;
+  flex: none;
+}
+.oc-solve-pips {
+  display: flex;
+  gap: 4px;
+}
+.oc-solve-pip {
+  width: 9px;
+  height: 9px;
+  box-sizing: border-box;
+}
+.oc-solve-pip-done {
+  background: #16140F;
+}
+.oc-solve-pip-current {
+  background: #DFFF4F;
+}
+.oc-solve-pip-pending {
+  background: transparent;
+  border: 1px solid #2A2721;
+}
+.oc-solve-divider {
+  height: 1px;
+  background: #2A2721;
+  margin: 16px 0 0;
+  flex: none;
+}
+
+/* State 1 — reveal */
+.oc-solve-reveal {
+  padding-top: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.oc-solve-chunk-bar-track {
+  display: flex;
+  gap: 4px;
+}
+.oc-solve-chunk-bar {
+  width: 26px;
+  height: 3px;
+  background: #2A2721;
+}
+.oc-solve-chunk-bar-filled {
+  background: #DFFF4F;
+}
+.oc-solve-chunk-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: oc-solve-fade-in-up 0.5s ease-out;
+}
+@keyframes oc-solve-fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.oc-solve-move-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.oc-solve-move-tile {
+  font: 700 21px var(--oc-font-mono), monospace;
+  color: #F4F1EA;
+  background: #191713;
+  border: 1px solid #2A2721;
+  padding: 11px 12px;
+  border-radius: 2px;
+}
+
+/* States 2/4 — shared camera-box chrome */
+.oc-solve-camera-box {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  border: 1px solid #2A2721;
+  background: repeating-linear-gradient(135deg, #141210 0 8px, #191713 8px 16px);
+  overflow: hidden;
+}
+.oc-solve-camera-box-portrait {
+  position: relative;
+  aspect-ratio: 3 / 4;
+  border: 1px solid #2A2721;
+  background: #141210;
+  overflow: hidden;
+}
+.oc-solve-camera-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.oc-solve-corner {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+}
+.oc-solve-corner-tl {
+  top: 8px;
+  left: 8px;
+  border-top: 1px solid #DFFF4F;
+  border-left: 1px solid #DFFF4F;
+}
+.oc-solve-corner-br {
+  bottom: 8px;
+  right: 8px;
+  border-bottom: 1px solid #DFFF4F;
+  border-right: 1px solid #DFFF4F;
+}
+
+/* State 2 — go (camera-ready countdown) */
+.oc-solve-go {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding-top: 20px;
+  flex: 1;
+}
+.oc-solve-countdown-number {
+  font: 700 148px/0.85 var(--oc-font-mono), monospace;
+  color: #DFFF4F;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  animation: oc-solve-pop 0.3s ease-out;
+}
+@keyframes oc-solve-pop {
+  from {
+    transform: scale(0.85);
+    opacity: 0.4;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* State 3 — goNow (GO flash) */
+.oc-solve-gonow {
+  position: absolute;
+  inset: 0;
+  background: #DFFF4F;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  z-index: 50;
+}
+.oc-solve-gonow-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 20px);
+  gap: 4px;
+}
+.oc-solve-gonow-cell {
+  width: 20px;
+  height: 20px;
+  background: #0D0C0A;
+}
+.oc-solve-gonow-title {
+  font: 700 34px var(--oc-font-heading), sans-serif;
+  color: #0D0C0A;
+  text-align: center;
+}
+
+/* State 4 — rec (recording, no timer) */
+.oc-solve-rec {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding-top: 20px;
+  flex: 1;
+}
+.oc-solve-rec-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #D8402C;
+  animation: oc-solve-pulse-rec 1.1s ease-in-out infinite;
+}
+@keyframes oc-solve-pulse-rec {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.oc-solve-tick-strip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 8px;
+  background: repeating-linear-gradient(90deg, #2A2721 0 6px, transparent 6px 12px);
+  background-size: 24px 100%;
+  animation: oc-solve-tick-scroll 3s linear infinite;
+}
+@keyframes oc-solve-tick-scroll {
+  from {
+    background-position-x: 0;
+  }
+  to {
+    background-position-x: -24px;
+  }
+}
+.oc-solve-btn-finish {
+  width: 100%;
+  border: 1px solid #F4F1EA;
+  background: transparent;
+  color: #F4F1EA;
+  padding: 24px;
+  border-radius: 2px;
+  font: 600 22px var(--oc-font-heading), sans-serif;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+.oc-solve-btn-finish:hover {
+  background: #F4F1EA;
+  color: #0D0C0A;
+}
+
+/* State 5 — entry (manual time entry) */
+.oc-solve-entry {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding-top: 18px;
+  flex: 1;
+}
+.oc-solve-entry-well {
+  border: 1px solid #2A2721;
+  background: #141210;
+  padding: 18px 16px;
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+}
+.oc-solve-entry-digits {
+  font: 700 52px var(--oc-font-mono), monospace;
+  color: #DFFF4F;
+  font-variant-numeric: tabular-nums;
+}
+.oc-solve-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+  margin-top: 16px;
+}
+.oc-solve-key {
+  border: 1px solid #2A2721;
+  background: #191713;
+  color: #F4F1EA;
+  padding: 15px 0;
+  border-radius: 2px;
+  font: 600 20px var(--oc-font-mono), monospace;
+  cursor: pointer;
+}
+.oc-solve-key:hover {
+  background: #232019;
+}
+.oc-solve-key-dnf {
+  border-color: #D8402C;
+  background: transparent;
+  color: #D8402C;
+}
+.oc-solve-key-dnf:hover {
+  background: rgba(216, 64, 44, 0.12);
+}
+.oc-solve-btn-confirm {
+  width: 100%;
+  margin-top: 12px;
+  border: none;
+  background: #DFFF4F;
+  color: #0D0C0A;
+  padding: 20px;
+  border-radius: 2px;
+  font: 600 18px var(--oc-font-heading), sans-serif;
+  cursor: pointer;
+}
+.oc-solve-btn-confirm:hover {
+  background: #E9FF7A;
+}
+.oc-solve-btn-confirm:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* State 6 — summary */
+.oc-solve-summary {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding-top: 20px;
+  flex: 1;
+}
+.oc-solve-attempt-list {
+  border: 1px solid #2A2721;
+  background: #2A2721;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.oc-solve-attempt-row {
+  background: #141210;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 13px;
+}
+.oc-solve-attempt-time {
+  flex: 1;
+  font: 700 22px var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #F4F1EA;
+}
+.oc-solve-attempt-time-dnf {
+  color: #D8402C;
+}
+.oc-solve-ao5-box {
+  border: 1px solid #DFFF4F;
+  padding: 14px 16px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+.oc-solve-ao5-value {
+  font: 700 40px var(--oc-font-mono), monospace;
+  color: #DFFF4F;
+  font-variant-numeric: tabular-nums;
+}
+.oc-solve-btn-redo {
+  flex: 1;
+  border: 1px solid #4C473C;
+  background: transparent;
+  color: #F4F1EA;
+  padding: 18px 10px;
+  border-radius: 2px;
+  font: 500 13px var(--oc-font-heading), sans-serif;
+  cursor: pointer;
+}
+.oc-solve-btn-redo:hover {
+  border-color: #F4F1EA;
+}
+.oc-solve-btn-submit {
+  flex: 1.3;
+  border: none;
+  background: #DFFF4F;
+  color: #0D0C0A;
+  padding: 18px 10px;
+  border-radius: 2px;
+  font: 600 16px var(--oc-font-heading), sans-serif;
+  cursor: pointer;
+}
+.oc-solve-btn-submit:hover {
+  background: #E9FF7A;
+}
+.oc-solve-btn-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* State 7 — sent */
+.oc-solve-sent {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 24px;
+  flex: 1;
+}
+.oc-solve-sent-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 16px);
+  gap: 3px;
+}
+.oc-solve-sent-cell {
+  width: 16px;
+  height: 16px;
+}
+.oc-solve-ao5-value-lg {
+  font: 700 56px var(--oc-font-mono), monospace;
+  color: #F4F1EA;
+  font-variant-numeric: tabular-nums;
+}
+.oc-solve-pending-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #E08A00;
+  padding: 7px 10px;
+  border-radius: 2px;
+}
+.oc-solve-pending-dot {
+  width: 9px;
+  height: 9px;
+  background: #E08A00;
+}
+.oc-solve-btn-back {
+  display: inline-block;
+  border: 1px solid #2A2721;
+  background: transparent;
+  color: #8A8474;
+  padding: 12px 16px;
+  border-radius: 2px;
+  font: 500 11px var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+}
+.oc-solve-btn-back:hover {
+  border-color: #8A8474;
+  color: #F4F1EA;
+}

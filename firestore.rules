@@ -126,5 +126,67 @@ service cloud.firestore {
       allow read: if isSignedIn();
     }
 
+    // ─── Online Competition (public, isolated) ─────────────────────────────
+    // Fully separate feature for the public online competition — never
+    // reads/writes athletes, competitions, or results above. Reuses the
+    // same isAdmin() helper (users/{uid}.role == 'admin') so competition
+    // judges are club admins, but the collections themselves are new and
+    // untouched by any existing rule block.
+
+    match /onlineCompetitions/{competitionId} {
+      allow read: if true;
+      allow write: if isAdmin();
+
+      match /scrambles/{scrambleId} {
+        allow read: if isSignedIn();
+        // Created client-side (getOrCreateScramble) the first time a
+        // participant needs a given event/round's scramble; never updated
+        // afterwards so every participant sees the same scramble.
+        allow create: if isSignedIn();
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    match /onlineParticipants/{uid} {
+     allow read: if isSignedIn();
+  allow create, update: if isSignedIn() &&
+                            request.auth.uid == uid &&
+                            (!('email' in request.resource.data) || request.resource.data.email == request.auth.token.email) &&
+                            (!('photoURL' in request.resource.data) || request.resource.data.photoURL is string) &&
+                            (!('displayName' in request.resource.data) || request.resource.data.displayName is string);
+
+  match /registrations/{competitionId} {
+    allow read: if isSignedIn();
+    allow create, update: if isSignedIn() &&
+                              request.auth.uid == uid &&
+                              request.resource.data.competitionId == competitionId &&
+                              request.resource.data.events is list &&
+                              request.resource.data.events.size() > 0;
+    allow delete: if false;
+  }
+    }
+
+    match /onlineSubmissions/{submissionId} {
+      allow read: if isSignedIn() &&
+                     (resource.data.uid == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
+      // Owner may edit their own doc, but never the fields a judge owns
+      // (status/penalty) — only isAdmin() can touch those.
+      allow update: if isAdmin() ||
+                       (isSignedIn() &&
+                        resource.data.uid == request.auth.uid &&
+                        request.resource.data.uid == resource.data.uid &&
+                        request.resource.data.status == resource.data.status &&
+                        request.resource.data.penalty == resource.data.penalty);
+      allow delete: if isAdmin();
+    }
+
+match /onlineSeasonPoints/{season} {
+  match /athletes/{uid} {
+    allow read: if true;
+    allow write: if false;
+  }
+}
+
   }
 }

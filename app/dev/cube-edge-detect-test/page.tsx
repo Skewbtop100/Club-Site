@@ -1,16 +1,29 @@
 'use client';
 
-// Standalone, isolated validation page: does contour-based quadrilateral
-// detection (OpenCV.js) reliably find a cube face in a handheld live camera
-// feed? Pure visual detection only — no color sampling, no perspective
-// transform, no state machine, no connection to app/dev/cube-color-test.
+// Full detect→sample→classify pipeline test page: does saturation-based
+// blob detection (see detectColorBlob below) reliably find a cube face in a
+// handheld live camera feed with NO manual alignment, then classify its 9
+// stickers via the same proven HSV sampling/classification logic validated
+// in app/dev/cube-color-test/page.tsx (ported here — see the "ported from
+// cube-color-test" sections below)? Two-face sequential capture (white,
+// green), auto-lock on stability — same UX pattern as cube-color-test, just
+// triggered off an auto-detected region instead of a fixed guide box.
+//
+// The earlier Canny/contour-based quad detection (detectQuads and its
+// helper functions/types below) is kept in the file as dead reference code
+// — it struggled with cluttered backgrounds (ceiling lines, doorframes)
+// producing more/stronger edges than the cube's own sticker grooves, and
+// with reliably finding all 9 individual sticker quads — but is no longer
+// wired into the detection loop or UI; detectColorBlob's saturation-blob
+// approach replaced it as the active strategy after on-device validation.
 //
 // Camera lifecycle (getUserMedia setup, the request-token leak-prevention
 // pattern, the init timeout + retry, the visibility-regain retry) is copied
-// verbatim from that page's proven pattern rather than reinvented — see the
-// comments there for the underlying reasoning (mount/unmount race, mobile
-// backgrounding, etc).
+// verbatim from cube-color-test's proven pattern rather than reinvented —
+// see the comments there for the underlying reasoning (mount/unmount race,
+// mobile backgrounding, etc).
 
+import type { RefObject } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -78,9 +91,16 @@ interface BlobResult {
   // big enough to count as a real detection, so the diagnostics panel can
   // distinguish "found a blob but too small" from "found nothing at all".
   largestContourArea: number;
-  // Bounding rect of that largest contour, or null if its area fell below
-  // BLOB_MIN_AREA_FRACTION of the frame (nothing cube-sized was found).
+  // Bounding rect of the selected candidate contour, or null if nothing
+  // cleared the area threshold, or everything that did was rejected by the
+  // aspect-ratio/edge-touching filters below (see BLOB_MAX_ASPECT_RATIO /
+  // BLOB_EDGE_TOUCH_TOLERANCE_PX).
   boundingRect: { x: number; y: number; width: number; height: number } | null;
+  // Count of contours that cleared the min-area threshold but were then
+  // rejected by the aspect-ratio or edge-touching filters (e.g. a wall/
+  // doorframe blob) — lets the diagnostics panel show whether those filters
+  // are doing meaningful work or rarely triggering.
+  rejectedCandidates: number;
 }
 
 // OpenCV.js attaches its entire API dynamically onto the loaded module at
@@ -108,6 +128,59 @@ declare global {
     cv: CvModule;
   }
 }
+
+// ── Ported color-sampling types (from app/dev/cube-color-test/page.tsx) ────
+// This page is now the active development target for the full detect→
+// sample→classify pipeline, so the proven sampling/classification types
+// (and the constants/functions ported alongside them further below) are
+// copied here as the source of truth going forward, rather than importing
+// across dev pages or reinventing them. cube-color-test/page.tsx itself is
+// left untouched — see its own comments for the original derivation.
+type CubeColorName = 'white' | 'yellow' | 'red' | 'orange' | 'blue' | 'green';
+
+interface RGB {
+  r: number;
+  g: number;
+  b: number;
+}
+
+interface HSV {
+  h: number; // 0-360
+  s: number; // 0-100
+  v: number; // 0-100
+}
+
+interface HsvRange {
+  h: number; // reference hue center, 0-360 (ignored for white, which is graded on low saturation)
+  s: number; // reference saturation center, 0-100
+  v: number; // reference value/brightness center, 0-100
+}
+
+interface SampleResult {
+  rgb: RGB;
+  hsv: HSV;
+  classified: CubeColorName;
+  // Canvas-buffer coordinates — the same processing-resolution `canvas`
+  // detectColorBlob runs on — the sample was taken from, kept so the debug
+  // overlay can draw a dot at the exact point that was read. Unlike
+  // cube-color-test's version of this type, these are NOT native-video
+  // coordinates requiring a display→native mapping: sampling here reads
+  // directly from the already-downscaled processing canvas, so no separate
+  // coordinate space exists to map between.
+  x: number;
+  y: number;
+  // True for the center cell, whose color is assumed from which capture
+  // step this is (never sampled from the camera) — see
+  // sampleNineCellsFromRect below.
+  isFixed: boolean;
+}
+
+// Two-face capture sequence: capture one face, immediately capture a second
+// (no re-init needed — the camera stream stays mounted throughout), then
+// show both results together. Deliberately generic ("first"/"second") since
+// this page doesn't hardcode which physical face the user shows first — see
+// the fixedCenterColor mapping in the detection loop below.
+type CaptureStep = 'first' | 'second' | 'done';
 
 const ACCENT = '#A78BFA';
 const BG = '#0a0a0a';
@@ -193,6 +266,86 @@ const BLOB_MORPH_KERNEL_SIZE = 15;
 // nothing cube-sized was found (background noise, or a stray small
 // saturated object).
 const BLOB_MIN_AREA_FRACTION = 0.05;
+// Max accepted bounding-rect aspect ratio (long side / short side, always
+// normalized to ≥1) — a hand-held cube face viewed roughly straight-on is
+// close to square (≈1.0); a plain white wall/doorframe segment that clears
+// the "white sticker" S/V range is typically much wider or taller than it
+// is deep, so this rejects it without needing to distinguish wall-white
+// from sticker-white by color alone. Added after an on-device false
+// positive locked onto a bright doorframe instead of the cube.
+const BLOB_MAX_ASPECT_RATIO = 1.4;
+// A candidate blob is rejected if its bounding rect touches this many (or
+// more) of the frame's 4 edges — walls/doors that fill much of the frame
+// typically run off multiple edges, while a hand-held cube centered in
+// frame typically touches none. Secondary heuristic alongside the
+// aspect-ratio filter above, since a wall segment can occasionally still
+// look roughly square (e.g. a door panel) while still clearly running off
+// the frame.
+const BLOB_EDGE_TOUCH_MIN_COUNT = 3;
+// Pixel tolerance for "touching" a frame edge — exact 0-pixel alignment
+// isn't required for this to be a useful heuristic, not a hard geometric
+// guarantee.
+const BLOB_EDGE_TOUCH_TOLERANCE_PX = 2;
+
+// ── Sampling / classification tuning (ported from cube-color-test) ─────────
+// These are the "centers" each sample is compared against. Hue distance is
+// weighted much more heavily than saturation/value distance since ambient
+// lighting swings brightness and saturation around a lot more than it
+// swings the underlying hue of a sticker. Ported verbatim from
+// cube-color-test/page.tsx, including its on-device red/orange retuning —
+// see the comment on red/orange below for why those two get special
+// handling in classifyHsv.
+const CUBE_COLOR_HSV_REFERENCE: Record<CubeColorName, HsvRange> = {
+  white: { h: 0, s: 10, v: 90 },
+  yellow: { h: 55, s: 70, v: 85 },
+  // red/orange retuned from on-device calibration data — their hues sit
+  // only ~15° apart under real lighting, so value is what actually
+  // separates them (see the higher value weight for these two in
+  // classifyHsv below).
+  red: { h: 355, s: 80, v: 60 },
+  orange: { h: 10, s: 82, v: 90 },
+  blue: { h: 215, s: 65, v: 65 },
+  green: { h: 140, s: 60, v: 60 },
+};
+
+const COLOR_LABELS_MN: Record<CubeColorName, string> = {
+  white: 'Цагаан',
+  yellow: 'Шар',
+  red: 'Улаан',
+  orange: 'Улбар шар',
+  blue: 'Хөх',
+  green: 'Ногоон',
+};
+
+// Swatch colors used to render each classified name as a chip in the debug
+// panel and legend — purely cosmetic, independent of the HSV reference math.
+const COLOR_SWATCH_HEX: Record<CubeColorName, string> = {
+  white: '#f5f5f5',
+  yellow: '#facc15',
+  red: '#ef4444',
+  orange: '#f97316',
+  blue: '#3b82f6',
+  green: '#22c55e',
+};
+
+const GRID_SIZE = 3;
+const SAMPLE_PATCH_PX = 10;
+const DEBUG_DOT_MIN_RADIUS_PX = 4;
+
+// ── Auto-lock stability tuning (ported pattern from cube-color-test) ───────
+const STABILITY_WINDOW = 4; // consecutive ticks required to agree before locking
+const LOCK_FLASH_MS = 800; // how long the "✓ Танигдлаа!" confirmation shows before advancing
+// Shrink the detected blob's bounding rect by this fraction on each side
+// before sampling within it (e.g. 0.12 → sample within the central 76%) —
+// avoids edge pixels that may include hand/background bleeding in from an
+// imperfect blob boundary.
+const BLOB_SAMPLE_INSET_FRACTION = 0.12;
+// Stability tolerance for the detected boundingRect's center position AND
+// size across the STABILITY_WINDOW, as a fraction of the frame's larger
+// dimension — confirms the user is actually holding the cube steady, not
+// just that classification happens to agree across a region that's still
+// drifting (e.g. mid-motion toward a stable hold).
+const BLOB_STABILITY_TOLERANCE_FRACTION = 0.08;
 
 // ── Camera math (copied pattern from cube-color-test) ───────────────────────
 
@@ -523,6 +676,7 @@ function detectColorBlob(
   let maskNonZeroPixels = 0;
   let largestContourArea = 0;
   let boundingRect: BlobResult['boundingRect'] = null;
+  let rejectedCandidates = 0;
 
   try {
     cv.cvtColor(src, rgb, cv.COLOR_RGBA2RGB);
@@ -565,23 +719,53 @@ function detectColorBlob(
     // (unlike detectQuads, which groups sticker siblings by hierarchy).
     cv.findContours(closed, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
+    const frameWidth = canvas.width;
+    const frameHeight = canvas.height;
+    const minArea = frameWidth * frameHeight * BLOB_MIN_AREA_FRACTION;
+    // Best candidate found so far AMONG those passing the aspect-ratio/
+    // edge-touching filters below — separate from largestContourArea
+    // (which tracks the raw largest contour regardless of shape, purely as
+    // a "did Canny even find anything cube-sized" diagnostic) so a large
+    // but wall-shaped blob doesn't win over a smaller, genuinely cube-
+    // shaped one.
+    let bestCandidateArea = 0;
+
     for (let i = 0; i < contours.size(); i++) {
       const contour = contours.get(i);
       try {
         const area = cv.contourArea(contour);
         if (area > largestContourArea) {
           largestContourArea = area;
-          const rect = cv.boundingRect(contour);
+        }
+        // Below the area threshold entirely — not a candidate at all, and
+        // not counted in rejectedCandidates (that count is reserved for
+        // contours that cleared this bar but failed shape/position checks).
+        if (area < minArea) continue;
+
+        const rect = cv.boundingRect(contour);
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        // Normalized so it's always >= 1, regardless of whether the blob is
+        // wider or taller than it is the other dimension.
+        const aspectRatio = Math.max(rect.width, rect.height) / Math.min(rect.width, rect.height);
+        const edgeTouchCount = [
+          rect.x <= BLOB_EDGE_TOUCH_TOLERANCE_PX,
+          rect.y <= BLOB_EDGE_TOUCH_TOLERANCE_PX,
+          frameWidth - (rect.x + rect.width) <= BLOB_EDGE_TOUCH_TOLERANCE_PX,
+          frameHeight - (rect.y + rect.height) <= BLOB_EDGE_TOUCH_TOLERANCE_PX,
+        ].filter(Boolean).length;
+
+        if (aspectRatio > BLOB_MAX_ASPECT_RATIO || edgeTouchCount >= BLOB_EDGE_TOUCH_MIN_COUNT) {
+          rejectedCandidates++;
+          continue;
+        }
+
+        if (area > bestCandidateArea) {
+          bestCandidateArea = area;
           boundingRect = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
         }
       } finally {
         contour.delete();
       }
-    }
-
-    const frameArea = canvas.width * canvas.height;
-    if (largestContourArea < frameArea * BLOB_MIN_AREA_FRACTION) {
-      boundingRect = null;
     }
   } finally {
     src.delete();
@@ -600,7 +784,7 @@ function detectColorBlob(
     highWhite?.delete();
   }
 
-  return { maskNonZeroPixels, largestContourArea, boundingRect };
+  return { maskNonZeroPixels, largestContourArea, boundingRect, rejectedCandidates };
 }
 
 function strokeQuad(ctx: CanvasRenderingContext2D, points: readonly Point[]) {
@@ -667,29 +851,414 @@ function drawBlobRect(canvas: HTMLCanvasElement, rect: BlobResult['boundingRect'
   ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
 }
 
+// ── Color sampling / classification (ported from cube-color-test/page.tsx) ─
+// Verbatim port of the proven implementation — see that file's comments for
+// the underlying derivation. This page is now the source of truth for this
+// logic going forward.
+
+function rgbToHsv(rgb: RGB): HSV {
+  const r = rgb.r / 255;
+  const g = rgb.g / 255;
+  const b = rgb.b / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+
+  let h = 0;
+  if (d !== 0) {
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+
+  const s = max === 0 ? 0 : (d / max) * 100;
+  const v = max * 100;
+
+  return { h, s, v };
+}
+
+function hueDistance(a: number, b: number): number {
+  const diff = Math.abs(a - b) % 360;
+  return diff > 180 ? 360 - diff : diff;
+}
+
+// Weighted HSV distance: hue dominates since it's the most lighting-stable
+// channel. White has no meaningful hue (low saturation), so it's scored
+// mostly on saturation + value instead of hue.
+function classifyHsv(sample: HSV, reference: Record<CubeColorName, HsvRange>): CubeColorName {
+  let best: CubeColorName = 'white';
+  let bestScore = Infinity;
+
+  (Object.keys(reference) as CubeColorName[]).forEach((name) => {
+    const ref = reference[name];
+    let score: number;
+    if (name === 'white') {
+      // White is defined by low saturation + high value; hue is unreliable.
+      score = Math.abs(sample.s - ref.s) * 1.5 + Math.abs(sample.v - ref.v) * 1.0;
+    } else {
+      // Red and orange sit only ~15° apart in hue under real lighting
+      // (calibration data: reds ~350-355°, oranges ~10°), so hue alone
+      // can't reliably separate them — value carries most of the signal
+      // there (reds V49-71%, oranges V80-100%), hence the heavier weight
+      // for just these two.
+      const valueWeight = name === 'red' || name === 'orange' ? 0.8 : 0.3;
+      const hDist = hueDistance(sample.h, ref.h);
+      score = hDist * 2.0 + Math.abs(sample.s - ref.s) * 0.5 + Math.abs(sample.v - ref.v) * valueWeight;
+    }
+    if (score < bestScore) {
+      bestScore = score;
+      best = name;
+    }
+  });
+
+  return best;
+}
+
+function sampleAverageRgb(
+  ctx: CanvasRenderingContext2D,
+  centerX: number,
+  centerY: number,
+  patch: number
+): RGB {
+  // Clamp so the patch never reads outside the canvas — guards against
+  // rounding error pushing an edge sample a fraction of a pixel out of
+  // bounds, which would otherwise throw in getImageData.
+  const maxX = Math.max(0, ctx.canvas.width - patch);
+  const maxY = Math.max(0, ctx.canvas.height - patch);
+  const half = Math.floor(patch / 2);
+  const x = Math.min(Math.max(0, Math.round(centerX - half)), maxX);
+  const y = Math.min(Math.max(0, Math.round(centerY - half)), maxY);
+  const { data } = ctx.getImageData(x, y, patch, patch);
+
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  const count = data.length / 4;
+  for (let i = 0; i < data.length; i += 4) {
+    r += data[i];
+    g += data[i + 1];
+    b += data[i + 2];
+  }
+
+  return {
+    r: Math.round(r / count),
+    g: Math.round(g / count),
+    b: Math.round(b / count),
+  };
+}
+
+function rgbToCss(rgb: RGB): string {
+  return `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+}
+
+function arraysEqual<T>(a: T[], b: T[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+// Shrinks `rect` by `insetFraction` on each side (so both width and height
+// shrink by 2×insetFraction total) — sampling stays inside the central
+// portion of the detected blob, away from edges that may include hand/
+// background bleeding in from an imperfect blob boundary.
+function insetRect(
+  rect: { x: number; y: number; width: number; height: number },
+  insetFraction: number
+): { x: number; y: number; width: number; height: number } {
+  const insetX = rect.width * insetFraction;
+  const insetY = rect.height * insetFraction;
+  return {
+    x: rect.x + insetX,
+    y: rect.y + insetY,
+    width: rect.width - insetX * 2,
+    height: rect.height - insetY * 2,
+  };
+}
+
+// True if every entry in `rects` (the last STABILITY_WINDOW ticks' detected
+// boundingRects) agrees closely enough on center position AND size —
+// confirms the user is actually holding the cube steady, not just that
+// classification happens to agree across a region that's still drifting
+// (e.g. mid-motion toward a stable hold).
+function boundingRectsAreStable(
+  rects: readonly { x: number; y: number; width: number; height: number }[],
+  toleranceFraction: number,
+  frameWidth: number,
+  frameHeight: number
+): boolean {
+  const tolerance = Math.max(frameWidth, frameHeight) * toleranceFraction;
+  const spread = (values: number[]) => Math.max(...values) - Math.min(...values);
+  return (
+    spread(rects.map((r) => r.x + r.width / 2)) <= tolerance &&
+    spread(rects.map((r) => r.y + r.height / 2)) <= tolerance &&
+    spread(rects.map((r) => r.width)) <= tolerance &&
+    spread(rects.map((r) => r.height)) <= tolerance
+  );
+}
+
+// Samples 9 grid-cell centers within `rect` (the inset detected blob),
+// skipping the fixed center. Unlike cube-color-test's sampleNineCells, this
+// reads directly from `ctx` — the SAME processing-resolution canvas
+// detectColorBlob already ran on — so no display↔native coordinate mapping
+// is needed; `rect` and the returned sample points are all in that one
+// canvas-buffer's pixel space throughout. No perspective correction: cells
+// are a simple axis-aligned subdivision, reasonable given the aspect-ratio
+// filter in detectColorBlob already constrains detected regions to be
+// roughly square/face-on.
+function sampleNineCellsFromRect(
+  ctx: CanvasRenderingContext2D,
+  rect: { x: number; y: number; width: number; height: number },
+  fixedCenterColor: CubeColorName,
+  hsvReference: Record<CubeColorName, HsvRange>
+): SampleResult[] {
+  const cellW = rect.width / GRID_SIZE;
+  const cellH = rect.height / GRID_SIZE;
+  const results: SampleResult[] = [];
+
+  for (let row = 0; row < GRID_SIZE; row++) {
+    for (let col = 0; col < GRID_SIZE; col++) {
+      const x = rect.x + cellW * col + cellW / 2;
+      const y = rect.y + cellH * row + cellH / 2;
+      const isCenterCell = row === 1 && col === 1;
+      if (isCenterCell) {
+        // The center piece's color is fixed by cube geometry — it's the
+        // same physical sticker regardless of scramble/solve state, so
+        // classifying it via CV only risks a misread from any printed
+        // center-cap logo skewing the averaged pixels. We already know
+        // which face this capture is for, so just record that directly.
+        results.push({
+          rgb: { r: 0, g: 0, b: 0 },
+          hsv: { h: 0, s: 0, v: 0 },
+          classified: fixedCenterColor,
+          x,
+          y,
+          isFixed: true,
+        });
+      } else {
+        const rgb = sampleAverageRgb(ctx, x, y, SAMPLE_PATCH_PX);
+        const hsv = rgbToHsv(rgb);
+        const classified = classifyHsv(hsv, hsvReference);
+        results.push({ rgb, hsv, classified, x, y, isFixed: false });
+      }
+    }
+  }
+
+  return results;
+}
+
+// Draws the already-sampled frame (from `sourceCanvas`, populated by the
+// sampleNineCellsFromRect call that produced `results`) plus a dot at each
+// exact sample point into `debugCanvas`. Only called once per face, when a
+// reading locks in — not on every sampling tick. `sourceCanvas` at that
+// point also carries this tick's magenta detected-region outline (drawn by
+// drawBlobRect before sampling runs), so the debug snapshot shows exactly
+// where the detector thought the face was, not just the raw frame.
+function drawDebugOverlay(sourceCanvas: HTMLCanvasElement, debugCanvas: HTMLCanvasElement, results: SampleResult[]) {
+  const vw = sourceCanvas.width;
+  const vh = sourceCanvas.height;
+  debugCanvas.width = vw;
+  debugCanvas.height = vh;
+  const debugCtx = debugCanvas.getContext('2d');
+  if (!debugCtx) return;
+
+  // Setting width/height already resets the bitmap per spec, but we also
+  // clearRect explicitly so a stale frame can never show through.
+  debugCtx.clearRect(0, 0, vw, vh);
+  debugCtx.drawImage(sourceCanvas, 0, 0);
+  const dotRadius = Math.max(DEBUG_DOT_MIN_RADIUS_PX, Math.min(vw, vh) * 0.012);
+  results.forEach((s) => {
+    debugCtx.beginPath();
+    debugCtx.arc(s.x, s.y, dotRadius, 0, Math.PI * 2);
+    // Fixed (unsampled) center dot renders yellow instead of the usual
+    // red, so it's obvious at a glance that this point wasn't actually
+    // read from the camera — it's an assumed value.
+    debugCtx.fillStyle = s.isFixed ? '#facc15' : '#ff0000';
+    debugCtx.fill();
+    debugCtx.lineWidth = Math.max(1, dotRadius * 0.25);
+    debugCtx.strokeStyle = '#ffffff';
+    debugCtx.stroke();
+
+    if (s.isFixed) {
+      const fontSize = Math.max(12, dotRadius * 1.4);
+      debugCtx.font = `bold ${fontSize}px sans-serif`;
+      debugCtx.textAlign = 'center';
+      debugCtx.fillStyle = '#facc15';
+      debugCtx.fillText('FIX', s.x, s.y - dotRadius - fontSize * 0.4);
+    }
+  });
+}
+
+// DEBUG ONLY — draws a dot at each of THIS TICK's 9 sample points directly
+// on the live camera view, every tick (not just once on lock, like
+// drawDebugOverlay above) — added to diagnose a mismatch between
+// LivePreviewGrid's classified colors and the actual held cube: lets the
+// user see in real time exactly where the 9 points are landing relative to
+// the cube's stickers as they hold it, before any lock happens. Purely
+// visual — does not touch sampling/classification/detection logic. Bright
+// cyan fill + white outline (vs. drawDebugOverlay's red/yellow/FIX scheme)
+// so this live overlay is never confused with the post-lock debug canvas
+// if the two are ever compared side by side.
+function drawLiveSampleDots(canvas: HTMLCanvasElement, results: readonly SampleResult[]) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const dotRadius = Math.max(DEBUG_DOT_MIN_RADIUS_PX, Math.min(canvas.width, canvas.height) * 0.012);
+  results.forEach((s) => {
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, dotRadius, 0, Math.PI * 2);
+    ctx.fillStyle = '#22d3ee'; // bright cyan
+    ctx.fill();
+    ctx.lineWidth = Math.max(1, dotRadius * 0.25);
+    ctx.strokeStyle = '#ffffff';
+    ctx.stroke();
+  });
+}
+
+function logLockedSample(label: string, results: SampleResult[]) {
+  // eslint-disable-next-line no-console
+  console.log(`[cube-edge-detect-test] locked in: ${label}`);
+  // eslint-disable-next-line no-console
+  console.table(
+    results.map((s, i) => ({
+      cell: i,
+      x: Math.round(s.x),
+      y: Math.round(s.y),
+      rgb: `${s.rgb.r},${s.rgb.g},${s.rgb.b}`,
+      classified: s.classified,
+    }))
+  );
+}
+
+// ── Small presentational pieces (ported from cube-color-test/page.tsx) ─────
+
+function FaceResultsGrid({ samples }: { samples: SampleResult[] }) {
+  return (
+    <div className="grid grid-cols-3 gap-2">
+      {samples.map((s, i) => (
+        <div
+          key={i}
+          className="flex flex-col items-center gap-1 rounded-lg border p-2"
+          style={{ borderColor: 'rgba(255,255,255,0.1)', backgroundColor: '#1a1a1a' }}
+        >
+          <div
+            className="h-12 w-12 rounded border border-white/20"
+            style={{ backgroundColor: s.isFixed ? COLOR_SWATCH_HEX[s.classified] : rgbToCss(s.rgb) }}
+          />
+          <span className="text-xs font-semibold">{COLOR_LABELS_MN[s.classified]}</span>
+          {s.isFixed ? (
+            <span className="text-center text-[10px] leading-tight text-white/40">(тогтмол)</span>
+          ) : (
+            <span className="text-center text-[10px] leading-tight text-white/40">
+              RGB {s.rgb.r},{s.rgb.g},{s.rgb.b}
+              <br />
+              HSV {Math.round(s.hsv.h)}°,{Math.round(s.hsv.s)}%,{Math.round(s.hsv.v)}%
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Compact live preview of the current tick's reading, shown continuously
+// while sampling so the user can see the reading settle as they hold the
+// cube steady. The center cell always shows the known fixed color; the
+// other 8 come from the latest tick's classification (liveReading), in the
+// same row-major-skip-center order sampleNineCellsFromRect produces them.
+function LivePreviewGrid({
+  liveReading,
+  fixedCenterColor,
+}: {
+  liveReading: CubeColorName[] | null;
+  fixedCenterColor: CubeColorName;
+}) {
+  return (
+    <div>
+      <p className="mb-1 text-xs text-white/50">Уншиж байна...</p>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, 1fr)',
+          gap: 4,
+          width: 96,
+        }}
+      >
+        {Array.from({ length: 9 }).map((_, i) => {
+          const isCenter = i === 4;
+          const color = isCenter ? fixedCenterColor : (liveReading?.[i < 4 ? i : i - 1] ?? null);
+          return (
+            <div
+              key={i}
+              style={{
+                aspectRatio: '1 / 1',
+                borderRadius: 4,
+                border: '1px solid rgba(255,255,255,0.25)',
+                backgroundColor: color ? COLOR_SWATCH_HEX[color] : '#2a2a2a',
+              }}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function FaceDebugCanvas({ canvasRef, label }: { canvasRef: RefObject<HTMLCanvasElement | null>; label: string }) {
+  return (
+    <div>
+      <p className="mb-1 text-xs text-white/50">{label}</p>
+      <canvas
+        ref={canvasRef}
+        style={{
+          display: 'block',
+          width: '100%',
+          borderRadius: 8,
+          border: '1px solid rgba(255,255,255,0.1)',
+        }}
+      />
+    </div>
+  );
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function CubeEdgeDetectTestPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  // DEBUG ONLY — small preview showing the post-dilate Canny edge map plus
-  // raw 4-vertex contour outlines, so we can see whether sticker grooves
-  // are being detected as continuous closed edges at all vs. found but
-  // failing to become clean quads afterward. See detectQuads/
-  // drawRawQuadOverlay above.
-  const edgePreviewCanvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null); // shared scratch buffer: detection AND sampling both read/write this same processing-resolution canvas
   // DEBUG ONLY — small preview showing the post-morphological-close
-  // saturation/value mask from the ALTERNATIVE detectColorBlob strategy
-  // below (a separate, diagnostic-only code path from detectQuads/
-  // edgePreviewCanvasRef above — both run every tick for side-by-side
-  // comparison).
+  // saturation/value mask detectColorBlob produced this tick (see
+  // detectColorBlob above).
   const blobPreviewCanvasRef = useRef<HTMLCanvasElement>(null);
+  const debugCanvasRef1 = useRef<HTMLCanvasElement>(null);
+  const debugCanvasRef2 = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const cvRef = useRef<CvModule | null>(null);
   const startCameraRequestIdRef = useRef(0);
   const cameraTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loopRunIdRef = useRef(0);
+  // Rolling history of the last STABILITY_WINDOW ticks' detected
+  // boundingRect + 8-color classification, for the current face only —
+  // cleared on lock, on advancing to the next face, and on restart. Kept as
+  // a ref (not state) since it's consulted and mutated every tick and
+  // doesn't need to itself trigger renders.
+  const historyRef = useRef<
+    { rect: { x: number; y: number; width: number; height: number }; colors: CubeColorName[] }[]
+  >([]);
+  // Guards against re-entrant locks and pauses sampling entirely during the
+  // ~800ms lock-confirmation flash window (the detection loop keeps ticking
+  // — blob detection/diagnostics still run — since captureStep hasn't
+  // advanced yet).
+  const lockingRef = useRef(false);
+  const lockFlashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mirror captureStep/hsvReference into refs so the tick closure below can
+  // read their latest values without needing the main detection loop's
+  // effect to depend on (and thus restart on every change of) either —
+  // that loop also owns camera-timing bookkeeping (nextDelay pacing, the
+  // wasm-heap diagnostic sampler) that shouldn't reset just because the
+  // user advanced to the second face or tweaked an HSV slider.
+  const captureStepRef = useRef<CaptureStep>('first');
+  const hsvReferenceRef = useRef<Record<CubeColorName, HsvRange>>(CUBE_COLOR_HSV_REFERENCE);
   // TEMPORARY diagnostic-only state for the progressive-degradation
   // investigation — not part of detection logic, safe to remove once the
   // investigation concludes. Counts ticks so every 20th one gets sampled.
@@ -709,23 +1278,6 @@ export default function CubeEdgeDetectTestPage() {
   const [opencvStatus, setOpencvStatus] = useState<OpenCvStatus>('loading');
   const [opencvError, setOpencvError] = useState<string>('');
   const [lastFrameMs, setLastFrameMs] = useState<number | null>(null);
-  // 4-vertex quads passing only the 4-vertex + area checks, BEFORE the
-  // convexity/side-length/corner-angle quality filters — compared against
-  // stickerCandidateCount (AFTER those filters) to see how aggressively
-  // they're rejecting candidates.
-  const [rawQuadCount, setRawQuadCount] = useState<number>(0);
-  // cv.countNonZero on the post-dilate edge map — near 0 means Canny/blur
-  // are too strict for the actual scene contrast (the fix lever); a
-  // healthy count with rawQuadCount still low means the problem is
-  // downstream (findContours/approxPolyDP/quality filters instead).
-  const [nonZeroEdgePixels, setNonZeroEdgePixels] = useState<number>(0);
-  // Raw per-contour sticker candidates found this tick, before grouping —
-  // separate from candidateCount (confirmed 3x3-grid faces) so it's clear
-  // whether the pipeline is finding shapes at all vs. finding shapes but
-  // failing to group them into a face.
-  const [stickerCandidateCount, setStickerCandidateCount] = useState<number>(0);
-  const [candidateCount, setCandidateCount] = useState<number>(0);
-  const [largestCandidate, setLargestCandidate] = useState<QuadCandidate | null>(null);
   const [diagTick, setDiagTick] = useState(0);
   // TEMPORARY — progressive-degradation investigation (see the tick handler
   // below). Surfaced in the on-screen diagnostics panel, not just
@@ -740,6 +1292,63 @@ export default function CubeEdgeDetectTestPage() {
   const [blobMaskNonZeroPixels, setBlobMaskNonZeroPixels] = useState<number>(0);
   const [blobLargestContourArea, setBlobLargestContourArea] = useState<number>(0);
   const [blobBoundingRect, setBlobBoundingRect] = useState<BlobResult['boundingRect']>(null);
+  // Contours that cleared the min-area threshold but got rejected by the
+  // aspect-ratio/edge-touching filters (e.g. a wall/doorframe blob) — see
+  // BLOB_MAX_ASPECT_RATIO / BLOB_EDGE_TOUCH_MIN_COUNT above.
+  const [blobRejectedCandidates, setBlobRejectedCandidates] = useState<number>(0);
+  // ── detect→sample→classify pipeline state (ported pattern from
+  // cube-color-test/page.tsx, wired to the auto-detected blob instead of a
+  // fixed guide box) ──────────────────────────────────────────────────────
+  const [captureStep, setCaptureStep] = useState<CaptureStep>('first');
+  const [firstFaceSamples, setFirstFaceSamples] = useState<SampleResult[] | null>(null);
+  const [secondFaceSamples, setSecondFaceSamples] = useState<SampleResult[] | null>(null);
+  // Latest tick's 8 outer-cell classifications, for the live preview grid.
+  const [liveReading, setLiveReading] = useState<CubeColorName[] | null>(null);
+  // Briefly true right after a face locks in, showing "✓ Танигдлаа!" in
+  // place of the normal instruction text before the next face is prompted.
+  const [lockFlashVisible, setLockFlashVisible] = useState(false);
+  const [showDebugPanel, setShowDebugPanel] = useState(false);
+  const [hsvReference, setHsvReference] = useState<Record<CubeColorName, HsvRange>>(CUBE_COLOR_HSV_REFERENCE);
+
+  useEffect(() => {
+    captureStepRef.current = captureStep;
+  }, [captureStep]);
+
+  useEffect(() => {
+    hsvReferenceRef.current = hsvReference;
+  }, [hsvReference]);
+
+  // Reset the stability-tracking history whenever the active capture step
+  // changes (new face, or a restart back to 'first') — a stale streak from
+  // the previous face/attempt must never carry over and cause an instant
+  // false lock.
+  useEffect(() => {
+    historyRef.current = [];
+    setLiveReading(null);
+  }, [captureStep]);
+
+  // Re-classify already-locked samples live when the HSV reference is
+  // tuned, without needing a new capture. The fixed center cell is skipped
+  // — its hsv is a meaningless placeholder, so running it through
+  // classifyHsv would stomp its known-correct 'white'/'green' with a bogus
+  // reading.
+  useEffect(() => {
+    setFirstFaceSamples((prev) =>
+      prev ? prev.map((s) => (s.isFixed ? s : { ...s, classified: classifyHsv(s.hsv, hsvReference) })) : prev
+    );
+    setSecondFaceSamples((prev) =>
+      prev ? prev.map((s) => (s.isFixed ? s : { ...s, classified: classifyHsv(s.hsv, hsvReference) })) : prev
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hsvReference]);
+
+  // Clear the lock-flash timeout on unmount so it can't fire setState after
+  // the component's gone.
+  useEffect(() => {
+    return () => {
+      if (lockFlashTimeoutRef.current) clearTimeout(lockFlashTimeoutRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     const id = setInterval(() => setDiagTick((t) => t + 1), 500);
@@ -873,6 +1482,27 @@ export default function CubeEdgeDetectTestPage() {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [cameraStatus, startCamera]);
 
+  const handleRestart = useCallback(() => {
+    if (lockFlashTimeoutRef.current) {
+      clearTimeout(lockFlashTimeoutRef.current);
+      lockFlashTimeoutRef.current = null;
+    }
+    lockingRef.current = false;
+    historyRef.current = [];
+    setLiveReading(null);
+    setLockFlashVisible(false);
+    setFirstFaceSamples(null);
+    setSecondFaceSamples(null);
+    setCaptureStep('first');
+  }, []);
+
+  const updateReferenceField = useCallback((color: CubeColorName, field: keyof HsvRange, value: number) => {
+    setHsvReference((prev) => ({
+      ...prev,
+      [color]: { ...prev[color], [field]: value },
+    }));
+  }, []);
+
   // ── Continuous detection loop ────────────────────────────────────────────
   // Self-scheduling via setTimeout rather than setInterval: each run measures
   // its own wall-clock cost and schedules the next run relative to when THIS
@@ -887,6 +1517,16 @@ export default function CubeEdgeDetectTestPage() {
   // immediately after a slow frame left the main thread no room to
   // decode/paint video between ticks, a near-100%-duty-cycle loop rather
   // than a genuinely periodic one.
+  //
+  // Also now does grid sampling + auto-lock, gated on this tick's detected
+  // blob — see the block below drawBlobRect inside tick(). Deliberately
+  // depends only on [cameraStatus, opencvStatus], NOT [captureStep,
+  // hsvReference]: those are read via captureStepRef/hsvReferenceRef so
+  // advancing to the next face or tweaking an HSV slider doesn't restart
+  // this effect's camera-timing bookkeeping (nextDelay pacing, the wasm-
+  // heap diagnostic sampler) — unlike cube-color-test's simpler
+  // setInterval-per-effect loop, which intentionally DOES restart on
+  // captureStep change to reset its own sampling state.
   useEffect(() => {
     if (cameraStatus !== 'ready' || opencvStatus !== 'ready') return;
 
@@ -904,52 +1544,105 @@ export default function CubeEdgeDetectTestPage() {
         const h = Math.round(video.videoHeight * Math.min(1, scale));
         canvas.width = w;
         canvas.height = h;
-        const ctx = canvas.getContext('2d');
+        // willReadFrequently — this canvas now also gets 9 getImageData
+        // calls a tick from sampleNineCellsFromRect below whenever a valid
+        // blob is detected, not just drawImage/stroke calls; only honored
+        // on the FIRST getContext call for a given canvas element, so it
+        // has to be set here rather than in sampleAverageRgb itself.
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
         if (ctx) {
           ctx.drawImage(video, 0, 0, w, h);
 
           const start = performance.now();
-          let result: DetectionResult = { rawQuads: [], stickers: [], faces: [], nonZeroEdgePixels: 0 };
-          try {
-            result = detectQuads(cv, canvas, edgePreviewCanvasRef.current);
-          } catch (err) {
-            // eslint-disable-next-line no-console
-            console.error('[cube-edge-detect-test] detection error', err);
-          }
-          const elapsed = performance.now() - start;
-
-          drawQuads(canvas, result.stickers, result.faces);
-          // DEBUG ONLY — overlay raw-quad outlines on top of the edge
-          // preview detectQuads already painted via cv.imshow. Must happen
-          // after detectQuads returns, since it draws using the plain-JS
-          // points (no Mat access needed), same split as drawQuads above.
-          if (edgePreviewCanvasRef.current) {
-            drawRawQuadOverlay(edgePreviewCanvasRef.current, result.rawQuads);
-          }
-          setLastFrameMs(elapsed);
-          setRawQuadCount(result.rawQuads.length);
-          setNonZeroEdgePixels(result.nonZeroEdgePixels);
-          setStickerCandidateCount(result.stickers.length);
-          setCandidateCount(result.faces.length);
-          setLargestCandidate(result.faces[0] ?? null);
-
-          // ALTERNATIVE saturation-blob strategy — runs as an ADDITIONAL
-          // computation alongside the Canny path above, not instead of it,
-          // so both results are visible simultaneously for comparison. Its
-          // own try/catch mirrors detectQuads' above: a failure here must
-          // not prevent the Canny-path results already computed from being
-          // applied.
-          let blobResult: BlobResult = { maskNonZeroPixels: 0, largestContourArea: 0, boundingRect: null };
+          let blobResult: BlobResult = {
+            maskNonZeroPixels: 0,
+            largestContourArea: 0,
+            boundingRect: null,
+            rejectedCandidates: 0,
+          };
           try {
             blobResult = detectColorBlob(cv, canvas, blobPreviewCanvasRef.current);
           } catch (err) {
             // eslint-disable-next-line no-console
             console.error('[cube-edge-detect-test] blob detection error', err);
           }
+          const elapsed = performance.now() - start;
+
           drawBlobRect(canvas, blobResult.boundingRect);
+          setLastFrameMs(elapsed);
           setBlobMaskNonZeroPixels(blobResult.maskNonZeroPixels);
           setBlobLargestContourArea(blobResult.largestContourArea);
           setBlobBoundingRect(blobResult.boundingRect);
+          setBlobRejectedCandidates(blobResult.rejectedCandidates);
+
+          // ── Grid sampling + auto-lock, gated on a valid detected blob ───
+          // Paused entirely during the ~800ms lock-confirmation flash
+          // window (captureStep hasn't advanced yet, so this loop keeps
+          // ticking for blob detection/diagnostics) — lockingRef guards
+          // against re-entrant locks and stray sampling while the flash is
+          // showing.
+          if (captureStepRef.current !== 'done' && !lockingRef.current) {
+            if (blobResult.boundingRect) {
+              const sampleRect = insetRect(blobResult.boundingRect, BLOB_SAMPLE_INSET_FRACTION);
+              const fixedCenterColor: CubeColorName = captureStepRef.current === 'first' ? 'white' : 'green';
+              const results = sampleNineCellsFromRect(ctx, sampleRect, fixedCenterColor, hsvReferenceRef.current);
+              // DEBUG ONLY — visualize exactly where these 9 points landed,
+              // every tick, on the live camera view. Drawn after
+              // sampleNineCellsFromRect already read the pixel data, so it
+              // can't skew the sample itself. See drawLiveSampleDots above.
+              drawLiveSampleDots(canvas, results);
+              const liveColors = results.filter((s) => !s.isFixed).map((s) => s.classified);
+              setLiveReading(liveColors);
+
+              historyRef.current = [
+                ...historyRef.current,
+                { rect: blobResult.boundingRect, colors: liveColors },
+              ].slice(-STABILITY_WINDOW);
+
+              // "Stable" requires BOTH the classified colors AND the
+              // detected region's position/size to agree across the whole
+              // window — colors alone could coincidentally agree while the
+              // detection is still drifting mid-motion toward a hold.
+              const isStable =
+                historyRef.current.length === STABILITY_WINDOW &&
+                historyRef.current.every((entry) => arraysEqual(entry.colors, liveColors)) &&
+                boundingRectsAreStable(
+                  historyRef.current.map((entry) => entry.rect),
+                  BLOB_STABILITY_TOLERANCE_FRACTION,
+                  canvas.width,
+                  canvas.height
+                );
+
+              if (isStable) {
+                lockingRef.current = true;
+                const debugCanvas =
+                  captureStepRef.current === 'first' ? debugCanvasRef1.current : debugCanvasRef2.current;
+                if (debugCanvas) drawDebugOverlay(canvas, debugCanvas, results);
+                logLockedSample(captureStepRef.current, results);
+
+                if (captureStepRef.current === 'first') {
+                  setFirstFaceSamples(results);
+                } else {
+                  setSecondFaceSamples(results);
+                }
+
+                historyRef.current = [];
+                setLockFlashVisible(true);
+                lockFlashTimeoutRef.current = setTimeout(() => {
+                  setLockFlashVisible(false);
+                  lockingRef.current = false;
+                  setCaptureStep((prev) => (prev === 'first' ? 'second' : 'done'));
+                }, LOCK_FLASH_MS);
+              }
+            } else {
+              // No valid blob this tick — the stability streak can't mean
+              // anything spanning a gap where nothing was even detected,
+              // so reset it rather than let ticks from before the gap
+              // count toward a later coincidental match.
+              historyRef.current = [];
+              setLiveReading(null);
+            }
+          }
 
           // TEMPORARY — progressive-degradation investigation. Tracks
           // lastFrameMs and the WASM heap's current byte length
@@ -1031,16 +1724,6 @@ export default function CubeEdgeDetectTestPage() {
         ? `${wasmHeapMB.toFixed(1)} (started at ${wasmHeapAtStart.toFixed(1)}, ${wasmHeapDelta >= 0 ? '+' : ''}${wasmHeapDelta.toFixed(1)})`
         : 'n/a (waiting for first 20-tick sample)'
     }`,
-    `nonZeroEdgePixels (post-dilate; near-0 = Canny/blur too strict): ${nonZeroEdgePixels}`,
-    `rawQuadCount (4-vertex+area, before quality filters): ${rawQuadCount}`,
-    `stickerCandidateCount (after convexity/side/angle filters): ${stickerCandidateCount}`,
-    `candidateCount (confirmed 3x3-grid faces): ${candidateCount}`,
-    `largestCandidate corners: ${
-      largestCandidate
-        ? largestCandidate.points.map((p) => `(${Math.round(p.x)},${Math.round(p.y)})`).join(' ')
-        : 'none'
-    }`,
-    `--- саарал/өнгөний blob (alt strategy) ---`,
     `blobMaskNonZeroPixels (post-close mask; near-0 = HSV thresholds too strict): ${blobMaskNonZeroPixels}`,
     `blobLargestContourArea (before min-area rejection): ${Math.round(blobLargestContourArea)}`,
     `blobBoundingRect: ${
@@ -1048,6 +1731,11 @@ export default function CubeEdgeDetectTestPage() {
         ? `x=${blobBoundingRect.x} y=${blobBoundingRect.y} w=${blobBoundingRect.width} h=${blobBoundingRect.height}`
         : 'none'
     }`,
+    `blobRejectedCandidates (passed area, rejected by aspect/edge filters): ${blobRejectedCandidates}`,
+    `captureStep: ${captureStep}`,
+    `firstFaceSamples: ${firstFaceSamples ? `${firstFaceSamples.length} samples` : 'null'}`,
+    `secondFaceSamples: ${secondFaceSamples ? `${secondFaceSamples.length} samples` : 'null'}`,
+    `lockFlashVisible: ${lockFlashVisible}`,
   ].join('\n');
 
   return (
@@ -1077,16 +1765,27 @@ export default function CubeEdgeDetectTestPage() {
         </pre>
 
         <header>
-          <h1 className="text-lg font-semibold">Куб ирмэг таних тест (OpenCV)</h1>
-          <p className="text-sm text-white/50">
-            Дөрвөн өнцөгт (куб тал шиг) хэлбэр илрүүлэх туршилт — өнгө уншихгүй.
+          <h1 className="text-lg font-semibold">Куб автомат таних (өнгөт blob)</h1>
+          <p className="text-sm" style={{ color: lockFlashVisible ? '#4ade80' : 'rgba(255,255,255,0.5)' }}>
+            {lockFlashVisible && '✓ Танигдлаа!'}
+            {!lockFlashVisible &&
+              captureStep === 'first' &&
+              'Эхний талаа (жишээ нь цагаан) камерт харуулаад тогтвортой барьж бай — рамканд тааруулах шаардлагагүй'}
+            {!lockFlashVisible &&
+              captureStep === 'second' &&
+              'Одоо хоёр дахь талаа (жишээ нь ногоон) харуулаад тогтвортой барьж бай'}
+            {!lockFlashVisible && captureStep === 'done' && 'Хоёр тал амжилттай бүртгэгдлээ'}
           </p>
         </header>
 
         {/* ── Detection view ───────────────────────────────────────────────
             The one visible canvas: each tick redraws the captured frame at
-            processing resolution, then strokes cyan outlines around every
-            surviving quad candidate directly on top of it. */}
+            processing resolution, then strokes a magenta outline around the
+            detected color blob directly on top of it (see drawBlobRect).
+            Hidden once both faces are captured (captureStep === 'done'),
+            same as cube-color-test hides its camera view for the results
+            screen — but never unmounted, so videoRef/canvasRef stay attached
+            across a restart. */}
         <div
           style={{
             position: 'relative',
@@ -1096,6 +1795,7 @@ export default function CubeEdgeDetectTestPage() {
             borderRadius: 12,
             overflow: 'hidden',
             backgroundColor: '#000000',
+            display: captureStep === 'done' ? 'none' : 'block',
           }}
         >
           {/* Video stays mounted and playing (never display:none, and never
@@ -1166,80 +1866,19 @@ export default function CubeEdgeDetectTestPage() {
           )}
         </div>
 
-        {/* ── DEBUG: edge preview ─────────────────────────────────────────
-            Temporary diagnostic-only addition — not part of the actual
-            detection UI. White lines = post-dilate Canny edge map (exactly
-            what findContours consumes below); dim yellow outlines = every
-            raw 4-vertex contour BEFORE the convexity/side/angle quality
-            filters. Answers: are sticker-groove edges even coming through
-            as continuous/closed lines Canny+dilate can produce quads from,
-            or is that the actual bottleneck (vs. quads existing but the
-            quality filters rejecting them, which rawQuadCount vs.
-            stickerCandidateCount in the diagnostics panel already shows)?
+        {/* ── Live preview ──────────────────────────────────────────────────
+            Continuous sampling, gated on a valid detected blob each tick —
+            shows the current reading updating in real time so the user can
+            see it settle as they hold the cube steady. */}
+        {captureStep !== 'done' && (
+          <LivePreviewGrid liveReading={liveReading} fixedCenterColor={captureStep === 'first' ? 'white' : 'green'} />
+        )}
 
-            Was rendering entirely black on-device despite nonZeroEdgePixels
-            confirming real edge content — investigated cv.imshow's actual
-            implementation (pulled straight from public/opencv.js, not
-            guessed) and confirmed it correctly sets canvas.width/height to
-            match the Mat every call and paints via putImageData, so a
-            resolution mismatch alone can't produce solid black (only
-            distorted scaling). Couldn't fully confirm the root cause
-            without a live device, so per the investigation's own fallback:
-            enlarged significantly (width:'100%', matching the main video
-            preview above, height omitted so the canvas scales by its own
-            intrinsic aspect ratio instead of a hardcoded 200x150 box that
-            may not match the camera's actual aspect) and added a bright
-            red border so the element's real presence/size in the layout is
-            visually unmistakable in a screenshot even if cv.imshow's
-            content still isn't. Shrink back down once the black-preview
-            bug is confirmed fixed. */}
-        <div>
-          {/* TEMPORARY — unconditional, cv-independent marker. If this lime
-              box is NOT visible on-device, the whole edge-preview section
-              isn't reaching the DOM at all (a mounting/deployment problem,
-              not a canvas/cv.imshow problem) — remove once that's settled. */}
-          <div
-            style={{
-              backgroundColor: 'lime',
-              color: 'black',
-              padding: '12px',
-              fontWeight: 'bold',
-              fontSize: '16px',
-            }}
-          >
-            MARKER: If you see this lime box, this section of the page IS mounting correctly.
-          </div>
-          <p className="mb-1 text-xs text-white/50">
-            Ирмэгийн зураг (Canny+dilate, findContours-д ордог өгөгдөл) — шар зураас: чанарын
-            шүүлтүүрээс өмнөх дөрвөн өнцөгт бүгд
-          </p>
-          <canvas
-            ref={edgePreviewCanvasRef}
-            style={{
-              display: 'block',
-              width: '100%',
-              borderRadius: 8,
-              // TEMPORARY — bright red 2px border to visually confirm this
-              // canvas element itself is present/sized in the layout,
-              // independent of whether cv.imshow's content is visible
-              // inside it. Revert to the subtle
-              // `1px solid rgba(255,255,255,0.1)` border once resolved.
-              border: '2px solid red',
-              backgroundColor: '#000000',
-              imageRendering: 'pixelated',
-            }}
-          />
-        </div>
-
-        {/* ── DEBUG: saturation-blob preview (ALTERNATIVE strategy) ────────
-            Diagnostic-only, separate code path from the Canny/contour
-            approach above — does not replace it. White = pixels that passed
-            the saturated-OR-white HSV threshold and survived the
-            morphological close (see detectColorBlob); the main camera view
-            above overlays this strategy's detected bounding rect in bright
-            magenta, distinct from the cyan/amber/yellow Canny-based
-            overlays, so both strategies can be compared on the same
-            frame. */}
+        {/* ── DEBUG: saturation-blob mask preview ───────────────────────────
+            White = pixels that passed the saturated-OR-white HSV threshold
+            and survived the morphological close (see detectColorBlob); the
+            main camera view above overlays the resulting detected region in
+            bright magenta. */}
         <div>
           <p className="mb-1 text-xs text-white/50">
             Өнгөний ханд blob (саарал дэвсгэр, тод шоо) — цагаан: ханд+гэрэлтэлт босго давсан ба
@@ -1258,12 +1897,85 @@ export default function CubeEdgeDetectTestPage() {
           />
         </div>
 
+        {/* ── Two-face results ─────────────────────────────────────────────
+            Only visible once both captures are done, but each debug canvas
+            below is always mounted (display-toggled, not unmounted) so its
+            ref exists when its own capture happens mid-sequence, in step
+            'first'/'second' — well before this section becomes visible. */}
+        <div style={{ display: captureStep === 'done' ? 'flex' : 'none', flexDirection: 'column', gap: 16 }}>
+          <div>
+            <h2 className="mb-2 text-sm font-semibold">1-р тал</h2>
+            {firstFaceSamples && <FaceResultsGrid samples={firstFaceSamples} />}
+          </div>
+          <FaceDebugCanvas
+            canvasRef={debugCanvasRef1}
+            label="Дээж авсан цэгүүд — 1-р тал (улаан цэгүүд куб талан дээр байх ёстой, ягаан хүрээ илрүүлсэн бүс)"
+          />
+
+          <div>
+            <h2 className="mb-2 text-sm font-semibold">2-р тал</h2>
+            {secondFaceSamples && <FaceResultsGrid samples={secondFaceSamples} />}
+          </div>
+          <FaceDebugCanvas
+            canvasRef={debugCanvasRef2}
+            label="Дээж авсан цэгүүд — 2-р тал (улаан цэгүүд куб талан дээр байх ёстой, ягаан хүрээ илрүүлсэн бүс)"
+          />
+
+          <button
+            onClick={handleRestart}
+            className="w-full rounded-lg py-3 text-sm font-semibold"
+            style={{
+              backgroundColor: 'transparent',
+              border: `1px solid ${ACCENT}`,
+              color: ACCENT,
+            }}
+          >
+            Дахин эхлэх
+          </button>
+        </div>
+
         <p className="text-xs text-white/40">
-          Бүдэг шар контур бол ганц наалт (стикер) нэр дэвшигч; тод хөх контур бол 9 наалт 3x3
-          тор хэлбэрээр бүлэглэгдэж баталгаажсан бүхэл тал. Ягаан (magenta) тэгш өнцөгт бол
-          өнгөний ханд blob стратегийн илрүүлсэн бүс. Куб талыг өөр өнцөг, зайнаас барьж үзээд
-          контур хэр тогтвортой, зөв бүрхэж байгааг ажигла.
+          Ягаан (magenta) тэгш өнцөгт бол автоматаар илрүүлсэн куб талын бүс. Куб талыг камерт ямар
+          ч байрлал, өнцгөөр харуулаад тогтвортой барьж байхад тухайн бүс дотор 9 нүд дээжлэгдэж,
+          тогтвортой болмогц автоматаар дараагийн тал руу шилжинэ.
         </p>
+
+        {/* ── Debug / calibration panel ─────────────────────────────────── */}
+        <div className="rounded-lg border" style={{ borderColor: 'rgba(255,255,255,0.1)' }}>
+          <button
+            onClick={() => setShowDebugPanel((v) => !v)}
+            className="flex w-full items-center justify-between px-3 py-2 text-sm text-white/70"
+          >
+            <span>HSV лавлах утгууд (тохируулах)</span>
+            <span>{showDebugPanel ? '−' : '+'}</span>
+          </button>
+
+          {showDebugPanel && (
+            <div className="flex flex-col gap-3 border-t px-3 py-3" style={{ borderColor: 'rgba(255,255,255,0.1)' }}>
+              {(Object.keys(hsvReference) as CubeColorName[]).map((color) => (
+                <div key={color} className="flex items-center gap-2">
+                  <div
+                    className="h-4 w-4 flex-shrink-0 rounded-full border border-white/20"
+                    style={{ backgroundColor: COLOR_SWATCH_HEX[color] }}
+                  />
+                  <span className="w-16 flex-shrink-0 text-xs text-white/60">{COLOR_LABELS_MN[color]}</span>
+                  {(['h', 's', 'v'] as const).map((field) => (
+                    <label key={field} className="flex items-center gap-1 text-[10px] text-white/40">
+                      {field.toUpperCase()}
+                      <input
+                        type="number"
+                        value={hsvReference[color][field]}
+                        onChange={(e) => updateReferenceField(color, field, Number(e.target.value))}
+                        className="w-14 rounded border bg-transparent px-1 py-0.5 text-white"
+                        style={{ borderColor: 'rgba(255,255,255,0.15)' }}
+                      />
+                    </label>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
