@@ -76,3 +76,6 @@ serviceAccountKey.json
 
 # dataconnect generated files
 .dataconnect
+
+.vercel
+.env*
