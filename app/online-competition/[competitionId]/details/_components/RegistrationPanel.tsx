@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import type { OnlineCompetitionEventConfig } from '@/lib/online-competition/types';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import { fetchRegistration, registerForCompetition } from '@/lib/online-competition/data';
@@ -249,9 +250,17 @@ export default function RegistrationPanel({
           Раунд эхлэхэд «Миний тэмцээнүүд» дээр «Эхлүүлэх» товч нээгдэнэ.
         </p>
       </div>
-      <button type="button" className="oc-btn-edit-registration" onClick={() => setState('picking')}>
-        Бүртгэлээ засах
-      </button>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }}>
+        <button type="button" className="oc-btn-edit-registration" onClick={() => setState('picking')}>
+          Бүртгэлээ засах
+        </button>
+        <Link
+          href="/dashboard"
+          style={{ font: '500 12px var(--oc-font-heading), sans-serif', color: '#1D6E3E' }}
+        >
+          Миний тэмцээнүүд →
+        </Link>
+      </div>
     </div>
   );
 }

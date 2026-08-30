@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import Logo from './Logo';
 
@@ -26,17 +27,25 @@ export default function NavBar() {
         </div>
         {/* Desktop-only text nav links. "Тамирчид"/"Оноо" have no route yet
             (this phase only ships the hub + detail pages), so they render
-            as inert labels rather than dead links. */}
+            as inert labels rather than dead links. "Миний тэмцээнүүд" only
+            makes sense for a real, returning identity (same gate as the
+            sign-in/user-badge area below), so it's omitted entirely rather
+            than shown disabled when signed out. */}
         <div className="oc-hub-desktop-only oc-hub-nav-links">
           <span className="oc-hub-nav-link oc-hub-nav-link-active">Тэмцээн</span>
           <span className="oc-hub-nav-link">Тамирчид</span>
           <span className="oc-hub-nav-link">Оноо</span>
+          {!loading && signedIn && (
+            <Link href="/dashboard" className="oc-hub-nav-link">
+              Миний тэмцээнүүд
+            </Link>
+          )}
         </div>
       </div>
 
       {loading ? null : signedIn ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div className="oc-hub-user-badge">
+          <Link href="/dashboard" className="oc-hub-user-badge" style={{ textDecoration: 'none' }}>
             {user.photoURL ? (
               // eslint-disable-next-line @next/next/no-img-element -- avatar
               // comes from Google's CDN, not our own image pipeline.
@@ -68,7 +77,7 @@ export default function NavBar() {
             <span style={{ font: '500 12px var(--oc-font-heading), sans-serif', color: '#16140F' }}>
               {user.displayName ?? 'Тамирчин'}
             </span>
-          </div>
+          </Link>
           <button
             type="button"
             onClick={() => signOut()}
