@@ -1036,6 +1036,16 @@
   background: #141210;
   overflow: hidden;
 }
+/* State 1 — reveal's small side preview (recording is already live by
+   then; this is just visual confirmation, not the main camera-box). */
+.oc-solve-camera-box-mini {
+  position: relative;
+  width: 74px;
+  aspect-ratio: 4 / 3;
+  border: 1px solid #2A2721;
+  background: #141210;
+  overflow: hidden;
+}
 .oc-solve-camera-video {
   width: 100%;
   height: 100%;

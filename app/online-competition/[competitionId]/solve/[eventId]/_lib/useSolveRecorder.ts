@@ -18,20 +18,26 @@ function pickMimeType(): string {
   return 'video/webm';
 }
 
-/** Camera + recording for the 5-attempt solve flow. One getUserMedia
- *  permission grant is reused across all 5 attempts (only requested on
- *  the first "go" state); each attempt gets its own fresh MediaRecorder
- *  instance on the same stream. */
+/** Camera + recording for the 5-attempt solve flow. getUserMedia
+ *  permission is requested exactly once, up front (the cameraSetup
+ *  stage), and the same stream is reused for all 5 attempts; each
+ *  attempt gets its own fresh MediaRecorder instance on that stream,
+ *  started as soon as that attempt's scramble reveal begins so the
+ *  scramble application itself is captured, not just the solve. */
 export function useSolveRecorder() {
   const streamRef = useRef<MediaStream | null>(null);
   const videoElRef = useRef<HTMLVideoElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  // Dedupes concurrent requestCamera() calls (e.g. React StrictMode's
+  // double-invoked effects in dev) into the one in-flight getUserMedia
+  // call, instead of prompting/opening the camera twice.
+  const pendingRequestRef = useRef<Promise<boolean> | null>(null);
 
   const [hasCamera, setHasCamera] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // A callback ref, not a plain ref — the `go` and `rec` states each
+  // A callback ref, not a plain ref — cameraSetup/reveal/go/rec each
   // render their own <video> element (different surrounding markup), so
   // a new DOM node mounts between them and needs the existing stream
   // re-attached immediately rather than waiting on an effect keyed to a
@@ -41,37 +47,56 @@ export function useSolveRecorder() {
     if (el && streamRef.current) el.srcObject = streamRef.current;
   }, []);
 
-  /** Ensures the camera stream exists (requesting it on first call only)
-   *  and starts a fresh MediaRecorder on it. Returns whether it
-   *  succeeded — the caller (the `go` state) should not proceed to
-   *  `goNow`/`rec` on failure. */
-  const startCameraAndRecording = useCallback(async (): Promise<boolean> => {
-    setError(null);
-    try {
-      let stream = streamRef.current;
-      if (!stream) {
-        stream = await navigator.mediaDevices.getUserMedia(VIDEO_CONSTRAINTS);
-        streamRef.current = stream;
-        setHasCamera(true);
-      }
-      if (videoElRef.current) videoElRef.current.srcObject = stream;
+  /** Requests the camera stream if it doesn't already exist; a no-op
+   *  (resolves true immediately) once granted, so attempts 2-5 never
+   *  re-prompt. Called once, by the cameraSetup stage. */
+  const requestCamera = useCallback((): Promise<boolean> => {
+    if (streamRef.current) return Promise.resolve(true);
+    if (pendingRequestRef.current) return pendingRequestRef.current;
 
-      chunksRef.current = [];
-      const recorder = new MediaRecorder(stream, {
-        mimeType: pickMimeType(),
-        videoBitsPerSecond: VIDEO_BITS_PER_SECOND,
-      });
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-      recorderRef.current = recorder;
-      recorder.start();
-      return true;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Камерт хандах эрх олдсонгүй');
-      setHasCamera(false);
+    setError(null);
+    const promise = (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(VIDEO_CONSTRAINTS);
+        streamRef.current = stream;
+        if (videoElRef.current) videoElRef.current.srcObject = stream;
+        setHasCamera(true);
+        return true;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Камерт хандах эрх олдсонгүй');
+        setHasCamera(false);
+        return false;
+      } finally {
+        pendingRequestRef.current = null;
+      }
+    })();
+    pendingRequestRef.current = promise;
+    return promise;
+  }, []);
+
+  /** Starts a fresh MediaRecorder on the already-granted stream — called
+   *  at the top of each attempt's reveal state, so the resulting blob
+   *  covers reveal -> go -> goNow -> rec as one continuous clip. Assumes
+   *  requestCamera() already succeeded; returns false (and does nothing)
+   *  if there's no stream to record from. */
+  const startRecording = useCallback((): boolean => {
+    const stream = streamRef.current;
+    if (!stream) {
+      setError('Камерын урсгал олдсонгүй');
       return false;
     }
+
+    chunksRef.current = [];
+    const recorder = new MediaRecorder(stream, {
+      mimeType: pickMimeType(),
+      videoBitsPerSecond: VIDEO_BITS_PER_SECOND,
+    });
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunksRef.current.push(e.data);
+    };
+    recorderRef.current = recorder;
+    recorder.start();
+    return true;
   }, []);
 
   const stopRecording = useCallback((): Promise<Blob> => {
@@ -92,5 +117,5 @@ export function useSolveRecorder() {
     setHasCamera(false);
   }, []);
 
-  return { videoRef, hasCamera, error, startCameraAndRecording, stopRecording, releaseCamera };
+  return { videoRef, hasCamera, error, requestCamera, startRecording, stopRecording, releaseCamera };
 }

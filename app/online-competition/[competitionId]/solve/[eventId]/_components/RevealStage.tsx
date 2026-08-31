@@ -13,7 +13,15 @@ function chunkLabel(chunks: string[], index: number): string {
   return start === end ? `${start}` : `${start}-${end}`;
 }
 
-export default function RevealStage({ scramble, onDone }: { scramble: string; onDone: () => void }) {
+export default function RevealStage({
+  scramble,
+  onDone,
+  videoRef,
+}: {
+  scramble: string;
+  onDone: () => void;
+  videoRef: (el: HTMLVideoElement | null) => void;
+}) {
   const chunks = splitScrambleIntoChunks(scramble, 4);
   const [revealedCount, setRevealedCount] = useState(1);
 
@@ -33,17 +41,43 @@ export default function RevealStage({ scramble, onDone }: { scramble: string; on
 
   return (
     <div className="oc-solve-reveal">
-      <div>
-        <p style={{ font: '500 9px var(--oc-font-mono), monospace', letterSpacing: '.2em', color: '#8A8474' }}>
-          СКРАМБЛ · ХЭСЭГ
-        </p>
-        <div className="oc-solve-chunk-bar-track" style={{ marginTop: 8 }}>
-          {chunks.map((_, i) => (
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ font: '500 9px var(--oc-font-mono), monospace', letterSpacing: '.2em', color: '#8A8474' }}>
+            СКРАМБЛ · ХЭСЭГ
+          </p>
+          <div className="oc-solve-chunk-bar-track" style={{ marginTop: 8 }}>
+            {chunks.map((_, i) => (
+              <span
+                key={i}
+                className={`oc-solve-chunk-bar${i < revealedCount ? ' oc-solve-chunk-bar-filled' : ''}`}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Recording already started (see page.tsx's effect on entering
+            this stage) — this mini preview + pulsing dot is just visual
+            confirmation for the athlete that the scramble application
+            itself is being captured, not only the solve. Kept small and
+            off to the side so it doesn't crowd the scramble chunks. */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          <div className="oc-solve-camera-box-mini">
+            <video ref={videoRef} autoPlay playsInline muted className="oc-solve-camera-video" />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span className="oc-solve-rec-dot" aria-hidden />
             <span
-              key={i}
-              className={`oc-solve-chunk-bar${i < revealedCount ? ' oc-solve-chunk-bar-filled' : ''}`}
-            />
-          ))}
+              style={{
+                font: '500 8px var(--oc-font-mono), monospace',
+                letterSpacing: '.14em',
+                color: '#D8402C',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              БИЧИЖ БАЙНА
+            </span>
+          </div>
         </div>
       </div>
 

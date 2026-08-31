@@ -9,6 +9,7 @@ import type { OnlineCompetition } from '@/lib/online-competition/types';
 import { useSolveRecorder } from './_lib/useSolveRecorder';
 import { computeAo5, type AttemptTime } from '@/lib/online-competition/ao5';
 import Header from './_components/Header';
+import CameraSetupStage from './_components/CameraSetupStage';
 import RevealStage from './_components/RevealStage';
 import GoStage from './_components/GoStage';
 import GoNowStage from './_components/GoNowStage';
@@ -17,7 +18,7 @@ import EntryStage from './_components/EntryStage';
 import SummaryStage from './_components/SummaryStage';
 import SentStage from './_components/SentStage';
 
-type Stage = 'reveal' | 'go' | 'goNow' | 'rec' | 'entry' | 'summary' | 'sent';
+type Stage = 'cameraSetup' | 'reveal' | 'go' | 'goNow' | 'rec' | 'entry' | 'summary' | 'sent';
 
 const TOTAL_ATTEMPTS = 5;
 
@@ -37,7 +38,7 @@ export default function SolvePage() {
   const [competition, setCompetition] = useState<OnlineCompetition | null>(null);
   const [loadError, setLoadError] = useState('');
 
-  const [stage, setStage] = useState<Stage>('reveal');
+  const [stage, setStage] = useState<Stage>('cameraSetup');
   const [attemptIndex, setAttemptIndex] = useState(0);
   const [scramble, setScramble] = useState('');
   const [attempts, setAttempts] = useState<Attempt[]>([]);
@@ -90,6 +91,21 @@ export default function SolvePage() {
     return () => recorder.releaseCamera();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Recording starts the moment each attempt's reveal begins (scramble
+  // application itself must be on video, not just the solve) and runs
+  // uninterrupted through go -> goNow -> rec, stopping only when the
+  // athlete clicks "Дуусгах" in rec. `stage` only takes the value
+  // 'reveal' at the start of a fresh attempt (from cameraSetup, from
+  // handleEntryConfirm, or from handleRedo) — never as an intermediate
+  // value while already sitting in reveal — so this fires exactly once
+  // per attempt's reveal.
+  useEffect(() => {
+    if (stage === 'reveal') {
+      recorder.startRecording();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage]);
 
   function handleEntryConfirm(result: { timeCs: number | null; isDnf: boolean }) {
     const newAttempt: Attempt = { timeCs: result.timeCs, isDnf: result.isDnf, videoBlob: pendingBlobRef.current };
@@ -248,16 +264,21 @@ export default function SolvePage() {
           <Header competitionName={competition.name} eventLabel={eventLabel} attemptIndex={attemptIndex} />
         )}
 
-        {stage === 'reveal' && <RevealStage scramble={scramble} onDone={() => setStage('go')} />}
-
-        {stage === 'go' && (
-          <GoStage
+        {stage === 'cameraSetup' && (
+          <CameraSetupStage
             videoRef={recorder.videoRef}
-            cameraError={recorder.error}
-            onStartRecording={recorder.startCameraAndRecording}
-            onDone={() => setStage('goNow')}
+            hasCamera={recorder.hasCamera}
+            error={recorder.error}
+            onRequestCamera={recorder.requestCamera}
+            onDone={() => setStage('reveal')}
           />
         )}
+
+        {stage === 'reveal' && (
+          <RevealStage scramble={scramble} videoRef={recorder.videoRef} onDone={() => setStage('go')} />
+        )}
+
+        {stage === 'go' && <GoStage videoRef={recorder.videoRef} onDone={() => setStage('goNow')} />}
 
         {stage === 'goNow' && <GoNowStage onDone={() => setStage('rec')} />}
 
