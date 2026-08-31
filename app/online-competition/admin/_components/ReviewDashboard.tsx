@@ -242,13 +242,24 @@ function SubmissionCard({
   return (
     <div style={{ border: '1px solid var(--color-border)', borderRadius: 2, background: 'var(--color-paper)', padding: 16 }}>
       <div style={{ border: '1px solid var(--color-border)', borderRadius: 2, background: 'var(--color-paper-2)', padding: 6 }}>
-        <div className="aspect-video w-full overflow-hidden" style={{ borderRadius: 1 }}>
+        {/* Submissions are recorded portrait (the solve flow's camera is
+            held upright) — this used to be Tailwind's `aspect-video`
+            (16:9, landscape) with `object-cover`, which forced a portrait
+            clip into a wide/short box and cropped it down to a thin,
+            heavily zoomed horizontal strip. That's what judges were
+            actually seeing as "sideways" — the file itself was never
+            rotated wrong. `aspect-[3/4]` matches the solve flow's own
+            portrait convention (see .oc-solve-camera-box-portrait in
+            theme.css); `object-contain` guarantees the full frame is
+            always visible with no cropping regardless of a given
+            recording's exact aspect ratio. */}
+        <div className="aspect-[3/4] w-full overflow-hidden" style={{ borderRadius: 1 }}>
           <video
             src={submission.videoUrl}
             controls
             muted
             playsInline
-            className="h-full w-full bg-black object-cover"
+            className="h-full w-full bg-black object-contain"
           />
         </div>
       </div>
