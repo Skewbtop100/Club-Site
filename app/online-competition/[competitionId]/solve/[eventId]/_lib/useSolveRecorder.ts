@@ -5,21 +5,11 @@ import { useCallback, useRef, useState } from 'react';
 // Deliberately NOT requesting portrait width/height/aspectRatio here
 // (tried before, reverted) — on a physically-landscape phone sensor,
 // asking the browser for a portrait shape makes it do its own
-// digital crop-to-portrait before handing us the track, so we'd then be
-// rotating an already-cropped, zoomed-in frame instead of the camera's
-// full field of view. Requesting the sensor's native landscape shape
-// instead gets us the full FOV; the canvas draw loop below does 100% of
-// the portrait conversion itself, from the uncropped frame.
+// digital crop-to-portrait before handing us the track, cropping/zooming
+// into less than the camera's full field of view. Requesting the
+// sensor's native landscape shape instead gets us the full FOV.
 // facingMode: 'user' targets the front/selfie camera — the one a laptop
 // webcam or a phone propped up facing the solver's own setup actually has.
-//
-// NOTE: this doesn't attempt to produce a portrait-oriented raw frame at
-// all. On many mobile browsers the front camera SENSOR is physically
-// landscape; the browser rotates the frame for on-screen <video> display
-// only — the raw MediaStreamTrack data (and therefore anything reading
-// straight from the track, like MediaRecorder) stays unrotated regardless
-// of any width/height/aspectRatio hints. That's what the canvas render
-// loop below exists to fix.
 const VIDEO_CONSTRAINTS: MediaStreamConstraints = {
   video: {
     width: { ideal: 640 },
@@ -29,8 +19,6 @@ const VIDEO_CONSTRAINTS: MediaStreamConstraints = {
   audio: false,
 };
 const VIDEO_BITS_PER_SECOND = 250_000;
-const CANVAS_WIDTH = 480;
-const CANVAS_HEIGHT = 640;
 const CANVAS_FPS = 30;
 
 function pickMimeType(): string {
@@ -44,15 +32,21 @@ function pickMimeType(): string {
 /** Camera + recording for the 5-attempt solve flow. getUserMedia
  *  permission is requested exactly once, up front (the cameraSetup
  *  stage), and the same raw stream is reused for all 5 attempts, feeding
- *  the on-screen <video> preview directly (browsers apply the correct
- *  rotation for display on their own).
+ *  the on-screen <video> preview directly.
  *
  *  MediaRecorder, however, does NOT record that raw stream — it records
  *  an off-screen <canvas> that a requestAnimationFrame loop continuously
- *  redraws from the live video frame, rotating landscape-sensor frames
- *  90deg so the output is actually portrait regardless of what the raw
- *  track reports. Each attempt gets its own fresh MediaRecorder instance
- *  on the canvas's captureStream(), started as soon as that attempt's
+ *  redraws from the live video frame. This used to also apply a manual
+ *  rotate()/translate() when the source looked landscape (videoWidth >
+ *  videoHeight), on the theory that MediaRecorder sees an unrotated raw
+ *  sensor frame while <video> only *displays* it rotated. Real-device
+ *  testing proved that wrong for this codebase/browser combination — the
+ *  <video> element's decoded frame (videoWidth/videoHeight included) is
+ *  already orientation-correct, so the manual rotation was double-
+ *  rotating an already-correct frame. The draw loop now does a plain,
+ *  transform-free copy: whatever the video shows is exactly what gets
+ *  recorded. Each attempt gets its own fresh MediaRecorder instance on
+ *  the canvas's captureStream(), started as soon as that attempt's
  *  scramble reveal begins so the scramble application itself is
  *  captured, not just the solve. */
 export function useSolveRecorder() {
@@ -114,13 +108,19 @@ export function useSolveRecorder() {
 
   /** Creates the off-screen canvas + its captureStream() once, on first
    *  use, and reuses both across every attempt (only the MediaRecorder
-   *  instance is per-attempt). */
+   *  instance is per-attempt). Sized to whatever the video already
+   *  reports at this point if available; drawFrame keeps this in sync
+   *  every frame afterward regardless, so this initial size is just a
+   *  non-zero placeholder for the (practically unreachable, since
+   *  requestCamera() already resolved before any attempt starts
+   *  recording) case where no frame has arrived yet. */
   function ensureCanvasStream(): MediaStream | null {
     if (canvasStreamRef.current) return canvasStreamRef.current;
 
     const canvas = canvasRef.current ?? document.createElement('canvas');
-    canvas.width = CANVAS_WIDTH;
-    canvas.height = CANVAS_HEIGHT;
+    const video = videoElRef.current;
+    canvas.width = video && video.videoWidth > 0 ? video.videoWidth : 2;
+    canvas.height = video && video.videoHeight > 0 ? video.videoHeight : 2;
     const ctx = canvas.getContext('2d');
     if (!ctx || typeof canvas.captureStream !== 'function') return null;
 
@@ -130,51 +130,42 @@ export function useSolveRecorder() {
     return canvasStreamRef.current;
   }
 
-  /** Draws the current live video frame onto the canvas every animation
-   *  frame, rotating it into portrait first if the source frame is
-   *  landscape. Runs only while an attempt is actively recording (started
-   *  in startRecording, cancelled in stopRecording) — not continuously —
-   *  so there's no rAF loop leaking between attempts or while sitting on
-   *  entry/summary/etc. */
+  /** Copies the current live video frame onto the canvas every animation
+   *  frame — no rotation, no transform, just whatever the video element
+   *  is already showing (see the hook's doc comment for why manual
+   *  rotation was removed). The canvas is resized to match the video's
+   *  own reported videoWidth/videoHeight every frame rather than assuming
+   *  a fixed size, since those can change (between attempts, or if the
+   *  browser adjusts on a real device rotation). Runs only while an
+   *  attempt is actively recording (started in startRecording, cancelled
+   *  in stopRecording) — not continuously — so there's no rAF loop
+   *  leaking between attempts or while sitting on entry/summary/etc. */
   function drawFrame() {
     const video = videoElRef.current;
     const ctx = canvasCtxRef.current;
-    if (video && ctx && video.readyState >= video.HAVE_CURRENT_DATA) {
+    const canvas = canvasRef.current;
+    if (video && ctx && canvas && video.readyState >= video.HAVE_CURRENT_DATA) {
       const vw = video.videoWidth;
       const vh = video.videoHeight;
       if (vw > 0 && vh > 0) {
-        ctx.save();
-        if (vw > vh) {
-          // Landscape sensor frame (the common real-phone case) — rotate
-          // 90deg counter-clockwise so it fills the portrait canvas
-          // instead of coming out sideways. (Was clockwise; a real-device
-          // test showed that direction was wrong and this was flipped —
-          // translate origin flipped to match, from the top-right corner
-          // to the bottom-left, so the rotated frame still lands fully
-          // on-canvas instead of drawing off it.) drawImage always uses
-          // the full source frame with no source-rect cropping, so the
-          // camera's complete field of view is preserved end to end.
-          ctx.translate(0, CANVAS_HEIGHT);
-          ctx.rotate(-Math.PI / 2);
-          ctx.drawImage(video, 0, 0, CANVAS_HEIGHT, CANVAS_WIDTH);
-        } else {
-          // Already portrait (some front cameras, most desktop webcams) —
-          // draw as-is.
-          ctx.drawImage(video, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        if (canvas.width !== vw || canvas.height !== vh) {
+          canvas.width = vw;
+          canvas.height = vh;
         }
-        ctx.restore();
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       }
     }
     rafIdRef.current = requestAnimationFrame(drawFrame);
   }
 
-  /** Starts a fresh MediaRecorder — reading from the rotation-corrected
-   *  canvas stream, not the raw camera stream — on top of a freshly
-   *  (re)started draw loop. Called at the top of each attempt's reveal
-   *  state, so the resulting blob covers reveal -> go -> goNow -> rec as
-   *  one continuous, correctly-oriented clip. Assumes requestCamera()
-   *  already succeeded; returns false (and does nothing) if there's no
-   *  camera stream, or if this browser can't produce a canvas stream. */
+  /** Starts a fresh MediaRecorder — reading from the canvas stream (a
+   *  transform-free mirror of the video preview), not the raw camera
+   *  stream — on top of a freshly (re)started draw loop. Called at the
+   *  top of each attempt's reveal state, so the resulting blob covers
+   *  reveal -> go -> goNow -> rec as one continuous clip. Assumes
+   *  requestCamera() already succeeded; returns false (and does nothing)
+   *  if there's no camera stream, or if this browser can't produce a
+   *  canvas stream. */
   const startRecording = useCallback((): boolean => {
     if (!streamRef.current) {
       setError('Камерын урсгал олдсонгүй');
