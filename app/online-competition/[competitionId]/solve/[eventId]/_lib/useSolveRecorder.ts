@@ -23,9 +23,7 @@ import { useCallback, useRef, useState } from 'react';
 // indirection entirely.
 //
 // audio: false here on purpose — no microphone/ambient audio is ever
-// captured, for the athlete's privacy and to save bandwidth. The only
-// audio in the final recording is the synthesized beep cues below, mixed
-// in via a separate MediaStreamAudioDestinationNode, not a mic.
+// captured, for the athlete's privacy and to save bandwidth.
 const VIDEO_CONSTRAINTS: MediaStreamConstraints = {
   video: {
     width: { ideal: 640 },
@@ -40,16 +38,7 @@ const BEEP_DURATION_S = 0.25;
 const BEEP_GAIN = 0.2;
 
 function pickMimeType(): string {
-  // Audio-codec-qualified variants first — Chrome will still mux Opus
-  // audio into a video-only-declared webm container if an audio track is
-  // present, but naming it explicitly is more correct/portable.
-  const candidates = [
-    'video/webm;codecs=vp9,opus',
-    'video/webm;codecs=vp8,opus',
-    'video/webm;codecs=vp9',
-    'video/webm;codecs=vp8',
-    'video/webm',
-  ];
+  const candidates = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
   for (const c of candidates) {
     if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(c)) return c;
   }
@@ -60,16 +49,30 @@ function pickMimeType(): string {
  *  permission is requested exactly once, up front (the cameraSetup
  *  stage), and the same stream is reused for all 5 attempts — it feeds
  *  the on-screen <video> preview directly, and MediaRecorder reads from
- *  it directly too. Each attempt gets its own fresh MediaRecorder
- *  instance, started as soon as that attempt's zeroDisplay begins so the
- *  frozen "0.00", the scramble application, the orientation hold, and the
- *  solve are all one continuous clip.
+ *  it directly too (video-only — see playBeep below for why). Each
+ *  attempt gets its own fresh MediaRecorder instance, started as soon as
+ *  that attempt's zeroDisplay begins so the frozen "0.00", the scramble
+ *  application, the orientation hold, and the solve are all one
+ *  continuous clip.
  *
- *  The MediaRecorder's stream is the camera's video track plus a second,
- *  synthesized audio track (see playBeep below) — never a microphone —
- *  so the WCA-style 8s/12s inspection cues end up embedded in the
- *  recording itself, audible to a reviewing judge without any separate
- *  timestamp bookkeeping. */
+ *  playBeep() plays the WCA-style 8s/12s inspection cues live, through
+ *  the device speaker, so the athlete actually hears them — but does NOT
+ *  mix them into the recording. An earlier version routed the same
+ *  oscillator into a MediaStreamAudioDestinationNode and added that
+ *  track alongside the video track into MediaRecorder's stream, so the
+ *  cues would be embedded in the file too. That broke recording entirely:
+ *  verified via an isolated test (video-only vs. video+a second audio
+ *  track, both with a fully "running" — not suspended — AudioContext)
+ *  that MediaRecorder produced a normal ~79KB clip for 4 seconds of
+ *  video-only, but only ~110 bytes (an essentially empty container, no
+ *  real frame data at all) the instant a second audio track was present
+ *  alongside it — reproducible regardless of whether anything was ever
+ *  played through that audio track. This is what caused attempts 1-5 to
+ *  all end up as near-empty recordings after the state-machine rework
+ *  that added embedded beep cues. Embedding may be revisitable later
+ *  (e.g. muxing audio+video as separate recordings after the fact), but
+ *  for now a reliable recording matters far more than an embedded cue —
+ *  the athlete still hears the beep live either way. */
 export function useSolveRecorder() {
   const streamRef = useRef<MediaStream | null>(null);
   const videoElRef = useRef<HTMLVideoElement | null>(null);
@@ -80,11 +83,9 @@ export function useSolveRecorder() {
   // call, instead of prompting/opening the camera twice.
   const pendingRequestRef = useRef<Promise<boolean> | null>(null);
 
-  // Created lazily, once, on first use (either the first startRecording()
-  // or the first playBeep(), whichever comes first) and reused across all
-  // 5 attempts — same lifecycle as the camera stream itself.
+  // Created lazily on first playBeep() call and reused for every
+  // subsequent beep across all 5 attempts.
   const audioContextRef = useRef<AudioContext | null>(null);
-  const audioDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
 
   const [hasCamera, setHasCamera] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -127,37 +128,18 @@ export function useSolveRecorder() {
     return promise;
   }, []);
 
-  /** Lazily creates the AudioContext + MediaStreamAudioDestinationNode
-   *  used for beep cues, reusing both across every attempt. Returns null
-   *  on browsers with no Web Audio API at all — playBeep()/startRecording
-   *  both treat that as "no audio track", not a hard failure, since the
-   *  beep cues are a nice-to-have on top of the actual recording. */
-  function ensureAudioGraph(): { ctx: AudioContext; dest: MediaStreamAudioDestinationNode } | null {
-    if (audioContextRef.current && audioDestRef.current) {
-      return { ctx: audioContextRef.current, dest: audioDestRef.current };
-    }
+  /** Plays a short beep live through the device speaker — a WCA-style
+   *  inspection cue for the athlete, not embedded in the recording (see
+   *  the hook's doc comment for why). Silently does nothing on browsers
+   *  with no Web Audio API at all. */
+  const playBeep = useCallback(() => {
     const AudioContextCtor =
       typeof window !== 'undefined'
         ? (window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)
         : undefined;
-    if (!AudioContextCtor) return null;
-
-    const ctx = new AudioContextCtor();
-    const dest = ctx.createMediaStreamDestination();
-    audioContextRef.current = ctx;
-    audioDestRef.current = dest;
-    return { ctx, dest };
-  }
-
-  /** Plays a short beep, both live (through the device speaker, so the
-   *  athlete actually hears the cue) and into the recording (via the
-   *  MediaStreamAudioDestinationNode mixed into the MediaRecorder's
-   *  stream) — the same oscillator feeds both destinations at once, so
-   *  there's no drift between what's heard live and what's embedded. */
-  const playBeep = useCallback(() => {
-    const graph = ensureAudioGraph();
-    if (!graph) return;
-    const { ctx, dest } = graph;
+    if (!AudioContextCtor) return;
+    if (!audioContextRef.current) audioContextRef.current = new AudioContextCtor();
+    const ctx = audioContextRef.current;
     if (ctx.state === 'suspended') ctx.resume().catch(() => {});
 
     const osc = ctx.createOscillator();
@@ -167,18 +149,16 @@ export function useSolveRecorder() {
     gain.gain.setValueAtTime(BEEP_GAIN, ctx.currentTime);
     osc.connect(gain);
     gain.connect(ctx.destination);
-    gain.connect(dest);
     osc.start();
     osc.stop(ctx.currentTime + BEEP_DURATION_S);
   }, []);
 
-  /** Starts a fresh MediaRecorder on the camera's video track plus the
-   *  synthesized-beep audio track (never a microphone) — called at the
-   *  top of each attempt's zeroDisplay state, so the resulting blob
-   *  covers zeroDisplay -> scrambleReveal -> orientationHold ->
-   *  readyPrompt -> rec as one continuous clip. Assumes requestCamera()
-   *  already succeeded; returns false (and does nothing) if there's no
-   *  camera stream to record from. */
+  /** Starts a fresh MediaRecorder on the already-granted (video-only)
+   *  stream — called at the top of each attempt's zeroDisplay state, so
+   *  the resulting blob covers zeroDisplay -> scrambleReveal ->
+   *  orientationHold -> readyPrompt -> rec as one continuous clip.
+   *  Assumes requestCamera() already succeeded; returns false (and does
+   *  nothing) if there's no stream to record from. */
   const startRecording = useCallback((): boolean => {
     const stream = streamRef.current;
     if (!stream) {
@@ -186,13 +166,8 @@ export function useSolveRecorder() {
       return false;
     }
 
-    const graph = ensureAudioGraph();
-    const tracks: MediaStreamTrack[] = [...stream.getVideoTracks()];
-    if (graph) tracks.push(...graph.dest.stream.getAudioTracks());
-    const combinedStream = new MediaStream(tracks);
-
     chunksRef.current = [];
-    const recorder = new MediaRecorder(combinedStream, {
+    const recorder = new MediaRecorder(stream, {
       mimeType: pickMimeType(),
       videoBitsPerSecond: VIDEO_BITS_PER_SECOND,
     });
@@ -202,7 +177,6 @@ export function useSolveRecorder() {
     recorderRef.current = recorder;
     recorder.start();
     return true;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const stopRecording = useCallback((): Promise<Blob> => {
@@ -220,8 +194,6 @@ export function useSolveRecorder() {
   const releaseCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
-    audioDestRef.current?.stream.getTracks().forEach((t) => t.stop());
-    audioDestRef.current = null;
     if (audioContextRef.current) {
       audioContextRef.current.close().catch(() => {});
       audioContextRef.current = null;
