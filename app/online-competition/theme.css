@@ -972,6 +972,16 @@
   flex: none;
 }
 
+/* State 0 — zeroDisplay (frozen "0.00", proves the timer read zero
+   before the scramble was applied) */
+.oc-solve-zero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+}
+
 /* State 1 — reveal */
 .oc-solve-reveal {
   padding-top: 22px;
@@ -1021,7 +1031,7 @@
   border-radius: 2px;
 }
 
-/* States 2/4 — shared camera-box chrome */
+/* Shared camera-box chrome — orientationHold, readyPrompt, and rec */
 .oc-solve-camera-box {
   position: relative;
   aspect-ratio: 4 / 3;
@@ -1070,7 +1080,8 @@
   border-right: 1px solid #DFFF4F;
 }
 
-/* State 2 — go (camera-ready countdown) */
+/* Shared top/bottom-split layout — orientationHold and readyPrompt (both
+   replaced the old countdown-number "go" stage) */
 .oc-solve-go {
   display: flex;
   flex-direction: column;
@@ -1078,6 +1089,10 @@
   padding-top: 20px;
   flex: 1;
 }
+/* Now used by zeroDisplay's frozen "0.00" — the old live countdown number
+   this treatment was originally built for (the "go" stage) is gone;
+   orientationHold shows instruction text instead, with progress marked by
+   the same tick pattern the reveal stage's progress bar uses. */
 .oc-solve-countdown-number {
   font: 700 148px/0.85 var(--oc-font-mono), monospace;
   color: #DFFF4F;
@@ -1094,34 +1109,6 @@
     transform: scale(1);
     opacity: 1;
   }
-}
-
-/* State 3 — goNow (GO flash) */
-.oc-solve-gonow {
-  position: absolute;
-  inset: 0;
-  background: #DFFF4F;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  z-index: 50;
-}
-.oc-solve-gonow-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 20px);
-  gap: 4px;
-}
-.oc-solve-gonow-cell {
-  width: 20px;
-  height: 20px;
-  background: #0D0C0A;
-}
-.oc-solve-gonow-title {
-  font: 700 34px var(--oc-font-heading), sans-serif;
-  color: #0D0C0A;
-  text-align: center;
 }
 
 /* State 4 — rec (recording, no timer) */

@@ -1,13 +1,12 @@
-/** Splits a scramble string into 4 roughly-equal chunks of moves, for the
- *  `reveal` state's sequential reveal. Practical scrambles always have
- *  well more than 4 moves, so this never produces an empty chunk in
- *  practice. */
-export function splitScrambleIntoChunks(scramble: string, chunkCount = 4): string[] {
+/** Splits a scramble string into fixed-size groups of `groupSize` moves
+ *  each, for the `scrambleReveal` state's one-group-at-a-time reveal.
+ *  Group COUNT is dynamic (Math.ceil(totalMoves / groupSize)) — a longer
+ *  scramble (e.g. bigger cubes) just gets more groups, not bigger ones. */
+export function splitScrambleIntoGroups(scramble: string, groupSize = 5): string[] {
   const moves = scramble.trim().split(/\s+/).filter(Boolean);
-  const perChunk = Math.ceil(moves.length / chunkCount);
-  const chunks: string[] = [];
-  for (let i = 0; i < chunkCount; i++) {
-    chunks.push(moves.slice(i * perChunk, (i + 1) * perChunk).join(' '));
+  const groups: string[] = [];
+  for (let i = 0; i < moves.length; i += groupSize) {
+    groups.push(moves.slice(i, i + groupSize).join(' '));
   }
-  return chunks;
+  return groups.length > 0 ? groups : [''];
 }

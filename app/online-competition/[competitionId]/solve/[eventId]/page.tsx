@@ -10,15 +10,25 @@ import { useSolveRecorder } from './_lib/useSolveRecorder';
 import { computeAo5, type AttemptTime } from '@/lib/online-competition/ao5';
 import Header from './_components/Header';
 import CameraSetupStage from './_components/CameraSetupStage';
+import ZeroDisplayStage from './_components/ZeroDisplayStage';
 import RevealStage from './_components/RevealStage';
-import GoStage from './_components/GoStage';
-import GoNowStage from './_components/GoNowStage';
+import OrientationHoldStage from './_components/OrientationHoldStage';
+import ReadyPromptStage from './_components/ReadyPromptStage';
 import RecStage from './_components/RecStage';
 import EntryStage from './_components/EntryStage';
 import SummaryStage from './_components/SummaryStage';
 import SentStage from './_components/SentStage';
 
-type Stage = 'cameraSetup' | 'reveal' | 'go' | 'goNow' | 'rec' | 'entry' | 'summary' | 'sent';
+type Stage =
+  | 'cameraSetup'
+  | 'zeroDisplay'
+  | 'scrambleReveal'
+  | 'orientationHold'
+  | 'readyPrompt'
+  | 'rec'
+  | 'entry'
+  | 'summary'
+  | 'sent';
 
 const TOTAL_ATTEMPTS = 5;
 
@@ -28,7 +38,7 @@ interface Attempt {
   videoBlob: Blob | null;
 }
 
-const HEADER_STAGES: Stage[] = ['reveal', 'go', 'rec', 'entry'];
+const HEADER_STAGES: Stage[] = ['zeroDisplay', 'scrambleReveal', 'orientationHold', 'readyPrompt', 'rec', 'entry'];
 
 export default function SolvePage() {
   const params = useParams<{ competitionId: string; eventId: string }>();
@@ -92,16 +102,17 @@ export default function SolvePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Recording starts the moment each attempt's reveal begins (scramble
-  // application itself must be on video, not just the solve) and runs
-  // uninterrupted through go -> goNow -> rec, stopping only when the
-  // athlete clicks "Дуусгах" in rec. `stage` only takes the value
-  // 'reveal' at the start of a fresh attempt (from cameraSetup, from
-  // handleEntryConfirm, or from handleRedo) — never as an intermediate
-  // value while already sitting in reveal — so this fires exactly once
-  // per attempt's reveal.
+  // Recording starts the moment each attempt's zeroDisplay begins (the
+  // frozen "0.00" itself must be on video, proving the timer read zero
+  // before the scramble was applied) and runs uninterrupted through
+  // scrambleReveal -> orientationHold -> readyPrompt -> rec, stopping
+  // only when the athlete clicks "Дуусгах" in rec. `stage` only takes the
+  // value 'zeroDisplay' at the start of a fresh attempt (from
+  // cameraSetup, from handleEntryConfirm, or from handleRedo) — never as
+  // an intermediate value while already sitting in zeroDisplay — so this
+  // fires exactly once per attempt.
   useEffect(() => {
-    if (stage === 'reveal') {
+    if (stage === 'zeroDisplay') {
       recorder.startRecording();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -118,7 +129,7 @@ export default function SolvePage() {
     } else {
       setAttemptIndex((i) => i + 1);
       fetchScramble();
-      setStage('reveal');
+      setStage('zeroDisplay');
     }
   }
 
@@ -151,7 +162,7 @@ export default function SolvePage() {
     setAttemptIndex(0);
     setSubmitError('');
     fetchScramble();
-    setStage('reveal');
+    setStage('zeroDisplay');
   }
 
   async function handleSubmit() {
@@ -270,21 +281,28 @@ export default function SolvePage() {
             hasCamera={recorder.hasCamera}
             error={recorder.error}
             onRequestCamera={recorder.requestCamera}
-            onDone={() => setStage('reveal')}
+            onDone={() => setStage('zeroDisplay')}
           />
         )}
 
-        {stage === 'reveal' && (
-          <RevealStage scramble={scramble} videoRef={recorder.videoRef} onDone={() => setStage('go')} />
+        {stage === 'zeroDisplay' && <ZeroDisplayStage onDone={() => setStage('scrambleReveal')} />}
+
+        {stage === 'scrambleReveal' && (
+          <RevealStage scramble={scramble} videoRef={recorder.videoRef} onDone={() => setStage('orientationHold')} />
         )}
 
-        {stage === 'go' && <GoStage videoRef={recorder.videoRef} onDone={() => setStage('goNow')} />}
+        {stage === 'orientationHold' && (
+          <OrientationHoldStage videoRef={recorder.videoRef} onDone={() => setStage('readyPrompt')} />
+        )}
 
-        {stage === 'goNow' && <GoNowStage onDone={() => setStage('rec')} />}
+        {stage === 'readyPrompt' && (
+          <ReadyPromptStage videoRef={recorder.videoRef} onDone={() => setStage('rec')} />
+        )}
 
         {stage === 'rec' && (
           <RecStage
             videoRef={recorder.videoRef}
+            onBeep={recorder.playBeep}
             onFinish={async () => {
               const blob = await recorder.stopRecording();
               pendingBlobRef.current = blob;
