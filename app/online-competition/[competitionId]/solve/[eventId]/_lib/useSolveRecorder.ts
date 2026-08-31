@@ -10,6 +10,14 @@ import { useCallback, useRef, useState } from 'react';
 // builds are known to do this). facingMode: 'user' targets the
 // front/selfie camera — the one a laptop webcam or a phone propped up
 // facing the solver's own setup actually has.
+//
+// NOTE: none of this actually guarantees a portrait-oriented raw frame on
+// a real phone. On many mobile browsers the front camera SENSOR is
+// physically landscape; the browser rotates the frame for on-screen
+// <video> display only — the raw MediaStreamTrack data (and therefore
+// anything reading straight from the track, like MediaRecorder) stays
+// unrotated regardless of these constraints. That's what the canvas
+// render loop below exists to fix.
 const VIDEO_CONSTRAINTS: MediaStreamConstraints = {
   video: {
     width: { ideal: 480 },
@@ -20,6 +28,9 @@ const VIDEO_CONSTRAINTS: MediaStreamConstraints = {
   audio: false,
 };
 const VIDEO_BITS_PER_SECOND = 250_000;
+const CANVAS_WIDTH = 480;
+const CANVAS_HEIGHT = 640;
+const CANVAS_FPS = 30;
 
 function pickMimeType(): string {
   const candidates = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
@@ -31,10 +42,18 @@ function pickMimeType(): string {
 
 /** Camera + recording for the 5-attempt solve flow. getUserMedia
  *  permission is requested exactly once, up front (the cameraSetup
- *  stage), and the same stream is reused for all 5 attempts; each
- *  attempt gets its own fresh MediaRecorder instance on that stream,
- *  started as soon as that attempt's scramble reveal begins so the
- *  scramble application itself is captured, not just the solve. */
+ *  stage), and the same raw stream is reused for all 5 attempts, feeding
+ *  the on-screen <video> preview directly (browsers apply the correct
+ *  rotation for display on their own).
+ *
+ *  MediaRecorder, however, does NOT record that raw stream — it records
+ *  an off-screen <canvas> that a requestAnimationFrame loop continuously
+ *  redraws from the live video frame, rotating landscape-sensor frames
+ *  90deg so the output is actually portrait regardless of what the raw
+ *  track reports. Each attempt gets its own fresh MediaRecorder instance
+ *  on the canvas's captureStream(), started as soon as that attempt's
+ *  scramble reveal begins so the scramble application itself is
+ *  captured, not just the solve. */
 export function useSolveRecorder() {
   const streamRef = useRef<MediaStream | null>(null);
   const videoElRef = useRef<HTMLVideoElement | null>(null);
@@ -45,6 +64,11 @@ export function useSolveRecorder() {
   // call, instead of prompting/opening the camera twice.
   const pendingRequestRef = useRef<Promise<boolean> | null>(null);
 
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const canvasCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const canvasStreamRef = useRef<MediaStream | null>(null);
+  const rafIdRef = useRef<number | null>(null);
+
   const [hasCamera, setHasCamera] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,7 +76,9 @@ export function useSolveRecorder() {
   // render their own <video> element (different surrounding markup), so
   // a new DOM node mounts between them and needs the existing stream
   // re-attached immediately rather than waiting on an effect keyed to a
-  // ref that doesn't itself trigger re-renders.
+  // ref that doesn't itself trigger re-renders. The canvas render loop
+  // reads videoElRef.current fresh every frame, so it keeps drawing from
+  // whichever <video> is currently mounted without needing to restart.
   const videoRef = useCallback((el: HTMLVideoElement | null) => {
     videoElRef.current = el;
     if (el && streamRef.current) el.srcObject = streamRef.current;
@@ -85,20 +111,83 @@ export function useSolveRecorder() {
     return promise;
   }, []);
 
-  /** Starts a fresh MediaRecorder on the already-granted stream — called
-   *  at the top of each attempt's reveal state, so the resulting blob
-   *  covers reveal -> go -> goNow -> rec as one continuous clip. Assumes
-   *  requestCamera() already succeeded; returns false (and does nothing)
-   *  if there's no stream to record from. */
+  /** Creates the off-screen canvas + its captureStream() once, on first
+   *  use, and reuses both across every attempt (only the MediaRecorder
+   *  instance is per-attempt). */
+  function ensureCanvasStream(): MediaStream | null {
+    if (canvasStreamRef.current) return canvasStreamRef.current;
+
+    const canvas = canvasRef.current ?? document.createElement('canvas');
+    canvas.width = CANVAS_WIDTH;
+    canvas.height = CANVAS_HEIGHT;
+    const ctx = canvas.getContext('2d');
+    if (!ctx || typeof canvas.captureStream !== 'function') return null;
+
+    canvasRef.current = canvas;
+    canvasCtxRef.current = ctx;
+    canvasStreamRef.current = canvas.captureStream(CANVAS_FPS);
+    return canvasStreamRef.current;
+  }
+
+  /** Draws the current live video frame onto the canvas every animation
+   *  frame, rotating it into portrait first if the source frame is
+   *  landscape. Runs only while an attempt is actively recording (started
+   *  in startRecording, cancelled in stopRecording) — not continuously —
+   *  so there's no rAF loop leaking between attempts or while sitting on
+   *  entry/summary/etc. */
+  function drawFrame() {
+    const video = videoElRef.current;
+    const ctx = canvasCtxRef.current;
+    if (video && ctx && video.readyState >= video.HAVE_CURRENT_DATA) {
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (vw > 0 && vh > 0) {
+        ctx.save();
+        if (vw > vh) {
+          // Landscape sensor frame (the common real-phone case) — rotate
+          // 90deg clockwise so it fills the portrait canvas instead of
+          // coming out sideways. Direction picked as the conventional
+          // front-camera mounting; unverifiable against a real sensor in
+          // this headless environment (see the caller's doc comment) —
+          // if a real device shows it rotated the wrong way, flip the
+          // translate/rotate pair below to counter-clockwise.
+          ctx.translate(CANVAS_WIDTH, 0);
+          ctx.rotate(Math.PI / 2);
+          ctx.drawImage(video, 0, 0, CANVAS_HEIGHT, CANVAS_WIDTH);
+        } else {
+          // Already portrait (some front cameras, most desktop webcams) —
+          // draw as-is.
+          ctx.drawImage(video, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        }
+        ctx.restore();
+      }
+    }
+    rafIdRef.current = requestAnimationFrame(drawFrame);
+  }
+
+  /** Starts a fresh MediaRecorder — reading from the rotation-corrected
+   *  canvas stream, not the raw camera stream — on top of a freshly
+   *  (re)started draw loop. Called at the top of each attempt's reveal
+   *  state, so the resulting blob covers reveal -> go -> goNow -> rec as
+   *  one continuous, correctly-oriented clip. Assumes requestCamera()
+   *  already succeeded; returns false (and does nothing) if there's no
+   *  camera stream, or if this browser can't produce a canvas stream. */
   const startRecording = useCallback((): boolean => {
-    const stream = streamRef.current;
-    if (!stream) {
+    if (!streamRef.current) {
       setError('Камерын урсгал олдсонгүй');
       return false;
     }
+    const canvasStream = ensureCanvasStream();
+    if (!canvasStream) {
+      setError('Бичлэг эхлүүлэхэд алдаа гарлаа');
+      return false;
+    }
+
+    if (rafIdRef.current !== null) cancelAnimationFrame(rafIdRef.current);
+    rafIdRef.current = requestAnimationFrame(drawFrame);
 
     chunksRef.current = [];
-    const recorder = new MediaRecorder(stream, {
+    const recorder = new MediaRecorder(canvasStream, {
       mimeType: pickMimeType(),
       videoBitsPerSecond: VIDEO_BITS_PER_SECOND,
     });
@@ -108,9 +197,14 @@ export function useSolveRecorder() {
     recorderRef.current = recorder;
     recorder.start();
     return true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const stopRecording = useCallback((): Promise<Blob> => {
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
     return new Promise((resolve) => {
       const recorder = recorderRef.current;
       if (!recorder || recorder.state === 'inactive') {
@@ -123,8 +217,16 @@ export function useSolveRecorder() {
   }, []);
 
   const releaseCamera = useCallback(() => {
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    canvasStreamRef.current?.getTracks().forEach((t) => t.stop());
+    canvasStreamRef.current = null;
+    canvasRef.current = null;
+    canvasCtxRef.current = null;
     setHasCamera(false);
   }, []);
 
