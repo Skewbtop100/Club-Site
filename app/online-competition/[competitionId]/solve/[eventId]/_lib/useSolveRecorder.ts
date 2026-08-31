@@ -2,27 +2,28 @@
 
 import { useCallback, useRef, useState } from 'react';
 
-// Ideal-portrait hint (the rec-state preview box is 3:4) — this is only a
-// request; actual stream dimensions depend on the device's camera. height
-// > width is what actually gets browsers to prefer a portrait capture;
-// aspectRatio is included alongside as a fallback for browsers/devices
-// that honor it over the width/height ideal hints (some Android Chrome
-// builds are known to do this). facingMode: 'user' targets the
-// front/selfie camera — the one a laptop webcam or a phone propped up
-// facing the solver's own setup actually has.
+// Deliberately NOT requesting portrait width/height/aspectRatio here
+// (tried before, reverted) — on a physically-landscape phone sensor,
+// asking the browser for a portrait shape makes it do its own
+// digital crop-to-portrait before handing us the track, so we'd then be
+// rotating an already-cropped, zoomed-in frame instead of the camera's
+// full field of view. Requesting the sensor's native landscape shape
+// instead gets us the full FOV; the canvas draw loop below does 100% of
+// the portrait conversion itself, from the uncropped frame.
+// facingMode: 'user' targets the front/selfie camera — the one a laptop
+// webcam or a phone propped up facing the solver's own setup actually has.
 //
-// NOTE: none of this actually guarantees a portrait-oriented raw frame on
-// a real phone. On many mobile browsers the front camera SENSOR is
-// physically landscape; the browser rotates the frame for on-screen
-// <video> display only — the raw MediaStreamTrack data (and therefore
-// anything reading straight from the track, like MediaRecorder) stays
-// unrotated regardless of these constraints. That's what the canvas
-// render loop below exists to fix.
+// NOTE: this doesn't attempt to produce a portrait-oriented raw frame at
+// all. On many mobile browsers the front camera SENSOR is physically
+// landscape; the browser rotates the frame for on-screen <video> display
+// only — the raw MediaStreamTrack data (and therefore anything reading
+// straight from the track, like MediaRecorder) stays unrotated regardless
+// of any width/height/aspectRatio hints. That's what the canvas render
+// loop below exists to fix.
 const VIDEO_CONSTRAINTS: MediaStreamConstraints = {
   video: {
-    width: { ideal: 480 },
-    height: { ideal: 640 },
-    aspectRatio: { ideal: 3 / 4 },
+    width: { ideal: 640 },
+    height: { ideal: 480 },
     facingMode: 'user',
   },
   audio: false,
@@ -145,14 +146,16 @@ export function useSolveRecorder() {
         ctx.save();
         if (vw > vh) {
           // Landscape sensor frame (the common real-phone case) — rotate
-          // 90deg clockwise so it fills the portrait canvas instead of
-          // coming out sideways. Direction picked as the conventional
-          // front-camera mounting; unverifiable against a real sensor in
-          // this headless environment (see the caller's doc comment) —
-          // if a real device shows it rotated the wrong way, flip the
-          // translate/rotate pair below to counter-clockwise.
-          ctx.translate(CANVAS_WIDTH, 0);
-          ctx.rotate(Math.PI / 2);
+          // 90deg counter-clockwise so it fills the portrait canvas
+          // instead of coming out sideways. (Was clockwise; a real-device
+          // test showed that direction was wrong and this was flipped —
+          // translate origin flipped to match, from the top-right corner
+          // to the bottom-left, so the rotated frame still lands fully
+          // on-canvas instead of drawing off it.) drawImage always uses
+          // the full source frame with no source-rect cropping, so the
+          // camera's complete field of view is preserved end to end.
+          ctx.translate(0, CANVAS_HEIGHT);
+          ctx.rotate(-Math.PI / 2);
           ctx.drawImage(video, 0, 0, CANVAS_HEIGHT, CANVAS_WIDTH);
         } else {
           // Already portrait (some front cameras, most desktop webcams) —
