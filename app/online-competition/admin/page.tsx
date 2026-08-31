@@ -1,6 +1,7 @@
 import { isOnlineCompAdmin } from '@/lib/online-competition/admin-auth';
 import LoginForm from './_components/LoginForm';
-import AdminTabs from './_components/AdminTabs';
+import AdminHeader from './_components/AdminHeader';
+import CompetitionsList from './_components/CompetitionsList';
 
 // Server Component gate — checks the httpOnly admin cookie before
 // rendering anything. Not the club's admin auth system: this page is
@@ -29,6 +30,12 @@ import AdminTabs from './_components/AdminTabs';
 // `padding-left`/`padding-right` all computed to 0px despite the classes
 // being present. Inline styles always win over any class regardless of
 // layer, so that's what actually centers/pads this element.
+//
+// This page is now the admin section's home: a competitions list (with a
+// "Шинэ тэмцээн" create action) plus a "Тохиргоо" link. Review moved to
+// being per-competition (app/online-competition/admin/competitions/[id]) —
+// the old flat "Шүүгчийн самбар" tab that showed every submission across
+// every competition is gone from here.
 export default async function OnlineCompetitionAdminPage() {
   const isAdmin = await isOnlineCompAdmin();
 
@@ -49,7 +56,8 @@ export default async function OnlineCompetitionAdminPage() {
   return (
     <div className="min-h-screen w-full" style={{ background: 'var(--color-paper)', color: 'var(--color-ink)' }}>
       <main style={{ maxWidth: 1152, margin: '0 auto', padding: '32px 24px' }}>
-        <AdminTabs />
+        <AdminHeader />
+        <CompetitionsList />
       </main>
     </div>
   );

@@ -3,7 +3,7 @@ import { isOnlineCompAdmin } from '@/lib/online-competition/admin-auth';
 import { recomputeSeasonPointsForCompetition } from '@/lib/online-competition/seasonPoints';
 
 // Admin-triggered recompute (the "Онооны тооцоо шинэчлэх" button per
-// finished competition in CompetitionsTab) — deliberately not a live
+// finished competition in CompetitionsList) — deliberately not a live
 // aggregation on every hub page load. Cheaper, and gives the admin a
 // clear moment to re-run it after approving more submissions.
 export async function POST(req: Request) {

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { Badge, Button, EmptyState, type BadgeSpec } from '../../_components/ui';
 import type { OnlineCompetitionAdminView, OnlineCompetitionStatus } from '@/lib/online-competition/types';
 import CompetitionForm from './CompetitionForm';
@@ -26,13 +27,17 @@ function fmtDateTime(ms: number | null): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-type FormTarget = 'closed' | 'create' | OnlineCompetitionAdminView;
-
-export default function CompetitionsTab() {
+/** Admin home page's main content — the competitions list. Each row now
+ *  links to that competition's own detail page (Тамирчид / Шүүгчийн
+ *  самбар tabs); the old per-row "Засах" button moved there too (see
+ *  CompetitionDetail) — this page keeps only "create a new competition"
+ *  as an inline action, via the exact same CompetitionForm used to
+ *  create one. */
+export default function CompetitionsList() {
   const [competitions, setCompetitions] = useState<OnlineCompetitionAdminView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [formTarget, setFormTarget] = useState<FormTarget>('closed');
+  const [creating, setCreating] = useState(false);
   const [recomputingId, setRecomputingId] = useState<string | null>(null);
   const [recomputeMsg, setRecomputeMsg] = useState<{ id: string; text: string; isError: boolean } | null>(null);
 
@@ -90,7 +95,7 @@ export default function CompetitionsTab() {
         <span className="font-[family-name:var(--oc-font-mono)] text-xs font-medium uppercase tracking-[.14em] text-[#8A8474]">
           Тэмцээнүүд
         </span>
-        <Button variant="primary" onClick={() => setFormTarget('create')}>
+        <Button variant="primary" onClick={() => setCreating(true)}>
           Шинэ тэмцээн
         </Button>
       </div>
@@ -123,7 +128,11 @@ export default function CompetitionsTab() {
             const label = STATUS_LABEL[c.status] ?? c.status;
             return (
               <div key={c.id}>
-                <div className="oc-table-row">
+                <Link
+                  href={`/online-competition/admin/competitions/${c.id}`}
+                  className="oc-table-row"
+                  style={{ textDecoration: 'none', color: 'inherit' }}
+                >
                   <span className="oc-table-name">{c.name}</span>
                   <span className="oc-table-date">{fmtDateTime(c.startAt)}</span>
                   <span>
@@ -132,16 +141,17 @@ export default function CompetitionsTab() {
                     </Badge>
                   </span>
                   <span className="oc-table-count">{c.participantCount}</span>
-                  <span>
-                    <Button variant="outline" className="oc-btn-sm" onClick={() => setFormTarget(c)}>
-                      Засах
-                    </Button>
+                  <span aria-hidden style={{ color: '#8A8474', textAlign: 'right' }}>
+                    →
                   </span>
-                </div>
+                </Link>
 
                 {/* Its own strip below the row, not squeezed into the 80px
-                    edit-button column — "Онооны тооцоо шинэчлэх" is far
-                    too long a label to fit that column's fixed width. */}
+                    last column — "Онооны тооцоо шинэчлэх" is far too long
+                    a label to fit that column's fixed width. Kept on the
+                    list (not the detail page) since it's a season-points
+                    action, unrelated to either of the detail page's two
+                    tabs. */}
                 {c.status === 'finished' && (
                   <div
                     style={{
@@ -178,12 +188,12 @@ export default function CompetitionsTab() {
         </div>
       )}
 
-      {formTarget !== 'closed' && (
+      {creating && (
         <CompetitionForm
-          competition={formTarget === 'create' ? null : formTarget}
-          onClose={() => setFormTarget('closed')}
+          competition={null}
+          onClose={() => setCreating(false)}
           onSaved={() => {
-            setFormTarget('closed');
+            setCreating(false);
             load();
           }}
         />

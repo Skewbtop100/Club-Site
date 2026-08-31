@@ -117,27 +117,32 @@ function JudgeActionButton({
   );
 }
 
-export default function ReviewDashboard() {
+export default function ReviewDashboard({ competitionId }: { competitionId?: string }) {
   const [filter, setFilter] = useState<Filter>('pending');
   const [submissions, setSubmissions] = useState<OnlineSubmissionAdminView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
-  const load = useCallback(async (status: Filter) => {
-    setLoading(true);
-    setError('');
-    try {
-      const res = await fetch(`/api/online-competition/submissions?status=${status}`);
-      if (!res.ok) throw new Error('failed');
-      const data = (await res.json()) as { submissions: OnlineSubmissionAdminView[] };
-      setSubmissions(data.submissions);
-    } catch {
-      setError('Илгээмжүүдийг ачааллаж чадсангүй');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const load = useCallback(
+    async (status: Filter) => {
+      setLoading(true);
+      setError('');
+      try {
+        const params = new URLSearchParams({ status });
+        if (competitionId) params.set('competitionId', competitionId);
+        const res = await fetch(`/api/online-competition/submissions?${params}`);
+        if (!res.ok) throw new Error('failed');
+        const data = (await res.json()) as { submissions: OnlineSubmissionAdminView[] };
+        setSubmissions(data.submissions);
+      } catch {
+        setError('Илгээмжүүдийг ачааллаж чадсангүй');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [competitionId],
+  );
 
   useEffect(() => {
     load(filter);

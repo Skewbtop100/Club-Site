@@ -26,7 +26,7 @@ export interface BadgeSpec {
 }
 
 /** Status badge/chip — component pattern 1 of the v2 system. Every color
- *  triple is supplied by the caller (CompetitionsTab, ReviewDashboard) as
+ *  triple is supplied by the caller (CompetitionsList, ReviewDashboard) as
  *  an exact literal value from the mockup spec — this component only
  *  renders the shared shape/typography, it doesn't own a tone lookup. */
 export function Badge({ borderColor, background, color, dotColor, padding = '7px 10px', children }: BadgeSpec & { children: ReactNode }) {

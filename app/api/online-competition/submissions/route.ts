@@ -15,7 +15,9 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const statusParam = new URL(req.url).searchParams.get('status') ?? 'pending';
+  const url = new URL(req.url);
+  const statusParam = url.searchParams.get('status') ?? 'pending';
+  const competitionId = url.searchParams.get('competitionId');
   const db = getOnlineCompAdminDb();
 
   const query =
@@ -27,7 +29,12 @@ export async function GET(req: Request) {
           .orderBy('createdAt', 'asc');
 
   const snap = await query.get();
-  const submissions: OnlineSubmissionAdminView[] = snap.docs.map((d) => {
+  // Filtered in memory rather than as a 3rd Firestore query clause (which
+  // would need a new composite index for every status/competitionId
+  // combination) — the review dashboard's dataset is small enough that
+  // this costs nothing meaningful.
+  const docs = competitionId ? snap.docs.filter((d) => d.data().competitionId === competitionId) : snap.docs;
+  const submissions: OnlineSubmissionAdminView[] = docs.map((d) => {
     const data = d.data();
     return {
       id: d.id,
