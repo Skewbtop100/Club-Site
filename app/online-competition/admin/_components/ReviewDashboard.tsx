@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
 import type { OnlineSubmissionAdminView, OnlineSubmissionPenalty, OnlineSubmissionStatus } from '@/lib/online-competition/types';
@@ -175,6 +175,12 @@ export default function ReviewDashboard() {
     [filter],
   );
 
+  const handleDelete = useCallback(async (submissionId: string) => {
+    const res = await fetch(`/api/online-competition/submissions/${submissionId}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('failed');
+    setSubmissions((prev) => prev.filter((s) => s.id !== submissionId));
+  }, []);
+
   return (
     <div>
       <div
@@ -222,6 +228,7 @@ export default function ReviewDashboard() {
               submission={s}
               busy={actionLoadingId === s.id}
               onAction={(action) => handleAction(s.id, action)}
+              onDelete={() => handleDelete(s.id)}
             />
           ))}
         </div>
@@ -234,13 +241,110 @@ function SubmissionCard({
   submission,
   busy,
   onAction,
+  onDelete,
 }: {
   submission: OnlineSubmissionAdminView;
   busy: boolean;
   onAction: (action: ReviewAction) => void;
+  onDelete: () => Promise<void>;
 }) {
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+
+  const videoElRef = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    if (videoElRef.current) videoElRef.current.muted = true;
+  }, []);
+
+  async function confirmDelete() {
+    setDeleting(true);
+    setDeleteError('');
+    try {
+      await onDelete();
+      // No further state to reset on success — the card is about to be
+      // removed from the parent's list entirely.
+    } catch {
+      setDeleteError('Устгаж чадсангүй');
+      setDeleting(false);
+    }
+  }
+
   return (
-    <div style={{ border: '1px solid var(--color-border)', borderRadius: 2, background: 'var(--color-paper)', padding: 16 }}>
+    <div style={{ position: 'relative', border: '1px solid var(--color-border)', borderRadius: 2, background: 'var(--color-paper)', padding: 16 }}>
+      {/* Small corner control, deliberately separate from the judging
+          actions below (Зөвшөөрөх/+2/DNF) so it can't be misclicked as
+          one of them — needs an explicit "Устгах уу?" confirm click
+          before it actually deletes anything. */}
+      <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 5 }}>
+        {confirmingDelete ? (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              background: 'var(--color-paper)',
+              border: '1px solid var(--color-border)',
+              borderRadius: 2,
+              padding: '4px 6px',
+            }}
+          >
+            <span className="text-xs" style={{ color: 'var(--color-ink-soft)', whiteSpace: 'nowrap' }}>
+              Устгах уу?
+            </span>
+            <button
+              type="button"
+              disabled={deleting}
+              onClick={confirmDelete}
+              className="text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
+              style={{ color: 'var(--color-dnf)', border: 'none', background: 'transparent', cursor: 'pointer', padding: 2 }}
+            >
+              {deleting ? '...' : 'Тийм'}
+            </button>
+            <button
+              type="button"
+              disabled={deleting}
+              onClick={() => setConfirmingDelete(false)}
+              className="text-xs disabled:cursor-not-allowed disabled:opacity-50"
+              style={{ color: 'var(--color-ink-faint)', border: 'none', background: 'transparent', cursor: 'pointer', padding: 2 }}
+            >
+              Үгүй
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            aria-label="Илгээмж устгах"
+            onClick={() => setConfirmingDelete(true)}
+            className="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ink)]"
+            style={{
+              width: 22,
+              height: 22,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              border: '1px solid var(--color-border)',
+              borderRadius: 2,
+              background: 'var(--color-paper)',
+              color: 'var(--color-ink-faint)',
+              cursor: 'pointer',
+              fontSize: 13,
+              lineHeight: 1,
+            }}
+          >
+            ✕
+          </button>
+        )}
+      </div>
+      {deleteError && (
+        <p
+          className="text-xs"
+          style={{ position: 'absolute', top: 34, right: 8, color: 'var(--color-dnf)', zIndex: 5 }}
+        >
+          {deleteError}
+        </p>
+      )}
+
       <div style={{ border: '1px solid var(--color-border)', borderRadius: 2, background: 'var(--color-paper-2)', padding: 6 }}>
         {/* Submissions are recorded portrait (the solve flow's camera is
             held upright) — this used to be Tailwind's `aspect-video`
@@ -254,10 +358,21 @@ function SubmissionCard({
             always visible with no cropping regardless of a given
             recording's exact aspect ratio. */}
         <div className="aspect-[3/4] w-full overflow-hidden" style={{ borderRadius: 1 }}>
+          {/* No `muted` JSX prop here on purpose — `muted` is a React-
+              controlled prop that gets re-applied (forcing muted back to
+              true) on every re-render of this card, which silently
+              overrides the native <video controls> unmute button the
+              instant anything else on the page causes a re-render (e.g.
+              clicking another card's judge action). `defaultMuted` would
+              be the idiomatic fix (mirrors defaultValue/defaultChecked)
+              but @types/react doesn't declare it on VideoHTMLAttributes,
+              so instead this sets the DOM `.muted` property imperatively,
+              exactly once on mount — after that the native control fully
+              owns muted state, same end result. */}
           <video
+            ref={videoElRef}
             src={submission.videoUrl}
             controls
-            muted
             playsInline
             className="h-full w-full bg-black object-contain"
           />

@@ -1,13 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import { fetchCompetition, createSubmission, recordAo5Result } from '@/lib/online-competition/data';
 import { uploadVideoToCloudinary } from '@/lib/online-competition/cloudinary';
 import type { OnlineCompetition } from '@/lib/online-competition/types';
 import { useSolveRecorder } from './_lib/useSolveRecorder';
-import { computeAo5, type AttemptTime } from '@/lib/online-competition/ao5';
+import type { AttemptTime } from '@/lib/online-competition/ao5';
+import { computeSummaryStats } from './_lib/summaryStats';
 import Header from './_components/Header';
 import CameraSetupStage from './_components/CameraSetupStage';
 import ZeroDisplayStage from './_components/ZeroDisplayStage';
@@ -30,7 +31,17 @@ type Stage =
   | 'summary'
   | 'sent';
 
-const TOTAL_ATTEMPTS = 5;
+const REAL_TOTAL_ATTEMPTS = 5;
+
+// TESTING-ONLY override: ?__testAttempts=2 shortens a manual test run to
+// 2 attempts instead of the real Ao5-mandated 5. Never surfaced in any
+// UI — only ever read from the URL — and clamped to [1, REAL_TOTAL_
+// ATTEMPTS] so a malformed value can't produce 0 or an absurdly long run.
+// Real athletes always get the real 5; this only ever changes anything
+// when the query param is explicitly present. When active, the summary
+// screen's Ao5 falls back to a plain average (see _lib/summaryStats.ts)
+// since real Ao5 math only makes sense at exactly 5 attempts.
+const TEST_ATTEMPTS_PARAM = '__testAttempts';
 
 interface Attempt {
   timeCs: number | null;
@@ -44,6 +55,14 @@ export default function SolvePage() {
   const params = useParams<{ competitionId: string; eventId: string }>();
   const { competitionId, eventId } = params;
   const { user, loading: authLoading, signInWithGoogle } = useOnlineAuth();
+
+  const searchParams = useSearchParams();
+  const testAttemptsRaw = searchParams.get(TEST_ATTEMPTS_PARAM);
+  const parsedTestAttempts = testAttemptsRaw ? parseInt(testAttemptsRaw, 10) : NaN;
+  const totalAttempts =
+    Number.isInteger(parsedTestAttempts) && parsedTestAttempts >= 1 && parsedTestAttempts <= REAL_TOTAL_ATTEMPTS
+      ? parsedTestAttempts
+      : REAL_TOTAL_ATTEMPTS;
 
   const [competition, setCompetition] = useState<OnlineCompetition | null>(null);
   const [loadError, setLoadError] = useState('');
@@ -124,7 +143,7 @@ export default function SolvePage() {
     setAttempts(next);
     pendingBlobRef.current = null;
 
-    if (next.length >= TOTAL_ATTEMPTS) {
+    if (next.length >= totalAttempts) {
       setStage('summary');
     } else {
       setAttemptIndex((i) => i + 1);
@@ -177,9 +196,9 @@ export default function SolvePage() {
     // Uploaded one at a time (not in parallel) — simpler aggregate
     // progress and easier on a mobile connection during a live
     // competition than 5 concurrent uploads.
-    const perAttemptProgress = new Array(TOTAL_ATTEMPTS).fill(0);
+    const perAttemptProgress = new Array(attempts.length).fill(0);
     const reportAggregate = () => {
-      const avg = perAttemptProgress.reduce((a, b) => a + b, 0) / TOTAL_ATTEMPTS;
+      const avg = perAttemptProgress.reduce((a, b) => a + b, 0) / attempts.length;
       setSubmitProgress(Math.round(avg));
     };
 
@@ -206,7 +225,7 @@ export default function SolvePage() {
       }
 
       const times: AttemptTime[] = attempts.map((a) => (a.isDnf ? 'DNF' : (a.timeCs as number)));
-      const { ao5 } = computeAo5(times);
+      const { ao5 } = computeSummaryStats(times);
       await recordAo5Result(user.uid, competitionId, eventId, { ao5, attempts: times });
       setFinalAo5(ao5);
 
@@ -272,7 +291,12 @@ export default function SolvePage() {
     <div className="oc-solve-page">
       <div className="oc-solve-shell">
         {HEADER_STAGES.includes(stage) && (
-          <Header competitionName={competition.name} eventLabel={eventLabel} attemptIndex={attemptIndex} />
+          <Header
+            competitionName={competition.name}
+            eventLabel={eventLabel}
+            attemptIndex={attemptIndex}
+            totalAttempts={totalAttempts}
+          />
         )}
 
         {stage === 'cameraSetup' && (

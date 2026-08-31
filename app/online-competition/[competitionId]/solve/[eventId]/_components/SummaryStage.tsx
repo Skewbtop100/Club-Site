@@ -1,7 +1,8 @@
 'use client';
 
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
-import { computeAo5, type AttemptTime } from '@/lib/online-competition/ao5';
+import type { AttemptTime } from '@/lib/online-competition/ao5';
+import { computeSummaryStats } from '../_lib/summaryStats';
 
 export interface AttemptResult {
   timeCs: number | null;
@@ -27,7 +28,7 @@ export default function SummaryStage({
   submitError: string;
 }) {
   const times: AttemptTime[] = attempts.map((a) => (a.isDnf ? 'DNF' : (a.timeCs as number)));
-  const { ao5, bestIndex, worstIndex } = computeAo5(times);
+  const { ao5, bestIndex, worstIndex } = computeSummaryStats(times);
 
   function handleRedo() {
     if (window.confirm('Бүх бичлэгийг устгаад дахин эхлэх үү?')) {
@@ -39,7 +40,7 @@ export default function SummaryStage({
     <div className="oc-solve-summary">
       <div>
         <p style={{ font: '500 9px var(--oc-font-mono), monospace', letterSpacing: '.2em', color: '#8A8474' }}>
-          5 ОРОЛДЛОГО
+          {attempts.length} ОРОЛДЛОГО
         </p>
 
         <div className="oc-solve-attempt-list" style={{ marginTop: 10 }}>
