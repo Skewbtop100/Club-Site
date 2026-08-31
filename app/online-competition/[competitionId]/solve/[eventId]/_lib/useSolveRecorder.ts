@@ -3,9 +3,20 @@
 import { useCallback, useRef, useState } from 'react';
 
 // Ideal-portrait hint (the rec-state preview box is 3:4) — this is only a
-// request; actual stream dimensions depend on the device's camera.
+// request; actual stream dimensions depend on the device's camera. height
+// > width is what actually gets browsers to prefer a portrait capture;
+// aspectRatio is included alongside as a fallback for browsers/devices
+// that honor it over the width/height ideal hints (some Android Chrome
+// builds are known to do this). facingMode: 'user' targets the
+// front/selfie camera — the one a laptop webcam or a phone propped up
+// facing the solver's own setup actually has.
 const VIDEO_CONSTRAINTS: MediaStreamConstraints = {
-  video: { width: { ideal: 480 }, height: { ideal: 640 } },
+  video: {
+    width: { ideal: 480 },
+    height: { ideal: 640 },
+    aspectRatio: { ideal: 3 / 4 },
+    facingMode: 'user',
+  },
   audio: false,
 };
 const VIDEO_BITS_PER_SECOND = 250_000;
