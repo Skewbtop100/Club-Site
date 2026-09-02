@@ -4,7 +4,7 @@ import { useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
-type CurrentSection = 'competitions' | 'settings' | 'detail';
+type CurrentSection = 'competitions' | 'athletes' | 'settings' | 'detail';
 
 // Persistent header across every admin page (competitions list, a
 // competition's detail page, settings) — the home link, the "Тохиргоо"
@@ -29,6 +29,13 @@ export default function AdminHeader({ current = 'competitions' }: { current?: Cu
       ) : (
         <Link href="/online-competition/admin" className="oc-tab" style={{ textDecoration: 'none' }}>
           {current === 'detail' ? '← Тэмцээнүүд' : 'Тэмцээнүүд'}
+        </Link>
+      )}
+      {current === 'athletes' ? (
+        <span className="oc-tab oc-tab-active">Тамирчид</span>
+      ) : (
+        <Link href="/online-competition/admin/athletes" className="oc-tab" style={{ textDecoration: 'none' }}>
+          Тамирчид
         </Link>
       )}
       {current === 'settings' ? (

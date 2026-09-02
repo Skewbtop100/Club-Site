@@ -19,6 +19,8 @@ import type {
   OnlineCompetitionScramble,
   OnlineCompetitionStatus,
   OnlineParticipant,
+  OnlineParticipantProfileInput,
+  OnlineParticipantProfileStatus,
   OnlineRegistration,
   OnlineSeasonAthletePoints,
   NextEventRound,
@@ -201,6 +203,40 @@ export async function fetchParticipant(uid: string): Promise<OnlineParticipant |
   const snap = await getDoc(doc(onlineCompDb, 'onlineParticipants', uid));
   if (!snap.exists()) return null;
   return snap.data() as OnlineParticipant;
+}
+
+// A participant doc created only via upsertGoogleParticipant (i.e. every
+// athlete who has signed in but never opened the profile form) has no
+// `profileStatus` field at all — treated as 'incomplete' here rather than
+// writing that value onto every doc on sign-in, same reasoning as
+// normalizeStatus()/normalizeEvents() above for legacy competition docs.
+export function resolveProfileStatus(participant: OnlineParticipant | null): OnlineParticipantProfileStatus {
+  return participant?.profileStatus ?? 'incomplete';
+}
+
+// Written by the athlete profile form (app/online-competition/profile) on
+// submit — both the first-ever submission and a resubmission after
+// rejection. Always moves profileStatus to 'pending'; approval/rejection
+// only ever happen server-side via the Admin SDK (see
+// app/api/online-competition/admin-athletes/[uid]/route.ts), which is also
+// what the Firestore rules for this collection enforce (see the rules
+// snippet in that route's file comment).
+export async function submitParticipantProfile(uid: string, input: OnlineParticipantProfileInput): Promise<void> {
+  await setDoc(
+    doc(onlineCompDb, 'onlineParticipants', uid),
+    {
+      lastName: input.lastName,
+      firstName: input.firstName,
+      dateOfBirth: input.dateOfBirth,
+      gender: input.gender,
+      citizenship: input.citizenship,
+      photoUrl: input.photoUrl,
+      photoPublicId: input.photoPublicId,
+      profileStatus: 'pending',
+      submittedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
 }
 
 function registrationRef(uid: string, competitionId: string) {

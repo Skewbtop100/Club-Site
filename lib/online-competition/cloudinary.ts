@@ -1,7 +1,6 @@
-// Unsigned Cloudinary video upload for the public online-competition
-// feature. Used instead of Firebase Storage because this project's
-// Firebase plan doesn't support enabling Storage without upgrading to a
-// paid tier.
+// Unsigned Cloudinary upload for the public online-competition feature.
+// Used instead of Firebase Storage because this project's Firebase plan
+// doesn't support enabling Storage without upgrading to a paid tier.
 //
 // TODO: submitted videos should auto-delete once retentionExpiresAt (see
 // onlineSubmissions in lib/online-competition/types.ts) passes. Not
@@ -18,8 +17,10 @@ export interface CloudinaryUploadResult {
 }
 
 // XMLHttpRequest (not fetch) is used deliberately — fetch has no built-in
-// upload-progress event, and the review screen's progress bar needs one.
-export function uploadVideoToCloudinary(
+// upload-progress event, and callers (the solve review screen, the profile
+// photo picker) show a progress bar.
+function uploadToCloudinary(
+  resourceType: 'video' | 'image',
   blob: Blob,
   onProgress: (percent: number) => void,
 ): Promise<CloudinaryUploadResult> {
@@ -33,7 +34,7 @@ export function uploadVideoToCloudinary(
     formData.append('upload_preset', UPLOAD_PRESET);
 
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/video/upload`);
+    xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/${resourceType}/upload`);
 
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) {
@@ -60,4 +61,20 @@ export function uploadVideoToCloudinary(
 
     xhr.send(formData);
   });
+}
+
+export function uploadVideoToCloudinary(
+  blob: Blob,
+  onProgress: (percent: number) => void,
+): Promise<CloudinaryUploadResult> {
+  return uploadToCloudinary('video', blob, onProgress);
+}
+
+// Used by the athlete profile form (app/online-competition/profile) for the
+// admin-reviewed verification photo.
+export function uploadImageToCloudinary(
+  blob: Blob,
+  onProgress: (percent: number) => void,
+): Promise<CloudinaryUploadResult> {
+  return uploadToCloudinary('image', blob, onProgress);
 }

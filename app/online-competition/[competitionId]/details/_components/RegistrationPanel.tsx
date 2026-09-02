@@ -4,9 +4,10 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { OnlineCompetitionEventConfig } from '@/lib/online-competition/types';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
-import { fetchRegistration, registerForCompetition } from '@/lib/online-competition/data';
+import { onlineCompAuth } from '@/lib/online-competition/firebase';
+import { fetchParticipant, fetchRegistration, registerForCompetition, resolveProfileStatus } from '@/lib/online-competition/data';
 
-type RegState = 'idle' | 'picking' | 'registered';
+type RegState = 'idle' | 'gated' | 'picking' | 'registered';
 
 /** idle -> picking -> registered, persisted to
  *  onlineParticipants/{uid}/registrations/{competitionId}. On mount, if
@@ -25,6 +26,7 @@ export default function RegistrationPanel({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [authError, setAuthError] = useState('');
   const [checkingExisting, setCheckingExisting] = useState(true);
+  const [checkingProfile, setCheckingProfile] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
 
@@ -59,10 +61,16 @@ export default function RegistrationPanel({
   async function handleRegisterClick() {
     // Anonymous (solve-page) sessions don't count — registering needs a
     // real, returning identity.
+    let uid = user?.uid;
     if (!user || user.isAnonymous) {
       setAuthError('');
       try {
         await signInWithGoogle();
+        // signInWithGoogle() resolves void — read the freshly-signed-in uid
+        // straight off the auth instance rather than the `user` from
+        // useOnlineAuth's closure, which won't reflect the new sign-in
+        // until this component re-renders off onAuthStateChanged.
+        uid = onlineCompAuth.currentUser?.uid;
       } catch (err) {
         const code = (err as { code?: string } | null)?.code;
         // User closed the popup or it got superseded by another —
@@ -71,6 +79,25 @@ export default function RegistrationPanel({
         setAuthError('Нэвтрэхэд алдаа гарлаа, дахин оролдоно уу');
         return;
       }
+    }
+    if (!uid) return;
+
+    // Registration is gated on the athlete's profile-verification status —
+    // an unverified/rejected athlete is sent to the profile form instead
+    // of the event-picking screen.
+    setAuthError('');
+    setCheckingProfile(true);
+    try {
+      const participant = await fetchParticipant(uid);
+      if (resolveProfileStatus(participant) !== 'approved') {
+        setState('gated');
+        return;
+      }
+    } catch {
+      setAuthError('Профайлын мэдээлэл шалгахад алдаа гарлаа, дахин оролдоно уу');
+      return;
+    } finally {
+      setCheckingProfile(false);
     }
     setState('picking');
   }
@@ -125,9 +152,30 @@ export default function RegistrationPanel({
             </p>
           )}
         </div>
-        <button type="button" className="oc-btn-register" onClick={handleRegisterClick}>
-          Бүртгүүлэх
+        <button
+          type="button"
+          className="oc-btn-register"
+          disabled={checkingProfile}
+          onClick={handleRegisterClick}
+        >
+          {checkingProfile ? 'Шалгаж байна...' : 'Бүртгүүлэх'}
         </button>
+      </div>
+    );
+  }
+
+  if (state === 'gated') {
+    return (
+      <div className="oc-reg-gated">
+        <p style={{ font: '600 15px var(--oc-font-heading), sans-serif', color: '#8A5400' }}>
+          Профайл баталгаажаагүй байна
+        </p>
+        <p style={{ marginTop: 8, font: '400 12px var(--oc-font-heading), sans-serif', color: '#4C473C', maxWidth: 420 }}>
+          Тэмцээнд бүртгүүлэхийн тулд эхлээд профайлаа бөглөж, админаар баталгаажуулах шаардлагатай.
+        </p>
+        <Link href="/online-competition/profile" className="oc-btn-register" style={{ marginTop: 14, display: 'inline-block' }}>
+          Профайл бөглөх →
+        </Link>
       </div>
     );
   }

@@ -56,17 +56,84 @@ export interface OnlineCompetitionScramble {
   createdAt?: Timestamp;
 }
 
+export type OnlineParticipantGender = 'male' | 'female' | 'other';
+
+/** Athlete identity-verification status, gating competition registration
+ *  (see RegistrationPanel.tsx). A doc with no `profileStatus` field at all
+ *  (every participant created before this feature existed, or created by
+ *  upsertGoogleParticipant on first Google sign-in, which never sets it)
+ *  is treated as 'incomplete' by every reader — see resolveProfileStatus
+ *  in data.ts — rather than writing 'incomplete' onto every doc up front. */
+export type OnlineParticipantProfileStatus = 'incomplete' | 'pending' | 'approved' | 'rejected';
+
 /** onlineParticipants/{uid} — public participant profile, deliberately NOT
  *  linked to the club's `athletes` collection. `photoURL`/`email` are
  *  populated from the Google profile on Google sign-in (see
  *  useOnlineAuth.tsx); the anonymous-auth nickname flow on the solve page
- *  only ever sets `displayName`, so both are optional. */
+ *  only ever sets `displayName`, so both are optional.
+ *
+ *  The fields below `email` are the athlete-verification profile (added
+ *  alongside the registration gate) — filled in by the athlete via
+ *  app/online-competition/profile, reviewed by an admin via
+ *  app/online-competition/admin/athletes. `photoUrl`/`photoPublicId` are
+ *  the athlete's latest *submitted* photo (pending review);
+ *  `approvedPhotoUrl` is only ever set once an admin approves, and is the
+ *  one other UI (e.g. a future public roster) should treat as "official". */
 export interface OnlineParticipant {
   uid: string;
   displayName: string;
   photoURL?: string | null;
   email?: string | null;
   createdAt?: Timestamp;
+  lastName?: string;
+  firstName?: string;
+  /** ISO date, e.g. "2000-05-14" — stored as a plain string (not a
+   *  Timestamp) since it's entered via a plain <input type="date"> and
+   *  never needs time-of-day or timezone handling. */
+  dateOfBirth?: string;
+  gender?: OnlineParticipantGender;
+  citizenship?: string;
+  photoUrl?: string | null;
+  photoPublicId?: string | null;
+  profileStatus?: OnlineParticipantProfileStatus;
+  approvedPhotoUrl?: string | null;
+  submittedAt?: Timestamp | null;
+  reviewedAt?: Timestamp | null;
+  rejectionReason?: string | null;
+}
+
+/** Payload for submitParticipantProfile (data.ts) — what the profile form
+ *  sends. */
+export interface OnlineParticipantProfileInput {
+  lastName: string;
+  firstName: string;
+  dateOfBirth: string;
+  gender: OnlineParticipantGender;
+  citizenship: string;
+  photoUrl: string;
+  photoPublicId: string;
+}
+
+/** Shape returned by GET /api/online-competition/admin-athletes — same
+ *  fields as OnlineParticipant but with `uid` required, Timestamps
+ *  converted to epoch-ms, and profileStatus always resolved (never
+ *  undefined), same reasoning as OnlineSubmissionAdminView/
+ *  OnlineCompetitionAdminView above. */
+export interface OnlineParticipantAdminView {
+  uid: string;
+  displayName: string;
+  email: string | null;
+  lastName: string;
+  firstName: string;
+  dateOfBirth: string;
+  gender: OnlineParticipantGender | null;
+  citizenship: string;
+  photoUrl: string | null;
+  profileStatus: OnlineParticipantProfileStatus;
+  approvedPhotoUrl: string | null;
+  submittedAt: number | null;
+  reviewedAt: number | null;
+  rejectionReason: string | null;
 }
 
 export type OnlineRegistrationStatus = 'registered';

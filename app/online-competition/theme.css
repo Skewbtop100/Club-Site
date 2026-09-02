@@ -692,6 +692,19 @@
   background: #C8E93C;
 }
 
+/* Registration panel — profile-verification gate. Same warn tone
+   (--color-warn / --color-warn-bg) as the review dashboard's "pending"
+   submission badge (submissionBadge() in ReviewDashboard.tsx), written
+   here as the token vars since this file already defines them, unlike
+   that dashboard file's exact-literal-hex precedent. */
+.oc-reg-gated {
+  border: 1px solid var(--color-warn);
+  background: var(--color-warn-bg);
+  padding: 20px;
+  margin-top: 6px;
+  border-radius: 2px;
+}
+
 .oc-reg-picking {
   border: 1px solid #16140F;
   background: #FFFDF8;
@@ -1357,4 +1370,88 @@
 .oc-solve-btn-back:hover {
   border-color: #8A8474;
   color: #F4F1EA;
+}
+
+/* ── Phase 6 — athlete profile verification
+   (app/online-competition/profile/page.tsx and
+   app/online-competition/admin/athletes/page.tsx). Same exact-literal-port
+   approach (warm paper/ink v2 tones) as every prior phase. */
+
+.oc-profile-card {
+  border: 1px solid #16140F;
+  background: #FFFDF8;
+  border-radius: 2px;
+  padding: 20px;
+}
+.oc-profile-photo-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.oc-profile-photo-preview {
+  width: 84px;
+  height: 84px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  border: 1px solid #DCD6C8;
+  background: #F4F1EA;
+  object-fit: cover;
+  display: block;
+}
+.oc-profile-photo-placeholder {
+  width: 84px;
+  height: 84px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  border: 1px dashed #DCD6C8;
+  background: #F4F1EA;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 500 9px var(--oc-font-mono), monospace;
+  color: #8A8474;
+  text-align: center;
+  padding: 4px;
+}
+
+/* Status banners — same warn/dnf/ok tone triples as submissionBadge() in
+   ReviewDashboard.tsx and .oc-reg-gated above. */
+.oc-profile-status-pending {
+  border: 1px solid var(--color-warn);
+  background: var(--color-warn-bg);
+  padding: 20px;
+  border-radius: 2px;
+}
+.oc-profile-status-rejected {
+  border: 1px solid #D8402C;
+  background: #FDE8E4;
+  color: #B22E1D;
+  padding: 16px 18px;
+  border-radius: 2px;
+}
+.oc-profile-status-approved {
+  border: 1px solid #2E9E5B;
+  background: #E9F6EE;
+  padding: 20px;
+  border-radius: 2px;
+}
+
+/* Admin athletes page */
+.oc-athlete-card {
+  border: 1px solid #DCD6C8;
+  background: #FFFDF8;
+  border-radius: 2px;
+  padding: 16px;
+  display: flex;
+  gap: 14px;
+}
+.oc-athlete-thumb {
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  border: 1px solid #DCD6C8;
+  background: #F4F1EA;
+  object-fit: cover;
+  display: block;
 }

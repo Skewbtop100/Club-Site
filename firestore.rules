@@ -8,15 +8,12 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Checks users/{uid}.role == 'admin' in Firestore — matches the app-level
-    // auth check (useAuth().user.role). No custom claims needed.
     function isAdmin() {
       return isSignedIn() &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
 
     // ─── Existing collections ─────────────────────────────────────────────────
-    // TODO: tighten these rules for each collection as needed.
 
     match /athletes/{doc} {
       allow read: if true;
@@ -72,8 +69,6 @@ service cloud.firestore {
     // ─── Virtual Competitions ─────────────────────────────────────────────────
 
     match /virtualCompetitions/{compId} {
-      // Defensive: allow read for anything that is not explicitly 'draft'.
-      // Old docs may lack the status field; denying them would break the list page.
       allow read: if isAdmin() ||
                      !('status' in resource.data) ||
                      resource.data.status != 'draft';
@@ -116,7 +111,6 @@ service cloud.firestore {
       }
     }
 
-    // Collection group rules
     match /{path=**}/attempts/{attemptId} {
       allow read: if isSignedIn() &&
                      (resource.data.uid == request.auth.uid || isAdmin());
@@ -127,11 +121,6 @@ service cloud.firestore {
     }
 
     // ─── Online Competition (public, isolated) ─────────────────────────────
-    // Fully separate feature for the public online competition — never
-    // reads/writes athletes, competitions, or results above. Reuses the
-    // same isAdmin() helper (users/{uid}.role == 'admin') so competition
-    // judges are club admins, but the collections themselves are new and
-    // untouched by any existing rule block.
 
     match /onlineCompetitions/{competitionId} {
       allow read: if true;
@@ -139,39 +128,58 @@ service cloud.firestore {
 
       match /scrambles/{scrambleId} {
         allow read: if isSignedIn();
-        // Created client-side (getOrCreateScramble) the first time a
-        // participant needs a given event/round's scramble; never updated
-        // afterwards so every participant sees the same scramble.
         allow create: if isSignedIn();
         allow update, delete: if isAdmin();
       }
     }
 
     match /onlineParticipants/{uid} {
-     allow read: if isSignedIn();
-  allow create, update: if isSignedIn() &&
-                            request.auth.uid == uid &&
-                            (!('email' in request.resource.data) || request.resource.data.email == request.auth.token.email) &&
-                            (!('photoURL' in request.resource.data) || request.resource.data.photoURL is string) &&
-                            (!('displayName' in request.resource.data) || request.resource.data.displayName is string);
+      function priorProfileStatus() {
+        return (resource == null || !('profileStatus' in resource.data))
+          ? 'incomplete'
+          : resource.data.profileStatus;
+      }
 
-  match /registrations/{competitionId} {
-    allow read: if isSignedIn();
-    allow create, update: if isSignedIn() &&
-                              request.auth.uid == uid &&
-                              request.resource.data.competitionId == competitionId &&
-                              request.resource.data.events is list &&
-                              request.resource.data.events.size() > 0;
-    allow delete: if false;
-  }
+      function profileStatusTransitionAllowed() {
+        return !('profileStatus' in request.resource.data) ||
+          request.resource.data.profileStatus == 'incomplete' ||
+          (request.resource.data.profileStatus == 'pending' &&
+           (priorProfileStatus() == 'incomplete' || priorProfileStatus() == 'rejected'));
+      }
+
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() &&
+                                request.auth.uid == uid &&
+                                (!('email' in request.resource.data) || request.resource.data.email == request.auth.token.email) &&
+                                (!('photoURL' in request.resource.data) || request.resource.data.photoURL is string) &&
+                                (!('displayName' in request.resource.data) || request.resource.data.displayName is string) &&
+                                (!('lastName' in request.resource.data) || request.resource.data.lastName is string) &&
+                                (!('firstName' in request.resource.data) || request.resource.data.firstName is string) &&
+                                (!('dateOfBirth' in request.resource.data) || request.resource.data.dateOfBirth is string) &&
+                                (!('gender' in request.resource.data) || request.resource.data.gender in ['male', 'female', 'other']) &&
+                                (!('citizenship' in request.resource.data) || request.resource.data.citizenship is string) &&
+                                (!('photoUrl' in request.resource.data) || request.resource.data.photoUrl == null || request.resource.data.photoUrl is string) &&
+                                (!('photoPublicId' in request.resource.data) || request.resource.data.photoPublicId == null || request.resource.data.photoPublicId is string) &&
+                                profileStatusTransitionAllowed() &&
+                                !('approvedPhotoUrl' in request.resource.data) &&
+                                !('reviewedAt' in request.resource.data) &&
+                                !('rejectionReason' in request.resource.data);
+
+      match /registrations/{competitionId} {
+        allow read: if isSignedIn();
+        allow create, update: if isSignedIn() &&
+                                  request.auth.uid == uid &&
+                                  request.resource.data.competitionId == competitionId &&
+                                  request.resource.data.events is list &&
+                                  request.resource.data.events.size() > 0;
+        allow delete: if false;
+      }
     }
 
     match /onlineSubmissions/{submissionId} {
       allow read: if isSignedIn() &&
                      (resource.data.uid == request.auth.uid || isAdmin());
       allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
-      // Owner may edit their own doc, but never the fields a judge owns
-      // (status/penalty) — only isAdmin() can touch those.
       allow update: if isAdmin() ||
                        (isSignedIn() &&
                         resource.data.uid == request.auth.uid &&
@@ -181,12 +189,11 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-match /onlineSeasonPoints/{season} {
-  match /athletes/{uid} {
-    allow read: if true;
-    allow write: if false;
-  }
-}
-
+    match /onlineSeasonPoints/{season} {
+      match /athletes/{uid} {
+        allow read: if true;
+        allow write: if false;
+      }
+    }
   }
 }
