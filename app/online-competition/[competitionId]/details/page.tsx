@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { fetchCompetition } from '@/lib/online-competition/data';
 import type { OnlineCompetition, OnlineCompetitionStatus } from '@/lib/online-competition/types';
 import { fmtDateTime, toMillisOrNull } from '../../_components/hub/format';
+import NavBar from '../../_components/hub/NavBar';
 import Countdown from './_components/Countdown';
 import RegistrationPanel from './_components/RegistrationPanel';
 
@@ -44,16 +45,18 @@ export default function CompetitionDetailPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen w-full" style={{ background: '#FFFDF8', padding: 24 }}>
-        <p style={{ font: '400 13px var(--oc-font-heading), sans-serif', color: '#D8402C' }}>{error}</p>
+      <div className="min-h-screen w-full" style={{ background: '#FFFDF8' }}>
+        <NavBar />
+        <p style={{ padding: 24, font: '400 13px var(--oc-font-heading), sans-serif', color: '#D8402C' }}>{error}</p>
       </div>
     );
   }
 
   if (notFound) {
     return (
-      <div className="min-h-screen w-full" style={{ background: '#FFFDF8', padding: 24 }}>
-        <p style={{ font: '400 13px var(--oc-font-heading), sans-serif', color: '#8A8474' }}>
+      <div className="min-h-screen w-full" style={{ background: '#FFFDF8' }}>
+        <NavBar />
+        <p style={{ padding: 24, font: '400 13px var(--oc-font-heading), sans-serif', color: '#8A8474' }}>
           Тэмцээн олдсонгүй.
         </p>
       </div>
@@ -62,8 +65,9 @@ export default function CompetitionDetailPage() {
 
   if (!competition) {
     return (
-      <div className="min-h-screen w-full" style={{ background: '#FFFDF8', padding: 24 }}>
-        <p style={{ font: '400 13px var(--oc-font-heading), sans-serif', color: '#8A8474' }}>
+      <div className="min-h-screen w-full" style={{ background: '#FFFDF8' }}>
+        <NavBar />
+        <p style={{ padding: 24, font: '400 13px var(--oc-font-heading), sans-serif', color: '#8A8474' }}>
           Ачааллаж байна...
         </p>
       </div>
@@ -80,6 +84,7 @@ export default function CompetitionDetailPage() {
 
   return (
     <div className="min-h-screen w-full" style={{ background: '#FFFDF8' }}>
+      <NavBar />
       <header className="oc-detail-header">
         <div>
           <Link

@@ -5,6 +5,7 @@ import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import { fetchParticipant, resolveProfileStatus, submitParticipantProfile } from '@/lib/online-competition/data';
 import { uploadImageToCloudinary } from '@/lib/online-competition/cloudinary';
 import type { OnlineParticipant, OnlineParticipantGender } from '@/lib/online-competition/types';
+import NavBar from '../_components/hub/NavBar';
 
 const GENDER_LABEL: Record<OnlineParticipantGender, string> = {
   male: 'Эрэгтэй',
@@ -20,9 +21,14 @@ function fmtDate(iso: string | null | undefined): string {
 // Centers the content column regardless of viewport, matching the
 // dashboard page's Shell (app/online-competition/dashboard/page.tsx) —
 // duplicated locally rather than imported since that one isn't exported.
+// Carries the shared hub NavBar so every state this page renders (signed-
+// out prompt, loading, form, pending, approved) has a way back to the hub
+// — its "Миний тэмцээнүүд" link/user badge is the "done, go back" path
+// after a submit or from the read-only approved view.
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen w-full" style={{ background: '#FFFDF8' }}>
+      <NavBar />
       <div style={{ maxWidth: 480, margin: '0 auto', padding: '24px 20px' }}>{children}</div>
     </div>
   );

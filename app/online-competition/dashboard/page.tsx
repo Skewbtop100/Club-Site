@@ -5,6 +5,7 @@ import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import { fetchCompetition, fetchMyRegistrations } from '@/lib/online-competition/data';
 import type { OnlineCompetition, OnlineRegistration } from '@/lib/online-competition/types';
 import { toMillisOrNull } from '../_components/hub/format';
+import NavBar from '../_components/hub/NavBar';
 import Header from './_components/Header';
 import LiveCard from './_components/LiveCard';
 import UpcomingCard from './_components/UpcomingCard';
@@ -17,10 +18,13 @@ interface RegisteredView {
 
 // Centers the content column regardless of viewport — the mockup is a
 // phone-frame layout, but this should still look reasonable at desktop
-// width rather than stretching edge to edge.
+// width rather than stretching edge to edge. Carries the shared hub NavBar
+// so this page always has a way back to the hub (and to the other public
+// pages), same as every other top-level online-competition page.
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen w-full" style={{ background: '#FFFDF8' }}>
+      <NavBar />
       <div style={{ maxWidth: 480, margin: '0 auto' }}>{children}</div>
     </div>
   );
