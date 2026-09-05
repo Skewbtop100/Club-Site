@@ -4,11 +4,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { fetchAllCompetitions, fetchSeasonLeaderboard } from '@/lib/online-competition/data';
 import type { OnlineCompetition, OnlineSeasonAthletePoints } from '@/lib/online-competition/types';
 import { toMillisOrNull } from './_components/hub/format';
-import NavBar from './_components/hub/NavBar';
-import LiveBanner from './_components/hub/LiveBanner';
-import CompetitionGroups from './_components/hub/CompetitionGroups';
-import Sidebar from './_components/hub/Sidebar';
-import MobileHub from './_components/hub/MobileHub';
+import HubNav from './_components/hub/v3/HubNav';
+import LiveHero from './_components/hub/v3/LiveHero';
+import UpcomingCard from './_components/hub/v3/UpcomingCard';
+import LiveMiniCard from './_components/hub/v3/LiveMiniCard';
+import LeaderboardCard from './_components/hub/v3/LeaderboardCard';
 
 export default function OnlineCompetitionHubPage() {
   const [competitions, setCompetitions] = useState<OnlineCompetition[] | null>(null);
@@ -30,12 +30,13 @@ export default function OnlineCompetitionHubPage() {
     };
   }, []);
 
-  const { live, upcoming, finished } = useMemo(() => {
+  const { live, upcoming } = useMemo(() => {
     const list = competitions ?? [];
     return {
       live: list.filter((c) => c.status === 'live'),
-      upcoming: list.filter((c) => c.status === 'upcoming'),
-      finished: list.filter((c) => c.status === 'finished'),
+      upcoming: list
+        .filter((c) => c.status === 'upcoming')
+        .sort((a, b) => (toMillisOrNull(a.startAt) ?? Infinity) - (toMillisOrNull(b.startAt) ?? Infinity)),
     };
   }, [competitions]);
 
@@ -61,32 +62,27 @@ export default function OnlineCompetitionHubPage() {
   }, [competitions]);
 
   return (
-    <div className="min-h-screen w-full" style={{ background: '#FFFDF8' }}>
-      <NavBar />
+    <div className="oc-v3-page">
+      <HubNav live={live[0] ?? null} />
 
       {competitions === null ? (
-        <p style={{ padding: 24, font: '400 13px var(--oc-font-heading), sans-serif', color: '#8A8474' }}>
-          Ачааллаж байна...
-        </p>
+        <p className="oc-v3-status">Ачааллаж байна...</p>
       ) : error ? (
-        <p style={{ padding: 24, font: '400 13px var(--oc-font-heading), sans-serif', color: '#D8402C' }}>
-          {error}
-        </p>
+        <p className="oc-v3-status oc-v3-status-error">{error}</p>
       ) : (
-        <>
-          {live[0] && <LiveBanner competition={live[0]} />}
+        <main className="oc-v3-main">
+          {live[0] && <LiveHero competition={live[0]} />}
 
-          <div className="oc-hub-desktop-only">
-            <div className="oc-hub-grid">
-              <CompetitionGroups live={live} upcoming={upcoming} finished={finished} />
-              <Sidebar season={season} leaderboard={leaderboard} />
+          <div className="oc-v3-grid">
+            <div className="oc-v3-col">
+              <UpcomingCard competitions={upcoming} />
+            </div>
+            <div className="oc-v3-col">
+              {live[0] && <LiveMiniCard competition={live[0]} />}
+              <LeaderboardCard season={season} leaderboard={leaderboard} />
             </div>
           </div>
-
-          <div className="oc-hub-mobile-only">
-            <MobileHub live={live} upcoming={upcoming} finished={finished} />
-          </div>
-        </>
+        </main>
       )}
     </div>
   );

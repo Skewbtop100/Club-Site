@@ -1455,3 +1455,570 @@
   object-fit: cover;
   display: block;
 }
+
+/* ── Phase 3 — public hub, dark redesign (app/online-competition/page.tsx
+   + _components/hub/v3/**) ────────────────────────────────────────────
+   A third, separate visual system layered next to the v1 (dark violet)
+   and v2 (warm paper) ones — near-black stage with volt accents. Named
+   `.oc-v3-*` so it can never collide with the `.oc-hub-*` classes above,
+   which the dashboard/profile/detail pages still render (they keep the
+   v2 NavBar, untouched this phase).
+
+   Same exact-literal-port rules as every block above: values are copied
+   verbatim from the approved spec rather than derived from --color-*
+   tokens, and anything needing :hover / @keyframes / @media lives here
+   as a plain unlayered class — a Tailwind utility would lose to
+   app/globals.css's unlayered `* { margin: 0; padding: 0; }` reset. */
+
+@keyframes khPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.oc-v3-page {
+  min-height: 100vh;
+  width: 100%;
+  background: #08080A;
+  color: #F4F1EA;
+}
+
+/* ── Header / nav ─────────────────────────────────────────────────── */
+
+.oc-v3-nav {
+  height: 60px;
+  border-bottom: 1px solid #1C1C21;
+  background: #0D0D10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 22px;
+}
+.oc-v3-tabs {
+  align-self: stretch;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+}
+.oc-v3-tab {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #6E6A62;
+  padding: 0 16px;
+  font: 600 12px var(--oc-font-heading), sans-serif;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.oc-v3-tab:hover {
+  color: #F4F1EA;
+}
+.oc-v3-tab-active {
+  border-bottom-color: #DFFF4F;
+  color: #F4F1EA;
+}
+/* The live-competition tab reads as volt even when it isn't the active
+   route — it is a status, not a selection. */
+.oc-v3-tab-live {
+  color: #DFFF4F;
+}
+.oc-v3-tab-caret {
+  font: 500 8px var(--oc-font-mono), monospace;
+  letter-spacing: 0;
+  color: #4A4740;
+}
+
+.oc-v3-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #DFFF4F;
+  animation: khPulse 1.4s ease-in-out infinite;
+}
+.oc-v3-dot-lg {
+  width: 7px;
+  height: 7px;
+}
+
+/* ── Dropdowns (Тэмцээнүүд tab + user badge) ──────────────────────── */
+
+.oc-v3-menu-wrap {
+  position: relative;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+}
+.oc-v3-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 60;
+  min-width: 196px;
+  border: 1px solid #2A2A31;
+  background: #0D0D10;
+  box-shadow: 0 18px 40px -14px rgba(0, 0, 0, 0.9);
+}
+.oc-v3-menu-right {
+  left: auto;
+  right: 0;
+  width: 238px;
+  min-width: 238px;
+}
+.oc-v3-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border: none;
+  border-bottom: 1px solid #16161B;
+  background: transparent;
+  color: #9A958A;
+  padding: 12px 14px;
+  font: 500 12px var(--oc-font-heading), sans-serif;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.oc-v3-menu-item:hover {
+  background: #16161B;
+  color: #F4F1EA;
+}
+.oc-v3-menu-item-active {
+  background: #16161B;
+  color: #F4F1EA;
+}
+.oc-v3-menu-item-split {
+  justify-content: space-between;
+}
+.oc-v3-menu-head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border-bottom: 1px solid #16161B;
+  padding: 12px 14px;
+}
+
+/* ── Nav right side ───────────────────────────────────────────────── */
+
+.oc-v3-signin {
+  border: 1px solid #DFFF4F;
+  background: transparent;
+  color: #DFFF4F;
+  padding: 11px 20px;
+  font: 600 11px var(--oc-font-heading), sans-serif;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.oc-v3-signin:hover {
+  background: #DFFF4F;
+  color: #08080A;
+}
+.oc-v3-userbtn {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid #2A2A31;
+  background: transparent;
+  padding: 5px 10px 5px 5px;
+  cursor: pointer;
+}
+.oc-v3-userbtn:hover {
+  border-color: #DFFF4F;
+}
+.oc-v3-avatar {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #DFFF4F;
+  color: #08080A;
+  font: 700 10px var(--oc-font-mono), monospace;
+  object-fit: cover;
+}
+.oc-v3-avatar-lg {
+  width: 34px;
+  height: 34px;
+}
+.oc-v3-tri {
+  width: 0;
+  height: 0;
+  flex-shrink: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid #6E6A62;
+}
+
+/* ── Main content ─────────────────────────────────────────────────── */
+
+.oc-v3-main {
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.oc-v3-grid {
+  display: grid;
+  grid-template-columns: minmax(420px, 2.1fr) minmax(280px, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.oc-v3-col {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+/* ── Live hero banner ─────────────────────────────────────────────── */
+
+.oc-v3-hero {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid #1C1C21;
+  background: linear-gradient(100deg, #141410 0%, #1E2210 55%, #2B3410 100%);
+  padding: 34px 36px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 26px;
+  align-items: center;
+}
+.oc-v3-hero-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(100deg, #08080A 0%, rgba(8, 8, 10, 0.86) 46%, rgba(8, 8, 10, 0.34) 100%);
+}
+/* Both grid children sit above the overlay — the overlay is a sibling
+   painted over the gradient, not a ::before under the text. */
+.oc-v3-hero-content,
+.oc-v3-hero-cta-wrap {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+}
+.oc-v3-hero-cta {
+  display: inline-block;
+  border: none;
+  background: #DFFF4F;
+  color: #08080A;
+  padding: 14px 24px;
+  font: 700 13px var(--oc-font-heading), sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.oc-v3-hero-cta:hover {
+  background: #E9FF7A;
+}
+
+/* ── Cards (upcoming list, leaderboard) ───────────────────────────── */
+
+.oc-v3-card {
+  border: 1px solid #1C1C21;
+  background: #0D0D10;
+}
+.oc-v3-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 15px 18px;
+  border-bottom: 1px solid #1C1C21;
+}
+.oc-v3-card-head-sm {
+  padding: 14px 16px;
+}
+.oc-v3-label {
+  font: 500 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.2em;
+  color: #6E6A62;
+  text-transform: uppercase;
+}
+.oc-v3-label-link {
+  font: 500 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.2em;
+  color: #6E6A62;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.oc-v3-label-link:hover {
+  color: #DFFF4F;
+}
+.oc-v3-season {
+  font: 400 9px var(--oc-font-mono), monospace;
+  color: #4A4740;
+  white-space: nowrap;
+}
+
+/* ── Upcoming competition rows ────────────────────────────────────── */
+
+.oc-v3-row {
+  display: grid;
+  grid-template-columns: 34px 1fr auto auto;
+  gap: 14px;
+  align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid #16161B;
+}
+.oc-v3-row:hover {
+  background: #131318;
+}
+.oc-v3-row-icon {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #16161B;
+  color: #F4F1EA;
+}
+.oc-v3-row-main {
+  min-width: 0;
+}
+.oc-v3-row-name {
+  display: block;
+  font: 500 14px var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oc-v3-row-name:hover {
+  color: #DFFF4F;
+}
+.oc-v3-row-meta {
+  font: 400 10px var(--oc-font-mono), monospace;
+  color: #6E6A62;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oc-v3-row-cap {
+  width: 104px;
+}
+.oc-v3-row-cta {
+  width: 168px;
+}
+.oc-v3-bar {
+  height: 3px;
+  background: #1C1C21;
+}
+.oc-v3-bar-fill {
+  height: 100%;
+  background: #DFFF4F;
+}
+.oc-v3-reg-btn {
+  display: block;
+  width: 100%;
+  border: none;
+  background: #DFFF4F;
+  color: #08080A;
+  padding: 11px 14px;
+  font: 700 10px var(--oc-font-heading), sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+.oc-v3-reg-btn:hover {
+  background: #E9FF7A;
+}
+.oc-v3-countdown {
+  position: relative;
+  overflow: hidden;
+  height: 15px;
+  background: #16161B;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.oc-v3-countdown-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  background: #26301A;
+}
+.oc-v3-countdown-text {
+  position: relative;
+  font: 400 8px var(--oc-font-mono), monospace;
+  color: #9A958A;
+  white-space: nowrap;
+}
+
+/* ── Empty state (dark) ───────────────────────────────────────────── */
+
+.oc-v3-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 13px;
+  padding: 64px 20px;
+}
+.oc-v3-empty-icon {
+  display: grid;
+  grid-template-columns: repeat(3, 11px);
+  gap: 3px;
+  opacity: 0.3;
+}
+.oc-v3-empty-cell {
+  width: 11px;
+  height: 11px;
+  border: 1px solid #6E6A62;
+}
+.oc-v3-empty-text {
+  font: 500 14px var(--oc-font-heading), sans-serif;
+  color: #6E6A62;
+}
+
+/* ── Live mini-card ───────────────────────────────────────────────── */
+
+.oc-v3-live-card {
+  border: 1px solid #2B3410;
+  background: linear-gradient(160deg, #141810, #0D0D10);
+}
+.oc-v3-live-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #1C1C21;
+}
+.oc-v3-live-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.oc-v3-live-btn {
+  display: block;
+  border: none;
+  background: #DFFF4F;
+  color: #08080A;
+  padding: 13px;
+  font: 700 12px var(--oc-font-heading), sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+.oc-v3-live-btn:hover {
+  background: #E9FF7A;
+}
+
+/* ── Leaderboard ──────────────────────────────────────────────────── */
+
+.oc-v3-lb-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 16px;
+  border-bottom: 1px solid #16161B;
+}
+.oc-v3-lb-row:hover {
+  background: #131318;
+}
+.oc-v3-lb-rank {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #16161B;
+  color: #F4F1EA;
+  font: 700 10px var(--oc-font-mono), monospace;
+}
+.oc-v3-lb-rank-top {
+  background: #DFFF4F;
+  color: #08080A;
+}
+.oc-v3-lb-name {
+  flex: 1;
+  min-width: 0;
+  font: 500 12px var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oc-v3-lb-points {
+  font: 700 14px var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #F4F1EA;
+}
+.oc-v3-lb-all {
+  display: block;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: #9A958A;
+  padding: 13px;
+  font: 600 10px var(--oc-font-mono), monospace;
+  letter-spacing: 0.16em;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+.oc-v3-lb-all:hover {
+  color: #DFFF4F;
+}
+
+/* ── Status / message text on the dark page ───────────────────────── */
+
+.oc-v3-status {
+  padding: 24px;
+  font: 400 13px var(--oc-font-heading), sans-serif;
+  color: #6E6A62;
+}
+.oc-v3-status-error {
+  color: #E8543C;
+}
+
+/* ── Narrow viewports ─────────────────────────────────────────────────
+   The spec is a desktop layout (its left column alone has a 420px
+   minimum), so below ~900px both the page grid and the competition row
+   collapse to a single column rather than forcing a horizontal scroll. */
+@media (max-width: 899px) {
+  .oc-v3-main {
+    padding: 16px;
+  }
+  .oc-v3-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .oc-v3-hero {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 24px 20px;
+  }
+  .oc-v3-row {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+  .oc-v3-row-cap,
+  .oc-v3-row-cta {
+    width: auto;
+    grid-column: 2;
+  }
+  .oc-v3-nav {
+    padding: 0 12px;
+  }
+  .oc-v3-tabs {
+    overflow-x: auto;
+  }
+}
