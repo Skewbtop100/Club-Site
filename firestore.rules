@@ -147,6 +147,16 @@ service cloud.firestore {
            (priorProfileStatus() == 'incomplete' || priorProfileStatus() == 'rejected'));
       }
 
+      function judgeFieldsUntouched() {
+        return resource == null
+          ? (!('approvedPhotoUrl' in request.resource.data) &&
+             !('reviewedAt' in request.resource.data) &&
+             !('rejectionReason' in request.resource.data))
+          : (request.resource.data.get('approvedPhotoUrl', null) == resource.data.get('approvedPhotoUrl', null) &&
+             request.resource.data.get('reviewedAt', null) == resource.data.get('reviewedAt', null) &&
+             request.resource.data.get('rejectionReason', null) == resource.data.get('rejectionReason', null));
+      }
+
       allow read: if isSignedIn();
       allow create, update: if isSignedIn() &&
                                 request.auth.uid == uid &&
@@ -161,9 +171,7 @@ service cloud.firestore {
                                 (!('photoUrl' in request.resource.data) || request.resource.data.photoUrl == null || request.resource.data.photoUrl is string) &&
                                 (!('photoPublicId' in request.resource.data) || request.resource.data.photoPublicId == null || request.resource.data.photoPublicId is string) &&
                                 profileStatusTransitionAllowed() &&
-                                !('approvedPhotoUrl' in request.resource.data) &&
-                                !('reviewedAt' in request.resource.data) &&
-                                !('rejectionReason' in request.resource.data);
+                                judgeFieldsUntouched();
 
       match /registrations/{competitionId} {
         allow read: if isSignedIn();

@@ -12,17 +12,31 @@ export default function UpcomingCard({
   const codes = myEvents.map((e) => e.eventId.toUpperCase()).join(', ');
 
   return (
-    <div className="oc-dash-upcoming-card">
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-        <div>
-          <p style={{ font: '500 15px var(--oc-font-heading), sans-serif', color: '#16140F' }}>{competition.name}</p>
-          <p style={{ marginTop: 3, font: '400 10px var(--oc-font-mono), monospace', color: '#8A8474' }}>
+    <div style={{ padding: '15px 18px', borderBottom: '1px solid #16161B' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ minWidth: 0 }}>
+          <p style={{ font: '600 15px var(--oc-font-heading), sans-serif', color: '#F4F1EA' }}>
+            {competition.name}
+          </p>
+          <p style={{ marginTop: 4, font: '400 10px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
             {fmtDateTime(competition.startAt)}
           </p>
         </div>
-        <span className="oc-dash-badge-outline">УДАХГҮЙ</span>
+        <span
+          style={{
+            alignSelf: 'flex-start',
+            border: '1px solid #2A2A31',
+            color: '#9A958A',
+            padding: '6px 8px',
+            font: '600 8px var(--oc-font-mono), monospace',
+            letterSpacing: '.14em',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          УДАХГҮЙ
+        </span>
       </div>
-      <p style={{ font: '400 11px var(--oc-font-heading), sans-serif', color: '#4C473C' }}>
+      <p style={{ marginTop: 10, font: '400 11px var(--oc-font-mono), monospace', color: '#9A958A' }}>
         {codes} · эхлэхэд сануулга ирнэ
       </p>
     </div>

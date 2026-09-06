@@ -2921,3 +2921,402 @@
     min-width: 44px;
   }
 }
+
+/* ── Phase 3c — profile + dashboard, dark v3 ──────────────────────────────
+   Continues the .oc-v3-* system; same exact-literal rules as every block
+   above (real classes, never Tailwind responsive prefixes, spacing here or
+   inline so app/globals.css's unlayered reset can't win). */
+
+.oc-v3-eyebrow {
+  font: 500 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.2em;
+  color: #6E6A62;
+  text-transform: uppercase;
+}
+.oc-v3-title {
+  font: 600 24px var(--oc-font-heading), sans-serif;
+  letter-spacing: -0.015em;
+  color: #F4F1EA;
+}
+.oc-v3-toast {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #4FD07A;
+  background: #0F1A12;
+  color: #4FD07A;
+  padding: 8px 11px;
+  font: 600 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.14em;
+  white-space: nowrap;
+}
+
+/* ── Profile: photo card ──────────────────────────────────────────────── */
+
+.oc-v3-photo-body {
+  padding: 20px 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: flex-start;
+}
+.oc-v3-avatar-88 {
+  width: 88px;
+  height: 88px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #DFFF4F;
+  color: #08080A;
+  font: 700 28px var(--oc-font-mono), monospace;
+  background-size: cover;
+  background-position: center;
+}
+.oc-v3-ghost-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #2A2A31;
+  background: transparent;
+  color: #F4F1EA;
+  padding: 11px 15px;
+  font: 500 10px var(--oc-font-mono), monospace;
+  letter-spacing: 0.14em;
+  text-decoration: none;
+  cursor: pointer;
+}
+.oc-v3-ghost-btn:hover {
+  border-color: #DFFF4F;
+  color: #DFFF4F;
+}
+
+.oc-v3-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 11px;
+  font: 600 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.14em;
+  white-space: nowrap;
+}
+.oc-v3-chip-pending {
+  border: 1px solid #DFFF4F;
+  background: #14170A;
+  color: #DFFF4F;
+}
+.oc-v3-chip-approved {
+  border: 1px solid #4FD07A;
+  color: #4FD07A;
+}
+.oc-v3-chip-rejected {
+  border: 1px solid #E8543C;
+  color: #E8543C;
+}
+.oc-v3-reject-block {
+  border: 1px solid #E8543C;
+  background: #160D0B;
+  padding: 14px 15px;
+}
+
+/* Upload flow */
+.oc-v3-upload {
+  border: 1px solid #2A2A31;
+  background: #08080A;
+  padding: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+}
+.oc-v3-upload-preview {
+  width: 96px;
+  height: 120px;
+  flex-shrink: 0;
+  border: 1px dashed #2A2A31;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-size: cover;
+  background-position: center;
+  font: 500 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+  color: #4A4740;
+}
+/* The real <input type="file"> is visually hidden and driven by its
+   <label>, so the picker gets the same button treatment as everything
+   else — the native control can't be styled to match. */
+.oc-v3-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.oc-v3-submit-btn {
+  display: block;
+  width: 100%;
+  border: none;
+  background: #DFFF4F;
+  color: #08080A;
+  padding: 13px;
+  font: 700 11px var(--oc-font-heading), sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+  cursor: pointer;
+}
+.oc-v3-submit-btn:hover:not(:disabled) {
+  background: #E9FF7A;
+}
+.oc-v3-submit-btn:disabled {
+  border: 1px solid #2A2A31;
+  background: transparent;
+  color: #4A4740;
+  cursor: not-allowed;
+}
+
+/* ── Profile: form fields ─────────────────────────────────────────────── */
+
+.oc-v3-form-grid {
+  padding: 20px 18px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.oc-v3-field-label {
+  display: block;
+  font: 500 8px var(--oc-font-mono), monospace;
+  letter-spacing: 0.16em;
+  color: #6E6A62;
+  text-transform: uppercase;
+}
+.oc-v3-input {
+  width: 100%;
+  border: 1px solid #2A2A31;
+  background: #08080A;
+  color: #F4F1EA;
+  padding: 12px;
+  font: 500 13px var(--oc-font-heading), sans-serif;
+  outline: none;
+}
+.oc-v3-input:focus {
+  border-color: #DFFF4F;
+}
+/* Read-only mirror of .oc-v3-input for the pending/approved states, where
+   the values exist but must not be editable. */
+.oc-v3-value {
+  border: 1px solid #1C1C21;
+  background: #08080A;
+  color: #F4F1EA;
+  padding: 12px;
+  font: 500 13px var(--oc-font-heading), sans-serif;
+}
+
+.oc-v3-seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 1px;
+  border: 1px solid #2A2A31;
+  background: #2A2A31;
+}
+.oc-v3-seg-btn {
+  border: none;
+  background: #08080A;
+  color: #F4F1EA;
+  padding: 12px 6px;
+  font: 500 11px var(--oc-font-heading), sans-serif;
+  cursor: pointer;
+}
+.oc-v3-seg-btn-active {
+  background: #DFFF4F;
+  color: #08080A;
+}
+
+.oc-v3-email-row {
+  border: 1px solid #1C1C21;
+  background: #08080A;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.oc-v3-chip-sm {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #4FD07A;
+  color: #4FD07A;
+  padding: 6px 8px;
+  font: 600 8px var(--oc-font-mono), monospace;
+  letter-spacing: 0.14em;
+  white-space: nowrap;
+}
+
+.oc-v3-footer-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* ── Dashboard ────────────────────────────────────────────────────────── */
+
+.oc-v3-dash-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(400px, 2.4fr);
+  gap: 20px;
+  align-items: start;
+}
+.oc-v3-side-top {
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  border-bottom: 1px solid #1C1C21;
+}
+.oc-v3-avatar-96 {
+  width: 96px;
+  height: 96px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #DFFF4F;
+  color: #08080A;
+  font: 700 30px var(--oc-font-mono), monospace;
+  object-fit: cover;
+}
+.oc-v3-stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: #1C1C21;
+}
+.oc-v3-stat-cell {
+  background: #0D0D10;
+  padding: 16px;
+}
+.oc-v3-stat-label {
+  display: block;
+  font: 500 8px var(--oc-font-mono), monospace;
+  letter-spacing: 0.16em;
+  color: #6E6A62;
+  text-transform: uppercase;
+}
+.oc-v3-stat-value {
+  display: block;
+  margin-top: 8px;
+  font: 700 20px var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #F4F1EA;
+}
+
+/* Per-event rows inside "МИНИЙ ТЭМЦЭЭНҮҮД" */
+.oc-v3-ev-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 18px;
+  border-bottom: 1px solid #16161B;
+}
+.oc-v3-start-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: #DFFF4F;
+  color: #08080A;
+  padding: 11px 16px;
+  font: 700 10px var(--oc-font-heading), sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.oc-v3-start-btn:hover {
+  background: #E9FF7A;
+}
+.oc-v3-start-btn-disabled {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #1C1C21;
+  background: #131318;
+  color: #4A4740;
+  padding: 11px 16px;
+  font: 700 10px var(--oc-font-heading), sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: not-allowed;
+}
+.oc-v3-done-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #4FD07A;
+  background: #0F1A12;
+  color: #4FD07A;
+  padding: 9px 11px;
+  font: 500 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+.oc-v3-dns-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #E8543C;
+  color: #E8543C;
+  padding: 9px 11px;
+  font: 500 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+
+/* Recent submissions */
+.oc-v3-sub-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 18px;
+  border-bottom: 1px solid #16161B;
+}
+.oc-v3-sub-row:hover {
+  background: #131318;
+}
+.oc-v3-sub-time {
+  font: 700 17px var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@media (max-width: 899px) {
+  .oc-v3-dash-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 640px) {
+  .oc-v3-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .oc-v3-ghost-btn,
+  .oc-v3-submit-btn,
+  .oc-v3-start-btn,
+  .oc-v3-start-btn-disabled,
+  .oc-v3-seg-btn,
+  .oc-v3-input {
+    min-height: 44px;
+  }
+  .oc-v3-sub-row {
+    grid-template-columns: auto minmax(0, 1fr);
+    row-gap: 8px;
+  }
+  .oc-v3-sub-row > *:nth-child(n + 3) {
+    grid-column: 1 / -1;
+  }
+}

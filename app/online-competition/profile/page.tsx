@@ -1,11 +1,24 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import { fetchParticipant, resolveProfileStatus, submitParticipantProfile } from '@/lib/online-competition/data';
 import { uploadImageToCloudinary } from '@/lib/online-competition/cloudinary';
-import type { OnlineParticipant, OnlineParticipantGender } from '@/lib/online-competition/types';
-import NavBar from '../_components/hub/NavBar';
+import type {
+  OnlineParticipant,
+  OnlineParticipantGender,
+  OnlineParticipantProfileStatus,
+} from '@/lib/online-competition/types';
+import HubNav from '../_components/hub/v3/HubNav';
+
+const DASHBOARD = '/online-competition/dashboard';
+
+const GENDERS: { value: OnlineParticipantGender; label: string }[] = [
+  { value: 'male', label: 'Эрэгтэй' },
+  { value: 'female', label: 'Эмэгтэй' },
+  { value: 'other', label: 'Бусад' },
+];
 
 const GENDER_LABEL: Record<OnlineParticipantGender, string> = {
   male: 'Эрэгтэй',
@@ -13,25 +26,58 @@ const GENDER_LABEL: Record<OnlineParticipantGender, string> = {
   other: 'Бусад',
 };
 
-function fmtDate(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  return iso;
-}
-
-// Centers the content column regardless of viewport, matching the
-// dashboard page's Shell (app/online-competition/dashboard/page.tsx) —
-// duplicated locally rather than imported since that one isn't exported.
-// Carries the shared hub NavBar so every state this page renders (signed-
-// out prompt, loading, form, pending, approved) has a way back to the hub
-// — its "Миний тэмцээнүүд" link/user badge is the "done, go back" path
-// after a submit or from the read-only approved view.
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen w-full" style={{ background: '#FFFDF8' }}>
-      <NavBar />
-      <div style={{ maxWidth: 480, margin: '0 auto', padding: '24px 20px' }}>{children}</div>
+    <div className="oc-v3-page">
+      <HubNav live={null} />
+      <main className="oc-v3-main" style={{ maxWidth: 760, margin: '0 auto', width: '100%' }}>
+        {children}
+      </main>
     </div>
   );
+}
+
+function CardHead({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ padding: '14px 18px', borderBottom: '1px solid #1C1C21' }}>
+      <span className="oc-v3-label">{children}</span>
+    </div>
+  );
+}
+
+function initials(name: string | null | undefined): string {
+  const parts = (name ?? '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return 'Т';
+  if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+  return (parts[0].charAt(0) + parts[1].charAt(0)).toUpperCase();
+}
+
+/** 88px avatar — the athlete's submitted/approved verification photo when
+ *  one exists, otherwise their initials on volt. */
+function Avatar88({ src, name }: { src: string | null | undefined; name: string | null | undefined }) {
+  return (
+    <span
+      className="oc-v3-avatar-88"
+      aria-hidden
+      style={src ? { backgroundImage: `url(${src})`, color: 'transparent' } : undefined}
+    >
+      {src ? '' : initials(name)}
+    </span>
+  );
+}
+
+function StatusChip({ status }: { status: OnlineParticipantProfileStatus }) {
+  if (status === 'pending') {
+    return (
+      <span className="oc-v3-chip oc-v3-chip-pending">
+        <span className="oc-v3-dot" aria-hidden />
+        ХҮЛЭЭГДЭЖ БУЙ
+      </span>
+    );
+  }
+  if (status === 'approved') return <span className="oc-v3-chip oc-v3-chip-approved">БАТАЛГААЖСАН</span>;
+  if (status === 'rejected') return <span className="oc-v3-chip oc-v3-chip-rejected">ТАТГАЛЗСАН</span>;
+  return null;
 }
 
 export default function ProfilePage() {
@@ -40,6 +86,7 @@ export default function ProfilePage() {
   const [participant, setParticipant] = useState<OnlineParticipant | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [savedToast, setSavedToast] = useState(false);
 
   useEffect(() => {
     if (!user || user.isAnonymous) {
@@ -64,129 +111,82 @@ export default function ProfilePage() {
     };
   }, [user]);
 
-  if (authLoading) {
-    return <Shell>{null}</Shell>;
-  }
+  // Purely presentational: flashes the "ХАДГАЛАГДЛАА" chip after a save.
+  // The save itself is unchanged — onSubmitted still swaps in the new
+  // participant, which is what moves the page into its pending state.
+  useEffect(() => {
+    if (!savedToast) return;
+    const id = setTimeout(() => setSavedToast(false), 3500);
+    return () => clearTimeout(id);
+  }, [savedToast]);
+
+  if (authLoading) return <Shell>{null}</Shell>;
 
   if (!user || user.isAnonymous) {
     return (
       <Shell>
-        <div style={{ padding: '48px 0', textAlign: 'center' }}>
-          <p style={{ marginBottom: 16, font: '400 13px var(--oc-font-heading), sans-serif', color: '#4C473C' }}>
-            Профайлаа бөглөхийн тулд нэвтэрнэ үү.
-          </p>
-          <button type="button" className="oc-hub-signin-btn" onClick={() => signInWithGoogle()}>
-            Нэвтрэх
-          </button>
+        <div className="oc-v3-card">
+          <div className="oc-v3-empty">
+            <p className="oc-v3-empty-text">Профайлаа бөглөхийн тулд нэвтэрнэ үү.</p>
+            <button type="button" className="oc-v3-signin" onClick={() => signInWithGoogle()}>
+              Нэвтрэх
+            </button>
+          </div>
         </div>
       </Shell>
     );
   }
 
-  if (loadingProfile) {
-    return (
-      <Shell>
-        <p style={{ font: '400 13px var(--oc-font-heading), sans-serif', color: '#8A8474' }}>Ачааллаж байна...</p>
-      </Shell>
-    );
-  }
-
-  if (loadError) {
-    return (
-      <Shell>
-        <p style={{ font: '400 13px var(--oc-font-heading), sans-serif', color: '#D8402C' }}>{loadError}</p>
-      </Shell>
-    );
-  }
+  if (loadingProfile) return <Shell><p className="oc-v3-status">Ачааллаж байна...</p></Shell>;
+  if (loadError) return <Shell><p className="oc-v3-status oc-v3-status-error">{loadError}</p></Shell>;
 
   const status = resolveProfileStatus(participant);
+  // Same gate as before: 'pending' and 'approved' are read-only. Firestore
+  // rules only permit incomplete->pending and rejected->pending, so an
+  // editable form in those states would just fail server-side.
+  const editable = status === 'incomplete' || status === 'rejected';
 
   return (
     <Shell>
-      <p className="oc-mono-label" style={{ marginBottom: 16 }}>
-        Тамирчны профайл
-      </p>
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <p className="oc-v3-eyebrow">Профайл</p>
+          <h1 className="oc-v3-title" style={{ marginTop: 8 }}>Тохиргоо</h1>
+        </div>
+        {savedToast && <span className="oc-v3-toast">ХАДГАЛАГДЛАА</span>}
+      </div>
 
-      {status === 'pending' && <PendingView />}
-
-      {/* Read-only once approved — profileStatus can never move back to
-          'pending' from 'approved' (see the Firestore rules snippet: only
-          incomplete->pending and rejected->pending are allowed for a
-          direct client write), so there's no resubmit path to offer here. */}
-      {status === 'approved' && <ApprovedView participant={participant} />}
-
-      {(status === 'incomplete' || status === 'rejected') && (
-        <ProfileForm
-          uid={user.uid}
-          participant={participant}
-          rejectionReason={status === 'rejected' ? (participant?.rejectionReason ?? null) : null}
-          onSubmitted={(next) => setParticipant(next)}
-        />
-      )}
+      <ProfileBody
+        uid={user.uid}
+        email={user.email}
+        displayName={user.displayName}
+        participant={participant}
+        status={status}
+        editable={editable}
+        onSubmitted={(next) => {
+          setParticipant(next);
+          setSavedToast(true);
+        }}
+      />
     </Shell>
   );
 }
 
-// Pending review — resubmission is deliberately not offered here. The
-// athlete already sees this the moment their submission is in an admin's
-// queue; letting them silently overwrite it mid-review (photo, DOB, etc.)
-// would let a submission change out from under whichever admin is looking
-// at it. If they made a mistake, contacting the club is the expected path
-// until there's a "withdraw submission" action — same tradeoff the
-// onlineSubmissions review flow makes (an owner can't touch status/penalty
-// once submitted either, see firestore.rules).
-function PendingView() {
-  return (
-    <div className="oc-profile-status-pending">
-      <p style={{ font: '600 15px var(--oc-font-heading), sans-serif', color: '#8A5400' }}>Хүлээгдэж байна</p>
-      <p style={{ marginTop: 8, font: '400 12px var(--oc-font-heading), sans-serif', color: '#4C473C' }}>
-        Таны профайлын мэдээллийг админ хянаж байна. Баталгаажсаны дараа тэмцээнд бүртгүүлэх боломжтой болно.
-      </p>
-    </div>
-  );
-}
-
-function ApprovedView({ participant }: { participant: OnlineParticipant | null }) {
-  return (
-    <div className="oc-profile-status-approved">
-      <div className="oc-profile-photo-row">
-        {participant?.approvedPhotoUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element -- Cloudinary URL, not our own image pipeline.
-          <img src={participant.approvedPhotoUrl} alt="" className="oc-profile-photo-preview" />
-        ) : (
-          <span className="oc-profile-photo-placeholder">ЗУРАГГҮЙ</span>
-        )}
-        <div>
-          <p style={{ font: '600 17px var(--oc-font-heading), sans-serif', color: '#1D6E3E' }}>
-            {participant?.lastName} {participant?.firstName}
-          </p>
-          <p style={{ marginTop: 4, font: '500 10px var(--oc-font-mono), monospace', letterSpacing: '.1em', color: '#1D6E3E' }}>
-            БАТАЛГААЖСАН
-          </p>
-        </div>
-      </div>
-
-      <dl style={{ marginTop: 16, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, font: '400 13px var(--oc-font-heading), sans-serif' }}>
-        <dt style={{ color: '#4C473C' }}>Төрсөн өдөр</dt>
-        <dd style={{ color: '#16140F' }}>{fmtDate(participant?.dateOfBirth)}</dd>
-        <dt style={{ color: '#4C473C' }}>Хүйс</dt>
-        <dd style={{ color: '#16140F' }}>{participant?.gender ? GENDER_LABEL[participant.gender] : '—'}</dd>
-        <dt style={{ color: '#4C473C' }}>Иргэншил</dt>
-        <dd style={{ color: '#16140F' }}>{participant?.citizenship || '—'}</dd>
-      </dl>
-    </div>
-  );
-}
-
-function ProfileForm({
+function ProfileBody({
   uid,
+  email,
+  displayName,
   participant,
-  rejectionReason,
+  status,
+  editable,
   onSubmitted,
 }: {
   uid: string;
+  email: string | null;
+  displayName: string | null;
   participant: OnlineParticipant | null;
-  rejectionReason: string | null;
+  status: OnlineParticipantProfileStatus;
+  editable: boolean;
   onSubmitted: (next: OnlineParticipant) => void;
 }) {
   const [lastName, setLastName] = useState(participant?.lastName ?? '');
@@ -198,6 +198,10 @@ function ProfileForm({
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(participant?.photoUrl ?? null);
   const objectUrlRef = useRef<string | null>(null);
+  // Rejected athletes see the chip + reason first; the upload box opens on
+  // "ДАХИН ОРУУЛАХ". An incomplete profile has nothing to review, so it
+  // starts open.
+  const [uploadOpen, setUploadOpen] = useState(status === 'incomplete');
 
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -285,113 +289,201 @@ function ProfileForm({
     }
   }
 
+  const shownPhoto = participant?.approvedPhotoUrl ?? photoPreview ?? participant?.photoUrl ?? null;
+  const canSubmit = !!photoFile || !!participant?.photoUrl;
+
   return (
-    <form onSubmit={handleSubmit} className="oc-profile-card">
-      {rejectionReason && (
-        <div className="oc-profile-status-rejected" style={{ marginBottom: 18 }}>
-          <p style={{ font: '600 13px var(--oc-font-heading), sans-serif' }}>Татгалзсан</p>
-          <p style={{ marginTop: 6, font: '400 12px var(--oc-font-heading), sans-serif' }}>{rejectionReason}</p>
-        </div>
-      )}
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <div>
-          <span className="oc-field-label">ОВОГ</span>
-          <input
-            className="oc-input"
-            style={{ marginTop: 8 }}
-            value={lastName}
-            onChange={(e) => setLastName(e.target.value)}
-            maxLength={60}
-          />
-        </div>
-
-        <div>
-          <span className="oc-field-label">НЭР</span>
-          <input
-            className="oc-input"
-            style={{ marginTop: 8 }}
-            value={firstName}
-            onChange={(e) => setFirstName(e.target.value)}
-            maxLength={60}
-          />
-        </div>
-
-        <div>
-          <span className="oc-field-label">ТӨРСӨН ӨДӨР</span>
-          <input
-            type="date"
-            className="oc-input oc-input-mono"
-            style={{ marginTop: 8 }}
-            value={dateOfBirth}
-            onChange={(e) => setDateOfBirth(e.target.value)}
-          />
-        </div>
-
-        <div>
-          <span className="oc-field-label">ХҮЙС</span>
-          <select
-            className="oc-input oc-input-select"
-            style={{ marginTop: 8 }}
-            value={gender}
-            onChange={(e) => setGender(e.target.value as OnlineParticipantGender)}
-          >
-            <option value="" disabled>
-              Сонгоно уу
-            </option>
-            <option value="male">Эрэгтэй</option>
-            <option value="female">Эмэгтэй</option>
-            <option value="other">Бусад</option>
-          </select>
-        </div>
-
-        <div>
-          <span className="oc-field-label">ИРГЭНШИЛ</span>
-          <input
-            className="oc-input"
-            style={{ marginTop: 8 }}
-            value={citizenship}
-            onChange={(e) => setCitizenship(e.target.value)}
-            placeholder="Монгол"
-            maxLength={60}
-          />
-        </div>
-
-        <div>
-          <span className="oc-field-label">ЗУРАГ</span>
-          <div className="oc-profile-photo-row" style={{ marginTop: 8 }}>
-            {photoPreview ? (
-              // eslint-disable-next-line @next/next/no-img-element -- local preview / Cloudinary URL, not our own image pipeline.
-              <img src={photoPreview} alt="" className="oc-profile-photo-preview" />
-            ) : (
-              <span className="oc-profile-photo-placeholder">ЗУРАГГҮЙ</span>
-            )}
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(e) => handlePhotoChange(e.target.files?.[0] ?? null)}
-              style={{ font: '400 12px var(--oc-font-heading), sans-serif' }}
-            />
-          </div>
-          {progress !== null && (
-            <p style={{ marginTop: 6, font: '400 11px var(--oc-font-mono), monospace', color: '#8A8474' }}>
-              Зураг илгээж байна... {progress}%
+    <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* ── Profile photo ─────────────────────────────────────────────── */}
+      <div className="oc-v3-card">
+        <CardHead>Профайл зураг</CardHead>
+        <div className="oc-v3-photo-body">
+          <Avatar88 src={shownPhoto} name={displayName} />
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <p style={{ font: '400 12px var(--oc-font-heading), sans-serif', color: '#9A958A' }}>
+              Царай тод харагдах зураг. Шүүгч бичлэг шалгахад ашиглана.
             </p>
-          )}
+            <div style={{ marginTop: 14, display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+              {editable && !uploadOpen && (
+                <button type="button" className="oc-v3-ghost-btn" onClick={() => setUploadOpen(true)}>
+                  {status === 'rejected' ? 'ДАХИН ОРУУЛАХ' : 'ЗУРАГ СОЛИХ'}
+                </button>
+              )}
+              <StatusChip status={status} />
+            </div>
+
+            {status === 'rejected' && participant?.rejectionReason && (
+              <div className="oc-v3-reject-block" style={{ marginTop: 14 }}>
+                <p style={{ font: '600 9px var(--oc-font-mono), monospace', letterSpacing: '.14em', color: '#E8543C' }}>
+                  ТАТГАЛЗСАН ШАЛТГААН
+                </p>
+                <p style={{ marginTop: 8, font: '400 12px var(--oc-font-heading), sans-serif', color: '#F4F1EA' }}>
+                  {participant.rejectionReason}
+                </p>
+              </div>
+            )}
+
+            {status === 'pending' && (
+              <p style={{ marginTop: 12, font: '400 12px var(--oc-font-heading), sans-serif', color: '#9A958A' }}>
+                Таны мэдээллийг админ хянаж байна. Баталгаажсаны дараа тэмцээнд бүртгүүлэх боломжтой.
+              </p>
+            )}
+          </div>
+        </div>
+
+        {editable && uploadOpen && (
+          <div style={{ padding: '0 18px 20px' }}>
+            <div className="oc-v3-upload">
+              <span
+                className="oc-v3-upload-preview"
+                aria-hidden
+                style={photoPreview ? { backgroundImage: `url(${photoPreview})` } : undefined}
+              >
+                {photoPreview ? '' : 'ЗУРАГГҮЙ'}
+              </span>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <label className="oc-v3-ghost-btn">
+                  ФАЙЛ СОНГОХ
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="oc-v3-file-input"
+                    onChange={(e) => handlePhotoChange(e.target.files?.[0] ?? null)}
+                  />
+                </label>
+                <p style={{ marginTop: 12, font: '400 12px var(--oc-font-heading), sans-serif', color: '#9A958A' }}>
+                  JPG эсвэл PNG. Царай төвд, гэрэлтэй, малгай нүдний шилгүй.
+                </p>
+                {progress !== null && (
+                  <p style={{ marginTop: 8, font: '400 11px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
+                    Зураг илгээж байна... {progress}%
+                  </p>
+                )}
+              </div>
+            </div>
+            <button type="submit" className="oc-v3-submit-btn" style={{ marginTop: 12 }} disabled={saving || !canSubmit}>
+              {saving ? 'Илгээж байна...' : 'Баталгаажуулалтад илгээх'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ── Personal details ──────────────────────────────────────────── */}
+      <div className="oc-v3-card">
+        <CardHead>Хувийн мэдээлэл</CardHead>
+        <div className="oc-v3-form-grid">
+          <Field label="Овог">
+            {editable ? (
+              <input className="oc-v3-input" value={lastName} onChange={(e) => setLastName(e.target.value)} maxLength={60} />
+            ) : (
+              <p className="oc-v3-value">{participant?.lastName || '—'}</p>
+            )}
+          </Field>
+
+          <Field label="Нэр">
+            {editable ? (
+              <input className="oc-v3-input" value={firstName} onChange={(e) => setFirstName(e.target.value)} maxLength={60} />
+            ) : (
+              <p className="oc-v3-value">{participant?.firstName || '—'}</p>
+            )}
+          </Field>
+
+          <Field label="Төрсөн огноо">
+            {editable ? (
+              <input
+                type="date"
+                className="oc-v3-input"
+                style={{ font: '500 13px var(--oc-font-mono), monospace', colorScheme: 'dark' }}
+                value={dateOfBirth}
+                onChange={(e) => setDateOfBirth(e.target.value)}
+              />
+            ) : (
+              <p className="oc-v3-value">{participant?.dateOfBirth || '—'}</p>
+            )}
+          </Field>
+
+          {/* Plain text input, not a searchable country/flag picker — that
+              needs a country dataset + combobox this feature doesn't have,
+              and the field is a free-text string in the schema. */}
+          <Field label="Иргэншил">
+            {editable ? (
+              <input
+                className="oc-v3-input"
+                value={citizenship}
+                onChange={(e) => setCitizenship(e.target.value)}
+                placeholder="Монгол"
+                maxLength={60}
+              />
+            ) : (
+              <p className="oc-v3-value">{participant?.citizenship || '—'}</p>
+            )}
+          </Field>
+
+          <div style={{ gridColumn: '1 / -1' }}>
+            <span className="oc-v3-field-label">Хүйс</span>
+            <div style={{ marginTop: 8 }}>
+              {editable ? (
+                <div className="oc-v3-seg">
+                  {GENDERS.map((g) => (
+                    <button
+                      key={g.value}
+                      type="button"
+                      className={`oc-v3-seg-btn${gender === g.value ? ' oc-v3-seg-btn-active' : ''}`}
+                      onClick={() => setGender(g.value)}
+                    >
+                      {g.label}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="oc-v3-value">{participant?.gender ? GENDER_LABEL[participant.gender] : '—'}</p>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
-      {error && (
-        <p style={{ marginTop: 16, font: '400 12px var(--oc-font-heading), sans-serif', color: '#D8402C' }}>
-          {error}
-        </p>
-      )}
+      {/* ── Email ─────────────────────────────────────────────────────────
+          Read-only: identity comes from Google Sign-In, so the address is
+          already verified and there is no change-email flow to offer. */}
+      <div className="oc-v3-card">
+        <CardHead>И-мэйл хаяг</CardHead>
+        <div style={{ padding: '20px 18px' }}>
+          <div className="oc-v3-email-row">
+            <span style={{ font: '500 13px var(--oc-font-heading), sans-serif', color: '#F4F1EA', overflowWrap: 'anywhere' }}>
+              {email ?? '—'}
+            </span>
+            <span className="oc-v3-chip-sm">БАТАЛГААЖСАН</span>
+          </div>
+        </div>
+      </div>
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
-        <button type="submit" className="oc-btn-register-confirm" disabled={saving}>
-          {saving ? 'Илгээж байна...' : 'Илгээх'}
-        </button>
+      {error && <p style={{ font: '400 12px var(--oc-font-heading), sans-serif', color: '#E8543C' }}>{error}</p>}
+
+      <div className="oc-v3-footer-row">
+        <Link href={DASHBOARD} className="oc-v3-ghost-btn">
+          БУЦАХ
+        </Link>
+        {editable && (
+          <button
+            type="submit"
+            className="oc-v3-submit-btn"
+            style={{ width: 'auto', paddingLeft: 26, paddingRight: 26 }}
+            disabled={saving}
+          >
+            {saving ? 'Хадгалж байна...' : 'Хадгалах'}
+          </button>
+        )}
       </div>
     </form>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <span className="oc-v3-field-label">{label}</span>
+      <div style={{ marginTop: 8 }}>{children}</div>
+    </div>
   );
 }

@@ -1,11 +1,13 @@
 import {
   doc,
   getDoc,
+  waitForPendingWrites,
   getDocs,
   limit,
   orderBy,
   query,
   serverTimestamp,
+  where,
   setDoc,
   Timestamp,
   addDoc,
@@ -21,6 +23,7 @@ import type {
   OnlineParticipantProfileStatus,
   OnlineRegistration,
   OnlineSeasonAthletePoints,
+  OnlineSubmission,
 } from './types';
 
 const RETENTION_DAYS = 14;
@@ -125,7 +128,33 @@ export async function upsertGoogleParticipant(profile: {
   );
 }
 
+// Reads from the SERVER, not getDoc()'s cache-or-server path, and that is
+// load-bearing rather than a preference.
+//
+// OnlineAuthProvider fires upsertGoogleParticipant() from inside
+// onAuthStateChanged without awaiting it, and every caller of this
+// function runs off that same auth change — so the read races the write.
+// While that setDoc(..., { merge: true }) is still pending and the SDK has
+// no cached server copy of the doc, getDoc() resolves against the local
+// mutation queue and returns a document consisting ONLY of the five fields
+// the upsert writes (displayName/email/photoURL/uid/createdAt, the last
+// one null because serverTimestamp() hasn't resolved). profileStatus is
+// absent from that view, so resolveProfileStatus() reports 'incomplete'
+// for an athlete who is actually approved — which showed up as the profile
+// page offering a blank form to an approved athlete, and would equally
+// make RegistrationPanel's gate bounce an approved athlete to the profile
+// form. Confirmed live: the client saw exactly those five keys while the
+// Admin SDK read profileStatus: 'approved' from the same document.
 export async function fetchParticipant(uid: string): Promise<OnlineParticipant | null> {
+  // Let any in-flight local mutation settle before reading. A server read
+  // is NOT enough on its own: Firestore layers pending local writes over
+  // every snapshot it hands back, including getDocFromServer()'s.
+  // Bounded so an offline client still falls through to a read (which will
+  // throw and surface as the caller's normal load error) instead of hanging.
+  await Promise.race([
+    waitForPendingWrites(onlineCompDb),
+    new Promise((resolve) => setTimeout(resolve, 3000)),
+  ]);
   const snap = await getDoc(doc(onlineCompDb, 'onlineParticipants', uid));
   if (!snap.exists()) return null;
   return snap.data() as OnlineParticipant;
@@ -197,6 +226,28 @@ export async function fetchRegistration(uid: string, competitionId: string): Pro
 export async function fetchMyRegistrations(uid: string): Promise<OnlineRegistration[]> {
   const snap = await getDocs(collection(onlineCompDb, 'onlineParticipants', uid, 'registrations'));
   return snap.docs.map((d) => d.data() as OnlineRegistration);
+}
+
+// The signed-in athlete's own submissions, for the dashboard's
+// "СҮҮЛИЙН ТАЙЛАЛТУУД" list. Firestore rules only expose a submission to
+// its owner (or an admin), and the uid equality filter is what makes the
+// query provably safe under that rule.
+//
+// Deliberately no orderBy/limit in the query itself: ordering by createdAt
+// alongside the uid filter needs a composite (uid, createdAt) index this
+// project doesn't have, and an undeployed index throws FAILED_PRECONDITION
+// at runtime. One athlete's submission count is small and bounded, so the
+// sort and the cut happen here instead. If that ever stops being true, add
+//   { "collectionGroup": "onlineSubmissions", "queryScope": "COLLECTION",
+//     "fields": [ { "fieldPath": "uid", "order": "ASCENDING" },
+//                 { "fieldPath": "createdAt", "order": "DESCENDING" } ] }
+// to firestore.indexes.json and push the ordering into the query.
+export async function fetchMySubmissions(uid: string, count = 5): Promise<OnlineSubmission[]> {
+  const snap = await getDocs(query(collection(onlineCompDb, 'onlineSubmissions'), where('uid', '==', uid)));
+  return snap.docs
+    .map((d) => ({ id: d.id, ...(d.data() as Omit<OnlineSubmission, 'id'>) }))
+    .sort((a, b) => (b.createdAt?.toMillis() ?? 0) - (a.createdAt?.toMillis() ?? 0))
+    .slice(0, count);
 }
 
 export async function createSubmission(input: {
