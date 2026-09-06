@@ -2,11 +2,13 @@
 // Used instead of Firebase Storage because this project's Firebase plan
 // doesn't support enabling Storage without upgrading to a paid tier.
 //
-// TODO: submitted videos should auto-delete once retentionExpiresAt (see
-// onlineSubmissions in lib/online-competition/types.ts) passes. Not
-// implemented yet — needs either a Cloudinary scheduled-deletion rule on
-// this upload preset, or a Cloud Function that reads retentionExpiresAt
-// and calls the Cloudinary Admin API (destroy) to remove expired videos.
+// Retention: submitted videos are auto-deleted once retentionExpiresAt
+// (see onlineSubmissions in lib/online-competition/types.ts) passes —
+// implemented as a nightly Vercel Cron job, app/api/online-competition/
+// cron/sweep-videos, which reuses the shared Cloudinary-then-Firestore
+// deletion in lib/online-competition/submission-cleanup.ts. Only
+// approved/rejected submissions are swept; a pending one is never touched
+// however old it is, since no judge has reviewed it yet.
 
 const CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
 const UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
