@@ -2482,3 +2482,273 @@
     padding: 24px 20px;
   }
 }
+
+/* Sub-line under an empty state — names the account the (empty) result
+   belongs to, so "no registrations" can't be mistaken for "wrong account".
+   Added after a bug report where the Миний тэмцээнүүд list looked broken
+   but was simply being read for a second Google account that had none. */
+.oc-v3-empty-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  font: 400 10px var(--oc-font-mono), monospace;
+  color: #4A4740;
+  text-align: center;
+}
+.oc-v3-empty-hint a {
+  color: #6E6A62;
+  text-decoration: none;
+  letter-spacing: 0.1em;
+}
+.oc-v3-empty-hint a:hover {
+  color: #DFFF4F;
+}
+
+/* ── v3 mobile breakpoint (<= 640px) ──────────────────────────────────────
+   Covers the three dark v3 pages: hub, competitions list, competition
+   detail. The 899px block above is the tablet step (two-column grids
+   collapse, fixed-px row columns start folding); this one is the phone
+   step — the header splits into two stacked rows, every fixed-px grid row
+   stacks vertically, and interactive controls get a 44px minimum height.
+
+   Written as literal media queries against the .oc-v3-* classes rather
+   than Tailwind's sm:/md: prefixes, for the same reason as every other
+   block in this file: Tailwind utilities sit in a cascade layer that
+   always loses to app/globals.css's unlayered `* { margin: 0; padding: 0 }`
+   reset, so any spacing has to be a real class or an inline style. */
+
+/* Desktop-side pieces of the mobile header. Declared outside the media
+   query so the brand is hidden by default and the auth wrapper is inert
+   on desktop — it exists only to give the mobile grid something to place,
+   and stretches to the full 60px bar so the user dropdown keeps anchoring
+   to the bar's bottom edge exactly as before. */
+.oc-v3-nav-brand {
+  display: none;
+  align-items: center;
+  gap: 9px;
+  font: 600 14px var(--oc-font-heading), sans-serif;
+  letter-spacing: 0.12em;
+  color: #F4F1EA;
+  text-decoration: none;
+}
+.oc-v3-logo {
+  display: grid;
+  grid-template-columns: repeat(3, 5px);
+  gap: 2px;
+  flex-shrink: 0;
+}
+.oc-v3-nav-auth {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+}
+
+@media (max-width: 640px) {
+  /* ── Header: two stacked rows ─────────────────────────────────────────
+     Row 1: brand | avatar-or-sign-in. Row 2: the tab strip, full width.
+     Sticky so the tab strip stays reachable while a long list scrolls —
+     the desktop bar is NOT sticky (deliberately unchanged this turn). */
+  .oc-v3-nav {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    height: auto;
+    padding: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+  .oc-v3-nav-brand {
+    display: flex;
+    grid-row: 1;
+    grid-column: 1;
+    min-height: 44px;
+    padding: 10px 14px;
+  }
+  .oc-v3-nav-auth {
+    grid-row: 1;
+    grid-column: 2;
+    justify-content: flex-end;
+    padding: 10px 14px;
+  }
+  .oc-v3-tabs {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    border-top: 1px solid #16161B;
+    white-space: nowrap;
+    overflow-x: auto;
+    /* Hidden scrollbar — the strip is short and a visible bar under the
+       tabs reads as a rendering artifact on a phone. */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .oc-v3-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .oc-v3-tab {
+    min-height: 44px;
+    padding: 0 13px;
+    font-size: 11px;
+  }
+
+  /* The Тэмцээнүүд dropdown is hover-opened and lives inside the tab
+     strip, whose overflow-x:auto makes overflow-y compute to auto too —
+     an absolutely-positioned panel would be clipped and add a stray
+     scroll area. Hover doesn't exist on touch anyway, and the tab itself
+     navigates to /competitions on tap, where the same two choices are
+     the pill toggle. So it's suppressed here rather than shipped broken.
+     The user menu is unaffected: it sits in .oc-v3-nav-auth, outside the
+     scroller. */
+  .oc-v3-tabs .oc-v3-menu {
+    display: none;
+  }
+
+  /* ── Touch targets ────────────────────────────────────────────────── */
+  .oc-v3-menu-item,
+  .oc-v3-userbtn,
+  .oc-v3-signin,
+  .oc-v3-pill,
+  .oc-v3-row-action,
+  .oc-v3-reg-btn,
+  .oc-v3-lb-all,
+  .oc-v3-live-btn,
+  .oc-v3-hero-cta,
+  .oc-v3-section-toggle,
+  .oc-v3-btn-register,
+  .oc-v3-btn-cancel,
+  .oc-v3-btn-edit-reg,
+  .oc-v3-reg-toggle-row,
+  .oc-v3-back-link,
+  .oc-v3-label-link {
+    min-height: 44px;
+  }
+  /* These are text-flow elements (inline links / centred labels), so a
+     min-height alone would leave the label pinned to the top of the box. */
+  .oc-v3-reg-btn,
+  .oc-v3-lb-all,
+  .oc-v3-live-btn,
+  .oc-v3-hero-cta,
+  .oc-v3-row-action,
+  .oc-v3-back-link,
+  .oc-v3-label-link,
+  .oc-v3-btn-register {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  /* Competition-name links are the primary tap target in every list row,
+     so they get the 44px height too — as vertical padding rather than
+     min-height + flex, because these rely on display:block for
+     text-overflow: ellipsis, which a flex container would break (the text
+     becomes an anonymous flex item and stops truncating). */
+  .oc-v3-row-name {
+    padding: 13px 0;
+  }
+
+  /* ── Hub: upcoming-competition row ───────────────────────────────────
+     [icon | name+date] / [capacity] / [action], each on its own line. */
+  .oc-v3-row {
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 10px;
+    row-gap: 12px;
+  }
+  .oc-v3-row-icon {
+    width: 28px;
+    height: 28px;
+  }
+  .oc-v3-row-cap,
+  .oc-v3-row-cta {
+    width: auto;
+    grid-column: 1 / -1;
+  }
+
+  /* ── Competitions list: all-competitions row ─────────────────────────
+     Six fixed-px columns fold to [icon | name | date] / [events] /
+     [capacity] / [action]. Placed by child index because the desktop
+     grid has no wrapper elements to target. */
+  .oc-v3-all-row {
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    gap: 10px;
+    row-gap: 12px;
+  }
+  .oc-v3-all-row > *:nth-child(1) {
+    grid-column: 1;
+  }
+  .oc-v3-all-row > *:nth-child(2) {
+    grid-column: 2;
+  }
+  .oc-v3-all-row > *:nth-child(3) {
+    grid-column: 3;
+    justify-self: end;
+    font-size: 10px;
+  }
+  .oc-v3-all-row > *:nth-child(n + 4) {
+    grid-column: 1 / -1;
+  }
+  .oc-v3-icon-30 {
+    width: 28px;
+    height: 28px;
+  }
+
+  /* ── Competitions list: my-competitions row ──────────────────────────
+     [name+season | date] / [event chips | status] / [action]. */
+  .oc-v3-mine-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    row-gap: 12px;
+  }
+  .oc-v3-mine-row > *:nth-child(3) {
+    grid-column: 1;
+  }
+  .oc-v3-mine-row > *:nth-child(4) {
+    grid-column: 2;
+    justify-self: end;
+  }
+  .oc-v3-mine-row > *:nth-child(5) {
+    grid-column: 1 / -1;
+  }
+
+  /* ── Hero / stat block: stack, and let the CTA fill the width ──────── */
+  .oc-v3-hero {
+    padding: 22px 16px;
+  }
+  .oc-v3-hero-cta-wrap {
+    width: 100%;
+  }
+  .oc-v3-hero-cta,
+  .oc-v3-reg-idle .oc-v3-btn-register {
+    width: 100%;
+  }
+  .oc-v3-dhero {
+    padding: 22px 16px;
+  }
+  .oc-v3-dhero-right {
+    width: 100%;
+  }
+  .oc-v3-statblock {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .oc-v3-statdiv {
+    height: 1px;
+  }
+  .oc-v3-cd-days {
+    font-size: 30px;
+  }
+  /* Confirm/cancel share the footer width rather than one stretching. */
+  .oc-v3-reg-picking-foot > * {
+    flex: 1;
+  }
+
+  .oc-v3-main {
+    padding: 14px;
+    gap: 14px;
+  }
+  .oc-v3-pill-row {
+    flex-wrap: wrap;
+  }
+  .oc-v3-pill {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}

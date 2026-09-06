@@ -17,7 +17,9 @@ type View = 'all' | 'mine';
 
 export default function CompetitionsPage() {
   const { user, loading: authLoading, signInWithGoogle } = useOnlineAuth();
-  const signedIn = !!user && !user.isAnonymous;
+  // Anonymous solve-page sessions don't count as a returning identity.
+  const uid = user && !user.isAnonymous ? user.uid : null;
+  const signedIn = uid !== null;
 
   const [view, setView] = useState<View>('all');
   const [competitions, setCompetitions] = useState<OnlineCompetition[] | null>(null);
@@ -43,15 +45,19 @@ export default function CompetitionsPage() {
   // Same registrations -> competitions join the "Миний тэмцээнүүд"
   // dashboard does: onlineParticipants/{uid}/registrations is only
   // readable by its owner, so this can't run until there's a real signed-in
-  // identity (an anonymous solve-page session doesn't count).
+  // identity.
+  //
+  // Keyed on `uid` (a string), not the `user` object: useOnlineAuth builds
+  // a fresh object on every onAuthStateChanged emission, so an object dep
+  // refetches on churn that didn't change the identity. `setMine(null)`
+  // runs unconditionally at the top so rows read for a previous account
+  // can never stay on screen while the new account's fetch is in flight.
   useEffect(() => {
-    if (!signedIn || !user) {
-      setMine(null);
-      return;
-    }
-    let cancelled = false;
+    setMine(null);
     setMineError('');
-    fetchMyRegistrations(user.uid)
+    if (uid === null) return;
+    let cancelled = false;
+    fetchMyRegistrations(uid)
       .then(async (regs) => {
         const joined = await Promise.all(
           regs.map(async (registration) => {
@@ -67,7 +73,7 @@ export default function CompetitionsPage() {
     return () => {
       cancelled = true;
     };
-  }, [signedIn, user]);
+  }, [uid]);
 
   const { live, sorted } = useMemo(() => {
     const list = competitions ?? [];
@@ -139,7 +145,7 @@ export default function CompetitionsPage() {
         ) : mine === null ? (
           <p className="oc-v3-status">Ачааллаж байна...</p>
         ) : (
-          <MyCompetitions views={mine} />
+          <MyCompetitions views={mine} account={user?.email ?? user?.displayName ?? null} />
         )}
       </main>
     </div>

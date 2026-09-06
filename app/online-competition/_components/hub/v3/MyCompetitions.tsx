@@ -12,6 +12,7 @@ import { EventChip } from './CompetitionCells';
 import EmptyBlock from './EmptyBlock';
 
 const HUB = '/online-competition';
+const COMPETITIONS = '/online-competition/competitions';
 
 export interface RegisteredView {
   registration: OnlineRegistration;
@@ -28,7 +29,19 @@ const STATUS: Record<OnlineCompetitionStatus, { dot: string; text: string; label
   finished: { dot: '#4A4740', text: '#6E6A62', label: 'ДУУССАН' },
 };
 
-export default function MyCompetitions({ views }: { views: RegisteredView[] }) {
+export default function MyCompetitions({
+  views,
+  account,
+}: {
+  views: RegisteredView[];
+  /** Email (or display name) of the signed-in account these rows were read
+   *  for. Shown in the empty state: registrations live under
+   *  onlineParticipants/{uid}, so an empty list is account-specific, and
+   *  without naming the account "no registrations" is indistinguishable
+   *  from "signed in as the wrong Google account" — which is exactly how
+   *  this view got reported as broken once. */
+  account?: string | null;
+}) {
   const [pastOpen, setPastOpen] = useState(false);
 
   const active = views
@@ -44,7 +57,15 @@ export default function MyCompetitions({ views }: { views: RegisteredView[] }) {
           <span className="oc-v3-count-badge">{active.length}</span>
         </div>
         {active.length === 0 ? (
-          <EmptyBlock text="Тэмцээн алга." />
+          <EmptyBlock
+            text="Бүртгүүлсэн тэмцээн алга."
+            hint={
+              <>
+                {account && <span>{account} хаягаар нэвтэрсэн</span>}
+                <Link href={COMPETITIONS}>БҮХ ТЭМЦЭЭН ҮЗЭХ →</Link>
+              </>
+            }
+          />
         ) : (
           active.map((v) => <Row key={v.competition.id} view={v} />)
         )}
@@ -61,7 +82,7 @@ export default function MyCompetitions({ views }: { views: RegisteredView[] }) {
         </button>
         {pastOpen &&
           (past.length === 0 ? (
-            <EmptyBlock text="Тэмцээн алга." />
+            <EmptyBlock text="Өмнө оролцсон тэмцээн алга." />
           ) : (
             past.map((v) => <Row key={v.competition.id} view={v} />)
           ))}

@@ -16,6 +16,11 @@ import { initials } from './util';
 // on the club's (unrelated) dashboard when not on comp.*.
 const HUB = '/online-competition';
 const COMPETITIONS = '/online-competition/competitions';
+
+// Same 3x3 mark as ../Logo.tsx, repainted for the dark header (that
+// component's "ink" tone is #16140F — invisible on #0D0D10).
+const LOGO_PATTERN = ['ink', 'ink', 'volt', 'ink', 'volt', 'ink', 'volt', 'ink', 'ink'] as const;
+const LOGO_COLOR = { ink: '#F4F1EA', volt: '#DFFF4F' } as const;
 const DASHBOARD = '/online-competition/dashboard';
 const PROFILE = '/online-competition/profile';
 
@@ -79,6 +84,18 @@ export default function HubNav({
 
   return (
     <nav className="oc-v3-nav">
+      {/* Brand row — hidden on desktop (the approved desktop header has no
+          wordmark; tabs sit flush left). Below 640px the header splits into
+          two stacked rows and this becomes row 1's left half. */}
+      <Link href={HUB} className="oc-v3-nav-brand">
+        <span className="oc-v3-logo" aria-hidden>
+          {LOGO_PATTERN.map((tone, i) => (
+            <span key={i} style={{ width: 5, height: 5, background: LOGO_COLOR[tone] }} />
+          ))}
+        </span>
+        ХОРОМ
+      </Link>
+
       <div className="oc-v3-tabs">
         <Link href={HUB} className={`oc-v3-tab${active === 'home' ? ' oc-v3-tab-active' : ''}`}>
           Нүүр
@@ -137,6 +154,7 @@ export default function HubNav({
         )}
       </div>
 
+      <div className="oc-v3-nav-auth">
       {loading ? null : signedIn ? (
         <div className="oc-v3-menu-wrap" ref={userRef}>
           <button type="button" className="oc-v3-userbtn" onClick={() => setUserOpen((v) => !v)}>
@@ -200,6 +218,7 @@ export default function HubNav({
           Нэвтрэх
         </button>
       )}
+      </div>
     </nav>
   );
 }
