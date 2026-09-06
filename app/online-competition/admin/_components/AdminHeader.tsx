@@ -3,6 +3,7 @@
 import { useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import Logo from '../../_components/hub/Logo';
 
 type CurrentSection = 'competitions' | 'athletes' | 'settings' | 'detail';
 
@@ -24,6 +25,16 @@ export default function AdminHeader({ current = 'competitions' }: { current?: Cu
 
   return (
     <div className="oc-tabs" style={{ marginBottom: 32 }}>
+      {/* Hidden on desktop — the approved desktop header starts flush
+          with the first tab. Below 640px the bar splits into two rows
+          (brand + Гарах, then the scrollable tab strip), mirroring the
+          public HubNav's mobile treatment. */}
+      <Link href="/online-competition/admin" className="oc-adm-brand">
+        <Logo />
+        ХОРОМ
+      </Link>
+
+      <div className="oc-adm-tabs-strip">
       {current === 'competitions' ? (
         <span className="oc-tab oc-tab-active">Тэмцээнүүд</span>
       ) : (
@@ -45,9 +56,11 @@ export default function AdminHeader({ current = 'competitions' }: { current?: Cu
           Тохиргоо
         </Link>
       )}
+      </div>
+
       <button
         onClick={handleLogout}
-        className="border border-[var(--color-border)] text-sm text-[var(--color-ink-soft)] transition hover:border-[var(--color-ink)] hover:text-[var(--color-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ink)]"
+        className="oc-adm-logout border border-[var(--color-border)] text-sm text-[var(--color-ink-soft)] transition hover:border-[var(--color-ink)] hover:text-[var(--color-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ink)]"
         style={{
           borderRadius: 2,
           marginLeft: 'auto',

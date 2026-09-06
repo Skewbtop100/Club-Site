@@ -108,7 +108,7 @@ function JudgeActionButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`inline-flex w-full items-center justify-center gap-2 border border-[var(--color-border)] text-sm font-medium text-[var(--color-ink-soft)] transition disabled:cursor-not-allowed disabled:opacity-50 sm:flex-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ink)] ${JUDGE_HOVER_CLASS[tone]}`}
+      className={`oc-adm-judge-btn inline-flex w-full items-center justify-center gap-2 border border-[var(--color-border)] text-sm font-medium text-[var(--color-ink-soft)] transition disabled:cursor-not-allowed disabled:opacity-50 sm:flex-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ink)] ${JUDGE_HOVER_CLASS[tone]}`}
       style={{ borderRadius: 2, paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 10 }}
     >
       <ShapeMarker tone={tone} />
@@ -196,7 +196,7 @@ export default function ReviewDashboard({ competitionId }: { competitionId?: str
           <button
             key={f.value}
             onClick={() => setFilter(f.value)}
-            className={`text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ink)] ${
+            className={`oc-adm-filter-btn text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ink)] ${
               filter === f.value
                 ? 'text-[var(--color-ink)]'
                 : 'text-[var(--color-ink-faint)] hover:text-[var(--color-ink-soft)]'
@@ -301,7 +301,7 @@ function SubmissionCard({
               type="button"
               disabled={deleting}
               onClick={confirmDelete}
-              className="text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
+              className="oc-adm-mini-btn text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
               style={{ color: 'var(--color-dnf)', border: 'none', background: 'transparent', cursor: 'pointer', padding: 2 }}
             >
               {deleting ? '...' : 'Тийм'}
@@ -310,7 +310,7 @@ function SubmissionCard({
               type="button"
               disabled={deleting}
               onClick={() => setConfirmingDelete(false)}
-              className="text-xs disabled:cursor-not-allowed disabled:opacity-50"
+              className="oc-adm-mini-btn text-xs disabled:cursor-not-allowed disabled:opacity-50"
               style={{ color: 'var(--color-ink-faint)', border: 'none', background: 'transparent', cursor: 'pointer', padding: 2 }}
             >
               Үгүй
@@ -321,7 +321,7 @@ function SubmissionCard({
             type="button"
             aria-label="Илгээмж устгах"
             onClick={() => setConfirmingDelete(true)}
-            className="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ink)]"
+            className="oc-adm-del-btn focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ink)]"
             style={{
               width: 22,
               height: 22,

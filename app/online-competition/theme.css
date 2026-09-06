@@ -2752,3 +2752,206 @@
     justify-content: center;
   }
 }
+
+/* ── Admin section, mobile (<= 640px) ─────────────────────────────────────
+   Same breakpoint and methodology as the public v3 pages' mobile block:
+   literal media queries against real classes, never Tailwind responsive
+   prefixes, and a 44px minimum height on every interactive control.
+
+   The admin section is the v2 paper/ink system, not v3 — colors here come
+   from the v2 palette, only the *layout* pattern is shared. */
+
+/* Desktop-side declarations for the pieces the mobile header needs. The
+   brand is hidden until the breakpoint; the tab strip is a transparent
+   wrapper that reproduces .oc-tabs' own 1px gap, so the desktop bar is
+   pixel-identical with the tabs nested one level deeper. */
+.oc-adm-brand {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  font: 600 14px var(--oc-font-heading), sans-serif;
+  letter-spacing: 0.12em;
+  color: #16140F;
+  text-decoration: none;
+}
+.oc-adm-tabs-strip {
+  display: flex;
+  gap: 1px;
+  min-width: 0;
+}
+
+/* CompetitionDetail's two-tab bar — was an inline style; identical values,
+   moved to a class so the breakpoint can reach it. */
+.oc-adm-tabbar {
+  display: flex;
+  gap: 1px;
+  border-bottom: 1px solid #DCD6C8;
+}
+
+/* Approved-athletes table: flex sizing lifted out of inline styles (a
+   child's inline `flex` beats any stylesheet rule, so the mobile restack
+   would have been impossible otherwise). Values are the previous inline
+   ones verbatim. */
+.oc-adm-ath-head,
+.oc-adm-ath-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.oc-adm-ath-head {
+  padding: 11px 14px;
+  border-bottom: 1px solid #DCD6C8;
+  background: #F4F1EA;
+}
+.oc-adm-ath-row {
+  padding: 10px 14px;
+  border-bottom: 1px solid #EFEBE0;
+}
+.oc-adm-ath-c1 { flex: 0 0 40px; }
+.oc-adm-ath-c2 { flex: 1.4 1 0; }
+.oc-adm-ath-c3 { flex: 1.4 1 0; }
+.oc-adm-ath-c4 { flex: 0.8 1 0; }
+.oc-adm-ath-c5 { flex: 0.9 1 0; }
+
+@media (max-width: 640px) {
+  /* ── Header: two stacked rows, matching the public HubNav ────────────
+     .oc-tabs sits inside each admin page's <main style="padding:32px 24px">,
+     so the negative margins pull it full-bleed before it goes sticky —
+     without them the sticky bar would leave 24px gutters with page content
+     sliding through them. margin-bottom stays owned by the inline style on
+     the element (32px). */
+  .oc-tabs {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    margin-top: -32px;
+    margin-left: -24px;
+    margin-right: -24px;
+    padding: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+  .oc-adm-brand {
+    display: inline-flex;
+    justify-self: start;
+    grid-row: 1;
+    grid-column: 1;
+    min-height: 44px;
+    padding: 10px 14px;
+  }
+  .oc-adm-logout {
+    grid-row: 1;
+    grid-column: 2;
+    min-height: 44px;
+    margin: 10px 14px;
+  }
+  .oc-adm-tabs-strip {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    border-top: 1px solid #EFEBE0;
+    white-space: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .oc-adm-tabs-strip::-webkit-scrollbar {
+    display: none;
+  }
+  .oc-tab {
+    min-height: 44px;
+    padding: 13px;
+    font-size: 12px;
+  }
+
+  /* Only two tabs on the competition detail page, so they split the width
+     evenly rather than needing a scroll strip. */
+  .oc-adm-tabbar .oc-tab {
+    flex: 1;
+    text-align: center;
+  }
+
+  /* ── Competitions list table ─────────────────────────────────────────
+     [name | date] / [status badge] / [count | →]. */
+  .oc-table-header {
+    display: none;
+  }
+  .oc-table-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 8px;
+  }
+  .oc-table-row > *:nth-child(3) {
+    grid-column: 1 / -1;
+  }
+
+  /* ── Athlete verification ────────────────────────────────────────────
+     Pending request cards stack photo above the detail block. */
+  .oc-athlete-card {
+    flex-direction: column;
+  }
+  .oc-athlete-thumb {
+    width: 96px;
+    height: 96px;
+  }
+  /* Approved table: header row goes, each row becomes
+     [avatar | name] / email / citizenship / reviewed-at. Switching the
+     row to grid neutralises the flex sizing above without touching it. */
+  .oc-adm-ath-head {
+    display: none;
+  }
+  .oc-adm-ath-row {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr);
+    column-gap: 12px;
+    row-gap: 4px;
+    align-items: center;
+  }
+  .oc-adm-ath-c1 {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .oc-adm-ath-c2 {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .oc-adm-ath-c3,
+  .oc-adm-ath-c4,
+  .oc-adm-ath-c5 {
+    grid-column: 1 / -1;
+  }
+
+  /* ── Create/edit form ────────────────────────────────────────────────
+     The auto-fit grid already yields one column at this width; the events
+     row is the part that needs help — its select would otherwise be
+     squeezed to nothing beside the fixed 74px rounds field. */
+  .oc-adm-event-row {
+    flex-wrap: wrap;
+  }
+  .oc-adm-event-row > select {
+    flex: 1 1 100%;
+  }
+
+  /* ── Touch targets ───────────────────────────────────────────────── */
+  .oc-btn,
+  .oc-input,
+  .oc-square-toggle,
+  .oc-adm-judge-btn,
+  .oc-adm-mini-btn,
+  .oc-adm-del-btn,
+  .oc-adm-event-del,
+  .oc-adm-add-row,
+  .oc-adm-filter-btn,
+  .oc-adm-logout,
+  .oc-tab {
+    min-height: 44px;
+  }
+  /* The delete control is a 22px corner square on desktop; it needs the
+     same 44px target here. Its confirm step ("Устгах уу?" -> Тийм/Үгүй)
+     means an accidental tap is still recoverable. */
+  .oc-adm-del-btn {
+    min-width: 44px;
+  }
+  .oc-adm-mini-btn {
+    min-width: 44px;
+  }
+}

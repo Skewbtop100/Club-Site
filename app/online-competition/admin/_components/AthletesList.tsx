@@ -210,12 +210,12 @@ export default function AthletesList() {
             <EmptyState text="Тамирчин алга." />
           ) : (
             <div className="oc-table">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px', borderBottom: '1px solid #DCD6C8', background: '#F4F1EA' }}>
+              <div className="oc-adm-ath-head">
                 {['', 'Нэр', 'И-мэйл', 'Иргэншил', 'Баталгаажсан'].map((label, i) => (
                   <span
                     key={i}
+                    className={`oc-adm-ath-c${i + 1}`}
                     style={{
-                      flex: i === 0 ? '0 0 40px' : i === 1 ? '1.4 1 0' : i === 2 ? '1.4 1 0' : i === 3 ? '.8 1 0' : '.9 1 0',
                       font: '500 9px var(--oc-font-mono), monospace',
                       letterSpacing: '.14em',
                       color: '#8A8474',
@@ -227,11 +227,8 @@ export default function AthletesList() {
                 ))}
               </div>
               {approved.map((a) => (
-                <div
-                  key={a.uid}
-                  style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderBottom: '1px solid #EFEBE0' }}
-                >
-                  <span style={{ flex: '0 0 40px' }}>
+                <div key={a.uid} className="oc-adm-ath-row">
+                  <span className="oc-adm-ath-c1">
                     {a.approvedPhotoUrl || a.photoUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element -- Cloudinary URL, not our own image pipeline.
                       <img
@@ -243,16 +240,22 @@ export default function AthletesList() {
                       <span style={{ width: 32, height: 32, borderRadius: '50%', display: 'block', background: '#F4F1EA' }} />
                     )}
                   </span>
-                  <span style={{ flex: '1.4 1 0', font: '500 13px var(--oc-font-heading), sans-serif', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span
+                    className="oc-adm-ath-c2"
+                    style={{ font: '500 13px var(--oc-font-heading), sans-serif', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  >
                     {a.lastName} {a.firstName}
                   </span>
-                  <span style={{ flex: '1.4 1 0', font: '400 12px var(--oc-font-heading), sans-serif', color: '#4C473C', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span
+                    className="oc-adm-ath-c3"
+                    style={{ font: '400 12px var(--oc-font-heading), sans-serif', color: '#4C473C', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  >
                     {a.email || '—'}
                   </span>
-                  <span style={{ flex: '.8 1 0', font: '400 12px var(--oc-font-heading), sans-serif', color: '#4C473C' }}>
+                  <span className="oc-adm-ath-c4" style={{ font: '400 12px var(--oc-font-heading), sans-serif', color: '#4C473C' }}>
                     {a.citizenship || '—'}
                   </span>
-                  <span style={{ flex: '.9 1 0', font: '400 11px var(--oc-font-mono), monospace', color: '#8A8474' }}>
+                  <span className="oc-adm-ath-c5" style={{ font: '400 11px var(--oc-font-mono), monospace', color: '#8A8474' }}>
                     {fmtDate(a.reviewedAt)}
                   </span>
                 </div>

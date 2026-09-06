@@ -158,7 +158,7 @@ export default function CompetitionForm({
           type="button"
           onClick={onClose}
           aria-label="Хаах"
-          className="text-[#8A8474] transition hover:text-[#16140F] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#16140F]"
+          className="oc-adm-mini-btn text-[#8A8474] transition hover:text-[#16140F] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#16140F]"
           style={{ border: 'none', background: 'transparent', font: '500 14px var(--oc-font-mono), monospace', cursor: 'pointer' }}
         >
           ✕
@@ -252,7 +252,7 @@ export default function CompetitionForm({
             <FieldLabel>ТӨРӨЛ · РАУНД</FieldLabel>
             <div className="flex flex-col gap-2" style={MT2}>
               {events.map((row, i) => (
-                <div key={i} className="flex items-center gap-2">
+                <div key={i} className="oc-adm-event-row flex items-center gap-2">
                   <select className={SELECT_CLASS} value={row.eventId} onChange={(e) => updateRow(i, { eventId: e.target.value })}>
                     {EVENT_OPTIONS.map((o) => (
                       <option key={o.eventId} value={o.eventId}>
@@ -273,7 +273,7 @@ export default function CompetitionForm({
                     onClick={() => removeRow(i)}
                     disabled={events.length === 1}
                     aria-label="Устгах"
-                    className="shrink-0 border border-[#DCD6C8] bg-transparent text-[#B22E1D] transition hover:border-[#D8402C] hover:bg-[#FDE8E4] disabled:cursor-not-allowed disabled:opacity-30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#16140F]"
+                    className="oc-adm-event-del shrink-0 border border-[#DCD6C8] bg-transparent text-[#B22E1D] transition hover:border-[#D8402C] hover:bg-[#FDE8E4] disabled:cursor-not-allowed disabled:opacity-30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#16140F]"
                     style={{
                       borderRadius: 2,
                       font: '500 12px var(--oc-font-mono), monospace',
@@ -291,7 +291,7 @@ export default function CompetitionForm({
             <button
               type="button"
               onClick={addRow}
-              className="w-full text-sm text-[#8A8474] transition hover:text-[#16140F] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#16140F]"
+              className="oc-adm-add-row w-full text-sm text-[#8A8474] transition hover:text-[#16140F] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#16140F]"
               style={{ border: '1px dashed #DCD6C8', borderRadius: 2, marginTop: 8, paddingTop: 8, paddingBottom: 8 }}
             >
               + Төрөл нэмэх

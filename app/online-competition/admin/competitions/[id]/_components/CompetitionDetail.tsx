@@ -52,7 +52,7 @@ export default function CompetitionDetail({ competitionId }: { competitionId: st
         </Button>
       </div>
 
-      <div style={{ display: 'flex', gap: 1, borderBottom: '1px solid #DCD6C8', marginBottom: 24 }}>
+      <div className="oc-adm-tabbar" style={{ marginBottom: 24 }}>
         <TabButton active={tab === 'athletes'} onClick={() => setTab('athletes')}>
           Тамирчид
         </TabButton>
