@@ -5,7 +5,6 @@ import {
   limit,
   orderBy,
   query,
-  runTransaction,
   serverTimestamp,
   setDoc,
   Timestamp,
@@ -16,14 +15,12 @@ import { onlineCompDb } from './firebase';
 import type {
   OnlineCompetition,
   OnlineCompetitionEventConfig,
-  OnlineCompetitionScramble,
   OnlineCompetitionStatus,
   OnlineParticipant,
   OnlineParticipantProfileInput,
   OnlineParticipantProfileStatus,
   OnlineRegistration,
   OnlineSeasonAthletePoints,
-  NextEventRound,
 } from './types';
 
 const RETENTION_DAYS = 14;
@@ -106,80 +103,9 @@ export async function fetchSeasonLeaderboard(season: string, count = 10): Promis
   return snap.docs.map((d) => d.data() as OnlineSeasonAthletePoints);
 }
 
-// ── STUB: next event/round selection ────────────────────────────────────
-// Full round-progression logic (multiple rounds per event, cutoffs, moving
-// on only once a submission is judged, etc.) doesn't exist yet. For now
-// this always sends every participant to the competition's first
-// configured event, round 1, so the rest of the page has something
-// concrete to render end-to-end.
-//
-// A real implementation should look at this participant's history in
-// `onlineSubmissions` for this competitionId (which events/rounds already
-// have a pending/approved submission) and the competition's configured
-// event/round order to decide what's next — and probably return `null`
-// once every event is done.
-export function getNextEventRound(competition: OnlineCompetition): NextEventRound {
-  // `competition.events` is always the normalized { eventId, label, rounds }
-  // shape by the time it gets here — fetchCompetition() normalizes legacy
-  // string[] docs (see normalizeEvents in this file) before returning.
-  return { event: competition.events[0]?.eventId ?? '333', round: 1 };
-}
-
-function scrambleDocId(event: string, round: number): string {
-  return `${event}_r${round}`;
-}
-
-// Fetches the stored scramble for this event/round, generating and storing
-// one via the server route if it doesn't exist yet. Uses a transaction so
-// two participants hitting an unset scramble at the same moment still end
-// up sharing a single, fair scramble rather than each generating their own.
-export async function getOrCreateScramble(
-  competitionId: string,
-  event: string,
-  round: number,
-): Promise<string> {
-  const ref = doc(
-    onlineCompDb,
-    'onlineCompetitions',
-    competitionId,
-    'scrambles',
-    scrambleDocId(event, round),
-  );
-
-  const existing = await getDoc(ref);
-  if (existing.exists()) {
-    return (existing.data() as OnlineCompetitionScramble).scramble;
-  }
-
-  const res = await fetch(`/api/online-competition/scramble?event=${encodeURIComponent(event)}`);
-  if (!res.ok) throw new Error('Scramble generation failed');
-  const { scramble } = (await res.json()) as { scramble: string };
-
-  return runTransaction(onlineCompDb, async (tx) => {
-    const snap = await tx.get(ref);
-    if (snap.exists()) {
-      return (snap.data() as OnlineCompetitionScramble).scramble;
-    }
-    tx.set(ref, { event, round, scramble, createdAt: serverTimestamp() });
-    return scramble;
-  });
-}
-
-export async function upsertParticipant(uid: string, displayName: string): Promise<void> {
-  await setDoc(
-    doc(onlineCompDb, 'onlineParticipants', uid),
-    { uid, displayName, createdAt: serverTimestamp() },
-    { merge: true },
-  );
-}
-
-// Separate from upsertParticipant() above (used by the solve page's
-// anonymous-auth nickname step) rather than widening that function's
-// signature — this keeps that page's only call site untouched, since it's
-// deliberately not being migrated to Google auth this turn. Called from
-// useOnlineAuth.tsx whenever onAuthStateChanged reports a non-anonymous
-// (Google) user, so onlineParticipants stays in sync with their current
-// Google profile.
+// Called from useOnlineAuth.tsx whenever onAuthStateChanged reports a
+// non-anonymous (Google) user, so onlineParticipants stays in sync with
+// their current Google profile.
 export async function upsertGoogleParticipant(profile: {
   uid: string;
   displayName: string | null;

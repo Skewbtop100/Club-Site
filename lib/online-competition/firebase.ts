@@ -2,12 +2,10 @@ import { initializeApp, getApps } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
 import {
   getAuth,
-  signInAnonymously,
   signInWithPopup,
   signInWithRedirect,
   GoogleAuthProvider,
   signOut,
-  type Auth,
 } from 'firebase/auth';
 
 // ── Isolated Firebase client for the public online-competition feature ──────
@@ -55,27 +53,14 @@ const onlineCompApp = existing ?? initializeApp(firebaseConfig, ONLINE_COMPETITI
 export const onlineCompAuth = getAuth(onlineCompApp);
 export const onlineCompDb = getFirestore(onlineCompApp);
 
-// Ensures the visitor has some Firebase Auth identity before touching
-// Firestore. Anonymous auth is used — not email — because this is a
-// public, one-off competition entry flow: requiring an account/password
-// would add friction for a participant who just wants to record one solve.
-// If already signed in (anonymous or otherwise) on this app instance, this
-// is a no-op and resolves with the current user.
-export async function ensureOnlineCompAuth(): Promise<Auth['currentUser']> {
-  if (onlineCompAuth.currentUser) return onlineCompAuth.currentUser;
-  const cred = await signInAnonymously(onlineCompAuth);
-  return cred.user;
-}
-
 const googleProvider = new GoogleAuthProvider();
 
-// Google sign-in — the primary identity for participants going forward
-// (registration, the nav bar's profile badge). Anonymous auth
-// (ensureOnlineCompAuth above) stays as-is for the existing solve page,
-// which already has submissions filed under anonymous uids; the two
-// coexist fine since Firebase Auth only ever has one *or* the other as
-// `onlineCompAuth.currentUser` at a time, and both read/write through
-// this same isolated app instance.
+// Google sign-in — the only identity participants get. (Anonymous auth
+// used to exist alongside it for the old solve flow; that flow now reads
+// its user from useOnlineAuth() like every other page, so the anonymous
+// helper was removed. Submissions filed under the old anonymous uids are
+// still in Firestore — consumers that care, such as the nav badge and the
+// registration gate, keep treating `isAnonymous` as signed-out.)
 //
 // Popup vs. redirect tradeoff: signInWithPopup is used by default — it
 // resolves in place with no extra wiring (no need to check

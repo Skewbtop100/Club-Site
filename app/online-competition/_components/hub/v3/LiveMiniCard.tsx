@@ -42,11 +42,10 @@ export default function LiveMiniCard({ competition }: { competition: OnlineCompe
 
         {/* Round progress ("РАУНД 2 / 3" + a completion bar) needs a
             current-round field that doesn't exist on the competition doc
-            yet — getNextEventRound() in lib/online-competition/data.ts is
-            still a stub that always returns round 1. This line shows the
-            configured events and total round count, both real; the
-            progress bar is omitted rather than filled with a made-up
-            percentage. */}
+            yet, and there is no round-progression logic anywhere to derive
+            one from. This line shows the configured events and total round
+            count, both real; the progress bar is omitted rather than
+            filled with a made-up percentage. */}
         {competition.events.length > 0 && (
           <div
             style={{

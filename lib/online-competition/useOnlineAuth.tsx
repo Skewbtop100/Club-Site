@@ -10,7 +10,8 @@ export interface OnlineAuthUser {
   displayName: string | null;
   photoURL: string | null;
   email: string | null;
-  /** True for the solve page's ensureOnlineCompAuth() sessions. Consumers
+  /** True for legacy anonymous sessions (the solve page created these
+   *  before it moved to this provider). Consumers
    *  that need a "really signed in" check (the nav badge, the
    *  registration gate) should treat an anonymous user the same as
    *  signed-out. */
@@ -39,10 +40,9 @@ function toOnlineAuthUser(fbUser: User | null): OnlineAuthUser | null {
 
 /** Wraps app/online-competition/layout.tsx so the hub, detail, and solve
  *  pages all share one onAuthStateChanged subscription instead of each
- *  standing up their own. Deliberately does NOT call ensureOnlineCompAuth()
- *  (anonymous sign-in) itself — just browsing the hub shouldn't create an
- *  identity; only actions that need one (registering, submitting a solve)
- *  should, and those already trigger it themselves. */
+ *  standing up their own. Deliberately never signs anyone in on its own —
+ *  just browsing the hub shouldn't create an identity; only actions that
+ *  need one (registering, submitting a solve) trigger sign-in themselves. */
 export function OnlineAuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<OnlineAuthUser | null>(null);
   const [loading, setLoading] = useState(true);
