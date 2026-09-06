@@ -17,15 +17,15 @@ type JudgeTone = 'ok' | 'warn' | 'dnf';
 // /--color-dnf, just written out verbatim instead of via var().
 function submissionBadge(status: OnlineSubmissionStatus, penalty: OnlineSubmissionPenalty): BadgeSpec {
   if (status === 'pending') {
-    return { borderColor: '#E08A00', background: 'transparent', color: '#B36E00', dotColor: '#E08A00' };
+    return { borderColor: '#E0A020', background: 'transparent', color: '#E0A020', dotColor: '#E0A020' };
   }
   if (status === 'rejected') {
-    return { borderColor: '#D8402C', background: '#FDE8E4', color: '#B22E1D' };
+    return { borderColor: '#D8402C', background: '#1A0D0A', color: '#E8543C' };
   }
   if (penalty === '+2') {
-    return { borderColor: '#E08A00', background: '#FFF3DB', color: '#8A5400' };
+    return { borderColor: '#E0A020', background: '#1A1408', color: '#E0A020' };
   }
-  return { borderColor: '#2E9E5B', background: '#E9F6EE', color: '#2E9E5B' };
+  return { borderColor: '#4FD07A', background: '#0F1A12', color: '#4FD07A' };
 }
 
 const FILTERS: { value: Filter; label: string }[] = [
@@ -55,10 +55,12 @@ const JUDGE_TONE_BG: Record<JudgeTone, string> = {
   warn: 'var(--color-warn-bg)',
   dnf: 'var(--color-dnf-bg)',
 };
+// Each button already carries its tone on the border and label (see
+// JudgeActionButton), so hover only needs to supply the tinted fill.
 const JUDGE_HOVER_CLASS: Record<JudgeTone, string> = {
-  ok: 'hover:border-[var(--color-ok)] hover:bg-[var(--color-ok-bg)]',
-  warn: 'hover:border-[var(--color-warn)] hover:bg-[var(--color-warn-bg)]',
-  dnf: 'hover:border-[var(--color-dnf)] hover:bg-[var(--color-dnf-bg)]',
+  ok: 'hover:bg-[var(--color-ok-bg)]',
+  warn: 'hover:bg-[var(--color-warn-bg)]',
+  dnf: 'hover:bg-[var(--color-dnf-bg)]',
 };
 
 function ShapeMarker({ tone }: { tone: JudgeTone }) {
@@ -108,8 +110,16 @@ function JudgeActionButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`oc-adm-judge-btn inline-flex w-full items-center justify-center gap-2 border border-[var(--color-border)] text-sm font-medium text-[var(--color-ink-soft)] transition disabled:cursor-not-allowed disabled:opacity-50 sm:flex-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ink)] ${JUDGE_HOVER_CLASS[tone]}`}
-      style={{ borderRadius: 2, paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 10 }}
+      className={`oc-adm-judge-btn inline-flex w-full items-center justify-center gap-2 border text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 sm:flex-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-volt)] ${JUDGE_HOVER_CLASS[tone]}`}
+      style={{
+        borderRadius: 2,
+        borderColor: JUDGE_TONE_COLOR[tone],
+        color: JUDGE_TONE_COLOR[tone],
+        paddingLeft: 12,
+        paddingRight: 12,
+        paddingTop: 10,
+        paddingBottom: 10,
+      }}
     >
       <ShapeMarker tone={tone} />
       {children}
@@ -276,7 +286,7 @@ function SubmissionCard({
   }
 
   return (
-    <div style={{ position: 'relative', border: '1px solid var(--color-border)', borderRadius: 2, background: 'var(--color-paper)', padding: 16 }}>
+    <div style={{ position: 'relative', border: '1px solid #1C1C21', borderRadius: 2, background: '#0D0D10', padding: 16 }}>
       {/* Small corner control, deliberately separate from the judging
           actions below (Зөвшөөрөх/+2/DNF) so it can't be misclicked as
           one of them — needs an explicit "Устгах уу?" confirm click
@@ -362,7 +372,7 @@ function SubmissionCard({
             theme.css); `object-contain` guarantees the full frame is
             always visible with no cropping regardless of a given
             recording's exact aspect ratio. */}
-        <div className="aspect-[3/4] w-full overflow-hidden" style={{ borderRadius: 1 }}>
+        <div className="aspect-[3/4] w-full overflow-hidden" style={{ borderRadius: 1, border: '1px solid #2A2A31' }}>
           {/* No `muted` JSX prop here on purpose — `muted` is a React-
               controlled prop that gets re-applied (forcing muted back to
               true) on every re-render of this card, which silently
@@ -389,7 +399,7 @@ function SubmissionCard({
         <dd className="text-[var(--color-ink)]">{submission.competitionId}</dd>
         <dt className="text-[var(--color-ink-faint)]">Төрөл</dt>
         <dd>
-          <Badge borderColor="#DCD6C8" background="transparent" color="#8A8474">
+          <Badge borderColor="#2A2A31" background="transparent" color="#9A958A">
             {submission.event.toUpperCase()} · Раунд {submission.round}
           </Badge>
         </dd>
@@ -398,7 +408,7 @@ function SubmissionCard({
           style={{
             fontFamily: 'var(--oc-font-mono)',
             fontVariantNumeric: 'tabular-nums',
-            color: submission.isDnf ? '#D8402C' : 'var(--color-ink)',
+            color: submission.isDnf ? '#E8543C' : 'var(--color-ink)',
           }}
         >
           {submission.isDnf ? 'DNF' : fmtCentiseconds(submission.reportedTime)}

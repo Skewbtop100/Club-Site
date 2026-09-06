@@ -36,9 +36,9 @@ export default function CompetitionDetail({ competitionId }: { competitionId: st
     loadCompetition();
   }, [loadCompetition]);
 
-  if (loading) return <p className="text-[#8A8474]">Ачааллаж байна...</p>;
+  if (loading) return <p className="text-[#6E6A62]">Ачааллаж байна...</p>;
   if (error || !competition) {
-    return <p className="text-sm text-[#D8402C]">{error || 'Тэмцээн олдсонгүй'}</p>;
+    return <p className="text-sm text-[#E8543C]">{error || 'Тэмцээн олдсонгүй'}</p>;
   }
 
   return (
@@ -116,8 +116,8 @@ function AthletesTab({ competition }: { competition: OnlineCompetitionAdminView 
     };
   }, [competition.id]);
 
-  if (error) return <p className="text-sm text-[#D8402C]">{error}</p>;
-  if (registrations === null) return <p className="text-[#8A8474]">Ачааллаж байна...</p>;
+  if (error) return <p className="text-sm text-[#E8543C]">{error}</p>;
+  if (registrations === null) return <p className="text-[#6E6A62]">Ачааллаж байна...</p>;
 
   return (
     <div className="flex flex-col gap-8">
@@ -125,7 +125,7 @@ function AthletesTab({ competition }: { competition: OnlineCompetitionAdminView 
         const athletes = registrations.filter((r) => r.events.includes(eventConfig.eventId));
         return (
           <div key={eventConfig.eventId}>
-            <span className="font-[family-name:var(--oc-font-mono)] text-xs font-medium uppercase tracking-[.14em] text-[#8A8474]">
+            <span className="oc-v3-label">
               {eventConfig.label}
             </span>
             <div style={{ marginTop: 10 }}>

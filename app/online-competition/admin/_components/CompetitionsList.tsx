@@ -15,9 +15,9 @@ const STATUS_LABEL: Record<OnlineCompetitionStatus, string> = {
 // Exact literal colors from the approved mockup — not derived from the
 // --color-* token block (see theme.css's top comment for why).
 const STATUS_BADGE: Record<OnlineCompetitionStatus, BadgeSpec> = {
-  upcoming: { borderColor: '#DCD6C8', background: 'transparent', color: '#8A8474' },
-  live: { borderColor: '#16140F', background: '#DFFF4F', color: '#16140F' },
-  finished: { borderColor: '#8A8474', background: 'transparent', color: '#8A8474' },
+  upcoming: { borderColor: '#2A2A31', background: 'transparent', color: '#9A958A' },
+  live: { borderColor: '#DFFF4F', background: '#DFFF4F', color: '#08080A' },
+  finished: { borderColor: '#16161B', background: '#131318', color: '#6E6A62' },
 };
 
 function fmtDateTime(ms: number | null): string {
@@ -92,7 +92,7 @@ export default function CompetitionsList() {
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3" style={{ marginBottom: 24 }}>
-        <span className="font-[family-name:var(--oc-font-mono)] text-xs font-medium uppercase tracking-[.14em] text-[#8A8474]">
+        <span className="oc-v3-label">
           Тэмцээнүүд
         </span>
         <Button variant="primary" onClick={() => setCreating(true)}>
@@ -101,13 +101,13 @@ export default function CompetitionsList() {
       </div>
 
       {error && (
-        <p className="text-sm text-[#D8402C]" style={{ marginBottom: 16 }}>
+        <p className="text-sm text-[#E8543C]" style={{ marginBottom: 16 }}>
           {error}
         </p>
       )}
 
       {loading ? (
-        <p className="text-[#8A8474]">Ачааллаж байна...</p>
+        <p className="text-[#6E6A62]">Ачааллаж байна...</p>
       ) : competitions.length === 0 ? (
         <EmptyState text="Тэмцээн алга." />
       ) : (
@@ -141,7 +141,7 @@ export default function CompetitionsList() {
                     </Badge>
                   </span>
                   <span className="oc-table-count">{c.participantCount}</span>
-                  <span aria-hidden style={{ color: '#8A8474', textAlign: 'right' }}>
+                  <span aria-hidden style={{ color: '#6E6A62', textAlign: 'right' }}>
                     →
                   </span>
                 </Link>
@@ -167,7 +167,7 @@ export default function CompetitionsList() {
                     {recomputeMsg && recomputeMsg.id === c.id && (
                       <span
                         className="text-xs"
-                        style={{ color: recomputeMsg.isError ? '#D8402C' : 'var(--color-ink-soft)' }}
+                        style={{ color: recomputeMsg.isError ? '#E8543C' : 'var(--color-ink-soft)' }}
                       >
                         {recomputeMsg.text}
                       </span>

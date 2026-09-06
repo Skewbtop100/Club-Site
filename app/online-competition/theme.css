@@ -4,18 +4,24 @@
    app/globals.css. This file is only ever imported by that layout, so it's
    only bundled for routes under /online-competition. */
 .oc-theme {
-  /* ── v2 design system (2026) — warm paper / ink / volt ────────────────
-     Used by the admin dashboard (app/online-competition/admin/**). This
-     is the current design system going forward. */
-  --color-paper: #FFFDF8;
-  --color-paper-2: #F4F1EA;
-  --color-paper-3: #FBF9F4;
-  --color-border: #DCD6C8;
-  --color-border-soft: #EFEBE0;
-  --color-ink: #16140F;
-  --color-ink-soft: #4C473C;
-  --color-ink-faint: #8A8474;
-  --color-ink-mute: #A9A392;
+  /* ── v2 design system tokens, retuned dark (2026) ─────────────────────
+     These names are historical — "paper"/"ink" date from the original
+     warm light palette. Every remaining consumer is the admin section
+     (app/online-competition/admin/**); the other components that once
+     used them — CompetitionGroups/LiveBanner/Sidebar/MobileHub/NavBar —
+     are dead code with no importers. The values below are the same dark
+     v3 palette the public pages use, so admin now matches the rest of the
+     product; the token names were left alone to keep this a pure recolor
+     rather than a rename touching every call site. */
+  --color-paper: #08080A;      /* page ground */
+  --color-paper-2: #131318;    /* hover / secondary surface */
+  --color-paper-3: #0D0D10;    /* card surface */
+  --color-border: #2A2A31;     /* inputs / interactive edges */
+  --color-border-soft: #16161B;/* row dividers */
+  --color-ink: #F4F1EA;
+  --color-ink-soft: #9A958A;
+  --color-ink-faint: #6E6A62;
+  --color-ink-mute: #4A4740;
 
   --color-stage: #0D0C0A;
   --color-stage-2: #191713;
@@ -25,18 +31,18 @@
   --color-volt: #DFFF4F;
   --color-volt-hi: #E9FF7A;
 
-  --color-ok: #2E9E5B;
-  --color-ok-bg: #E9F6EE;
-  --color-ok-hover: #25864C;
-  --color-ok-active: #1D6E3E;
+  --color-ok: #4FD07A;
+  --color-ok-bg: #0F1A12;
+  --color-ok-hover: #3FB868;
+  --color-ok-active: #35A45A;
 
-  --color-warn: #E08A00;
-  --color-warn-text: #8A5400;
-  --color-warn-bg: #FFF3DB;
+  --color-warn: #E0A020;
+  --color-warn-text: #E0A020;
+  --color-warn-bg: #1A1408;
 
   --color-dnf: #D8402C;
-  --color-dnf-text: #B22E1D;
-  --color-dnf-bg: #FDE8E4;
+  --color-dnf-text: #E8543C;
+  --color-dnf-bg: #1A0D0A;
 }
 
 /* ── v2 admin dashboard — EXACT literal port of the approved Claude Design
@@ -71,13 +77,13 @@
   opacity: 0.5;
 }
 .oc-btn:focus-visible {
-  outline: 2px solid #16140F;
+  outline: 2px solid #DFFF4F;
   outline-offset: 2px;
 }
 .oc-btn-primary {
   border: none;
   background: #DFFF4F;
-  color: #16140F;
+  color: #08080A;
   padding: 10px 14px;
   font: 600 13px var(--oc-font-heading), sans-serif;
 }
@@ -89,28 +95,28 @@
   display: flex;
   width: 100%;
   border: none;
-  background: #16140F;
-  color: #F4F1EA;
-  padding: 16px;
+  background: #DFFF4F;
+  color: #08080A;
+  padding: 14px;
   font: 600 14px var(--oc-font-heading), sans-serif;
 }
 .oc-btn-primary-dark:hover:not(:disabled) {
-  background: #33302A;
+  background: #E9FF7A;
 }
 .oc-btn-primary-dark:active:not(:disabled) {
-  background: #000;
+  background: #C8E93C;
 }
 .oc-btn-outline {
-  border: 1px solid #DCD6C8;
+  border: 1px solid #2A2A31;
   background: transparent;
-  color: #4C473C;
+  color: #9A958A;
   padding: 9px 12px;
   font: 500 10px var(--oc-font-mono), monospace;
   letter-spacing: 0.1em;
 }
 .oc-btn-outline:hover:not(:disabled) {
-  border-color: #16140F;
-  color: #16140F;
+  border-color: #DFFF4F;
+  color: #DFFF4F;
 }
 /* Small size modifier (e.g. the "Засах" table-row action button). */
 .oc-btn-sm {
@@ -120,17 +126,17 @@
 /* Form input / select / textarea */
 .oc-input {
   width: 100%;
-  border: 1px solid #DCD6C8;
-  background: #F4F1EA;
+  border: 1px solid #2A2A31;
+  background: #08080A;
   border-radius: 2px;
   padding: 12px;
-  color: #16140F;
+  color: #F4F1EA;
   outline: none;
   font: 400 13px var(--oc-font-heading), sans-serif;
 }
 .oc-input:focus {
-  border-color: #16140F;
-  background: #FFFDF8;
+  border-color: #DFFF4F;
+  background: #08080A;
 }
 /* Numeric/date fields — mono per the exact spec. */
 .oc-input-mono {
@@ -146,7 +152,7 @@
   display: block;
   font: 500 9px var(--oc-font-mono), monospace;
   letter-spacing: 0.16em;
-  color: #8A8474;
+  color: #6E6A62;
   text-transform: uppercase;
 }
 
@@ -155,19 +161,19 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid #DCD6C8;
+  border: 1px solid #2A2A31;
   background: transparent;
   padding: 11px 12px;
   border-radius: 2px;
   font: 500 12px var(--oc-font-heading), sans-serif;
-  color: #4C473C;
+  color: #9A958A;
   cursor: pointer;
 }
 .oc-square-toggle:hover {
-  border-color: #16140F;
+  border-color: #DFFF4F;
 }
 .oc-square-toggle:focus-visible {
-  outline: 2px solid #16140F;
+  outline: 2px solid #DFFF4F;
   outline-offset: 2px;
 }
 
@@ -176,45 +182,45 @@
   display: flex;
   gap: 1px;
   padding: 0 24px;
-  background: #FFFDF8;
-  border-bottom: 1px solid #DCD6C8;
+  background: #0D0D10;
+  border-bottom: 1px solid #1C1C21;
 }
 .oc-tab {
   border: none;
   border-bottom: 2px solid transparent;
   background: transparent;
-  color: #8A8474;
+  color: #6E6A62;
   padding: 13px 16px;
   font: 600 13px var(--oc-font-heading), sans-serif;
   cursor: pointer;
 }
 .oc-tab:hover {
-  color: #16140F;
+  color: #F4F1EA;
 }
 .oc-tab-active {
-  color: #16140F;
-  border-bottom-color: #16140F;
+  color: #F4F1EA;
+  border-bottom-color: #DFFF4F;
 }
 .oc-tab:focus-visible {
-  outline: 2px solid #16140F;
+  outline: 2px solid #DFFF4F;
   outline-offset: 2px;
 }
 
 /* CompetitionsTab table */
 .oc-table {
-  border: 1px solid #DCD6C8;
-  background: #FFFDF8;
+  border: 1px solid #1C1C21;
+  background: #0D0D10;
 }
 .oc-table-header {
   display: grid;
   grid-template-columns: 2.2fr 1.2fr 1fr .8fr 80px;
   gap: 12px;
   padding: 11px 14px;
-  border-bottom: 1px solid #DCD6C8;
-  background: #F4F1EA;
-  font: 500 9px var(--oc-font-mono), monospace;
-  letter-spacing: 0.14em;
-  color: #8A8474;
+  border-bottom: 1px solid #1C1C21;
+  background: #0D0D10;
+  font: 500 8px var(--oc-font-mono), monospace;
+  letter-spacing: 0.12em;
+  color: #6E6A62;
   text-transform: uppercase;
 }
 .oc-table-row {
@@ -223,10 +229,10 @@
   gap: 12px;
   align-items: center;
   padding: 13px 14px;
-  border-bottom: 1px solid #EFEBE0;
+  border-bottom: 1px solid #16161B;
 }
 .oc-table-row:hover {
-  background: #FBF9F4;
+  background: #131318;
 }
 .oc-table-name {
   font: 500 13px var(--oc-font-heading), sans-serif;
@@ -236,7 +242,7 @@
 }
 .oc-table-date {
   font: 400 11px var(--oc-font-mono), monospace;
-  color: #4C473C;
+  color: #9A958A;
 }
 .oc-table-count {
   font: 500 12px var(--oc-font-mono), monospace;
@@ -250,7 +256,7 @@
   align-items: center;
   gap: 14px;
   padding: 72px 20px;
-  border: 1px dashed #DCD6C8;
+  border: 1px dashed #2A2A31;
 }
 .oc-empty-icon {
   display: grid;
@@ -261,11 +267,11 @@
 .oc-empty-icon-cell {
   width: 11px;
   height: 11px;
-  border: 1px solid #8A8474;
+  border: 1px solid #6E6A62;
 }
 .oc-empty-text {
   font: 500 15px var(--oc-font-heading), sans-serif;
-  color: #8A8474;
+  color: #6E6A62;
 }
 
 /* ── Phase 2 — public hub (app/online-competition/page.tsx) and
@@ -1404,8 +1410,8 @@
 
 /* Admin athletes page */
 .oc-athlete-card {
-  border: 1px solid #DCD6C8;
-  background: #FFFDF8;
+  border: 1px solid #1C1C21;
+  background: #0D0D10;
   border-radius: 2px;
   padding: 16px;
   display: flex;
@@ -1416,8 +1422,8 @@
   height: 64px;
   flex-shrink: 0;
   border-radius: 4px;
-  border: 1px solid #DCD6C8;
-  background: #F4F1EA;
+  border: 1px solid #2A2A31;
+  background: #131318;
   object-fit: cover;
   display: block;
 }
@@ -2737,9 +2743,34 @@
   gap: 10px;
   font: 600 14px var(--oc-font-heading), sans-serif;
   letter-spacing: 0.12em;
-  color: #16140F;
+  color: #F4F1EA;
   text-decoration: none;
 }
+.oc-adm-logo {
+  display: grid;
+  grid-template-columns: repeat(3, 5px);
+  gap: 2px;
+  flex-shrink: 0;
+}
+/* Was a Tailwind var(--color-*) class list; now a real class so the
+   header's one interactive control matches the dark v3 button language. */
+.oc-adm-logout {
+  border: 1px solid #2A2A31;
+  background: transparent;
+  color: #9A958A;
+  border-radius: 2px;
+  font: 500 12px var(--oc-font-heading), sans-serif;
+  cursor: pointer;
+}
+.oc-adm-logout:hover {
+  border-color: #DFFF4F;
+  color: #DFFF4F;
+}
+.oc-adm-logout:focus-visible {
+  outline: 2px solid #DFFF4F;
+  outline-offset: 2px;
+}
+
 .oc-adm-tabs-strip {
   display: flex;
   gap: 1px;
@@ -2751,7 +2782,7 @@
 .oc-adm-tabbar {
   display: flex;
   gap: 1px;
-  border-bottom: 1px solid #DCD6C8;
+  border-bottom: 1px solid #1C1C21;
 }
 
 /* Approved-athletes table: flex sizing lifted out of inline styles (a
@@ -2766,12 +2797,15 @@
 }
 .oc-adm-ath-head {
   padding: 11px 14px;
-  border-bottom: 1px solid #DCD6C8;
-  background: #F4F1EA;
+  border-bottom: 1px solid #1C1C21;
+  background: #0D0D10;
 }
 .oc-adm-ath-row {
   padding: 10px 14px;
-  border-bottom: 1px solid #EFEBE0;
+  border-bottom: 1px solid #16161B;
+}
+.oc-adm-ath-row:hover {
+  background: #131318;
 }
 .oc-adm-ath-c1 { flex: 0 0 40px; }
 .oc-adm-ath-c2 { flex: 1.4 1 0; }
@@ -2815,7 +2849,7 @@
   .oc-adm-tabs-strip {
     grid-row: 2;
     grid-column: 1 / -1;
-    border-top: 1px solid #EFEBE0;
+    border-top: 1px solid #16161B;
     white-space: nowrap;
     overflow-x: auto;
     scrollbar-width: none;

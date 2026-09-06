@@ -3,7 +3,12 @@
 import { useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import Logo from '../../_components/hub/Logo';
+
+
+// Same 3x3 mark as ../../_components/hub/Logo, repainted for the dark
+// header (that component's "ink" tone is #16140F, invisible on #0D0D10).
+const LOGO_PATTERN = ['ink', 'ink', 'volt', 'ink', 'volt', 'ink', 'volt', 'ink', 'ink'] as const;
+const LOGO_COLOR = { ink: '#F4F1EA', volt: '#DFFF4F' } as const;
 
 type CurrentSection = 'competitions' | 'athletes' | 'settings' | 'detail';
 
@@ -30,7 +35,11 @@ export default function AdminHeader({ current = 'competitions' }: { current?: Cu
           (brand + Гарах, then the scrollable tab strip), mirroring the
           public HubNav's mobile treatment. */}
       <Link href="/online-competition/admin" className="oc-adm-brand">
-        <Logo />
+        <span className="oc-adm-logo" aria-hidden>
+          {LOGO_PATTERN.map((tone, i) => (
+            <span key={i} style={{ width: 5, height: 5, background: LOGO_COLOR[tone] }} />
+          ))}
+        </span>
         ХОРОМ
       </Link>
 
@@ -60,7 +69,7 @@ export default function AdminHeader({ current = 'competitions' }: { current?: Cu
 
       <button
         onClick={handleLogout}
-        className="oc-adm-logout border border-[var(--color-border)] text-sm text-[var(--color-ink-soft)] transition hover:border-[var(--color-ink)] hover:text-[var(--color-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ink)]"
+        className="oc-adm-logout"
         style={{
           borderRadius: 2,
           marginLeft: 'auto',

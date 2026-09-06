@@ -148,17 +148,17 @@ export default function CompetitionForm({
   return (
     <form
       onSubmit={handleSubmit}
-      style={{ marginTop: 20, border: '1px solid #16140F', background: '#FFFDF8', borderRadius: 2 }}
+      style={{ marginTop: 20, border: '1px solid #1C1C21', background: '#0D0D10', borderRadius: 2 }}
     >
-      <div className="flex items-center justify-between" style={{ padding: '15px 18px', borderBottom: '1px solid #DCD6C8' }}>
-        <h2 className="font-[family-name:var(--oc-font-heading)] text-lg font-semibold text-[#16140F]">
+      <div className="flex items-center justify-between" style={{ padding: '15px 18px', borderBottom: '1px solid #1C1C21' }}>
+        <h2 className="font-[family-name:var(--oc-font-heading)] text-lg font-semibold text-[#F4F1EA]">
           {competition ? 'Тэмцээн засах' : 'Шинэ тэмцээн нэмэх'}
         </h2>
         <button
           type="button"
           onClick={onClose}
           aria-label="Хаах"
-          className="oc-adm-mini-btn text-[#8A8474] transition hover:text-[#16140F] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#16140F]"
+          className="oc-adm-mini-btn text-[#6E6A62] transition hover:text-[#E8543C] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#DFFF4F]"
           style={{ border: 'none', background: 'transparent', font: '500 14px var(--oc-font-mono), monospace', cursor: 'pointer' }}
         >
           ✕
@@ -273,7 +273,7 @@ export default function CompetitionForm({
                     onClick={() => removeRow(i)}
                     disabled={events.length === 1}
                     aria-label="Устгах"
-                    className="oc-adm-event-del shrink-0 border border-[#DCD6C8] bg-transparent text-[#B22E1D] transition hover:border-[#D8402C] hover:bg-[#FDE8E4] disabled:cursor-not-allowed disabled:opacity-30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#16140F]"
+                    className="oc-adm-event-del shrink-0 border border-[#2A2A31] bg-transparent text-[#E8543C] transition hover:border-[#E8543C] hover:bg-[#1A0D0A] disabled:cursor-not-allowed disabled:opacity-30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#DFFF4F]"
                     style={{
                       borderRadius: 2,
                       font: '500 12px var(--oc-font-mono), monospace',
@@ -291,8 +291,8 @@ export default function CompetitionForm({
             <button
               type="button"
               onClick={addRow}
-              className="oc-adm-add-row w-full text-sm text-[#8A8474] transition hover:text-[#16140F] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#16140F]"
-              style={{ border: '1px dashed #DCD6C8', borderRadius: 2, marginTop: 8, paddingTop: 8, paddingBottom: 8 }}
+              className="oc-adm-add-row w-full text-sm text-[#6E6A62] transition hover:text-[#DFFF4F] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#DFFF4F]"
+              style={{ border: '1px dashed #2A2A31', borderRadius: 2, marginTop: 8, paddingTop: 8, paddingBottom: 8 }}
             >
               + Төрөл нэмэх
             </button>
@@ -300,7 +300,7 @@ export default function CompetitionForm({
         </div>
 
         {error && (
-          <p className="text-sm text-[#D8402C]" style={{ marginTop: 16 }}>
+          <p className="text-sm text-[#E8543C]" style={{ marginTop: 16 }}>
             {error}
           </p>
         )}

@@ -108,7 +108,7 @@ export function SquareToggle({
           height: 14,
           flexShrink: 0,
           borderRadius: 2,
-          border: checked ? '1px solid #16140F' : '1px solid #A9A392',
+          border: checked ? '1px solid #DFFF4F' : '1px solid #2A2A31',
           background: checked ? '#DFFF4F' : 'transparent',
         }}
       />

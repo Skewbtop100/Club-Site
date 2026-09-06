@@ -97,18 +97,18 @@ export default function AthletesList() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 36 }}>
       {error && (
-        <p className="text-sm text-[#D8402C]" style={{ marginBottom: -12 }}>
+        <p className="text-sm text-[#E8543C]" style={{ marginBottom: -12 }}>
           {error}
         </p>
       )}
 
       <section>
-        <span className="font-[family-name:var(--oc-font-mono)] text-xs font-medium uppercase tracking-[.14em] text-[#8A8474]">
+        <span className="oc-v3-label">
           Ирсэн хүсэлт
         </span>
         <div style={{ marginTop: 16 }}>
           {loading ? (
-            <p className="text-[#8A8474]">Ачааллаж байна...</p>
+            <p className="text-[#6E6A62]">Ачааллаж байна...</p>
           ) : pending.length === 0 ? (
             <EmptyState text="Хүсэлт алга." />
           ) : (
@@ -122,18 +122,18 @@ export default function AthletesList() {
                     <span className="oc-athlete-thumb" />
                   )}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <p className="font-[family-name:var(--oc-font-heading)] text-base font-semibold text-[#16140F]">
+                    <p className="font-[family-name:var(--oc-font-heading)] text-base font-semibold text-[#F4F1EA]">
                       {a.lastName} {a.firstName}
                     </p>
                     <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm" style={{ marginTop: 8 }}>
-                      <dt className="text-[#8A8474]">Төрсөн өдөр</dt>
-                      <dd className="text-[#16140F]">{a.dateOfBirth || '—'}</dd>
-                      <dt className="text-[#8A8474]">Хүйс</dt>
-                      <dd className="text-[#16140F]">{a.gender ? GENDER_LABEL[a.gender] : '—'}</dd>
-                      <dt className="text-[#8A8474]">Иргэншил</dt>
-                      <dd className="text-[#16140F]">{a.citizenship || '—'}</dd>
-                      <dt className="text-[#8A8474]">И-мэйл</dt>
-                      <dd className="text-[#16140F]" style={{ overflowWrap: 'anywhere' }}>
+                      <dt className="text-[#6E6A62]">Төрсөн өдөр</dt>
+                      <dd className="text-[#F4F1EA]">{a.dateOfBirth || '—'}</dd>
+                      <dt className="text-[#6E6A62]">Хүйс</dt>
+                      <dd className="text-[#F4F1EA]">{a.gender ? GENDER_LABEL[a.gender] : '—'}</dd>
+                      <dt className="text-[#6E6A62]">Иргэншил</dt>
+                      <dd className="text-[#F4F1EA]">{a.citizenship || '—'}</dd>
+                      <dt className="text-[#6E6A62]">И-мэйл</dt>
+                      <dd className="text-[#F4F1EA]" style={{ overflowWrap: 'anywhere' }}>
                         {a.email || '—'}
                       </dd>
                     </dl>
@@ -200,12 +200,12 @@ export default function AthletesList() {
       </section>
 
       <section>
-        <span className="font-[family-name:var(--oc-font-mono)] text-xs font-medium uppercase tracking-[.14em] text-[#8A8474]">
+        <span className="oc-v3-label">
           Бүртгэлтэй тамирчид
         </span>
         <div style={{ marginTop: 16 }}>
           {loading ? (
-            <p className="text-[#8A8474]">Ачааллаж байна...</p>
+            <p className="text-[#6E6A62]">Ачааллаж байна...</p>
           ) : approved.length === 0 ? (
             <EmptyState text="Тамирчин алга." />
           ) : (
@@ -218,7 +218,7 @@ export default function AthletesList() {
                     style={{
                       font: '500 9px var(--oc-font-mono), monospace',
                       letterSpacing: '.14em',
-                      color: '#8A8474',
+                      color: '#6E6A62',
                       textTransform: 'uppercase',
                     }}
                   >
@@ -237,7 +237,7 @@ export default function AthletesList() {
                         style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover', display: 'block' }}
                       />
                     ) : (
-                      <span style={{ width: 32, height: 32, borderRadius: '50%', display: 'block', background: '#F4F1EA' }} />
+                      <span style={{ width: 32, height: 32, borderRadius: '50%', display: 'block', background: '#131318' }} />
                     )}
                   </span>
                   <span
@@ -248,14 +248,14 @@ export default function AthletesList() {
                   </span>
                   <span
                     className="oc-adm-ath-c3"
-                    style={{ font: '400 12px var(--oc-font-heading), sans-serif', color: '#4C473C', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    style={{ font: '400 12px var(--oc-font-heading), sans-serif', color: '#9A958A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                   >
                     {a.email || '—'}
                   </span>
-                  <span className="oc-adm-ath-c4" style={{ font: '400 12px var(--oc-font-heading), sans-serif', color: '#4C473C' }}>
+                  <span className="oc-adm-ath-c4" style={{ font: '400 12px var(--oc-font-heading), sans-serif', color: '#9A958A' }}>
                     {a.citizenship || '—'}
                   </span>
-                  <span className="oc-adm-ath-c5" style={{ font: '400 11px var(--oc-font-mono), monospace', color: '#8A8474' }}>
+                  <span className="oc-adm-ath-c5" style={{ font: '400 11px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
                     {fmtDate(a.reviewedAt)}
                   </span>
                 </div>

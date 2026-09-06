@@ -39,7 +39,7 @@ export default function LoginForm() {
     <form
       onSubmit={handleSubmit}
       className="w-full"
-      style={{ border: '1px solid #DCD6C8', borderRadius: 2, background: '#FFFDF8', padding: 24 }}
+      style={{ border: '1px solid #1C1C21', borderRadius: 2, background: '#0D0D10', padding: 32 }}
     >
       <FieldLabel>Нууц үг</FieldLabel>
       <input
@@ -51,7 +51,7 @@ export default function LoginForm() {
         autoFocus
       />
       {error && (
-        <p className="text-sm text-[#D8402C]" style={{ marginTop: 8 }}>
+        <p className="text-sm text-[#E8543C]" style={{ marginTop: 8 }}>
           {error}
         </p>
       )}
