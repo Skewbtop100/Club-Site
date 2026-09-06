@@ -31,6 +31,14 @@ const EVENT_ICON_MAP: Record<string, string> = {
   'minx':   'event-minx',
 };
 
+/** True when @cubing/icons actually publishes a glyph for this event id.
+ *  WcaEventIcon falls back to the 3x3 icon for anything unknown, which is
+ *  misleading in a list of mixed events — callers that would rather print
+ *  the raw event code can check this first. */
+export function hasWcaEventIcon(eventId: string): boolean {
+  return eventId in EVENT_ICON_MAP;
+}
+
 export function WcaEventIcon({ eventId, size = 24, className = '' }: WcaEventIconProps) {
   const iconClass = EVENT_ICON_MAP[eventId] ?? 'event-333';
   return (

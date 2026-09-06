@@ -8,6 +8,7 @@ import { fmtDate, fmtRemaining, fmtTime } from './util';
 import EmptyBlock from './EmptyBlock';
 
 const HUB = '/online-competition';
+const COMPETITIONS = '/online-competition/competitions';
 
 export default function UpcomingCard({ competitions }: { competitions: OnlineCompetition[] }) {
   // Countdowns are clock-dependent, so they'd differ between the server
@@ -24,8 +25,7 @@ export default function UpcomingCard({ competitions }: { competitions: OnlineCom
     <div className="oc-v3-card">
       <div className="oc-v3-card-head">
         <span className="oc-v3-label">Удахгүй болох тэмцээн</span>
-        {/* No "all competitions" route exists yet — see HubNav's TODO. */}
-        <Link href={HUB} className="oc-v3-label-link">
+        <Link href={COMPETITIONS} className="oc-v3-label-link">
           БҮГД →
         </Link>
       </div>

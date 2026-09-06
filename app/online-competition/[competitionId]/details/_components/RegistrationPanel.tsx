@@ -141,20 +141,20 @@ export default function RegistrationPanel({
 
   if (state === 'idle') {
     return (
-      <div className="oc-reg-idle">
+      <div className="oc-v3-reg-idle">
         <div>
-          <p style={{ font: '400 12px var(--oc-font-heading), sans-serif', color: '#4C473C', maxWidth: 420 }}>
+          <p style={{ font: '400 12px var(--oc-font-heading), sans-serif', color: '#9A958A', maxWidth: 420 }}>
             Бүртгүүлснээр тухайн төрлүүдийн раунд эхлэх үед камерын урсгал танд нээгдэнэ.
           </p>
           {authError && (
-            <p style={{ marginTop: 8, font: '400 12px var(--oc-font-heading), sans-serif', color: '#D8402C' }}>
+            <p style={{ marginTop: 8, font: '400 12px var(--oc-font-heading), sans-serif', color: '#E8543C' }}>
               {authError}
             </p>
           )}
         </div>
         <button
           type="button"
-          className="oc-btn-register"
+          className="oc-v3-btn-register"
           disabled={checkingProfile}
           onClick={handleRegisterClick}
         >
@@ -166,14 +166,14 @@ export default function RegistrationPanel({
 
   if (state === 'gated') {
     return (
-      <div className="oc-reg-gated">
-        <p style={{ font: '600 15px var(--oc-font-heading), sans-serif', color: '#8A5400' }}>
+      <div className="oc-v3-reg-gated">
+        <p style={{ font: '600 15px var(--oc-font-heading), sans-serif', color: '#E0C46A' }}>
           Профайл баталгаажаагүй байна
         </p>
-        <p style={{ marginTop: 8, font: '400 12px var(--oc-font-heading), sans-serif', color: '#4C473C', maxWidth: 420 }}>
+        <p style={{ marginTop: 8, font: '400 12px var(--oc-font-heading), sans-serif', color: '#9A958A', maxWidth: 420 }}>
           Тэмцээнд бүртгүүлэхийн тулд эхлээд профайлаа бөглөж, админаар баталгаажуулах шаардлагатай.
         </p>
-        <Link href="/online-competition/profile" className="oc-btn-register" style={{ marginTop: 14, display: 'inline-block' }}>
+        <Link href="/online-competition/profile" className="oc-v3-btn-register" style={{ marginTop: 14 }}>
           Профайл бөглөх →
         </Link>
       </div>
@@ -182,25 +182,25 @@ export default function RegistrationPanel({
 
   if (state === 'picking') {
     return (
-      <div className="oc-reg-picking">
-        <div className="oc-reg-picking-header">
-          <span style={{ font: '600 16px var(--oc-font-heading), sans-serif', color: '#16140F' }}>
+      <div className="oc-v3-reg-picking">
+        <div className="oc-v3-reg-picking-head">
+          <span style={{ font: '600 15px var(--oc-font-heading), sans-serif', color: '#F4F1EA' }}>
             Ямар төрөлд орох вэ?
           </span>
           <span
-            style={{ font: '500 10px var(--oc-font-mono), monospace', letterSpacing: '.12em', color: '#8A8474' }}
+            style={{ font: '500 10px var(--oc-font-mono), monospace', letterSpacing: '.12em', color: '#6E6A62' }}
           >
             {selected.size} СОНГОСОН
           </span>
         </div>
-        <div className="oc-reg-picking-body">
+        <div className="oc-v3-reg-picking-body">
           {events.map((e) => {
             const checked = selected.has(e.eventId);
             return (
               <button
                 key={e.eventId}
                 type="button"
-                className="oc-reg-toggle-row"
+                className="oc-v3-reg-toggle-row"
                 onClick={() => toggle(e.eventId)}
               >
                 <span
@@ -213,19 +213,19 @@ export default function RegistrationPanel({
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    border: checked ? '1px solid #16140F' : '1px solid #A9A392',
+                    border: checked ? '1px solid #DFFF4F' : '1px solid #2A2A31',
                     background: checked ? '#DFFF4F' : 'transparent',
-                    color: '#16140F',
+                    color: '#08080A',
                     fontSize: 12,
                     fontWeight: 700,
                   }}
                 >
                   {checked ? '✓' : ''}
                 </span>
-                <span style={{ flex: 1, font: '600 14px var(--oc-font-mono), monospace', color: '#16140F' }}>
+                <span style={{ flex: 1, font: '600 13px var(--oc-font-mono), monospace', color: '#F4F1EA' }}>
                   {e.eventId.toUpperCase()}
                 </span>
-                <span style={{ font: '400 11px var(--oc-font-mono), monospace', color: '#8A8474' }}>
+                <span style={{ font: '400 11px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
                   {e.rounds} раунд
                 </span>
               </button>
@@ -235,22 +235,22 @@ export default function RegistrationPanel({
         {saveError && (
           <p
             style={{
-              padding: '0 20px',
+              padding: '0 16px',
               marginBottom: -4,
               font: '400 12px var(--oc-font-heading), sans-serif',
-              color: '#D8402C',
+              color: '#E8543C',
             }}
           >
             {saveError}
           </p>
         )}
-        <div className="oc-reg-picking-footer">
-          <button type="button" className="oc-btn-cancel" disabled={saving} onClick={() => setState('idle')}>
+        <div className="oc-v3-reg-picking-foot">
+          <button type="button" className="oc-v3-btn-cancel" disabled={saving} onClick={() => setState('idle')}>
             Болих
           </button>
           <button
             type="button"
-            className="oc-btn-register-confirm"
+            className="oc-v3-btn-register"
             disabled={selected.size === 0 || saving}
             onClick={handleConfirm}
           >
@@ -263,48 +263,41 @@ export default function RegistrationPanel({
 
   const chosen = events.filter((e) => selected.has(e.eventId));
   return (
-    <div className="oc-reg-registered">
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span
-            aria-hidden
-            style={{
-              width: 18,
-              height: 18,
-              borderRadius: '50%',
-              border: '1.5px solid #2E9E5B',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#1D6E3E',
-              fontSize: 11,
-              fontWeight: 700,
-            }}
-          >
-            ✓
-          </span>
-          <span style={{ font: '600 17px var(--oc-font-heading), sans-serif', color: '#1D6E3E' }}>
-            Та бүртгүүлсэн
-          </span>
-        </div>
-        <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {chosen.map((e) => (
-            <span key={e.eventId} className="oc-reg-chip">
-              {e.eventId.toUpperCase()} · {e.rounds} раунд
-            </span>
-          ))}
-        </div>
-        <p style={{ marginTop: 12, font: '400 12px var(--oc-font-heading), sans-serif', color: '#4C473C' }}>
-          Раунд эхлэхэд «Миний тэмцээнүүд» дээр «Эхлүүлэх» товч нээгдэнэ.
-        </p>
+    <div className="oc-v3-reg-registered">
+      <div className="oc-v3-reg-pill">
+        <span aria-hidden className="oc-v3-check">
+          ✓
+        </span>
+        <span
+          style={{
+            font: '600 11px var(--oc-font-mono), monospace',
+            letterSpacing: '.1em',
+            color: '#4FD07A',
+          }}
+        >
+          ТА БҮРТГҮҮЛСЭН
+        </span>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }}>
-        <button type="button" className="oc-btn-edit-registration" onClick={() => setState('picking')}>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {chosen.map((e) => (
+          <span key={e.eventId} className="oc-v3-reg-chip">
+            {e.eventId.toUpperCase()} · {e.rounds} раунд
+          </span>
+        ))}
+      </div>
+
+      <p style={{ font: '400 12px var(--oc-font-heading), sans-serif', color: '#9A958A' }}>
+        Раунд эхлэхэд «Миний тэмцээнүүд» дээр «Эхлүүлэх» товч нээгдэнэ.
+      </p>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <button type="button" className="oc-v3-btn-edit-reg" onClick={() => setState('picking')}>
           Бүртгэлээ засах
         </button>
         <Link
-          href="/dashboard"
-          style={{ font: '500 12px var(--oc-font-heading), sans-serif', color: '#1D6E3E' }}
+          href="/online-competition/dashboard"
+          style={{ font: '500 12px var(--oc-font-heading), sans-serif', color: '#9A958A' }}
         >
           Миний тэмцээнүүд →
         </Link>

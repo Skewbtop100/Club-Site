@@ -15,6 +15,7 @@ import { initials } from './util';
 // own /online-competition path — unlike a bare "/dashboard", which lands
 // on the club's (unrelated) dashboard when not on comp.*.
 const HUB = '/online-competition';
+const COMPETITIONS = '/online-competition/competitions';
 const DASHBOARD = '/online-competition/dashboard';
 const PROFILE = '/online-competition/profile';
 
@@ -24,7 +25,15 @@ const PROFILE = '/online-competition/profile';
  *  still on the light v2 palette this phase, and this header additionally
  *  needs the hub's live-competition data (for the live tab) that those
  *  pages don't fetch. */
-export default function HubNav({ live }: { live: OnlineCompetition | null }) {
+export default function HubNav({
+  live,
+  active = 'home',
+}: {
+  live: OnlineCompetition | null;
+  /** Which top-level tab this page is. Passed explicitly rather than read
+   *  from usePathname(), which reports the pre-rewrite "/" on comp.*. */
+  active?: 'home' | 'competitions';
+}) {
   const router = useRouter();
   const { user, loading, signInWithGoogle, signOut } = useOnlineAuth();
   // Anonymous sessions (from the solve page) don't count as "signed in" —
@@ -71,23 +80,21 @@ export default function HubNav({ live }: { live: OnlineCompetition | null }) {
   return (
     <nav className="oc-v3-nav">
       <div className="oc-v3-tabs">
-        {/* This header only ships on the hub, so "Нүүр" is always the
-            active tab — no usePathname() branch needed (and it would
-            report the pre-rewrite "/" on comp.* anyway). */}
-        <Link href={HUB} className="oc-v3-tab oc-v3-tab-active">
+        <Link href={HUB} className={`oc-v3-tab${active === 'home' ? ' oc-v3-tab-active' : ''}`}>
           Нүүр
         </Link>
 
-        {/* TODO(next phase): there is no "all competitions" sub-route yet,
-            so both this tab and its "Бүх тэмцээн" item resolve to the hub
-            itself rather than inventing a page. */}
         <div
           className="oc-v3-menu-wrap"
           ref={compsRef}
           onMouseEnter={() => setCompsOpen(true)}
           onMouseLeave={() => setCompsOpen(false)}
         >
-          <button type="button" className="oc-v3-tab" onClick={() => setCompsOpen((v) => !v)}>
+          <button
+            type="button"
+            className={`oc-v3-tab${active === 'competitions' ? ' oc-v3-tab-active' : ''}`}
+            onClick={() => router.push(COMPETITIONS)}
+          >
             Тэмцээнүүд
             <span className="oc-v3-tab-caret" aria-hidden>
               ▼
@@ -96,12 +103,12 @@ export default function HubNav({ live }: { live: OnlineCompetition | null }) {
           {compsOpen && (
             <div className="oc-v3-menu">
               <Link
-                href={HUB}
-                className="oc-v3-menu-item oc-v3-menu-item-active"
+                href={COMPETITIONS}
+                className={`oc-v3-menu-item${active === 'competitions' ? ' oc-v3-menu-item-active' : ''}`}
                 onClick={() => setCompsOpen(false)}
               >
-                <span aria-hidden style={{ color: '#DFFF4F' }}>
-                  ●
+                <span aria-hidden style={{ color: active === 'competitions' ? '#DFFF4F' : '#3A3A42' }}>
+                  {active === 'competitions' ? '●' : '○'}
                 </span>
                 Бүх тэмцээн
               </Link>
