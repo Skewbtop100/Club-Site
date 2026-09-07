@@ -146,6 +146,18 @@ service cloud.firestore {
       match /groupAssignments/{roundId} {
         allow read, write: if false;
       }
+
+      // Round state + qualifier lists (app/online-competition/admin/rounds).
+      // Same reasoning as the two above: written only by the Admin SDK from
+      // admin-cookie-gated routes, and read server-side when gating a solve.
+      // Denied to clients so an athlete can't read who qualified — or, worse,
+      // mark themselves qualified.
+      match /roundState/{roundId} {
+        allow read, write: if false;
+      }
+      match /qualifiers/{roundId} {
+        allow read, write: if false;
+      }
     }
 
     match /onlineParticipants/{uid} {

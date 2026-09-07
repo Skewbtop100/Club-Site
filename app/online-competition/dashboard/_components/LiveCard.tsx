@@ -1,5 +1,10 @@
+'use client';
+
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { OnlineCompetition, OnlineRegistration } from '@/lib/online-competition/types';
+import type { RoundAccess } from '@/lib/online-competition/round-access';
+import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import { fmtDateTime } from '../../_components/hub/format';
 import { deriveEventState } from './eventState';
 
@@ -30,6 +35,16 @@ function EventStatus({
       </span>
     );
   }
+  // Round 2+ and this athlete didn't make the cut — say so, rather than
+  // showing a disabled button with no explanation.
+  if (state === 'notqualified') {
+    return (
+      <span className="oc-v3-dns-chip" title="Өмнөх раундад шалгараагүй">
+        <span aria-hidden style={{ width: 11, height: 11, border: '1.5px solid #E8543C', transform: 'rotate(45deg)' }} />
+        ШАЛГАРААГҮЙ
+      </span>
+    );
+  }
   if (state === 'live') {
     return (
       <Link href={`/online-competition/${competitionId}/solve/${eventId}`} className="oc-v3-start-btn">
@@ -51,6 +66,33 @@ export default function LiveCard({
   competition: OnlineCompetition;
   registration: OnlineRegistration;
 }) {
+  const { user } = useOnlineAuth();
+  const uid = user && !user.isAnonymous ? user.uid : null;
+
+  // Per-event round access for this athlete. `undefined` until it
+  // resolves; a failed lookup leaves it undefined too, so every row simply
+  // keeps the previous schedule-based state instead of falsely claiming
+  // someone didn't qualify.
+  const [access, setAccess] = useState<Record<string, RoundAccess> | undefined>(undefined);
+
+  useEffect(() => {
+    if (!uid) return;
+    let cancelled = false;
+    fetch(
+      `/api/online-competition/round-access?competitionId=${encodeURIComponent(competition.id)}&uid=${encodeURIComponent(uid)}`,
+    )
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('failed'))))
+      .then((d: { events: Record<string, RoundAccess> }) => {
+        if (!cancelled) setAccess(d.events ?? {});
+      })
+      .catch(() => {
+        /* keep the schedule-based state */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [uid, competition.id]);
+
   const myEvents = competition.events.filter((e) => registration.events.includes(e.eventId));
   const state = deriveEventState(competition);
   const completed = state === 'done' ? myEvents.length : 0;
@@ -94,7 +136,11 @@ export default function LiveCard({
               {e.rounds} раунд
             </p>
           </div>
-          <EventStatus competitionId={competition.id} eventId={e.eventId} state={state} />
+          <EventStatus
+            competitionId={competition.id}
+            eventId={e.eventId}
+            state={deriveEventState(competition, access?.[e.eventId])}
+          />
         </div>
       ))}
     </div>

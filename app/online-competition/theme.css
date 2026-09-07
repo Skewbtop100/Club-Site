@@ -4491,3 +4491,224 @@ button.oc-rv-cell:hover {
     height: 90px;
   }
 }
+
+/* ── Admin: Раунд удирдах (app/online-competition/admin/rounds) ────────
+   Round open/close/advance. Reuses the `.oc-sc-*` button, table and
+   message primitives from the Холилт ба групп page rather than defining a
+   parallel set — only the row layout and the status badges are new. */
+
+.oc-rd-note {
+  font: 400 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.14em;
+  color: #6E6A62;
+  text-transform: uppercase;
+}
+.oc-rd-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 13px 14px;
+  border-bottom: 1px solid #16161B;
+}
+.oc-rd-row:last-child {
+  border-bottom: none;
+}
+.oc-rd-main {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.oc-rd-name {
+  font: 600 13px var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+}
+.oc-rd-sub {
+  display: block;
+  margin-top: 3px;
+  font: 400 10px var(--oc-font-mono), monospace;
+  color: #6E6A62;
+}
+.oc-rd-time {
+  font: 500 10px var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #9A958A;
+  white-space: nowrap;
+}
+/* Status badges — same shape language as the review grid's chips. */
+.oc-rd-badge {
+  display: inline-block;
+  padding: 5px 9px;
+  font: 500 8px var(--oc-font-mono), monospace;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+  border: 1px solid #2A2A31;
+  color: #9A958A;
+  background: transparent;
+}
+.oc-rd-badge-live {
+  border-color: #DFFF4F;
+  color: #DFFF4F;
+}
+.oc-rd-badge-done {
+  border-color: #4FD07A;
+  color: #4FD07A;
+}
+.oc-rd-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+/* Open / close toggle: volt-tinted to open, danger-tinted to close. */
+.oc-rd-open {
+  border-color: #4A5520;
+  background: #12140A;
+  color: #DFFF4F;
+}
+.oc-rd-open:hover:not(:disabled) {
+  border-color: #DFFF4F;
+  background: #1A1D0C;
+  color: #DFFF4F;
+}
+.oc-rd-close {
+  border-color: #D8402C;
+  background: #1A0D0A;
+  color: #E8543C;
+}
+.oc-rd-close:hover:not(:disabled) {
+  background: #24110C;
+  color: #E8543C;
+}
+/* Inline ШАЛГАРУУЛАХ form + preview. */
+.oc-rd-form {
+  border: 1px solid #1C1C21;
+  background: #0A0A0C;
+  padding: 13px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.oc-rd-formrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.oc-rd-input {
+  width: 96px;
+  min-height: 36px;
+  border: 1px solid #2A2A31;
+  background: #0D0D10;
+  color: #F4F1EA;
+  padding: 8px 10px;
+  font: 500 12px var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+}
+.oc-rd-input:focus {
+  outline: none;
+  border-color: #DFFF4F;
+}
+.oc-rd-preview {
+  border: 1px solid #1C1C21;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.oc-rd-prow {
+  display: grid;
+  grid-template-columns: 38px minmax(120px, 1fr) 92px 104px;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 11px;
+  border-bottom: 1px solid #16161B;
+}
+.oc-rd-prow:last-child {
+  border-bottom: none;
+}
+.oc-rd-prow-out {
+  opacity: 0.45;
+}
+@media (max-width: 640px) {
+  .oc-rd-open,
+  .oc-rd-close,
+  .oc-rd-input {
+    min-height: 44px;
+  }
+}
+
+/* ── Admin: Тест өгөгдөл (app/online-competition/admin/testdata) ───────
+   Deliberately amber-tinted, unlike every other admin page, so seeding or
+   wiping fixture data can never be mistaken for a normal admin action. */
+
+.oc-adm-navitem-test {
+  color: #E0A020;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  border-top: 1px solid #1C1C21;
+  padding-top: 14px;
+}
+.oc-adm-navitem-test:hover {
+  color: #F0B840;
+}
+
+.oc-td-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  border: 1px solid #5A4718;
+  background: #16120A;
+  padding: 14px 16px;
+}
+.oc-td-warn-icon {
+  font-size: 18px;
+  line-height: 1;
+  color: #E0A020;
+  flex-shrink: 0;
+}
+.oc-td-warn-title {
+  font: 600 10px var(--oc-font-mono), monospace;
+  letter-spacing: 0.14em;
+  color: #E0A020;
+}
+.oc-td-warn-body {
+  margin-top: 7px;
+  font: 400 11px var(--oc-font-heading), sans-serif;
+  color: #9A958A;
+  line-height: 1.7;
+}
+.oc-td-code {
+  font: 500 11px var(--oc-font-mono), monospace;
+  color: #E0A020;
+  background: #221B0C;
+  border: 1px solid #3A3018;
+  padding: 1px 5px;
+}
+.oc-td-badge-on {
+  border-color: #5A4718;
+  color: #E0A020;
+}
+.oc-td-result {
+  border: 1px solid #1C1C21;
+  background: #0A0A0C;
+  padding: 12px 13px;
+}
+.oc-td-counts {
+  margin-top: 9px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 1px;
+  background: #16161B;
+  border: 1px solid #16161B;
+}
+.oc-td-countrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: #0A0A0C;
+  padding: 8px 11px;
+}

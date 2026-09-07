@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import type {
   OnlineCompetitionAdminView,
@@ -352,9 +353,16 @@ export default function ReviewGrid() {
         ))}
 
         <span style={{ flex: 1 }} />
-        <span className="oc-rv-finish" aria-disabled="true">
-          РАУНД ДУУСГАХ (Удахгүй)
-        </span>
+        {/* Round state lives on its own page — this links there with the
+            current competition preselected rather than duplicating
+            open/close/advance controls inside the review grid. */}
+        <Link
+          href={`/online-competition/admin/rounds${competitionId ? `?competitionId=${encodeURIComponent(competitionId)}` : ''}`}
+          className="oc-rv-tab"
+          style={{ textDecoration: 'none' }}
+        >
+          РАУНД УДИРДАХ →
+        </Link>
       </div>
 
       {/* ── Grid ───────────────────────────────────────────────────── */}

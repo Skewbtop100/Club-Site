@@ -4,7 +4,15 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
-export type AdminSection = 'overview' | 'competitions' | 'athletes' | 'review' | 'scrambles' | 'settings';
+export type AdminSection =
+  | 'overview'
+  | 'competitions'
+  | 'athletes'
+  | 'review'
+  | 'scrambles'
+  | 'rounds'
+  | 'settings'
+  | 'testdata';
 
 const ADMIN = '/online-competition/admin';
 
@@ -102,13 +110,17 @@ export default function AdminShell({
             count={counts.athletes}
           />
           <NavItem href={`${ADMIN}/scrambles`} label="Холилт ба групп" active={current === 'scrambles'} />
-          {/* Still a real planned feature with no backend — genuinely
-              inert: rendered as <span>, no href, no handler, no
-              hover/active styling. */}
-          <span className="oc-adm-navitem oc-adm-navitem-disabled" aria-disabled="true">
-            Раунд удирдах (Удахгүй)
-          </span>
+          <NavItem href={`${ADMIN}/rounds`} label="Раунд удирдах" active={current === 'rounds'} />
           <NavItem href={`${ADMIN}/settings`} label="Тохиргоо" active={current === 'settings'} />
+          {/* Last, and visually separated: this page seeds and wipes
+              fixture data in the same collections real records live in. */}
+          <Link
+            href={`${ADMIN}/testdata`}
+            className={`oc-adm-navitem oc-adm-navitem-test${current === 'testdata' ? ' oc-adm-navitem-active' : ''}`}
+          >
+            <span aria-hidden>⚠</span>
+            Тест өгөгдөл
+          </Link>
         </nav>
 
         <div className="oc-adm-sidefoot">

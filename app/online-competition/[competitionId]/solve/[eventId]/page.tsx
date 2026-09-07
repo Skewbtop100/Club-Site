@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import {
@@ -49,14 +50,6 @@ const REAL_TOTAL_ATTEMPTS = 5;
 // since real Ao5 math only makes sense at exactly 5 attempts.
 const TEST_ATTEMPTS_PARAM = '__testAttempts';
 
-// The competition round this flow solves. There is no round selection
-// anywhere in the app yet — a submission's `round` field is its attempt
-// index 1-5 (see the createSubmission call below and the note at the top
-// of admin/_components/ReviewGrid.tsx), not a competition round — so the
-// solve flow is always round 1. Named rather than inlined so the day a
-// real round selector lands, every place that needs it is one grep away.
-const COMPETITION_ROUND = 1;
-
 interface Attempt {
   timeCs: number | null;
   isDnf: boolean;
@@ -100,6 +93,11 @@ export default function SolvePage() {
   // by the admin recompute after a judge approves (see
   // lib/online-competition/athleteStats.ts), which is also why every
   // indicator below is labelled provisional.
+  // Set when the API refuses this attempt on round grounds (no live round,
+  // or not qualified into the live one). Distinct from loadError: this is
+  // a legitimate "you can't solve right now" answer, not a failure, and
+  // gets its own explanatory screen rather than a red error line.
+  const [blockedMessage, setBlockedMessage] = useState('');
   const [bests, setBests] = useState<{ pr: number | null; ao5: number | null } | null>(null);
   const [prToast, setPrToast] = useState(false);
   const [signInError, setSignInError] = useState('');
@@ -132,16 +130,28 @@ export default function SolvePage() {
         // athlete's assigned group's official scramble for this attempt
         // when the competition has imported one; without a match it
         // returns a randomly generated scramble exactly as before.
+        // No `round` param: which round is live is the server's call now
+        // (see the round-gating block in the scramble route), so the client
+        // can't ask for one it hasn't qualified into.
         const qs = new URLSearchParams({
           event: eventId,
           competitionId,
-          round: String(COMPETITION_ROUND),
           attempt: String(attemptNumber),
         });
         if (solverUid) qs.set('uid', solverUid);
         const res = await fetch(`/api/online-competition/scramble?${qs.toString()}`);
-        if (!res.ok) throw new Error('failed');
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { message?: string };
+          // A round-gating refusal carries a Mongolian `message`; anything
+          // else is a genuine failure.
+          if (body.message) {
+            setBlockedMessage(body.message);
+            return;
+          }
+          throw new Error('failed');
+        }
         const data = (await res.json()) as { scramble: string };
+        setBlockedMessage('');
         setScramble(data.scramble);
       } catch {
         setLoadError('Скрамбл авахад алдаа гарлаа');
@@ -357,6 +367,44 @@ export default function SolvePage() {
       <div className="oc-solve-page">
         <div className="oc-solve-shell" style={{ justifyContent: 'center' }}>
           <p style={{ font: '400 13px var(--oc-font-heading), sans-serif', color: '#D8402C' }}>{loadError}</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Round gate: a real answer, not a failure, so it gets a readable screen
+  // with a way back rather than the blank loading state below.
+  if (blockedMessage) {
+    return (
+      <div className="oc-solve-page">
+        <div className="oc-solve-shell" style={{ justifyContent: 'center', alignItems: 'center', gap: 14 }}>
+          <p style={{ font: '500 10px var(--oc-font-mono), monospace', letterSpacing: '.14em', color: '#6E6A62' }}>
+            {eventId.toUpperCase()}
+          </p>
+          <p
+            style={{
+              font: '400 14px var(--oc-font-heading), sans-serif',
+              color: '#F4F1EA',
+              textAlign: 'center',
+              maxWidth: 320,
+              lineHeight: 1.6,
+            }}
+          >
+            {blockedMessage}
+          </p>
+          <Link
+            href="/online-competition/dashboard"
+            style={{
+              border: '1px solid #2A2A31',
+              color: '#9A958A',
+              padding: '11px 18px',
+              font: '600 9px var(--oc-font-mono), monospace',
+              letterSpacing: '.1em',
+              textDecoration: 'none',
+            }}
+          >
+            БУЦАХ
+          </Link>
         </div>
       </div>
     );
