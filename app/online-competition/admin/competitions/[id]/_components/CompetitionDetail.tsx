@@ -1,20 +1,16 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import type { ReactNode } from 'react';
 import { Button, EmptyState } from '../../../../_components/ui';
 import type { OnlineCompetitionAdminView } from '@/lib/online-competition/types';
 import type { RegistrationAdminView } from '@/app/api/online-competition/admin-competitions/[id]/registrations/route';
+import Link from 'next/link';
 import CompetitionForm from '../../../_components/CompetitionForm';
-import ReviewDashboard from '../../../_components/ReviewDashboard';
-
-type Tab = 'athletes' | 'review';
 
 export default function CompetitionDetail({ competitionId }: { competitionId: string }) {
   const [competition, setCompetition] = useState<OnlineCompetitionAdminView | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [tab, setTab] = useState<Tab>('athletes');
   const [editing, setEditing] = useState(false);
 
   const loadCompetition = useCallback(async () => {
@@ -52,20 +48,22 @@ export default function CompetitionDetail({ competitionId }: { competitionId: st
         </Button>
       </div>
 
+      {/* Review lives at /admin/review now — one destination, with this
+          competition preselected in its dropdown. The duplicate
+          "Шүүгчийн самбар" tab that used to sit here is gone. */}
       <div className="oc-adm-tabbar" style={{ marginBottom: 24 }}>
-        <TabButton active={tab === 'athletes'} onClick={() => setTab('athletes')}>
-          Тамирчид
-        </TabButton>
-        <TabButton active={tab === 'review'} onClick={() => setTab('review')}>
-          Шүүгчийн самбар
-        </TabButton>
+        <span className="oc-tab oc-tab-active">Тамирчид</span>
+        <span style={{ flex: 1 }} />
+        <Link
+          href={`/online-competition/admin/review?competitionId=${competitionId}`}
+          className="oc-v3-row-action"
+          style={{ width: 'auto', alignSelf: 'center', marginBottom: 6 }}
+        >
+          БИЧЛЭГ ШҮҮХ →
+        </Link>
       </div>
 
-      {tab === 'athletes' ? (
-        <AthletesTab competition={competition} />
-      ) : (
-        <ReviewDashboard competitionId={competitionId} />
-      )}
+      <AthletesTab competition={competition} />
 
       {editing && (
         <CompetitionForm
@@ -78,14 +76,6 @@ export default function CompetitionDetail({ competitionId }: { competitionId: st
         />
       )}
     </div>
-  );
-}
-
-function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button onClick={onClick} className={`oc-tab${active ? ' oc-tab-active' : ''}`}>
-      {children}
-    </button>
   );
 }
 

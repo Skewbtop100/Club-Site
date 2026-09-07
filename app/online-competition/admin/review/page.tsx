@@ -1,13 +1,18 @@
+import { Suspense } from 'react';
 import AdminGate from '../_components/AdminGate';
-import ReviewDashboard from '../_components/ReviewDashboard';
+import ReviewGrid from '../_components/ReviewGrid';
 
-// Cross-competition pending queue — ReviewDashboard with no competitionId,
-// which its existing API call already supports. Same scope as the
-// sidebar's "Шүүлт" badge and the overview page's queue preview.
+// The single review destination. Competition selection happens in the
+// dropdown at the top of the grid (optionally preselected via
+// ?competitionId=), which is what let the competition-detail page drop its
+// duplicate "Шүүгчийн самбар" tab.
 export default function OnlineCompetitionAdminReviewPage() {
   return (
     <AdminGate current="review">
-      <ReviewDashboard />
+      {/* useSearchParams needs a Suspense boundary in the App Router. */}
+      <Suspense fallback={<p className="oc-v3-status">Ачааллаж байна...</p>}>
+        <ReviewGrid />
+      </Suspense>
     </AdminGate>
   );
 }
