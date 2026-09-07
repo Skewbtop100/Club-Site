@@ -4345,8 +4345,11 @@ button.oc-rv-cell:hover {
 }
 .oc-sc-scrrow {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 14px;
+  /* Lets the cube diagram drop onto its own line under the move text once
+     the row runs out of width, instead of squeezing the text column. */
+  flex-wrap: wrap;
   padding: 11px 14px;
   border-bottom: 1px solid #131318;
 }
@@ -4361,12 +4364,37 @@ button.oc-rv-cell:hover {
   color: #4A4740;
 }
 .oc-sc-scrtext {
+  /* Basis, not a hard width: the text keeps the row until it can no longer
+     hold 260px, at which point the diagram wraps below. */
+  flex: 1 1 260px;
   min-width: 0;
   font: 500 15px var(--oc-font-mono), monospace;
   letter-spacing: 0.04em;
   color: #F4F1EA;
   line-height: 1.55;
   overflow-wrap: anywhere;
+}
+
+/* Cube-state diagram beside each scramble. Fixed box because the renderer
+   (components/shared/ScramblePreview, the same one Daily Practice uses)
+   fills its parent and needs a definite size to resolve against. */
+.oc-sc-scrdiag {
+  flex: 0 0 auto;
+  width: 96px;
+  height: 96px;
+  margin-left: auto;
+  /* Plain `display: flex` with a definite height, exactly like the Daily
+     Practice preview's container in components/admin/ResultsEntryTab.tsx.
+     The default `align-items: stretch` is load-bearing: ScramblePreview's
+     root is `flex: 1 1 auto; min-height: 0` and its child player is sized
+     `height: 100%`, so the root only gets a definite height by stretching.
+     Centring the item instead makes the root size to its content, the
+     child's 100% has nothing to resolve against, and the whole diagram
+     collapses to zero height — confirmed in a live browser. */
+  display: flex;
+  border: 1px solid #1C1C21;
+  background: #08080A;
+  overflow: hidden;
 }
 
 /* ── Tab 4: Сингл/Дундаж segmented control ────────────────────────── */
@@ -4447,5 +4475,12 @@ button.oc-rv-cell:hover {
   }
   .oc-sc-scrtext {
     font-size: 13px;
+  }
+  /* Wrapped onto its own line: line it up under the move text rather than
+     against the right edge, past the row's number gutter. */
+  .oc-sc-scrdiag {
+    margin-left: 32px;
+    width: 88px;
+    height: 88px;
   }
 }

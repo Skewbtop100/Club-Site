@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { OnlineCompetitionAdminView } from '@/lib/online-competition/types';
 import { roundKey, type ScrambleRoundData } from '@/lib/online-competition/scrambles';
 import { EventChips, eventLabel, roundTitle } from './shared';
+import ScrambleDiagram from './ScrambleDiagram';
 
 // ── Tab 03 · Холилт ──────────────────────────────────────────────────────
 // The imported move sequences themselves, one section per round+group.
@@ -66,6 +67,10 @@ export default function ScrambleTextTab({
                   {i + 1}
                 </span>
                 <span className="oc-sc-scrtext">{scramble}</span>
+                {/* Cube state AFTER this scramble, so the move text can be
+                    checked against a picture. Wraps under the text on
+                    narrow screens (see .oc-sc-scrdiag in theme.css). */}
+                <ScrambleDiagram eventId={round.eventId} scramble={scramble} />
               </div>
             ))}
           </section>
