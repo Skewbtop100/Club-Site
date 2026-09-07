@@ -4425,24 +4425,9 @@ button.oc-rv-cell:hover {
   color: #DFFF4F;
 }
 
-/* ── Tab 4: round sections ────────────────────────────────────────────
-   The Групп tab groups its per-event assignment tables under one heading
-   per round. Stacked rather than collapsible: a competition has one to
-   three rounds, so a disclosure control would hide almost nothing while
-   adding a click before every edit. */
-.oc-sc-roundsec {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.oc-sc-roundlabel {
-  font: 500 9px var(--oc-font-mono), monospace;
-  letter-spacing: 0.18em;
-  color: #6E6A62;
-  text-transform: uppercase;
-  padding-bottom: 2px;
-  border-bottom: 1px solid #1C1C21;
-}
+/* The Групп tab's round tab strip reuses the review grid's `.oc-rv-tab`
+   / `.oc-rv-toolbar` classes directly — see GroupsTab.tsx — so there is
+   deliberately no round-section styling of its own here. */
 
 /* ── Tab 4: assignment table ──────────────────────────────────────── */
 .oc-sc-select {

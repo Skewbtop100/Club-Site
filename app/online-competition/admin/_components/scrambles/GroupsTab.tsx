@@ -8,14 +8,18 @@ import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
 import { eventLabel } from './shared';
 
 // ── Tab 04 · Групп ───────────────────────────────────────────────────────
-// The snake-seeded group assignment. Organised by ROUND first: one section
-// per round that exists in the imported scramble data, and inside it one
-// table per event holding scrambles for that round. A single-round event
-// therefore appears only under Раунд 1, while a three-round event appears
-// in all three sections. Assignment is stored per event+round, so each
-// table maps exactly onto one groupAssignments doc and keeps its own
-// controls — the auto-assign / manual-move / revert logic below is
-// untouched by this layout.
+// The snake-seeded group assignment, organised by ROUND. A round tab strip
+// selects one round at a time and only that round's per-event tables are
+// rendered — stacking every round at once made three near-identical blocks
+// read as repetition. The strip reuses the review grid's `.oc-rv-tab`
+// classes so the two admin pages present rounds the same way.
+//
+// Inside the selected round there is one table per event holding scrambles
+// for it, so a single-round event appears only under Раунд 1 while a
+// three-round event has a table in each of the three tabs. Assignment is
+// stored per event+round, so each table maps exactly onto one
+// groupAssignments doc and keeps its own controls — the auto-assign /
+// manual-move / revert logic below is untouched by this layout.
 //
 // Every round is fully assignable right now. A future round-advancement
 // feature is expected to gate later rounds behind "previous round
@@ -54,13 +58,21 @@ export default function GroupsTab({
   onChanged: () => Promise<void>;
 }) {
   const [metric, setMetric] = useState<Metric>('single');
+  const [round, setRound] = useState<number | null>(null);
 
   // Rounds that exist anywhere in the imported data, ascending — a round
-  // with no scrambles for any event simply has no section.
+  // with no scrambles for any event simply has no tab.
   const rounds = useMemo(
     () => [...new Set(scrambleData.map((d) => d.round))].sort((a, b) => a - b),
     [scrambleData],
   );
+
+  // Round 1 on load (rounds[0] is the lowest that exists, normally 1), and
+  // recover the same way if the selected round disappears — a competition
+  // switch, or a re-import that dropped it.
+  useEffect(() => {
+    setRound((current) => (current !== null && rounds.includes(current) ? current : (rounds[0] ?? null)));
+  }, [rounds]);
 
   if (scrambleData.length === 0) {
     return (
@@ -72,11 +84,25 @@ export default function GroupsTab({
 
   return (
     <>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        {/* Names what the toggle does, and stops the row reading as empty
-            now that the event chips no longer sit on its left. */}
-        <span className="oc-sc-mono">Эрэмбэлэх үзүүлэлт</span>
+      {/* Round tabs + the ranking control share one toolbar, the same
+          arrangement the review grid uses. `.oc-rv-toolbar` wraps rather
+          than scrolls, so a narrow screen drops the ranking control to its
+          own line instead of overflowing. */}
+      <div className="oc-rv-toolbar" role="tablist" aria-label="Раунд">
+        {rounds.map((r) => (
+          <button
+            key={r}
+            type="button"
+            role="tab"
+            aria-selected={r === round}
+            className={`oc-rv-tab${r === round ? ' oc-rv-tab-active' : ''}`}
+            onClick={() => setRound(r)}
+          >
+            РАУНД {r}
+          </button>
+        ))}
         <span style={{ flex: 1 }} />
+        <span className="oc-sc-mono">Эрэмбэлэх үзүүлэлт</span>
         <div className="oc-sc-seg" role="group" aria-label="Эрэмбэлэх үзүүлэлт">
           <button
             type="button"
@@ -97,27 +123,24 @@ export default function GroupsTab({
         </div>
       </div>
 
-      {rounds.map((round) => {
-        const forRound = scrambleData.filter((d) => d.round === round);
-        return (
-          <section key={round} className="oc-sc-roundsec">
-            <h2 className="oc-sc-roundlabel">Раунд {round}</h2>
-            {forRound.map((data) => (
-              <EventGroupTable
-                key={roundKey(data.eventId, data.round)}
-                competitionId={competitionId}
-                competition={competition}
-                round={data}
-                assignments={assignments[roundKey(data.eventId, data.round)] ?? {}}
-                autoAssignments={autoAssignments[roundKey(data.eventId, data.round)] ?? {}}
-                athletes={athletes}
-                metric={metric}
-                onChanged={onChanged}
-              />
-            ))}
-          </section>
-        );
-      })}
+      {/* Only the selected round's tables. Keyed by event+round, so
+          switching rounds remounts the tables rather than reusing one
+          round's local assignment state under another's data. */}
+      {scrambleData
+        .filter((d) => d.round === round)
+        .map((data) => (
+          <EventGroupTable
+            key={roundKey(data.eventId, data.round)}
+            competitionId={competitionId}
+            competition={competition}
+            round={data}
+            assignments={assignments[roundKey(data.eventId, data.round)] ?? {}}
+            autoAssignments={autoAssignments[roundKey(data.eventId, data.round)] ?? {}}
+            athletes={athletes}
+            metric={metric}
+            onChanged={onChanged}
+          />
+        ))}
     </>
   );
 }
