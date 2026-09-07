@@ -21,6 +21,7 @@ const COMPETITIONS = '/online-competition/competitions';
 // component's "ink" tone is #16140F — invisible on #0D0D10).
 const LOGO_PATTERN = ['ink', 'ink', 'volt', 'ink', 'volt', 'ink', 'volt', 'ink', 'ink'] as const;
 const LOGO_COLOR = { ink: '#F4F1EA', volt: '#DFFF4F' } as const;
+const RANK = '/online-competition/rank';
 const DASHBOARD = '/online-competition/dashboard';
 const PROFILE = '/online-competition/profile';
 
@@ -37,7 +38,7 @@ export default function HubNav({
   live: OnlineCompetition | null;
   /** Which top-level tab this page is. Passed explicitly rather than read
    *  from usePathname(), which reports the pre-rewrite "/" on comp.*. */
-  active?: 'home' | 'competitions';
+  active?: 'home' | 'competitions' | 'rank';
 }) {
   const router = useRouter();
   const { user, loading, signInWithGoogle, signOut } = useOnlineAuth();
@@ -139,10 +140,7 @@ export default function HubNav({
           )}
         </div>
 
-        {/* TODO(next phase): no standalone leaderboard route exists yet —
-            the season table lives in the hub's right column, so "Ранк"
-            points back at the hub for now. */}
-        <Link href={HUB} className="oc-v3-tab">
+        <Link href={RANK} className={`oc-v3-tab${active === 'rank' ? ' oc-v3-tab-active' : ''}`}>
           Ранк
         </Link>
 

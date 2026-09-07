@@ -3852,3 +3852,56 @@ button.oc-rv-cell:hover {
     min-height: 44px;
   }
 }
+
+/* ── Live "ШИНЭ PR!" indicator (solve flow) ───────────────────────────
+   Unofficial and provisional: it compares the athlete's self-reported
+   time against the PR stored on their participant doc, purely for
+   feedback during the session. It never writes anything — the real PR is
+   only ever recomputed by the admin flow after a judge approves. */
+.oc-solve-pr-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #DFFF4F;
+  background: #101208;
+  color: #DFFF4F;
+  padding: 6px 9px;
+  font: 700 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+}
+.oc-solve-pr-note {
+  display: block;
+  margin-top: 5px;
+  font: 400 8px var(--oc-font-mono), monospace;
+  letter-spacing: 0.04em;
+  color: #6E6A62;
+}
+/* Session toast — sits above whichever stage is on screen so it survives
+   the immediate transition into the next attempt's reveal. */
+.oc-solve-pr-toast {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 80;
+  border: 1px solid #DFFF4F;
+  background: #101208;
+  padding: 12px 16px;
+  text-align: center;
+  box-shadow: 0 18px 40px -14px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+}
+.oc-solve-pr-toast-title {
+  display: block;
+  font: 700 13px var(--oc-font-mono), monospace;
+  letter-spacing: 0.14em;
+  color: #DFFF4F;
+}
+@media (max-width: 640px) {
+  .oc-solve-pr-toast {
+    left: 12px;
+    right: 12px;
+    transform: none;
+  }
+}

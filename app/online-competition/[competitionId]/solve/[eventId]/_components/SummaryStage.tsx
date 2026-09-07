@@ -3,14 +3,27 @@
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
 import type { AttemptTime } from '@/lib/online-competition/ao5';
 import { computeSummaryStats } from '../_lib/summaryStats';
+import { beatsAo5, beatsPr, type StoredBests } from '../_lib/prCheck';
 
 export interface AttemptResult {
   timeCs: number | null;
   isDnf: boolean;
 }
 
+/** Provisional PR marker. Reads the athlete's stored bests (fetched once
+ *  by the page); never writes them — stats.{eventId} is only ever
+ *  computed by the admin recompute once a judge approves. */
+function PrTag() {
+  return (
+    <span className="oc-solve-pr-badge" title="шүүгч баталгаажуулснаар эцэслэнэ">
+      ШИНЭ PR!
+    </span>
+  );
+}
+
 export default function SummaryStage({
   attempts,
+  bests,
   onRedo,
   onSubmit,
   submitting,
@@ -18,6 +31,9 @@ export default function SummaryStage({
   submitError,
 }: {
   attempts: AttemptResult[];
+  /** The athlete's stored bests for this event, or null while still
+   *  loading / unavailable — in which case no marker is shown. */
+  bests: StoredBests | null;
   onRedo: () => void;
   onSubmit: () => void;
   submitting: boolean;
@@ -29,6 +45,13 @@ export default function SummaryStage({
 }) {
   const times: AttemptTime[] = attempts.map((a) => (a.isDnf ? 'DNF' : (a.timeCs as number)));
   const { ao5, bestIndex, worstIndex } = computeSummaryStats(times);
+
+  // Same predicate the live toast uses, so a row can't disagree with the
+  // badge the athlete already saw mid-session.
+  const prRows = attempts.map((a) => beatsPr(a.timeCs, a.isDnf, bests));
+  const anyPr = prRows.some(Boolean);
+  // A first-ever Ao5 for this event counts, same rule as a first single.
+  const ao5IsPr = beatsAo5(ao5, bests);
 
   function handleRedo() {
     if (window.confirm('Бүх бичлэгийг устгаад дахин эхлэх үү?')) {
@@ -58,6 +81,7 @@ export default function SummaryStage({
                     {tag}
                   </span>
                 )}
+                {prRows[i] && <PrTag />}
               </div>
             );
           })}
@@ -70,7 +94,18 @@ export default function SummaryStage({
             AO5
           </span>
           <span className="oc-solve-ao5-value">{ao5 === null ? 'DNF' : fmtCentiseconds(ao5)}</span>
+          {ao5IsPr && (
+            <div style={{ marginTop: 8 }}>
+              <PrTag />
+            </div>
+          )}
         </div>
+
+        {(anyPr || ao5IsPr) && (
+          <span className="oc-solve-pr-note" style={{ marginTop: 0 }}>
+            шүүгч баталгаажуулснаар эцэслэнэ
+          </span>
+        )}
 
         {submitError && (
           <p style={{ font: '400 12px var(--oc-font-heading), sans-serif', color: '#D8402C' }}>{submitError}</p>

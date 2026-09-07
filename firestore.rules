@@ -147,14 +147,34 @@ service cloud.firestore {
            (priorProfileStatus() == 'incomplete' || priorProfileStatus() == 'rejected'));
       }
 
+      // Admin-owned fields. An admin (or the admin-triggered recompute)
+      // writes these through the Admin SDK, which bypasses rules
+      // entirely; a client may never introduce, change, or erase them.
+      // `stats` is the per-athlete PR/Ao5/solve-count rollup written by
+      // lib/online-competition/athleteStats.ts — without it here a client
+      // could set its own personal bests through the profile form, which
+      // is a merge write and therefore carries the whole document.
+      //
+      // Requiring them to be ABSENT was wrong: every client write here is
+      // a setDoc(..., { merge: true }), so request.resource.data is the
+      // FULL resulting document and carries forward whatever the admin
+      // last wrote. Comparing each field against its prior value locks
+      // them down just as tightly while letting an untouched
+      // carry-forward through.
+      //
+      // map.get(field, null) rather than an `in` test so all cases
+      // collapse to one comparison: absent==absent passes, unchanged
+      // passes, and introducing, changing OR erasing the field all fail.
       function judgeFieldsUntouched() {
         return resource == null
           ? (!('approvedPhotoUrl' in request.resource.data) &&
              !('reviewedAt' in request.resource.data) &&
-             !('rejectionReason' in request.resource.data))
+             !('rejectionReason' in request.resource.data) &&
+             !('stats' in request.resource.data))
           : (request.resource.data.get('approvedPhotoUrl', null) == resource.data.get('approvedPhotoUrl', null) &&
              request.resource.data.get('reviewedAt', null) == resource.data.get('reviewedAt', null) &&
-             request.resource.data.get('rejectionReason', null) == resource.data.get('rejectionReason', null));
+             request.resource.data.get('rejectionReason', null) == resource.data.get('rejectionReason', null) &&
+             request.resource.data.get('stats', null) == resource.data.get('stats', null));
       }
 
       allow read: if isSignedIn();

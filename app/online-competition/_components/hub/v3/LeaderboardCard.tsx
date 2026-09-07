@@ -2,7 +2,7 @@ import Link from 'next/link';
 import type { OnlineSeasonAthletePoints } from '@/lib/online-competition/types';
 import EmptyBlock from './EmptyBlock';
 
-const HUB = '/online-competition';
+const RANK = '/online-competition/rank';
 
 /** Season points table — fed by fetchSeasonLeaderboard (the admin
  *  points-recompute writes onlineSeasonPoints/{season}/athletes). */
@@ -35,9 +35,8 @@ export default function LeaderboardCard({
         ))
       )}
 
-      {/* Same destination as the "Ранк" tab — no standalone leaderboard
-          route exists yet. */}
-      <Link href={HUB} className="oc-v3-lb-all">
+      {/* Same destination as the "Ранк" tab. */}
+      <Link href={RANK} className="oc-v3-lb-all">
         БҮГДИЙГ ХАРАХ
       </Link>
     </div>

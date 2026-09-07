@@ -3,12 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
-import { fetchCompetition, createSubmission, recordAo5Result } from '@/lib/online-competition/data';
+import {
+  fetchCompetition,
+  createSubmission,
+  fetchParticipant,
+  recordAo5Result,
+} from '@/lib/online-competition/data';
 import { uploadVideoToCloudinary } from '@/lib/online-competition/cloudinary';
 import type { OnlineCompetition } from '@/lib/online-competition/types';
 import { useSolveRecorder } from './_lib/useSolveRecorder';
 import type { AttemptTime } from '@/lib/online-competition/ao5';
 import { computeSummaryStats } from './_lib/summaryStats';
+import { beatsPr } from './_lib/prCheck';
 import Header from './_components/Header';
 import CameraSetupStage from './_components/CameraSetupStage';
 import ZeroDisplayStage from './_components/ZeroDisplayStage';
@@ -78,6 +84,16 @@ export default function SolvePage() {
   const [submitError, setSubmitError] = useState('');
   const [finalAo5, setFinalAo5] = useState<number | null>(null);
   const [signingIn, setSigningIn] = useState(false);
+
+  // ── Live PR indicator ────────────────────────────────────────────────
+  // The athlete's stored bests for THIS event, read once when the flow
+  // loads and cached for the whole 5-attempt session. Read-only: this
+  // page never writes stats — stats.{eventId}.pr is computed exclusively
+  // by the admin recompute after a judge approves (see
+  // lib/online-competition/athleteStats.ts), which is also why every
+  // indicator below is labelled provisional.
+  const [bests, setBests] = useState<{ pr: number | null; ao5: number | null } | null>(null);
+  const [prToast, setPrToast] = useState(false);
   const [signInError, setSignInError] = useState('');
 
   const recorder = useSolveRecorder();
@@ -121,6 +137,31 @@ export default function SolvePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // One fetch per session, keyed on the real (non-anonymous) uid.
+  useEffect(() => {
+    if (!user || user.isAnonymous) return;
+    let cancelled = false;
+    fetchParticipant(user.uid)
+      .then((p) => {
+        if (cancelled) return;
+        const forEvent = p?.stats?.[eventId];
+        setBests({ pr: forEvent?.pr ?? null, ao5: forEvent?.ao5 ?? null });
+      })
+      .catch(() => {
+        // Missing bests just means no badge is shown — never blocks solving.
+        if (!cancelled) setBests({ pr: null, ao5: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user, eventId]);
+
+  useEffect(() => {
+    if (!prToast) return;
+    const id = setTimeout(() => setPrToast(false), 2200);
+    return () => clearTimeout(id);
+  }, [prToast]);
+
   // Recording starts the moment each attempt's zeroDisplay begins (the
   // frozen "0.00" itself must be on video, proving the timer read zero
   // before the scramble was applied) and runs uninterrupted through
@@ -138,6 +179,10 @@ export default function SolvePage() {
   }, [stage]);
 
   function handleEntryConfirm(result: { timeCs: number | null; isDnf: boolean }) {
+    // Provisional only — a first-ever time for this event counts as a PR
+    // too (there is nothing to beat yet).
+    if (beatsPr(result.timeCs, result.isDnf, bests)) setPrToast(true);
+
     const newAttempt: Attempt = { timeCs: result.timeCs, isDnf: result.isDnf, videoBlob: pendingBlobRef.current };
     const next = [...attempts, newAttempt];
     setAttempts(next);
@@ -289,6 +334,12 @@ export default function SolvePage() {
 
   return (
     <div className="oc-solve-page">
+      {prToast && (
+        <div className="oc-solve-pr-toast" role="status">
+          <span className="oc-solve-pr-toast-title">ШИНЭ PR!</span>
+          <span className="oc-solve-pr-note">шүүгч баталгаажуулснаар эцэслэнэ</span>
+        </div>
+      )}
       <div className="oc-solve-shell">
         {HEADER_STAGES.includes(stage) && (
           <Header
@@ -339,6 +390,7 @@ export default function SolvePage() {
 
         {stage === 'summary' && (
           <SummaryStage
+            bests={bests}
             attempts={attempts.map((a) => ({ timeCs: a.timeCs, isDnf: a.isDnf }))}
             onRedo={handleRedo}
             onSubmit={handleSubmit}

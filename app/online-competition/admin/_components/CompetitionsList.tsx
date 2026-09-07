@@ -69,19 +69,30 @@ export default function CompetitionsList() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ competitionId }),
       });
-      const data = (await res.json()) as { season?: string; athletesUpdated?: number; error?: string };
+      const data = (await res.json()) as {
+        season?: string;
+        athletesUpdated?: number;
+        error?: string;
+        stats?: { athletesUpdated: number; events: number } | null;
+      };
+      const statsNote = data.stats ? ` · Статистик: ${data.stats.athletesUpdated} тамирчин` : '';
       if (!res.ok) throw new Error(data.error ?? 'failed');
       setRecomputeMsg({
         id: competitionId,
-        text: `Шинэчлэгдлээ: ${data.athletesUpdated} тамирчин (${data.season})`,
+        text: `Шинэчлэгдлээ: ${data.athletesUpdated} тамирчин (${data.season})${statsNote}`,
         isError: false,
       });
     } catch (err) {
+      // The per-athlete stats recompute runs first and independently of
+      // the season, so points can fail while stats succeeded — the server
+      // says so in its message and it would be misleading to replace that
+      // with a flat "something went wrong".
+      const raw = err instanceof Error ? err.message : '';
       setRecomputeMsg({
         id: competitionId,
-        text: err instanceof Error && err.message === 'Competition has no season set'
-          ? 'Энэ тэмцээнд сезон тохируулаагүй байна'
-          : 'Онооны тооцоо шинэчлэхэд алдаа гарлаа',
+        text: raw.startsWith('Competition has no season set')
+          ? `Энэ тэмцээнд сезон тохируулаагүй байна${raw.includes('статистик') ? ' · Статистик шинэчлэгдсэн' : ''}`
+          : raw || 'Онооны тооцоо шинэчлэхэд алдаа гарлаа',
         isError: true,
       });
     } finally {

@@ -4,15 +4,20 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import {
+  fetchAllCompetitions,
+  fetchAthleteSeasonPoints,
   fetchCompetition,
   fetchMyRegistrations,
   fetchMySubmissions,
+  fetchParticipant,
 } from '@/lib/online-competition/data';
 import type {
   OnlineCompetition,
+  OnlineParticipant,
   OnlineRegistration,
   OnlineSubmission,
 } from '@/lib/online-competition/types';
+import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
 import { toMillisOrNull } from '../_components/hub/format';
 import HubNav from '../_components/hub/v3/HubNav';
 import EmptyBlock from '../_components/hub/v3/EmptyBlock';
@@ -44,17 +49,25 @@ function initials(name: string | null | undefined): string {
   return (parts[0].charAt(0) + parts[1].charAt(0)).toUpperCase();
 }
 
-// Every one of these needs an aggregate the schema doesn't produce: there
-// is no per-athlete PR, rolling average, points total or solve count
-// anywhere in Firestore (season points exist only as a top-10 leaderboard
-// document, and submissions carry single attempts). Placeholders rather
-// than invented numbers, same convention as the hub's empty leaderboard.
-const STATS: { label: string; accent?: boolean }[] = [
-  { label: 'ПР', accent: true },
-  { label: 'Дундаж' },
-  { label: 'Оноо' },
-  { label: 'Эвлүүлэлт' },
-];
+/** Best value across every event the athlete has stats for. With one
+ *  event configured today this is the same as "their 3x3 PR"; across
+ *  several it reads as a personal best overall, which is what a single
+ *  headline number on a profile card should mean. */
+function bestAcrossEvents(
+  participant: OnlineParticipant | null,
+  key: 'pr' | 'ao5',
+): number | null {
+  const values = Object.values(participant?.stats ?? {})
+    .map((e) => e[key])
+    .filter((v): v is number => typeof v === 'number');
+  return values.length > 0 ? Math.min(...values) : null;
+}
+
+function totalSolves(participant: OnlineParticipant | null): number | null {
+  const entries = Object.values(participant?.stats ?? {});
+  if (entries.length === 0) return null;
+  return entries.reduce((sum, e) => sum + (e.solveCount ?? 0), 0);
+}
 
 export default function DashboardPage() {
   const { user, loading: authLoading, signInWithGoogle } = useOnlineAuth();
@@ -62,14 +75,47 @@ export default function DashboardPage() {
 
   const [views, setViews] = useState<RegisteredView[] | null>(null);
   const [submissions, setSubmissions] = useState<OnlineSubmission[] | null>(null);
+  const [participant, setParticipant] = useState<OnlineParticipant | null>(null);
+  const [points, setPoints] = useState<number | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
     setViews(null);
     setSubmissions(null);
+    setParticipant(null);
+    setPoints(null);
     setError('');
     if (uid === null) return;
     let cancelled = false;
+
+    // PR / Ao5 / solve count come from the stats rollup the admin
+    // recompute writes onto the participant doc.
+    fetchParticipant(uid)
+      .then((p) => {
+        if (!cancelled) setParticipant(p);
+      })
+      .catch(() => {
+        if (!cancelled) setParticipant(null);
+      });
+
+    // Points are the real season-points total. Season is derived the same
+    // way the hub does it: whichever competition with a season set has the
+    // latest startAt.
+    fetchAllCompetitions()
+      .then(async (list) => {
+        const withSeason = list.filter((c) => c.season);
+        if (withSeason.length === 0) return null;
+        const latest = withSeason.reduce((best, c) =>
+          (toMillisOrNull(c.startAt) ?? 0) > (toMillisOrNull(best.startAt) ?? 0) ? c : best,
+        );
+        return fetchAthleteSeasonPoints(latest.season as string, uid);
+      })
+      .then((row) => {
+        if (!cancelled) setPoints(row?.totalPoints ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setPoints(null);
+      });
 
     fetchMyRegistrations(uid)
       .then(async (regs) => {
@@ -175,15 +221,14 @@ export default function DashboardPage() {
             </Link>
           </div>
 
+          {/* Real values from the stats rollup + season points; "—" only
+              when the underlying data genuinely isn't there yet (no
+              recompute has run, or the athlete has no approved solves). */}
           <div className="oc-v3-stat-grid">
-            {STATS.map((s) => (
-              <div key={s.label} className="oc-v3-stat-cell">
-                <span className="oc-v3-stat-label">{s.label}</span>
-                <span className="oc-v3-stat-value" style={s.accent ? { color: '#DFFF4F' } : undefined}>
-                  —
-                </span>
-              </div>
-            ))}
+            <StatCell label="ПР" accent value={fmtOrDash(bestAcrossEvents(participant, 'pr'))} />
+            <StatCell label="Дундаж" value={fmtOrDash(bestAcrossEvents(participant, 'ao5'))} />
+            <StatCell label="Оноо" value={points === null ? '—' : String(points)} />
+            <StatCell label="Эвлүүлэлт" value={totalSolves(participant) === null ? '—' : String(totalSolves(participant))} />
           </div>
         </div>
 
@@ -222,5 +267,20 @@ export default function DashboardPage() {
         </div>
       </div>
     </Shell>
+  );
+}
+
+function fmtOrDash(cs: number | null): string {
+  return cs === null ? '—' : fmtCentiseconds(cs);
+}
+
+function StatCell({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+  return (
+    <div className="oc-v3-stat-cell">
+      <span className="oc-v3-stat-label">{label}</span>
+      <span className="oc-v3-stat-value" style={accent ? { color: '#DFFF4F' } : undefined}>
+        {value}
+      </span>
+    </div>
   );
 }

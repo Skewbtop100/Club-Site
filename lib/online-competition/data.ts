@@ -242,6 +242,18 @@ export async function fetchMyRegistrations(uid: string): Promise<OnlineRegistrat
 //     "fields": [ { "fieldPath": "uid", "order": "ASCENDING" },
 //                 { "fieldPath": "createdAt", "order": "DESCENDING" } ] }
 // to firestore.indexes.json and push the ordering into the query.
+// One athlete's own season-points doc. The leaderboard query above only
+// returns the top N, so the dashboard's "ОНОО" card needs a direct read —
+// same collection, same public read rule.
+export async function fetchAthleteSeasonPoints(
+  season: string,
+  uid: string,
+): Promise<OnlineSeasonAthletePoints | null> {
+  const snap = await getDoc(doc(onlineCompDb, 'onlineSeasonPoints', season, 'athletes', uid));
+  if (!snap.exists()) return null;
+  return snap.data() as OnlineSeasonAthletePoints;
+}
+
 export async function fetchMySubmissions(uid: string, count = 5): Promise<OnlineSubmission[]> {
   const snap = await getDocs(query(collection(onlineCompDb, 'onlineSubmissions'), where('uid', '==', uid)));
   return snap.docs

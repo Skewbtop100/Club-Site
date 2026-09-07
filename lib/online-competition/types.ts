@@ -79,6 +79,18 @@ export type OnlineParticipantProfileStatus = 'incomplete' | 'pending' | 'approve
  *  the athlete's latest *submitted* photo (pending review);
  *  `approvedPhotoUrl` is only ever set once an admin approves, and is the
  *  one other UI (e.g. a future public roster) should treat as "official". */
+/** Per-event rollup written by the admin recompute (see
+ *  lib/online-competition/athleteStats.ts). Absent until a recompute has
+ *  run for a competition the athlete had approved submissions in. */
+export interface OnlineParticipantEventStats {
+  /** Best single, centiseconds. */
+  pr: number | null;
+  /** Best Ao5 over complete approved rounds-1-5 sets, centiseconds. */
+  ao5: number | null;
+  /** Approved submissions for this event. */
+  solveCount: number;
+}
+
 export interface OnlineParticipant {
   uid: string;
   displayName: string;
@@ -100,6 +112,8 @@ export interface OnlineParticipant {
   submittedAt?: Timestamp | null;
   reviewedAt?: Timestamp | null;
   rejectionReason?: string | null;
+  /** eventId -> rollup. Written only by the Admin SDK recompute. */
+  stats?: Record<string, OnlineParticipantEventStats>;
 }
 
 /** Payload for submitParticipantProfile (data.ts) — what the profile form
