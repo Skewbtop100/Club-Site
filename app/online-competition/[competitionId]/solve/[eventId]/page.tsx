@@ -49,6 +49,14 @@ const REAL_TOTAL_ATTEMPTS = 5;
 // since real Ao5 math only makes sense at exactly 5 attempts.
 const TEST_ATTEMPTS_PARAM = '__testAttempts';
 
+// The competition round this flow solves. There is no round selection
+// anywhere in the app yet — a submission's `round` field is its attempt
+// index 1-5 (see the createSubmission call below and the note at the top
+// of admin/_components/ReviewGrid.tsx), not a competition round — so the
+// solve flow is always round 1. Named rather than inlined so the day a
+// real round selector lands, every place that needs it is one grep away.
+const COMPETITION_ROUND = 1;
+
 interface Attempt {
   timeCs: number | null;
   isDnf: boolean;
@@ -112,25 +120,51 @@ export default function SolvePage() {
     };
   }, [competitionId]);
 
-  const fetchScramble = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/online-competition/scramble?event=${encodeURIComponent(eventId)}`);
-      if (!res.ok) throw new Error('failed');
-      const data = (await res.json()) as { scramble: string };
-      setScramble(data.scramble);
-    } catch {
-      setLoadError('Скрамбл авахад алдаа гарлаа');
-    }
-  }, [eventId]);
+  // The real (non-anonymous) uid, or null while auth is still resolving.
+  // Everything below the auth gate requires it, and the scramble fetch
+  // waits for it too — see the effect below.
+  const solverUid = user && !user.isAnonymous ? user.uid : null;
 
-  // Fetch the first attempt's scramble once. Later attempts fetch theirs
-  // explicitly (in handleEntryConfirm/handleRedo below) rather than via a
-  // reactive effect — attemptIndex going back to 0 on a redo wouldn't
-  // re-trigger an effect keyed on its value.
+  const fetchScramble = useCallback(
+    async (attemptNumber: number) => {
+      try {
+        // competitionId/uid/round/attempt let the API hand back this
+        // athlete's assigned group's official scramble for this attempt
+        // when the competition has imported one; without a match it
+        // returns a randomly generated scramble exactly as before.
+        const qs = new URLSearchParams({
+          event: eventId,
+          competitionId,
+          round: String(COMPETITION_ROUND),
+          attempt: String(attemptNumber),
+        });
+        if (solverUid) qs.set('uid', solverUid);
+        const res = await fetch(`/api/online-competition/scramble?${qs.toString()}`);
+        if (!res.ok) throw new Error('failed');
+        const data = (await res.json()) as { scramble: string };
+        setScramble(data.scramble);
+      } catch {
+        setLoadError('Скрамбл авахад алдаа гарлаа');
+      }
+    },
+    [eventId, competitionId, solverUid],
+  );
+
+  // Fetch the first attempt's scramble once the athlete is known. Later
+  // attempts fetch theirs explicitly (in handleEntryConfirm/handleRedo
+  // below) rather than via a reactive effect — attemptIndex going back to
+  // 0 on a redo wouldn't re-trigger an effect keyed on its value.
+  //
+  // Keyed on solverUid rather than running on mount: without a uid the
+  // request can't resolve a group assignment, and an anonymous/loading
+  // visitor is sitting on the sign-in gate anyway, so there is nothing to
+  // scramble for yet. solverUid only ever transitions null -> uid, so this
+  // still fires exactly once per session.
   useEffect(() => {
-    fetchScramble();
+    if (!solverUid) return;
+    fetchScramble(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [solverUid]);
 
   useEffect(() => {
     return () => recorder.releaseCamera();
@@ -192,7 +226,10 @@ export default function SolvePage() {
       setStage('summary');
     } else {
       setAttemptIndex((i) => i + 1);
-      fetchScramble();
+      // next.length is the count of completed attempts, so the attempt now
+      // starting is next.length + 1 (1-based, matching the group scramble
+      // array index the API reads).
+      fetchScramble(next.length + 1);
       setStage('zeroDisplay');
     }
   }
@@ -225,7 +262,7 @@ export default function SolvePage() {
     setAttempts([]);
     setAttemptIndex(0);
     setSubmitError('');
-    fetchScramble();
+    fetchScramble(1);
     setStage('zeroDisplay');
   }
 

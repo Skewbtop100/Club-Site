@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
-export type AdminSection = 'overview' | 'competitions' | 'athletes' | 'review' | 'settings';
+export type AdminSection = 'overview' | 'competitions' | 'athletes' | 'review' | 'scrambles' | 'settings';
 
 const ADMIN = '/online-competition/admin';
 
@@ -101,12 +101,10 @@ export default function AdminShell({
             active={current === 'athletes'}
             count={counts.athletes}
           />
-          {/* Real planned features with no backend yet — shown for context,
-              genuinely inert: rendered as <span>, no href, no handler, no
+          <NavItem href={`${ADMIN}/scrambles`} label="Холилт ба групп" active={current === 'scrambles'} />
+          {/* Still a real planned feature with no backend — genuinely
+              inert: rendered as <span>, no href, no handler, no
               hover/active styling. */}
-          <span className="oc-adm-navitem oc-adm-navitem-disabled" aria-disabled="true">
-            Холилт ба групп (Удахгүй)
-          </span>
           <span className="oc-adm-navitem oc-adm-navitem-disabled" aria-disabled="true">
             Раунд удирдах (Удахгүй)
           </span>

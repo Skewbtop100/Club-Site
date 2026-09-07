@@ -7,6 +7,8 @@ import type {
   OnlineSubmissionAdminView,
 } from '@/lib/online-competition/types';
 import type { RegistrationAdminView } from '@/app/api/online-competition/admin-competitions/[id]/registrations/route';
+import type { ScramblesOverview } from '@/app/api/online-competition/admin-scrambles/route';
+import { roundKey } from '@/lib/online-competition/scrambles';
 import { computeAo5, type AttemptTime } from '@/lib/online-competition/ao5';
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
 import SubmissionDetailPanel from './SubmissionDetailPanel';
@@ -66,6 +68,10 @@ export default function ReviewGrid() {
 
   const [registrations, setRegistrations] = useState<RegistrationAdminView[]>([]);
   const [submissions, setSubmissions] = useState<OnlineSubmissionAdminView[] | null>(null);
+  // Imported scrambles + group assignments for this competition, used only
+  // to label the detail panel. Null when the competition has none (or the
+  // fetch failed) — the panel then shows its original "not assigned" note.
+  const [scrambles, setScrambles] = useState<ScramblesOverview | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -103,7 +109,7 @@ export default function ReviewGrid() {
 
   const load = useCallback(async () => {
     if (!competitionId) return;
-    const [regs, subs] = await Promise.all([
+    const [regs, subs, scr] = await Promise.all([
       fetch(`/api/online-competition/admin-competitions/${competitionId}/registrations`)
         .then((r) => (r.ok ? r.json() : { registrations: [] }))
         .then((d: { registrations: RegistrationAdminView[] }) => d.registrations ?? [])
@@ -112,9 +118,13 @@ export default function ReviewGrid() {
         .then((r) => (r.ok ? r.json() : { submissions: [] }))
         .then((d: { submissions: OnlineSubmissionAdminView[] }) => d.submissions ?? [])
         .catch(() => []),
+      fetch(`/api/online-competition/admin-scrambles?competitionId=${competitionId}`)
+        .then((r) => (r.ok ? (r.json() as Promise<ScramblesOverview>) : null))
+        .catch(() => null),
     ]);
     setRegistrations(regs);
     setSubmissions(subs);
+    setScrambles(scr);
   }, [competitionId]);
 
   useEffect(() => {
@@ -180,6 +190,19 @@ export default function ReviewGrid() {
     () => (selectedSubmission ? rows.find((r) => r.uid === selectedSubmission.uid) ?? null : null),
     [selectedSubmission, rows],
   );
+
+  // The selected athlete's real group for the event+round currently in
+  // view. `round` here is the competition round the toolbar selects, NOT
+  // the submission's `round` field (which is its attempt index) — see the
+  // storage note at the top of this file.
+  const selectedGroupLabel = useMemo(() => {
+    if (!selectedSubmission || !eventId || !scrambles) return null;
+    const key = roundKey(eventId, round);
+    const index = scrambles.assignments[key]?.[selectedSubmission.uid];
+    if (typeof index !== 'number') return null;
+    const data = scrambles.scrambleData.find((d) => d.eventId === eventId && d.round === round);
+    return data?.groups[index]?.label ?? null;
+  }, [selectedSubmission, eventId, round, scrambles]);
 
   /** Optimistic local patch, matching the pattern the old dashboard used. */
   const patch = useCallback((id: string, next: Partial<OnlineSubmissionAdminView>) => {
@@ -375,6 +398,7 @@ export default function ReviewGrid() {
         <SubmissionDetailPanel
           submission={selectedSubmission}
           athleteName={selectedRow?.name ?? selectedSubmission.uid.slice(0, 10)}
+          groupLabel={selectedGroupLabel}
           onClose={() => setSelected(null)}
           onReview={review}
           onDelete={remove}

@@ -15,12 +15,17 @@ type ReviewAction = 'approve' | 'approve_plus2' | 'dnf';
 export default function SubmissionDetailPanel({
   submission,
   athleteName,
+  groupLabel,
   onClose,
   onReview,
   onDelete,
 }: {
   submission: OnlineSubmissionAdminView;
   athleteName: string;
+  /** The athlete's assigned scramble group for this event+round ("A"),
+   *  or null when this competition has no imported scrambles for the
+   *  round or the athlete isn't in a group. */
+  groupLabel: string | null;
   onClose: () => void;
   onReview: (submissionId: string, action: ReviewAction) => Promise<void>;
   onDelete: (submissionId: string) => Promise<void>;
@@ -87,16 +92,26 @@ export default function SubmissionDetailPanel({
           </button>
         </div>
 
-        {/* Static informational note — scramble-group import/assignment is
-            a separate unbuilt feature, so this states the current reality
-            rather than pretending an assignment exists. */}
+        {/* Real assignment data from onlineCompetitions/{id}/
+            groupAssignments (see admin/scrambles). Falls back to the
+            original "not assigned" note — unchanged — for competitions
+            with no imported scrambles and for athletes not in a group,
+            rather than implying an assignment that doesn't exist. */}
         <div className="oc-rv-note" style={{ marginTop: 16 }}>
-          <p style={{ font: '500 9px var(--oc-font-mono), monospace', letterSpacing: '.12em', color: '#9A958A' }}>
-            ХОЛИЛТ · ГРУПП ХУВААРИЛААГҮЙ
+          <p
+            style={{
+              font: '500 9px var(--oc-font-mono), monospace',
+              letterSpacing: '.12em',
+              color: groupLabel ? '#DFFF4F' : '#9A958A',
+            }}
+          >
+            {groupLabel ? `ХОЛИЛТ · ГРУПП ${groupLabel}` : 'ХОЛИЛТ · ГРУПП ХУВААРИЛААГҮЙ'}
           </p>
-          <p style={{ marginTop: 6, font: '400 9px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
-            ТАМИРЧИН ГРУППЭД ХУВААРИЛАГДААГҮЙ · ХОЛИЛТ ХЭСГЭЭС ХУВААРИЛНА
-          </p>
+          {!groupLabel && (
+            <p style={{ marginTop: 6, font: '400 9px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
+              ТАМИРЧИН ГРУППЭД ХУВААРИЛАГДААГҮЙ · ХОЛИЛТ ХЭСГЭЭС ХУВААРИЛНА
+            </p>
+          )}
         </div>
 
         <div style={{ marginTop: 18 }}>

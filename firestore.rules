@@ -131,6 +131,21 @@ service cloud.firestore {
         allow create: if isSignedIn();
         allow update, delete: if isAdmin();
       }
+
+      // Official imported scrambles + snake-seeded group assignments
+      // (app/online-competition/admin/scrambles). Written and read
+      // exclusively by the Admin SDK from admin-cookie-gated API routes
+      // — the online-competition admin is a shared password, not a
+      // Firebase Auth identity, so there is no request.auth for a rule
+      // here to check. Denied to every client: reading scrambleData
+      // directly would hand an athlete every group's scrambles before
+      // they solve. Explicit rather than relying on the default deny.
+      match /scrambleData/{roundId} {
+        allow read, write: if false;
+      }
+      match /groupAssignments/{roundId} {
+        allow read, write: if false;
+      }
     }
 
     match /onlineParticipants/{uid} {

@@ -3905,3 +3905,214 @@ button.oc-rv-cell:hover {
     transform: none;
   }
 }
+
+/* ── Admin: холилт ба групп (app/online-competition/admin/scrambles) ───
+   Official WCA/TNoodle scramble import + snake-seeded group assignment.
+   Same dark v3 chrome as the review grid — deliberately its own `.oc-sc-*`
+   namespace so neither page's spacing can drift the other's. */
+
+.oc-sc-card {
+  border: 1px solid #1C1C21;
+  background: #0D0D10;
+}
+.oc-sc-cardhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 13px 16px;
+  border-bottom: 1px solid #1C1C21;
+}
+.oc-sc-cardbody {
+  padding: 16px;
+}
+.oc-sc-hint {
+  font: 400 11px var(--oc-font-heading), sans-serif;
+  color: #6E6A62;
+  line-height: 1.6;
+}
+.oc-sc-mono {
+  font: 500 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.12em;
+  color: #6E6A62;
+  text-transform: uppercase;
+}
+
+/* File picker — a styled <label> wrapping a visually-hidden <input> so the
+   native "no file chosen" chrome never appears. */
+.oc-sc-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px dashed #2A2A31;
+  background: transparent;
+  color: #9A958A;
+  padding: 11px 14px;
+  font: 500 10px var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+.oc-sc-file:hover {
+  border-color: #DFFF4F;
+  color: #F4F1EA;
+}
+.oc-sc-file input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.oc-sc-btn {
+  border: 1px solid #2A2A31;
+  background: transparent;
+  color: #9A958A;
+  padding: 9px 13px;
+  font: 600 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.oc-sc-btn:hover:not(:disabled) {
+  border-color: #DFFF4F;
+  color: #F4F1EA;
+}
+.oc-sc-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.oc-sc-btn-primary {
+  border-color: #DFFF4F;
+  background: #DFFF4F;
+  color: #08080A;
+}
+.oc-sc-btn-primary:hover:not(:disabled) {
+  background: #E9FF7A;
+  color: #08080A;
+}
+.oc-sc-btn-danger {
+  border-color: #D8402C;
+  background: #1A0D0A;
+  color: #E8543C;
+}
+.oc-sc-btn-danger:hover:not(:disabled) {
+  background: #24110C;
+  color: #E8543C;
+}
+
+.oc-sc-msg-ok {
+  font: 400 11px var(--oc-font-heading), sans-serif;
+  color: #4FD07A;
+}
+.oc-sc-msg-err {
+  font: 400 11px var(--oc-font-heading), sans-serif;
+  color: #E8543C;
+  line-height: 1.6;
+}
+.oc-sc-warn {
+  border: 1px solid #3A3018;
+  background: #14100A;
+  padding: 9px 11px;
+  font: 400 10px var(--oc-font-mono), monospace;
+  color: #E0A020;
+  line-height: 1.6;
+}
+
+/* Import preview — one row per parsed event+round. */
+.oc-sc-prevrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid #16161B;
+}
+.oc-sc-prevrow:last-child {
+  border-bottom: none;
+}
+.oc-sc-prevname {
+  font: 500 12px var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+}
+.oc-sc-prevcount {
+  font: 500 10px var(--oc-font-mono), monospace;
+  letter-spacing: 0.08em;
+  color: #DFFF4F;
+  white-space: nowrap;
+}
+
+/* Groups table — one column per group, horizontally scrollable when a
+   round has more groups than fit. */
+.oc-sc-groups {
+  display: grid;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.oc-sc-groupcol {
+  border: 1px solid #1C1C21;
+  background: #0A0A0C;
+  min-width: 0;
+}
+.oc-sc-grouphead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 11px;
+  border-bottom: 1px solid #1C1C21;
+  background: #101014;
+}
+.oc-sc-grouplabel {
+  font: 700 13px var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+  color: #DFFF4F;
+}
+.oc-sc-athlete {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 11px;
+  border-bottom: 1px solid #141419;
+}
+.oc-sc-athlete:last-child {
+  border-bottom: none;
+}
+.oc-sc-athletename {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 500 12px var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+}
+.oc-sc-athletepr {
+  font: 500 10px var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #9A958A;
+  white-space: nowrap;
+}
+.oc-sc-select {
+  border: 1px solid #2A2A31;
+  background: #0D0D10;
+  color: #9A958A;
+  padding: 3px 5px;
+  font: 500 10px var(--oc-font-mono), monospace;
+  cursor: pointer;
+}
+.oc-sc-select:hover {
+  border-color: #DFFF4F;
+  color: #F4F1EA;
+}
+.oc-sc-select:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.oc-sc-emptycol {
+  padding: 12px 11px;
+  font: 400 10px var(--oc-font-mono), monospace;
+  color: #4A4740;
+}
