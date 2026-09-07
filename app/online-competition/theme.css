@@ -2737,48 +2737,6 @@
    brand is hidden until the breakpoint; the tab strip is a transparent
    wrapper that reproduces .oc-tabs' own 1px gap, so the desktop bar is
    pixel-identical with the tabs nested one level deeper. */
-.oc-adm-brand {
-  display: none;
-  align-items: center;
-  gap: 10px;
-  font: 600 14px var(--oc-font-heading), sans-serif;
-  letter-spacing: 0.12em;
-  color: #F4F1EA;
-  text-decoration: none;
-}
-.oc-adm-logo {
-  display: grid;
-  grid-template-columns: repeat(3, 5px);
-  gap: 2px;
-  flex-shrink: 0;
-}
-/* Was a Tailwind var(--color-*) class list; now a real class so the
-   header's one interactive control matches the dark v3 button language. */
-.oc-adm-logout {
-  border: 1px solid #2A2A31;
-  background: transparent;
-  color: #9A958A;
-  border-radius: 2px;
-  font: 500 12px var(--oc-font-heading), sans-serif;
-  cursor: pointer;
-}
-.oc-adm-logout:hover {
-  border-color: #DFFF4F;
-  color: #DFFF4F;
-}
-.oc-adm-logout:focus-visible {
-  outline: 2px solid #DFFF4F;
-  outline-offset: 2px;
-}
-
-.oc-adm-tabs-strip {
-  display: flex;
-  gap: 1px;
-  min-width: 0;
-}
-
-/* CompetitionDetail's two-tab bar — was an inline style; identical values,
-   moved to a class so the breakpoint can reach it. */
 .oc-adm-tabbar {
   display: flex;
   gap: 1px;
@@ -2820,44 +2778,6 @@
      without them the sticky bar would leave 24px gutters with page content
      sliding through them. margin-bottom stays owned by the inline style on
      the element (32px). */
-  .oc-tabs {
-    position: sticky;
-    top: 0;
-    z-index: 30;
-    margin-top: -32px;
-    margin-left: -24px;
-    margin-right: -24px;
-    padding: 0;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-  }
-  .oc-adm-brand {
-    display: inline-flex;
-    justify-self: start;
-    grid-row: 1;
-    grid-column: 1;
-    min-height: 44px;
-    padding: 10px 14px;
-  }
-  .oc-adm-logout {
-    grid-row: 1;
-    grid-column: 2;
-    min-height: 44px;
-    margin: 10px 14px;
-  }
-  .oc-adm-tabs-strip {
-    grid-row: 2;
-    grid-column: 1 / -1;
-    border-top: 1px solid #16161B;
-    white-space: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-  }
-  .oc-adm-tabs-strip::-webkit-scrollbar {
-    display: none;
-  }
   .oc-tab {
     min-height: 44px;
     padding: 13px;
@@ -2941,7 +2861,6 @@
   .oc-adm-event-del,
   .oc-adm-add-row,
   .oc-adm-filter-btn,
-  .oc-adm-logout,
   .oc-tab {
     min-height: 44px;
   }
@@ -3353,4 +3272,300 @@
   .oc-v3-sub-row > *:nth-child(n + 3) {
     grid-column: 1 / -1;
   }
+}
+
+/* ── Admin shell: persistent left sidebar (replaces the old top-tab
+   AdminHeader) ────────────────────────────────────────────────────────
+   Same dark v3 palette as the rest of the product; tokens are the ones
+   already established, nothing redefined here. */
+
+.oc-adm-shell {
+  display: flex;
+  min-height: 100vh;
+  background: #08080A;
+  color: #F4F1EA;
+}
+.oc-adm-side {
+  width: 212px;
+  flex-shrink: 0;
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  background: #0D0D10;
+  border-right: 1px solid #1C1C21;
+  overflow-y: auto;
+}
+/* Spacer so the fixed sidebar doesn't overlap the content column. */
+.oc-adm-side-gap {
+  width: 212px;
+  flex-shrink: 0;
+}
+.oc-adm-main {
+  flex: 1;
+  min-width: 0;
+  padding: 22px;
+}
+
+.oc-adm-brandblock {
+  padding: 0 16px 20px;
+  border-bottom: 1px solid #1C1C21;
+}
+.oc-adm-mark {
+  display: grid;
+  grid-template-columns: repeat(3, 6px);
+  gap: 2px;
+  flex-shrink: 0;
+}
+.oc-adm-wordmark {
+  font: 600 14px var(--oc-font-heading), sans-serif;
+  letter-spacing: 0.12em;
+  color: #F4F1EA;
+}
+.oc-adm-sublabel {
+  display: block;
+  font: 500 8px var(--oc-font-mono), monospace;
+  letter-spacing: 0.2em;
+  color: #6E6A62;
+}
+
+.oc-adm-navlist {
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+}
+.oc-adm-navitem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: none;
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: #9A958A;
+  padding: 13px 16px;
+  font: 600 12px var(--oc-font-heading), sans-serif;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  width: 100%;
+}
+.oc-adm-navitem:hover {
+  background: #16161B;
+  color: #F4F1EA;
+}
+.oc-adm-navitem-active {
+  border-left-color: #DFFF4F;
+  background: #16161B;
+  color: #F4F1EA;
+}
+/* Planned features with no backend yet — rendered for context but inert:
+   no indicator, no hover, no handler (see AdminShell). */
+.oc-adm-navitem-disabled,
+.oc-adm-navitem-disabled:hover {
+  border-left-color: transparent;
+  background: transparent;
+  color: #4A4740;
+  cursor: default;
+}
+.oc-adm-navcount {
+  font: 500 9px var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #6E6A62;
+}
+
+.oc-adm-sidefoot {
+  margin-top: auto;
+  padding: 16px;
+  border-top: 1px solid #1C1C21;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.oc-adm-signout {
+  border: 1px solid #2A2A31;
+  background: transparent;
+  color: #9A958A;
+  padding: 10px;
+  font: 500 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.14em;
+  cursor: pointer;
+}
+.oc-adm-signout:hover {
+  border-color: #E8543C;
+  color: #E8543C;
+}
+
+/* ── Dashboard overview ───────────────────────────────────────────── */
+
+.oc-adm-statgrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: #1C1C21;
+  border: 1px solid #1C1C21;
+}
+.oc-adm-statcell {
+  background: #0D0D10;
+  padding: 18px;
+}
+.oc-adm-statvalue {
+  display: block;
+  margin-top: 10px;
+  font: 700 30px var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+}
+.oc-adm-overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.oc-adm-queue-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 84px 96px;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #16161B;
+}
+.oc-adm-queue-row:hover {
+  background: #131318;
+}
+.oc-adm-progress-row {
+  padding: 12px 16px;
+  border-bottom: 1px solid #16161B;
+}
+
+/* ── Mobile: sidebar becomes a slide-in drawer ────────────────────── */
+
+.oc-adm-topbar {
+  display: none;
+}
+.oc-adm-scrim {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .oc-adm-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 45;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 56px;
+    padding: 0 14px;
+    background: #0D0D10;
+    border-bottom: 1px solid #1C1C21;
+  }
+  .oc-adm-burger {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    min-width: 44px;
+    min-height: 44px;
+    border: 1px solid #2A2A31;
+    background: transparent;
+    padding: 0 12px;
+    cursor: pointer;
+  }
+  .oc-adm-burger span {
+    display: block;
+    width: 16px;
+    height: 2px;
+    background: #F4F1EA;
+  }
+
+  .oc-adm-side-gap {
+    display: none;
+  }
+  /* Off-canvas until opened; the drawer itself keeps the exact same
+     card styling as the desktop rail. */
+  .oc-adm-side {
+    width: 248px;
+    transform: translateX(-100%);
+    transition: transform 160ms ease-out;
+    padding-top: 16px;
+  }
+  .oc-adm-side-open {
+    transform: translateX(0);
+  }
+  .oc-adm-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 39;
+    background: rgba(8, 8, 10, 0.72);
+    border: none;
+  }
+  .oc-adm-navitem {
+    min-height: 44px;
+  }
+  .oc-adm-signout {
+    min-height: 44px;
+  }
+
+  .oc-adm-main {
+    padding: 14px;
+  }
+  .oc-adm-statgrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .oc-adm-overview-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .oc-adm-queue-row {
+    grid-template-columns: 24px minmax(0, 1fr);
+    row-gap: 8px;
+  }
+  .oc-adm-queue-row > *:nth-child(n + 3) {
+    grid-column: 2;
+  }
+}
+
+/* The desktop rail is only fixed at >640px; above that the drawer state
+   is irrelevant, so make sure an open drawer never sticks around when the
+   viewport grows back. */
+@media (min-width: 641px) {
+  .oc-adm-side {
+    transform: none;
+  }
+}
+
+/* ── Admin login screen ───────────────────────────────────────────── */
+.oc-adm-login-input {
+  width: 100%;
+  border: 1px solid #2A2A31;
+  background: #08080A;
+  color: #F4F1EA;
+  padding: 14px 13px;
+  font: 500 15px var(--oc-font-mono), monospace;
+  outline: none;
+}
+.oc-adm-login-input:focus {
+  border-color: #DFFF4F;
+}
+.oc-adm-login-btn {
+  display: block;
+  width: 100%;
+  border: none;
+  background: #DFFF4F;
+  color: #08080A;
+  padding: 16px;
+  font: 700 13px var(--oc-font-heading), sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.oc-adm-login-btn:hover:not(:disabled) {
+  background: #E9FF7A;
+}
+.oc-adm-login-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

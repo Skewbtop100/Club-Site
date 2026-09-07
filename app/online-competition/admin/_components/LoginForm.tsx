@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button, FieldLabel, INPUT_CLASS } from '../../_components/ui';
+import { FieldLabel } from '../../_components/ui';
 
 export default function LoginForm() {
   const router = useRouter();
@@ -36,17 +36,13 @@ export default function LoginForm() {
   }
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="w-full"
-      style={{ border: '1px solid #1C1C21', borderRadius: 2, background: '#0D0D10', padding: 32 }}
-    >
+    <form onSubmit={handleSubmit} className="w-full">
       <FieldLabel>Нууц үг</FieldLabel>
       <input
         type="password"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
-        className={INPUT_CLASS}
+        className="oc-adm-login-input"
         style={{ marginTop: 8 }}
         autoFocus
       />
@@ -55,14 +51,9 @@ export default function LoginForm() {
           {error}
         </p>
       )}
-      <Button
-        type="submit"
-        variant="primary-dark"
-        disabled={loading || !password}
-        style={{ marginTop: 16 }}
-      >
-        Нэвтрэх
-      </Button>
+      <button type="submit" className="oc-adm-login-btn" disabled={loading || !password} style={{ marginTop: 16 }}>
+        {loading ? 'Шалгаж байна...' : 'Нэвтрэх'}
+      </button>
     </form>
   );
 }
