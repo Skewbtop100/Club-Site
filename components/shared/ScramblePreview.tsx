@@ -51,9 +51,25 @@ const PUZZLE_MAP: Record<string, string> = {
  *  app/api/scramble/route.ts). Safe to use anywhere scramble generation
  *  itself isn't.
  *
+ *  `visualization` picks the render mode for the TwistyPlayer puzzles:
+ *  '3D' (default) is the rotated cube every existing caller uses, '2D' is
+ *  the flat unfolded net in the WCA scramble-PDF style. It defaults to '3D'
+ *  so adding the option changed nothing for the Timer / Daily Practice
+ *  callers; only the online-competition scramble list opts into '2D'.
+ *  Square-1 ignores it — that puzzle is already a flat net via
+ *  sr-puzzlegen, for the reason above.
+ *
  *  Sizing is caller-controlled: the root fills its parent (flex: 1 1 auto),
  *  so wrap this in a fixed-size/aspect-ratio container. */
-export default function ScramblePreview({ eventId, scramble }: { eventId: string; scramble: string }) {
+export default function ScramblePreview({
+  eventId,
+  scramble,
+  visualization = '3D',
+}: {
+  eventId: string;
+  scramble: string;
+  visualization?: '3D' | '2D';
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sq1MountRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<TwistyPlayerType | null>(null);
@@ -120,7 +136,7 @@ export default function ScramblePreview({ eventId, scramble }: { eventId: string
         const player = new mod.TwistyPlayer({
           puzzle: puzzleId, experimentalSetupAlg: scramble, alg: '',
           background: 'none', controlPanel: 'none', viewerLink: 'none',
-          hintFacelets: 'none', backView: 'none', visualization: '3D',
+          hintFacelets: 'none', backView: 'none', visualization,
         } as unknown as ConstructorParameters<typeof mod.TwistyPlayer>[0]);
         const el = player as unknown as HTMLElement;
         el.style.width = '100%'; el.style.height = '100%';
@@ -136,7 +152,9 @@ export default function ScramblePreview({ eventId, scramble }: { eventId: string
       if (player && c && c.contains(player)) c.removeChild(player);
       playerRef.current = null;
     };
-  }, [puzzleId, isSq1]);
+    // visualization is a construction-time option, so changing it rebuilds
+    // the player rather than mutating the existing one.
+  }, [puzzleId, isSq1, visualization]);
 
   useEffect(() => {
     if (isSq1) return;

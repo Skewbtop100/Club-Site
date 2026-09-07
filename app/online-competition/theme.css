@@ -4380,7 +4380,10 @@ button.oc-rv-cell:hover {
    fills its parent and needs a definite size to resolve against. */
 .oc-sc-scrdiag {
   flex: 0 0 auto;
-  width: 96px;
+  /* 4:3 to match the unfolded net's own bounding box (U over L-F-R-B over
+     D, so four faces wide by three tall). A square box would letterbox it
+     and waste a third of the width. */
+  width: 128px;
   height: 96px;
   margin-left: auto;
   /* Plain `display: flex` with a definite height, exactly like the Daily
@@ -4480,7 +4483,7 @@ button.oc-rv-cell:hover {
      against the right edge, past the row's number gutter. */
   .oc-sc-scrdiag {
     margin-left: 32px;
-    width: 88px;
-    height: 88px;
+    width: 120px;
+    height: 90px;
   }
 }

@@ -150,7 +150,12 @@ export default function ScramblesManager() {
           ) : tab === 'registration' ? (
             <RegistrationTab competition={competition} athletes={overview.athletes} />
           ) : tab === 'file' ? (
-            <FileTab competitionId={competitionId} competition={competition} onSaved={load} />
+            <FileTab
+              competitionId={competitionId}
+              competition={competition}
+              hasImported={overview.scrambleData.length > 0}
+              onSaved={load}
+            />
           ) : tab === 'scrambles' ? (
             <ScrambleTextTab competition={competition} scrambleData={overview.scrambleData} />
           ) : (

@@ -7,20 +7,21 @@ import ScramblePreview from '@/components/shared/ScramblePreview';
 //
 // The render itself is components/shared/ScramblePreview — the exact same
 // component the club's Daily Practice judging flow uses (see the preview
-// block in components/admin/ResultsEntryTab.tsx), so the puzzle style,
-// colours and proportions here are that component's, not a second
-// implementation. This file adds nothing to the drawing; it only decides
-// WHEN to mount it.
+// block in components/admin/ResultsEntryTab.tsx) — asked for its flat
+// unfolded-net mode rather than the rotated 3D cube, to match the layout
+// of an official WCA scramble PDF. This file adds nothing to the drawing;
+// it only decides WHEN to mount it.
 //
-// Why the gating matters: ScramblePreview mounts a @cubing/twisty
-// TwistyPlayer, which is one WebGL context per instance. This tab renders
-// a whole round's worth of scrambles at once — five per group, and a
-// 3x3x3 event with two rounds of two groups is twenty rows — while
-// browsers cap simultaneous WebGL contexts in the mid-teens and silently
-// drop the OLDEST context once past it, blanking diagrams the admin has
-// already scrolled to. Mounting only what is near the viewport keeps the
-// live count to roughly what fits on screen, and also avoids building
-// twenty players up front.
+// Why the gating matters: each preview is a @cubing/twisty TwistyPlayer,
+// and this tab renders a whole round's worth of scrambles at once — five
+// per group, so a 3x3x3 event with two rounds of two groups is twenty
+// rows. Mounting only what is near the viewport keeps the number of live
+// players to roughly what fits on screen instead of building twenty up
+// front. It was originally required rather than merely nice: under the 3D
+// mode this started with, every player held its own WebGL context, and
+// browsers cap those in the mid-teens and silently drop the OLDEST one
+// past the limit, blanking diagrams already scrolled past. The flat 2D
+// net used now is lighter, but the bound is still worth keeping.
 //
 // The margin is deliberately generous so a diagram is ready before it
 // scrolls into view and is only torn down well after it leaves.
@@ -51,7 +52,7 @@ export default function ScrambleDiagram({ eventId, scramble }: { eventId: string
 
   return (
     <div ref={boxRef} className="oc-sc-scrdiag" aria-hidden>
-      {visible && <ScramblePreview eventId={eventId} scramble={scramble} />}
+      {visible && <ScramblePreview eventId={eventId} scramble={scramble} visualization="2D" />}
     </div>
   );
 }

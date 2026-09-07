@@ -74,6 +74,44 @@ export async function GET(req: Request) {
   return NextResponse.json(payload);
 }
 
+/** Deletes ALL imported scramble data and group assignments for one
+ *  competition — what the Файл tab's УСТГАХ action calls. Deliberately
+ *  wipes both subcollections rather than just the scrambles: an assignment
+ *  is an index into a specific round's groups, so keeping it without them
+ *  would be meaningless state. The competition itself, its registrations
+ *  and its submissions are untouched, and with no scrambleData the solve
+ *  flow simply falls back to random generation again. */
+export async function DELETE(req: Request) {
+  if (!(await isOnlineCompAdmin())) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const competitionId = new URL(req.url).searchParams.get('competitionId');
+  if (!competitionId) {
+    return NextResponse.json({ error: 'Тэмцээн сонгогдоогүй байна.' }, { status: 400 });
+  }
+
+  const db = getOnlineCompAdminDb();
+  const compRef = db.collection('onlineCompetitions').doc(competitionId);
+  if (!(await compRef.get()).exists) {
+    return NextResponse.json({ error: 'Тэмцээн олдсонгүй.' }, { status: 404 });
+  }
+
+  const [scrambleSnap, assignSnap] = await Promise.all([
+    compRef.collection('scrambleData').get(),
+    compRef.collection('groupAssignments').get(),
+  ]);
+
+  const batch = db.batch();
+  for (const d of [...scrambleSnap.docs, ...assignSnap.docs]) batch.delete(d.ref);
+  await batch.commit();
+
+  return NextResponse.json({
+    removedScrambleData: scrambleSnap.size,
+    removedGroupAssignments: assignSnap.size,
+  });
+}
+
 /** Imports a TNoodle scramble JSON. The body carries the file's raw text
  *  rather than a client-parsed structure so this route runs the *same*
  *  validation the admin preview ran, on the original bytes — the preview
@@ -114,6 +152,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Тэмцээн олдсонгүй.' }, { status: 404 });
   }
 
+  // An import REPLACES the competition's scramble data — it is not merged
+  // into whatever was imported before. Without this, a first import of a
+  // multi-event file followed by a corrected 3x3x3-only file left the
+  // earlier file's 2x2x2/3x3x3-OH rounds sitting in Firestore forever,
+  // and the admin page (and the solve flow) went on serving them as if
+  // they were part of the current competition.
+  const existing = await compRef.collection('scrambleData').get();
+  const keep = new Set(parsed.rounds.map((r) => roundKey(r.eventId, r.round)));
+  const stale = existing.docs.filter((d) => !keep.has(d.id)).map((d) => d.id);
+
   const batch = db.batch();
   for (const round of parsed.rounds) {
     batch.set(compRef.collection('scrambleData').doc(roundKey(round.eventId, round.round)), {
@@ -121,11 +169,24 @@ export async function POST(req: Request) {
       importedAt: FieldValue.serverTimestamp(),
     });
   }
+  for (const id of stale) {
+    batch.delete(compRef.collection('scrambleData').doc(id));
+    // A group assignment only means anything alongside the scrambles it
+    // indexes into, so a dropped round takes its assignments with it
+    // rather than leaving an orphan that would silently reattach if the
+    // same round were imported again later with different groups.
+    batch.delete(compRef.collection('groupAssignments').doc(id));
+  }
   await batch.commit();
 
-  // Group assignments are deliberately NOT cleared here: re-importing the
-  // same round's scrambles (a corrected file, say) shouldn't silently wipe
-  // groups an admin has already hand-tuned. The admin page shows a warning
-  // instead when a round's groupCount shrinks below an existing assignment.
-  return NextResponse.json({ saved: parsed.rounds.length, rounds: parsed.rounds, warnings: parsed.warnings });
+  // Assignments for rounds the new file DOES contain are deliberately kept:
+  // re-importing a corrected file for the same rounds shouldn't wipe groups
+  // an admin has already hand-tuned. The admin page warns instead when a
+  // round's groupCount shrinks below an existing assignment.
+  return NextResponse.json({
+    saved: parsed.rounds.length,
+    removed: stale.length,
+    rounds: parsed.rounds,
+    warnings: parsed.warnings,
+  });
 }

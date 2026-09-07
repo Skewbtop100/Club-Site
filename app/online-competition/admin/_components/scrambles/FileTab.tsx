@@ -22,10 +22,15 @@ const SUMMARY_COLUMNS = 'minmax(150px, 1.5fr) 90px 90px 100px';
 export default function FileTab({
   competitionId,
   competition,
+  hasImported,
   onSaved,
 }: {
   competitionId: string | null;
   competition: OnlineCompetitionAdminView | null;
+  /** Whether this competition already has scramble data in Firestore —
+   *  gates the destructive УСТГАХ action, which is about stored data, not
+   *  about the file currently staged in the picker. */
+  hasImported: boolean;
   onSaved: () => Promise<void>;
 }) {
   const [fileName, setFileName] = useState('');
@@ -34,14 +39,53 @@ export default function FileTab({
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState('');
   const [open, setOpen] = useState(true);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  /** Drops the staged file only. Purely local — it does not touch anything
+   *  already imported into Firestore; that is what handleDelete does. */
   function reset() {
     setFileName('');
     setFileText('');
     setParsed(null);
     setSavedMsg('');
+    setConfirmingDelete(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
+  }
+
+  /** Deletes this competition's imported scrambles AND group assignments
+   *  from Firestore. Two-step confirm, same pattern as the other
+   *  irreversible admin actions — there is no undo. */
+  async function handleDelete() {
+    if (!competitionId) return;
+    setDeleting(true);
+    setSavedMsg('');
+    try {
+      const res = await fetch(
+        `/api/online-competition/admin-scrambles?competitionId=${encodeURIComponent(competitionId)}`,
+        { method: 'DELETE' },
+      );
+      const data = (await res.json().catch(() => ({}))) as {
+        removedScrambleData?: number;
+        removedGroupAssignments?: number;
+        error?: string;
+      };
+      if (!res.ok) {
+        setParsed({ ok: false, error: data.error ?? 'Устгахад алдаа гарлаа.' });
+        return;
+      }
+      await onSaved();
+      reset();
+      setSavedMsg(
+        `${data.removedScrambleData ?? 0} раундын холилт устгагдлаа` +
+          `${data.removedGroupAssignments ? ` (${data.removedGroupAssignments} группын хуваарилалт хамт)` : ''}.`,
+      );
+    } catch {
+      setParsed({ ok: false, error: 'Устгахад алдаа гарлаа. Дахин оролдоно уу.' });
+    } finally {
+      setDeleting(false);
+    }
   }
 
   function load(name: string, text: string) {
@@ -85,14 +129,21 @@ export default function FileTab({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ competitionId, fileText }),
       });
-      const data = (await res.json().catch(() => ({}))) as { saved?: number; error?: string };
+      const data = (await res.json().catch(() => ({}))) as {
+        saved?: number;
+        removed?: number;
+        error?: string;
+      };
       if (!res.ok) {
         setParsed({ ok: false, error: data.error ?? 'Хадгалахад алдаа гарлаа.' });
         return;
       }
       await onSaved();
       reset();
-      setSavedMsg(`${data.saved ?? 0} раундын холилт хадгалагдлаа.`);
+      setSavedMsg(
+        `${data.saved ?? 0} раундын холилт хадгалагдлаа` +
+          `${data.removed ? ` · өмнөх ${data.removed} раунд устгагдлаа` : ''}.`,
+      );
     } catch {
       setParsed({ ok: false, error: 'Хадгалахад алдаа гарлаа. Дахин оролдоно уу.' });
     } finally {
@@ -127,13 +178,48 @@ export default function FileTab({
           >
             ЖИШЭЭ АЧААЛАХ
           </button>
+          {/* Dismissing the staged file and deleting the competition's
+              imported data are different actions with different stakes, so
+              they are different buttons. The old single УСТГАХ only did the
+              first while reading as the second, which is how a previous
+              import's events survived a "clear" and reappeared merged into
+              the next upload. */}
           {loaded && (
-            <button type="button" className="oc-sc-clear" disabled={saving} onClick={reset}>
+            <button type="button" className="oc-sc-btn" disabled={saving || deleting} onClick={reset}>
+              ЦУЦЛАХ
+            </button>
+          )}
+          {hasImported && !confirmingDelete && (
+            <button
+              type="button"
+              className="oc-sc-clear"
+              disabled={saving || deleting}
+              onClick={() => setConfirmingDelete(true)}
+            >
               УСТГАХ
             </button>
           )}
         </div>
       </div>
+
+      {confirmingDelete && (
+        <div className="oc-sc-warn" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <span style={{ flex: '1 1 240px' }}>
+            ЭНЭ ТЭМЦЭЭНИЙ ИМПОРТЛОСОН БҮХ ХОЛИЛТ БА ГРУППЫН ХУВААРИЛАЛТ УСТАНА. БУЦААХ БОЛОМЖГҮЙ.
+          </span>
+          <button type="button" className="oc-sc-btn oc-sc-btn-danger" disabled={deleting} onClick={handleDelete}>
+            {deleting ? 'УСТГАЖ БАЙНА...' : 'ТИЙМ, УСТГА'}
+          </button>
+          <button
+            type="button"
+            className="oc-sc-btn"
+            disabled={deleting}
+            onClick={() => setConfirmingDelete(false)}
+          >
+            ҮГҮЙ
+          </button>
+        </div>
+      )}
 
       <p className="oc-sc-hint">
         TNoodle-ээс татсан албан ёсны холилтын JSON файлыг оруулна. Раунд бүрийн scrambleSet тус бүр нэг групп
