@@ -1,0 +1,134 @@
+{
+  "competitionName": "ЖИШЭЭ ТЭМЦЭЭН (SAMPLE)",
+  "version": "TNoodle-WCA-1.2.2",
+  "generationDate": "2026-01-01",
+  "generationUrl": "https://www.worldcubeassociation.org/regulations/scrambles/",
+  "events": [
+    {
+      "id": "333",
+      "rounds": [
+        {
+          "id": "333-r1",
+          "scrambleSets": [
+            {
+              "scrambles": [
+                "D' R2 B2 R2 D F2 D' U' L U' R' F' R' D R' D'",
+                "U2 F2 R2 B2 F2 D L2 U2 L2 B2 R B' D L B' L B' D L' F2",
+                "L2 D R2 F2 D B2 U' F2 U2 F2 B' R B2 U B D' B L' R' D2",
+                "F U' L2 F' B R' B2 U R' U2 R2 L' B2 U2 R' D2 F2 D2",
+                "U2 L2 U2 R2 F' L2 F' R2 B U2 B D U' L B' L2 F L B2"
+              ],
+              "extraScrambles": [
+                "D2 R B2 L D2 U2 F2 L U2 L' U2 B U2 F U' B2 F' D B U",
+                "L U2 R B2 D2 R B2 D2 R D2 L' U' L' B' U' B R U2 F' L'"
+              ]
+            },
+            {
+              "scrambles": [
+                "U' F2 U' F2 R2 D' F2 D2 B2 R2 U B L2 F R' B D L2 U' F2",
+                "B D2 R2 U R2 U B2 D2 F2 L2 F2 R2 U R' U2 F L U L2 F U'",
+                "F2 D2 F D' L2 U' F2 L2 R2 D2 U R2 U' R' B' F2 D2 R B' D'",
+                "U' R D' F R D R L2 B2 U' B2 U2 B2 D R2 U2 F2 B2 L2 R' U'",
+                "B2 D2 L2 F2 R2 D L2 R2 D B2 L' B' D U2 L2 D2 F2 R2 B D"
+              ],
+              "extraScrambles": [
+                "U B R D B2 D' B2 D2 B2 U F2 R2 U' B2 L' F2 U F U' L F'",
+                "B' D2 U2 L2 U2 B2 F U2 B D2 F' U L R2 U' R' B D2 R D'"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "333-r2",
+          "scrambleSets": [
+            {
+              "scrambles": [
+                "L' U2 L2 U2 F' L2 U2 B' D2 F U2 R2 F' L F2 D L F2 L2 D2 L",
+                "B' D' U2 B' U2 B' R2 F2 R2 F L2 F U2 L' B2 D F2 R' D' L",
+                "D' F2 D2 F L2 D2 B U2 B2 R2 F' R' D F2 L B' F' U2 F U'",
+                "U2 L2 U2 F2 R2 B2 R2 U R2 D' R2 U2 R' U2 B2 U2 L2 U2 B' D",
+                "B L F2 D2 R B2 R' D2 B2 U2 F2 R2 B L' D2 U F2 L2 F D2"
+              ],
+              "extraScrambles": [
+                "F' U F2 U2 B2 D' F2 U B2 F2 U F2 L' D' L B L' B2 D2 U",
+                "R L D' B D2 L D2 R' L2 D2 R2 F' R2 F' R2 B2 L2 F L'"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "222",
+      "rounds": [
+        {
+          "id": "222-r1",
+          "scrambleSets": [
+            {
+              "scrambles": [
+                "U2 F2 R F' R U' R' F U2",
+                "F' U' R' U F2 U' F R2 U2",
+                "U F' U2 R U R F' U R U2",
+                "U F2 U2 R' U' F2 R' U2 R'",
+                "R F R2 F R' U R' F' U'"
+              ],
+              "extraScrambles": [
+                "R2 F' R' F R2 F R' U R2 U'",
+                "F' R' U' F U' F U2 F2 R' U'"
+              ]
+            },
+            {
+              "scrambles": [
+                "R F U F' U2 F' R U' F2 U2",
+                "U2 R2 F U2 F' R F' R' F U",
+                "R2 F R F' R' F' R F' U'",
+                "R U2 R' U R' F R F U2",
+                "U' F2 R2 U2 F' R U F' U2"
+              ],
+              "extraScrambles": [
+                "R2 F U F' R F' U2 R2 U'",
+                "F2 R' F R' U R F' R U2"
+              ]
+            },
+            {
+              "scrambles": [
+                "F2 U F' U2 R2 F' U R U'",
+                "R2 F' R F R U' F2 R' U'",
+                "F' R U' R2 F2 R' U F2 U'",
+                "U F' R2 U' F R2 F2 R' F",
+                "R' F U2 F R2 U R' U2 R2 U'"
+              ],
+              "extraScrambles": [
+                "R2 U2 F U' F R' F2 R' U",
+                "U F U' R2 U' R U2 F U2"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "333oh",
+      "rounds": [
+        {
+          "id": "333oh-r1",
+          "scrambleSets": [
+            {
+              "scrambles": [
+                "R' F U2 F2 U' L2 R2 F2 D R2 D2 U F2 R2 F' L' R2 B2 R D2 F2",
+                "B2 L2 F2 U' F2 L2 D2 F2 R2 U' L2 U2 L' U F' L F' L' B2 F U",
+                "F2 U2 D2 R' D' R2 F U2 R' U2 F2 L F2 D2 B2 L2 U L'",
+                "L2 D2 L2 D L2 U L2 F2 L2 R2 D B2 L' D2 F2 R2 B' D2 F' U L'",
+                "R' F2 L2 B2 D2 B2 L F2 L2 U2 R' U2 B' R F2 D F' L2 D' U' L"
+              ],
+              "extraScrambles": [
+                "L2 B F L2 D2 F' D2 F' R2 D2 R2 U2 R' B2 L' F' L' D L R F2",
+                "L F L2 U B2 F2 L2 U' B2 D F2 U' L' D2 L F' U2 B2 U'"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

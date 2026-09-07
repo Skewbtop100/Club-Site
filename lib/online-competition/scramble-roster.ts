@@ -1,4 +1,5 @@
 import type { Firestore } from 'firebase-admin/firestore';
+import type { OnlineParticipantProfileStatus } from '@/lib/online-competition/types';
 
 /** One registered athlete, with everything the group-assignment UI and the
  *  auto-seeder need: which events they signed up for, when they registered
@@ -13,6 +14,22 @@ export interface ScrambleRosterAthlete {
   /** eventId -> best single in centiseconds, or null when the athlete has
    *  no approved result for that event yet. */
   prByEvent: Record<string, number | null>;
+  /** eventId -> best Ao5 in centiseconds, same nullability as prByEvent.
+   *  Drives the groups tab's Сингл/Дундаж ranking toggle. */
+  ao5ByEvent: Record<string, number | null>;
+  /** Identity-verification status of the athlete's profile. Resolved the
+   *  same way resolveProfileStatus does client-side: a doc with no
+   *  `profileStatus` field at all counts as 'incomplete' rather than
+   *  having the value written onto it. */
+  profileStatus: OnlineParticipantProfileStatus;
+}
+
+const PROFILE_STATUSES: OnlineParticipantProfileStatus[] = ['incomplete', 'pending', 'approved', 'rejected'];
+
+function resolveStatus(value: unknown): OnlineParticipantProfileStatus {
+  return PROFILE_STATUSES.includes(value as OnlineParticipantProfileStatus)
+    ? (value as OnlineParticipantProfileStatus)
+    : 'incomplete';
 }
 
 /** Registered athletes for one competition, joined against their
@@ -43,10 +60,12 @@ export async function fetchScrambleRoster(
     const uid = d.ref.parent.parent!.id;
     const data = d.data();
     const profile = profileByUid.get(uid) ?? {};
-    const stats = (profile.stats ?? {}) as Record<string, { pr?: number | null } | undefined>;
+    const stats = (profile.stats ?? {}) as Record<string, { pr?: number | null; ao5?: number | null } | undefined>;
     const prByEvent: Record<string, number | null> = {};
+    const ao5ByEvent: Record<string, number | null> = {};
     for (const [eventId, rollup] of Object.entries(stats)) {
       prByEvent[eventId] = typeof rollup?.pr === 'number' ? rollup.pr : null;
+      ao5ByEvent[eventId] = typeof rollup?.ao5 === 'number' ? rollup.ao5 : null;
     }
     return {
       uid,
@@ -54,6 +73,8 @@ export async function fetchScrambleRoster(
       events: Array.isArray(data.events) ? data.events.filter((e: unknown) => typeof e === 'string') : [],
       registeredAt: data.registeredAt?.toMillis?.() ?? null,
       prByEvent,
+      ao5ByEvent,
+      profileStatus: resolveStatus(profile.profileStatus),
     };
   });
 

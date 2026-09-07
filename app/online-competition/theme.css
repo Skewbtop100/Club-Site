@@ -3906,27 +3906,71 @@ button.oc-rv-cell:hover {
   }
 }
 
-/* ── Admin: холилт ба групп (app/online-competition/admin/scrambles) ───
-   Official WCA/TNoodle scramble import + snake-seeded group assignment.
-   Same dark v3 chrome as the review grid — deliberately its own `.oc-sc-*`
-   namespace so neither page's spacing can drift the other's. */
+
+/* ── Admin: Холилт ба групп (app/online-competition/admin/scrambles) ───
+   Four-tab workspace — Бүртгэл / Файл / Холилт / Групп — over the WCA
+   TNoodle scramble import and snake-seeded group assignment. Its own
+   `.oc-sc-*` namespace so neither this page's nor the review grid's
+   spacing can drift the other's.
+
+   Every tab is always reachable: there is deliberately no locked or
+   disabled tab state, and no "registration closed" gate. */
 
 .oc-sc-card {
   border: 1px solid #1C1C21;
   background: #0D0D10;
 }
-.oc-sc-cardhead {
+
+/* ── Tab strip ────────────────────────────────────────────────────── */
+.oc-sc-tabstrip {
+  display: flex;
+  border-bottom: 1px solid #1C1C21;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.oc-sc-tabstrip::-webkit-scrollbar {
+  display: none;
+}
+.oc-sc-tab {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 13px 16px;
-  border-bottom: 1px solid #1C1C21;
+  gap: 9px;
+  flex: 0 0 auto;
+  min-height: 44px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #6E6A62;
+  padding: 14px 18px;
+  font: 600 11px var(--oc-font-heading), sans-serif;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  cursor: pointer;
 }
-.oc-sc-cardbody {
+.oc-sc-tab:hover {
+  color: #9A958A;
+}
+.oc-sc-tab-active {
+  border-bottom-color: #DFFF4F;
+  color: #F4F1EA;
+}
+.oc-sc-tabnum {
+  font: 500 9px var(--oc-font-mono), monospace;
+  color: #3A3A42;
+}
+.oc-sc-tab-active .oc-sc-tabnum,
+.oc-sc-tab:hover .oc-sc-tabnum {
+  color: #6E6A62;
+}
+.oc-sc-tabbody {
   padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
+
+/* ── Shared small type ────────────────────────────────────────────── */
 .oc-sc-hint {
   font: 400 11px var(--oc-font-heading), sans-serif;
   color: #6E6A62;
@@ -3938,34 +3982,33 @@ button.oc-rv-cell:hover {
   color: #6E6A62;
   text-transform: uppercase;
 }
-
-/* File picker — a styled <label> wrapping a visually-hidden <input> so the
-   native "no file chosen" chrome never appears. */
-.oc-sc-file {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  border: 1px dashed #2A2A31;
-  background: transparent;
-  color: #9A958A;
-  padding: 11px 14px;
-  font: 500 10px var(--oc-font-mono), monospace;
-  letter-spacing: 0.1em;
-  cursor: pointer;
+.oc-sc-msg-ok {
+  font: 400 11px var(--oc-font-heading), sans-serif;
+  color: #4FD07A;
 }
-.oc-sc-file:hover {
-  border-color: #DFFF4F;
-  color: #F4F1EA;
+.oc-sc-msg-err {
+  font: 400 11px var(--oc-font-heading), sans-serif;
+  color: #E8543C;
+  line-height: 1.6;
 }
-.oc-sc-file input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
+.oc-sc-warn {
+  border: 1px solid #3A3018;
+  background: #14100A;
+  padding: 9px 11px;
+  font: 400 10px var(--oc-font-mono), monospace;
+  color: #E0A020;
+  line-height: 1.6;
+}
+.oc-sc-empty {
+  padding: 26px 4px;
+  text-align: center;
+  font: 400 11px var(--oc-font-heading), sans-serif;
+  color: #4A4740;
 }
 
+/* ── Buttons ──────────────────────────────────────────────────────── */
 .oc-sc-btn {
+  min-height: 36px;
   border: 1px solid #2A2A31;
   background: transparent;
   color: #9A958A;
@@ -4001,87 +4044,128 @@ button.oc-rv-cell:hover {
   background: #24110C;
   color: #E8543C;
 }
-
-.oc-sc-msg-ok {
-  font: 400 11px var(--oc-font-heading), sans-serif;
-  color: #4FD07A;
-}
-.oc-sc-msg-err {
-  font: 400 11px var(--oc-font-heading), sans-serif;
-  color: #E8543C;
-  line-height: 1.6;
-}
-.oc-sc-warn {
-  border: 1px solid #3A3018;
-  background: #14100A;
-  padding: 9px 11px;
-  font: 400 10px var(--oc-font-mono), monospace;
-  color: #E0A020;
-  line-height: 1.6;
-}
-
-/* Import preview — one row per parsed event+round. */
-.oc-sc-prevrow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 9px 0;
-  border-bottom: 1px solid #16161B;
-}
-.oc-sc-prevrow:last-child {
-  border-bottom: none;
-}
-.oc-sc-prevname {
-  font: 500 12px var(--oc-font-heading), sans-serif;
-  color: #F4F1EA;
-}
-.oc-sc-prevcount {
-  font: 500 10px var(--oc-font-mono), monospace;
-  letter-spacing: 0.08em;
-  color: #DFFF4F;
+/* Clear-loaded-file action: quiet until hovered, then danger-tinted. */
+.oc-sc-clear {
+  min-height: 36px;
+  border: 1px solid #2A2A31;
+  background: transparent;
+  color: #FF9C8C;
+  padding: 9px 13px;
+  font: 600 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+  cursor: pointer;
   white-space: nowrap;
 }
-
-/* Groups table — one column per group, horizontally scrollable when a
-   round has more groups than fit. */
-.oc-sc-groups {
-  display: grid;
-  gap: 10px;
-  overflow-x: auto;
-  padding-bottom: 4px;
+.oc-sc-clear:hover:not(:disabled) {
+  border-color: #D8402C;
+  background: #1A0D0A;
 }
-.oc-sc-groupcol {
+.oc-sc-clear:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Tab 1: registration stats ────────────────────────────────────── */
+.oc-sc-statgrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: #1C1C21;
   border: 1px solid #1C1C21;
+}
+@media (min-width: 900px) {
+  .oc-sc-statgrid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+.oc-sc-statcell {
   background: #0A0A0C;
+  padding: 14px 13px;
   min-width: 0;
 }
-.oc-sc-grouphead {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 9px 11px;
-  border-bottom: 1px solid #1C1C21;
-  background: #101014;
+.oc-sc-statlabel {
+  display: block;
+  font: 500 8px var(--oc-font-mono), monospace;
+  letter-spacing: 0.14em;
+  color: #6E6A62;
+  text-transform: uppercase;
 }
-.oc-sc-grouplabel {
-  font: 700 13px var(--oc-font-mono), monospace;
-  letter-spacing: 0.1em;
+.oc-sc-statvalue {
+  display: block;
+  margin-top: 8px;
+  font: 700 26px var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #F4F1EA;
+  line-height: 1.1;
+}
+.oc-sc-statvalue-volt {
   color: #DFFF4F;
 }
-.oc-sc-athlete {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 11px;
-  border-bottom: 1px solid #141419;
+.oc-sc-statsub {
+  display: block;
+  margin-top: 4px;
+  font: 400 9px var(--oc-font-mono), monospace;
+  color: #4A4740;
 }
-.oc-sc-athlete:last-child {
+
+/* ── Shared table shell (event breakdown, file summary, groups) ───── */
+.oc-sc-table {
+  border: 1px solid #1C1C21;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.oc-sc-thead,
+.oc-sc-trow {
+  display: grid;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 13px;
+}
+.oc-sc-thead {
+  border-bottom: 1px solid #1C1C21;
+  background: #0A0A0C;
+}
+.oc-sc-trow {
+  border-bottom: 1px solid #16161B;
+}
+.oc-sc-trow:last-child {
   border-bottom: none;
 }
-.oc-sc-athletename {
-  flex: 1;
+.oc-sc-th {
+  font: 500 8px var(--oc-font-mono), monospace;
+  letter-spacing: 0.14em;
+  color: #6E6A62;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.oc-sc-num {
+  font: 500 12px var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #F4F1EA;
+  white-space: nowrap;
+}
+.oc-sc-num-dim {
+  color: #6E6A62;
+}
+.oc-sc-cellname {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.oc-sc-icon {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #2A2A31;
+  background: transparent;
+  color: #F4F1EA;
+  font: 600 9px var(--oc-font-mono), monospace;
+}
+.oc-sc-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4089,30 +4173,279 @@ button.oc-rv-cell:hover {
   font: 500 12px var(--oc-font-heading), sans-serif;
   color: #F4F1EA;
 }
-.oc-sc-athletepr {
-  font: 500 10px var(--oc-font-mono), monospace;
-  font-variant-numeric: tabular-nums;
+.oc-sc-subline {
+  display: block;
+  margin-top: 2px;
+  font: 400 9px var(--oc-font-mono), monospace;
+  color: #4A4740;
+}
+/* Bold totals row closing the file-summary table. */
+.oc-sc-trow-total {
+  border-top: 1px solid #1C1C21;
+  border-bottom: none;
+  background: #0A0A0C;
+}
+.oc-sc-total-label {
+  font: 600 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.14em;
   color: #9A958A;
+  text-transform: uppercase;
+}
+.oc-sc-total-num {
+  font: 700 12px var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #DFFF4F;
+}
+
+/* ── Tab 2: upload row ────────────────────────────────────────────── */
+.oc-sc-uploadrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  border: 1px solid #2A2A31;
+  background: #08080A;
+  padding: 13px 14px;
+}
+.oc-sc-uploadrow-loaded {
+  border-color: #4A5520;
+}
+.oc-sc-uploadlabel {
+  font: 500 8px var(--oc-font-mono), monospace;
+  letter-spacing: 0.16em;
+  color: #6E6A62;
+  text-transform: uppercase;
+}
+.oc-sc-uploadstatus {
+  display: block;
+  margin-top: 6px;
+  font: 500 12px var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+  overflow-wrap: anywhere;
+}
+.oc-sc-uploadstatus-empty {
+  color: #4A4740;
+}
+/* Styled <label> around a visually-hidden <input type="file"> so the
+   native "no file chosen" chrome never renders. */
+.oc-sc-file {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  border: 1px dashed #3A3A42;
+  background: transparent;
+  color: #9A958A;
+  padding: 9px 13px;
+  font: 600 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+  cursor: pointer;
   white-space: nowrap;
 }
+.oc-sc-file:hover {
+  border-color: #DFFF4F;
+  color: #DFFF4F;
+}
+.oc-sc-file input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+/* The sample-load action, matching the file picker's dashed outline. */
+.oc-sc-btn-dashed {
+  border-style: dashed;
+  border-color: #3A3A42;
+}
+.oc-sc-btn-dashed:hover:not(:disabled) {
+  border-color: #DFFF4F;
+  color: #DFFF4F;
+}
+
+/* ── Tab 2: collapsible summary ───────────────────────────────────── */
+.oc-sc-collapse {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  border: 1px solid #1C1C21;
+  background: #0A0A0C;
+  color: #F4F1EA;
+  padding: 12px 13px;
+  font: 600 11px var(--oc-font-heading), sans-serif;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  text-align: left;
+}
+.oc-sc-collapse:hover {
+  border-color: #2A2A31;
+}
+.oc-sc-chev {
+  font: 400 9px var(--oc-font-mono), monospace;
+  color: #6E6A62;
+}
+
+/* ── Event filter chips (tabs 3 and 4) ────────────────────────────── */
+.oc-sc-chiprow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.oc-sc-chip {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 36px;
+  border: 1px solid #2A2A31;
+  background: transparent;
+  color: #9A958A;
+  padding: 8px 13px;
+  font: 500 11px var(--oc-font-heading), sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.oc-sc-chip:hover {
+  background: #16161B;
+  color: #F4F1EA;
+}
+.oc-sc-chip-active {
+  border-color: #DFFF4F;
+  background: #16161B;
+  color: #F4F1EA;
+}
+.oc-sc-chipcount {
+  font: 500 9px var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #6E6A62;
+}
+.oc-sc-chip-active .oc-sc-chipcount {
+  color: #DFFF4F;
+}
+
+/* ── Tab 3: scramble text listing ─────────────────────────────────── */
+.oc-sc-scrsec {
+  border: 1px solid #1C1C21;
+}
+.oc-sc-scrhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border-bottom: 1px solid #1C1C21;
+  background: #0A0A0C;
+}
+.oc-sc-scrtitle {
+  font: 600 15px var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+}
+.oc-sc-scrrow {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 11px 14px;
+  border-bottom: 1px solid #131318;
+}
+.oc-sc-scrrow:last-child {
+  border-bottom: none;
+}
+.oc-sc-scrnum {
+  flex: 0 0 auto;
+  min-width: 18px;
+  font: 400 12px var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #4A4740;
+}
+.oc-sc-scrtext {
+  min-width: 0;
+  font: 500 15px var(--oc-font-mono), monospace;
+  letter-spacing: 0.04em;
+  color: #F4F1EA;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+/* ── Tab 4: Сингл/Дундаж segmented control ────────────────────────── */
+.oc-sc-seg {
+  display: inline-flex;
+  border: 1px solid #2A2A31;
+  padding: 2px;
+}
+.oc-sc-segbtn {
+  min-height: 32px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #6E6A62;
+  padding: 7px 14px;
+  font: 600 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.oc-sc-segbtn:hover {
+  color: #F4F1EA;
+}
+.oc-sc-segbtn-active {
+  border-color: #DFFF4F;
+  color: #DFFF4F;
+}
+
+/* ── Tab 4: assignment table ──────────────────────────────────────── */
 .oc-sc-select {
+  min-height: 32px;
   border: 1px solid #2A2A31;
   background: #0D0D10;
-  color: #9A958A;
-  padding: 3px 5px;
-  font: 500 10px var(--oc-font-mono), monospace;
+  color: #F4F1EA;
+  padding: 5px 7px;
+  font: 500 11px var(--oc-font-mono), monospace;
   cursor: pointer;
 }
 .oc-sc-select:hover {
   border-color: #DFFF4F;
-  color: #F4F1EA;
 }
 .oc-sc-select:disabled {
   opacity: 0.5;
   cursor: wait;
 }
-.oc-sc-emptycol {
-  padding: 12px 11px;
+.oc-sc-badge {
+  display: inline-block;
+  border: 1px solid #2A2A31;
+  background: transparent;
+  color: #6E6A62;
+  padding: 4px 7px;
+  font: 500 8px var(--oc-font-mono), monospace;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+}
+.oc-sc-badge-manual {
+  border-color: #4A5520;
+  background: #12140A;
+  color: #DFFF4F;
+}
+.oc-sc-foot {
   font: 400 10px var(--oc-font-mono), monospace;
+  letter-spacing: 0.06em;
   color: #4A4740;
+}
+
+/* ── Touch targets on small screens ───────────────────────────────── */
+@media (max-width: 640px) {
+  .oc-sc-tabbody {
+    padding: 13px;
+  }
+  .oc-sc-btn,
+  .oc-sc-clear,
+  .oc-sc-file,
+  .oc-sc-chip,
+  .oc-sc-select,
+  .oc-sc-segbtn {
+    min-height: 44px;
+  }
+  .oc-sc-scrtext {
+    font-size: 13px;
+  }
 }

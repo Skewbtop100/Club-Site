@@ -6,10 +6,19 @@ import { fetchScrambleRoster } from '@/lib/online-competition/scramble-roster';
 import { autoAssign, roundKey } from '@/lib/online-competition/scrambles';
 
 // Group assignment writes for one event+round:
-//   POST  — (re)run the snake-seeded auto-assignment, replacing the doc
-//   PATCH — move a single athlete to another group
-// Both are admin-cookie gated and go through the Admin SDK, same as every
-// other write in this feature.
+//   POST  mode:'auto'   — (re)run the snake-seeded auto-assignment
+//   POST  mode:'revert' — drop every manual move, restoring the last
+//                         auto-assignment exactly
+//   PATCH               — move a single athlete to another group
+// All admin-cookie gated and through the Admin SDK, same as every other
+// write in this feature.
+//
+// The doc keeps TWO maps: `assignments` (in effect) and `autoAssignments`
+// (the untouched output of the last auto-run). A manual move via PATCH
+// writes only the first, so the difference between them is exactly the set
+// of hand edits — that's what the groups tab's АВТОМАТ/ГАРААР badge reads
+// and what 'revert' undoes, with no extra per-athlete flag to keep in
+// sync.
 
 interface RoundTarget {
   competitionId: string;
@@ -36,6 +45,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Буруу хүсэлт (тэмцээн/төрөл/раунд дутуу).' }, { status: 400 });
   }
 
+  const mode = body?.mode === 'revert' ? 'revert' : 'auto';
+
   const db = getOnlineCompAdminDb();
   const compRef = db.collection('onlineCompetitions').doc(target.competitionId);
   const key = roundKey(target.eventId, target.round);
@@ -50,6 +61,28 @@ export async function POST(req: Request) {
   const groupCount = scrambleSnap.get('groupCount');
   if (typeof groupCount !== 'number' || groupCount < 1) {
     return NextResponse.json({ error: 'Импортлосон холилтын группын тоо буруу байна.' }, { status: 400 });
+  }
+
+  // Revert: restore the stored baseline rather than re-seeding. Re-running
+  // the seeder instead would look identical only until someone's pr
+  // changed, so this really does put the groups back the way the last
+  // auto-run left them.
+  if (mode === 'revert') {
+    const assignRef = compRef.collection('groupAssignments').doc(key);
+    const current = await assignRef.get();
+    const baseline = current.get('autoAssignments');
+    if (!current.exists || !baseline || typeof baseline !== 'object') {
+      return NextResponse.json(
+        { error: 'Буцаах автомат хуваарилалт байхгүй байна. Эхлээд автоматаар хуваарилна уу.' },
+        { status: 400 },
+      );
+    }
+    const assignments = baseline as Record<string, number>;
+    await assignRef.set(
+      { assignments, assignedAt: FieldValue.serverTimestamp() },
+      { mergeFields: ['assignments', 'assignedAt'] },
+    );
+    return NextResponse.json({ assignments, autoAssignments: assignments, assignedCount: Object.keys(assignments).length });
   }
 
   // Only athletes actually registered for THIS event get seeded — someone
@@ -71,10 +104,14 @@ export async function POST(req: Request) {
     eventId: target.eventId,
     round: target.round,
     assignments,
+    // The baseline manual moves are measured against, and what 'revert'
+    // restores. Rewritten on every auto-run so re-seeding also resets what
+    // counts as "manually edited".
+    autoAssignments: assignments,
     assignedAt: FieldValue.serverTimestamp(),
   });
 
-  return NextResponse.json({ assignments, assignedCount: Object.keys(assignments).length });
+  return NextResponse.json({ assignments, autoAssignments: assignments, assignedCount: Object.keys(assignments).length });
 }
 
 export async function PATCH(req: Request) {
@@ -103,21 +140,41 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: 'Ийм групп байхгүй байна.' }, { status: 400 });
   }
 
-  // Dotted field path so one athlete's move can't clobber a concurrent
-  // move of another; `merge` creates the doc when an admin hand-places an
-  // athlete before ever running auto-assignment.
-  await compRef
-    .collection('groupAssignments')
-    .doc(key)
-    .set(
-      {
-        eventId: target.eventId,
-        round: target.round,
-        assignments: { [uid]: groupIndex },
-        assignedAt: FieldValue.serverTimestamp(),
-      },
-      { mergeFields: [new FieldPath('assignments', uid), 'eventId', 'round', 'assignedAt'] },
-    );
+  const assignRef = compRef.collection('groupAssignments').doc(key);
+  const existing = await assignRef.get();
+
+  // Docs written before `autoAssignments` existed carry no baseline, and
+  // the state right before the first hand edit IS the last auto-assignment
+  // — so capture it now. Without this, reverting such a round would have
+  // nothing to restore, and every athlete in it would keep reading as
+  // auto-assigned even after being moved.
+  const needsBaseline =
+    existing.exists &&
+    !existing.get('autoAssignments') &&
+    existing.get('assignments') &&
+    typeof existing.get('assignments') === 'object';
+
+  const mergeFields: (string | FieldPath)[] = [
+    new FieldPath('assignments', uid),
+    'eventId',
+    'round',
+    'assignedAt',
+  ];
+  const payload: Record<string, unknown> = {
+    eventId: target.eventId,
+    round: target.round,
+    // Dotted field path so one athlete's move can't clobber a concurrent
+    // move of another; the merge also creates the doc when an admin
+    // hand-places an athlete before ever running auto-assignment.
+    assignments: { [uid]: groupIndex },
+    assignedAt: FieldValue.serverTimestamp(),
+  };
+  if (needsBaseline) {
+    payload.autoAssignments = existing.get('assignments');
+    mergeFields.push('autoAssignments');
+  }
+
+  await assignRef.set(payload, { mergeFields });
 
   return NextResponse.json({ ok: true });
 }

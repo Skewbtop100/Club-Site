@@ -18,8 +18,14 @@ import {
 
 export interface ScramblesOverview {
   scrambleData: ScrambleRoundData[];
-  /** `${eventId}_${round}` -> { uid -> groupIndex } */
+  /** `${eventId}_${round}` -> { uid -> groupIndex }: the assignment in
+   *  effect, auto-seeded plus any manual moves on top. */
   assignments: Record<string, Record<string, number>>;
+  /** Same keys, but the untouched result of the last auto-assignment.
+   *  Comparing the two is what tells the groups tab which athletes were
+   *  moved by hand, and what "revert manual edits" restores. Empty for a
+   *  round only ever assigned by hand. */
+  autoAssignments: Record<string, Record<string, number>>;
   athletes: ScrambleRosterAthlete[];
 }
 
@@ -53,12 +59,18 @@ export async function GET(req: Request) {
   scrambleData.sort((a, b) => a.eventId.localeCompare(b.eventId) || a.round - b.round);
 
   const assignments: Record<string, Record<string, number>> = {};
+  const autoAssignments: Record<string, Record<string, number>> = {};
   for (const d of assignSnap.docs) {
-    const map = d.data().assignments;
-    assignments[d.id] = map && typeof map === 'object' ? (map as Record<string, number>) : {};
+    const data = d.data();
+    const asMap = (v: unknown) => (v && typeof v === 'object' ? (v as Record<string, number>) : {});
+    assignments[d.id] = asMap(data.assignments);
+    // Docs written before this field existed have no baseline — every
+    // athlete in them simply reads as auto-assigned, which is what they
+    // were.
+    autoAssignments[d.id] = asMap(data.autoAssignments ?? data.assignments);
   }
 
-  const payload: ScramblesOverview = { scrambleData, assignments, athletes };
+  const payload: ScramblesOverview = { scrambleData, assignments, autoAssignments, athletes };
   return NextResponse.json(payload);
 }
 
