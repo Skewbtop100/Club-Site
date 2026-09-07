@@ -5,15 +5,31 @@ import type { OnlineCompetitionAdminView } from '@/lib/online-competition/types'
 import type { ScrambleRosterAthlete } from '@/lib/online-competition/scramble-roster';
 import { roundKey, type ScrambleRoundData } from '@/lib/online-competition/scrambles';
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
-import { EventChips, eventLabel, roundTitle } from './shared';
+import { eventLabel } from './shared';
 
 // ── Tab 04 · Групп ───────────────────────────────────────────────────────
-// The snake-seeded group assignment, unchanged underneath — this is the
-// mockup's table over the same auto-assign / manual-move API routes.
+// The snake-seeded group assignment. Organised by ROUND first: one section
+// per round that exists in the imported scramble data, and inside it one
+// table per event holding scrambles for that round. A single-round event
+// therefore appears only under Раунд 1, while a three-round event appears
+// in all three sections. Assignment is stored per event+round, so each
+// table maps exactly onto one groupAssignments doc and keeps its own
+// controls — the auto-assign / manual-move / revert logic below is
+// untouched by this layout.
 //
-// Assignment is stored per event+round, so one section renders per round
-// of the selected event, each with its own controls. There is no hidden
-// round picker: every imported round of the event is on screen.
+// Every round is fully assignable right now. A future round-advancement
+// feature is expected to gate later rounds behind "previous round
+// finished", but that feature does not exist yet and nothing here
+// restricts Раунд 2/3 in the meantime.
+//
+// The event filter chips that used to sit at the top were REMOVED with
+// this reorganisation rather than repurposed as scroll anchors: the round
+// sections already list every event, so a chip that hides events would
+// contradict the structure, and one event can now appear in several round
+// sections, which makes "jump to event X" ambiguous about which round is
+// meant. The Сингл/Дундаж control stays — it applies to every table at
+// once. (The chips remain in ./shared for the Холилт tab, which still
+// shows one event at a time.)
 
 type Metric = 'single' | 'average';
 
@@ -37,23 +53,14 @@ export default function GroupsTab({
   athletes: ScrambleRosterAthlete[];
   onChanged: () => Promise<void>;
 }) {
-  const choices = useMemo(() => {
-    const ids = [...new Set(scrambleData.map((d) => d.eventId))];
-    return ids.map((eventId) => ({
-      eventId,
-      label: eventLabel(competition, eventId),
-      count: scrambleData.filter((d) => d.eventId === eventId).length,
-    }));
-  }, [scrambleData, competition]);
-
-  const [eventId, setEventId] = useState<string | null>(null);
   const [metric, setMetric] = useState<Metric>('single');
 
-  useEffect(() => {
-    setEventId((current) =>
-      current && choices.some((c) => c.eventId === current) ? current : (choices[0]?.eventId ?? null),
-    );
-  }, [choices]);
+  // Rounds that exist anywhere in the imported data, ascending — a round
+  // with no scrambles for any event simply has no section.
+  const rounds = useMemo(
+    () => [...new Set(scrambleData.map((d) => d.round))].sort((a, b) => a - b),
+    [scrambleData],
+  );
 
   if (scrambleData.length === 0) {
     return (
@@ -63,12 +70,12 @@ export default function GroupsTab({
     );
   }
 
-  const rounds = scrambleData.filter((d) => d.eventId === eventId);
-
   return (
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <EventChips choices={choices} value={eventId} onChange={setEventId} />
+        {/* Names what the toggle does, and stops the row reading as empty
+            now that the event chips no longer sit on its left. */}
+        <span className="oc-sc-mono">Эрэмбэлэх үзүүлэлт</span>
         <span style={{ flex: 1 }} />
         <div className="oc-sc-seg" role="group" aria-label="Эрэмбэлэх үзүүлэлт">
           <button
@@ -90,24 +97,34 @@ export default function GroupsTab({
         </div>
       </div>
 
-      {rounds.map((round) => (
-        <RoundSection
-          key={roundKey(round.eventId, round.round)}
-          competitionId={competitionId}
-          competition={competition}
-          round={round}
-          assignments={assignments[roundKey(round.eventId, round.round)] ?? {}}
-          autoAssignments={autoAssignments[roundKey(round.eventId, round.round)] ?? {}}
-          athletes={athletes}
-          metric={metric}
-          onChanged={onChanged}
-        />
-      ))}
+      {rounds.map((round) => {
+        const forRound = scrambleData.filter((d) => d.round === round);
+        return (
+          <section key={round} className="oc-sc-roundsec">
+            <h2 className="oc-sc-roundlabel">Раунд {round}</h2>
+            {forRound.map((data) => (
+              <EventGroupTable
+                key={roundKey(data.eventId, data.round)}
+                competitionId={competitionId}
+                competition={competition}
+                round={data}
+                assignments={assignments[roundKey(data.eventId, data.round)] ?? {}}
+                autoAssignments={autoAssignments[roundKey(data.eventId, data.round)] ?? {}}
+                athletes={athletes}
+                metric={metric}
+                onChanged={onChanged}
+              />
+            ))}
+          </section>
+        );
+      })}
     </>
   );
 }
 
-function RoundSection({
+/** One event's assignment table for one round — the whole of the previous
+ *  flat-table implementation, moved under a round heading. */
+function EventGroupTable({
   competitionId,
   competition,
   round,
@@ -225,7 +242,7 @@ function RoundSection({
     <section className="oc-sc-scrsec">
       <div className="oc-sc-scrhead">
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
-          <h3 className="oc-sc-scrtitle">{roundTitle(competition, round.eventId, round.round)}</h3>
+          <h3 className="oc-sc-scrtitle">{eventLabel(competition, round.eventId)}</h3>
           <span className="oc-sc-mono">
             {groupCount} групп · {assignedCount}/{rows.length} тамирчин
           </span>
