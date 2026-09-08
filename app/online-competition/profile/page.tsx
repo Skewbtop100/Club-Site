@@ -3,7 +3,13 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
-import { fetchParticipant, resolveProfileStatus, submitParticipantProfile } from '@/lib/online-competition/data';
+import {
+  fetchAllCompetitions,
+  fetchAthleteSeasonPoints,
+  fetchParticipant,
+  resolveProfileStatus,
+  submitParticipantProfile,
+} from '@/lib/online-competition/data';
 import { uploadImageToCloudinary } from '@/lib/online-competition/cloudinary';
 import type {
   OnlineParticipant,
@@ -11,6 +17,8 @@ import type {
   OnlineParticipantProfileStatus,
 } from '@/lib/online-competition/types';
 import HubNav from '../_components/hub/v3/HubNav';
+import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
+import { toMillisOrNull } from '../_components/hub/format';
 import AuthModal from '../_components/hub/v3/AuthModal';
 
 const DASHBOARD = '/online-competition/dashboard';
@@ -67,6 +75,41 @@ function Avatar88({ src, name }: { src: string | null | undefined; name: string 
   );
 }
 
+/** Best value across every event the athlete has stats for. With one
+ *  event configured today this is the same as "their 3x3 PR"; across
+ *  several it reads as a personal best overall, which is what a single
+ *  headline number on a profile card should mean. */
+function bestAcrossEvents(
+  participant: OnlineParticipant | null,
+  key: 'pr' | 'ao5',
+): number | null {
+  const values = Object.values(participant?.stats ?? {})
+    .map((e) => e[key])
+    .filter((v): v is number => typeof v === 'number');
+  return values.length > 0 ? Math.min(...values) : null;
+}
+
+function totalSolves(participant: OnlineParticipant | null): number | null {
+  const entries = Object.values(participant?.stats ?? {});
+  if (entries.length === 0) return null;
+  return entries.reduce((sum, e) => sum + (e.solveCount ?? 0), 0);
+}
+
+function fmtOrDash(cs: number | null): string {
+  return cs === null ? '—' : fmtCentiseconds(cs);
+}
+
+function StatCell({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+  return (
+    <div className="oc-v3-stat-cell">
+      <span className="oc-v3-stat-label">{label}</span>
+      <span className="oc-v3-stat-value" style={accent ? { color: '#DFFF4F' } : undefined}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
 function StatusChip({ status }: { status: OnlineParticipantProfileStatus }) {
   if (status === 'pending') {
     return (
@@ -90,6 +133,38 @@ export default function ProfilePage() {
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [savedToast, setSavedToast] = useState(false);
+  // Season-points total for the stat grid below. `participant` (which
+  // feeds the other three cells) is already loaded by the effect further
+  // down for the verification form, so it is reused rather than fetched
+  // a second time.
+  const [points, setPoints] = useState<number | null>(null);
+
+  // Season-points total for the stat grid. Season is derived the same way
+  // the hub and the dashboard did it: whichever competition with a season
+  // set has the latest startAt.
+  useEffect(() => {
+    const uid = user && !user.isAnonymous ? user.uid : null;
+    if (uid === null) return;
+    let cancelled = false;
+    fetchAllCompetitions()
+      .then(async (list) => {
+        const withSeason = list.filter((c) => c.season);
+        if (withSeason.length === 0) return null;
+        const latest = withSeason.reduce((best, c) =>
+          (toMillisOrNull(c.startAt) ?? 0) > (toMillisOrNull(best.startAt) ?? 0) ? c : best,
+        );
+        return fetchAthleteSeasonPoints(latest.season as string, uid);
+      })
+      .then((row) => {
+        if (!cancelled) setPoints(row?.totalPoints ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setPoints(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   useEffect(() => {
     if (!user || user.isAnonymous) {
@@ -158,9 +233,59 @@ export default function ProfilePage() {
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div>
           <p className="oc-v3-eyebrow">Профайл</p>
-          <h1 className="oc-v3-title" style={{ marginTop: 8 }}>Тохиргоо</h1>
+          <h1 className="oc-v3-title" style={{ marginTop: 8 }}>Профайл</h1>
         </div>
         {savedToast && <span className="oc-v3-toast">ХАДГАЛАГДЛАА</span>}
+      </div>
+
+      {/* ── Athlete identity ─────────────────────────────────────
+          Moved here from the dashboard, which now carries only "Миний
+          тэмцээнүүд" and "Сүүлийн тайлалтууд". The card's
+          "ПРОФАЙЛ ЗАСАХ" link was dropped in the move: it pointed at
+          this page. */}
+      <div className="oc-v3-card" style={{ marginBottom: 20 }}>
+        <div className="oc-v3-side-top">
+          {user.photoURL ? (
+            // eslint-disable-next-line @next/next/no-img-element -- avatar
+            // comes from Google's CDN, not our own image pipeline.
+            <img src={user.photoURL} alt="" className="oc-v3-avatar-96" />
+          ) : (
+            <span className="oc-v3-avatar-96" aria-hidden>
+              {initials(user.displayName)}
+            </span>
+          )}
+          <p style={{ font: '600 20px var(--oc-font-heading), sans-serif', color: '#F4F1EA', textAlign: 'center' }}>
+            {user.displayName ?? 'Тамирчин'}
+          </p>
+          {/* No join-date or location field exists on onlineParticipants
+              (createdAt is set by a merge-write that can post-date the
+              real first sign-in, and there is no location at all), so
+              this slot carries the verified email instead of a
+              fabricated "ULAANBAATAR · 2024-Н ХОЙШ" line. */}
+          {user.email && (
+            <p
+              style={{
+                marginTop: -6,
+                font: '400 10px var(--oc-font-mono), monospace',
+                color: '#6E6A62',
+                overflowWrap: 'anywhere',
+                textAlign: 'center',
+              }}
+            >
+              {user.email}
+            </p>
+          )}
+        </div>
+
+        {/* Real values from the stats rollup + season points; "—" only
+            when the underlying data genuinely isn't there yet (no
+            recompute has run, or the athlete has no approved solves). */}
+        <div className="oc-v3-stat-grid">
+          <StatCell label="ПР" accent value={fmtOrDash(bestAcrossEvents(participant, 'pr'))} />
+          <StatCell label="Дундаж" value={fmtOrDash(bestAcrossEvents(participant, 'ao5'))} />
+          <StatCell label="Оноо" value={points === null ? '—' : String(points)} />
+          <StatCell label="Эвлүүлэлт" value={totalSolves(participant) === null ? '—' : String(totalSolves(participant))} />
+        </div>
       </div>
 
       <ProfileBody
