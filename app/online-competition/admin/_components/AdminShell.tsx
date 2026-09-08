@@ -11,8 +11,7 @@ export type AdminSection =
   | 'review'
   | 'scrambles'
   | 'rounds'
-  | 'settings'
-  | 'testdata';
+  | 'settings';
 
 const ADMIN = '/online-competition/admin';
 
@@ -112,15 +111,6 @@ export default function AdminShell({
           <NavItem href={`${ADMIN}/scrambles`} label="Холилт ба групп" active={current === 'scrambles'} />
           <NavItem href={`${ADMIN}/rounds`} label="Раунд удирдах" active={current === 'rounds'} />
           <NavItem href={`${ADMIN}/settings`} label="Тохиргоо" active={current === 'settings'} />
-          {/* Last, and visually separated: this page seeds and wipes
-              fixture data in the same collections real records live in. */}
-          <Link
-            href={`${ADMIN}/testdata`}
-            className={`oc-adm-navitem oc-adm-navitem-test${current === 'testdata' ? ' oc-adm-navitem-active' : ''}`}
-          >
-            <span aria-hidden>⚠</span>
-            Тест өгөгдөл
-          </Link>
         </nav>
 
         <div className="oc-adm-sidefoot">

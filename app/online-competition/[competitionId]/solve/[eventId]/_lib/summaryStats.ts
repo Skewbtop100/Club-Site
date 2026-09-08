@@ -7,10 +7,12 @@ import { computeAo5, type AttemptTime, type Ao5Result } from '@/lib/online-compe
  *  on real, 5-attempt competition data — it must never be weakened for a
  *  testing shortcut).
  *
- *  The solve flow's own attempt count is normally always 5, but can be
- *  overridden for local testing via ?__testAttempts=N (see page.tsx) to
- *  shorten manual test runs. This wraps computeAo5 so the UI still shows
- *  *something* sensible for a non-5 test run: a plain average of every
+ *  The solve flow always runs exactly 5 attempts, so the guard below is
+ *  now unreachable in normal operation — it dates from a
+ *  `?__testAttempts=N` URL override, removed with the test-data feature.
+ *  It is kept as a defensive fallback so a future change to the attempt
+ *  count can never silently feed a non-5 array to computeAo5 and get
+ *  nonsense back. In that case the UI shows a plain average of every
  *  non-DNF attempt, with no best/worst exclusion at all — there's no
  *  meaningful "drop 2, average the rest" at e.g. 2 attempts. bestIndex/
  *  worstIndex come back as -1 (never matches a real array index) so the

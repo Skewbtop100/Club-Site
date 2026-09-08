@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import {
   fetchCompetition,
@@ -38,17 +38,10 @@ type Stage =
   | 'summary'
   | 'sent';
 
-const REAL_TOTAL_ATTEMPTS = 5;
-
-// TESTING-ONLY override: ?__testAttempts=2 shortens a manual test run to
-// 2 attempts instead of the real Ao5-mandated 5. Never surfaced in any
-// UI — only ever read from the URL — and clamped to [1, REAL_TOTAL_
-// ATTEMPTS] so a malformed value can't produce 0 or an absurdly long run.
-// Real athletes always get the real 5; this only ever changes anything
-// when the query param is explicitly present. When active, the summary
-// screen's Ao5 falls back to a plain average (see _lib/summaryStats.ts)
-// since real Ao5 math only makes sense at exactly 5 attempts.
-const TEST_ATTEMPTS_PARAM = '__testAttempts';
+/** Attempts in a run — the WCA Ao5 count, and the only value the flow
+ *  ever uses. (A `?__testAttempts=N` URL override used to shorten manual
+ *  test runs; it was removed with the rest of the test-data feature.) */
+const TOTAL_ATTEMPTS = 5;
 
 interface Attempt {
   timeCs: number | null;
@@ -62,14 +55,6 @@ export default function SolvePage() {
   const params = useParams<{ competitionId: string; eventId: string }>();
   const { competitionId, eventId } = params;
   const { user, loading: authLoading, signInWithGoogle } = useOnlineAuth();
-
-  const searchParams = useSearchParams();
-  const testAttemptsRaw = searchParams.get(TEST_ATTEMPTS_PARAM);
-  const parsedTestAttempts = testAttemptsRaw ? parseInt(testAttemptsRaw, 10) : NaN;
-  const totalAttempts =
-    Number.isInteger(parsedTestAttempts) && parsedTestAttempts >= 1 && parsedTestAttempts <= REAL_TOTAL_ATTEMPTS
-      ? parsedTestAttempts
-      : REAL_TOTAL_ATTEMPTS;
 
   const [competition, setCompetition] = useState<OnlineCompetition | null>(null);
   const [loadError, setLoadError] = useState('');
@@ -249,7 +234,7 @@ export default function SolvePage() {
     setAttempts(next);
     pendingBlobRef.current = null;
 
-    if (next.length >= totalAttempts) {
+    if (next.length >= TOTAL_ATTEMPTS) {
       setStage('summary');
     } else {
       setAttemptIndex((i) => i + 1);
@@ -462,7 +447,7 @@ export default function SolvePage() {
             competitionName={competition.name}
             eventLabel={eventLabel}
             attemptIndex={attemptIndex}
-            totalAttempts={totalAttempts}
+            totalAttempts={TOTAL_ATTEMPTS}
           />
         )}
 

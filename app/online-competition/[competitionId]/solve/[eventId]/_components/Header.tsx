@@ -7,8 +7,7 @@ export default function Header({
   competitionName: string;
   eventLabel: string;
   attemptIndex: number; // 0-based
-  /** Normally always 5 (real Ao5) — can be lower under the solve page's
-   *  ?__testAttempts= testing override. */
+  /** The run's attempt count — always 5 (real Ao5). */
   totalAttempts: number;
 }) {
   return (
