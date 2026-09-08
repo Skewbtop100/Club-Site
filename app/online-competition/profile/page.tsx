@@ -439,9 +439,15 @@ function ProfileBody({
 
             <div style={{ flex: 1, minWidth: 220, display: 'flex', flexDirection: 'column', gap: 11 }}>
               <span className="oc-v3-label">Профайл зураг</span>
-              <p style={{ font: '400 12px/1.65 Geologica, sans-serif', color: '#9A958A', textWrap: 'pretty' }}>
-                Царай тод харагдах зураг. Шүүгч бичлэг шалгахад ашиглана.
-              </p>
+              {/* Guidance for choosing a photo — only useful while one can
+                  actually be chosen, so it rides the same `editable` gate
+                  as the upload affordances. Read-only, the cell is just
+                  the photo, the name, the chip and the edit button. */}
+              {editable && (
+                <p style={{ font: '400 12px/1.65 Geologica, sans-serif', color: '#9A958A', textWrap: 'pretty' }}>
+                  Царай тод харагдах зураг. Шүүгч бичлэг шалгахад ашиглана.
+                </p>
+              )}
               <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap', alignItems: 'center' }}>
                 {editable && !uploadOpen && (
                   <button type="button" className="oc-v3-ghost-btn" onClick={() => setUploadOpen(true)}>
