@@ -30,7 +30,21 @@ const LOGO_CELLS = [
   '#DFFF4F', '#1C1C21', '#DFFF4F',
 ] as const;
 
-export default function AuthModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export default function AuthModal({
+  open,
+  onClose,
+  onSignedIn,
+}: {
+  open: boolean;
+  /** Every DISMISS path — Escape, overlay click, ×. A caller that queued
+   *  an intent behind sign-in should drop it here: a cancel must not be
+   *  honoured later. */
+  onClose: () => void;
+  /** Called INSTEAD of onClose after a successful sign-in, so a caller can
+   *  tell "signed in" from "gave up" and act on a queued destination.
+   *  Responsible for closing the modal itself. Defaults to onClose. */
+  onSignedIn?: () => void;
+}) {
   const { signInWithGoogle } = useOnlineAuth();
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const [signingIn, setSigningIn] = useState(false);
@@ -77,7 +91,7 @@ export default function AuthModal({ open, onClose }: { open: boolean; onClose: (
     setSigningIn(true);
     try {
       await signInWithGoogle();
-      onClose();
+      (onSignedIn ?? onClose)();
     } catch (err) {
       const code = (err as { code?: string } | null)?.code;
       // Closing the popup, or superseding it with another, is a cancel —

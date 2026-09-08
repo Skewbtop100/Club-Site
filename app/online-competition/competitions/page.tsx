@@ -12,14 +12,17 @@ import { toMillisOrNull } from '../_components/hub/format';
 import HubNav from '../_components/hub/v3/HubNav';
 import AllCompetitionsTable from '../_components/hub/v3/AllCompetitionsTable';
 import MyCompetitions, { type RegisteredView } from '../_components/hub/v3/MyCompetitions';
+import AuthModal from '../_components/hub/v3/AuthModal';
 
 type View = 'all' | 'mine';
 
 export default function CompetitionsPage() {
-  const { user, loading: authLoading, signInWithGoogle } = useOnlineAuth();
+  const { user, loading: authLoading } = useOnlineAuth();
   // Anonymous solve-page sessions don't count as a returning identity.
   const uid = user && !user.isAnonymous ? user.uid : null;
   const signedIn = uid !== null;
+
+  const [authOpen, setAuthOpen] = useState(false);
 
   const [view, setView] = useState<View>('all');
   const [competitions, setCompetitions] = useState<OnlineCompetition[] | null>(null);
@@ -132,14 +135,21 @@ export default function CompetitionsPage() {
         ) : !signedIn ? (
           /* Same sign-in gate the dashboard page uses — an anonymous
              solve-page session isn't a returning identity. */
-          <div className="oc-v3-card">
-            <div className="oc-v3-empty">
-              <p className="oc-v3-empty-text">Өөрийн тэмцээнүүдээ харахын тулд нэвтэрнэ үү.</p>
-              <button type="button" className="oc-v3-signin" onClick={() => signInWithGoogle()}>
-                Нэвтрэх
-              </button>
+          <>
+            <div className="oc-v3-card">
+              <div className="oc-v3-empty">
+                <p className="oc-v3-empty-text">Өөрийн тэмцээнүүдээ харахын тулд нэвтэрнэ үү.</p>
+                <button type="button" className="oc-v3-signin" onClick={() => setAuthOpen(true)}>
+                  Нэвтрэх
+                </button>
+              </div>
             </div>
-          </div>
+            {/* Plain sign-in: the user is already on the page they want,
+                so the modal just closes and this gate re-renders signed-in
+                — no queued destination, same shape as the nav's Нэвтрэх
+                button. */}
+            <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
+          </>
         ) : mineError ? (
           <p className="oc-v3-status oc-v3-status-error">{mineError}</p>
         ) : mine === null ? (

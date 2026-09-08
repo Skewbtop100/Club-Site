@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { OnlineCompetition } from '@/lib/online-competition/types';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
-import { onlineCompAuth } from '@/lib/online-competition/firebase';
 import { initials } from './util';
 import NotificationBell from './NotificationBell';
 import AuthModal from './AuthModal';
@@ -43,7 +42,7 @@ export default function HubNav({
   active?: 'home' | 'competitions' | 'rank';
 }) {
   const router = useRouter();
-  const { user, loading, signInWithGoogle, signOut } = useOnlineAuth();
+  const { user, loading, signOut } = useOnlineAuth();
   // Anonymous sessions (from the solve page) don't count as "signed in" —
   // same rule the old NavBar and the registration gate use.
   const signedIn = !!user && !user.isAnonymous;
@@ -56,6 +55,11 @@ export default function HubNav({
   // "Нэвтрэх" now opens the sign-in modal; the Google popup fires
   // from inside it. The auth call itself is unchanged — see AuthModal.
   const [authOpen, setAuthOpen] = useState(false);
+  // Where to go once sign-in succeeds, for entry points that mean "sign in
+  // AND THEN take me somewhere". null for the plain Нэвтрэх button, which
+  // leaves the user where they are. Cleared on every dismiss, so a
+  // cancelled trip to the dashboard can't redirect a later sign-in.
+  const [authRedirect, setAuthRedirect] = useState<string | null>(null);
   const compsRef = useRef<HTMLDivElement | null>(null);
   const userRef = useRef<HTMLDivElement | null>(null);
   const signInRef = useRef<HTMLButtonElement | null>(null);
@@ -73,9 +77,12 @@ export default function HubNav({
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [compsOpen, userOpen]);
 
-  /** "Миний тэмцээнүүд" needs a real, returning identity — same gate the
-   *  detail page's registration button uses: sign in first, then go. */
-  async function goToDashboard() {
+  /** "Миний тэмцээнүүд" needs a real, returning identity: sign in
+   *  first, then go. Signed in, it just goes — no modal. Signed out, it
+   *  queues the destination and opens the same AuthModal the Нэвтрэх
+   *  button uses, rather than firing the Google popup bare; the navigation
+   *  happens in onSignedIn below. */
+  function goToDashboard() {
     setCompsOpen(false);
     setUserOpen(false);
     setNotifOpen(false);
@@ -83,15 +90,8 @@ export default function HubNav({
       router.push(DASHBOARD);
       return;
     }
-    try {
-      await signInWithGoogle();
-    } catch (err) {
-      const code = (err as { code?: string } | null)?.code;
-      // Popup closed / superseded — nothing went wrong, just stay put.
-      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') return;
-      return;
-    }
-    if (onlineCompAuth.currentUser && !onlineCompAuth.currentUser.isAnonymous) router.push(DASHBOARD);
+    setAuthRedirect(DASHBOARD);
+    setAuthOpen(true);
   }
 
   return (
@@ -252,15 +252,27 @@ export default function HubNav({
       )}
       </div>
 
-      {/* Focus returns to the trigger on every close path — Escape, the
-          overlay, and the × button all route through here. After a
-          successful sign-in the trigger has unmounted, so the optional
-          call is a no-op rather than an error. */}
+      {/* onClose is the DISMISS path only — Escape, the overlay, and the ×
+          button all route through here. It drops any queued destination:
+          someone who backed out of "Миний тэмцээнүүд" must not be
+          bounced to the dashboard the next time they sign in from the
+          Нэвтрэх button. Focus returns to that trigger; after a
+          successful sign-in it has unmounted, so the optional call is a
+          no-op rather than an error. */}
       <AuthModal
         open={authOpen}
         onClose={() => {
           setAuthOpen(false);
+          setAuthRedirect(null);
           signInRef.current?.focus();
+        }}
+        onSignedIn={() => {
+          setAuthOpen(false);
+          const destination = authRedirect;
+          setAuthRedirect(null);
+          // No destination is the plain Нэвтрэх path: stay put, exactly
+          // as before this entry point existed.
+          if (destination) router.push(destination);
         }}
       />
     </nav>

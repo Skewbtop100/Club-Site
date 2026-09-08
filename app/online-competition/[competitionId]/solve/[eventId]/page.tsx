@@ -26,6 +26,7 @@ import RecStage from './_components/RecStage';
 import EntryStage from './_components/EntryStage';
 import SummaryStage from './_components/SummaryStage';
 import SentStage from './_components/SentStage';
+import AuthModal from '@/app/online-competition/_components/hub/v3/AuthModal';
 
 type Stage =
   | 'cameraSetup'
@@ -54,7 +55,7 @@ const HEADER_STAGES: Stage[] = ['zeroDisplay', 'scrambleReveal', 'orientationHol
 export default function SolvePage() {
   const params = useParams<{ competitionId: string; eventId: string }>();
   const { competitionId, eventId } = params;
-  const { user, loading: authLoading, signInWithGoogle } = useOnlineAuth();
+  const { user, loading: authLoading } = useOnlineAuth();
 
   const [competition, setCompetition] = useState<OnlineCompetition | null>(null);
   const [loadError, setLoadError] = useState('');
@@ -69,7 +70,6 @@ export default function SolvePage() {
   const [submitProgress, setSubmitProgress] = useState(0);
   const [submitError, setSubmitError] = useState('');
   const [finalAo5, setFinalAo5] = useState<number | null>(null);
-  const [signingIn, setSigningIn] = useState(false);
 
   // ── Live PR indicator ────────────────────────────────────────────────
   // The athlete's stored bests for THIS event, read once when the flow
@@ -97,7 +97,7 @@ export default function SolvePage() {
   const [competitionRound, setCompetitionRound] = useState<number | null>(null);
   const [bests, setBests] = useState<{ pr: number | null; ao5: number | null } | null>(null);
   const [prToast, setPrToast] = useState(false);
-  const [signInError, setSignInError] = useState('');
+  const [authOpen, setAuthOpen] = useState(false);
 
   const recorder = useSolveRecorder();
 
@@ -246,30 +246,6 @@ export default function SolvePage() {
     }
   }
 
-  // Guarded the same way RegistrationPanel's sign-in gate is: without a
-  // pending-flag + disabled button, an impatient double-click here fires
-  // signInWithPopup twice on the same auth instance, and the second call
-  // cancels the first with an uncaught "auth/cancelled-popup-request" —
-  // this button was the one unguarded signInWithGoogle() call site left
-  // in the whole solve flow.
-  async function handleSignIn() {
-    if (signingIn) return;
-    setSignInError('');
-    setSigningIn(true);
-    try {
-      await signInWithGoogle();
-    } catch (err) {
-      const code = (err as { code?: string } | null)?.code;
-      // User closed the popup, or a repeat click superseded the first
-      // popup — nothing went wrong, just stay on the gate quietly.
-      if (code !== 'auth/popup-closed-by-user' && code !== 'auth/cancelled-popup-request') {
-        setSignInError('Нэвтрэхэд алдаа гарлаа, дахин оролдоно уу');
-      }
-    } finally {
-      setSigningIn(false);
-    }
-  }
-
   function handleRedo() {
     setAttempts([]);
     setAttemptIndex(0);
@@ -359,21 +335,20 @@ export default function SolvePage() {
           <p style={{ font: '400 13px var(--oc-font-heading), sans-serif', color: '#F4F1EA', textAlign: 'center' }}>
             Тэмцээнд орохын тулд нэвтэрнэ үү.
           </p>
-          {signInError && (
-            <p style={{ font: '400 12px var(--oc-font-heading), sans-serif', color: '#D8402C', textAlign: 'center' }}>
-              {signInError}
-            </p>
-          )}
           <button
             type="button"
             className="oc-solve-btn-confirm"
             style={{ width: 'auto', padding: '12px 24px' }}
-            disabled={signingIn}
-            onClick={handleSignIn}
+            onClick={() => setAuthOpen(true)}
           >
-            {signingIn ? 'Нэвтэрч байна...' : 'Нэвтрэх'}
+            Нэвтрэх
           </button>
         </div>
+        {/* AuthModal owns the pending state, the double-click guard and the
+            error line that used to live on this page — the button above is
+            now only a trigger. Plain sign-in: on success the modal closes
+            and this gate re-renders signed-in, straight into the flow. */}
+        <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
       </div>
     );
   }

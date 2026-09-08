@@ -24,6 +24,7 @@ import EmptyBlock from '../_components/hub/v3/EmptyBlock';
 import LiveCard from './_components/LiveCard';
 import UpcomingCard from './_components/UpcomingCard';
 import RecentSubmissions from './_components/RecentSubmissions';
+import AuthModal from '../_components/hub/v3/AuthModal';
 
 const COMPETITIONS = '/online-competition/competitions';
 const PROFILE = '/online-competition/profile';
@@ -70,8 +71,10 @@ function totalSolves(participant: OnlineParticipant | null): number | null {
 }
 
 export default function DashboardPage() {
-  const { user, loading: authLoading, signInWithGoogle } = useOnlineAuth();
+  const { user, loading: authLoading } = useOnlineAuth();
   const uid = user && !user.isAnonymous ? user.uid : null;
+
+  const [authOpen, setAuthOpen] = useState(false);
 
   const [views, setViews] = useState<RegisteredView[] | null>(null);
   const [submissions, setSubmissions] = useState<OnlineSubmission[] | null>(null);
@@ -155,11 +158,15 @@ export default function DashboardPage() {
         <div className="oc-v3-card">
           <div className="oc-v3-empty">
             <p className="oc-v3-empty-text">Хувийн самбараа харахын тулд нэвтэрнэ үү.</p>
-            <button type="button" className="oc-v3-signin" onClick={() => signInWithGoogle()}>
+            <button type="button" className="oc-v3-signin" onClick={() => setAuthOpen(true)}>
               Нэвтрэх
             </button>
           </div>
         </div>
+        {/* Plain sign-in: the user is already on the page they want, so
+            the modal just closes and this gate re-renders signed-in — no
+            queued destination, same shape as the nav's Нэвтрэх button. */}
+        <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
       </Shell>
     );
   }

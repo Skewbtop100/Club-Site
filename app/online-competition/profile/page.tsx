@@ -11,6 +11,7 @@ import type {
   OnlineParticipantProfileStatus,
 } from '@/lib/online-competition/types';
 import HubNav from '../_components/hub/v3/HubNav';
+import AuthModal from '../_components/hub/v3/AuthModal';
 
 const DASHBOARD = '/online-competition/dashboard';
 
@@ -81,7 +82,9 @@ function StatusChip({ status }: { status: OnlineParticipantProfileStatus }) {
 }
 
 export default function ProfilePage() {
-  const { user, loading: authLoading, signInWithGoogle } = useOnlineAuth();
+  const { user, loading: authLoading } = useOnlineAuth();
+
+  const [authOpen, setAuthOpen] = useState(false);
 
   const [participant, setParticipant] = useState<OnlineParticipant | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
@@ -128,11 +131,15 @@ export default function ProfilePage() {
         <div className="oc-v3-card">
           <div className="oc-v3-empty">
             <p className="oc-v3-empty-text">Профайлаа бөглөхийн тулд нэвтэрнэ үү.</p>
-            <button type="button" className="oc-v3-signin" onClick={() => signInWithGoogle()}>
+            <button type="button" className="oc-v3-signin" onClick={() => setAuthOpen(true)}>
               Нэвтрэх
             </button>
           </div>
         </div>
+        {/* Plain sign-in: the user is already on the page they want, so
+            the modal just closes and this gate re-renders signed-in — no
+            queued destination, same shape as the nav's Нэвтрэх button. */}
+        <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
       </Shell>
     );
   }
