@@ -124,6 +124,12 @@ export interface OnlineParticipant {
   rejectionReason?: string | null;
   /** eventId -> rollup. Written only by the Admin SDK recompute. */
   stats?: Record<string, OnlineParticipantEventStats>;
+  /** Set when this account's data was moved to another uid (the athlete
+   *  lost access to this Gmail — see scripts/merge-athlete-uid.mjs). The
+   *  document is stripped to its Google identity at the same time, so its
+   *  presence means "this is an empty forwarding stub, not a profile". */
+  mergedInto?: string;
+  mergedAt?: Timestamp | null;
 }
 
 /** Payload for submitParticipantProfile (data.ts) — what the profile form

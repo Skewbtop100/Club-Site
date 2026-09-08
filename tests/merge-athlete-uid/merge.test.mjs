@@ -371,12 +371,34 @@ async function main() {
     !Object.prototype.hasOwnProperty.call(newData.stats ?? {}, '555'),
     Object.keys(newData.stats ?? {}).join(','));
 
-  // 7 — tombstone
-  console.log('\n── 7. old doc tombstoned ────────────────────────────────');
+  // 7 — tombstone: the old doc is EMPTIED, not merely flagged
+  console.log('\n── 7. old doc tombstoned and stripped ───────────────────');
   check('old doc still exists', oldDoc.exists);
   check('mergedInto points at the new uid', oldData.mergedInto === NEW, oldData.mergedInto);
-  check('profileStatus removed', oldData.profileStatus === undefined, oldData.profileStatus);
   check('mergedAt recorded', oldData.mergedAt !== undefined);
+  // Every field the merge migrated must be gone. Leaving any of them means
+  // signing in with the old Gmail shows a complete-looking second athlete.
+  const MUST_BE_STRIPPED = [
+    'lastName', 'firstName', 'dateOfBirth', 'gender', 'citizenship',
+    'photoUrl', 'photoPublicId', 'profileStatus', 'submittedAt', 'reviewedAt',
+    'rejectionReason', 'stats',
+    'approvedPhotoUrl', 'approvedLastName', 'approvedFirstName',
+    'approvedDateOfBirth', 'approvedGender', 'approvedCitizenship',
+  ];
+  for (const field of MUST_BE_STRIPPED) {
+    check(`${field} stripped from the old doc`, oldData[field] === undefined, JSON.stringify(oldData[field]));
+  }
+  check(
+    'old doc has NOTHING but its Google identity + tombstone markers',
+    Object.keys(oldData).sort().join(',') === 'createdAt,displayName,email,mergedAt,mergedInto,photoURL,uid',
+    Object.keys(oldData).sort().join(','),
+  );
+  // ...and the identity it keeps is its OWN, untouched.
+  check('uid kept (own)', oldData.uid === OLD, oldData.uid);
+  check('email kept (own)', oldData.email === OLD_EMAIL, oldData.email);
+  check('displayName kept (own)', oldData.displayName === 'Old Account Name', oldData.displayName);
+  check('photoURL kept (own)', oldData.photoURL === 'https://lh3.google/old.jpg', oldData.photoURL);
+  check('createdAt kept (own)', oldData.createdAt?.toMillis() === 1_700_000_000_000, oldData.createdAt?.toMillis());
 
   // 8 — bystanders
   console.log('\n── 8. bystander athletes untouched ──────────────────────');
