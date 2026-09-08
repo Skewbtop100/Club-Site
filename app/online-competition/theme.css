@@ -3131,7 +3131,10 @@
 .oc-v3-seg-btn {
   border: none;
   background: #08080A;
-  color: #F4F1EA;
+  /* Muted, not full-strength ink: the ACTIVE segment is what carries
+     emphasis (volt on ink below), and an unselected segment at #F4F1EA
+     read as though it were selected too. */
+  color: #9A958A;
   padding: 12px 6px;
   font: 500 11px var(--oc-font-heading), sans-serif;
   cursor: pointer;

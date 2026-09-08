@@ -134,7 +134,7 @@ export default function AthletesList() {
                       <dd className="text-[#F4F1EA]">{a.dateOfBirth || '—'}</dd>
                       <dt className="text-[#6E6A62]">Хүйс</dt>
                       <dd className="text-[#F4F1EA]">{a.gender ? GENDER_LABEL[a.gender] : '—'}</dd>
-                      <dt className="text-[#6E6A62]">Иргэншил</dt>
+                      <dt className="text-[#6E6A62]">Улс</dt>
                       <dd className="text-[#F4F1EA]">{a.citizenship ? countryName(a.citizenship) : '—'}</dd>
                       <dt className="text-[#6E6A62]">WCA ID</dt>
                       <dd className="text-[#F4F1EA]" style={{ fontFamily: 'var(--oc-font-mono), monospace' }}>
@@ -219,7 +219,7 @@ export default function AthletesList() {
           ) : (
             <div className="oc-table">
               <div className="oc-adm-ath-head">
-                {['', 'Нэр', 'И-мэйл', 'Иргэншил', 'WCA ID', 'Баталгаажсан', ''].map((label, i) => (
+                {['', 'Нэр', 'И-мэйл', 'Улс', 'WCA ID', 'Баталгаажсан', ''].map((label, i) => (
                   <span
                     key={i}
                     className={`oc-adm-ath-c${i + 1}`}

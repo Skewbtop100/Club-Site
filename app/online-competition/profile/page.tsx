@@ -619,38 +619,38 @@ function ProfileBody({
             )}
           </Field>
 
+          {/* Row 3 with Улс beside it. The three-segment control is
+              unchanged (.oc-v3-seg / .oc-v3-seg-btn); only the placement is,
+              and it no longer spans both columns. */}
+          <Field label="Хүйс">
+            {editable ? (
+              <div className="oc-v3-seg">
+                {GENDERS.map((g) => (
+                  <button
+                    key={g.value}
+                    type="button"
+                    className={`oc-v3-seg-btn${gender === g.value ? ' oc-v3-seg-btn-active' : ''}`}
+                    onClick={() => setGender(g.value)}
+                  >
+                    {g.label}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="oc-v3-value">{participant?.gender ? GENDER_LABEL[participant.gender] : '—'}</p>
+            )}
+          </Field>
+
           {/* Stores the ISO alpha-2 code, not the name — see
               lib/online-competition/countries.ts. Read-only mode renders the
               flag + name with no button affordance. */}
-          <Field label="Иргэншил">
+          <Field label="Улс">
             <CountryPicker
               value={editable ? citizenship : participant?.citizenship ?? ''}
               onChange={setCitizenship}
               editable={editable}
             />
           </Field>
-
-          <div style={{ gridColumn: '1 / -1' }}>
-            <span className="oc-v3-field-label">Хүйс</span>
-            <div style={{ marginTop: 8 }}>
-              {editable ? (
-                <div className="oc-v3-seg">
-                  {GENDERS.map((g) => (
-                    <button
-                      key={g.value}
-                      type="button"
-                      className={`oc-v3-seg-btn${gender === g.value ? ' oc-v3-seg-btn-active' : ''}`}
-                      onClick={() => setGender(g.value)}
-                    >
-                      {g.label}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="oc-v3-value">{participant?.gender ? GENDER_LABEL[participant.gender] : '—'}</p>
-              )}
-            </div>
-          </div>
 
           {/* Folded in from its own card: one read-only line does not need
               a section of its own. Read-only because identity comes from
