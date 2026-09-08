@@ -98,6 +98,18 @@ export default function SolvePage() {
   // a legitimate "you can't solve right now" answer, not a failure, and
   // gets its own explanatory screen rather than a red error line.
   const [blockedMessage, setBlockedMessage] = useState('');
+  // ── Which competition round this run belongs to ──────────────────────
+  // Taken from the scramble route's response, which is the SAME call that
+  // gates access (resolveRoundAccess decides both whether the athlete may
+  // solve and which round is live — see the round-gating block in
+  // app/api/online-competition/scramble/route.ts). Deliberately NOT
+  // re-derived here: a second derivation could disagree with the gate.
+  //
+  // Captured ONCE, on attempt 1, and reused for all five submissions. If
+  // an admin advances the event's round mid-run, the run still lands
+  // whole in the round it started in rather than being split across two.
+  // A redo restarts the run and re-resolves it.
+  const [competitionRound, setCompetitionRound] = useState<number | null>(null);
   const [bests, setBests] = useState<{ pr: number | null; ao5: number | null } | null>(null);
   const [prToast, setPrToast] = useState(false);
   const [signInError, setSignInError] = useState('');
@@ -150,9 +162,14 @@ export default function SolvePage() {
           }
           throw new Error('failed');
         }
-        const data = (await res.json()) as { scramble: string };
+        const data = (await res.json()) as { scramble: string; round?: number };
         setBlockedMessage('');
         setScramble(data.scramble);
+        // Attempt 1 only — later attempts re-hit the gate but must not
+        // move a run that has already started.
+        if (attemptNumber === 1 && typeof data.round === 'number') {
+          setCompetitionRound(data.round);
+        }
       } catch {
         setLoadError('Скрамбл авахад алдаа гарлаа');
       }
@@ -272,6 +289,9 @@ export default function SolvePage() {
     setAttempts([]);
     setAttemptIndex(0);
     setSubmitError('');
+    // Cleared so a failed re-fetch can't leave the previous run's round
+    // attached to the new one; fetchScramble(1) re-resolves it.
+    setCompetitionRound(null);
     fetchScramble(1);
     setStage('zeroDisplay');
   }
@@ -279,6 +299,16 @@ export default function SolvePage() {
   async function handleSubmit() {
     if (!user || user.isAnonymous) {
       setSubmitError('Та нэвтрээгүй байна. Дахин нэвтэрнэ үү.');
+      return;
+    }
+    // Unreachable in practice — the flow only renders once attempt 1's
+    // scramble came back, and that response only exists when the gate
+    // resolved a live round. Handled the same way the gate itself answers
+    // (ROUND_ACCESS_MESSAGE['no-live-round'] in round-access.ts, a
+    // server-only module) rather than defaulting to round 1, so a run can
+    // never be filed under a round nobody opened.
+    if (competitionRound === null) {
+      setSubmitError('Энэ төрлийн раунд одоогоор нээлттэй биш байна.');
       return;
     }
     setSubmitError('');
@@ -307,6 +337,7 @@ export default function SolvePage() {
           uid: user.uid,
           event: eventId,
           round: i + 1,
+          competitionRound,
           videoUrl: secureUrl,
           cloudinaryPublicId: publicId,
           reportedTime: attempt.isDnf ? 0 : (attempt.timeCs as number),

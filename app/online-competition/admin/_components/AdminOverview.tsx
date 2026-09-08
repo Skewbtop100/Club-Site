@@ -9,6 +9,7 @@ import type {
 } from '@/lib/online-competition/types';
 import type { RegistrationAdminView } from '@/app/api/online-competition/admin-competitions/[id]/registrations/route';
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
+import RoundGapWarning from './RoundGapWarning';
 import { WcaEventIcon, hasWcaEventIcon } from '@/lib/wca-event-icon';
 import { Badge } from '../../_components/ui';
 
@@ -193,6 +194,9 @@ export default function AdminOverview() {
         {/* ── Round progress (live competition) ────────────────────── */}
         <div style={{ border: '1px solid #1C1C21', background: '#0D0D10' }}>
           <CardHead label="Раундын явц" />
+          {/* The admin lands here first — a live competition with no round
+              open must not read as "just no submissions yet". */}
+          {live && <RoundGapWarning events={live.eventsWithoutLiveRound ?? []} />}
           {liveSubs === null || registrations === null ? (
             <p className="oc-v3-status">Ачааллаж байна...</p>
           ) : !live ? (

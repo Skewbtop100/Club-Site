@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { isOnlineCompAdmin } from '@/lib/online-competition/admin-auth';
 import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
 import { normalizeCompetitionStatus, toFirestoreDoc, validateCompetitionInput } from '@/lib/online-competition/admin-competitions';
+import { resolveEventLiveRounds } from '@/lib/online-competition/round-access';
 import type { OnlineCompetitionAdminView } from '@/lib/online-competition/types';
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -17,6 +18,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   }
 
   const data = snap.data()!;
+  // Always computed here (unlike the list endpoint, which only pays for
+  // live competitions): this single-competition response also backs the
+  // edit form's "switching to live with no round open" confirmation,
+  // which by definition asks about a competition that is not live yet.
+  const liveRounds = await resolveEventLiveRounds(db, id);
   const competition: OnlineCompetitionAdminView = {
     id: snap.id,
     name: data.name ?? '',
@@ -31,6 +37,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     // the extra onlineSubmissions query here.
     participantCount: 0,
     season: typeof data.season === 'string' ? data.season : '',
+    eventsWithoutLiveRound: liveRounds
+      .filter((e) => e.liveRound === null)
+      .map((e) => ({ eventId: e.eventId, label: e.label })),
   };
 
   return NextResponse.json({ competition });

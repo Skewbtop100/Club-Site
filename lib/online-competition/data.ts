@@ -266,7 +266,14 @@ export async function createSubmission(input: {
   competitionId: string;
   uid: string;
   event: string;
+  /** Attempt index 1-5 — see the field note in types.ts. */
   round: number;
+  /** The competition round this run belongs to. REQUIRED (unlike the
+   *  optional field on the stored doc, which is optional only for
+   *  historical docs): the caller must resolve it once per run from the
+   *  round-access gate rather than letting it default here, so the stored
+   *  value can never disagree with the gate that admitted the athlete. */
+  competitionRound: number;
   videoUrl: string;
   cloudinaryPublicId: string;
   reportedTime: number;
@@ -283,6 +290,7 @@ export async function createSubmission(input: {
     uid: input.uid,
     event: input.event,
     round: input.round,
+    competitionRound: input.competitionRound,
     videoUrl: input.videoUrl,
     cloudinaryPublicId: input.cloudinaryPublicId,
     reportedTime: input.reportedTime,

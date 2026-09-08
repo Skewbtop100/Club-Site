@@ -244,6 +244,22 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Per-athlete notification feed for the online-competition platform.
+    // Written ONLY server-side, by the Admin SDK (the judge-decision route
+    // app/api/online-competition/review/route.ts), which bypasses these
+    // rules entirely — so `create` is denied to every client, matching how
+    // onlineSubmissions.status/penalty are handled. The owner may read
+    // their own notifications and flip nothing but the `read` flag.
+    match /onlineNotifications/{notificationId} {
+      allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow create: if false;
+      allow update: if isSignedIn() &&
+                       resource.data.uid == request.auth.uid &&
+                       request.resource.data.diff(resource.data)
+                         .affectedKeys().hasOnly(['read']);
+      allow delete: if false;
+    }
+
     match /onlineSeasonPoints/{season} {
       match /athletes/{uid} {
         allow read: if true;

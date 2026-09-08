@@ -79,3 +79,6 @@ serviceAccountKey.json
 
 .vercel
 .env*
+
+# One-off script build output (scripts/*.ts compiled via npx tsc)
+.tmp-*-build/

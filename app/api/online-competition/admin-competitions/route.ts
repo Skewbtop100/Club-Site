@@ -3,6 +3,7 @@ import { FieldValue, type Firestore } from 'firebase-admin/firestore';
 import { isOnlineCompAdmin } from '@/lib/online-competition/admin-auth';
 import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
 import { normalizeCompetitionStatus, toFirestoreDoc, validateCompetitionInput } from '@/lib/online-competition/admin-competitions';
+import { resolveEventLiveRounds } from '@/lib/online-competition/round-access';
 import type { OnlineCompetitionAdminView } from '@/lib/online-competition/types';
 
 // Distinct-uid count of onlineSubmissions for this competition — a
@@ -38,6 +39,11 @@ export async function GET() {
   const competitions: OnlineCompetitionAdminView[] = await Promise.all(
     snap.docs.map(async (d) => {
       const data = d.data();
+      const status = normalizeCompetitionStatus(data.status);
+      // Only live competitions can strand an athlete on the blocked
+      // screen, and this costs a roundState subcollection read each — so
+      // the others report an empty gap list rather than paying for it.
+      const liveRounds = status === 'live' ? await resolveEventLiveRounds(db, d.id) : [];
       return {
         id: d.id,
         name: data.name ?? '',
@@ -46,10 +52,13 @@ export async function GET() {
         registrationDeadline: data.registrationDeadline?.toMillis?.() ?? null,
         participantLimit: typeof data.participantLimit === 'number' ? data.participantLimit : null,
         events: Array.isArray(data.events) ? data.events : [],
-        status: normalizeCompetitionStatus(data.status),
+        status,
         createdAt: data.createdAt?.toMillis?.() ?? null,
         participantCount: await countDistinctParticipants(db, d.id),
         season: typeof data.season === 'string' ? data.season : '',
+        eventsWithoutLiveRound: liveRounds
+          .filter((e) => e.liveRound === null)
+          .map((e) => ({ eventId: e.eventId, label: e.label })),
       };
     }),
   );

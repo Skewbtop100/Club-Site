@@ -6,6 +6,7 @@ import type { OnlineCompetitionAdminView } from '@/lib/online-competition/types'
 import type { RegistrationAdminView } from '@/app/api/online-competition/admin-competitions/[id]/registrations/route';
 import Link from 'next/link';
 import CompetitionForm from '../../../_components/CompetitionForm';
+import RoundGapWarning from '../../../_components/RoundGapWarning';
 
 export default function CompetitionDetail({ competitionId }: { competitionId: string }) {
   const [competition, setCompetition] = useState<OnlineCompetitionAdminView | null>(null);
@@ -47,6 +48,16 @@ export default function CompetitionDetail({ competitionId }: { competitionId: st
           Засах
         </Button>
       </div>
+
+      {/* Live, but at least one event has no round open — athletes on
+          those events get a blocked screen, so this sits above the tab
+          bar rather than inside the tab's content. */}
+      {competition.status === 'live' && (
+        <RoundGapWarning
+          events={competition.eventsWithoutLiveRound ?? []}
+          style={{ marginBottom: 20 }}
+        />
+      )}
 
       {/* Review lives at /admin/review now — one destination, with this
           competition preselected in its dropdown. The duplicate

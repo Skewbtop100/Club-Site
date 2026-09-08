@@ -4,6 +4,7 @@ import { isOnlineCompAdmin } from '@/lib/online-competition/admin-auth';
 import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
 import { roundKey } from '@/lib/online-competition/scrambles';
 import { fetchRoundStates } from '@/lib/online-competition/round-results';
+import { resolveEventLiveRounds } from '@/lib/online-competition/round-access';
 import type { QualifierMethod, RoundStatus } from '@/lib/online-competition/rounds';
 
 // ── Round management (Раунд удирдах) ────────────────────────────────────
@@ -84,7 +85,14 @@ export async function GET(req: Request) {
     }
   }
 
-  return NextResponse.json({ rounds });
+  // Which events have no round open at all — the same findLiveRound rule
+  // the solve gate uses, not a scan of the `rounds` array above, so the
+  // panel's warning and the athlete's 409 can never disagree.
+  const eventsWithoutLiveRound = (await resolveEventLiveRounds(db, competitionId))
+    .filter((e) => e.liveRound === null)
+    .map((e) => ({ eventId: e.eventId, label: e.label }));
+
+  return NextResponse.json({ rounds, eventsWithoutLiveRound });
 }
 
 /** Opens or closes a round.

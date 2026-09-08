@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Badge, Button, EmptyState, type BadgeSpec } from '../../_components/ui';
 import type { OnlineCompetitionAdminView, OnlineCompetitionStatus } from '@/lib/online-competition/types';
 import CompetitionForm from './CompetitionForm';
+import RoundGapWarning from './RoundGapWarning';
 
 const STATUS_LABEL: Record<OnlineCompetitionStatus, string> = {
   upcoming: 'Удахгүй болох',
@@ -156,6 +157,18 @@ export default function CompetitionsList() {
                     →
                   </span>
                 </Link>
+
+                {/* A live competition with no round open silently refuses
+                    every solve attempt — surfaced here, on its own strip
+                    below the row, because the row's grid has no column
+                    wide enough for it (same reason as the recompute strip
+                    below). */}
+                {c.status === 'live' && (
+                  <RoundGapWarning
+                    events={c.eventsWithoutLiveRound ?? []}
+                    style={{ borderTop: 'none' }}
+                  />
+                )}
 
                 {/* Its own strip below the row, not squeezed into the 80px
                     last column — "Онооны тооцоо шинэчлэх" is far too long

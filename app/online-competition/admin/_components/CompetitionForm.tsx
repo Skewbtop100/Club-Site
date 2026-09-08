@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Button, FieldLabel, INPUT_CLASS, MONO_INPUT_CLASS, SELECT_CLASS, SquareToggle } from '../../_components/ui';
+import { ROUND_GAP_TEXT, type RoundGapEvent } from './RoundGapWarning';
 import type {
   OnlineCompetitionAdminView,
   OnlineCompetitionStatus,
@@ -74,6 +75,9 @@ export default function CompetitionForm({
   );
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  // Non-null while the "going live with no round open" confirmation is up;
+  // holds the affected events so the dialog can name them.
+  const [confirmGaps, setConfirmGaps] = useState<RoundGapEvent[] | null>(null);
 
   function updateRow(index: number, patch: Partial<EventRow>) {
     setEvents((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
@@ -105,6 +109,37 @@ export default function CompetitionForm({
     return null;
   }
 
+  /** The events this save would leave unsolvable — configured, but with no
+   *  round open. Uses the server's own answer (computed with the solve
+   *  gate's findLiveRound) rather than guessing from round counts.
+   *
+   *  A competition that doesn't exist yet cannot have an open round, so
+   *  every one of its events counts; for an existing one, an event ADDED
+   *  in this very edit has no round open by construction, so it counts
+   *  too even though the server has never seen it. */
+  async function eventsGoingLiveWithoutRound(): Promise<RoundGapEvent[]> {
+    const formEvents: RoundGapEvent[] = [];
+    for (const row of events) {
+      const opt = EVENT_OPTIONS.find((o) => o.eventId === row.eventId) ?? EVENT_OPTIONS[0];
+      if (!formEvents.some((e) => e.eventId === opt.eventId)) {
+        formEvents.push({ eventId: opt.eventId, label: opt.label });
+      }
+    }
+    if (!competition) return formEvents;
+    try {
+      const res = await fetch(`/api/online-competition/admin-competitions/${competition.id}`);
+      if (!res.ok) throw new Error('failed');
+      const d = (await res.json()) as { competition: OnlineCompetitionAdminView };
+      const gapIds = new Set((d.competition.eventsWithoutLiveRound ?? []).map((e) => e.eventId));
+      const storedIds = new Set(d.competition.events.map((e) => e.eventId));
+      return formEvents.filter((e) => gapIds.has(e.eventId) || !storedIds.has(e.eventId));
+    } catch {
+      // A failed lookup must not stand between the admin and their save —
+      // this is a warning, not a precondition.
+      return [];
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const validationError = validate();
@@ -112,6 +147,25 @@ export default function CompetitionForm({
       setError(validationError);
       return;
     }
+    setError('');
+
+    // Only on the transition INTO live — a competition that is already
+    // live is covered by the standing warnings on the list, detail and
+    // Раунд удирдах screens.
+    if (status === 'live' && competition?.status !== 'live' && confirmGaps === null) {
+      setSaving(true);
+      const gaps = await eventsGoingLiveWithoutRound();
+      setSaving(false);
+      if (gaps.length > 0) {
+        setConfirmGaps(gaps);
+        return;
+      }
+    }
+    await doSave();
+  }
+
+  async function doSave() {
+    setConfirmGaps(null);
     setError('');
     setSaving(true);
     try {
@@ -303,6 +357,31 @@ export default function CompetitionForm({
           <p className="text-sm text-[#E8543C]" style={{ marginTop: 16 }}>
             {error}
           </p>
+        )}
+
+        {/* Warning, not a block: a staged opening (go live now, open
+            round 1 when the field is ready) is a legitimate thing to do,
+            so the admin can proceed — they just can't do it unknowingly. */}
+        {confirmGaps && (
+          <div
+            className="oc-sc-warn"
+            style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 10 }}
+          >
+            <span>
+              ▲ {ROUND_GAP_TEXT}
+            </span>
+            <span style={{ color: '#8A6A28' }}>
+              Раунд нээгдээгүй төрөл: {confirmGaps.map((e) => e.label).join(', ')}
+            </span>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setConfirmGaps(null)}>
+                Буцах
+              </Button>
+              <Button type="button" variant="primary" disabled={saving} onClick={doSave}>
+                Харин хадгалах
+              </Button>
+            </div>
+          </div>
         )}
 
         <div className="flex justify-end gap-2" style={{ marginTop: 20 }}>

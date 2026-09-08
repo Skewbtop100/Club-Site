@@ -42,6 +42,49 @@ function findLiveRound(
   return live;
 }
 
+/** One configured event's live-round status. `liveRound === null` is the
+ *  state the admin UI warns about: the event is configured, the
+ *  competition may be live, but no round is open, so every solve attempt
+ *  is refused with 'no-live-round'. */
+export interface EventLiveRoundStatus {
+  eventId: string;
+  label: string;
+  liveRound: number | null;
+}
+
+/** Live-round status for EVERY event a competition configures, in config
+ *  order.
+ *
+ *  A thin fan-out over findLiveRound above — deliberately the same rule
+ *  the solve gate enforces with, so the admin warning can never disagree
+ *  with what an athlete actually experiences. One roundState read serves
+ *  the whole competition. This asks nothing about qualification (there is
+ *  no athlete here), which is the only reason it isn't just
+ *  resolveRoundAccessForCompetition. */
+export async function resolveEventLiveRounds(
+  db: Firestore,
+  competitionId: string,
+): Promise<EventLiveRoundStatus[]> {
+  const compSnap = await db.collection('onlineCompetitions').doc(competitionId).get();
+  if (!compSnap.exists) return [];
+
+  const events = compSnap.get('events');
+  if (!Array.isArray(events)) return [];
+
+  const states = await fetchRoundStates(db, competitionId);
+  const out: EventLiveRoundStatus[] = [];
+  for (const e of events) {
+    const eventId = typeof e?.eventId === 'string' ? e.eventId : '';
+    if (!eventId) continue;
+    out.push({
+      eventId,
+      label: typeof e?.label === 'string' && e.label ? e.label : eventId.toUpperCase(),
+      liveRound: findLiveRound(states, eventId),
+    });
+  }
+  return out;
+}
+
 /** Resolves access for one athlete and event.
  *
  *  Round 1 has no prerequisite — any registered athlete may attempt it

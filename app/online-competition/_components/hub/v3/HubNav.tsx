@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { OnlineCompetition } from '@/lib/online-competition/types';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import { onlineCompAuth } from '@/lib/online-competition/firebase';
 import { initials } from './util';
+import NotificationBell from './NotificationBell';
 
 // Canonical in-app paths. The comp.* subdomain rewrite (middleware.ts)
 // maps "/" -> "/online-competition" and passes anything already under
@@ -48,8 +49,12 @@ export default function HubNav({
 
   const [compsOpen, setCompsOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
+  // The bell popup and the user menu are mutually exclusive — opening one
+  // closes the other — so this lives here rather than inside the bell.
+  const [notifOpen, setNotifOpen] = useState(false);
   const compsRef = useRef<HTMLDivElement | null>(null);
   const userRef = useRef<HTMLDivElement | null>(null);
+  const closeNotif = useCallback(() => setNotifOpen(false), []);
 
   // Click-anywhere-else closes whichever menu is open.
   useEffect(() => {
@@ -68,6 +73,7 @@ export default function HubNav({
   async function goToDashboard() {
     setCompsOpen(false);
     setUserOpen(false);
+    setNotifOpen(false);
     if (signedIn) {
       router.push(DASHBOARD);
       return;
@@ -152,10 +158,27 @@ export default function HubNav({
         )}
       </div>
 
-      <div className="oc-v3-nav-auth">
+      <div className="oc-v3-nav-auth" style={{ gap: 10 }}>
       {loading ? null : signedIn ? (
+        <>
+        <NotificationBell
+          uid={user.uid}
+          open={notifOpen}
+          onToggle={() => {
+            setNotifOpen((v) => !v);
+            setUserOpen(false);
+          }}
+          onClose={closeNotif}
+        />
         <div className="oc-v3-menu-wrap" ref={userRef}>
-          <button type="button" className="oc-v3-userbtn" onClick={() => setUserOpen((v) => !v)}>
+          <button
+            type="button"
+            className="oc-v3-userbtn"
+            onClick={() => {
+              setUserOpen((v) => !v);
+              setNotifOpen(false);
+            }}
+          >
             <Avatar user={user} />
             <span style={{ font: '500 12px var(--oc-font-heading), sans-serif', color: '#F4F1EA' }}>
               {user.displayName ?? 'Тамирчин'}
@@ -211,6 +234,7 @@ export default function HubNav({
             </div>
           )}
         </div>
+        </>
       ) : (
         <button type="button" className="oc-v3-signin" onClick={() => signInWithGoogle()}>
           Нэвтрэх

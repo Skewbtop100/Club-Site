@@ -8,6 +8,7 @@ import type { QualifyResponse } from '@/app/api/online-competition/admin-rounds/
 import type { QualifierMethod, RoundRanking } from '@/lib/online-competition/rounds';
 import { roundKey } from '@/lib/online-competition/scrambles';
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
+import RoundGapWarning, { type RoundGapEvent } from './RoundGapWarning';
 
 // ── Раунд удирдах ────────────────────────────────────────────────────────
 // Open / close / advance each event's rounds. Every write goes through the
@@ -39,6 +40,10 @@ export default function RoundsManager() {
   const [competitionId, setCompetitionId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [rounds, setRounds] = useState<RoundAdminView[] | null>(null);
+  // Events with no round open at all, straight from the API (computed
+  // there with the solve gate's own findLiveRound) — never derived from
+  // `rounds` here, which would be a second copy of that rule.
+  const [gaps, setGaps] = useState<RoundGapEvent[]>([]);
   const [loadError, setLoadError] = useState('');
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [rowError, setRowError] = useState<{ key: string; message: string } | null>(null);
@@ -77,16 +82,22 @@ export default function RoundsManager() {
         `/api/online-competition/admin-rounds?competitionId=${encodeURIComponent(competitionId)}`,
       );
       if (!res.ok) throw new Error('failed');
-      const d = (await res.json()) as { rounds: RoundAdminView[] };
+      const d = (await res.json()) as {
+        rounds: RoundAdminView[];
+        eventsWithoutLiveRound?: RoundGapEvent[];
+      };
       setRounds(d.rounds ?? []);
+      setGaps(d.eventsWithoutLiveRound ?? []);
     } catch {
       setRounds(null);
+      setGaps([]);
       setLoadError('Раундын мэдээллийг ачааллаж чадсангүй');
     }
   }, [competitionId]);
 
   useEffect(() => {
     setRounds(null);
+    setGaps([]);
     setQualifyKey(null);
     setRowError(null);
     load();
@@ -160,6 +171,19 @@ export default function RoundsManager() {
       </div>
 
       {loadError && <p className="oc-v3-status-error">{loadError}</p>}
+
+      {/* One line per event with no round open, at the top of the panel —
+          the ОНГОЙЛОХ button that fixes each one is in the rows
+          directly below. Rendered per event rather than as a single
+          combined line so an admin scanning a multi-event competition can
+          match each warning to its own row. */}
+      {gaps.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {gaps.map((g) => (
+            <RoundGapWarning key={g.eventId} events={[g]} />
+          ))}
+        </div>
+      )}
 
       {rounds === null && !loadError ? (
         <p className="oc-v3-status">Ачааллаж байна...</p>

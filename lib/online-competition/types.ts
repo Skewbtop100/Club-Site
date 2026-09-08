@@ -172,9 +172,23 @@ export interface OnlineSubmission {
   competitionId: string;
   uid: string;
   event: string;
-  /** Not in the minimal spec shape but needed by the (stubbed) next-round
-   *  selection logic to know which attempt this submission belongs to. */
+  /** ATTEMPT INDEX 1-5 within one run — NOT a competition round. The solve
+   *  flow writes `round: i + 1` per attempt, and every Ao5 consumer
+   *  (seasonPoints, athleteStats, round-results, ReviewGrid) reads it that
+   *  way. The competition round lives in `competitionRound` below; the two
+   *  are deliberately separate fields, and this one must not be renamed or
+   *  repurposed. */
   round: number;
+  /** The competition round (1..N, as configured by events[].rounds) this
+   *  attempt belongs to — the round that was live for this event when the
+   *  run started, resolved ONCE per run from the same round-access gate
+   *  that let the athlete in (see round-access.ts / the scramble route).
+   *
+   *  Optional because every submission written before this field existed
+   *  lacks it; those are attributed by the createdAt time window instead
+   *  (roundWindow in round-results.ts) until the backfill lands. New
+   *  submissions always carry it. */
+  competitionRound?: number;
   /** Cloudinary secure_url for the uploaded solve video. */
   videoUrl: string;
   /** Cloudinary public_id — needed to delete/manage the asset later
@@ -205,6 +219,39 @@ export type OnlineSubmissionPenalty = '+2' | 'DNF' | null;
 export interface NextEventRound {
   event: string;
   round: number;
+}
+
+// ── Notifications (onlineNotifications/{notificationId}) ───────────────
+// Per-athlete notification feed for the hub's nav bell. Docs are only ever
+// created server-side with the Admin SDK (see lib/online-competition/
+// notifications-server.ts); the client may read its own and flip nothing
+// but `read`. `title` is composed at WRITE time into final Mongolian
+// display text rather than being templated at render time — the wording
+// of an old notification then never changes under the athlete when the
+// copy is edited later.
+
+/** Collection name, kept here (an SDK-free module) so the client half
+ *  and the Admin-SDK half can share it without either importing the
+ *  other's Firebase client. */
+export const ONLINE_NOTIFICATIONS = 'onlineNotifications';
+
+export type OnlineNotificationType = 'result_approved' | 'result_rejected';
+
+export interface OnlineNotification {
+  id?: string;
+  /** Recipient's Firebase Auth uid. */
+  uid: string;
+  type: OnlineNotificationType;
+  /** Final Mongolian display text, composed at write time. */
+  title: string;
+  /** Short uppercase label shown in the meta line, e.g. 'ТЭСТ ТЭМЦЭЭН'. */
+  contextLabel: string;
+  /** Where clicking the row navigates; '' for a non-clickable notice. */
+  href: string;
+  read: boolean;
+  /** serverTimestamp() — null in the local snapshot until the write round-
+   *  trips, so every consumer must tolerate null (see formatNotifMeta). */
+  createdAt?: Timestamp | null;
 }
 
 // ── Referee review dashboard (app/online-competition/admin) ────────────────
@@ -251,6 +298,13 @@ export interface OnlineCompetitionAdminView {
   /** '' when unset — the admin view always has *something* to show, same
    *  reasoning as every other field here. */
   season: string;
+  /** Configured events that currently have NO live round — i.e. every
+   *  solve attempt for them is refused with 'no-live-round'. Computed
+   *  server-side with resolveEventLiveRounds (round-access.ts), the same
+   *  rule the solve gate enforces with. Empty array means every event has
+   *  an open round; the list endpoint only computes it for live
+   *  competitions, where it is the state the admin needs warning about. */
+  eventsWithoutLiveRound: { eventId: string; label: string }[];
 }
 
 /** Payload for POST/PUT admin-competitions — what the create/edit form

@@ -64,8 +64,13 @@ export async function fetchRoundStates(
   return out;
 }
 
-/** [start, end) in epoch ms during which this round was the live one. */
-function roundWindow(
+/** [start, end) in epoch ms during which this round was the live one.
+ *
+ *  Exported only so the one-off backfill script
+ *  (scripts/backfill-competition-round.ts) attributes historical
+ *  submissions with the EXACT interval logic the platform has been using,
+ *  rather than a second copy of it. No behaviour change. */
+export function roundWindow(
   states: Map<string, RoundStateDoc>,
   eventId: string,
   round: number,
