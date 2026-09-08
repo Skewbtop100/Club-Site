@@ -8,6 +8,7 @@ import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import { onlineCompAuth } from '@/lib/online-competition/firebase';
 import { initials } from './util';
 import NotificationBell from './NotificationBell';
+import AuthModal from './AuthModal';
 
 // Canonical in-app paths. The comp.* subdomain rewrite (middleware.ts)
 // maps "/" -> "/online-competition" and passes anything already under
@@ -52,8 +53,12 @@ export default function HubNav({
   // The bell popup and the user menu are mutually exclusive — opening one
   // closes the other — so this lives here rather than inside the bell.
   const [notifOpen, setNotifOpen] = useState(false);
+  // "Нэвтрэх" now opens the sign-in modal; the Google popup fires
+  // from inside it. The auth call itself is unchanged — see AuthModal.
+  const [authOpen, setAuthOpen] = useState(false);
   const compsRef = useRef<HTMLDivElement | null>(null);
   const userRef = useRef<HTMLDivElement | null>(null);
+  const signInRef = useRef<HTMLButtonElement | null>(null);
   const closeNotif = useCallback(() => setNotifOpen(false), []);
 
   // Click-anywhere-else closes whichever menu is open.
@@ -236,11 +241,28 @@ export default function HubNav({
         </div>
         </>
       ) : (
-        <button type="button" className="oc-v3-signin" onClick={() => signInWithGoogle()}>
+        <button
+          ref={signInRef}
+          type="button"
+          className="oc-v3-signin"
+          onClick={() => setAuthOpen(true)}
+        >
           Нэвтрэх
         </button>
       )}
       </div>
+
+      {/* Focus returns to the trigger on every close path — Escape, the
+          overlay, and the × button all route through here. After a
+          successful sign-in the trigger has unmounted, so the optional
+          call is a no-op rather than an error. */}
+      <AuthModal
+        open={authOpen}
+        onClose={() => {
+          setAuthOpen(false);
+          signInRef.current?.focus();
+        }}
+      />
     </nav>
   );
 }

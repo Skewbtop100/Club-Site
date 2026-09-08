@@ -1447,6 +1447,19 @@
   50% { opacity: 0.3; }
 }
 
+/* Entry for the sign-in modal (v3/AuthModal.tsx) — a short fade with a
+   small upward travel, so the panel arrives rather than snapping in. */
+@keyframes khFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .oc-v3-page {
   min-height: 100vh;
   width: 100%;
