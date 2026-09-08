@@ -234,7 +234,12 @@ export interface NextEventRound {
  *  other's Firebase client. */
 export const ONLINE_NOTIFICATIONS = 'onlineNotifications';
 
-export type OnlineNotificationType = 'result_approved' | 'result_rejected';
+/** 'round_result'   — your round is finalised, here is your placement.
+ *  'round_advanced' — same, plus you made the cut into the next round.
+ *  An athlete gets exactly ONE of these per round, never both. (The
+ *  earlier per-judge-decision kinds are gone: they fired five times for
+ *  one round.) */
+export type OnlineNotificationType = 'round_result' | 'round_advanced';
 
 export interface OnlineNotification {
   id?: string;

@@ -5,6 +5,7 @@ import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
 import { roundKey } from '@/lib/online-competition/scrambles';
 import { fetchRoundStates } from '@/lib/online-competition/round-results';
 import { resolveEventLiveRounds } from '@/lib/online-competition/round-access';
+import { notifyRoundFinalised } from '@/lib/online-competition/notifications-server';
 import type { QualifierMethod, RoundStatus } from '@/lib/online-competition/rounds';
 
 // ── Round management (Раунд удирдах) ────────────────────────────────────
@@ -158,5 +159,14 @@ export async function POST(req: Request) {
     },
     { merge: true },
   );
+
+  // Closing is one of the two ways a round ends, so athletes are told
+  // here too — with no qualifiers, since closing deliberately computes no
+  // cut. Never throws, and its own marker makes closing an already-closed
+  // round send nothing. Awaited rather than fired-and-forgotten: this is a
+  // serverless handler, and work left running past the response is not
+  // guaranteed to finish.
+  await notifyRoundFinalised({ competitionId, eventId, round });
+
   return NextResponse.json({ status: 'done' });
 }

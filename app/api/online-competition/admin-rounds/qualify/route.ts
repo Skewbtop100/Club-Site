@@ -4,6 +4,7 @@ import { isOnlineCompAdmin } from '@/lib/online-competition/admin-auth';
 import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
 import { roundKey } from '@/lib/online-competition/scrambles';
 import { rankRoundResults } from '@/lib/online-competition/round-results';
+import { notifyRoundFinalised } from '@/lib/online-competition/notifications-server';
 import {
   selectQualifiers,
   validateQualifierInput,
@@ -88,6 +89,18 @@ export async function POST(req: Request) {
     { merge: true },
   );
   await batch.commit();
+
+  // Advancing also ends the round, so this is the other moment athletes
+  // are told — here with the qualifier list in hand, so those who made the
+  // cut get the "шалгарлаа" wording instead of a plain result (one
+  // notification either way, never two). Never throws, and its marker
+  // makes a re-run of ШАЛГАРУУЛАХ send nothing a second time.
+  await notifyRoundFinalised({
+    competitionId,
+    eventId,
+    round,
+    qualifiedUids: qualifiers.map((q) => q.uid),
+  });
 
   const payload: QualifyResponse = { ranked, qualifiers, committed: true };
   return NextResponse.json(payload);
