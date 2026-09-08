@@ -3,7 +3,12 @@ import { computeAo5, type AttemptTime } from './ao5';
 
 interface ApprovedSubmission {
   event: string;
+  /** Attempt index 1-5 within one run. */
   round: number;
+  /** Which competition this attempt belongs to. */
+  competitionId: string;
+  /** The competition round this attempt belongs to. */
+  competitionRound: number;
   reportedTime: number;
   isDnf?: boolean;
   penalty: '+2' | 'DNF' | null;
@@ -73,6 +78,12 @@ export async function recomputeAthleteStatsForCompetition(
       const s: ApprovedSubmission = {
         event: d.event,
         round: d.round,
+        competitionId: d.competitionId,
+        // Attempts with no competitionRound can't be attributed to a round
+        // and are excluded from Ao5 grouping below (NaN never matches a
+        // real round key). They still count towards the single-solve PR,
+        // which needs no grouping at all.
+        competitionRound: typeof d.competitionRound === 'number' ? d.competitionRound : NaN,
         reportedTime: d.reportedTime,
         isDnf: d.isDnf,
         penalty: d.penalty ?? null,
@@ -87,28 +98,32 @@ export async function recomputeAthleteStatsForCompetition(
       const times = subs.map(effectiveTime).filter((t): t is number => typeof t === 'number');
       const pr = times.length > 0 ? Math.min(...times) : null;
 
-      // Ao5: best average over complete rounds-1-5 sets. Grouped per
-      // competition because rounds only mean anything within one — and a
-      // competition where the same round appears more than once (an
-      // athlete re-running the solve flow, which real data does contain)
-      // has no unambiguous set, so it's skipped rather than guessed at.
-      // This mirrors the season scorer's "exactly 5, rounds 1-5" rule.
-      const byComp = new Map<string, ApprovedSubmission[]>();
-      for (const doc of mine.docs) {
-        const d = doc.data();
-        if (d.event !== eventId) continue;
-        const key = d.competitionId as string;
-        if (!byComp.has(key)) byComp.set(key, []);
-        byComp.get(key)!.push({
-          event: d.event,
-          round: d.round,
-          reportedTime: d.reportedTime,
-          isDnf: d.isDnf,
-          penalty: d.penalty ?? null,
-        });
+      // Ao5: best average over complete attempt-1-5 sets. Grouped per
+      // competition AND per competition round: a round is the unit an Ao5
+      // is actually solved over, so two rounds of the same event in one
+      // competition are two independent candidates, never one merged set.
+      // (Grouping by competition alone used to be the rule, on the
+      // reasoning that "rounds only mean anything within one competition".
+      // That is now inverted — grouping by competition alone is exactly
+      // what let a round-1 attempt and a round-2 attempt average together
+      // into an Ao5 neither of them was part of.) A group where the same
+      // attempt index appears twice — an athlete re-running the solve
+      // flow, which real data does contain — still has no unambiguous
+      // set, so it is skipped rather than guessed at.
+      //
+      // Selection stays "best wins", unlike the season scorer's
+      // furthest-round rule: a PR is a fact about a solve, so an average
+      // set in round 1 remains this athlete's best even if they went on to
+      // a slower final.
+      const byRoundSet = new Map<string, ApprovedSubmission[]>();
+      for (const sub of subs) {
+        if (!Number.isFinite(sub.competitionRound)) continue;
+        const key = `${sub.competitionId}|${eventId}|${sub.competitionRound}`;
+        if (!byRoundSet.has(key)) byRoundSet.set(key, []);
+        byRoundSet.get(key)!.push(sub);
       }
       let bestAo5: number | null = null;
-      for (const set of byComp.values()) {
+      for (const set of byRoundSet.values()) {
         if (set.length !== 5) continue;
         const rounds = set.map((s) => s.round).sort((a, b) => a - b);
         if (rounds.join(',') !== '1,2,3,4,5') continue;

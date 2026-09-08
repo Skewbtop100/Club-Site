@@ -7,10 +7,29 @@ const PLACEMENT_BONUS: Record<number, number> = { 1: 15, 2: 10, 3: 5 };
 
 interface ApprovedSubmission {
   uid: string;
+  /** Attempt index 1-5 within one run. */
   round: number;
+  /** The competition round this attempt belongs to. */
+  competitionRound: number;
   reportedTime: number;
   isDnf?: boolean;
   penalty: '+2' | 'DNF' | null;
+}
+
+/** One athlete's work in one event of this competition, partitioned by
+ *  competition round — the grouping key is competitionId + eventId +
+ *  competitionRound (competitionId is constant here; the query fetches a
+ *  single competition). Before this partition existed, attempts from two
+ *  different rounds could land in one five-attempt set and produce a
+ *  fabricated Ao5. */
+interface AthleteEvent {
+  /** competitionRound -> that round's APPROVED submissions. */
+  approvedByRound: Map<number, ApprovedSubmission[]>;
+  /** Highest competitionRound this athlete has ANY submission in for this
+   *  event — pending and rejected included. This is their furthest round
+   *  REACHED, which is what placement is decided on; it deliberately does
+   *  not depend on whether that round has been judged yet. */
+  furthestRound: number;
 }
 
 /** A submission's effective Ao5 input: DNF (self-reported at entry, or
@@ -27,12 +46,26 @@ function effectiveTime(s: ApprovedSubmission): AttemptTime {
  *
  * Scoring: only approved submissions count. For each event, an athlete
  * needs a *complete* set of exactly 5 approved submissions covering
- * rounds 1-5 to get an Ao5 — a partially-approved set (some of their 5
+ * attempts 1-5 to get an Ao5 — a partially-approved set (some of their 5
  * attempts still pending/rejected) is skipped rather than averaging
  * whatever subset happens to be approved, since that wouldn't be a real
  * Ao5. Athletes are ranked ascending by Ao5 within each event; a DNF
  * average is excluded from ranking entirely (no placement, no points).
  * Points = 10 base for any placed result, +15/+10/+5 for 1st/2nd/3rd.
+ *
+ * WHICH ROUND SCORES — the furthest one reached. WCA semantics: an
+ * athlete's placement in an event comes from the last round they made,
+ * not from their best round. Someone who advances to round 2 is placed
+ * on their round-2 result even if their round-1 Ao5 was faster; the
+ * earlier rounds are superseded, not merely worse.
+ *
+ * The corollary matters as much as the rule: an athlete who reached
+ * round 2 but whose round-2 set is incomplete or still being judged is
+ * excluded from placement ENTIRELY until it completes. Falling back to
+ * their round-1 result would score them as though they had never
+ * advanced, which is precisely backwards. Because `furthestRound` is
+ * derived from submissions of ANY status, a not-yet-judged later round
+ * still counts as reached and still suppresses the earlier one.
  *
  * Idempotent: re-running this (e.g. after more submissions get approved,
  * or just to re-check) replaces this competition's *own* breakdown
@@ -55,14 +88,19 @@ export async function recomputeSeasonPointsForCompetition(
     throw new Error('Competition has no season set');
   }
 
+  // Every submission for this competition, not only the approved ones:
+  // deciding the furthest round an athlete REACHED has to see pending and
+  // rejected work too, or a not-yet-judged round 2 would be invisible and
+  // the athlete would be scored on round 1 as if they had never advanced.
+  // Only approved docs ever feed an Ao5 — the partition below keeps that
+  // split explicit.
   const subsSnap = await db
     .collection('onlineSubmissions')
     .where('competitionId', '==', competitionId)
-    .where('status', '==', 'approved')
     .get();
 
-  // eventId -> uid -> submissions
-  const byEvent = new Map<string, Map<string, ApprovedSubmission[]>>();
+  // eventId -> uid -> that athlete's per-round work in the event
+  const byEvent = new Map<string, Map<string, AthleteEvent>>();
   // Every uid with at least one currently-approved submission for this
   // competition, regardless of whether they end up qualifying for a
   // placement — needed below so an athlete who qualified on a PREVIOUS
@@ -74,13 +112,36 @@ export async function recomputeSeasonPointsForCompetition(
     const d = doc.data();
     const eventId: string = d.event;
     const uid: string = d.uid;
-    involvedUids.add(uid);
+    // A submission with no competitionRound cannot be attributed to a
+    // round at all, so it takes no part here — the same treatment
+    // rankRoundResults gives it, where the round filter simply never
+    // matches. The field is required on every document written since the
+    // cutover, so this is belt-and-braces rather than an expected path.
+    const competitionRound = typeof d.competitionRound === 'number' ? d.competitionRound : null;
+    if (competitionRound === null) continue;
+
+    // Unchanged meaning: uids with at least one CURRENTLY-approved
+    // submission, so an athlete who placed on a previous recompute but no
+    // longer does still gets their stale breakdown entry cleared below.
+    const approved = d.status === 'approved';
+    if (approved) involvedUids.add(uid);
+
     if (!byEvent.has(eventId)) byEvent.set(eventId, new Map());
     const byUid = byEvent.get(eventId)!;
-    if (!byUid.has(uid)) byUid.set(uid, []);
-    byUid.get(uid)!.push({
+    let entry = byUid.get(uid);
+    if (!entry) {
+      entry = { approvedByRound: new Map(), furthestRound: competitionRound };
+      byUid.set(uid, entry);
+    }
+    // Reached, regardless of how far judging has got.
+    if (competitionRound > entry.furthestRound) entry.furthestRound = competitionRound;
+    if (!approved) continue;
+
+    if (!entry.approvedByRound.has(competitionRound)) entry.approvedByRound.set(competitionRound, []);
+    entry.approvedByRound.get(competitionRound)!.push({
       uid,
       round: d.round,
+      competitionRound,
       reportedTime: d.reportedTime,
       isDnf: d.isDnf,
       penalty: d.penalty ?? null,
@@ -93,10 +154,16 @@ export async function recomputeSeasonPointsForCompetition(
   for (const [eventId, byUid] of byEvent) {
     const ranked: { uid: string; ao5: number }[] = [];
 
-    for (const [uid, subs] of byUid) {
+    for (const [uid, entry] of byUid) {
+      // Placement comes from the furthest round reached and from nothing
+      // else. If that round is not fully approved yet the athlete is
+      // excluded outright — there is deliberately no fallback to an
+      // earlier round, which would score them as if they had never
+      // advanced past it.
+      const subs = entry.approvedByRound.get(entry.furthestRound) ?? [];
       if (subs.length !== 5) continue; // incomplete set — not all 5 attempts approved yet
       const rounds = subs.map((s) => s.round).sort((a, b) => a - b);
-      if (rounds.join(',') !== '1,2,3,4,5') continue; // missing/duplicate round
+      if (rounds.join(',') !== '1,2,3,4,5') continue; // missing/duplicate attempt
       const byRound = new Map(subs.map((s) => [s.round, s]));
       const times: AttemptTime[] = [1, 2, 3, 4, 5].map((r) => effectiveTime(byRound.get(r)!));
       const { ao5 } = computeAo5(times);

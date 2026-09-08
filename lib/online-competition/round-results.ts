@@ -1,30 +1,27 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { computeAo5, type AttemptTime } from './ao5';
-import { roundKey } from './scrambles';
 import { normalizeRoundStatus, type RoundRanking, type RoundStateDoc } from './rounds';
 
 // ── Ranking a competition round's results ───────────────────────────────
 // Server-only. Turns approved submissions into the ordered standings the
 // qualifier selection works from.
 //
-// ── How a submission is attributed to a competition round ──────────────
-// A submission's `round` field is its ATTEMPT index 1-5, not a competition
-// round — the solve flow writes `round: i + 1` per attempt, and nothing on
-// the doc records which competition round it belongs to (see the storage
-// note at the top of admin/_components/ReviewGrid.tsx).
+// ── How a submission is attributed to a competition round ──────────
+// By the `competitionRound` field on the document, matched directly in
+// the query below. Two separate fields, deliberately not merged:
+//   `round`            — the ATTEMPT index 1-5 within one run
+//   `competitionRound` — the competition round that run belongs to
+// The solve flow resolves competitionRound once per run from the same
+// round-access gate that admits the athlete, so the stored value can
+// never disagree with the round they were actually let into.
 //
-// So attribution uses time instead: a round is attributed every approved
-// submission created while it was the live round, i.e. from its own
-// `openedAt` up to the moment a LATER round of the same event was opened.
-// That works because rounds open in order and a round must be advanced
-// before the next can open, so the windows never overlap. A round that was
-// never opened has no start bound and takes everything before the next
-// round's opening, which keeps competitions that predate round management
-// rankable instead of silently scoring zero athletes.
-//
-// The alternative — adding a real competition-round field to submissions —
-// is the proper fix, but it changes the solve flow's write shape and every
-// existing doc, so it is deliberately out of scope here.
+// This replaced a createdAt time-window rule (a round took everything
+// created between its own openedAt and the next round's). That INFERRED
+// the round instead of recording it, and broke three ways: re-opening a
+// round rewrote openedAt and silently re-attributed already-judged work;
+// a round that was never opened had no start bound and swallowed
+// everything; and nothing separated two runs inside one window. None of
+// that applies to a field written at submission time.
 
 const ATTEMPTS_PER_ROUND = 5;
 
@@ -64,27 +61,6 @@ export async function fetchRoundStates(
   return out;
 }
 
-/** [start, end) in epoch ms during which this round was the live one.
- *
- *  Exported only so the one-off backfill script
- *  (scripts/backfill-competition-round.ts) attributes historical
- *  submissions with the EXACT interval logic the platform has been using,
- *  rather than a second copy of it. No behaviour change. */
-export function roundWindow(
-  states: Map<string, RoundStateDoc>,
-  eventId: string,
-  round: number,
-): { start: number; end: number } {
-  const start = states.get(roundKey(eventId, round))?.openedAt ?? 0;
-  let end = Number.POSITIVE_INFINITY;
-  for (const [key, state] of states) {
-    const [keyEvent, keyRound] = [key.slice(0, key.lastIndexOf('_')), Number(key.slice(key.lastIndexOf('_') + 1))];
-    if (keyEvent !== eventId || !Number.isFinite(keyRound) || keyRound <= round) continue;
-    if (state.openedAt !== null && state.openedAt < end) end = state.openedAt;
-  }
-  return { start, end };
-}
-
 /** Standings for one event+round, best Ao5 first.
  *
  *  Only athletes with all five attempts approved AND a real (non-DNF) Ao5
@@ -96,21 +72,20 @@ export async function rankRoundResults(
   eventId: string,
   round: number,
 ): Promise<RoundRanking[]> {
-  const states = await fetchRoundStates(db, competitionId);
-  const { start, end } = roundWindow(states, eventId, round);
-
   const snap = await db
     .collection('onlineSubmissions')
     .where('competitionId', '==', competitionId)
     .where('status', '==', 'approved')
+    .where('competitionRound', '==', round)
     .get();
 
   const byUid = new Map<string, ApprovedAttempt[]>();
   for (const d of snap.docs) {
     const data = d.data();
     if (data.event !== eventId) continue;
+    // Still read — but only for the oldest-per-slot rule below, never for
+    // deciding which round this attempt belongs to.
     const createdAt = data.createdAt?.toMillis?.() ?? 0;
-    if (createdAt < start || createdAt >= end) continue;
     const attempt = typeof data.round === 'number' ? data.round : 0;
     if (attempt < 1 || attempt > ATTEMPTS_PER_ROUND) continue;
     const uid = data.uid;

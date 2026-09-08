@@ -184,11 +184,10 @@ export interface OnlineSubmission {
    *  run started, resolved ONCE per run from the same round-access gate
    *  that let the athlete in (see round-access.ts / the scramble route).
    *
-   *  Optional because every submission written before this field existed
-   *  lacks it; those are attributed by the createdAt time window instead
-   *  (roundWindow in round-results.ts) until the backfill lands. New
-   *  submissions always carry it. */
-  competitionRound?: number;
+   *  Required. It was briefly optional to accommodate documents written
+   *  before the field existed; none remain, and rankRoundResults now
+   *  matches on it directly rather than inferring a round from createdAt. */
+  competitionRound: number;
   /** Cloudinary secure_url for the uploaded solve video. */
   videoUrl: string;
   /** Cloudinary public_id — needed to delete/manage the asset later
