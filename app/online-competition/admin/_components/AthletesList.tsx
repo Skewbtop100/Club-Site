@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { EmptyState } from '../../_components/ui';
 import EmailChangeDialog from './EmailChangeDialog';
 import { countryName } from '@/lib/online-competition/countries';
+import { resolveParticipantPhoto } from '@/lib/online-competition/data';
 import type { OnlineParticipantAdminView, OnlineParticipantGender } from '@/lib/online-competition/types';
 
 const GENDER_LABEL: Record<OnlineParticipantGender, string> = {
@@ -237,10 +238,10 @@ export default function AthletesList() {
               {approved.map((a) => (
                 <div key={a.uid} className="oc-adm-ath-row">
                   <span className="oc-adm-ath-c1">
-                    {a.approvedPhotoUrl || a.photoUrl ? (
+                    {resolveParticipantPhoto(a) ? (
                       // eslint-disable-next-line @next/next/no-img-element -- Cloudinary URL, not our own image pipeline.
                       <img
-                        src={a.approvedPhotoUrl ?? a.photoUrl ?? undefined}
+                        src={resolveParticipantPhoto(a) ?? undefined}
                         alt=""
                         style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover', display: 'block' }}
                       />

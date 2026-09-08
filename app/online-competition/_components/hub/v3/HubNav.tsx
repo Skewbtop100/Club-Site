@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import type { OnlineCompetition } from '@/lib/online-competition/types';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import { initials } from './util';
+import { resolveParticipantPhoto } from '@/lib/online-competition/data';
 import NotificationBell from './NotificationBell';
 import AuthModal from './AuthModal';
 
@@ -42,10 +43,11 @@ export default function HubNav({
   active?: 'home' | 'competitions' | 'rank';
 }) {
   const router = useRouter();
-  const { user, loading, signOut } = useOnlineAuth();
+  const { user, participant, loading, signOut } = useOnlineAuth();
   // Anonymous sessions (from the solve page) don't count as "signed in" —
   // same rule the old NavBar and the registration gate use.
   const signedIn = !!user && !user.isAnonymous;
+  const athletePhoto = resolveParticipantPhoto(participant);
 
   const [compsOpen, setCompsOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
@@ -184,7 +186,7 @@ export default function HubNav({
               setNotifOpen(false);
             }}
           >
-            <Avatar user={user} />
+            <Avatar photo={athletePhoto} name={user.displayName} />
             <span style={{ font: '500 12px var(--oc-font-heading), sans-serif', color: '#F4F1EA' }}>
               {user.displayName ?? 'Тамирчин'}
             </span>
@@ -193,7 +195,7 @@ export default function HubNav({
           {userOpen && (
             <div className="oc-v3-menu oc-v3-menu-right">
               <div className="oc-v3-menu-head">
-                <Avatar user={user} large />
+                <Avatar photo={athletePhoto} name={user.displayName} large />
                 <div style={{ minWidth: 0 }}>
                   <p
                     style={{
@@ -279,16 +281,28 @@ export default function HubNav({
   );
 }
 
-function Avatar({ user, large = false }: { user: { displayName: string | null; photoURL: string | null }; large?: boolean }) {
+/** The athlete's VERIFICATION photo — what a judge reviewed — not the
+ *  Google account picture. resolveParticipantPhoto is the single source of
+ *  that choice; see its comment in data.ts. Initials stand in until a photo
+ *  has been submitted, exactly as before. */
+function Avatar({
+  photo,
+  name,
+  large = false,
+}: {
+  photo: string | null;
+  name: string | null;
+  large?: boolean;
+}) {
   const cls = `oc-v3-avatar${large ? ' oc-v3-avatar-lg' : ''}`;
-  if (user.photoURL) {
-    // eslint-disable-next-line @next/next/no-img-element -- avatar comes
-    // from Google's CDN, not our own image pipeline.
-    return <img src={user.photoURL} alt="" className={cls} />;
+  if (photo) {
+    // eslint-disable-next-line @next/next/no-img-element -- Cloudinary URL,
+    // not our own image pipeline.
+    return <img src={photo} alt="" className={cls} />;
   }
   return (
     <span aria-hidden className={cls}>
-      {initials(user.displayName)}
+      {initials(name)}
     </span>
   );
 }

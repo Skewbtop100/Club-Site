@@ -7,6 +7,7 @@ import {
   fetchAllCompetitions,
   fetchAthleteSeasonPoints,
   fetchParticipant,
+  resolveParticipantPhoto,
   resolveProfileStatus,
   submitParticipantProfile,
 } from '@/lib/online-competition/data';
@@ -112,7 +113,7 @@ function StatusChip({ status }: { status: OnlineParticipantProfileStatus }) {
 }
 
 export default function ProfilePage() {
-  const { user, loading: authLoading } = useOnlineAuth();
+  const { user, refreshParticipant, loading: authLoading } = useOnlineAuth();
 
   const [authOpen, setAuthOpen] = useState(false);
 
@@ -246,6 +247,10 @@ export default function ProfilePage() {
         onSubmitted={(next) => {
           setParticipant(next);
           setSavedToast(true);
+          // The nav avatar reads the participant from auth context, so a
+          // new verification photo would otherwise not appear there until
+          // the next full page load.
+          void refreshParticipant();
         }}
       />
     </Shell>
@@ -400,11 +405,7 @@ function ProfileBody({
   // Gated on photoFile rather than photoPreview because photoPreview is
   // seeded from participant.photoUrl at mount, so it is non-null even when
   // nothing has been picked and would otherwise always win.
-  const officialPhoto =
-    status === 'approved'
-      ? participant?.approvedPhotoUrl ?? participant?.photoUrl ?? null
-      : participant?.photoUrl ?? null;
-  const shownPhoto = (photoFile ? photoPreview : null) ?? officialPhoto;
+  const shownPhoto = (photoFile ? photoPreview : null) ?? resolveParticipantPhoto(participant);
   const canSubmit = !!photoFile || !!participant?.photoUrl;
 
   return (

@@ -170,6 +170,42 @@ export function resolveProfileStatus(participant: OnlineParticipant | null): Onl
   return participant?.profileStatus ?? 'incomplete';
 }
 
+/** Which image represents an athlete, everywhere in this feature.
+ *
+ *  Approved → the APPROVED photo (types.ts calls it the official one — it
+ *  is the snapshot an admin actually reviewed), falling back to the latest
+ *  submitted one. Not approved → the submitted photo. Neither → null, and
+ *  the caller renders its initials block.
+ *
+ *  Deliberately NOT the Google avatar: that is whatever picture is on the
+ *  athlete's Gmail account, which a judge has never seen and which the
+ *  athlete can change at will.
+ *
+ *  One implementation, called by every surface. Two surfaces disagreeing
+ *  about which photo is official means the same athlete shows up with two
+ *  different faces. The one deliberate exception is the admin's PENDING
+ *  review list, which shows photoUrl only — it is reviewing the newly
+ *  submitted photo, so the approved one would defeat the purpose.
+ *
+ *  Structurally typed rather than taking OnlineParticipant, so the admin
+ *  view (OnlineParticipantAdminView) can pass itself in unchanged. */
+export function resolveParticipantPhoto(
+  participant:
+    | {
+        profileStatus?: OnlineParticipantProfileStatus | null;
+        approvedPhotoUrl?: string | null;
+        photoUrl?: string | null;
+      }
+    | null
+    | undefined,
+): string | null {
+  if (!participant) return null;
+  if (participant.profileStatus === 'approved') {
+    return participant.approvedPhotoUrl ?? participant.photoUrl ?? null;
+  }
+  return participant.photoUrl ?? null;
+}
+
 // Written by the athlete profile form (app/online-competition/profile) on
 // submit — both the first-ever submission and a resubmission after
 // rejection. Always moves profileStatus to 'pending'; approval/rejection
