@@ -429,13 +429,35 @@ function ProfileBody({
       {/* ── Profile photo ─────────────────────────────────────────────── */}
       <div className="oc-v3-card">
         <CardHead>Профайл зураг</CardHead>
-        <div className="oc-v3-photo-body">
+        {/* Photo left, everything else in a column to its right — the
+            description on top, the button/chip row under it. The chip used
+            to sit in that row already; what made it land ON the photo was
+            a CSS class collision, not this markup (see .oc-v3-event-chip
+            in theme.css). Layout values are the approved mockup's. */}
+        <div
+          className="oc-v3-photo-body"
+          style={{ display: 'flex', gap: 18, alignItems: 'center', flexWrap: 'wrap' }}
+        >
           <Avatar88 src={shownPhoto} name={displayName} />
-          <div style={{ flex: 1, minWidth: 200 }}>
-            <p style={{ font: '400 12px var(--oc-font-heading), sans-serif', color: '#9A958A' }}>
+          <div
+            style={{
+              flex: 1,
+              minWidth: 220,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 11,
+            }}
+          >
+            <p
+              style={{
+                font: '400 12px/1.65 Geologica, sans-serif',
+                color: '#9A958A',
+                textWrap: 'pretty',
+              }}
+            >
               Царай тод харагдах зураг. Шүүгч бичлэг шалгахад ашиглана.
             </p>
-            <div style={{ marginTop: 14, display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap', alignItems: 'center' }}>
               {editable && !uploadOpen && (
                 <button type="button" className="oc-v3-ghost-btn" onClick={() => setUploadOpen(true)}>
                   {status === 'rejected' ? 'ДАХИН ОРУУЛАХ' : 'ЗУРАГ СОЛИХ'}
@@ -445,7 +467,7 @@ function ProfileBody({
             </div>
 
             {status === 'rejected' && participant?.rejectionReason && (
-              <div className="oc-v3-reject-block" style={{ marginTop: 14 }}>
+              <div className="oc-v3-reject-block">
                 <p style={{ font: '600 9px var(--oc-font-mono), monospace', letterSpacing: '.14em', color: '#E8543C' }}>
                   ТАТГАЛЗСАН ШАЛТГААН
                 </p>
@@ -456,7 +478,7 @@ function ProfileBody({
             )}
 
             {status === 'pending' && (
-              <p style={{ marginTop: 12, font: '400 12px var(--oc-font-heading), sans-serif', color: '#9A958A' }}>
+              <p style={{ font: '400 12px var(--oc-font-heading), sans-serif', color: '#9A958A' }}>
                 Таны мэдээллийг админ хянаж байна. Баталгаажсаны дараа тэмцээнд бүртгүүлэх боломжтой.
               </p>
             )}

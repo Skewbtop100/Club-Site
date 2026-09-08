@@ -2102,14 +2102,21 @@
 /* Event chips — 28px squares. @cubing/icons is already a project
    dependency (imported globally in app/layout.tsx and bridged by
    lib/wca-event-icon.tsx), so these carry the real WCA glyph; the event
-   code is only the fallback for an id that set doesn't publish. */
+   code is only the fallback for an id that set doesn't publish.
+
+   NAMED `-event-chip`, not `-chip`: this used to be `.oc-v3-chip`, which
+   collided with the text status pill of the same name further down. Same
+   specificity, so the later rule won per-property — but `width`/`height`
+   are declared only here, so every status pill was silently forced into a
+   28px box and its nowrap text spilled over whatever sat next to it (on
+   the profile page, the photo). Two different components, two names. */
 .oc-v3-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
 }
-.oc-v3-chip {
+.oc-v3-event-chip {
   width: 28px;
   height: 28px;
   flex-shrink: 0;
