@@ -167,11 +167,52 @@ service cloud.firestore {
           : resource.data.profileStatus;
       }
 
+      // The identity an admin actually reviews. Changing any of these
+      // invalidates a prior approval, so a write that touches one must
+      // also carry a legal profileStatus transition (see below).
+      // NOTE `photoUrl` (the submitted verification photo) is NOT
+      // `photoURL` (the Google avatar the sign-in upsert syncs) — the
+      // casing is the whole difference and only the former is reviewed.
+      function reviewedIdentityKeys() {
+        return ['lastName', 'firstName', 'dateOfBirth', 'gender', 'citizenship', 'photoUrl'];
+      }
+
+      // Does this write ADD, CHANGE or REMOVE a reviewed identity field?
+      // affectedKeys() is the diff, so a merge write that merely carries
+      // an unchanged value forward does not count as touching it.
+      function touchesReviewedIdentity() {
+        return resource == null
+          ? request.resource.data.keys().hasAny(reviewedIdentityKeys())
+          : request.resource.data.diff(resource.data).affectedKeys().hasAny(reviewedIdentityKeys());
+      }
+
+      // ── Which profileStatus values a client may produce ─────────────
+      //
+      // Every client write here is a merge/update, so request.resource.data
+      // is the FULL resulting document: an existing profileStatus is
+      // carried forward whether the client mentioned it or not. Rules
+      // therefore CANNOT distinguish "explicitly wrote 'approved'" from
+      // "left the existing 'approved' alone". What they can do is forbid
+      // the value from CHANGING to approved, which is the only case that
+      // grants anything — see the note above `allow create, update`.
+      //
+      // Three ways to pass:
+      //   1. profileStatus absent entirely (a doc that has never had one),
+      //      allowed only if no reviewed identity field is being touched;
+      //   2. 'incomplete', or 'pending' from any prior status — the
+      //      submit / resubmit path, including an approved athlete
+      //      re-submitting an edited profile, which correctly drops them
+      //      back into the review queue;
+      //   3. unchanged from its prior value AND touching no reviewed
+      //      identity field — the sign-in upsert, which rewrites
+      //      displayName / photoURL / email and nothing reviewable.
       function profileStatusTransitionAllowed() {
-        return !('profileStatus' in request.resource.data) ||
-          request.resource.data.profileStatus == 'incomplete' ||
-          (request.resource.data.profileStatus == 'pending' &&
-           (priorProfileStatus() == 'incomplete' || priorProfileStatus() == 'rejected'));
+        return !('profileStatus' in request.resource.data)
+          ? !touchesReviewedIdentity()
+          : (request.resource.data.profileStatus == 'incomplete' ||
+             request.resource.data.profileStatus == 'pending' ||
+             (request.resource.data.profileStatus == priorProfileStatus() &&
+              !touchesReviewedIdentity()));
       }
 
       // Admin-owned fields. An admin (or the admin-triggered recompute)
@@ -192,13 +233,28 @@ service cloud.firestore {
       // map.get(field, null) rather than an `in` test so all cases
       // collapse to one comparison: absent==absent passes, unchanged
       // passes, and introducing, changing OR erasing the field all fail.
+      //
+      // The approved* set records the identity an admin ACTUALLY reviewed,
+      // so a later edit can never retroactively change what was approved.
+      // approvedPhotoUrl has always done this for the photo; the name,
+      // birth date, gender and citizenship now do the same.
       function judgeFieldsUntouched() {
         return resource == null
           ? (!('approvedPhotoUrl' in request.resource.data) &&
+             !('approvedLastName' in request.resource.data) &&
+             !('approvedFirstName' in request.resource.data) &&
+             !('approvedDateOfBirth' in request.resource.data) &&
+             !('approvedGender' in request.resource.data) &&
+             !('approvedCitizenship' in request.resource.data) &&
              !('reviewedAt' in request.resource.data) &&
              !('rejectionReason' in request.resource.data) &&
              !('stats' in request.resource.data))
           : (request.resource.data.get('approvedPhotoUrl', null) == resource.data.get('approvedPhotoUrl', null) &&
+             request.resource.data.get('approvedLastName', null) == resource.data.get('approvedLastName', null) &&
+             request.resource.data.get('approvedFirstName', null) == resource.data.get('approvedFirstName', null) &&
+             request.resource.data.get('approvedDateOfBirth', null) == resource.data.get('approvedDateOfBirth', null) &&
+             request.resource.data.get('approvedGender', null) == resource.data.get('approvedGender', null) &&
+             request.resource.data.get('approvedCitizenship', null) == resource.data.get('approvedCitizenship', null) &&
              request.resource.data.get('reviewedAt', null) == resource.data.get('reviewedAt', null) &&
              request.resource.data.get('rejectionReason', null) == resource.data.get('rejectionReason', null) &&
              request.resource.data.get('stats', null) == resource.data.get('stats', null));
@@ -208,7 +264,7 @@ service cloud.firestore {
       allow create, update: if isSignedIn() &&
                                 request.auth.uid == uid &&
                                 (!('email' in request.resource.data) || request.resource.data.email == request.auth.token.email) &&
-                                (!('photoURL' in request.resource.data) || request.resource.data.photoURL is string) &&
+                                (!('photoURL' in request.resource.data) || request.resource.data.photoURL == null || request.resource.data.photoURL is string) &&
                                 (!('displayName' in request.resource.data) || request.resource.data.displayName is string) &&
                                 (!('lastName' in request.resource.data) || request.resource.data.lastName is string) &&
                                 (!('firstName' in request.resource.data) || request.resource.data.firstName is string) &&

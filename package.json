@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:rules": "firebase emulators:exec --only firestore \"node tests/firestore-rules/participants.test.mjs\""
   },
   "dependencies": {
     "@cubing/icons": "^3.0.5",
@@ -28,6 +29,7 @@
     "sr-puzzlegen": "^1.0.4"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

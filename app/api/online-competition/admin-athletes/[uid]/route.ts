@@ -28,14 +28,24 @@ export async function POST(req: Request, { params }: { params: Promise<{ uid: st
     if (!snap.exists) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
-    // approvedPhotoUrl is a snapshot of the reviewed photoUrl at approval
-    // time — if the athlete later submits a new pending profile, photoUrl
-    // moves on but approvedPhotoUrl keeps pointing at the photo an admin
-    // actually saw.
-    const photoUrl = (snap.data()?.photoUrl as string | undefined) ?? null;
+    // The approved* fields are a snapshot of the identity this admin
+    // actually reviewed. If the athlete later submits an edited profile,
+    // the live fields move on but these keep pointing at what was
+    // approved — approvedPhotoUrl has always worked this way for the
+    // photo, and the reviewed name, birth date, gender and citizenship
+    // now do too. Firestore rules lock all of them against client writes
+    // (judgeFieldsUntouched in firestore.rules), so this route is the
+    // only thing that can set them.
+    const data = snap.data() ?? {};
+    const str = (value: unknown): string | null => (typeof value === 'string' ? value : null);
     await ref.update({
       profileStatus: 'approved',
-      approvedPhotoUrl: photoUrl,
+      approvedPhotoUrl: str(data.photoUrl),
+      approvedLastName: str(data.lastName),
+      approvedFirstName: str(data.firstName),
+      approvedDateOfBirth: str(data.dateOfBirth),
+      approvedGender: str(data.gender),
+      approvedCitizenship: str(data.citizenship),
       reviewedAt: FieldValue.serverTimestamp(),
       rejectionReason: null,
     });

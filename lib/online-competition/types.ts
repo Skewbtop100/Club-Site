@@ -108,7 +108,17 @@ export interface OnlineParticipant {
   photoUrl?: string | null;
   photoPublicId?: string | null;
   profileStatus?: OnlineParticipantProfileStatus;
+  /** Snapshot of the identity an admin actually reviewed, written only by
+   *  the Admin SDK at approval time and locked against client writes by
+   *  firestore.rules. The live fields above may move on when an athlete
+   *  edits and resubmits; these do not, so what a judge approved stays
+   *  recoverable. */
   approvedPhotoUrl?: string | null;
+  approvedLastName?: string | null;
+  approvedFirstName?: string | null;
+  approvedDateOfBirth?: string | null;
+  approvedGender?: string | null;
+  approvedCitizenship?: string | null;
   submittedAt?: Timestamp | null;
   reviewedAt?: Timestamp | null;
   rejectionReason?: string | null;
