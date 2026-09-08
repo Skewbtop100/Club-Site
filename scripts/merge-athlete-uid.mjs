@@ -189,6 +189,16 @@ async function main() {
   console.log(`  resolved OLD uid: ${planned.oldUid}`);
   console.log(`  resolved NEW uid: ${planned.newUid}\n`);
 
+  // The plan is identical in both modes — which is exactly why the mode
+  // has to be said out loud here. A destructive tool must never print a
+  // block that reads like a preview while it is about to write.
+  console.log(
+    COMMIT
+      ? '── PLAN — these changes are ABOUT TO BE APPLIED ──────────'
+      : '── PLAN — dry run, nothing will be written ─────────────',
+  );
+  console.log('');
+
   printPlan(planned);
 
   console.log('── Pre-flight ───────────────────────────────────────');
@@ -205,15 +215,19 @@ async function main() {
   const { plan } = planned;
   const total = plan.B.length + plan.C.length + plan.D.length + plan.E.length + plan.F.length + plan.G.length + 2;
   console.log('');
-  console.log('── Total ───────────────────────────────────────────');
-  console.log('  A participant docs written : 2 (merge target + tombstone)');
-  console.log(`  B registrations moved      : ${plan.B.length}`);
-  console.log(`  C submissions rewritten    : ${plan.C.length}`);
-  console.log(`  D season-points docs moved : ${plan.D.length}`);
-  console.log(`  E notifications rewritten  : ${plan.E.length}`);
-  console.log(`  F qualifier arrays edited  : ${plan.F.length}`);
-  console.log(`  G assignment maps rekeyed  : ${plan.G.length}`);
-  console.log(`  TOTAL document writes      : ${total}`);
+  // Counts of what the plan CONTAINS, printed before anything is written
+  // in either mode — so the nouns are neutral and the heading states what
+  // is true at this point regardless of --commit. The past-tense report
+  // comes after commitMerge, below.
+  console.log('── Planned total — nothing written yet ────────────────');
+  console.log('  A participant docs   : 2 (merge target + tombstone)');
+  console.log(`  B registrations      : ${plan.B.length}`);
+  console.log(`  C submissions        : ${plan.C.length}`);
+  console.log(`  D season-points docs : ${plan.D.length}`);
+  console.log(`  E notifications      : ${plan.E.length}`);
+  console.log(`  F qualifier arrays   : ${plan.F.length}`);
+  console.log(`  G assignment maps    : ${plan.G.length}`);
+  console.log(`  TOTAL document writes: ${total}`);
   console.log('');
 
   if (!planned.ok) {
@@ -228,6 +242,7 @@ async function main() {
   }
 
   const counts = await commitMerge(db, planned);
+  console.log('── Applied ──────────────────────────────────────');
   console.log(`  C submissions: ${counts.C} rewritten`);
   console.log(`  E notifications: ${counts.E} rewritten`);
   console.log(`  B registrations: ${counts.B} moved`);
