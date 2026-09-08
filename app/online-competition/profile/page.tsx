@@ -39,7 +39,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="oc-v3-page">
       <HubNav live={null} />
-      <main className="oc-v3-main" style={{ maxWidth: 760, margin: '0 auto', width: '100%' }}>
+      <main className="oc-v3-main" style={{ maxWidth: 1080, margin: '0 auto', width: '100%' }}>
         {children}
       </main>
     </div>
@@ -223,11 +223,6 @@ export default function ProfilePage() {
   if (loadError) return <Shell><p className="oc-v3-status oc-v3-status-error">{loadError}</p></Shell>;
 
   const status = resolveProfileStatus(participant);
-  // Same gate as before: 'pending' and 'approved' are read-only. Firestore
-  // rules only permit incomplete->pending and rejected->pending, so an
-  // editable form in those states would just fail server-side.
-  const editable = status === 'incomplete' || status === 'rejected';
-
   return (
     <Shell>
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
@@ -238,63 +233,14 @@ export default function ProfilePage() {
         {savedToast && <span className="oc-v3-toast">ХАДГАЛАГДЛАА</span>}
       </div>
 
-      {/* ── Athlete identity ─────────────────────────────────────
-          Moved here from the dashboard, which now carries only "Миний
-          тэмцээнүүд" and "Сүүлийн тайлалтууд". The card's
-          "ПРОФАЙЛ ЗАСАХ" link was dropped in the move: it pointed at
-          this page. */}
-      <div className="oc-v3-card" style={{ marginBottom: 20 }}>
-        <div className="oc-v3-side-top">
-          {user.photoURL ? (
-            // eslint-disable-next-line @next/next/no-img-element -- avatar
-            // comes from Google's CDN, not our own image pipeline.
-            <img src={user.photoURL} alt="" className="oc-v3-avatar-96" />
-          ) : (
-            <span className="oc-v3-avatar-96" aria-hidden>
-              {initials(user.displayName)}
-            </span>
-          )}
-          <p style={{ font: '600 20px var(--oc-font-heading), sans-serif', color: '#F4F1EA', textAlign: 'center' }}>
-            {user.displayName ?? 'Тамирчин'}
-          </p>
-          {/* No join-date or location field exists on onlineParticipants
-              (createdAt is set by a merge-write that can post-date the
-              real first sign-in, and there is no location at all), so
-              this slot carries the verified email instead of a
-              fabricated "ULAANBAATAR · 2024-Н ХОЙШ" line. */}
-          {user.email && (
-            <p
-              style={{
-                marginTop: -6,
-                font: '400 10px var(--oc-font-mono), monospace',
-                color: '#6E6A62',
-                overflowWrap: 'anywhere',
-                textAlign: 'center',
-              }}
-            >
-              {user.email}
-            </p>
-          )}
-        </div>
-
-        {/* Real values from the stats rollup + season points; "—" only
-            when the underlying data genuinely isn't there yet (no
-            recompute has run, or the athlete has no approved solves). */}
-        <div className="oc-v3-stat-grid">
-          <StatCell label="ПР" accent value={fmtOrDash(bestAcrossEvents(participant, 'pr'))} />
-          <StatCell label="Дундаж" value={fmtOrDash(bestAcrossEvents(participant, 'ao5'))} />
-          <StatCell label="Оноо" value={points === null ? '—' : String(points)} />
-          <StatCell label="Эвлүүлэлт" value={totalSolves(participant) === null ? '—' : String(totalSolves(participant))} />
-        </div>
-      </div>
-
       <ProfileBody
         uid={user.uid}
         email={user.email}
         displayName={user.displayName}
+        photoURL={user.photoURL}
+        points={points}
         participant={participant}
         status={status}
-        editable={editable}
         onSubmitted={(next) => {
           setParticipant(next);
           setSavedToast(true);
@@ -308,17 +254,21 @@ function ProfileBody({
   uid,
   email,
   displayName,
+  photoURL,
+  points,
   participant,
   status,
-  editable,
   onSubmitted,
 }: {
   uid: string;
   email: string | null;
   displayName: string | null;
+  /** Google avatar for the identity cell — distinct from the reviewed
+   *  verification photo shown beside it. */
+  photoURL: string | null;
+  points: number | null;
   participant: OnlineParticipant | null;
   status: OnlineParticipantProfileStatus;
-  editable: boolean;
   onSubmitted: (next: OnlineParticipant) => void;
 }) {
   const [lastName, setLastName] = useState(participant?.lastName ?? '');
@@ -334,6 +284,16 @@ function ProfileBody({
   // "ДАХИН ОРУУЛАХ". An incomplete profile has nothing to review, so it
   // starts open.
   const [uploadOpen, setUploadOpen] = useState(status === 'incomplete');
+  // An approved athlete edits only after asking to — the МЭДЭЭЛЭЛ ЗАСАХ
+  // button below. Saving re-submits for review (submitParticipantProfile
+  // always writes profileStatus: 'pending'), which is the point: a changed
+  // identity is no longer the one an admin approved.
+  const [editing, setEditing] = useState(false);
+
+  // 'incomplete' and 'rejected' have nothing approved to protect, so they
+  // are always open. 'approved' opens only via the explicit button.
+  // 'pending' stays read-only: a review is already in flight.
+  const editable = status === 'incomplete' || status === 'rejected' || editing;
 
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -414,6 +374,10 @@ function ProfileBody({
         profileStatus: 'pending',
         approvedPhotoUrl: participant?.approvedPhotoUrl ?? null,
       });
+      // Status is now 'pending'; the form goes back to read-only and the
+      // warning below disappears with it.
+      setEditing(false);
+      setUploadOpen(false);
     } catch {
       setError('Хадгалахад алдаа гарлаа. Дахин оролдоно уу.');
     } finally {
@@ -426,44 +390,54 @@ function ProfileBody({
 
   return (
     <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* ── Profile photo ─────────────────────────────────────────────── */}
+      {/* ── Top band: identity | verification photo | stats ────────────
+          One card instead of three. The athlete card already carried an
+          avatar, so the verification photo sits beside it rather than in
+          its own block below, and the stat grid moves alongside instead of
+          under. .oc-v3-profile-band collapses this to two columns, then
+          one, on narrower viewports. */}
       <div className="oc-v3-card">
-        <CardHead>Профайл зураг</CardHead>
-        {/* Photo left, everything else in a column to its right — the
-            description on top, the button/chip row under it. The chip used
-            to sit in that row already; what made it land ON the photo was
-            a CSS class collision, not this markup (see .oc-v3-event-chip
-            in theme.css). Layout values are the approved mockup's. */}
-        <div
-          className="oc-v3-photo-body"
-          style={{ display: 'flex', gap: 18, alignItems: 'center', flexWrap: 'wrap' }}
-        >
-          <Avatar88 src={shownPhoto} name={displayName} />
-          <div
-            style={{
-              flex: 1,
-              minWidth: 220,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 11,
-            }}
-          >
-            <p
-              style={{
-                font: '400 12px/1.65 Geologica, sans-serif',
-                color: '#9A958A',
-                textWrap: 'pretty',
-              }}
-            >
-              Царай тод харагдах зураг. Шүүгч бичлэг шалгахад ашиглана.
+        <div className="oc-v3-profile-band">
+          {/* Identity */}
+          <div className="oc-v3-side-top" style={{ borderBottom: 'none', justifyContent: 'center' }}>
+            {photoURL ? (
+              // eslint-disable-next-line @next/next/no-img-element -- avatar
+              // comes from Google's CDN, not our own image pipeline.
+              <img src={photoURL} alt="" className="oc-v3-avatar-96" />
+            ) : (
+              <span className="oc-v3-avatar-96" aria-hidden>
+                {initials(displayName)}
+              </span>
+            )}
+            <p style={{ font: '600 20px var(--oc-font-heading), sans-serif', color: '#F4F1EA', textAlign: 'center' }}>
+              {displayName ?? 'Тамирчин'}
             </p>
-            <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap', alignItems: 'center' }}>
-              {editable && !uploadOpen && (
-                <button type="button" className="oc-v3-ghost-btn" onClick={() => setUploadOpen(true)}>
-                  {status === 'rejected' ? 'ДАХИН ОРУУЛАХ' : 'ЗУРАГ СОЛИХ'}
-                </button>
-              )}
-              <StatusChip status={status} />
+          </div>
+
+          {/* Verification photo — what an admin reviews, which is not the
+              same image as the Google avatar to its left. */}
+          <div style={{ padding: '20px 18px', display: 'flex', flexDirection: 'column', gap: 11, minWidth: 0 }}>
+            <span className="oc-v3-label">Профайл зураг</span>
+            <div style={{ display: 'flex', gap: 18, alignItems: 'center', flexWrap: 'wrap' }}>
+              <Avatar88 src={shownPhoto} name={displayName} />
+              <div style={{ flex: 1, minWidth: 200, display: 'flex', flexDirection: 'column', gap: 11 }}>
+                <p style={{ font: '400 12px/1.65 Geologica, sans-serif', color: '#9A958A', textWrap: 'pretty' }}>
+                  Царай тод харагдах зураг. Шүүгч бичлэг шалгахад ашиглана.
+                </p>
+                <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {editable && !uploadOpen && (
+                    <button type="button" className="oc-v3-ghost-btn" onClick={() => setUploadOpen(true)}>
+                      {status === 'rejected' ? 'ДАХИН ОРУУЛАХ' : 'ЗУРАГ СОЛИХ'}
+                    </button>
+                  )}
+                  {status === 'approved' && !editing && (
+                    <button type="button" className="oc-v3-ghost-btn" onClick={() => setEditing(true)}>
+                      МЭДЭЭЛЭЛ ЗАСАХ
+                    </button>
+                  )}
+                  <StatusChip status={status} />
+                </div>
+              </div>
             </div>
 
             {status === 'rejected' && participant?.rejectionReason && (
@@ -483,17 +457,36 @@ function ProfileBody({
               </p>
             )}
           </div>
+
+          {/* Stats — real values from the stats rollup + season points;
+              "—" only when the data genuinely isn't there yet (no recompute
+              has run, or the athlete has no approved solves). */}
+          <div className="oc-v3-stat-grid">
+            <StatCell label="ПР" accent value={fmtOrDash(bestAcrossEvents(participant, 'pr'))} />
+            <StatCell label="Дундаж" value={fmtOrDash(bestAcrossEvents(participant, 'ao5'))} />
+            <StatCell label="Оноо" value={points === null ? '—' : String(points)} />
+            <StatCell label="Эвлүүлэлт" value={totalSolves(participant) === null ? '—' : String(totalSolves(participant))} />
+          </div>
         </div>
 
+        {/* Shown from the moment an approved athlete opens the form until
+            the save that actually re-submits them. It is a consequence
+            they should see BEFORE typing, not after. */}
+        {editing && status === 'approved' && (
+          <div className="oc-sc-warn" style={{ margin: '0 18px 18px' }}>
+            Мэдээллээ засвал профайл дахин хянагдана. Хянагдах хүртэл тэмцээнд бүртгүүлэх боломжгүй.
+          </div>
+        )}
+
         {editable && uploadOpen && (
-          <div style={{ padding: '0 18px 20px' }}>
+          <div style={{ padding: '0 18px 20px', borderTop: '1px solid #1C1C21', paddingTop: 20 }}>
             <div className="oc-v3-upload">
               <span
                 className="oc-v3-upload-preview"
                 aria-hidden
                 style={photoPreview ? { backgroundImage: `url(${photoPreview})` } : undefined}
               >
-                {photoPreview ? '' : 'ЗУРАГГҮЙ'}
+                {photoPreview ? '' : 'ЗУРАГГүЙ'}
               </span>
               <div style={{ flex: 1, minWidth: 200 }}>
                 <label className="oc-v3-ghost-btn">
@@ -594,20 +587,21 @@ function ProfileBody({
               )}
             </div>
           </div>
-        </div>
-      </div>
 
-      {/* ── Email ─────────────────────────────────────────────────────────
-          Read-only: identity comes from Google Sign-In, so the address is
-          already verified and there is no change-email flow to offer. */}
-      <div className="oc-v3-card">
-        <CardHead>И-мэйл хаяг</CardHead>
-        <div style={{ padding: '20px 18px' }}>
-          <div className="oc-v3-email-row">
-            <span style={{ font: '500 13px var(--oc-font-heading), sans-serif', color: '#F4F1EA', overflowWrap: 'anywhere' }}>
-              {email ?? '—'}
-            </span>
-            <span className="oc-v3-chip-sm">БАТАЛГААЖСАН</span>
+          {/* Folded in from its own card: one read-only line does not need
+              a section of its own. Read-only because identity comes from
+              Google Sign-In — the address is already verified and there is
+              no change-email flow to offer. */}
+          <div style={{ gridColumn: '1 / -1', minWidth: 0 }}>
+            <span className="oc-v3-field-label">И-мэйл хаяг</span>
+            <div style={{ marginTop: 8 }}>
+              <div className="oc-v3-email-row">
+                <span style={{ font: '500 13px var(--oc-font-heading), sans-serif', color: '#F4F1EA', overflowWrap: 'anywhere' }}>
+                  {email ?? '—'}
+                </span>
+                <span className="oc-v3-chip-sm">БАТАЛГААЖСАН</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>

@@ -3126,6 +3126,42 @@
   white-space: nowrap;
 }
 
+/* ── Profile: the top identity band ──────────────────────────────
+   Three cells inside ONE card — identity, verification photo, stats — so
+   the top of the page is a single compact band instead of three stacked
+   full-width cards. The 1px rules between cells stand in for the card
+   borders the merged blocks used to have, so the treatment is unchanged;
+   only the arrangement is. Collapses to two columns, then one. */
+.oc-v3-profile-band {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr) 300px;
+  align-items: stretch;
+}
+.oc-v3-profile-band > * + * {
+  border-left: 1px solid #1C1C21;
+}
+@media (max-width: 1040px) {
+  .oc-v3-profile-band {
+    grid-template-columns: 250px minmax(0, 1fr);
+  }
+  /* Stats drop to their own full-width row rather than squeezing the
+     photo cell below its 88px + text minimum. */
+  .oc-v3-profile-band > :nth-child(3) {
+    grid-column: 1 / -1;
+    border-left: none;
+    border-top: 1px solid #1C1C21;
+  }
+}
+@media (max-width: 640px) {
+  .oc-v3-profile-band {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .oc-v3-profile-band > * + * {
+    border-left: none;
+    border-top: 1px solid #1C1C21;
+  }
+}
+
 .oc-v3-footer-row {
   display: flex;
   justify-content: flex-end;
