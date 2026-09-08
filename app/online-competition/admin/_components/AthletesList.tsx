@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { EmptyState } from '../../_components/ui';
+import EmailChangeDialog from './EmailChangeDialog';
 import type { OnlineParticipantAdminView, OnlineParticipantGender } from '@/lib/online-competition/types';
 
 const GENDER_LABEL: Record<OnlineParticipantGender, string> = {
@@ -20,6 +21,8 @@ function fmtDate(ms: number | null): string {
 export default function AthletesList() {
   const [pending, setPending] = useState<OnlineParticipantAdminView[]>([]);
   const [approved, setApproved] = useState<OnlineParticipantAdminView[]>([]);
+  // The athlete whose МЭЙЛ СОЛИХ dialog is open, if any.
+  const [merging, setMerging] = useState<OnlineParticipantAdminView | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [actionLoadingUid, setActionLoadingUid] = useState<string | null>(null);
@@ -211,7 +214,7 @@ export default function AthletesList() {
           ) : (
             <div className="oc-table">
               <div className="oc-adm-ath-head">
-                {['', 'Нэр', 'И-мэйл', 'Иргэншил', 'Баталгаажсан'].map((label, i) => (
+                {['', 'Нэр', 'И-мэйл', 'Иргэншил', 'Баталгаажсан', ''].map((label, i) => (
                   <span
                     key={i}
                     className={`oc-adm-ath-c${i + 1}`}
@@ -258,12 +261,36 @@ export default function AthletesList() {
                   <span className="oc-adm-ath-c5" style={{ font: '400 11px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
                     {fmtDate(a.reviewedAt)}
                   </span>
+                  <span className="oc-adm-ath-c6">
+                    {/* Opens the two-step merge dialog. Nothing is written
+                        until the preview inside it has been confirmed. */}
+                    <button
+                      type="button"
+                      className="oc-v3-row-action"
+                      title="Тамирчны мэдээллийг шинэ Gmail рүү шилжүүлэх"
+                      onClick={() => setMerging(a)}
+                    >
+                      МЭЙЛ СОЛИХ
+                    </button>
+                  </span>
                 </div>
               ))}
             </div>
           )}
         </div>
       </section>
+
+      {merging && (
+        <EmailChangeDialog
+          athlete={merging}
+          onClose={() => setMerging(null)}
+          onMerged={() => {
+            // The athlete now lives under a different uid, so the list is
+            // stale in both tabs — refetch rather than patch locally.
+            load();
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -2786,10 +2786,52 @@
   background: #131318;
 }
 .oc-adm-ath-c1 { flex: 0 0 40px; }
-.oc-adm-ath-c2 { flex: 1.4 1 0; }
-.oc-adm-ath-c3 { flex: 1.4 1 0; }
-.oc-adm-ath-c4 { flex: 0.8 1 0; }
-.oc-adm-ath-c5 { flex: 0.9 1 0; }
+.oc-adm-ath-c2 { flex: 1.3 1 0; }
+.oc-adm-ath-c3 { flex: 1.3 1 0; }
+.oc-adm-ath-c4 { flex: 0.7 1 0; }
+.oc-adm-ath-c5 { flex: 0.8 1 0; }
+/* Action column — fixed, so the row's text columns keep their proportions. */
+.oc-adm-ath-c6 { flex: 0 0 104px; text-align: right; }
+
+/* ── Мэйл солих dialog (uid merge) ────────────────────────
+   Same dark surface as the rest of the admin panel; nothing new invented. */
+.oc-adm-merge-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(6, 6, 8, 0.82);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 48px 22px;
+  overflow-y: auto;
+}
+.oc-adm-merge-panel {
+  width: 100%;
+  max-width: 520px;
+  border: 1px solid #2A2A31;
+  background: #0D0D10;
+  box-shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.95);
+}
+.oc-adm-merge-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  background: #0D0D10;
+  padding: 10px 12px;
+}
+.oc-adm-merge-row > span:first-child {
+  flex: 0 0 116px;
+}
+@media (max-width: 640px) {
+  .oc-adm-merge-row {
+    flex-direction: column;
+    gap: 4px;
+  }
+  .oc-adm-merge-row > span:first-child {
+    flex: none;
+  }
+}
 
 @media (max-width: 640px) {
   /* ── Header: two stacked rows, matching the public HubNav ────────────
