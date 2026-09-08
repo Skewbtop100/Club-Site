@@ -20,6 +20,7 @@ import HubNav from '../_components/hub/v3/HubNav';
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
 import { toMillisOrNull } from '../_components/hub/format';
 import AuthModal from '../_components/hub/v3/AuthModal';
+import CountryPicker from './_components/CountryPicker';
 
 const DASHBOARD = '/online-competition/dashboard';
 
@@ -588,21 +589,15 @@ function ProfileBody({
             )}
           </Field>
 
-          {/* Plain text input, not a searchable country/flag picker — that
-              needs a country dataset + combobox this feature doesn't have,
-              and the field is a free-text string in the schema. */}
+          {/* Stores the ISO alpha-2 code, not the name — see
+              lib/online-competition/countries.ts. Read-only mode renders the
+              flag + name with no button affordance. */}
           <Field label="Иргэншил">
-            {editable ? (
-              <input
-                className="oc-v3-input"
-                value={citizenship}
-                onChange={(e) => setCitizenship(e.target.value)}
-                placeholder="Монгол"
-                maxLength={60}
-              />
-            ) : (
-              <p className="oc-v3-value">{participant?.citizenship || '—'}</p>
-            )}
+            <CountryPicker
+              value={editable ? citizenship : participant?.citizenship ?? ''}
+              onChange={setCitizenship}
+              editable={editable}
+            />
           </Field>
 
           <div style={{ gridColumn: '1 / -1' }}>

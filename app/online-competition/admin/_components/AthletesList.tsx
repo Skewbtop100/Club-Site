@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { EmptyState } from '../../_components/ui';
 import EmailChangeDialog from './EmailChangeDialog';
+import { countryName } from '@/lib/online-competition/countries';
 import type { OnlineParticipantAdminView, OnlineParticipantGender } from '@/lib/online-competition/types';
 
 const GENDER_LABEL: Record<OnlineParticipantGender, string> = {
@@ -134,7 +135,7 @@ export default function AthletesList() {
                       <dt className="text-[#6E6A62]">Хүйс</dt>
                       <dd className="text-[#F4F1EA]">{a.gender ? GENDER_LABEL[a.gender] : '—'}</dd>
                       <dt className="text-[#6E6A62]">Иргэншил</dt>
-                      <dd className="text-[#F4F1EA]">{a.citizenship || '—'}</dd>
+                      <dd className="text-[#F4F1EA]">{a.citizenship ? countryName(a.citizenship) : '—'}</dd>
                       <dt className="text-[#6E6A62]">И-мэйл</dt>
                       <dd className="text-[#F4F1EA]" style={{ overflowWrap: 'anywhere' }}>
                         {a.email || '—'}
@@ -256,7 +257,7 @@ export default function AthletesList() {
                     {a.email || '—'}
                   </span>
                   <span className="oc-adm-ath-c4" style={{ font: '400 12px var(--oc-font-heading), sans-serif', color: '#9A958A' }}>
-                    {a.citizenship || '—'}
+                    {a.citizenship ? countryName(a.citizenship) : '—'}
                   </span>
                   <span className="oc-adm-ath-c5" style={{ font: '400 11px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
                     {fmtDate(a.reviewedAt)}
