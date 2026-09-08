@@ -271,6 +271,11 @@ service cloud.firestore {
                                 (!('dateOfBirth' in request.resource.data) || request.resource.data.dateOfBirth is string) &&
                                 (!('gender' in request.resource.data) || request.resource.data.gender in ['male', 'female', 'other']) &&
                                 (!('citizenship' in request.resource.data) || request.resource.data.citizenship is string) &&
+                                // Type-only, like its neighbours. wcaId is NOT in
+                                // reviewedIdentityKeys() and has no approved* snapshot:
+                                // a WCA id is public and independently checkable, so it
+                                // needs no review machinery. Format is a UI concern.
+                                (!('wcaId' in request.resource.data) || request.resource.data.wcaId is string) &&
                                 (!('photoUrl' in request.resource.data) || request.resource.data.photoUrl == null || request.resource.data.photoUrl is string) &&
                                 (!('photoPublicId' in request.resource.data) || request.resource.data.photoPublicId == null || request.resource.data.photoPublicId is string) &&
                                 profileStatusTransitionAllowed() &&

@@ -83,6 +83,7 @@ async function seed() {
     dateOfBirth: '2003-04-12',
     gender: 'male',
     citizenship: 'Mongolia',
+    wcaId: '2016BAYA01',
     photoUrl: 'https://res.cloudinary.com/x/verify.jpg',
     photoPublicId: 'verify',
     profileStatus: 'approved',
@@ -379,7 +380,7 @@ async function main() {
   // Every field the merge migrated must be gone. Leaving any of them means
   // signing in with the old Gmail shows a complete-looking second athlete.
   const MUST_BE_STRIPPED = [
-    'lastName', 'firstName', 'dateOfBirth', 'gender', 'citizenship',
+    'lastName', 'firstName', 'dateOfBirth', 'gender', 'citizenship', 'wcaId',
     'photoUrl', 'photoPublicId', 'profileStatus', 'submittedAt', 'reviewedAt',
     'rejectionReason', 'stats',
     'approvedPhotoUrl', 'approvedLastName', 'approvedFirstName',

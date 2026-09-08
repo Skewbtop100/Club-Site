@@ -80,11 +80,20 @@ export default function CountryPicker({
   }, [query]);
 
   // Read-only: the same flag + name, with nothing that looks clickable.
+  //
+  // .oc-v3-value goes on the BLOCK container, not on the inner span. It is
+  // the read-only mirror of .oc-v3-input (same padding, same box) and every
+  // other read-only field is a <p> carrying it, which fills its grid column
+  // naturally. A <span> here is a flex ITEM, so the box shrank to the text
+  // and the country cell rendered visibly smaller than its neighbours.
   if (!editable) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+      <div
+        className="oc-v3-value"
+        style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}
+      >
         {value ? <Flag code={value} /> : null}
-        <span className="oc-v3-value" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {value ? countryName(value) : '—'}
         </span>
       </div>
@@ -107,9 +116,16 @@ export default function CountryPicker({
           border: `1px solid ${open || hover ? '#DFFF4F' : '#2A2A31'}`,
           background: '#08080A',
           color: '#F4F1EA',
-          padding: '11px 12px',
+          // Padding and font deliberately match .oc-v3-input rather than the
+          // mockup's 11px/line-height-1: the field has to be the same HEIGHT
+          // as ОВОГ / НЭР / ТӨРСӨН ОГНОО beside it. var(--oc-font-heading)
+          // rather than the literal 'Geologica' for the reason theme.css
+          // records: the literal silently falls back to the system sans on
+          // any machine without the font installed; the next/font variable
+          // is what makes the self-hosted file apply.
+          padding: 12,
           cursor: 'pointer',
-          font: '500 13px/1 Geologica, sans-serif',
+          font: '500 13px var(--oc-font-heading), sans-serif',
           textAlign: 'left',
         }}
       >
@@ -159,13 +175,13 @@ export default function CountryPicker({
               background: '#08080A',
               color: '#F4F1EA',
               padding: '12px 13px',
-              font: '500 12px/1 Geologica, sans-serif',
+              font: '500 12px var(--oc-font-heading), sans-serif',
               outline: 'none',
             }}
           />
 
           {matches.length === 0 ? (
-            <p style={{ padding: '20px 13px', font: '500 11px/1 Geologica, sans-serif', color: '#6E6A62' }}>
+            <p style={{ padding: '20px 13px', font: '500 11px var(--oc-font-heading), sans-serif', color: '#6E6A62' }}>
               Улс олдсонгүй.
             </p>
           ) : (
@@ -193,7 +209,7 @@ export default function CountryPicker({
                       padding: '11px 13px',
                       cursor: 'pointer',
                       textAlign: 'left',
-                      font: '500 12px/1 Geologica, sans-serif',
+                      font: '500 12px var(--oc-font-heading), sans-serif',
                       background: selected || hovered ? '#16161B' : 'transparent',
                       color: selected ? '#DFFF4F' : hovered ? '#F4F1EA' : '#9A958A',
                     }}

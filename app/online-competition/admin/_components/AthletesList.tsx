@@ -136,6 +136,10 @@ export default function AthletesList() {
                       <dd className="text-[#F4F1EA]">{a.gender ? GENDER_LABEL[a.gender] : '—'}</dd>
                       <dt className="text-[#6E6A62]">Иргэншил</dt>
                       <dd className="text-[#F4F1EA]">{a.citizenship ? countryName(a.citizenship) : '—'}</dd>
+                      <dt className="text-[#6E6A62]">WCA ID</dt>
+                      <dd className="text-[#F4F1EA]" style={{ fontFamily: 'var(--oc-font-mono), monospace' }}>
+                        {a.wcaId || '—'}
+                      </dd>
                       <dt className="text-[#6E6A62]">И-мэйл</dt>
                       <dd className="text-[#F4F1EA]" style={{ overflowWrap: 'anywhere' }}>
                         {a.email || '—'}
@@ -215,7 +219,7 @@ export default function AthletesList() {
           ) : (
             <div className="oc-table">
               <div className="oc-adm-ath-head">
-                {['', 'Нэр', 'И-мэйл', 'Иргэншил', 'Баталгаажсан', ''].map((label, i) => (
+                {['', 'Нэр', 'И-мэйл', 'Иргэншил', 'WCA ID', 'Баталгаажсан', ''].map((label, i) => (
                   <span
                     key={i}
                     className={`oc-adm-ath-c${i + 1}`}
@@ -259,10 +263,13 @@ export default function AthletesList() {
                   <span className="oc-adm-ath-c4" style={{ font: '400 12px var(--oc-font-heading), sans-serif', color: '#9A958A' }}>
                     {a.citizenship ? countryName(a.citizenship) : '—'}
                   </span>
-                  <span className="oc-adm-ath-c5" style={{ font: '400 11px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
+                  <span className="oc-adm-ath-c5" style={{ font: '400 11px var(--oc-font-mono), monospace', color: '#9A958A' }}>
+                    {a.wcaId || '—'}
+                  </span>
+                  <span className="oc-adm-ath-c6" style={{ font: '400 11px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
                     {fmtDate(a.reviewedAt)}
                   </span>
-                  <span className="oc-adm-ath-c6">
+                  <span className="oc-adm-ath-c7">
                     {/* Opens the two-step merge dialog. Nothing is written
                         until the preview inside it has been confirmed. */}
                     <button

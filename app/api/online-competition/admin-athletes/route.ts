@@ -42,6 +42,7 @@ export async function GET(req: Request) {
       dateOfBirth: data.dateOfBirth ?? '',
       gender: data.gender ?? null,
       citizenship: data.citizenship ?? '',
+      wcaId: data.wcaId ?? '',
       photoUrl: data.photoUrl ?? null,
       profileStatus: status,
       approvedPhotoUrl: data.approvedPhotoUrl ?? null,

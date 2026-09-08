@@ -2786,12 +2786,14 @@
   background: #131318;
 }
 .oc-adm-ath-c1 { flex: 0 0 40px; }
-.oc-adm-ath-c2 { flex: 1.3 1 0; }
-.oc-adm-ath-c3 { flex: 1.3 1 0; }
+.oc-adm-ath-c2 { flex: 1.2 1 0; }
+.oc-adm-ath-c3 { flex: 1.2 1 0; }
 .oc-adm-ath-c4 { flex: 0.7 1 0; }
-.oc-adm-ath-c5 { flex: 0.8 1 0; }
+/* WCA id — fixed at its own maximum width (10 mono characters). */
+.oc-adm-ath-c5 { flex: 0 0 92px; }
+.oc-adm-ath-c6 { flex: 0.8 1 0; }
 /* Action column — fixed, so the row's text columns keep their proportions. */
-.oc-adm-ath-c6 { flex: 0 0 104px; text-align: right; }
+.oc-adm-ath-c7 { flex: 0 0 104px; text-align: right; }
 
 /* ── Мэйл солих dialog (uid merge) ────────────────────────
    Same dark surface as the rest of the admin panel; nothing new invented. */
@@ -3103,6 +3105,11 @@
 }
 .oc-v3-input:focus {
   border-color: #DFFF4F;
+}
+/* WCA id: same box as .oc-v3-input (border, background, padding, focus),
+   monospace because it is a code, not a name. */
+.oc-v3-input-mono {
+  font-family: var(--oc-font-mono), monospace;
 }
 /* Read-only mirror of .oc-v3-input for the pending/approved states, where
    the values exist but must not be editable. */

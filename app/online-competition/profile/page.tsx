@@ -274,6 +274,7 @@ function ProfileBody({
   const [dateOfBirth, setDateOfBirth] = useState(participant?.dateOfBirth ?? '');
   const [gender, setGender] = useState<OnlineParticipantGender | ''>(participant?.gender ?? '');
   const [citizenship, setCitizenship] = useState(participant?.citizenship ?? '');
+  const [wcaId, setWcaId] = useState(participant?.wcaId ?? '');
 
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(participant?.photoUrl ?? null);
@@ -324,6 +325,12 @@ function ProfileBody({
     if (!dateOfBirth) return 'Төрсөн өдрөө сонгоно уу';
     if (!gender) return 'Хүйсээ сонгоно уу';
     if (!citizenship.trim()) return 'Иргэншлээ оруулна уу';
+    // Optional — most athletes have no WCA id. A value that IS given must
+    // be well formed: 4 digits (first competition year), 4 letters (name),
+    // 2 digits (disambiguator).
+    if (wcaId.trim() && !/^\d{4}[A-Za-z]{4}\d{2}$/.test(wcaId.trim())) {
+      return 'WCA ID буруу форматтай байна. 4 ороны он, 4 үсэг, 2 ороны дугаар — жишээ нь 2016BAYA01.';
+    }
     if (!photoFile && !participant?.photoUrl) return 'Зураг оруулна уу';
     return null;
   }
@@ -353,6 +360,7 @@ function ProfileBody({
         dateOfBirth,
         gender: gender as OnlineParticipantGender,
         citizenship: citizenship.trim(),
+        wcaId: wcaId.trim().toUpperCase(),
         photoUrl,
         photoPublicId,
       });
@@ -367,6 +375,7 @@ function ProfileBody({
         dateOfBirth,
         gender: gender as OnlineParticipantGender,
         citizenship: citizenship.trim(),
+        wcaId: wcaId.trim().toUpperCase(),
         photoUrl,
         photoPublicId,
         profileStatus: 'pending',
@@ -586,6 +595,27 @@ function ProfileBody({
               />
             ) : (
               <p className="oc-v3-value">{participant?.dateOfBirth || '—'}</p>
+            )}
+          </Field>
+
+          {/* Optional, and not part of the reviewed identity — a WCA id is
+              public and checkable on worldcubeassociation.org, so changing
+              it does not send an approved athlete back for review. */}
+          <Field label="WCA ID">
+            {editable ? (
+              <input
+                className="oc-v3-input oc-v3-input-mono"
+                value={wcaId}
+                onChange={(e) => setWcaId(e.target.value)}
+                placeholder="2019BATB01"
+                maxLength={10}
+                autoCapitalize="characters"
+                spellCheck={false}
+              />
+            ) : (
+              <p className="oc-v3-value" style={{ fontFamily: 'var(--oc-font-mono), monospace' }}>
+                {participant?.wcaId || '—'}
+              </p>
             )}
           </Field>
 

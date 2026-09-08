@@ -150,6 +150,22 @@ await check('6e. client writes stats', 'DENY', APPROVED, (ref) =>
   setDoc(ref, { stats: { '333': { pr: 1, ao5: 1, solveCount: 1 } } }, { merge: true }),
 );
 
+// ── wcaId: a plain, unreviewed string ──
+// Not in reviewedIdentityKeys(), no approved* snapshot, no entry in
+// judgeFieldsUntouched(). The rules type-check it and nothing more: format
+// is enforced by the profile form, which is a UI concern, not a security
+// one. A malformed id is a self-defeating lie (WCA ids are public and
+// checkable), so there is nothing to protect against here.
+await check('W1. athlete may write a wcaId with their profile', 'ALLOW', INCOMPLETE_SEED, (ref) =>
+  setDoc(ref, { ...IDENTITY, wcaId: '2016BAYA01', profileStatus: 'pending' }, { merge: true }),
+);
+await check('W2. a MALFORMED wcaId is still accepted by the rules (format is a UI concern)', 'ALLOW', INCOMPLETE_SEED, (ref) =>
+  setDoc(ref, { ...IDENTITY, wcaId: 'not-a-wca-id', profileStatus: 'pending' }, { merge: true }),
+);
+await check('W3. an APPROVED athlete may change wcaId without re-review', 'ALLOW', APPROVED, (ref) =>
+  updateDoc(ref, { wcaId: '2020NEWW02' }),
+);
+
 // ── A merged-away account must be reusable ──
 // The merge tombstones the old document with mergedInto/mergedAt and strips
 // the rest. That account stays usable: submitting a fresh profile clears the

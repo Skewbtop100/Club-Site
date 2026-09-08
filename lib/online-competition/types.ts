@@ -105,6 +105,13 @@ export interface OnlineParticipant {
   dateOfBirth?: string;
   gender?: OnlineParticipantGender;
   citizenship?: string;
+  /** WCA competitor id, e.g. "2016BAYA01". Optional — most athletes have
+   *  none. Deliberately NOT part of the reviewed identity: a WCA id is
+   *  public and independently checkable on worldcubeassociation.org, so a
+   *  false one is self-defeating and it needs no approval machinery. It has
+   *  no approved* snapshot, and changing it does not send an approved
+   *  athlete back into the review queue. */
+  wcaId?: string;
   photoUrl?: string | null;
   photoPublicId?: string | null;
   profileStatus?: OnlineParticipantProfileStatus;
@@ -140,6 +147,9 @@ export interface OnlineParticipantProfileInput {
   dateOfBirth: string;
   gender: OnlineParticipantGender;
   citizenship: string;
+  /** '' when the athlete has none. Uppercased by the form before it gets
+   *  here; format is validated there, not in the rules. */
+  wcaId: string;
   photoUrl: string;
   photoPublicId: string;
 }
@@ -158,6 +168,7 @@ export interface OnlineParticipantAdminView {
   dateOfBirth: string;
   gender: OnlineParticipantGender | null;
   citizenship: string;
+  wcaId?: string;
   photoUrl: string | null;
   profileStatus: OnlineParticipantProfileStatus;
   approvedPhotoUrl: string | null;

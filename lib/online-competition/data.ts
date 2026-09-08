@@ -186,6 +186,7 @@ export async function submitParticipantProfile(uid: string, input: OnlinePartici
       dateOfBirth: input.dateOfBirth,
       gender: input.gender,
       citizenship: input.citizenship,
+      wcaId: input.wcaId,
       photoUrl: input.photoUrl,
       photoPublicId: input.photoPublicId,
       profileStatus: 'pending',
