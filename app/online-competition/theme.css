@@ -2932,19 +2932,6 @@
   gap: 18px;
   align-items: flex-start;
 }
-.oc-v3-avatar-88 {
-  width: 88px;
-  height: 88px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #DFFF4F;
-  color: #08080A;
-  font: 700 28px var(--oc-font-mono), monospace;
-  background-size: cover;
-  background-position: center;
-}
 .oc-v3-ghost-btn {
   display: inline-flex;
   align-items: center;
@@ -3134,25 +3121,18 @@
    only the arrangement is. Collapses to two columns, then one. */
 .oc-v3-profile-band {
   display: grid;
-  grid-template-columns: 250px minmax(0, 1fr) 300px;
+  grid-template-columns: minmax(0, 1fr) 300px;
   align-items: stretch;
 }
 .oc-v3-profile-band > * + * {
   border-left: 1px solid #1C1C21;
 }
+/* One column below 1040px: the identity cell needs ~96px of avatar plus a
+   220px text column, which no longer fits beside a 300px stat grid. The
+   rule between the two cells flips from left to top so the separation
+   survives the stack. Nothing further is needed at 640px — the cell's own
+   flex-wrap handles the narrow case. */
 @media (max-width: 1040px) {
-  .oc-v3-profile-band {
-    grid-template-columns: 250px minmax(0, 1fr);
-  }
-  /* Stats drop to their own full-width row rather than squeezing the
-     photo cell below its 88px + text minimum. */
-  .oc-v3-profile-band > :nth-child(3) {
-    grid-column: 1 / -1;
-    border-left: none;
-    border-top: 1px solid #1C1C21;
-  }
-}
-@media (max-width: 640px) {
   .oc-v3-profile-band {
     grid-template-columns: minmax(0, 1fr);
   }

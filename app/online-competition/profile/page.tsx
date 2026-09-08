@@ -61,20 +61,6 @@ function initials(name: string | null | undefined): string {
   return (parts[0].charAt(0) + parts[1].charAt(0)).toUpperCase();
 }
 
-/** 88px avatar — the athlete's submitted/approved verification photo when
- *  one exists, otherwise their initials on volt. */
-function Avatar88({ src, name }: { src: string | null | undefined; name: string | null | undefined }) {
-  return (
-    <span
-      className="oc-v3-avatar-88"
-      aria-hidden
-      style={src ? { backgroundImage: `url(${src})`, color: 'transparent' } : undefined}
-    >
-      {src ? '' : initials(name)}
-    </span>
-  );
-}
-
 /** Best value across every event the athlete has stats for. With one
  *  event configured today this is the same as "their 3x3 PR"; across
  *  several it reads as a personal best overall, which is what a single
@@ -237,7 +223,6 @@ export default function ProfilePage() {
         uid={user.uid}
         email={user.email}
         displayName={user.displayName}
-        photoURL={user.photoURL}
         points={points}
         participant={participant}
         status={status}
@@ -254,7 +239,6 @@ function ProfileBody({
   uid,
   email,
   displayName,
-  photoURL,
   points,
   participant,
   status,
@@ -263,9 +247,6 @@ function ProfileBody({
   uid: string;
   email: string | null;
   displayName: string | null;
-  /** Google avatar for the identity cell — distinct from the reviewed
-   *  verification photo shown beside it. */
-  photoURL: string | null;
   points: number | null;
   participant: OnlineParticipant | null;
   status: OnlineParticipantProfileStatus;
@@ -385,77 +366,113 @@ function ProfileBody({
     }
   }
 
-  const shownPhoto = participant?.approvedPhotoUrl ?? photoPreview ?? participant?.photoUrl ?? null;
+  // Which image represents the athlete, in priority order:
+  //   1. a file they just picked, so the preview shows what they chose;
+  //   2. once approved, the APPROVED photo — types.ts calls this the
+  //      official one, and it is what the admin roster shows;
+  //   3. otherwise the latest submitted photo.
+  // Gated on photoFile rather than photoPreview because photoPreview is
+  // seeded from participant.photoUrl at mount, so it is non-null even when
+  // nothing has been picked and would otherwise always win.
+  const officialPhoto =
+    status === 'approved'
+      ? participant?.approvedPhotoUrl ?? participant?.photoUrl ?? null
+      : participant?.photoUrl ?? null;
+  const shownPhoto = (photoFile ? photoPreview : null) ?? officialPhoto;
   const canSubmit = !!photoFile || !!participant?.photoUrl;
 
   return (
     <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* ── Top band: identity | verification photo | stats ────────────
-          One card instead of three. The athlete card already carried an
-          avatar, so the verification photo sits beside it rather than in
-          its own block below, and the stat grid moves alongside instead of
-          under. .oc-v3-profile-band collapses this to two columns, then
-          one, on narrower viewports. */}
+      {/* ── Top band: identity+photo | stats ───────────────────────
+          One card where there used to be three stacked ones. The athlete's
+          avatar and the verification photo are the same image, so they
+          share a cell, and the stat grid sits alongside rather than under.
+          .oc-v3-profile-band stacks the two cells below 1040px. */}
       <div className="oc-v3-card">
         <div className="oc-v3-profile-band">
-          {/* Identity */}
-          <div className="oc-v3-side-top" style={{ borderBottom: 'none', justifyContent: 'center' }}>
-            {photoURL ? (
-              // eslint-disable-next-line @next/next/no-img-element -- avatar
-              // comes from Google's CDN, not our own image pipeline.
-              <img src={photoURL} alt="" className="oc-v3-avatar-96" />
-            ) : (
-              <span className="oc-v3-avatar-96" aria-hidden>
-                {initials(displayName)}
-              </span>
-            )}
-            <p style={{ font: '600 20px var(--oc-font-heading), sans-serif', color: '#F4F1EA', textAlign: 'center' }}>
-              {displayName ?? 'Тамирчин'}
-            </p>
-          </div>
-
-          {/* Verification photo — what an admin reviews, which is not the
-              same image as the Google avatar to its left. */}
-          <div style={{ padding: '20px 18px', display: 'flex', flexDirection: 'column', gap: 11, minWidth: 0 }}>
-            <span className="oc-v3-label">Профайл зураг</span>
-            <div style={{ display: 'flex', gap: 18, alignItems: 'center', flexWrap: 'wrap' }}>
-              <Avatar88 src={shownPhoto} name={displayName} />
-              <div style={{ flex: 1, minWidth: 200, display: 'flex', flexDirection: 'column', gap: 11 }}>
-                <p style={{ font: '400 12px/1.65 Geologica, sans-serif', color: '#9A958A', textWrap: 'pretty' }}>
-                  Царай тод харагдах зураг. Шүүгч бичлэг шалгахад ашиглана.
-                </p>
-                <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap', alignItems: 'center' }}>
-                  {editable && !uploadOpen && (
-                    <button type="button" className="oc-v3-ghost-btn" onClick={() => setUploadOpen(true)}>
-                      {status === 'rejected' ? 'ДАХИН ОРУУЛАХ' : 'ЗУРАГ СОЛИХ'}
-                    </button>
-                  )}
-                  {status === 'approved' && !editing && (
-                    <button type="button" className="oc-v3-ghost-btn" onClick={() => setEditing(true)}>
-                      МЭДЭЭЛЭЛ ЗАСАХ
-                    </button>
-                  )}
-                  <StatusChip status={status} />
-                </div>
-              </div>
+          {/* Identity + verification photo — one cell, one image.
+              These used to be two cells showing two different photos of
+              the same person (the Google avatar and the reviewed
+              verification photo), which read as a bug. The verification
+              photo IS the athlete's avatar here; initials stand in until
+              one has been submitted. */}
+          <div
+            style={{
+              padding: '24px 18px',
+              display: 'flex',
+              gap: 18,
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              minWidth: 0,
+            }}
+          >
+            <div
+              style={{
+                flex: 'none',
+                width: 150,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 12,
+              }}
+            >
+              {shownPhoto ? (
+                // eslint-disable-next-line @next/next/no-img-element -- Cloudinary
+                // URL, not our own image pipeline.
+                <img src={shownPhoto} alt="" className="oc-v3-avatar-96" />
+              ) : (
+                <span className="oc-v3-avatar-96" aria-hidden>
+                  {initials(displayName)}
+                </span>
+              )}
+              <p
+                style={{
+                  font: '600 20px var(--oc-font-heading), sans-serif',
+                  color: '#F4F1EA',
+                  textAlign: 'center',
+                  overflowWrap: 'anywhere',
+                }}
+              >
+                {displayName ?? 'Тамирчин'}
+              </p>
             </div>
 
-            {status === 'rejected' && participant?.rejectionReason && (
-              <div className="oc-v3-reject-block">
-                <p style={{ font: '600 9px var(--oc-font-mono), monospace', letterSpacing: '.14em', color: '#E8543C' }}>
-                  ТАТГАЛЗСАН ШАЛТГААН
-                </p>
-                <p style={{ marginTop: 8, font: '400 12px var(--oc-font-heading), sans-serif', color: '#F4F1EA' }}>
-                  {participant.rejectionReason}
-                </p>
-              </div>
-            )}
-
-            {status === 'pending' && (
-              <p style={{ font: '400 12px var(--oc-font-heading), sans-serif', color: '#9A958A' }}>
-                Таны мэдээллийг админ хянаж байна. Баталгаажсаны дараа тэмцээнд бүртгүүлэх боломжтой.
+            <div style={{ flex: 1, minWidth: 220, display: 'flex', flexDirection: 'column', gap: 11 }}>
+              <span className="oc-v3-label">Профайл зураг</span>
+              <p style={{ font: '400 12px/1.65 Geologica, sans-serif', color: '#9A958A', textWrap: 'pretty' }}>
+                Царай тод харагдах зураг. Шүүгч бичлэг шалгахад ашиглана.
               </p>
-            )}
+              <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap', alignItems: 'center' }}>
+                {editable && !uploadOpen && (
+                  <button type="button" className="oc-v3-ghost-btn" onClick={() => setUploadOpen(true)}>
+                    {status === 'rejected' ? 'ДАХИН ОРУУЛАХ' : 'ЗУРАГ СОЛИХ'}
+                  </button>
+                )}
+                {status === 'approved' && !editing && (
+                  <button type="button" className="oc-v3-ghost-btn" onClick={() => setEditing(true)}>
+                    МЭДЭЭЛЭЛ ЗАСАХ
+                  </button>
+                )}
+                <StatusChip status={status} />
+              </div>
+
+              {status === 'rejected' && participant?.rejectionReason && (
+                <div className="oc-v3-reject-block">
+                  <p style={{ font: '600 9px var(--oc-font-mono), monospace', letterSpacing: '.14em', color: '#E8543C' }}>
+                    ТАТГАЛЗСАН ШАЛТГААН
+                  </p>
+                  <p style={{ marginTop: 8, font: '400 12px var(--oc-font-heading), sans-serif', color: '#F4F1EA' }}>
+                    {participant.rejectionReason}
+                  </p>
+                </div>
+              )}
+
+              {status === 'pending' && (
+                <p style={{ font: '400 12px var(--oc-font-heading), sans-serif', color: '#9A958A' }}>
+                  Таны мэдээллийг админ хянаж байна. Баталгаажсаны дараа тэмцээнд бүртгүүлэх боломжтой.
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Stats — real values from the stats rollup + season points;
