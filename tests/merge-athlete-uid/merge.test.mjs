@@ -191,11 +191,11 @@ async function seed() {
   });
 }
 
-function runMerge(extraArgs = []) {
+function runMerge(extraArgs = [], oldEmail = OLD_EMAIL, newEmail = NEW_EMAIL) {
   try {
     const out = execFileSync(
       process.execPath,
-      ['scripts/merge-athlete-uid.mjs', '--old-email', OLD_EMAIL, '--new-email', NEW_EMAIL, ...extraArgs],
+      ['scripts/merge-athlete-uid.mjs', '--old-email', oldEmail, '--new-email', newEmail, ...extraArgs],
       { encoding: 'utf8', env: process.env },
     );
     return { code: 0, out };
@@ -407,41 +407,104 @@ async function main() {
     eq(`${uid.slice(0, 8)}… participant doc identical in every field`, after, before[`participant/${uid}`]);
   }
 
-  // ── Run 2: re-run guarded by the tombstone ──
-  console.log('\n── Run 2: --commit --resume on an already-merged athlete ─');
+  // ── Run 2: repeating the SAME merge ──────────────────────────────────
+  // The ALREADY_MERGED guard is gone (a merged-away account is empty, so
+  // merging into one is safe). What still refuses a careless double-merge
+  // is the freshness pre-flight: the destination now holds real data.
+  console.log('\n── Run 2: repeating the same merge ──────────────────────');
   const afterRun1 = await snapshotWorld();
-  const run2 = runMerge(['--commit', '--resume']);
-  check('exits non-zero (refuses to merge twice)', run2.code !== 0, `exit ${run2.code}`);
-  check('aborts on the mergedInto guard', run2.out.includes('already been merged'));
+  const run2 = runMerge(['--commit']);
+  check('exits non-zero', run2.code !== 0, `exit ${run2.code}`);
+  check('refused by the freshness pre-flight, not a merged flag',
+    run2.out.includes('new uid has no submissions') && !run2.out.includes('already been merged'));
   eq('world byte-identical to after run 1', await snapshotWorld(), afterRun1);
 
-  // ── Run 3: a true resume — tombstone cleared, everything already moved ──
-  // This is the state an interrupted run leaves behind, and it exercises
-  // the "already migrated" skip branches in the F and G transactions.
-  console.log('\n── Run 3: true resume (tombstone cleared, work already done) ─');
-  await db.collection('onlineParticipants').doc(OLD).update({
-    mergedInto: admin.firestore.FieldValue.delete(),
-    mergedAt: admin.firestore.FieldValue.delete(),
-  });
-  const beforeRun3 = await snapshotWorld();
+  // ── Run 3: --resume finishes an interrupted run ──────────────────────
+  // Everything has already moved, so this exercises the "already migrated"
+  // skip branches in the F and G transactions.
+  console.log('\n── Run 3: --resume over already-migrated data ───────────');
   const run3 = runMerge(['--commit', '--resume']);
   check('exits 0', run3.code === 0, run3.out.split('\n').slice(-6).join('\n'));
   const afterRun3 = await snapshotWorld();
-  // The only legitimate difference is the fresh tombstone on the old doc.
-  const strip = (w) => {
+  const stripMarkers = (w) => {
     const c = JSON.parse(JSON.stringify(w));
     delete c[`participant/${OLD}`].mergedAt;
-    delete c[`participant/${OLD}`].mergedInto;
     return c;
   };
-  eq('world unchanged apart from the re-applied tombstone', strip(afterRun3), strip(beforeRun3));
-  check('tombstone re-applied', (await db.collection('onlineParticipants').doc(OLD).get()).get('mergedInto') === NEW);
-  check('qualifiers array still correct after resume',
+  eq('world unchanged apart from the re-applied tombstone timestamp',
+    stripMarkers(afterRun3), stripMarkers(afterRun1));
+  check('qualifiers still correct',
     JSON.stringify(afterRun3.qualifiers) === JSON.stringify([OTHER1, NEW, OTHER2]),
     JSON.stringify(afterRun3.qualifiers));
-  check('assignments still correct after resume',
-    JSON.stringify(afterRun3.assignments) === JSON.stringify(norm({ [OTHER1]: 0, [NEW]: 2, [OTHER2]: 1 })),
-    JSON.stringify(afterRun3.assignments));
+
+  // ── Run 4: the REVERSE merge, B -> A ────────────────────────────────
+  // The whole point of making the tombstone a record rather than a lock:
+  // A is empty, so it is a legitimate destination, and this must succeed
+  // with no manual intervention.
+  console.log('\n── Run 4: reverse merge (B -> A), no manual intervention ─');
+  const run4 = runMerge(['--commit'], NEW_EMAIL, OLD_EMAIL);
+  check('reverse merge exits 0', run4.code === 0, run4.out.split('\n').slice(-8).join('\n'));
+
+  const backOld = (await db.collection('onlineParticipants').doc(OLD).get()).data() ?? {};
+  const backNew = (await db.collection('onlineParticipants').doc(NEW).get()).data() ?? {};
+
+  console.log('\n── 9. the receiving account is un-tombstoned ────────────');
+  check('mergedInto cleared on the account that received data',
+    backOld.mergedInto === undefined, backOld.mergedInto);
+  check('mergedAt cleared on the account that received data',
+    backOld.mergedAt === undefined, backOld.mergedAt);
+  check('profile is back on A', backOld.lastName === 'Ganzorig', backOld.lastName);
+  check('approved snapshot came back with it',
+    backOld.approvedLastName === 'Ganzorig' && backOld.profileStatus === 'approved',
+    `${backOld.approvedLastName} / ${backOld.profileStatus}`);
+  check('A keeps its OWN identity', backOld.email === OLD_EMAIL && backOld.uid === OLD,
+    `${backOld.email} / ${backOld.uid}`);
+  check('stats came back', JSON.stringify(norm(backOld.stats)) ===
+    JSON.stringify(norm({ 222: { pr: 300, ao5: 350, solveCount: 5 }, 333: { pr: 900, ao5: 1000, solveCount: 12 } })),
+    JSON.stringify(norm(backOld.stats)));
+
+  console.log('\n── 10. B is now the stripped tombstone ──────────────────');
+  check('B tombstoned toward A', backNew.mergedInto === OLD, backNew.mergedInto);
+  check('B stripped to identity + markers',
+    Object.keys(backNew).sort().join(',') === 'createdAt,displayName,email,mergedAt,mergedInto,photoURL,uid',
+    Object.keys(backNew).sort().join(','));
+  check('B keeps its own email', backNew.email === NEW_EMAIL, backNew.email);
+
+  console.log('\n── 11. references followed the data back ────────────────');
+  const subsBack = await db.collection('onlineSubmissions').get();
+  check('3 submissions carry A again',
+    subsBack.docs.filter((d) => d.get('uid') === OLD).length === 3);
+  check('none carry B', subsBack.docs.filter((d) => d.get('uid') === NEW).length === 0);
+  const notifsBack = await db.collection('onlineNotifications').get();
+  check('3 notifications carry A again',
+    notifsBack.docs.filter((d) => d.get('uid') === OLD).length === 3);
+  check('2 registrations under A again',
+    (await db.collection('onlineParticipants').doc(OLD).collection('registrations').get()).size === 2);
+  check('0 registrations under B',
+    (await db.collection('onlineParticipants').doc(NEW).collection('registrations').get()).size === 0);
+  const seasonBack = await db.collection('onlineSeasonPoints').doc(SEASON).collection('athletes').doc(OLD).get();
+  check('season doc back under A with its points', seasonBack.exists && seasonBack.get('totalPoints') === 45);
+  const qBack = (await db.collection('onlineCompetitions').doc(COMP).collection('qualifiers').doc(RKEY).get()).get('uids');
+  eq('qualifiers array back to [OTHER1, A, OTHER2] — index 1 preserved', qBack, [OTHER1, OLD, OTHER2]);
+  const gBack = (await db.collection('onlineCompetitions').doc(COMP).collection('groupAssignments').doc(RKEY).get()).get('assignments');
+  check('assignments back to A with the same group index', gBack[OLD] === 2, gBack[OLD]);
+
+  console.log('\n── 12. bystanders untouched through BOTH merges ─────────');
+  for (const uid of [OTHER1, OTHER2]) {
+    const after = norm((await db.collection('onlineParticipants').doc(uid).get()).data());
+    eq(`${uid.slice(0, 8)}… identical after two merges`, after, before[`participant/${uid}`]);
+  }
+  check("bystander's submission still theirs",
+    subsBack.docs.find((d) => d.id === 'sub-other-1')?.get('uid') === OTHER1);
+  check("bystander's notification still theirs",
+    notifsBack.docs.find((d) => d.id === 'n-other-1')?.get('uid') === OTHER2);
+  check("bystander's season doc still 10 points",
+    (await db.collection('onlineSeasonPoints').doc(SEASON).collection('athletes').doc(OTHER1).get()).get('totalPoints') === 10);
+  check('bystanders still at their original array positions',
+    qBack[0] === OTHER1 && qBack[2] === OTHER2);
+  check('bystanders still hold their group indices',
+    gBack[OTHER1] === 0 && gBack[OTHER2] === 1, JSON.stringify(gBack));
+
 
   console.log(`\n  ${pass} passed, ${fail} failed\n`);
   process.exit(fail === 0 ? 0 : 1);

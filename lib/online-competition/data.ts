@@ -2,6 +2,7 @@ import {
   doc,
   getDoc,
   waitForPendingWrites,
+  deleteField,
   getDocs,
   limit,
   orderBy,
@@ -189,6 +190,21 @@ export async function submitParticipantProfile(uid: string, input: OnlinePartici
       photoPublicId: input.photoPublicId,
       profileStatus: 'pending',
       submittedAt: serverTimestamp(),
+      // An account whose data was merged away is left empty and fully
+      // reusable. Filling in a profile is the moment it stops being
+      // "merged away", so the record of that move is cleared HERE rather
+      // than anywhere else: this is the single write that gives the
+      // document content again, so the flag and the content it describes
+      // change atomically. deleteField() on an absent field is a no-op,
+      // so the ordinary first-time submission is unaffected.
+      //
+      // Permitted by firestore.rules: mergedInto/mergedAt are not in
+      // judgeFieldsUntouched()'s admin-owned lockout, and no clause
+      // constrains them, so a client may clear them. Proven by the
+      // 'a merged-away athlete may submit a fresh profile' case in
+      // tests/firestore-rules.
+      mergedInto: deleteField(),
+      mergedAt: deleteField(),
     },
     { merge: true },
   );

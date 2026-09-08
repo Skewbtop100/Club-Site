@@ -207,29 +207,6 @@ export default function ProfilePage() {
 
   if (loadingProfile) return <Shell><p className="oc-v3-status">Ачааллаж байна...</p></Shell>;
 
-  // This account's data was moved to another Gmail. The document that
-  // remains is an empty forwarding stub — showing the verification form
-  // here would invite the athlete to rebuild a profile they already have
-  // under their new address.
-  if (participant?.mergedInto) {
-    return (
-      <Shell>
-        <div>
-          <p className="oc-v3-eyebrow">Профайл</p>
-          <h1 className="oc-v3-title" style={{ marginTop: 8 }}>Профайл</h1>
-        </div>
-        <div className="oc-v3-card" style={{ marginTop: 20 }}>
-          <div className="oc-v3-empty">
-            <p className="oc-v3-empty-text">
-              Энэ бүртгэлийн мэдээллийг өөр мэйл хаяг руу шилжүүлсэн байна. Шинэ хаягаараа нэвтэрнэ үү.
-            </p>
-          </div>
-        </div>
-      </Shell>
-    );
-  }
-  if (loadError) return <Shell><p className="oc-v3-status oc-v3-status-error">{loadError}</p></Shell>;
-
   const status = resolveProfileStatus(participant);
   return (
     <Shell>
@@ -240,6 +217,23 @@ export default function ProfilePage() {
         </div>
         {savedToast && <span className="oc-v3-toast">ХАДГАЛАГДЛАА</span>}
       </div>
+
+      {/* A merged-away account is empty and fully reusable — so this is a
+          note, not a gate. The verification form below stays usable, and
+          submitting it clears the flag (submitParticipantProfile), which
+          removes this note. */}
+      {participant?.mergedInto && (
+        <p
+          style={{
+            marginBottom: 20,
+            font: '400 12px var(--oc-font-heading), sans-serif',
+            color: '#9A958A',
+            lineHeight: 1.6,
+          }}
+        >
+          Энэ бүртгэлийн өмнөх мэдээллийг өөр хаяг руу шилжүүлсэн. Шинээр мэдээллээ бөглөж болно.
+        </p>
+      )}
 
       <ProfileBody
         uid={user.uid}

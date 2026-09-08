@@ -150,6 +150,37 @@ await check('6e. client writes stats', 'DENY', APPROVED, (ref) =>
   setDoc(ref, { stats: { '333': { pr: 1, ao5: 1, solveCount: 1 } } }, { merge: true }),
 );
 
+// ── A merged-away account must be reusable ──
+// The merge tombstones the old document with mergedInto/mergedAt and strips
+// the rest. That account stays usable: submitting a fresh profile clears the
+// markers in the SAME write (submitParticipantProfile). These prove the
+// rules allow a client to do that, rather than the app assuming they do.
+const TOMBSTONED = {
+  uid: UID,
+  displayName: 'Batbayar',
+  email: 'a@example.com',
+  photoURL: 'https://google/a.jpg',
+  mergedInto: 'someOtherUid0000000000000001',
+  mergedAt: new Date(1_700_000_000_000),
+};
+await check('M1. merged-away athlete submits a fresh profile AND clears mergedInto', 'ALLOW', TOMBSTONED, (ref) =>
+  setDoc(
+    ref,
+    { ...IDENTITY, profileStatus: 'pending', submittedAt: serverTimestamp(), mergedInto: deleteField(), mergedAt: deleteField() },
+    { merge: true },
+  ),
+);
+await check('M2. merged-away athlete clears mergedInto alone', 'ALLOW', TOMBSTONED, (ref) =>
+  updateDoc(ref, { mergedInto: deleteField(), mergedAt: deleteField() }),
+);
+await check('M3. sign-in upsert still works on a tombstoned doc', 'ALLOW', TOMBSTONED, (ref) =>
+  setDoc(
+    ref,
+    { uid: UID, displayName: 'Batbayar B', photoURL: 'https://google/a.jpg', email: 'a@example.com', createdAt: serverTimestamp() },
+    { merge: true },
+  ),
+);
+
 // ── The non-identity writer that must keep working ──
 await check('N1. sign-in upsert on an APPROVED doc (no identity fields)', 'ALLOW', APPROVED, (ref) =>
   setDoc(

@@ -79,13 +79,6 @@ function errorCopy(err: MergeError, newEmail: string): { title: string; body: st
         title: 'Ижил бүртгэл',
         body: 'Оруулсан мэйл нь тухайн тамирчны одоогийн мэйлтэй ижил байна. Шилжүүлэх зүйл алга.',
       };
-    case 'ALREADY_MERGED':
-      return {
-        title: 'Аль хэдийн шилжүүлсэн',
-        body:
-          'Энэ бүртгэлийн мэдээллийг өмнө нь өөр бүртгэл рүү шилжүүлсэн байна. Дахин ' +
-          'шилжүүлэх боломжгүй — шаардлагатай бол хөгжүүлэгчид хандана уу.',
-      };
     case 'NEW_HAS_SUBMISSIONS':
       return {
         title: 'Шинэ бүртгэл хоосон биш',
