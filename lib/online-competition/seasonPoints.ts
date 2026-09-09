@@ -1,16 +1,21 @@
 import { getOnlineCompAdminDb } from './firebase-admin';
-import { computeAo5, type AttemptTime } from './ao5';
+import { computeAo5, effectiveAttemptTime, type AttemptTime } from './ao5';
 import type { OnlineSeasonPointsBreakdownEntry } from './types';
 
 const BASE_POINTS = 10;
 const PLACEMENT_BONUS: Record<number, number> = { 1: 15, 2: 10, 3: 5 };
 
-interface ApprovedSubmission {
+interface JudgedSubmission {
   uid: string;
   /** Attempt index 1-5 within one run. */
   round: number;
   /** The competition round this attempt belongs to. */
   competitionRound: number;
+  /** Approved or rejected — never pending; an unjudged attempt is filtered
+   *  out before one of these is built. Load-bearing: effectiveAttemptTime
+   *  reads it FIRST, so a rejected attempt scores DNF and its
+   *  `reportedTime` is never trusted. */
+  status: 'approved' | 'rejected';
   reportedTime: number;
   isDnf?: boolean;
   penalty: '+2' | 'DNF' | null;
@@ -23,8 +28,9 @@ interface ApprovedSubmission {
  *  different rounds could land in one five-attempt set and produce a
  *  fabricated Ao5. */
 interface AthleteEvent {
-  /** competitionRound -> that round's APPROVED submissions. */
-  approvedByRound: Map<number, ApprovedSubmission[]>;
+  /** competitionRound -> that round's JUDGED submissions (approved or
+   *  rejected). A rejected attempt is a DNF, not an absent one. */
+  judgedByRound: Map<number, JudgedSubmission[]>;
   /** Highest competitionRound this athlete has ANY submission in for this
    *  event — pending and rejected included. This is their furthest round
    *  REACHED, which is what placement is decided on; it deliberately does
@@ -32,25 +38,26 @@ interface AthleteEvent {
   furthestRound: number;
 }
 
-/** A submission's effective Ao5 input: DNF (self-reported at entry, or
- *  — in practice never for an *approved* doc, since a judge-assigned DNF
- *  penalty gets `status: 'rejected'`, not 'approved' — included anyway
- *  for robustness) counts as 'DNF'; a judge's +2 penalty adds 200cs. */
-function effectiveTime(s: ApprovedSubmission): AttemptTime {
-  if (s.isDnf || s.penalty === 'DNF') return 'DNF';
-  return s.reportedTime + (s.penalty === '+2' ? 200 : 0);
+/** A submission's effective Ao5 input — the one shared rule (ao5.ts).
+ *  A rejected attempt is a DNF; its reported time is never read. The old
+ *  local copy noted that a judge DNF lands as `status: 'rejected'` and
+ *  called handling it "robustness" — it was in fact the bug: such an
+ *  attempt never reached this function at all, and its athlete was
+ *  dropped from the event outright. */
+function effectiveTime(s: JudgedSubmission): AttemptTime {
+  return effectiveAttemptTime(s);
 }
 
 /** Recomputes season points for one competition and merges them into
  *  onlineSeasonPoints/{season}/athletes/{uid}.
  *
- * Scoring: only approved submissions count. For each event, an athlete
- * needs a *complete* set of exactly 5 approved submissions covering
- * attempts 1-5 to get an Ao5 — a partially-approved set (some of their 5
- * attempts still pending/rejected) is skipped rather than averaging
- * whatever subset happens to be approved, since that wouldn't be a real
- * Ao5. Athletes are ranked ascending by Ao5 within each event; a DNF
- * average is excluded from ranking entirely (no placement, no points).
+ * Scoring: JUDGED submissions count — approved ones at their time, and
+ * rejected ones as a DNF. For each event, an athlete needs a *complete*
+ * set of 5 judged submissions covering attempts 1-5 to get an Ao5; a set
+ * with an attempt still PENDING is skipped rather than averaging whatever
+ * subset happens to be decided, since that wouldn't be a real Ao5.
+ * Athletes are ranked ascending by Ao5 within each event; a DNF average
+ * is excluded from ranking entirely (no placement, no points).
  * Points = 10 base for any placed result, +15/+10/+5 for 1st/2nd/3rd.
  *
  * WHICH ROUND SCORES — the furthest one reached. WCA semantics: an
@@ -120,28 +127,34 @@ export async function recomputeSeasonPointsForCompetition(
     const competitionRound = typeof d.competitionRound === 'number' ? d.competitionRound : null;
     if (competitionRound === null) continue;
 
-    // Unchanged meaning: uids with at least one CURRENTLY-approved
-    // submission, so an athlete who placed on a previous recompute but no
-    // longer does still gets their stale breakdown entry cleared below.
-    const approved = d.status === 'approved';
-    if (approved) involvedUids.add(uid);
+    // JUDGED = decided either way. Two separate uses:
+    //  - `judged` gates whether the attempt feeds an average at all
+    //    (a pending attempt makes the round incomplete).
+    //  - involvedUids drives the stale-entry cleanup below. Widened from
+    //    approved-only so an athlete whose every attempt was rejected —
+    //    who therefore has no approved submission at all — still gets a
+    //    previous recompute's breakdown entry cleared. It never grants
+    //    points; only DNF-free averages below do that.
+    const judged = d.status === 'approved' || d.status === 'rejected';
+    if (judged) involvedUids.add(uid);
 
     if (!byEvent.has(eventId)) byEvent.set(eventId, new Map());
     const byUid = byEvent.get(eventId)!;
     let entry = byUid.get(uid);
     if (!entry) {
-      entry = { approvedByRound: new Map(), furthestRound: competitionRound };
+      entry = { judgedByRound: new Map(), furthestRound: competitionRound };
       byUid.set(uid, entry);
     }
     // Reached, regardless of how far judging has got.
     if (competitionRound > entry.furthestRound) entry.furthestRound = competitionRound;
-    if (!approved) continue;
+    if (!judged) continue;
 
-    if (!entry.approvedByRound.has(competitionRound)) entry.approvedByRound.set(competitionRound, []);
-    entry.approvedByRound.get(competitionRound)!.push({
+    if (!entry.judgedByRound.has(competitionRound)) entry.judgedByRound.set(competitionRound, []);
+    entry.judgedByRound.get(competitionRound)!.push({
       uid,
       round: d.round,
       competitionRound,
+      status: d.status,
       reportedTime: d.reportedTime,
       isDnf: d.isDnf,
       penalty: d.penalty ?? null,
@@ -160,8 +173,8 @@ export async function recomputeSeasonPointsForCompetition(
       // excluded outright — there is deliberately no fallback to an
       // earlier round, which would score them as if they had never
       // advanced past it.
-      const subs = entry.approvedByRound.get(entry.furthestRound) ?? [];
-      if (subs.length !== 5) continue; // incomplete set — not all 5 attempts approved yet
+      const subs = entry.judgedByRound.get(entry.furthestRound) ?? [];
+      if (subs.length !== 5) continue; // incomplete — an attempt is still unjudged
       const rounds = subs.map((s) => s.round).sort((a, b) => a - b);
       if (rounds.join(',') !== '1,2,3,4,5') continue; // missing/duplicate attempt
       const byRound = new Map(subs.map((s) => [s.round, s]));

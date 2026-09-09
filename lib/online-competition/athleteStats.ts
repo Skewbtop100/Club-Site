@@ -1,8 +1,12 @@
 import { getOnlineCompAdminDb } from './firebase-admin';
-import { computeAo5, type AttemptTime } from './ao5';
+import { computeAo5, effectiveAttemptTime, type AttemptTime } from './ao5';
 
-interface ApprovedSubmission {
+interface JudgedSubmission {
   event: string;
+  /** Approved or rejected — never pending. Load-bearing: a rejected
+   *  attempt counts toward a set being COMPLETE but scores DNF, and its
+   *  reportedTime is never read (see effectiveAttemptTime). */
+  status: 'approved' | 'rejected';
   /** Attempt index 1-5 within one run. */
   round: number;
   /** Which competition this attempt belongs to. */
@@ -14,17 +18,16 @@ interface ApprovedSubmission {
   penalty: '+2' | 'DNF' | null;
 }
 
-/** Same effective-time rule the season-points scorer uses: a judge's +2
- *  adds 200cs, a DNF is a DNF. */
-function effectiveTime(s: ApprovedSubmission): AttemptTime {
-  if (s.isDnf || s.penalty === 'DNF') return 'DNF';
-  return s.reportedTime + (s.penalty === '+2' ? 200 : 0);
+/** The one shared rule (ao5.ts) — literally the same function the
+ *  season-points scorer and the round ranker use, not a third copy of it. */
+function effectiveTime(s: JudgedSubmission): AttemptTime {
+  return effectiveAttemptTime(s);
 }
 
 export interface AthleteEventStats {
   /** Best single (lowest effective time) among approved submissions. */
   pr: number | null;
-  /** Best Ao5 among complete approved rounds-1-5 sets. */
+  /** Best Ao5 among complete judged rounds-1-5 sets. */
   ao5: number | null;
   /** Approved submissions for this event. */
   solveCount: number;
@@ -54,10 +57,13 @@ export async function recomputeAthleteStatsForCompetition(
 ): Promise<{ athletesUpdated: number; events: number }> {
   const db = getOnlineCompAdminDb();
 
+  // Judged, not approved: an athlete whose attempts were all rejected has
+  // no approved submission at all, and would otherwise never be
+  // recomputed — leaving a stale stat from before the rejection.
   const involved = await db
     .collection('onlineSubmissions')
     .where('competitionId', '==', competitionId)
-    .where('status', '==', 'approved')
+    .where('status', 'in', ['approved', 'rejected'])
     .get();
 
   const uids = new Set<string>();
@@ -65,18 +71,27 @@ export async function recomputeAthleteStatsForCompetition(
 
   let eventsTouched = 0;
   for (const uid of uids) {
-    // Every approved submission this athlete has, anywhere.
+    // Every JUDGED submission this athlete has, anywhere. Rejected ones
+    // are included so a round with a judge DNF still forms a complete
+    // five-attempt set — approved-only left it at four and the set was
+    // silently skipped, costing the athlete an Ao5 they had earned.
+    // Pending stays excluded: an unjudged attempt makes the set
+    // incomplete, which is the correct reason to skip it.
+    //
+    // No new composite index — `in` over two values expands to the same
+    // equality shape this query already used.
     const mine = await db
       .collection('onlineSubmissions')
       .where('uid', '==', uid)
-      .where('status', '==', 'approved')
+      .where('status', 'in', ['approved', 'rejected'])
       .get();
 
-    const byEvent = new Map<string, ApprovedSubmission[]>();
+    const byEvent = new Map<string, JudgedSubmission[]>();
     for (const doc of mine.docs) {
       const d = doc.data();
-      const s: ApprovedSubmission = {
+      const s: JudgedSubmission = {
         event: d.event,
+        status: d.status,
         round: d.round,
         competitionId: d.competitionId,
         // Attempts with no competitionRound can't be attributed to a round
@@ -94,11 +109,19 @@ export async function recomputeAthleteStatsForCompetition(
 
     const stats: Record<string, AthleteEventStats> = {};
     for (const [eventId, subs] of byEvent) {
-      // PR: lowest effective time among non-DNF approved solves.
-      const times = subs.map(effectiveTime).filter((t): t is number => typeof t === 'number');
+      // PR: lowest effective time among non-DNF APPROVED solves.
+      // `subs` now also holds rejected attempts (needed for complete Ao5
+      // sets below), but effectiveTime maps every one of them to 'DNF',
+      // which this filter drops — so a rejected attempt can never become
+      // someone's personal best. Belt and braces: the approved filter is
+      // also explicit here rather than relying on that alone.
+      const approvedSubs = subs.filter((x) => x.status === 'approved');
+      const times = approvedSubs.map(effectiveTime).filter((t): t is number => typeof t === 'number');
       const pr = times.length > 0 ? Math.min(...times) : null;
 
-      // Ao5: best average over complete attempt-1-5 sets. Grouped per
+      // Ao5: best average over complete attempt-1-5 sets, where COMPLETE
+      // means all five JUDGED (a rejected attempt is a DNF in the set, not
+      // a missing one) and none still pending. Grouped per
       // competition AND per competition round: a round is the unit an Ao5
       // is actually solved over, so two rounds of the same event in one
       // competition are two independent candidates, never one merged set.
@@ -115,7 +138,7 @@ export async function recomputeAthleteStatsForCompetition(
       // furthest-round rule: a PR is a fact about a solve, so an average
       // set in round 1 remains this athlete's best even if they went on to
       // a slower final.
-      const byRoundSet = new Map<string, ApprovedSubmission[]>();
+      const byRoundSet = new Map<string, JudgedSubmission[]>();
       for (const sub of subs) {
         if (!Number.isFinite(sub.competitionRound)) continue;
         const key = `${sub.competitionId}|${eventId}|${sub.competitionRound}`;
@@ -133,7 +156,10 @@ export async function recomputeAthleteStatsForCompetition(
         if (bestAo5 === null || ao5 < bestAo5) bestAo5 = ao5;
       }
 
-      stats[eventId] = { pr, ao5: bestAo5, solveCount: subs.length };
+      // solveCount keeps its published meaning — APPROVED submissions —
+      // rather than silently growing to include rejected ones now that
+      // `subs` carries them.
+      stats[eventId] = { pr, ao5: bestAo5, solveCount: approvedSubs.length };
       eventsTouched += 1;
     }
 

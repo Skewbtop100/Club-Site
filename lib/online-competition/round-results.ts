@@ -1,5 +1,5 @@
 import type { Firestore } from 'firebase-admin/firestore';
-import { computeAo5, type AttemptTime } from './ao5';
+import { computeAo5, effectiveAttemptTime, type AttemptTime } from './ao5';
 import { normalizeRoundStatus, type RoundRanking, type RoundStateDoc } from './rounds';
 
 // ── Ranking a competition round's results ───────────────────────────────
@@ -32,11 +32,17 @@ interface ApprovedAttempt {
 }
 
 /** Same effective-time rule as athleteStats/seasonPoints: a judge's +2
- *  adds 200cs, a DNF is a DNF. */
+ *  adds 200cs, a DNF is a DNF, and a REJECTED attempt is a DNF whatever
+ *  it claims. One shared implementation (ao5.ts) — this used to be a local
+ *  copy, and the rule is now status-dependent enough that three copies of
+ *  it was the bug. */
 function effectiveTime(data: FirebaseFirestore.DocumentData): AttemptTime {
-  if (data.isDnf === true || data.penalty === 'DNF') return 'DNF';
-  const reported = typeof data.reportedTime === 'number' ? data.reportedTime : 0;
-  return reported + (data.penalty === '+2' ? 200 : 0);
+  return effectiveAttemptTime({
+    status: data.status === 'approved' || data.status === 'rejected' ? data.status : 'pending',
+    reportedTime: typeof data.reportedTime === 'number' ? data.reportedTime : 0,
+    isDnf: data.isDnf === true,
+    penalty: data.penalty ?? null,
+  });
 }
 
 export async function fetchRoundStates(
@@ -90,7 +96,19 @@ export async function collectRoundResults(
   const snap = await db
     .collection('onlineSubmissions')
     .where('competitionId', '==', competitionId)
-    .where('status', '==', 'approved')
+    // JUDGED, not approved. A judge-assigned DNF writes status:'rejected'
+    // (review/route.ts), so an approved-only query silently dropped that
+    // attempt, left the athlete with 4 of 5 slots, and the completeness
+    // check below then removed them from the standings altogether — when
+    // WCA says one DNF is simply the worst attempt, dropped, leaving a
+    // perfectly valid Ao5. A rejected attempt now enters the set as a DNF.
+    //
+    // PENDING is still excluded, which is what keeps "complete" meaning
+    // "fully judged": an athlete with an unjudged attempt is not ranked.
+    //
+    // No new composite index: `in` over two values expands to the same
+    // equality shape this query already used.
+    .where('status', 'in', ['approved', 'rejected'])
     .where('competitionRound', '==', round)
     .get();
 
@@ -111,15 +129,24 @@ export async function collectRoundResults(
 
   const results: RoundResult[] = [];
   for (const [uid, attempts] of byUid) {
-    // An athlete can re-run the solve flow, leaving several approved
+    // An athlete can re-run the solve flow, leaving several judged
     // submissions in one attempt slot. Take the OLDEST per slot — the same
     // "first run counts" rule the review grid surfaces — so the ranking is
     // deterministic rather than depending on read order.
+    //
+    // Now that rejected attempts are visible here, this has teeth it did
+    // not have before: if run 1 was judged DNF and run 2 approved, the
+    // OLDEST is the rejected one, so the slot is a DNF. That is the point
+    // of "first run counts" — re-running until a solve passes must not be
+    // a way to erase a DNF. It does mean a rejection is final for that
+    // slot; there is no "voided, please resubmit" verdict in the schema
+    // (review/route.ts offers approve / +2 / DNF only).
     const bySlot = new Map<number, ApprovedAttempt>();
     for (const a of attempts) {
       const existing = bySlot.get(a.attempt);
       if (!existing || a.createdAt < existing.createdAt) bySlot.set(a.attempt, a);
     }
+    // Judged attempts, not approved ones — see the query above.
     if (bySlot.size < ATTEMPTS_PER_ROUND) continue;
     const times: AttemptTime[] = [];
     for (let i = 1; i <= ATTEMPTS_PER_ROUND; i++) times.push(bySlot.get(i)!.time);
@@ -152,7 +179,7 @@ export async function collectRoundResults(
 
 /** Standings for one event+round, best Ao5 first.
  *
- *  Only athletes with all five attempts approved AND a real (non-DNF) Ao5
+ *  Only athletes with all five attempts JUDGED AND a real (non-DNF) Ao5
  *  are ranked — everyone else is simply absent, which is what makes them
  *  non-qualifying by construction rather than by a separate rule. The
  *  filter preserves collectRoundResults' order, so the Nth entry here is

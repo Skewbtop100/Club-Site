@@ -6,6 +6,44 @@
 
 export type AttemptTime = number | 'DNF';
 
+/** The judged shape of one attempt, as far as scoring is concerned. */
+export interface JudgedAttempt {
+  status: 'pending' | 'approved' | 'rejected';
+  /** Centiseconds, as the athlete reported them. Only ever trusted on an
+   *  APPROVED attempt — see effectiveAttemptTime. */
+  reportedTime: number;
+  /** Self-reported DNF at time entry. */
+  isDnf?: boolean;
+  /** Judge-assigned penalty. */
+  penalty: '+2' | 'DNF' | null;
+}
+
+/** One attempt's contribution to an average, for every scorer.
+ *
+ *  Lives here, shared, because it is now status-dependent and three
+ *  separate scorers (round-results, seasonPoints, athleteStats) each used
+ *  to carry their own copy of the old rule. A rule this subtle with three
+ *  implementations is the exact shape of the bug this function exists to
+ *  fix.
+ *
+ *  REJECTED IS ALWAYS A DNF, and it is checked FIRST — deliberately not
+ *  via `penalty === 'DNF'`. A judge's only rejection action today does set
+ *  that penalty (review/route.ts), but keying on the status rather than
+ *  the penalty means an athlete's self-reported `reportedTime` on a
+ *  rejected attempt can never be read as a real time, whatever else is on
+ *  the document. A rejected attempt COUNTS toward a round being complete;
+ *  it never counts as a time.
+ *
+ *  PENDING must never reach here — an unjudged attempt makes a round
+ *  incomplete, and callers exclude it before scoring. Treated as a DNF if
+ *  it somehow does, which is the conservative answer (it cannot invent a
+ *  result), never a trusted time. */
+export function effectiveAttemptTime(a: JudgedAttempt): AttemptTime {
+  if (a.status !== 'approved') return 'DNF';
+  if (a.isDnf === true || a.penalty === 'DNF') return 'DNF';
+  return a.reportedTime + (a.penalty === '+2' ? 200 : 0);
+}
+
 export interface Ao5Result {
   /** null represents a DNF average (2+ DNFs among the 5). */
   ao5: number | null;

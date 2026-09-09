@@ -198,7 +198,8 @@ export type OnlineParticipantProfileStatus = 'incomplete' | 'pending' | 'approve
 export interface OnlineParticipantEventStats {
   /** Best single, centiseconds. */
   pr: number | null;
-  /** Best Ao5 over complete approved rounds-1-5 sets, centiseconds. */
+  /** Best Ao5 over complete JUDGED rounds-1-5 sets, centiseconds — a
+   *  judge-rejected attempt counts as a DNF in the set, not a gap. */
   ao5: number | null;
   /** Approved submissions for this event. */
   solveCount: number;

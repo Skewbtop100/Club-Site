@@ -401,7 +401,7 @@ function QualifyForm({
           <p className="oc-sc-hint">
             {preview.ranked.length} тамирчин дүнтэй · {preview.qualifiers.length} тамирчин шалгарна.
             {preview.ranked.length === 0 &&
-              ' Баталгаажсан бүрэн дүн (5 оролдлого) байхгүй тул шалгарах тамирчин алга.'}
+              ' Бүрэн шүүгдсэн дүн (5 оролдлого) байхгүй тул шалгарах тамирчин алга.'}
           </p>
 
           {preview.ranked.length > 0 && (
