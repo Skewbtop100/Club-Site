@@ -1,5 +1,14 @@
 import { getOnlineCompAdminDb } from './firebase-admin';
-import { computeAo5, effectiveAttemptTime, type AttemptTime } from './ao5';
+import type { Firestore } from 'firebase-admin/firestore';
+import {
+  attemptsForFormat,
+  computeResult,
+  effectiveAttemptTime,
+  isAveragingFormat,
+  resolveResultFormat,
+  type AttemptTime,
+  type ResultFormat,
+} from './ao5';
 
 interface JudgedSubmission {
   event: string;
@@ -25,12 +34,41 @@ function effectiveTime(s: JudgedSubmission): AttemptTime {
 }
 
 export interface AthleteEventStats {
-  /** Best single (lowest effective time) among approved submissions. */
+  /** Best single (lowest effective time) among approved submissions.
+   *  Format-agnostic by nature — a single is a single whatever format the
+   *  round it was solved in used — so this is unchanged and every format,
+   *  bo-N included, feeds it. */
   pr: number | null;
-  /** Best Ao5 among complete judged rounds-1-5 sets. */
+  /** Best Ao5, from 'ao5' rounds ONLY. */
   ao5: number | null;
+  /** Best Mo3, from 'mo3' rounds ONLY. */
+  mo3: number | null;
   /** Approved submissions for this event. */
   solveCount: number;
+}
+
+/** competitionId -> eventId -> that event's result format.
+ *
+ *  Built from ONE read of the whole onlineCompetitions collection, once
+ *  per recompute — NOT per athlete, and NOT per submission. The
+ *  alternative, denormalising `format` onto each submission, would be a
+ *  second source of truth for something the competition already owns, and
+ *  a stale copy would silently re-derive an athlete's history under the
+ *  wrong rule. That is the bug class the round-attribution work removed;
+ *  it is not being reintroduced to save a read. */
+async function loadFormatIndex(db: Firestore): Promise<Map<string, Map<string, ResultFormat>>> {
+  const snap = await db.collection('onlineCompetitions').select('events').get();
+  const index = new Map<string, Map<string, ResultFormat>>();
+  for (const doc of snap.docs) {
+    const events = doc.get('events');
+    if (!Array.isArray(events)) continue;
+    const byEvent = new Map<string, ResultFormat>();
+    for (const e of events as Record<string, unknown>[]) {
+      if (typeof e?.eventId === 'string') byEvent.set(e.eventId, resolveResultFormat(e.resultFormat));
+    }
+    index.set(doc.id, byEvent);
+  }
+  return index;
 }
 
 /** Recomputes per-event stats for every athlete who has an approved
@@ -56,6 +94,10 @@ export async function recomputeAthleteStatsForCompetition(
   competitionId: string,
 ): Promise<{ athletesUpdated: number; events: number }> {
   const db = getOnlineCompAdminDb();
+  // ONCE per recompute, before the per-athlete loop below.
+  const formatIndex = await loadFormatIndex(db);
+  const formatFor = (competitionId: string, eventId: string): ResultFormat =>
+    formatIndex.get(competitionId)?.get(eventId) ?? 'ao5';
 
   // Judged, not approved: an athlete whose attempts were all rejected has
   // no approved submission at all, and would otherwise never be
@@ -145,21 +187,46 @@ export async function recomputeAthleteStatsForCompetition(
         if (!byRoundSet.has(key)) byRoundSet.set(key, []);
         byRoundSet.get(key)!.push(sub);
       }
-      let bestAo5: number | null = null;
+      // THE STRUCTURAL GUARANTEE that an Ao5 and an Mo3 never overwrite
+      // one another: the best is tracked in a map KEYED BY THE FORMAT that
+      // produced it. `value < prev` therefore only ever compares two
+      // results of the same format — a cross-format comparison is not
+      // expressible here, rather than merely avoided by convention. The
+      // named fields are projected out of that map at the end, each from
+      // its own key.
+      const bestByFormat = new Map<ResultFormat, number>();
       for (const set of byRoundSet.values()) {
-        if (set.length !== 5) continue;
+        // The format of the round this set belongs to — every submission
+        // in a set shares one competition, so the first is representative.
+        const format = formatFor(set[0].competitionId, eventId);
+        // A bo-N round's result is a single, not an average; it feeds the
+        // PR above and is deliberately not stored as an average.
+        if (!isAveragingFormat(format)) continue;
+
+        const expected = attemptsForFormat(format);
+        if (set.length !== expected) continue;
         const rounds = set.map((s) => s.round).sort((a, b) => a - b);
-        if (rounds.join(',') !== '1,2,3,4,5') continue;
+        const wanted = Array.from({ length: expected }, (_, i) => i + 1);
+        if (rounds.join(',') !== wanted.join(',')) continue;
         const byRound = new Map(set.map((s) => [s.round, s]));
-        const { ao5 } = computeAo5([1, 2, 3, 4, 5].map((r) => effectiveTime(byRound.get(r)!)));
-        if (ao5 === null) continue; // DNF average isn't a result
-        if (bestAo5 === null || ao5 < bestAo5) bestAo5 = ao5;
+        const { value } = computeResult(
+          wanted.map((r) => effectiveTime(byRound.get(r)!)),
+          format,
+        );
+        if (value === null) continue; // DNF result isn't a result
+        const prev = bestByFormat.get(format);
+        if (prev === undefined || value < prev) bestByFormat.set(format, value);
       }
 
       // solveCount keeps its published meaning — APPROVED submissions —
       // rather than silently growing to include rejected ones now that
       // `subs` carries them.
-      stats[eventId] = { pr, ao5: bestAo5, solveCount: approvedSubs.length };
+      stats[eventId] = {
+        pr,
+        ao5: bestByFormat.get('ao5') ?? null,
+        mo3: bestByFormat.get('mo3') ?? null,
+        solveCount: approvedSubs.length,
+      };
       eventsTouched += 1;
     }
 

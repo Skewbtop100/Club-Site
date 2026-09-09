@@ -78,23 +78,21 @@ export function resolveResultFormat(raw: unknown): ResultFormat {
 
 /** How many attempts a format is solved over.
  *
- *  ⚠ PARTIALLY HONOURED. As of step C a non-Ao5 competition can be RUN but
- *  not yet RANKED.
- *
- *  Threaded through (steps C-D):
- *    - round-results.ts: the attempt count, the completeness check, the
- *      result itself, and the WCA tie-break on single
+ *  Honoured everywhere. Every site that once hardcoded five attempts now
+ *  reads this function or computeResult:
  *    - the solve page (captured once per run as `runShape`)
  *    - the summary screen, via computeResult + excludedIndices
- *    - ATTEMPTS columns in the admin ReviewGrid
+ *    - the admin ReviewGrid's attempt columns
  *    - the TNoodle import (expectedScrambleCountFor in scrambles.ts)
  *    - the scramble route's attempt bound
+ *    - round-results.ts: attempt count, completeness, result, tie-break
+ *    - seasonPoints.ts and athleteStats.ts
  *
- *  STILL HARDCODED TO 5 — these ignore this function, so a non-Ao5 event
- *  ranks and qualifies but earns no season points and no stats:
- *    - the length-5 guards in seasonPoints.ts        (step E)
- *    - the length-5 guards in athleteStats.ts        (step E)
- *  The editor's amber warning says exactly this to the admin. */
+ *  The one remaining Ao5-shaped thing is computeAo5 itself, kept as a
+ *  compatibility wrapper (see below), and the STORED field names
+ *  `stats[event].ao5` and the registration doc's `results.{event}.ao5` —
+ *  those keep their names because renaming them is a data migration, and
+ *  they are only ever written from an ao5 round. */
 export function attemptsForFormat(format: ResultFormat): number {
   switch (format) {
     case 'ao5':
@@ -107,6 +105,16 @@ export function attemptsForFormat(format: ResultFormat): number {
     case 'bo1':
       return 1;
   }
+}
+
+/** Whether this format produces an AVERAGE (a number derived from several
+ *  attempts) as opposed to a best single.
+ *
+ *  Load-bearing for the stats recompute: a bo-N round's `value` is a
+ *  single, not an average, so it must never be stored as one. It feeds the
+ *  PR (which is format-agnostic — a single is a single) and nothing else. */
+export function isAveragingFormat(format: ResultFormat): boolean {
+  return format === 'ao5' || format === 'mo3';
 }
 
 /** Display label. Standard cubing notation rather than translated words —

@@ -115,7 +115,7 @@ export default function SolvePage() {
    *  deliberately keeps the captured shape: it restarts the run, it does
    *  not renegotiate its format. */
   const [runShape, setRunShape] = useState<{ format: ResultFormat; attempts: number } | null>(null);
-  const [bests, setBests] = useState<{ pr: number | null; ao5: number | null } | null>(null);
+  const [bests, setBests] = useState<{ pr: number | null; ao5: number | null; mo3: number | null } | null>(null);
   const [prToast, setPrToast] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
 
@@ -215,11 +215,11 @@ export default function SolvePage() {
       .then((p) => {
         if (cancelled) return;
         const forEvent = p?.stats?.[eventId];
-        setBests({ pr: forEvent?.pr ?? null, ao5: forEvent?.ao5 ?? null });
+        setBests({ pr: forEvent?.pr ?? null, ao5: forEvent?.ao5 ?? null, mo3: forEvent?.mo3 ?? null });
       })
       .catch(() => {
         // Missing bests just means no badge is shown — never blocks solving.
-        if (!cancelled) setBests({ pr: null, ao5: null });
+        if (!cancelled) setBests({ pr: null, ao5: null, mo3: null });
       });
     return () => {
       cancelled = true;

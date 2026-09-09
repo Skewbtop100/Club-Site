@@ -1,5 +1,12 @@
 import { getOnlineCompAdminDb } from './firebase-admin';
-import { computeAo5, effectiveAttemptTime, type AttemptTime } from './ao5';
+import {
+  attemptsForFormat,
+  computeResult,
+  effectiveAttemptTime,
+  resolveResultFormat,
+  type AttemptTime,
+  type ResultFormat,
+} from './ao5';
 import type { OnlineSeasonPointsBreakdownEntry } from './types';
 
 const BASE_POINTS = 10;
@@ -53,7 +60,8 @@ function effectiveTime(s: JudgedSubmission): AttemptTime {
  *
  * Scoring: JUDGED submissions count — approved ones at their time, and
  * rejected ones as a DNF. For each event, an athlete needs a *complete*
- * set of 5 judged submissions covering attempts 1-5 to get an Ao5; a set
+ * set of judged submissions covering every attempt THAT EVENT'S FORMAT
+ * asks for (5 for Ao5, 3 for Mo3/Bo3, and so on) to get a result; a set
  * with an attempt still PENDING is skipped rather than averaging whatever
  * subset happens to be decided, since that wouldn't be a real Ao5.
  * Athletes are ranked ascending by Ao5 within each event; a DNF average
@@ -90,6 +98,14 @@ export async function recomputeSeasonPointsForCompetition(
     throw new Error('Competition not found');
   }
   const compData = compSnap.data()!;
+  // seasonPoints RE-DERIVES each athlete's result rather than reading the
+  // round standings, so it needs the format itself. The competition
+  // document is already in hand here — no extra read.
+  const formatByEvent = new Map<string, ResultFormat>(
+    (Array.isArray(compData.events) ? (compData.events as Record<string, unknown>[]) : [])
+      .filter((e) => typeof e?.eventId === 'string')
+      .map((e) => [e.eventId as string, resolveResultFormat(e.resultFormat)]),
+  );
   const season: string = typeof compData.season === 'string' && compData.season ? compData.season : '';
   if (!season) {
     throw new Error('Competition has no season set');
@@ -165,7 +181,14 @@ export async function recomputeSeasonPointsForCompetition(
   const perUid = new Map<string, OnlineSeasonPointsBreakdownEntry[]>();
 
   for (const [eventId, byUid] of byEvent) {
-    const ranked: { uid: string; ao5: number }[] = [];
+    // Every athlete in this loop is being scored on the SAME event of the
+    // SAME competition, so they all share one format — which is what makes
+    // comparing their values below legitimate. There is no cross-format
+    // comparison here to guard against.
+    const format = formatByEvent.get(eventId) ?? 'ao5';
+    const expected = attemptsForFormat(format);
+    const wanted = Array.from({ length: expected }, (_, i) => i + 1);
+    const ranked: { uid: string; value: number; best: number | null }[] = [];
 
     for (const [uid, entry] of byUid) {
       // Placement comes from the furthest round reached and from nothing
@@ -174,17 +197,31 @@ export async function recomputeSeasonPointsForCompetition(
       // earlier round, which would score them as if they had never
       // advanced past it.
       const subs = entry.judgedByRound.get(entry.furthestRound) ?? [];
-      if (subs.length !== 5) continue; // incomplete — an attempt is still unjudged
+      if (subs.length !== expected) continue; // incomplete — an attempt is still unjudged
       const rounds = subs.map((s) => s.round).sort((a, b) => a - b);
-      if (rounds.join(',') !== '1,2,3,4,5') continue; // missing/duplicate attempt
+      if (rounds.join(',') !== wanted.join(',')) continue; // missing/duplicate attempt
       const byRound = new Map(subs.map((s) => [s.round, s]));
-      const times: AttemptTime[] = [1, 2, 3, 4, 5].map((r) => effectiveTime(byRound.get(r)!));
-      const { ao5 } = computeAo5(times);
-      if (ao5 === null) continue; // DNF average — excluded from ranking
-      ranked.push({ uid, ao5 });
+      const times: AttemptTime[] = wanted.map((r) => effectiveTime(byRound.get(r)!));
+      const { value } = computeResult(times, format);
+      if (value === null) continue; // DNF result — excluded from ranking
+      const finished = times.filter((t): t is number => t !== 'DNF');
+      ranked.push({ uid, value, best: finished.length > 0 ? Math.min(...finished) : null });
     }
 
-    ranked.sort((a, b) => a.ao5 - b.ao5);
+    // Same WCA tie-break the round standings use (round-results.ts): equal
+    // values are separated by the better SINGLE. It matters MORE here than
+    // there — placement is this array's index, so a tie decides who gets
+    // +15 and who gets +10. Previously ties fell to insertion order, which
+    // is Firestore read order: not merely arbitrary but unstable between
+    // runs of the same recompute.
+    ranked.sort((a, b) => {
+      if (a.value !== b.value) return a.value - b.value;
+      if (a.best === null && b.best === null) return a.uid.localeCompare(b.uid);
+      if (a.best === null) return 1;
+      if (b.best === null) return -1;
+      if (a.best !== b.best) return a.best - b.best;
+      return a.uid.localeCompare(b.uid);
+    });
     ranked.forEach(({ uid }, i) => {
       const placement = i + 1;
       const points = BASE_POINTS + (PLACEMENT_BONUS[placement] ?? 0);

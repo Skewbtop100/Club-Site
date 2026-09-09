@@ -243,7 +243,11 @@ const ONE_DNF_AO5 = 1200;
   ok('stats: pending athlete solveCount is 4 (pending is not judged)', stats.get('pending')?.solveCount === 4, String(stats.get('pending')?.solveCount));
 
 
-  // ══ NON-Ao5 FORMATS ══════════════════════════════════════════════════
+  // NOTE: every fixture athlete below has a GLOBALLY UNIQUE uid. That is
+// not cosmetic: recomputeAthleteStatsForCompetition recomputes an
+// athlete across EVERY competition they appear in, so a uid reused
+// between two fixtures silently merges their solveCount and PR.
+// ══ NON-Ao5 FORMATS ══════════════════════════════════════════════════
   // Same judged-not-approved rule, but the attempt count, the result and
   // the sort all come from the event's resultFormat now.
   const { selectQualifiers } = require(path.join(OUT, 'rounds.js'));
@@ -281,28 +285,28 @@ const ONE_DNF_AO5 = 1200;
   const MO3 = 'comp-mo3';
   await seedFormat(MO3, 'mo3', 3, {
     // mean(1000,1100,1200) = 1100
-    clean:   { times: [1000, 1100, 1200] },
+    mClean:   { times: [1000, 1100, 1200] },
     // mean(1200,1300,1400) = 1300
-    slower:  { times: [1200, 1300, 1400] },
+    mSlower:  { times: [1200, 1300, 1400] },
     // ANY DNF kills an Mo3 — no cushion
-    oneDnf:  { times: [1000, 1100, 'DNF'] },
+    mOneDnf:  { times: [1000, 1100, 'DNF'] },
     // only 2 of 3 judged
-    partial: { times: [1000, 1100, 1200], pending: [2] },
+    mPartial: { times: [1000, 1100, 1200], pending: [2] },
   });
 
   const mo3All = await collectRoundResults(db, MO3, EVENT, ROUND);
   const mo3By = new Map(mo3All.map((r) => [r.uid, r]));
-  ok('mo3: reads 3 attempts, not 5 — clean set is ranked', mo3By.has('clean'));
-  ok('mo3: clean mean is right (no trimming)', mo3By.get('clean')?.value === 1100, String(mo3By.get('clean')?.value));
-  ok('mo3: slower athlete ranked too', mo3By.get('slower')?.value === 1300, String(mo3By.get('slower')?.value));
-  ok('mo3: ONE DNF is a DNF result (no cushion)', mo3By.get('oneDnf')?.value === null, String(mo3By.get('oneDnf')?.value));
-  ok('mo3: DNF-result athlete still FINISHED the round', mo3By.has('oneDnf'));
-  ok('mo3: an unjudged attempt means incomplete, not ranked', !mo3By.has('partial'));
-  ok('mo3: DNF result sorts last among finishers', mo3All[mo3All.length - 1].uid === 'oneDnf', mo3All.map((r) => r.uid).join(','));
+  ok('mo3: reads 3 attempts, not 5 — clean set is ranked', mo3By.has('mClean'));
+  ok('mo3: clean mean is right (no trimming)', mo3By.get('mClean')?.value === 1100, String(mo3By.get('mClean')?.value));
+  ok('mo3: slower athlete ranked too', mo3By.get('mSlower')?.value === 1300, String(mo3By.get('mSlower')?.value));
+  ok('mo3: ONE DNF is a DNF result (no cushion)', mo3By.get('mOneDnf')?.value === null, String(mo3By.get('mOneDnf')?.value));
+  ok('mo3: DNF-result athlete still FINISHED the round', mo3By.has('mOneDnf'));
+  ok('mo3: an unjudged attempt means incomplete, not ranked', !mo3By.has('mPartial'));
+  ok('mo3: DNF result sorts last among finishers', mo3All[mo3All.length - 1].uid === 'mOneDnf', mo3All.map((r) => r.uid).join(','));
 
   const mo3Ranked = await rankRoundResults(db, MO3, EVENT, ROUND);
   ok('mo3: exactly the two finishers with a real mean are ranked',
-    mo3Ranked.map((r) => r.uid).join(',') === 'clean,slower', mo3Ranked.map((r) => r.uid).join(','));
+    mo3Ranked.map((r) => r.uid).join(',') === 'mClean,mSlower', mo3Ranked.map((r) => r.uid).join(','));
   ok('mo3: a rejected attempt never contributes its reportedTime',
     mo3Ranked.every((r) => r.value !== 999), JSON.stringify(mo3Ranked.map((r) => r.value)));
 
@@ -310,55 +314,55 @@ const ONE_DNF_AO5 = 1200;
   const BO3 = 'comp-bo3';
   await seedFormat(BO3, 'bo3', 3, {
     // best of the three = 900
-    fast:    { times: [1200, 900, 1500] },
+    b3Fast:    { times: [1200, 900, 1500] },
     // one DNF, still ranked on the best of what remains = 1000
-    oneDnf:  { times: ['DNF', 1000, 1400] },
+    b3OneDnf:  { times: ['DNF', 1000, 1400] },
     // every attempt DNF -> no result
-    allDnf:  { times: ['DNF', 'DNF', 'DNF'] },
-    partial: { times: [800, 900, 1000], pending: [2] },
+    b3AllDnf:  { times: ['DNF', 'DNF', 'DNF'] },
+    b3Partial: { times: [800, 900, 1000], pending: [2] },
   });
 
   const bo3All = await collectRoundResults(db, BO3, EVENT, ROUND);
   const bo3By = new Map(bo3All.map((r) => [r.uid, r]));
-  ok('bo3: value is the BEST SINGLE, not an average', bo3By.get('fast')?.value === 900, String(bo3By.get('fast')?.value));
-  ok('bo3: one DNF still ranks on the best of the rest', bo3By.get('oneDnf')?.value === 1000, String(bo3By.get('oneDnf')?.value));
-  ok('bo3: all-DNF has no result', bo3By.get('allDnf')?.value === null, String(bo3By.get('allDnf')?.value));
-  ok('bo3: an unjudged attempt means incomplete, not ranked', !bo3By.has('partial'));
-  ok('bo3: value equals best for a best-of format', bo3By.get('fast')?.best === bo3By.get('fast')?.value);
+  ok('bo3: value is the BEST SINGLE, not an average', bo3By.get('b3Fast')?.value === 900, String(bo3By.get('b3Fast')?.value));
+  ok('bo3: one DNF still ranks on the best of the rest', bo3By.get('b3OneDnf')?.value === 1000, String(bo3By.get('b3OneDnf')?.value));
+  ok('bo3: all-DNF has no result', bo3By.get('b3AllDnf')?.value === null, String(bo3By.get('b3AllDnf')?.value));
+  ok('bo3: an unjudged attempt means incomplete, not ranked', !bo3By.has('b3Partial'));
+  ok('bo3: value equals best for a best-of format', bo3By.get('b3Fast')?.best === bo3By.get('b3Fast')?.value);
 
   const bo3Ranked = await rankRoundResults(db, BO3, EVENT, ROUND);
   ok('bo3: ranked fastest-single first',
-    bo3Ranked.map((r) => r.uid).join(',') === 'fast,oneDnf', bo3Ranked.map((r) => r.uid).join(','));
+    bo3Ranked.map((r) => r.uid).join(',') === 'b3Fast,b3OneDnf', bo3Ranked.map((r) => r.uid).join(','));
 
   // ── Bo1 ───────────────────────────────────────────────────────────────
   const BO1 = 'comp-bo1';
   await seedFormat(BO1, 'bo1', 1, {
-    solo: { times: [1234] },
-    dnf:  { times: ['DNF'] },
+    b1Solo: { times: [1234] },
+    b1Dnf:  { times: ['DNF'] },
   });
   const bo1All = await collectRoundResults(db, BO1, EVENT, ROUND);
   const bo1By = new Map(bo1All.map((r) => [r.uid, r]));
-  ok('bo1: a single attempt is a complete round', bo1By.get('solo')?.value === 1234, String(bo1By.get('solo')?.value));
-  ok('bo1: a DNF single has no result', bo1By.get('dnf')?.value === null, String(bo1By.get('dnf')?.value));
+  ok('bo1: a single attempt is a complete round', bo1By.get('b1Solo')?.value === 1234, String(bo1By.get('b1Solo')?.value));
+  ok('bo1: a DNF single has no result', bo1By.get('b1Dnf')?.value === null, String(bo1By.get('b1Dnf')?.value));
 
   // ── the WCA tie-break ────────────────────────────────────────────────
   // Equal Mo3 means, different singles. Before this changeset a tie fell
   // straight to uid (alphabetical), which silently decided who advanced.
-  // 'zzz' is deliberately alphabetically LAST so a uid tie-break would put
+  // 'tZzz' is deliberately alphabetically LAST so a uid tie-break would put
   // it second — it must come first on the better single.
   const TIE = 'comp-tie';
   await seedFormat(TIE, 'mo3', 3, {
     // mean(1000,1100,1200) = 1100, best single 1000
-    aaa: { times: [1000, 1100, 1200] },
+    tAaa: { times: [1000, 1100, 1200] },
     // mean(900,1100,1300)  = 1100, best single 900  <- better single
-    zzz: { times: [900, 1100, 1300] },
+    tZzz: { times: [900, 1100, 1300] },
   });
   const tieRanked = await rankRoundResults(db, TIE, EVENT, ROUND);
   ok('tie-break: both athletes have the SAME mean',
     tieRanked[0]?.value === 1100 && tieRanked[1]?.value === 1100,
     JSON.stringify(tieRanked.map((r) => r.value)));
   ok('tie-break: the better SINGLE ranks first (not alphabetical uid)',
-    tieRanked[0]?.uid === 'zzz', tieRanked.map((r) => `${r.uid}:${r.best}`).join(','));
+    tieRanked[0]?.uid === 'tZzz', tieRanked.map((r) => `${r.uid}:${r.best}`).join(','));
   ok('tie-break: best single is carried on the ranking',
     tieRanked[0]?.best === 900 && tieRanked[1]?.best === 1000,
     JSON.stringify(tieRanked.map((r) => r.best)));
@@ -368,15 +372,143 @@ const ONE_DNF_AO5 = 1200;
   // of the above; selectQualifiers is the pure selection it then applies.
   const bo3Cut = selectQualifiers(bo3Ranked, 'count', 1);
   ok('qualify: top-1 of a Bo3 round selects the fastest single',
-    bo3Cut.length === 1 && bo3Cut[0].uid === 'fast', JSON.stringify(bo3Cut.map((r) => r.uid)));
+    bo3Cut.length === 1 && bo3Cut[0].uid === 'b3Fast', JSON.stringify(bo3Cut.map((r) => r.uid)));
   const mo3Cut = selectQualifiers(mo3Ranked, 'count', 1);
   ok('qualify: top-1 of an Mo3 round selects the best mean',
-    mo3Cut.length === 1 && mo3Cut[0].uid === 'clean', JSON.stringify(mo3Cut.map((r) => r.uid)));
+    mo3Cut.length === 1 && mo3Cut[0].uid === 'mClean', JSON.stringify(mo3Cut.map((r) => r.uid)));
   const tieCut = selectQualifiers(tieRanked, 'count', 1);
   ok('qualify: a tie is broken by single, so the cut is not arbitrary',
-    tieCut.length === 1 && tieCut[0].uid === 'zzz', JSON.stringify(tieCut.map((r) => r.uid)));
+    tieCut.length === 1 && tieCut[0].uid === 'tZzz', JSON.stringify(tieCut.map((r) => r.uid)));
   ok('qualify: a DNF-result athlete is never selected',
     selectQualifiers(mo3Ranked, 'count', 99).every((r) => r.uid !== 'oneDnf'));
+
+
+  // ══ CROSS-FORMAT STATS AND SEASON POINTS ═════════════════════════════
+  // athleteStats recomputes GLOBALLY — across every competition an athlete
+  // has ever solved in — so an Ao5 result in one and an Mo3 in another for
+  // the SAME event must land in separate fields and never overwrite one
+  // another. `pr` spans everything, because a single is a single.
+
+  /** Seeds one competition + one athlete's judged attempts for an event. */
+  async function seedComp(compId, format, attemptCount, perUid, season = 's2') {
+    await db.collection('onlineCompetitions').doc(compId).set({
+      name: compId, status: 'finished', season,
+      events: [{ eventId: EVENT, label: '3x3x3', rounds: 1, resultFormat: format }],
+    });
+    let t = 1_900_000_000_000;
+    for (const [uid, times] of Object.entries(perUid)) {
+      await db.collection('onlineParticipants').doc(uid).set({ uid, displayName: uid }, { merge: true });
+      for (let i = 0; i < attemptCount; i++) {
+        const v = times[i];
+        await db.collection('onlineSubmissions').add({
+          competitionId: compId, uid, event: EVENT, round: i + 1, competitionRound: 1,
+          videoUrl: 'x', cloudinaryPublicId: 'x',
+          reportedTime: v === 'DNF' ? 999 : v,
+          isDnf: false,
+          penalty: v === 'DNF' ? 'DNF' : null,
+          status: v === 'DNF' ? 'rejected' : 'approved',
+          createdAt: Timestamp.fromMillis((t += 1000)),
+        });
+      }
+    }
+  }
+
+  const statsFor = async (uid) =>
+    (await db.collection('onlineParticipants').doc(uid).get()).data()?.stats?.[EVENT];
+
+  // Same athlete, same event, two competitions with different formats.
+  // Ao5 of [1000,1100,1200,1300,1400] = 1200; best single 1000.
+  // Mo3 of [1500,1600,1700]           = 1600; best single 1500.
+  await seedComp('x-ao5', 'ao5', 5, { xDual: [1000, 1100, 1200, 1300, 1400] });
+  await seedComp('x-mo3', 'mo3', 3, { xDual: [1500, 1600, 1700] });
+  await recomputeAthleteStatsForCompetition('x-ao5');
+  let dual = await statsFor('xDual');
+  ok('cross-format: Ao5 stored in stats.ao5', dual?.ao5 === 1200, JSON.stringify(dual));
+  ok('cross-format: Mo3 stored in stats.mo3', dual?.mo3 === 1600, JSON.stringify(dual));
+  ok('cross-format: the SLOWER Mo3 did not overwrite the Ao5', dual?.ao5 === 1200);
+  ok('cross-format: the FASTER Ao5 did not overwrite the Mo3', dual?.mo3 === 1600);
+  ok('cross-format: pr is the best single across BOTH competitions', dual?.pr === 1000, String(dual?.pr));
+  ok('cross-format: solveCount spans both competitions', dual?.solveCount === 8, String(dual?.solveCount));
+
+  // Recomputing from the OTHER competition must reach the same answer —
+  // the recompute is global, not per-competition.
+  await recomputeAthleteStatsForCompetition('x-mo3');
+  dual = await statsFor('xDual');
+  ok('cross-format: recomputing from the Mo3 competition gives the same stats',
+    dual?.ao5 === 1200 && dual?.mo3 === 1600 && dual?.pr === 1000, JSON.stringify(dual));
+
+  // An Mo3 that is FASTER than the athlete's Ao5 still must not touch it.
+  await seedComp('x-mo3-fast', 'mo3', 3, { xDual: [500, 600, 700] });
+  await recomputeAthleteStatsForCompetition('x-mo3-fast');
+  dual = await statsFor('xDual');
+  ok('cross-format: a faster Mo3 (600) replaces only stats.mo3', dual?.mo3 === 600, JSON.stringify(dual));
+  ok('cross-format: ...and leaves stats.ao5 alone', dual?.ao5 === 1200, JSON.stringify(dual));
+  ok('cross-format: ...and does move pr', dual?.pr === 500, String(dual?.pr));
+
+  // ── Bo-N contributes to pr and solveCount but NO average ─────────────
+  await seedComp('x-bo3', 'bo3', 3, { xBonly: [800, 700, 900] });
+  await recomputeAthleteStatsForCompetition('x-bo3');
+  const bonly = await statsFor('xBonly');
+  ok('bo3: contributes to pr', bonly?.pr === 700, String(bonly?.pr));
+  ok('bo3: contributes to solveCount', bonly?.solveCount === 3, String(bonly?.solveCount));
+  ok('bo3: produces NO ao5', bonly?.ao5 === null, JSON.stringify(bonly));
+  ok('bo3: produces NO mo3', bonly?.mo3 === null, JSON.stringify(bonly));
+
+  // ── season points for a non-Ao5 round ────────────────────────────────
+  await seedComp('x-season', 'mo3', 3, {
+    sWinner: [1000, 1000, 1000], // mean 1000
+    sSecond: [1100, 1100, 1100], // mean 1100
+    sDnfd:   [1000, 1100, 'DNF'], // any DNF kills an Mo3
+  }, 's3');
+  await recomputeSeasonPointsForCompetition('x-season');
+  const seasonRows = await db.collection('onlineSeasonPoints').doc('s3').collection('athletes').get();
+  const pts = new Map(seasonRows.docs.map((d) => [d.id, d.data()]));
+  const placementOf = (uid) => (pts.get(uid)?.breakdown ?? []).find((b) => b.competitionId === 'x-season')?.placement;
+  ok('season/mo3: the better mean places first', placementOf('sWinner') === 1, String(placementOf('sWinner')));
+  ok('season/mo3: the slower mean places second', placementOf('sSecond') === 2, String(placementOf('sSecond')));
+  ok('season/mo3: a DNF mean gets no placement', placementOf('sDnfd') === undefined, String(placementOf('sDnfd')));
+  ok('season/mo3: the winner scores more than second',
+    (pts.get('sWinner')?.totalPoints ?? 0) > (pts.get('sSecond')?.totalPoints ?? 0),
+    `${pts.get('sWinner')?.totalPoints} vs ${pts.get('sSecond')?.totalPoints}`);
+
+  // The season tie-break: equal means, better single wins the placement —
+  // and placement is what decides +15 vs +10.
+  await seedComp('x-tie', 'mo3', 3, {
+    sAaa: [1000, 1100, 1200], // mean 1100, best 1000
+    sZzz: [900, 1100, 1300],  // mean 1100, best 900   <- better single
+  }, 's4');
+  await recomputeSeasonPointsForCompetition('x-tie');
+  const tieRows = await db.collection('onlineSeasonPoints').doc('s4').collection('athletes').get();
+  const tiePts = new Map(tieRows.docs.map((d) => [d.id, d.data()]));
+  const tiePlace = (uid) => (tiePts.get(uid)?.breakdown ?? []).find((b) => b.competitionId === 'x-tie')?.placement;
+  ok('season tie-break: the better single takes 1st (not read order)', tiePlace('sZzz') === 1, String(tiePlace('sZzz')));
+  ok('season tie-break: the other takes 2nd', tiePlace('sAaa') === 2, String(tiePlace('sAaa')));
+
+  // ── THE REGRESSION THAT MATTERS MOST ─────────────────────────────────
+  // Every Ao5-only case above (the original suite) must be byte-identical.
+  // Re-run the original competition's recomputes and re-assert them.
+  await recomputeSeasonPointsForCompetition(COMP);
+  await recomputeAthleteStatsForCompetition(COMP);
+  const regStats = await Promise.all(
+    Object.keys(ATHLETES).map(async (uid) => [uid, (await db.collection('onlineParticipants').doc(uid).get()).data()?.stats?.[EVENT]]),
+  );
+  const reg = new Map(regStats);
+  ok('REGRESSION ao5: 5-approved athlete Ao5 unchanged', reg.get('full')?.ao5 === FULL_AO5, JSON.stringify(reg.get('full')));
+  ok('REGRESSION ao5: one-DNF athlete Ao5 unchanged', reg.get('oneDnf')?.ao5 === ONE_DNF_AO5, JSON.stringify(reg.get('oneDnf')));
+  ok('REGRESSION ao5: DNF-average athlete still has no Ao5', reg.get('twoDnf')?.ao5 === null);
+  ok('REGRESSION ao5: incomplete athlete still has no Ao5', reg.get('pending')?.ao5 === null);
+  ok('REGRESSION ao5: PR unchanged', reg.get('oneDnf')?.pr === 1000, String(reg.get('oneDnf')?.pr));
+  ok('REGRESSION ao5: solveCount unchanged', reg.get('oneDnf')?.solveCount === 4, String(reg.get('oneDnf')?.solveCount));
+  // An Ao5-only athlete has no Mo3 — the new field is null, not absent-
+  // and-undefined, so readers get a consistent shape.
+  ok('REGRESSION ao5: an Ao5-only athlete has mo3 === null', reg.get('full')?.mo3 === null, JSON.stringify(reg.get('full')));
+
+  const regSeason = await db.collection('onlineSeasonPoints').doc('s1').collection('athletes').get();
+  const regPts = new Map(regSeason.docs.map((d) => [d.id, d.data()]));
+  ok('REGRESSION ao5: season points still awarded to the two finishers',
+    (regPts.get('full')?.totalPoints ?? 0) > 0 && (regPts.get('oneDnf')?.totalPoints ?? 0) > 0);
+  ok('REGRESSION ao5: DNF-average athlete still unplaced',
+    (regPts.get('twoDnf')?.breakdown ?? []).length === 0);
 
   console.log(`\n  ${pass} passed, ${fail} failed\n`);
   fs.rmSync(OUT, { recursive: true, force: true });

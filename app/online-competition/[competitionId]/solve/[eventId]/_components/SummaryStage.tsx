@@ -3,7 +3,7 @@
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
 import type { AttemptTime } from '@/lib/online-competition/ao5';
 import { computeResult, type ResultFormat } from '@/lib/online-competition/ao5';
-import { beatsAo5, beatsPr, type StoredBests } from '../_lib/prCheck';
+import { beatsAverage, beatsPr, type StoredBests } from '../_lib/prCheck';
 
 export interface AttemptResult {
   timeCs: number | null;
@@ -55,7 +55,7 @@ export default function SummaryStage({
   const prRows = attempts.map((a) => beatsPr(a.timeCs, a.isDnf, bests));
   const anyPr = prRows.some(Boolean);
   // A first-ever Ao5 for this event counts, same rule as a first single.
-  const ao5IsPr = beatsAo5(ao5, bests);
+  const ao5IsPr = beatsAverage(ao5, resultFormat, bests);
 
   function handleRedo() {
     if (window.confirm('Бүх бичлэгийг устгаад дахин эхлэх үү?')) {

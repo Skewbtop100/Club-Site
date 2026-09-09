@@ -580,15 +580,6 @@ function transitionLabel(fromRound: number, rounds: number): string {
 
 const FORMAT_LOCKED_REASON = 'Үзүүлэлт орсон тул формат солих боломжгүй.';
 
-// Step D added ranking and qualification, so a non-Ao5 round can now be
-// judged, ranked and advanced. What remains is the cross-competition
-// scoring: seasonPoints.ts and athleteStats.ts still require exactly five
-// judged attempts, so a non-Ao5 event contributes no season points and
-// produces no athlete stats (PR, best average) at all. That is step E.
-const FORMAT_UNSUPPORTED_WARNING =
-  'Ao5-аас өөр формат: тэмцээн явуулж, шүүж, эрэмбэлж, шалгаруулах боломжтой. ' +
-  'Гэвч улирлын оноо болон тамирчны статистик хараахан тооцогдохгүй.';
-
 function EventsTab({
   events,
   setEvents,
@@ -607,7 +598,6 @@ function EventsTab({
 
   const used = new Set(events.map((e) => e.eventId));
   const allAdded = ONLINE_COMP_EVENTS.every((o) => used.has(o.id));
-  const unsupported = events.filter((e) => e.resultFormat !== 'ao5');
 
   // Close on an outside click or Escape. Both listeners are only attached
   // while the picker is open, so a closed picker costs nothing.
@@ -654,19 +644,6 @@ function EventsTab({
 
   return (
     <div>
-      {unsupported.length > 0 && (
-        <div className="oc-sc-warn" style={{ marginBottom: 14, display: 'flex', gap: 9, flexWrap: 'wrap' }}>
-          <span aria-hidden>▲</span>
-          <span>{FORMAT_UNSUPPORTED_WARNING}</span>
-          <span style={{ color: '#8A6A28' }}>
-            ·{' '}
-            {unsupported
-              .map((e) => `${onlineCompEventLabel(e.eventId)}: ${formatLabel(e.resultFormat)}`)
-              .join(', ')}
-          </span>
-        </div>
-      )}
-
       {events.length === 0 && (
         <p className="oc-cf-soon" style={{ marginBottom: 12 }}>
           Төрөл нэмээгүй байна. Тэмцээнийг нийтлэхийн тулд дор хаяж нэг төрөл нэмнэ үү.

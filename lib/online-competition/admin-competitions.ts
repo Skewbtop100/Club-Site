@@ -347,13 +347,39 @@ export async function writeCompetitionDoc(
     // submission can reference an id that did not exist.
     if (!isCreate) {
       const snap = await tx.get(ref);
-      const changing = snap.exists ? eventsChangingFormat(snap.get('events'), input.events) : [];
-      if (changing.length > 0) {
+      const storedEvents = snap.exists ? snap.get('events') : [];
+      const changing = snap.exists ? eventsChangingFormat(storedEvents, input.events) : [];
+      // REMOVING a locked event is refused too, and that is not belt-and-
+      // braces — without it the format lock has a trivial two-save bypass:
+      // save once dropping the event (nothing flags it, because the check
+      // only looked at events present in BOTH), then save again re-adding
+      // it with a different format (nothing flags it either, because it is
+      // no longer in the stored document to compare against).
+      //
+      // Removal is also independently destructive: athleteStats resolves a
+      // submission's format by looking the event up on its competition, so
+      // an event deleted out from under judged results silently re-derives
+      // all of them as Ao5 — the default for "event not found".
+      const storedIds = new Set(
+        (Array.isArray(storedEvents) ? (storedEvents as Record<string, unknown>[]) : [])
+          .map((e) => e?.eventId)
+          .filter((id): id is string => typeof id === 'string'),
+      );
+      const incomingIds = new Set(input.events.map((e) => e.eventId));
+      const removed = [...storedIds].filter((id) => !incomingIds.has(id));
+
+      if (changing.length > 0 || removed.length > 0) {
         const locked = new Set(await lockedFormatEventIds(db, ref.id));
-        const refused = changing.filter((id) => locked.has(id));
-        if (refused.length > 0) {
+        const refusedChange = changing.filter((id) => locked.has(id));
+        const refusedRemoval = removed.filter((id) => locked.has(id));
+        if (refusedChange.length > 0) {
           throw new CompetitionWriteError(
-            `Үзүүлэлт орсон тул формат солих боломжгүй: ${refused.join(', ')}`,
+            `Үзүүлэлт орсон тул формат солих боломжгүй: ${refusedChange.join(', ')}`,
+          );
+        }
+        if (refusedRemoval.length > 0) {
+          throw new CompetitionWriteError(
+            `Үзүүлэлт орсон тул төрлийг устгах боломжгүй: ${refusedRemoval.join(', ')}`,
           );
         }
       }

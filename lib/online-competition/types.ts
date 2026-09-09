@@ -214,9 +214,24 @@ export type OnlineParticipantProfileStatus = 'incomplete' | 'pending' | 'approve
 export interface OnlineParticipantEventStats {
   /** Best single, centiseconds. */
   pr: number | null;
-  /** Best Ao5 over complete JUDGED rounds-1-5 sets, centiseconds — a
-   *  judge-rejected attempt counts as a DNF in the set, not a gap. */
+  /** Best Ao5 over complete JUDGED attempt sets, centiseconds — a
+   *  judge-rejected attempt counts as a DNF in the set, not a gap.
+   *
+   *  ONLY ever computed from rounds whose resultFormat is 'ao5'. Its
+   *  meaning is unchanged from before per-event formats existed, which is
+   *  why no migration was needed. */
   ao5: number | null;
+  /** Best Mo3, same rule, and ONLY from rounds whose resultFormat is
+   *  'mo3'. Absent on every athlete whose stats predate this field, and on
+   *  anyone who has never solved an Mo3 round.
+   *
+   *  Deliberately a SEPARATE field rather than one "best average": a mean
+   *  of 3 with no dropped attempt is systematically slower than an Ao5, so
+   *  the two are not comparable and must never overwrite one another.
+   *
+   *  Bo-N rounds produce no average at all and appear in neither field —
+   *  they contribute only to `pr`. */
+  mo3?: number | null;
   /** Approved submissions for this event. */
   solveCount: number;
 }
