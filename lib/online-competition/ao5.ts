@@ -44,6 +44,136 @@ export function effectiveAttemptTime(a: JudgedAttempt): AttemptTime {
   return a.reportedTime + (a.penalty === '+2' ? 200 : 0);
 }
 
+// ── Result formats ───────────────────────────────────────────────────────
+// How a round's attempts collapse into one comparable number.
+//
+// NOT to be confused with OnlineCompetition.format (Хэлбэр —
+// 'online-video': how a competition is DELIVERED, see types.ts). This is
+// the scoring format of one event's round. The two are unrelated and are
+// deliberately named apart.
+//
+// Nothing calls computeResult/attemptsForFormat/formatLabel yet. This is
+// step A of the format work — the maths only — so that the eight sites
+// currently hardcoding "5 attempts" have one correct implementation to
+// move to later, instead of each growing its own switch.
+
+export type ResultFormat = 'ao5' | 'mo3' | 'bo3' | 'bo2' | 'bo1';
+
+export const RESULT_FORMATS: ResultFormat[] = ['ao5', 'mo3', 'bo3', 'bo2', 'bo1'];
+
+/** How many attempts a format is solved over — the single source step C
+ *  will read, instead of a literal 5 in each of the eight sites. */
+export function attemptsForFormat(format: ResultFormat): number {
+  switch (format) {
+    case 'ao5':
+      return 5;
+    case 'mo3':
+    case 'bo3':
+      return 3;
+    case 'bo2':
+      return 2;
+    case 'bo1':
+      return 1;
+  }
+}
+
+/** Display label. Standard cubing notation rather than translated words —
+ *  "Ao5"/"Mo3" are what the mockup shows and what competitors read, in
+ *  Mongolian copy as everywhere else. */
+export function formatLabel(format: ResultFormat): string {
+  switch (format) {
+    case 'ao5':
+      return 'Ao5';
+    case 'mo3':
+      return 'Mo3';
+    case 'bo3':
+      return 'Bo3';
+    case 'bo2':
+      return 'Bo2';
+    case 'bo1':
+      return 'Bo1';
+  }
+}
+
+export interface FormatResult {
+  /** Centiseconds, or null for a DNF result (nothing rankable). */
+  value: number | null;
+  /** Indices of attempts NOT counted toward the value — what a summary
+   *  screen greys out. Only Ao5 excludes anything: a mean counts all
+   *  three, and a best-of excludes none (the slower attempts were not
+   *  "dropped", they simply were not the best). For Ao5 the order is
+   *  [bestIndex, worstIndex], which is what lets computeAo5 project its
+   *  own return shape back out of this one. */
+  excludedIndices: number[];
+}
+
+/** The result of one round's attempts under a given format.
+ *
+ *  A DNF is the string 'DNF' — the SAME representation computeAo5 has
+ *  always used (`AttemptTime = number | 'DNF'`, above). No second sentinel
+ *  is introduced.
+ *
+ *  `times` is expected to be exactly attemptsForFormat(format) long.
+ *  Completeness is the caller's job, as it already is for Ao5
+ *  (round-results checks bySlot.size before calling).
+ *
+ *  ROUNDING is Math.round for every averaging format, matching every other
+ *  average in this repo — computeAo5 itself, lib/results-entry-helpers.ts,
+ *  lib/timer-engine.ts and lib/firebase/services/virtual-competitions.ts
+ *  all use Math.round(sum / n). NOTHING in this codebase truncates, so a
+ *  mean of 3 rounds exactly as a mean of 5 does.
+ *
+ *  Ao5 is deliberately NOT length-guarded, unlike the other formats: it
+ *  carries computeAo5's existing behaviour verbatim, including on a
+ *  malformed input, because computeAo5 is a wrapper over this branch and
+ *  must not change for ANY input. The newer formats have no callers and
+ *  therefore no such history, so a wrong length there is a caller bug and
+ *  yields a DNF result rather than a fabricated number. */
+export function computeResult(times: AttemptTime[], format: ResultFormat): FormatResult {
+  if (format === 'ao5') {
+    // ── verbatim the original computeAo5 body ──
+    // Kept literal rather than refactored: this is the one branch with
+    // existing callers and stored historical results. `sum / 3` divides by
+    // the constant 3, not by middle.length, exactly as before.
+    const withIndex = times.map((v, i) => ({ v: v === 'DNF' ? Infinity : v, i }));
+    const sorted = [...withIndex].sort((a, b) => a.v - b.v);
+    const bestIndex = sorted[0].i;
+    const worstIndex = sorted[sorted.length - 1].i;
+
+    // Best and worst are resolved BEFORE the DNF check and returned either
+    // way, so a summary screen greys out the same two attempts on a DNF
+    // average as it does on a valid one.
+    const dnfCount = times.filter((t) => t === 'DNF').length;
+    if (dnfCount >= 2) {
+      return { value: null, excludedIndices: [bestIndex, worstIndex] };
+    }
+
+    const middle = sorted.slice(1, 4);
+    const sum = middle.reduce((acc, x) => acc + x.v, 0);
+    return { value: Math.round(sum / 3), excludedIndices: [bestIndex, worstIndex] };
+  }
+
+  if (times.length !== attemptsForFormat(format)) {
+    return { value: null, excludedIndices: [] };
+  }
+
+  if (format === 'mo3') {
+    // Mean of 3: no trimming, so there is no cushion — ANY DNF makes the
+    // whole mean a DNF. This is the rule people get wrong by assuming it
+    // behaves like an Ao5 with its one DNF dropped.
+    if (times.some((t) => t === 'DNF')) return { value: null, excludedIndices: [] };
+    const nums = times as number[];
+    return { value: Math.round(nums.reduce((a, b) => a + b, 0) / nums.length), excludedIndices: [] };
+  }
+
+  // bo3 / bo2 / bo1 — the best single. There is no average, so nothing is
+  // rounded and nothing is excluded. A DNF is simply never the best; only
+  // an all-DNF set has no result at all.
+  const finished = times.filter((t): t is number => t !== 'DNF');
+  if (finished.length === 0) return { value: null, excludedIndices: [] };
+  return { value: Math.min(...finished), excludedIndices: [] };
+}
+
 export interface Ao5Result {
   /** null represents a DNF average (2+ DNFs among the 5). */
   ao5: number | null;
@@ -56,19 +186,16 @@ export interface Ao5Result {
 
 /** Standard WCA Ao5: drop the best and worst of 5, average the middle 3.
  *  A single DNF counts as the worst attempt and gets dropped; 2+ DNFs
- *  make the whole average a DNF. */
+ *  make the whole average a DNF.
+ *
+ *  Now a thin projection of computeResult(times, 'ao5') — same maths, same
+ *  numbers, different shape. The shape is unchanged on purpose: every
+ *  existing caller (summaryStats, round-results, athleteStats,
+ *  seasonPoints) keeps calling this and reading .ao5/.bestIndex/
+ *  .worstIndex, and SummaryStage greys attempts out by those two indices.
+ *  Migrating callers to computeResult is a later step, not this one. */
 export function computeAo5(times: AttemptTime[]): Ao5Result {
-  const withIndex = times.map((v, i) => ({ v: v === 'DNF' ? Infinity : v, i }));
-  const sorted = [...withIndex].sort((a, b) => a.v - b.v);
-  const bestIndex = sorted[0].i;
-  const worstIndex = sorted[sorted.length - 1].i;
-
-  const dnfCount = times.filter((t) => t === 'DNF').length;
-  if (dnfCount >= 2) {
-    return { ao5: null, bestIndex, worstIndex };
-  }
-
-  const middle = sorted.slice(1, 4);
-  const sum = middle.reduce((acc, x) => acc + x.v, 0);
-  return { ao5: Math.round(sum / 3), bestIndex, worstIndex };
+  const { value, excludedIndices } = computeResult(times, 'ao5');
+  const [bestIndex, worstIndex] = excludedIndices;
+  return { ao5: value, bestIndex, worstIndex };
 }

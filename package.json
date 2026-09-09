@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test:rules": "firebase emulators:exec --only firestore \"node tests/firestore-rules/participants.test.mjs && node tests/firestore-rules/competitions.test.mjs\"",
     "test:fields": "firebase emulators:exec --only firestore \"node tests/competition-fields/roundtrip.test.cjs\"",
+    "test:formats": "node tests/competition-fields/result-format.test.cjs",
     "test:ranking": "firebase emulators:exec --only firestore \"node tests/competition-fields/ranking.test.cjs\"",
     "test:merge": "firebase emulators:exec --only firestore \"node tests/merge-athlete-uid/merge.test.mjs\""
   },
