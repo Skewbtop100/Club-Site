@@ -4966,12 +4966,6 @@ button.oc-rv-cell:hover {
 .oc-cf-ev + .oc-cf-ev {
   margin-top: 12px;
 }
-.oc-cf-ev-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
 .oc-cf-ev-icon {
   width: 30px;
   height: 30px;
@@ -4992,11 +4986,91 @@ button.oc-rv-cell:hover {
   border: 1px solid #1C1C21;
   background: #08080A;
   color: #6E6A62;
-  padding: 10px 12px;
+  /* 12px to match .oc-input's padding — this cell sits in the same
+     labelled row as the РАУНД and ЛИМИТ inputs and must line up with
+     them. */
+  padding: 12px;
   font: 500 11px var(--oc-font-mono), monospace;
   letter-spacing: .1em;
   white-space: nowrap;
 }
+/* Labelled control columns: ТӨРӨЛ | РАУНД | ФОРМАТ | ЛИМИТ | X.
+   ФОРМАТ and ЛИМИТ hold their column now while still being inert, so
+   turning either into a real control later is a drop-in replacement of
+   the cell contents rather than a re-layout. */
+.oc-cf-ev-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px 116px 116px auto;
+  gap: 12px;
+  align-items: end;
+}
+.oc-cf-ev-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+/* Keep the native up/down steppers on РАУНД (the mockup shows them).
+   color-scheme tells the browser to paint them for a dark surface —
+   without it Chrome draws near-black arrows on a near-black field. */
+.oc-cf-steppers {
+  color-scheme: dark;
+}
+@media (max-width: 720px) {
+  .oc-cf-ev-grid {
+    grid-template-columns: minmax(0, 1fr) 92px;
+  }
+}
+
+/* ── Event picker dropdown ─────────────────────────────────────────────
+   Anchored under "+ Төрөл нэмэх". Replaces the old behaviour, where the
+   button silently added whichever event happened to be unused. */
+.oc-cf-picker-wrap {
+  position: relative;
+  margin-top: 12px;
+}
+.oc-cf-picker {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  max-height: 350px;
+  overflow-y: auto;
+  border: 1px solid #2A2A31;
+  background: #0D0D10;
+}
+.oc-cf-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 13px 16px;
+  border: none;
+  border-bottom: 1px solid #16161B;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font: 500 13px/1 var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+}
+.oc-cf-picker-row:last-child {
+  border-bottom: none;
+}
+.oc-cf-picker-row:hover:not(:disabled) {
+  background: #16161B;
+}
+.oc-cf-picker-row:disabled {
+  color: #4A4740;
+  cursor: default;
+}
+.oc-cf-picker-added {
+  margin-left: auto;
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .14em;
+  color: #4A4740;
+}
+
 /* Advancement rows, indented under their event. */
 .oc-cf-adv {
   margin-top: 12px;

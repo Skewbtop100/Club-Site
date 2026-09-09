@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button, FieldLabel, INPUT_CLASS, MONO_INPUT_CLASS, SELECT_CLASS, SquareToggle } from '../../_components/ui';
@@ -574,8 +574,31 @@ function EventsTab({
   events: EventRow[];
   setEvents: React.Dispatch<React.SetStateAction<EventRow[]>>;
 }) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const pickerWrapRef = useRef<HTMLDivElement | null>(null);
+
   const used = new Set(events.map((e) => e.eventId));
-  const firstUnused = ONLINE_COMP_EVENTS.find((o) => !used.has(o.id));
+  const allAdded = ONLINE_COMP_EVENTS.every((o) => used.has(o.id));
+
+  // Close on an outside click or Escape. Both listeners are only attached
+  // while the picker is open, so a closed picker costs nothing.
+  useEffect(() => {
+    if (!pickerOpen) return;
+    function onPointerDown(e: MouseEvent | TouchEvent) {
+      if (!pickerWrapRef.current?.contains(e.target as Node)) setPickerOpen(false);
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setPickerOpen(false);
+    }
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('touchstart', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('touchstart', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [pickerOpen]);
 
   function update(index: number, patch: Partial<EventRow>) {
     setEvents((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
@@ -595,6 +618,11 @@ function EventsTab({
     );
   }
 
+  function addEvent(eventId: string) {
+    setEvents((prev) => [...prev, { eventId, rounds: '1', advancement: {} }]);
+    setPickerOpen(false);
+  }
+
   return (
     <div>
       {events.length === 0 && (
@@ -609,84 +637,117 @@ function EventsTab({
         const known = ONLINE_COMP_EVENTS.some((o) => o.id === row.eventId);
         return (
           <div key={i} className="oc-cf-ev">
-            <div className="oc-cf-ev-head">
-              <span className="oc-cf-ev-icon" aria-hidden>
-                {hasWcaEventIcon(row.eventId) ? (
-                  <WcaEventIcon eventId={row.eventId} size={16} />
-                ) : (
-                  row.eventId.slice(0, 4).toUpperCase()
-                )}
-              </span>
+            <div className="oc-cf-ev-grid">
+              <div className="oc-cf-ev-cell">
+                <FieldLabel>ТӨРӨЛ</FieldLabel>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                  <span className="oc-cf-ev-icon" aria-hidden>
+                    {hasWcaEventIcon(row.eventId) ? (
+                      <WcaEventIcon eventId={row.eventId} size={16} />
+                    ) : (
+                      row.eventId.slice(0, 4).toUpperCase()
+                    )}
+                  </span>
+                  <select
+                    className={SELECT_CLASS}
+                    style={{ minWidth: 0 }}
+                    value={row.eventId}
+                    onChange={(e) => update(i, { eventId: e.target.value })}
+                    aria-label="Төрөл"
+                  >
+                    {/* An event chosen on another row is disabled, not
+                        hidden: hiding it would make the list jump around
+                        as rows are edited. */}
+                    {ONLINE_COMP_EVENTS.map((o) => (
+                      <option key={o.id} value={o.id} disabled={o.id !== row.eventId && used.has(o.id)}>
+                        {o.label}
+                      </option>
+                    ))}
+                    {/* A competition may hold an event this build no
+                        longer offers (the list shrank, or the doc predates
+                        it). Without this option the select would silently
+                        snap to another event and the next save would
+                        rewrite it. */}
+                    {!known && (
+                      <option value={row.eventId}>{onlineCompEventLabel(row.eventId)} (дэмжигдэхгүй)</option>
+                    )}
+                  </select>
+                </span>
+              </div>
 
-              <select
-                className={SELECT_CLASS}
-                style={{ flex: '1 1 160px', minWidth: 0 }}
-                value={row.eventId}
-                onChange={(e) => update(i, { eventId: e.target.value })}
-                aria-label="Төрөл"
-              >
-                {/* An event chosen on another row is disabled, not hidden:
-                    hiding it would make the list jump around as rows are
-                    edited. */}
-                {ONLINE_COMP_EVENTS.map((o) => (
-                  <option key={o.id} value={o.id} disabled={o.id !== row.eventId && used.has(o.id)}>
-                    {o.label}
-                  </option>
-                ))}
-                {/* A competition may hold an event this build no longer
-                    offers (the list shrank, or the doc predates it).
-                    Without this option the select would silently snap to
-                    another event and the next save would rewrite it. */}
-                {!known && (
-                  <option value={row.eventId}>{onlineCompEventLabel(row.eventId)} (дэмжигдэхгүй)</option>
-                )}
-              </select>
-
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <span className="oc-cf-adv-suffix">РАУНД</span>
+              <div className="oc-cf-ev-cell">
+                <FieldLabel>РАУНД</FieldLabel>
                 <input
                   type="number"
                   min={1}
-                  className={MONO_INPUT_CLASS}
-                  style={{ width: 74, flexShrink: 0 }}
+                  className={`${MONO_INPUT_CLASS} oc-cf-steppers`}
                   value={row.rounds}
                   onChange={(e) => update(i, { rounds: e.target.value })}
                   aria-label="Раундын тоо"
                 />
-              </span>
+              </div>
 
-              {/* ФОРМАТ is a fixed readout, NOT a dropdown, and there is no
-                  schema field behind it. Ao5 is hardcoded in seven places —
-                  computeAo5 (ao5.ts), ATTEMPTS_PER_ROUND (round-results.ts),
-                  the length-5 guards in athleteStats.ts and seasonPoints.ts,
-                  TOTAL_ATTEMPTS on the solve page, SCRAMBLES_PER_GROUP for
-                  the TNoodle import, and the length === 5 branch in
-                  summaryStats.ts — so a control offering Bo3 or Mo3 would
-                  change nothing while implying it had. Make it a real
-                  control only once those seven agree. */}
-              <span className="oc-cf-ev-format" title="Формат тогтмол — Ao5">
-                ФОРМАТ · Ao5
-              </span>
+              <div className="oc-cf-ev-cell">
+                {/* ФОРМАТ holds its column but is a fixed readout, NOT a
+                    dropdown, and there is no schema field behind it. Ao5 is
+                    hardcoded in seven places — computeAo5 (ao5.ts),
+                    ATTEMPTS_PER_ROUND (round-results.ts), the length-5
+                    guards in athleteStats.ts and seasonPoints.ts,
+                    TOTAL_ATTEMPTS on the solve page, SCRAMBLES_PER_GROUP
+                    for the TNoodle import, and the length === 5 branch in
+                    summaryStats.ts — so a control offering Bo3 or Mo3 would
+                    change nothing while implying it had. Swap this span for
+                    a select once those seven agree. */}
+                <FieldLabel>ФОРМАТ</FieldLabel>
+                <span className="oc-cf-ev-format" title="Формат тогтмол — Ao5">
+                  Ao5
+                </span>
+              </div>
 
-              <button
-                type="button"
-                onClick={() => setEvents((prev) => prev.filter((_, x) => x !== i))}
-                aria-label="Төрөл устгах"
-                className="oc-adm-event-del shrink-0 border border-[#2A2A31] bg-transparent text-[#E8543C] transition hover:border-[#E8543C] hover:bg-[#1A0D0A] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#DFFF4F]"
-                style={{
-                  borderRadius: 2,
-                  font: '500 12px var(--oc-font-mono), monospace',
-                  padding: '10px 12px',
-                }}
-              >
-                ✕
-              </button>
+              <div className="oc-cf-ev-cell">
+                {/* TODO: ЛИМИТ is laid out but deliberately inert — there
+                    is NO schema field and nothing to store yet. A time
+                    limit only means something once it is ENFORCED, which
+                    needs the solve flow to compare against it and the
+                    review route to apply the DNF; neither exists. Storing
+                    a number that changes nothing would be worse than an
+                    empty column. When it lands: centiseconds (matching
+                    reportedTime), not a "10:00" display string. */}
+                <FieldLabel>ЛИМИТ</FieldLabel>
+                <input
+                  className={MONO_INPUT_CLASS}
+                  value=""
+                  readOnly
+                  disabled
+                  placeholder="—"
+                  title="Хугацааны хязгаар удахгүй"
+                  aria-label="Хугацааны хязгаар (удахгүй)"
+                  style={{ opacity: 0.4 }}
+                />
+              </div>
+
+              <div className="oc-cf-ev-cell">
+                <button
+                  type="button"
+                  onClick={() => setEvents((prev) => prev.filter((_, x) => x !== i))}
+                  aria-label="Төрөл устгах"
+                  className="oc-adm-event-del shrink-0 border border-[#2A2A31] bg-transparent text-[#E8543C] transition hover:border-[#E8543C] hover:bg-[#1A0D0A] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#DFFF4F]"
+                  style={{
+                    borderRadius: 2,
+                    font: '500 12px var(--oc-font-mono), monospace',
+                    padding: '12px 13px',
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
             </div>
 
             {/* One row per transition, derived from the round count. A
                 single-round event has none. */}
             {transitions.length > 0 && (
               <div className="oc-cf-adv">
+                <FieldLabel>ДАРААХ РАУНДАД ОРОХ ТООНЫ ХЯЗГААР</FieldLabel>
                 {transitions.map((fromRound) => {
                   const entry = row.advancement[fromRound] ?? { method: 'count' as const, value: '' };
                   return (
@@ -731,18 +792,54 @@ function EventsTab({
         );
       })}
 
-      <button
-        type="button"
-        disabled={!firstUnused}
-        onClick={() =>
-          firstUnused &&
-          setEvents((prev) => [...prev, { eventId: firstUnused.id, rounds: '1', advancement: {} }])
-        }
-        className="oc-adm-add-row w-full text-sm text-[#6E6A62] transition hover:text-[#DFFF4F] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#DFFF4F]"
-        style={{ border: '1px dashed #2A2A31', borderRadius: 2, marginTop: 12, paddingTop: 8, paddingBottom: 8 }}
-      >
-        {firstUnused ? '+ Төрөл нэмэх' : 'Бүх төрөл нэмэгдсэн'}
-      </button>
+      {/* The button OPENS A PICKER. It used to add whichever event
+          happened to be unused, which meant the admin's first action on
+          every new event was to correct it. */}
+      <div className="oc-cf-picker-wrap" ref={pickerWrapRef}>
+        <button
+          type="button"
+          disabled={allAdded}
+          aria-expanded={pickerOpen}
+          aria-haspopup="listbox"
+          onClick={() => setPickerOpen((v) => !v)}
+          className="oc-adm-add-row w-full text-sm text-[#6E6A62] transition hover:text-[#DFFF4F] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#DFFF4F]"
+          style={{ border: '1px dashed #2A2A31', borderRadius: 2, paddingTop: 8, paddingBottom: 8 }}
+        >
+          {allAdded ? 'Бүх төрөл нэмэгдсэн' : '+ Төрөл нэмэх'}
+        </button>
+
+        {pickerOpen && !allAdded && (
+          <div className="oc-cf-picker" role="listbox" aria-label="Төрөл сонгох">
+            {/* Added events stay in the list, disabled and marked, rather
+                than being filtered out — so the list is the same length
+                every time it opens and an event's position never moves. */}
+            {ONLINE_COMP_EVENTS.map((o) => {
+              const added = used.has(o.id);
+              return (
+                <button
+                  key={o.id}
+                  type="button"
+                  role="option"
+                  aria-selected={added}
+                  disabled={added}
+                  className="oc-cf-picker-row"
+                  onClick={() => addEvent(o.id)}
+                >
+                  <span className="oc-cf-ev-icon" aria-hidden>
+                    {hasWcaEventIcon(o.id) ? (
+                      <WcaEventIcon eventId={o.id} size={16} />
+                    ) : (
+                      o.id.slice(0, 4).toUpperCase()
+                    )}
+                  </span>
+                  <span>{o.label}</span>
+                  {added && <span className="oc-cf-picker-added">НЭМСЭН</span>}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
