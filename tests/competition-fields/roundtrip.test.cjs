@@ -83,6 +83,10 @@ const UNTIL = Date.UTC(2026, 3, 5, 0, 0);
 const HEADING = 'СЕЗОН 3 · БҮРТГЭЛ НЭЭЛТТЭЙ';
 const CTA = 'Бүртгүүлэх';
 const INSTRUCTIONS = 'Заавар текст';
+const POSTER = 'https://res.cloudinary.com/x/image/upload/poster.jpg';
+const POSTER_ID = 'comp/poster_abc';
+const BANNER = 'https://res.cloudinary.com/x/image/upload/banner.jpg';
+const BANNER_ID = 'comp/banner_xyz';
 
 /** The exact JSON body CompetitionEditor sends. */
 const body = (over = {}) => ({
@@ -103,6 +107,10 @@ const body = (over = {}) => ({
   featuredUntil: UNTIL,
   instructions: INSTRUCTIONS,
   paid: false,
+  posterUrl: POSTER,
+  posterPublicId: POSTER_ID,
+  bannerUrl: BANNER,
+  bannerPublicId: BANNER_ID,
   ...over,
 });
 
@@ -125,6 +133,10 @@ const read = async (id) => (await db.collection(COL).doc(id).get()).data();
     ['featuredUntil', UNTIL],
     ['instructions', INSTRUCTIONS],
     ['paid', false],
+    ['posterUrl', POSTER],
+    ['posterPublicId', POSTER_ID],
+    ['bannerUrl', BANNER],
+    ['bannerPublicId', BANNER_ID],
   ];
   for (const [k, want] of KEPT) {
     ok(`  ...keeps ${k}`, v.ok && v.data[k] === want, v.ok ? String(v.data[k]) : '');
@@ -142,6 +154,10 @@ const read = async (id) => (await db.collection(COL).doc(id).get()).data();
   ok('CREATE stores featuredUntil as a Timestamp', d.featuredUntil?.toMillis?.() === UNTIL, String(d.featuredUntil));
   ok('CREATE stores instructions', d.instructions === INSTRUCTIONS, String(d.instructions));
   ok('CREATE stores paid', d.paid === false, String(d.paid));
+  ok('CREATE stores posterUrl', d.posterUrl === POSTER, String(d.posterUrl));
+  ok('CREATE stores posterPublicId', d.posterPublicId === POSTER_ID, String(d.posterPublicId));
+  ok('CREATE stores bannerUrl', d.bannerUrl === BANNER, String(d.bannerUrl));
+  ok('CREATE stores bannerPublicId', d.bannerPublicId === BANNER_ID, String(d.bannerPublicId));
   ok('CREATE stamps createdAt', d.createdAt != null);
   ok(
     'CREATE keeps the pre-existing fields too',
@@ -166,6 +182,11 @@ const read = async (id) => (await db.collection(COL).doc(id).get()).data();
       featuredUntil: null,
       instructions: 'Шинэчилсэн заавар',
       paid: true,
+      posterUrl: 'https://res.cloudinary.com/x/image/upload/poster2.jpg',
+      posterPublicId: 'comp/poster_def',
+      // Removing an image: the editor's УСТГАХ sets both to null.
+      bannerUrl: null,
+      bannerPublicId: null,
     }),
   );
   await writeCompetitionDoc(db, id, v2.data);
@@ -179,6 +200,13 @@ const read = async (id) => (await db.collection(COL).doc(id).get()).data();
   ok('UPDATE clears featuredUntil to null', d2.featuredUntil === null, String(d2.featuredUntil));
   ok('UPDATE changes instructions', d2.instructions === 'Шинэчилсэн заавар', String(d2.instructions));
   ok('UPDATE sets paid', d2.paid === true);
+  ok('UPDATE replaces posterUrl', d2.posterUrl === 'https://res.cloudinary.com/x/image/upload/poster2.jpg', String(d2.posterUrl));
+  ok('UPDATE replaces posterPublicId', d2.posterPublicId === 'comp/poster_def', String(d2.posterPublicId));
+  // The one that matters most: a merge:true write must actually overwrite
+  // the old value with null, not skip the field and leave a stale URL that
+  // would keep rendering an image the admin thinks they deleted.
+  ok('REMOVING an image writes null, not a stale URL — bannerUrl', d2.bannerUrl === null, String(d2.bannerUrl));
+  ok('REMOVING an image writes null — bannerPublicId', d2.bannerPublicId === null, String(d2.bannerPublicId));
   ok('UPDATE preserves createdAt (merge)', d2.createdAt?.toMillis() === d.createdAt.toMillis());
 
   // ── the banner copy is NOT tied to the featured flag ──────────────────
@@ -232,6 +260,14 @@ const read = async (id) => (await db.collection(COL).doc(id).get()).data();
     'omitted text fields default to empty string',
     v4.ok && v4.data.featuredHeading === '' && v4.data.featuredCtaLabel === '' && v4.data.instructions === '',
   );
+  ok(
+    'omitted image fields default to null (not empty string)',
+    v4.ok &&
+      v4.data.posterUrl === null &&
+      v4.data.posterPublicId === null &&
+      v4.data.bannerUrl === null &&
+      v4.data.bannerPublicId === null,
+  );
 
   // ── junk is coerced, never stored ─────────────────────────────────────
   const v5 = validateCompetitionInput(
@@ -241,6 +277,19 @@ const read = async (id) => (await db.collection(COL).doc(id).get()).data();
   ok('junk instructions coerces to empty string', v5.ok && v5.data.instructions === '');
   ok('truthy-but-not-true paid coerces to false', v5.ok && v5.data.paid === false, v5.ok ? String(v5.data.paid) : '');
   ok('junk featuredUntil coerces to null', v5.ok && v5.data.featuredUntil === null);
+
+  // '' must normalise to null so "no image" has ONE representation in the
+  // document rather than two for readers to handle.
+  const v6 = validateCompetitionInput(body({ posterUrl: '', posterPublicId: '   ', bannerUrl: 7 }));
+  ok('empty-string posterUrl normalises to null', v6.ok && v6.data.posterUrl === null, v6.ok ? String(v6.data.posterUrl) : '');
+  ok('whitespace-only posterPublicId normalises to null', v6.ok && v6.data.posterPublicId === null);
+  ok('non-string bannerUrl normalises to null', v6.ok && v6.data.bannerUrl === null);
+
+  // A URL that survives a full write/read cycle unchanged — no trimming
+  // surprises on a real Cloudinary secure_url.
+  const idImg = await writeCompetitionDoc(db, null, validateCompetitionInput(body()).data);
+  const dImg = await read(idImg);
+  ok('a Cloudinary secure_url round-trips byte-identical', dImg.posterUrl === POSTER, String(dImg.posterUrl));
 
   console.log(`\n  ${pass} passed, ${fail} failed\n`);
   fs.rmSync(OUT, { recursive: true, force: true });

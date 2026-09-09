@@ -42,6 +42,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     featuredUntil: data.featuredUntil?.toMillis?.() ?? null,
     instructions: typeof data.instructions === 'string' ? data.instructions : '',
     paid: data.paid === true,
+    posterUrl: typeof data.posterUrl === 'string' && data.posterUrl ? data.posterUrl : null,
+    posterPublicId: typeof data.posterPublicId === 'string' && data.posterPublicId ? data.posterPublicId : null,
+    bannerUrl: typeof data.bannerUrl === 'string' && data.bannerUrl ? data.bannerUrl : null,
+    bannerPublicId: typeof data.bannerPublicId === 'string' && data.bannerPublicId ? data.bannerPublicId : null,
     createdAt: data.createdAt?.toMillis?.() ?? null,
     // Neither count is needed for the edit form (only the list view shows
     // them) — skip the extra queries here.

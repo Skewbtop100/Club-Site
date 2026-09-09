@@ -85,8 +85,22 @@ export function validateCompetitionInput(body: unknown): ValidationResult {
       featuredUntil: typeof b.featuredUntil === 'number' ? b.featuredUntil : null,
       instructions: typeof b.instructions === 'string' ? b.instructions : '',
       paid: b.paid === true,
+      // Images: null unless a non-empty string arrives. An empty string is
+      // normalised to null so "removed" has exactly one representation in
+      // the document rather than two ('' and null) for readers to handle.
+      posterUrl: nullableString(b.posterUrl),
+      posterPublicId: nullableString(b.posterPublicId),
+      bannerUrl: nullableString(b.bannerUrl),
+      bannerPublicId: nullableString(b.bannerPublicId),
     },
   };
+}
+
+/** '' / non-string / absent -> null; otherwise the trimmed string. */
+function nullableString(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  return trimmed ? trimmed : null;
 }
 
 /** Normalizes a raw Firestore `status` value into the current v2 enum
@@ -139,6 +153,10 @@ export function toFirestoreDoc(input: OnlineCompetitionWriteInput) {
     featuredUntil: input.featuredUntil !== null ? Timestamp.fromMillis(input.featuredUntil) : null,
     instructions: input.instructions,
     paid: input.paid,
+    posterUrl: input.posterUrl,
+    posterPublicId: input.posterPublicId,
+    bannerUrl: input.bannerUrl,
+    bannerPublicId: input.bannerPublicId,
   };
 }
 

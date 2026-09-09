@@ -4906,6 +4906,57 @@ button.oc-rv-cell:hover {
   border-left: 1px solid #2A2A31;
 }
 
+/* ── Зураг tab: poster + banner drop areas ─────────────────────────────
+   Not .oc-v3-upload-preview, which is a fixed 96x120 portrait box for the
+   athlete verification photo. These two are ratio-driven and fluid, but
+   deliberately keep that class's visual language: dashed border when
+   empty, cover/center when filled, 9px mono placeholder label. */
+.oc-cf-images {
+  display: grid;
+  /* Poster 1:1 on the left at a fixed comfortable width, banner takes the
+     rest. Collapses to one column when there is no room for both. */
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.oc-cf-drop {
+  width: 100%;
+  border: 1px dashed #2A2A31;
+  background-color: #08080A;
+  background-size: cover;
+  background-position: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 500 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+  color: #4A4740;
+  overflow: hidden;
+}
+/* Solid border once filled — the dashed edge reads as "drop here", which
+   is misleading over an image that is already set. */
+.oc-cf-drop-filled {
+  border-style: solid;
+  border-color: #1C1C21;
+}
+.oc-cf-drop-poster {
+  aspect-ratio: 1 / 1;
+}
+.oc-cf-drop-banner {
+  aspect-ratio: 16 / 5;
+}
+/* Caption under each drop area. */
+.oc-cf-imgcap {
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.14em;
+  color: #4A4740;
+}
+@media (max-width: 640px) {
+  .oc-cf-images {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* Placeholder body for the six tabs that have no content yet.
    --oc-font-heading, not --oc-font-body: the latter is never declared
    anywhere (layout.tsx defines only --oc-font-heading and --oc-font-mono),

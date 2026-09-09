@@ -111,6 +111,24 @@ export interface OnlineCompetition {
    *  details, payment deadline and per-event surcharges belong to the
    *  Төлбөр tab and have no fields yet. Absent = false = Төлбөргүй. */
   paid?: boolean;
+  /** Square (1:1) artwork for the detail page's general-info block, and
+   *  the wide (16:5) artwork for the hub's featured banner. Cloudinary
+   *  secure_url plus the public_id needed to manage the asset later.
+   *
+   *  Stored EXACTLY as uploaded — nothing crops or resizes, client or
+   *  server side, matching the athlete verification photo. The stated
+   *  1200x1200 / 1920x600 targets are guidance in the admin UI; render
+   *  sites are expected to use object-fit rather than trust the ratio.
+   *
+   *  null = no image. The publicId is kept alongside the url so a future
+   *  cleanup can find the asset — see the orphaning note on
+   *  destroyCloudinaryVideo in submission-cleanup.ts; there is no image
+   *  equivalent yet, so removing an image here nulls both fields and
+   *  leaves the Cloudinary asset in place. */
+  posterUrl?: string | null;
+  posterPublicId?: string | null;
+  bannerUrl?: string | null;
+  bannerPublicId?: string | null;
   createdAt?: Timestamp;
   /** e.g. "2026-spring" — groups competitions into onlineSeasonPoints
    *  leaderboards. Optional for the same legacy-doc reason as the fields
@@ -406,6 +424,12 @@ export interface OnlineCompetitionAdminView {
   featuredUntil: number | null;
   instructions: string;
   paid: boolean;
+  /** null when unset — unlike the string fields above, which flatten to
+   *  '', these stay nullable end to end: '' is not a meaningful image. */
+  posterUrl: string | null;
+  posterPublicId: string | null;
+  bannerUrl: string | null;
+  bannerPublicId: string | null;
   createdAt: number | null;
   /** Count of distinct uids with a submission for this competition — a
    *  submissions-based proxy for "participants", since there's no separate
@@ -451,6 +475,10 @@ export interface OnlineCompetitionWriteInput {
   featuredUntil: number | null;
   instructions: string;
   paid: boolean;
+  posterUrl: string | null;
+  posterPublicId: string | null;
+  bannerUrl: string | null;
+  bannerPublicId: string | null;
 }
 
 // ── Season points / leaderboard ─────────────────────────────────────────

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button, FieldLabel, INPUT_CLASS, MONO_INPUT_CLASS, SELECT_CLASS, SquareToggle } from '../../_components/ui';
 import { ROUND_GAP_TEXT, type RoundGapEvent } from './RoundGapWarning';
+import { uploadImageToCloudinary } from '@/lib/online-competition/cloudinary';
 import {
   COMPETITION_FORMAT_OPTIONS,
   DEFAULT_COMPETITION_FORMAT,
@@ -121,6 +122,13 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
   const [featuredUntil, setFeaturedUntil] = useState('');
   const [instructions, setInstructions] = useState('');
   const [paid, setPaid] = useState(false);
+  // Зураг tab. Uploaded to Cloudinary the moment a file is chosen (see
+  // ImageSlot), so these hold a real remote URL, not a local preview —
+  // they then persist with every other field on the next save.
+  const [posterUrl, setPosterUrl] = useState<string | null>(null);
+  const [posterPublicId, setPosterPublicId] = useState<string | null>(null);
+  const [bannerUrl, setBannerUrl] = useState<string | null>(null);
+  const [bannerPublicId, setBannerPublicId] = useState<string | null>(null);
   const [unlimited, setUnlimited] = useState(true);
   const [participantLimit, setParticipantLimit] = useState('');
 
@@ -166,6 +174,10 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
         setFeaturedUntil(msToDatetimeLocal(c.featuredUntil));
         setInstructions(c.instructions);
         setPaid(c.paid);
+        setPosterUrl(c.posterUrl);
+        setPosterPublicId(c.posterPublicId);
+        setBannerUrl(c.bannerUrl);
+        setBannerPublicId(c.bannerPublicId);
         setUnlimited(c.participantLimit === null);
         setParticipantLimit(c.participantLimit != null ? String(c.participantLimit) : '');
         setEvents(c.events);
@@ -237,6 +249,17 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
     }
   }, [events, savedId]);
 
+  // url and publicId always move together — a stale publicId beside a new
+  // url would point cleanup at the wrong asset.
+  const setPoster = useCallback((url: string | null, publicId: string | null) => {
+    setPosterUrl(url);
+    setPosterPublicId(publicId);
+  }, []);
+  const setBanner = useCallback((url: string | null, publicId: string | null) => {
+    setBannerUrl(url);
+    setBannerPublicId(publicId);
+  }, []);
+
   async function doSave(then: 'stay' | 'next') {
     setConfirmGaps(null);
     setError('');
@@ -262,6 +285,10 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
         featuredUntil: datetimeLocalToMs(featuredUntil),
         instructions,
         paid,
+        posterUrl,
+        posterPublicId,
+        bannerUrl,
+        bannerPublicId,
       };
       const url = savedId
         ? `/api/online-competition/admin-competitions/${savedId}`
@@ -392,6 +419,17 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
               setDescription,
             }}
           />
+        ) : tab === 1 ? (
+          <ImagesTab
+            {...{
+              posterUrl,
+              posterPublicId,
+              setPoster,
+              bannerUrl,
+              bannerPublicId,
+              setBanner,
+            }}
+          />
         ) : (
           <div>
             <span className="oc-v3-label">{TABS[tab].label}</span>
@@ -449,6 +487,175 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
           Дараах
         </Button>
       </div>
+    </div>
+  );
+}
+
+// ── 02 Зураг ─────────────────────────────────────────────────────────────
+
+// Enforced before a byte is uploaded. The athlete profile photo picker does
+// NOT do this — it accepts image/* and validates nothing — so these two
+// rules are new here rather than copied. They are cheap and the failure
+// they prevent (a 30MB HEIC that uploads for a minute and then renders
+// nowhere) is worth a divergence.
+const IMAGE_MAX_BYTES = 4 * 1024 * 1024;
+const IMAGE_TYPES = ['image/jpeg', 'image/png'];
+const IMAGE_ACCEPT = 'image/jpeg,image/png';
+
+function imageFileError(file: File): string | null {
+  if (!IMAGE_TYPES.includes(file.type)) return 'Зөвхөн JPG эсвэл PNG файл оруулна уу';
+  if (file.size > IMAGE_MAX_BYTES) return 'Зургийн хэмжээ 4MB-аас бага байх ёстой';
+  return null;
+}
+
+interface ImagesTabProps {
+  posterUrl: string | null;
+  posterPublicId: string | null;
+  setPoster: (url: string | null, publicId: string | null) => void;
+  bannerUrl: string | null;
+  bannerPublicId: string | null;
+  setBanner: (url: string | null, publicId: string | null) => void;
+}
+
+function ImagesTab(p: ImagesTabProps) {
+  return (
+    <div>
+      <div className="oc-cf-images">
+        <ImageSlot
+          kind="poster"
+          url={p.posterUrl}
+          caption="ПОСТЕР · 1:1 · 1200×1200"
+          emptyLabel="ЗУРАГГҮЙ"
+          onChange={p.setPoster}
+        />
+        <ImageSlot
+          kind="banner"
+          url={p.bannerUrl}
+          caption="БАННЕР · 16:5 · 1920×600 · НҮҮР ХУУДСАНД ХАРАГДАНА"
+          emptyLabel="БАННЕР ЗУРАГГҮЙ"
+          onChange={p.setBanner}
+        />
+      </div>
+
+      <div style={{ marginTop: 28 }}>
+        <FieldLabel>ЗУРГИЙН ШААРДЛАГА</FieldLabel>
+        <p className="oc-cf-soon" style={{ marginTop: 10, maxWidth: 640, textWrap: 'pretty' }}>
+          Постер нүүр хуудсын тэмцээний ерөнхий мэдээлэл хэсэгт, баннер нүүр хуудсын дээд хэсэгт
+          харагдана. JPG эсвэл PNG, 4MB хүртэл.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/** One image: preview-or-drop-area, caption, change + remove buttons.
+ *
+ *  Uploads on SELECT, not on form save. The athlete profile defers its
+ *  upload to submit, but it has exactly one image and one submit button;
+ *  here an upload has to be a discrete action so a failure can leave the
+ *  previously saved image untouched, which is what "keep the existing
+ *  image on failure" requires. The url only reaches Firestore on the next
+ *  save, like every other field on this form.
+ *
+ *  Nothing is cropped or resized before upload — the file goes to
+ *  Cloudinary exactly as chosen, matching the athlete verification photo.
+ *  The caption states the target ratio; render sites use object-fit. */
+function ImageSlot({
+  kind,
+  url,
+  caption,
+  emptyLabel,
+  onChange,
+}: {
+  kind: 'poster' | 'banner';
+  url: string | null;
+  caption: string;
+  emptyLabel: string;
+  onChange: (url: string | null, publicId: string | null) => void;
+}) {
+  const [progress, setProgress] = useState<number | null>(null);
+  const [error, setError] = useState('');
+
+  async function handleFile(file: File | null) {
+    if (!file) return;
+    const invalid = imageFileError(file);
+    if (invalid) {
+      setError(invalid);
+      return;
+    }
+    setError('');
+    setProgress(0);
+    try {
+      const uploaded = await uploadImageToCloudinary(file, setProgress);
+      onChange(uploaded.secureUrl, uploaded.publicId);
+    } catch {
+      // Deliberately does NOT call onChange — a failed upload leaves
+      // whatever image was already there in place.
+      setError('Зураг илгээхэд алдаа гарлаа');
+    } finally {
+      setProgress(null);
+    }
+  }
+
+  const uploading = progress !== null;
+
+  return (
+    <div>
+      <div
+        className={`oc-cf-drop oc-cf-drop-${kind}${url ? ' oc-cf-drop-filled' : ''}`}
+        style={url ? { backgroundImage: `url(${url})` } : undefined}
+        aria-hidden={!!url}
+      >
+        {url ? '' : emptyLabel}
+      </div>
+
+      <p className="oc-cf-imgcap" style={{ marginTop: 8 }}>
+        {caption}
+      </p>
+
+      <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap', marginTop: 10 }}>
+        {/* A label, not a button, wrapping a visually-hidden input — the
+            same pattern as ФАЙЛ СОНГОХ on the athlete profile. */}
+        <label className="oc-v3-ghost-btn" style={uploading ? { opacity: 0.5, cursor: 'default' } : undefined}>
+          {url ? 'ЗУРАГ СОЛИХ' : 'ЗУРАГ НЭМЭХ'}
+          <input
+            type="file"
+            accept={IMAGE_ACCEPT}
+            className="oc-v3-file-input"
+            disabled={uploading}
+            onChange={(e) => {
+              handleFile(e.target.files?.[0] ?? null);
+              // Reset so choosing the SAME file again after an error still
+              // fires a change event.
+              e.target.value = '';
+            }}
+          />
+        </label>
+        {url && (
+          <button
+            type="button"
+            className="oc-v3-ghost-btn"
+            disabled={uploading}
+            onClick={() => {
+              setError('');
+              onChange(null, null);
+            }}
+          >
+            УСТГАХ
+          </button>
+        )}
+      </div>
+
+      {uploading && (
+        <p style={{ marginTop: 8, font: '400 11px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
+          Зураг илгээж байна... {progress}%
+        </p>
+      )}
+      {error && (
+        <p className="text-sm text-[#E8543C]" style={{ marginTop: 8 }}>
+          {error}
+        </p>
+      )}
     </div>
   );
 }
