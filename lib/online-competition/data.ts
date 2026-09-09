@@ -29,7 +29,10 @@ import type {
 
 const RETENTION_DAYS = 14;
 
-const VALID_STATUSES: OnlineCompetitionStatus[] = ['upcoming', 'live', 'finished'];
+// Must list every member of OnlineCompetitionStatus — see the identical
+// list (and the same warning) in admin-competitions.ts. Omitting 'draft'
+// here would make normalizeStatus report a draft as 'upcoming'.
+const VALID_STATUSES: OnlineCompetitionStatus[] = ['draft', 'upcoming', 'live', 'finished'];
 
 // Client-safe duplicate of admin-competitions.ts's normalizeCompetitionStatus
 // — that one can't be imported here since it pulls in 'firebase-admin/
@@ -44,6 +47,8 @@ function normalizeStatus(raw: unknown): OnlineCompetitionStatus {
   }
   if (raw === 'active') return 'live';
   if (raw === 'closed') return 'finished';
+  // Never 'draft' — same reasoning as the server-side twin in
+  // admin-competitions.ts.
   return 'upcoming';
 }
 
@@ -72,20 +77,64 @@ function normalizeEvents(raw: unknown): OnlineCompetitionEventConfig[] {
   return out;
 }
 
+/** One competition, by id. Returns null both when the doc does not exist
+ *  and when the rules refuse it — which, since drafts became unreadable to
+ *  clients (firestore.rules: onlineCompetitions), is what a draft looks
+ *  like from out here. Collapsing the two is deliberate: to a visitor a
+ *  draft simply isn't a competition yet, and the detail page's "Тэмцээн
+ *  олдсонгүй" is the honest answer. It also keeps the fan-out in
+ *  fetchMyRegistrations working if a competition is ever moved BACK to
+ *  draft — those rows drop out instead of failing the whole join.
+ *
+ *  Only 'permission-denied' is swallowed. Any other error (offline, a
+ *  malformed id) still throws, so a real failure stays a visible load
+ *  error rather than a silent empty page. */
 export async function fetchCompetition(competitionId: string): Promise<OnlineCompetition | null> {
-  const snap = await getDoc(doc(onlineCompDb, 'onlineCompetitions', competitionId));
+  let snap;
+  try {
+    snap = await getDoc(doc(onlineCompDb, 'onlineCompetitions', competitionId));
+  } catch (err) {
+    if ((err as { code?: string })?.code === 'permission-denied') return null;
+    throw err;
+  }
   if (!snap.exists()) return null;
   const data = snap.data() as Omit<OnlineCompetition, 'id'>;
   return { id: snap.id, ...data, status: normalizeStatus(data.status), events: normalizeEvents(data.events) };
 }
 
-// Public read (Firestore rules: `allow read: if true` on onlineCompetitions)
-// for the hub page — every competition, grouped by status client-side. No
-// server-side sort here since older docs may lack `createdAt` entirely
+// Public read for the hub and the competitions page — every NON-DRAFT
+// competition, grouped by status client-side.
+//
+// The `status != 'draft'` filter is not a convenience, it is what makes
+// this query legal. The matching rule (firestore.rules) refuses any doc
+// whose status is 'draft', and Firestore only permits a list query it can
+// prove returns nothing the rule would refuse — an unfiltered read of this
+// collection is now rejected outright rather than silently filtered. The
+// rules test suite pins both halves of that (tests/firestore-rules/
+// competitions.test.mjs).
+//
+// `!=` rather than an `in` list of the allowed values: a legacy doc may
+// still carry the pre-migration 'active'/'closed' strings (see
+// normalizeStatus above), and an `in` list would have to enumerate those
+// too or silently drop those competitions from the public site.
+//
+// KNOWN LIMITATION: an inequality filter matches only docs that HAVE the
+// field, so a competition doc with no `status` at all would disappear from
+// the public list. Every doc written by toFirestoreDoc has one, and the
+// type declares it required, so this is theoretical — but it is the one
+// behaviour that changed here beyond hiding drafts, and it cannot be
+// avoided while the rule is enforced: a query covering field-less docs is
+// not provably safe. Such a doc is still reachable by direct id
+// (fetchCompetition), which the rule's `!('status' in resource.data)`
+// clause explicitly allows.
+//
+// Still no server-side sort — older docs may lack `createdAt` entirely
 // (see the admin list route's identical reasoning) and Firestore would
 // silently drop them from an orderBy query.
 export async function fetchAllCompetitions(): Promise<OnlineCompetition[]> {
-  const snap = await getDocs(collection(onlineCompDb, 'onlineCompetitions'));
+  const snap = await getDocs(
+    query(collection(onlineCompDb, 'onlineCompetitions'), where('status', '!=', 'draft')),
+  );
   return snap.docs.map((d) => {
     const data = d.data() as Omit<OnlineCompetition, 'id'>;
     return { id: d.id, ...data, status: normalizeStatus(data.status), events: normalizeEvents(data.events) };

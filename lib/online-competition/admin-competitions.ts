@@ -9,7 +9,13 @@ import type { OnlineCompetitionEventConfig, OnlineCompetitionStatus, OnlineCompe
 // .tsx) — this is a lighter server-side sanity check against a
 // malformed/malicious payload, not a duplicate of every UI rule.
 
-const VALID_STATUSES: OnlineCompetitionStatus[] = ['upcoming', 'live', 'finished'];
+// MUST list every member of OnlineCompetitionStatus. A value missing here
+// is not rejected — normalizeCompetitionStatus below falls through to
+// 'upcoming', so omitting 'draft' would make a draft competition read back
+// as a public one. Kept in step with the identical list in data.ts (the
+// client half, deliberately duplicated — this file imports firebase-admin)
+// and with STATUS_OPTIONS in the admin form.
+const VALID_STATUSES: OnlineCompetitionStatus[] = ['draft', 'upcoming', 'live', 'finished'];
 
 export type ValidationResult =
   | { ok: true; data: OnlineCompetitionWriteInput }
@@ -55,7 +61,7 @@ export function validateCompetitionInput(body: unknown): ValidationResult {
 }
 
 /** Normalizes a raw Firestore `status` value into the current v2 enum
- *  ('upcoming' | 'live' | 'finished'). Competition docs created before the
+ *  ('draft' | 'upcoming' | 'live' | 'finished'). Competition docs created before the
  *  Phase 1 schema migration — namely the original test-comp-1 seed — may
  *  still carry the old 'upcoming' | 'active' | 'closed' shape. Reading
  *  that raw string straight through (typed as OnlineCompetitionStatus but
@@ -69,6 +75,13 @@ export function normalizeCompetitionStatus(raw: unknown): OnlineCompetitionStatu
   }
   if (raw === 'active') return 'live';
   if (raw === 'closed') return 'finished';
+  // Fallback for a genuinely unrecognized value (or a doc with no status
+  // field at all). Deliberately NOT 'draft': a legacy doc that currently
+  // shows publicly must not silently vanish from the public site because
+  // its status string wasn't recognised. The cost of that choice is that
+  // 'draft' has to be a RECOGNISED value (it is, via VALID_STATUSES above)
+  // — if it is ever dropped from that list, every draft lands here and
+  // goes public. That is the failure this comment exists to prevent.
   return 'upcoming';
 }
 

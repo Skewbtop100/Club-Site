@@ -6,7 +6,7 @@ import {
   fetchCompetition,
   fetchMyRegistrations,
 } from '@/lib/online-competition/data';
-import type { OnlineCompetition } from '@/lib/online-competition/types';
+import type { OnlineCompetition, OnlineCompetitionStatus } from '@/lib/online-competition/types';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import { toMillisOrNull } from '../_components/hub/format';
 import HubNav from '../_components/hub/v3/HubNav';
@@ -80,7 +80,13 @@ export default function CompetitionsPage() {
 
   const { live, sorted } = useMemo(() => {
     const list = competitions ?? [];
-    const order: Record<string, number> = { live: 0, upcoming: 1, finished: 2 };
+    // Typed on the status union, not Record<string, number>: with a loose
+    // key type an unlisted status yields undefined, and `undefined - n` is
+    // NaN, which makes the comparator below incoherent rather than merely
+    // mis-ordered. Drafts are filtered out server-side and never arrive
+    // here — this keeps that assumption compiler-checked instead of
+    // implicit, and sorts them first if one ever does.
+    const order: Record<OnlineCompetitionStatus, number> = { draft: 0, live: 1, upcoming: 2, finished: 3 };
     return {
       live: list.find((c) => c.status === 'live') ?? null,
       // Live first, then soonest upcoming, then most-recent finished.

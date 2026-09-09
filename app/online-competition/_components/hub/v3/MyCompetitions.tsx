@@ -24,6 +24,12 @@ export interface RegisteredView {
 // value 'registered' today (see types.ts), so a row's presence here IS
 // the registration.
 const STATUS: Record<OnlineCompetitionStatus, { dot: string; text: string; label: string }> = {
+  // Unreachable in practice: you cannot register for a draft, and a
+  // competition moved back to draft drops out of the join in
+  // fetchMyRegistrations (fetchCompetition returns null for it). Present
+  // because the Record demands it, and muted so that if one ever did
+  // appear it reads as "not a real fixture yet" rather than as a live row.
+  draft: { dot: '#4A4740', text: '#6E6A62', label: 'НООРОГ' },
   live: { dot: '#DFFF4F', text: '#DFFF4F', label: 'ЯВАГДАЖ БАЙНА' },
   upcoming: { dot: '#4FD07A', text: '#4FD07A', label: 'БҮРТГҮҮЛСЭН' },
   finished: { dot: '#4A4740', text: '#6E6A62', label: 'ДУУССАН' },

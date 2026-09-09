@@ -4,7 +4,22 @@ import type { Timestamp } from 'firebase/firestore';
 // Fully separate from the club's internal `athletes` / `results` /
 // `competitions` collections — nothing here reads or writes those.
 
-export type OnlineCompetitionStatus = 'upcoming' | 'live' | 'finished';
+/** 'draft' is the created-but-not-yet-public state (see the tabbed admin
+ *  form): a competition is born a draft and stays invisible to the public
+ *  site until an admin moves it on. It is deliberately the FIRST member —
+ *  every list of these values in the codebase must contain it.
+ *
+ *  Adding a value here is never enough on its own. Three separate lists
+ *  enumerate these strings and all three must agree:
+ *    - VALID_STATUSES in lib/online-competition/admin-competitions.ts (server)
+ *    - VALID_STATUSES in lib/online-competition/data.ts (client — a
+ *      deliberate duplicate, since the server file imports firebase-admin)
+ *    - STATUS_OPTIONS in app/online-competition/admin/_components/CompetitionForm
+ *  Both VALID_STATUSES lists feed a normalize function whose fallback is
+ *  'upcoming'. A status missing from a list therefore does not fail loudly
+ *  — it reads back as 'upcoming', which for 'draft' means an unfinished
+ *  competition silently goes public. */
+export type OnlineCompetitionStatus = 'draft' | 'upcoming' | 'live' | 'finished';
 
 /** One configured event within a competition — e.g. { eventId: '333',
  *  label: '3x3x3', rounds: 2 }. `label` is stored redundantly (rather than

@@ -13,7 +13,12 @@ import RegistrationPanel from './_components/RegistrationPanel';
 
 const COMPETITIONS = '/online-competition/competitions';
 
+// A draft never reaches this page — fetchCompetition returns null for one
+// (the rules refuse it) and the page renders "Тэмцээн олдсонгүй". The
+// entry exists because the Record demands one, and so that a draft can
+// never render as a blank badge if that ever changes.
 const STATUS_LABEL: Record<OnlineCompetitionStatus, string> = {
+  draft: 'Ноорог',
   upcoming: 'Удахгүй болох',
   live: 'Явагдаж буй',
   finished: 'Дууссан',

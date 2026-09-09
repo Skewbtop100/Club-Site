@@ -6,6 +6,12 @@ import type { OnlineCompetition, OnlineCompetitionStatus } from '@/lib/online-co
 import { EmptyState } from '../ui';
 import { fmtDateTime } from './format';
 
+// NOTE: this component is the pre-v3 mobile hub and is currently imported
+// by nothing (the live hub is _components/hub/v3). It is still type-checked
+// by the build, which is why the maps below carry 'draft' entries.
+//
+// No 'draft' TAB, deliberately: this is a public surface and a draft is not
+// a public competition. The three tabs are the three public statuses.
 const TABS: { value: OnlineCompetitionStatus; label: string }[] = [
   { value: 'live', label: 'Явагдаж буй' },
   { value: 'upcoming', label: 'Удахгүй' },
@@ -13,12 +19,14 @@ const TABS: { value: OnlineCompetitionStatus; label: string }[] = [
 ];
 
 const BADGE_CLASS: Record<OnlineCompetitionStatus, string> = {
+  draft: 'oc-hub-badge-finished',
   live: 'oc-hub-badge-live',
   upcoming: 'oc-hub-badge-outline',
   finished: 'oc-hub-badge-finished',
 };
 
 const BADGE_LABEL: Record<OnlineCompetitionStatus, string> = {
+  draft: 'НООРОГ',
   live: 'LIVE',
   upcoming: 'УДАХГҮЙ',
   finished: 'ДУУССАН',
@@ -34,7 +42,9 @@ export default function MobileHub({
   finished: OnlineCompetition[];
 }) {
   const [tab, setTab] = useState<OnlineCompetitionStatus>(live.length > 0 ? 'live' : 'upcoming');
-  const byTab: Record<OnlineCompetitionStatus, OnlineCompetition[]> = { live, upcoming, finished };
+  // `draft: []` — there is no draft tab to select, so this bucket is only
+  // here to satisfy the Record. Public callers pass no drafts either way.
+  const byTab: Record<OnlineCompetitionStatus, OnlineCompetition[]> = { draft: [], live, upcoming, finished };
   const items = byTab[tab];
 
   return (

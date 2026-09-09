@@ -17,7 +17,14 @@ const EVENT_OPTIONS = [
   { eventId: 'pyram', label: 'Пирамид' },
 ];
 
+// The third of the three lists that must enumerate every
+// OnlineCompetitionStatus (see the type's own comment). Unlike the two
+// VALID_STATUSES arrays this one is compiler-checked only for the value
+// TYPE, not for completeness — a missing entry just means the admin can
+// never select that status, which for 'draft' would mean no way back out
+// of, or into, the unpublished state.
 const STATUS_OPTIONS: { value: OnlineCompetitionStatus; label: string }[] = [
+  { value: 'draft', label: 'Ноорог' },
   { value: 'upcoming', label: 'Удахгүй болох' },
   { value: 'live', label: 'Явагдаж буй' },
   { value: 'finished', label: 'Дууссан' },
@@ -62,7 +69,9 @@ export default function CompetitionForm({
   const [registrationDeadline, setRegistrationDeadline] = useState(
     msToDatetimeLocal(competition?.registrationDeadline ?? null),
   );
-  const [status, setStatus] = useState<OnlineCompetitionStatus>(competition?.status ?? 'upcoming');
+  // A NEW competition starts as a draft — it is not public until an admin
+  // moves it on. Editing an existing one keeps whatever it already is.
+  const [status, setStatus] = useState<OnlineCompetitionStatus>(competition?.status ?? 'draft');
   const [season, setSeason] = useState(competition?.season ?? '');
   const [unlimited, setUnlimited] = useState(competition ? competition.participantLimit === null : true);
   const [participantLimit, setParticipantLimit] = useState(

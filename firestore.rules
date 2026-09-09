@@ -123,7 +123,48 @@ service cloud.firestore {
     // ─── Online Competition (public, isolated) ─────────────────────────────
 
     match /onlineCompetitions/{competitionId} {
-      allow read: if true;
+      // Drafts are private: a competition is created as a draft and must
+      // not be reachable — by list OR by direct id — until an admin moves
+      // it on.
+      //
+      // Modelled on the virtualCompetitions block above but deliberately
+      // NOT identical to it. That one reads
+      //     isAdmin() || !('status' in resource.data) || status != 'draft'
+      // and the middle clause silently defeats the whole guard on list
+      // queries: because the rule permits documents that lack the field,
+      // Firestore can no longer statically prove an UNFILTERED query is
+      // safe — and rather than refusing it, it allows the query and
+      // returns the drafts. Verified against the emulator: with that
+      // clause present, an anonymous getDocs() of the whole collection
+      // succeeds and includes every draft. (virtualCompetitions still has
+      // this hole — see the note in tests/firestore-rules/README.md.)
+      //
+      // Dropping the clause is what makes the guard real, at one cost: a
+      // doc with NO `status` field at all is now unreadable to clients
+      // (it fails `resource.data.status != 'draft'` outright) rather than
+      // being treated as public. Every doc toFirestoreDoc writes has a
+      // status and the type declares it required, so this is theoretical;
+      // and it changes nothing for the public LIST either way, since the
+      // inequality filter that list must use already skips field-less
+      // docs. Test 8 in competitions.test.mjs pins this trade-off.
+      //
+      // The `isAdmin()` disjunct is the club's Firebase Auth admin. It is
+      // effectively dead for this feature — the online-competition admin
+      // is a shared password, not an auth identity, so there is no
+      // request.auth for it to match — and is kept only so a club admin
+      // is never locked out of a collection they can already write.
+      //
+      // Hiding drafts at the rules layer WORKS regardless, because the
+      // online-competition admin UI never reads this collection through
+      // the client SDK: it goes via the admin-cookie-gated
+      // /api/online-competition/admin-competitions routes, which use the
+      // Admin SDK and bypass rules entirely. The admin still sees every
+      // draft while no client can.
+      //
+      // Consequence for callers: a list query here is allowed only if it
+      // PROVES it excludes drafts, e.g. where('status', '!=', 'draft')
+      // (what fetchAllCompetitions issues). An unfiltered getDocs() fails.
+      allow read: if isAdmin() || resource.data.status != 'draft';
       allow write: if isAdmin();
 
       match /scrambles/{scrambleId} {

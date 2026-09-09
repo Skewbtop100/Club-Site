@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:rules": "firebase emulators:exec --only firestore \"node tests/firestore-rules/participants.test.mjs\"",
+    "test:rules": "firebase emulators:exec --only firestore \"node tests/firestore-rules/participants.test.mjs && node tests/firestore-rules/competitions.test.mjs\"",
     "test:merge": "firebase emulators:exec --only firestore \"node tests/merge-athlete-uid/merge.test.mjs\""
   },
   "dependencies": {

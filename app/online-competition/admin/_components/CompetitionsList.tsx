@@ -7,7 +7,10 @@ import type { OnlineCompetitionAdminView, OnlineCompetitionStatus } from '@/lib/
 import CompetitionForm from './CompetitionForm';
 import RoundGapWarning from './RoundGapWarning';
 
+// Record<OnlineCompetitionStatus, ...> — the compiler requires an entry
+// for every status, which is what keeps a new one from rendering blank.
 const STATUS_LABEL: Record<OnlineCompetitionStatus, string> = {
+  draft: 'Ноорог',
   upcoming: 'Удахгүй болох',
   live: 'Явагдаж буй',
   finished: 'Дууссан',
@@ -16,6 +19,12 @@ const STATUS_LABEL: Record<OnlineCompetitionStatus, string> = {
 // Exact literal colors from the approved mockup — not derived from the
 // --color-* token block (see theme.css's top comment for why).
 const STATUS_BADGE: Record<OnlineCompetitionStatus, BadgeSpec> = {
+  // Ноорог is muted on purpose — deliberately NOT the volt accent, which
+  // this system reserves for the live state. Distinguished from `upcoming`
+  // (same outline, brighter text, no dot) by the dimmer ink plus a dot
+  // swatch, and from `finished` (filled dark) by staying transparent: a
+  // draft is unfinished, not over.
+  draft: { borderColor: '#2A2A31', background: 'transparent', color: '#6E6A62', dotColor: '#4A4740' },
   upcoming: { borderColor: '#2A2A31', background: 'transparent', color: '#9A958A' },
   live: { borderColor: '#DFFF4F', background: '#DFFF4F', color: '#08080A' },
   finished: { borderColor: '#16161B', background: '#131318', color: '#6E6A62' },
@@ -50,6 +59,9 @@ export default function CompetitionsList() {
     try {
       const res = await fetch('/api/online-competition/admin-competitions');
       if (!res.ok) throw new Error('failed');
+      // Every competition, drafts included. This list reads through the
+      // Admin SDK route, which bypasses the rules that hide drafts from
+      // the public site — so no status filter belongs here.
       const data = (await res.json()) as { competitions: OnlineCompetitionAdminView[] };
       setCompetitions(data.competitions);
     } catch {
