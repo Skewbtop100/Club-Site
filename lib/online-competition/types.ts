@@ -52,6 +52,30 @@ export interface OnlineCompetitionEventConfig {
   eventId: string;
   label: string;
   rounds: number;
+  /** The PLANNED cut for each round transition of this event, one entry
+   *  per transition (a 3-round event has two: from round 1, and from
+   *  round 2). Absent on every competition created before the Төрөл tab,
+   *  and legitimately absent for a single-round event, which has no
+   *  transition.
+   *
+   *  THIS IS A PLAN, NOT A RECORD. What a round was ACTUALLY cut to is
+   *  written to roundState.qualifierMethod/qualifierValue by the qualify
+   *  route at commit time, and that is the only value any computation
+   *  ever reads. This one exists so the admin can declare the intent up
+   *  front and have ШАЛГАРУУЛАХ pre-filled with it — a client-side
+   *  prefill and nothing more. The qualify route must never fall back to
+   *  it; see the comment at that spot for why. */
+  advancement?: OnlineCompetitionAdvancement[];
+}
+
+/** One planned round transition. `fromRound` is the round being cut FROM,
+ *  so it is always 1..rounds-1. `method`/`value` mirror
+ *  RoundStateDoc.qualifierMethod/qualifierValue exactly, and are validated
+ *  with the same validateQualifierInput the qualify route uses. */
+export interface OnlineCompetitionAdvancement {
+  fromRound: number;
+  method: 'count' | 'percent';
+  value: number;
 }
 
 /** onlineCompetitions/{competitionId}

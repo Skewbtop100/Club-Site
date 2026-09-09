@@ -4957,6 +4957,104 @@ button.oc-rv-cell:hover {
   }
 }
 
+/* ── Төрөл tab ──────────────────────────────────────────────────────── */
+.oc-cf-ev {
+  border: 1px solid #1C1C21;
+  background: #0D0D10;
+  padding: 14px;
+}
+.oc-cf-ev + .oc-cf-ev {
+  margin-top: 12px;
+}
+.oc-cf-ev-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.oc-cf-ev-icon {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #2A2A31;
+  color: #9A958A;
+  font: 500 10px var(--oc-font-mono), monospace;
+}
+/* ФОРМАТ is a fixed readout, not a control — see the comment in
+   CompetitionEditor. Styled as a disabled-looking field so it never
+   invites a click. */
+.oc-cf-ev-format {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #1C1C21;
+  background: #08080A;
+  color: #6E6A62;
+  padding: 10px 12px;
+  font: 500 11px var(--oc-font-mono), monospace;
+  letter-spacing: .1em;
+  white-space: nowrap;
+}
+/* Advancement rows, indented under their event. */
+.oc-cf-adv {
+  margin-top: 12px;
+  padding-left: 14px;
+  border-left: 1px solid #2A2A31;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.oc-cf-adv-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.oc-cf-adv-label {
+  font: 500 10px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .1em;
+  color: #9A958A;
+  min-width: 150px;
+}
+.oc-cf-adv-suffix {
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .1em;
+  color: #4A4740;
+}
+/* Compact two-segment [#]/[%] toggle. Same colours as .oc-v3-seg-btn but
+   sized for an inline row rather than a full-width field. */
+.oc-cf-seg {
+  display: inline-flex;
+  border: 1px solid #2A2A31;
+  flex: none;
+}
+.oc-cf-seg-btn {
+  border: none;
+  background: #08080A;
+  color: #9A958A;
+  padding: 8px 12px;
+  font: 500 11px var(--oc-font-mono), monospace;
+  cursor: pointer;
+}
+.oc-cf-seg-btn + .oc-cf-seg-btn {
+  border-left: 1px solid #2A2A31;
+}
+.oc-cf-seg-btn-active {
+  background: #DFFF4F;
+  color: #08080A;
+}
+@media (max-width: 640px) {
+  .oc-cf-seg-btn {
+    min-height: 44px;
+  }
+  .oc-cf-adv-label {
+    min-width: 0;
+    flex-basis: 100%;
+  }
+}
+
 /* Placeholder body for the six tabs that have no content yet.
    --oc-font-heading, not --oc-font-body: the latter is never declared
    anywhere (layout.tsx defines only --oc-font-heading and --oc-font-mono),

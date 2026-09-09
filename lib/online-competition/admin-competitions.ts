@@ -1,5 +1,7 @@
 import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { DEFAULT_COMPETITION_FORMAT } from './types';
+import { validateQualifierInput } from './rounds';
+import type { OnlineCompetitionAdvancement } from './types';
 import type { OnlineCompetitionEventConfig, OnlineCompetitionStatus, OnlineCompetitionWriteInput } from './types';
 
 // Server-only validation + Firestore-doc-shaping helpers shared by
@@ -21,6 +23,61 @@ const VALID_STATUSES: OnlineCompetitionStatus[] = ['draft', 'upcoming', 'live', 
 export type ValidationResult =
   | { ok: true; data: OnlineCompetitionWriteInput }
   | { ok: false; error: string };
+
+/** Validates one event's planned advancement rows.
+ *
+ *  The method/value rules are NOT restated here — validateQualifierInput
+ *  (rounds.ts) is the same function the qualify route validates a real cut
+ *  with, so a plan that would be rejected at qualify time is rejected at
+ *  save time, in the same words. Only the two things it cannot know are
+ *  checked locally: that the method is one of the two, and that fromRound
+ *  is a transition this event actually has.
+ *
+ *  Absent/empty is valid — a single-round event has no transitions, and a
+ *  competition created before this field existed has none stored. */
+function parseAdvancement(
+  raw: unknown,
+  rounds: number,
+): { ok: true; value: OnlineCompetitionAdvancement[] } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true, value: [] };
+  if (!Array.isArray(raw)) return { ok: false, error: 'advancement must be an array' };
+
+  const out: OnlineCompetitionAdvancement[] = [];
+  const seen = new Set<number>();
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') return { ok: false, error: 'invalid advancement entry' };
+    const a = entry as Record<string, unknown>;
+
+    if (a.method !== 'count' && a.method !== 'percent') {
+      return { ok: false, error: 'invalid advancement method' };
+    }
+    if (typeof a.value !== 'number') {
+      return { ok: false, error: 'advancement value must be a number' };
+    }
+    // The qualify route's own rules: > 0, integer for a count, <= 100 for
+    // a percent. Its Mongolian message is passed straight through.
+    const invalid = validateQualifierInput(a.method, a.value);
+    if (invalid) return { ok: false, error: invalid };
+
+    // A transition cuts FROM round N INTO round N+1, so the last round an
+    // event has cannot be a `fromRound` — there is nothing after it.
+    if (typeof a.fromRound !== 'number' || !Number.isInteger(a.fromRound)) {
+      return { ok: false, error: 'advancement fromRound must be an integer' };
+    }
+    if (a.fromRound < 1 || a.fromRound > rounds - 1) {
+      return { ok: false, error: `advancement fromRound ${a.fromRound} is out of range for ${rounds} round(s)` };
+    }
+    if (seen.has(a.fromRound)) {
+      return { ok: false, error: `duplicate advancement for round ${a.fromRound}` };
+    }
+    seen.add(a.fromRound);
+
+    out.push({ fromRound: a.fromRound, method: a.method, value: a.value });
+  }
+
+  out.sort((x, y) => x.fromRound - y.fromRound);
+  return { ok: true, value: out };
+}
 
 export function validateCompetitionInput(body: unknown): ValidationResult {
   if (!body || typeof body !== 'object') return { ok: false, error: 'Invalid body' };
@@ -47,6 +104,11 @@ export function validateCompetitionInput(body: unknown): ValidationResult {
     return { ok: false, error: 'at least one event is required' };
   }
 
+  // NOTE: this loop REBUILDS each event object field by field rather than
+  // passing it through, so any property not named here is silently
+  // dropped. That is the trap `advancement` has to be added to — a new
+  // per-event field that is not listed below saves as undefined with no
+  // error anywhere.
   const events: OnlineCompetitionEventConfig[] = [];
   for (const raw of b.events) {
     if (!raw || typeof raw !== 'object') return { ok: false, error: 'invalid event config' };
@@ -54,7 +116,9 @@ export function validateCompetitionInput(body: unknown): ValidationResult {
     if (typeof e.eventId !== 'string' || typeof e.label !== 'string' || typeof e.rounds !== 'number' || e.rounds < 1) {
       return { ok: false, error: 'invalid event config' };
     }
-    events.push({ eventId: e.eventId, label: e.label, rounds: e.rounds });
+    const advancement = parseAdvancement(e.advancement, e.rounds);
+    if (!advancement.ok) return { ok: false, error: `${e.eventId}: ${advancement.error}` };
+    events.push({ eventId: e.eventId, label: e.label, rounds: e.rounds, advancement: advancement.value });
   }
 
   return {

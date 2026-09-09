@@ -6,10 +6,13 @@ import Link from 'next/link';
 import { Button, FieldLabel, INPUT_CLASS, MONO_INPUT_CLASS, SELECT_CLASS, SquareToggle } from '../../_components/ui';
 import { ROUND_GAP_TEXT, type RoundGapEvent } from './RoundGapWarning';
 import { uploadImageToCloudinary } from '@/lib/online-competition/cloudinary';
+import { ONLINE_COMP_EVENTS, onlineCompEventLabel } from '@/lib/online-competition/events';
+import { WcaEventIcon, hasWcaEventIcon } from '@/lib/wca-event-icon';
 import {
   COMPETITION_FORMAT_OPTIONS,
   DEFAULT_COMPETITION_FORMAT,
   type OnlineCompetitionAdminView,
+  type OnlineCompetitionAdvancement,
   type OnlineCompetitionEventConfig,
   type OnlineCompetitionStatus,
   type OnlineCompetitionWriteInput,
@@ -132,9 +135,10 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
   const [unlimited, setUnlimited] = useState(true);
   const [participantLimit, setParticipantLimit] = useState('');
 
-  // Not edited here — the Төрөл tab owns it. Held in state and sent back
-  // untouched so saving from this tab cannot wipe a competition's events.
-  const [events, setEvents] = useState<OnlineCompetitionEventConfig[]>([]);
+  // Owned by the Төрөл tab. Kept as EventRow (rounds as a string,
+  // advancement keyed by fromRound) rather than the stored shape — see
+  // EventRow's comment for why.
+  const [events, setEvents] = useState<EventRow[]>([]);
   // Same: the status this competition had when loaded, so the round-gap
   // confirm can tell a transition INTO live from an already-live save.
   const [loadedStatus, setLoadedStatus] = useState<OnlineCompetitionStatus | null>(null);
@@ -180,7 +184,7 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
         setBannerPublicId(c.bannerPublicId);
         setUnlimited(c.participantLimit === null);
         setParticipantLimit(c.participantLimit != null ? String(c.participantLimit) : '');
-        setEvents(c.events);
+        setEvents(c.events.map(toEventRow));
         setLoading(false);
       })
       .catch(() => {
@@ -231,7 +235,7 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
     const formEvents: RoundGapEvent[] = [];
     for (const e of events) {
       if (!formEvents.some((x) => x.eventId === e.eventId)) {
-        formEvents.push({ eventId: e.eventId, label: e.label });
+        formEvents.push({ eventId: e.eventId, label: onlineCompEventLabel(e.eventId) });
       }
     }
     if (savedId === null) return formEvents;
@@ -274,8 +278,7 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
         registrationOpensAt: datetimeLocalToMs(registrationOpensAt),
         endAt: datetimeLocalToMs(endAt),
         participantLimit: unlimited ? null : Math.max(1, parseInt(participantLimit, 10) || 0),
-        // Untouched by this tab — see the `events` state comment.
-        events,
+        events: events.map(toEventConfig),
         status,
         season: season.trim(),
         format,
@@ -419,6 +422,8 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
               setDescription,
             }}
           />
+        ) : tab === 2 ? (
+          <EventsTab events={events} setEvents={setEvents} />
         ) : tab === 1 ? (
           <ImagesTab
             {...{
@@ -487,6 +492,257 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
           Дараах
         </Button>
       </div>
+    </div>
+  );
+}
+
+// ── 03 Төрөл ─────────────────────────────────────────────────────────────
+
+/** One event while it is being edited.
+ *
+ *  `rounds` is a STRING because a number input is legitimately empty or
+ *  half-typed mid-edit; it becomes a number only at save.
+ *
+ *  `advancement` is keyed by fromRound rather than being an array, and is
+ *  DELIBERATELY NOT PRUNED when the round count drops. Take a 3-round
+ *  event with "Раунд 2 → Финал" set to 12, then change it to 2 rounds:
+ *  that transition no longer exists and its row disappears, but the entry
+ *  stays in this map. Change back to 3 and the 12 is still there. Only
+ *  in-range entries are sent (toEventConfig filters), so an orphan never
+ *  reaches Firestore and never survives a reload — it is a within-session
+ *  undo, the same treatment the featured banner fields get on Ерөнхий. */
+interface EventRow {
+  eventId: string;
+  rounds: string;
+  advancement: Record<number, { method: 'count' | 'percent'; value: string }>;
+}
+
+function toEventRow(e: OnlineCompetitionEventConfig): EventRow {
+  const advancement: EventRow['advancement'] = {};
+  for (const a of e.advancement ?? []) {
+    advancement[a.fromRound] = { method: a.method, value: String(a.value) };
+  }
+  return { eventId: e.eventId, rounds: String(e.rounds), advancement };
+}
+
+function toEventConfig(row: EventRow): OnlineCompetitionEventConfig {
+  const rounds = roundsOf(row);
+  const advancement: OnlineCompetitionAdvancement[] = [];
+  // In-range and actually filled in. A blank value is "not planned yet",
+  // not an error — a draft is allowed to be half-specified.
+  for (const fromRound of transitionsFor(rounds)) {
+    const entry = row.advancement[fromRound];
+    if (!entry || entry.value.trim() === '') continue;
+    const value = Number(entry.value);
+    if (!Number.isFinite(value)) continue;
+    advancement.push({ fromRound, method: entry.method, value });
+  }
+  return {
+    eventId: row.eventId,
+    // Re-resolved from the shared list at save time so a relabelled event
+    // updates, but falls back to the id for an event no longer offered.
+    label: onlineCompEventLabel(row.eventId),
+    rounds,
+    advancement,
+  };
+}
+
+/** Parsed round count, floored at 1 — an empty or junk input must not
+ *  produce NaN rounds or a negative transition list. */
+function roundsOf(row: EventRow): number {
+  const n = parseInt(row.rounds, 10);
+  return Number.isFinite(n) && n >= 1 ? n : 1;
+}
+
+/** The fromRound of every transition this event has: 1..rounds-1. A
+ *  single-round event has none. */
+function transitionsFor(rounds: number): number[] {
+  return Array.from({ length: Math.max(0, rounds - 1) }, (_, i) => i + 1);
+}
+
+/** "Раунд 1 → Раунд 2" / "Раунд 2 → Финал" — the last transition's target
+ *  is the final. */
+function transitionLabel(fromRound: number, rounds: number): string {
+  const to = fromRound + 1;
+  return `Раунд ${fromRound} → ${to >= rounds ? 'Финал' : `Раунд ${to}`}`;
+}
+
+function EventsTab({
+  events,
+  setEvents,
+}: {
+  events: EventRow[];
+  setEvents: React.Dispatch<React.SetStateAction<EventRow[]>>;
+}) {
+  const used = new Set(events.map((e) => e.eventId));
+  const firstUnused = ONLINE_COMP_EVENTS.find((o) => !used.has(o.id));
+
+  function update(index: number, patch: Partial<EventRow>) {
+    setEvents((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  }
+
+  function setAdvancement(
+    index: number,
+    fromRound: number,
+    patch: Partial<{ method: 'count' | 'percent'; value: string }>,
+  ) {
+    setEvents((prev) =>
+      prev.map((row, i) => {
+        if (i !== index) return row;
+        const current = row.advancement[fromRound] ?? { method: 'count' as const, value: '' };
+        return { ...row, advancement: { ...row.advancement, [fromRound]: { ...current, ...patch } } };
+      }),
+    );
+  }
+
+  return (
+    <div>
+      {events.length === 0 && (
+        <p className="oc-cf-soon" style={{ marginBottom: 12 }}>
+          Төрөл нэмээгүй байна. Тэмцээнийг нийтлэхийн тулд дор хаяж нэг төрөл нэмнэ үү.
+        </p>
+      )}
+
+      {events.map((row, i) => {
+        const rounds = roundsOf(row);
+        const transitions = transitionsFor(rounds);
+        const known = ONLINE_COMP_EVENTS.some((o) => o.id === row.eventId);
+        return (
+          <div key={i} className="oc-cf-ev">
+            <div className="oc-cf-ev-head">
+              <span className="oc-cf-ev-icon" aria-hidden>
+                {hasWcaEventIcon(row.eventId) ? (
+                  <WcaEventIcon eventId={row.eventId} size={16} />
+                ) : (
+                  row.eventId.slice(0, 4).toUpperCase()
+                )}
+              </span>
+
+              <select
+                className={SELECT_CLASS}
+                style={{ flex: '1 1 160px', minWidth: 0 }}
+                value={row.eventId}
+                onChange={(e) => update(i, { eventId: e.target.value })}
+                aria-label="Төрөл"
+              >
+                {/* An event chosen on another row is disabled, not hidden:
+                    hiding it would make the list jump around as rows are
+                    edited. */}
+                {ONLINE_COMP_EVENTS.map((o) => (
+                  <option key={o.id} value={o.id} disabled={o.id !== row.eventId && used.has(o.id)}>
+                    {o.label}
+                  </option>
+                ))}
+                {/* A competition may hold an event this build no longer
+                    offers (the list shrank, or the doc predates it).
+                    Without this option the select would silently snap to
+                    another event and the next save would rewrite it. */}
+                {!known && (
+                  <option value={row.eventId}>{onlineCompEventLabel(row.eventId)} (дэмжигдэхгүй)</option>
+                )}
+              </select>
+
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span className="oc-cf-adv-suffix">РАУНД</span>
+                <input
+                  type="number"
+                  min={1}
+                  className={MONO_INPUT_CLASS}
+                  style={{ width: 74, flexShrink: 0 }}
+                  value={row.rounds}
+                  onChange={(e) => update(i, { rounds: e.target.value })}
+                  aria-label="Раундын тоо"
+                />
+              </span>
+
+              {/* ФОРМАТ is a fixed readout, NOT a dropdown, and there is no
+                  schema field behind it. Ao5 is hardcoded in seven places —
+                  computeAo5 (ao5.ts), ATTEMPTS_PER_ROUND (round-results.ts),
+                  the length-5 guards in athleteStats.ts and seasonPoints.ts,
+                  TOTAL_ATTEMPTS on the solve page, SCRAMBLES_PER_GROUP for
+                  the TNoodle import, and the length === 5 branch in
+                  summaryStats.ts — so a control offering Bo3 or Mo3 would
+                  change nothing while implying it had. Make it a real
+                  control only once those seven agree. */}
+              <span className="oc-cf-ev-format" title="Формат тогтмол — Ao5">
+                ФОРМАТ · Ao5
+              </span>
+
+              <button
+                type="button"
+                onClick={() => setEvents((prev) => prev.filter((_, x) => x !== i))}
+                aria-label="Төрөл устгах"
+                className="oc-adm-event-del shrink-0 border border-[#2A2A31] bg-transparent text-[#E8543C] transition hover:border-[#E8543C] hover:bg-[#1A0D0A] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#DFFF4F]"
+                style={{
+                  borderRadius: 2,
+                  font: '500 12px var(--oc-font-mono), monospace',
+                  padding: '10px 12px',
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* One row per transition, derived from the round count. A
+                single-round event has none. */}
+            {transitions.length > 0 && (
+              <div className="oc-cf-adv">
+                {transitions.map((fromRound) => {
+                  const entry = row.advancement[fromRound] ?? { method: 'count' as const, value: '' };
+                  return (
+                    <div key={fromRound} className="oc-cf-adv-row">
+                      <span className="oc-cf-adv-label">{transitionLabel(fromRound, rounds)}</span>
+
+                      <span className="oc-cf-seg" role="radiogroup" aria-label="Шалгаруулах арга">
+                        {(['count', 'percent'] as const).map((m) => (
+                          <button
+                            key={m}
+                            type="button"
+                            role="radio"
+                            aria-checked={entry.method === m}
+                            className={`oc-cf-seg-btn${entry.method === m ? ' oc-cf-seg-btn-active' : ''}`}
+                            onClick={() => setAdvancement(i, fromRound, { method: m })}
+                          >
+                            {m === 'count' ? '#' : '%'}
+                          </button>
+                        ))}
+                      </span>
+
+                      <input
+                        type="number"
+                        min={1}
+                        max={entry.method === 'percent' ? 100 : undefined}
+                        className={MONO_INPUT_CLASS}
+                        style={{ width: 84, flexShrink: 0 }}
+                        value={entry.value}
+                        onChange={(e) => setAdvancement(i, fromRound, { value: e.target.value })}
+                        aria-label={transitionLabel(fromRound, rounds)}
+                      />
+
+                      <span className="oc-cf-adv-suffix">
+                        {entry.method === 'count' ? 'тамирчин' : '% бүртгэлээс'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      <button
+        type="button"
+        disabled={!firstUnused}
+        onClick={() =>
+          firstUnused &&
+          setEvents((prev) => [...prev, { eventId: firstUnused.id, rounds: '1', advancement: {} }])
+        }
+        className="oc-adm-add-row w-full text-sm text-[#6E6A62] transition hover:text-[#DFFF4F] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#DFFF4F]"
+        style={{ border: '1px dashed #2A2A31', borderRadius: 2, marginTop: 12, paddingTop: 8, paddingBottom: 8 }}
+      >
+        {firstUnused ? '+ Төрөл нэмэх' : 'Бүх төрөл нэмэгдсэн'}
+      </button>
     </div>
   );
 }

@@ -28,8 +28,16 @@ export interface RoundAdminView {
   round: number;
   status: RoundStatus;
   openedAt: number | null;
+  /** What this round was ACTUALLY cut to, from roundState — null until it
+   *  has been qualified at least once. */
   qualifierMethod: QualifierMethod | null;
   qualifierValue: number | null;
+  /** What the admin PLANNED for this transition, from the competition
+   *  document's events[].advancement. Null for the event's final round,
+   *  which has no transition. Used only to prefill the ШАЛГАРУУЛАХ form —
+   *  see the comment in ./qualify/route.ts. */
+  plannedMethod: QualifierMethod | null;
+  plannedValue: number | null;
   /** How many uids this round has advanced (0 when never advanced). */
   qualifierCount: number;
   /** Whether the PREVIOUS round has been advanced — the precondition for
@@ -72,6 +80,14 @@ export async function GET(req: Request) {
     for (let round = 1; round <= total; round++) {
       const key = roundKey(eventId, round);
       const state = states.get(key);
+      // The planned cut for the transition OUT of this round. Absent for
+      // the last round, and for any competition saved before the Төрөл
+      // tab existed.
+      const plan = Array.isArray(e?.advancement)
+        ? (e.advancement as { fromRound?: number; method?: QualifierMethod; value?: number }[]).find(
+            (a) => a?.fromRound === round,
+          )
+        : undefined;
       rounds.push({
         eventId,
         label: typeof e?.label === 'string' && e.label ? e.label : eventId.toUpperCase(),
@@ -80,6 +96,8 @@ export async function GET(req: Request) {
         openedAt: state?.openedAt ?? null,
         qualifierMethod: state?.qualifierMethod ?? null,
         qualifierValue: state?.qualifierValue ?? null,
+        plannedMethod: plan?.method ?? null,
+        plannedValue: plan?.value ?? null,
         qualifierCount: qualifierCounts.get(key) ?? 0,
         canOpen: round === 1 || qualifierCounts.has(roundKey(eventId, round - 1)),
       });

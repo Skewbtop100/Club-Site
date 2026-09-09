@@ -44,6 +44,22 @@ export async function POST(req: Request) {
   const value = typeof body?.value === 'number' ? body.value : NaN;
   const commit = body?.mode === 'commit';
 
+  // A missing method is a 400, deliberately, and MUST STAY ONE.
+  //
+  // The competition document now carries a planned cut per round
+  // transition (OnlineCompetitionEventConfig.advancement, set on the
+  // admin editor's Төрөл tab). It would be easy to "helpfully" fall back
+  // to it here when the body omits a method. Do not.
+  //
+  // That plan is an intention; roundState.qualifierMethod/qualifierValue,
+  // written below at commit, is the record of what was actually applied.
+  // If this route read the plan, editing the Төрөл tab later would
+  // retroactively change what a re-run of ШАЛГАРУУЛАХ does, and a plan
+  // edited after a commit would silently disagree with the stored record
+  // with nothing marking which one produced the qualifiers. The plan
+  // reaches this endpoint exactly one way: as a PREFILL in the admin's
+  // form (RoundsManager's QualifyForm), which the admin sees and can
+  // change before submitting. It is never an implicit server-side input.
   if (!competitionId || !eventId || !Number.isInteger(round) || round < 1 || !method) {
     return NextResponse.json({ error: 'Буруу хүсэлт.' }, { status: 400 });
   }

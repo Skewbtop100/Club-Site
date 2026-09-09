@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import cstimer from 'cstimer_module';
-import { ONLINE_COMP_SCRAMBLE_TYPE } from '@/lib/online-competition/scramble-types';
+import { scrambleConfigFor } from '@/lib/online-competition/scramble-types';
 import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
 import { roundKey, type ScrambleGroup } from '@/lib/online-competition/scrambles';
 import { ROUND_ACCESS_MESSAGE, resolveRoundAccess } from '@/lib/online-competition/round-access';
@@ -65,7 +65,7 @@ export async function GET(req: Request) {
   if (!eventId) {
     return NextResponse.json({ error: 'Missing event param' }, { status: 400 });
   }
-  const cfg = ONLINE_COMP_SCRAMBLE_TYPE[eventId];
+  const cfg = scrambleConfigFor(eventId);
   if (!cfg) {
     return NextResponse.json({ error: `Unsupported event: ${eventId}` }, { status: 400 });
   }

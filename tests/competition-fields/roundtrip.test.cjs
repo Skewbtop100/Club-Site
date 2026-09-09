@@ -44,6 +44,11 @@ function compile() {
       '--module', 'commonjs',
       '--target', 'es2022',
       '--moduleResolution', 'node',
+      // --strict to match tsconfig.json. Without it, strictNullChecks is
+      // off and true/false literal types stop discriminating a union, so
+      // this compile can fail on code the real build accepts (and, worse,
+      // could pass code it rejects).
+      '--strict',
       '--skipLibCheck',
       '--esModuleInterop',
     ],
@@ -290,6 +295,116 @@ const read = async (id) => (await db.collection(COL).doc(id).get()).data();
   const idImg = await writeCompetitionDoc(db, null, validateCompetitionInput(body()).data);
   const dImg = await read(idImg);
   ok('a Cloudinary secure_url round-trips byte-identical', dImg.posterUrl === POSTER, String(dImg.posterUrl));
+
+
+  // ── events[].advancement — the planned cut per round transition ───────
+  // validateCompetitionInput REBUILDS each event object field by field, so
+  // a per-event field it does not name is silently dropped. These pin that
+  // advancement is actually carried, and that a malformed plan is refused
+  // by the same rules the qualify route applies to a real cut.
+  const ADV_EVENT = (over = {}) => ({
+    eventId: '333',
+    label: '3x3x3',
+    rounds: 3,
+    advancement: [
+      { fromRound: 1, method: 'percent', value: 50 },
+      { fromRound: 2, method: 'count', value: 12 },
+    ],
+    ...over,
+  });
+
+  const vAdv = validateCompetitionInput(body({ events: [ADV_EVENT()], status: 'upcoming' }));
+  ok('advancement survives validation', vAdv.ok, vAdv.ok ? '' : vAdv.error);
+  ok(
+    '  ...with both transitions intact',
+    vAdv.ok &&
+      vAdv.data.events[0].advancement.length === 2 &&
+      vAdv.data.events[0].advancement[0].fromRound === 1 &&
+      vAdv.data.events[0].advancement[0].method === 'percent' &&
+      vAdv.data.events[0].advancement[0].value === 50 &&
+      vAdv.data.events[0].advancement[1].fromRound === 2 &&
+      vAdv.data.events[0].advancement[1].method === 'count' &&
+      vAdv.data.events[0].advancement[1].value === 12,
+    vAdv.ok ? JSON.stringify(vAdv.data.events[0].advancement) : '',
+  );
+
+  const advId = await writeCompetitionDoc(db, null, vAdv.data);
+  const dAdv = await read(advId);
+  ok(
+    'advancement round-trips through Firestore',
+    JSON.stringify(dAdv.events?.[0]?.advancement) ===
+      JSON.stringify([
+        { fromRound: 1, method: 'percent', value: 50 },
+        { fromRound: 2, method: 'count', value: 12 },
+      ]),
+    JSON.stringify(dAdv.events?.[0]?.advancement),
+  );
+
+  // Entries are normalised into fromRound order regardless of input order.
+  const vSort = validateCompetitionInput(
+    body({
+      events: [
+        ADV_EVENT({
+          advancement: [
+            { fromRound: 2, method: 'count', value: 12 },
+            { fromRound: 1, method: 'percent', value: 50 },
+          ],
+        }),
+      ],
+      status: 'upcoming',
+    }),
+  );
+  ok(
+    'advancement is sorted by fromRound',
+    vSort.ok && vSort.data.events[0].advancement.map((a) => a.fromRound).join(',') === '1,2',
+  );
+
+  // Absent / empty is legal: a single-round event has no transition, and a
+  // competition saved before this field existed has none.
+  ok(
+    'a single-round event with no advancement is accepted',
+    validateCompetitionInput(
+      body({ events: [{ eventId: '222', label: '2x2x2', rounds: 1 }], status: 'upcoming' }),
+    ).ok,
+  );
+  const vEmpty = validateCompetitionInput(
+    body({ events: [ADV_EVENT({ advancement: undefined })], status: 'upcoming' }),
+  );
+  ok('omitted advancement defaults to []', vEmpty.ok && Array.isArray(vEmpty.data.events[0].advancement) && vEmpty.data.events[0].advancement.length === 0);
+
+  // ── malformed plans are refused ───────────────────────────────────────
+  const reject = (name, advancement, rounds = 3) => {
+    const r = validateCompetitionInput(
+      body({ events: [ADV_EVENT({ advancement, rounds })], status: 'upcoming' }),
+    );
+    ok(name, !r.ok, r.ok ? 'accepted!' : r.error);
+  };
+  reject('rejects method not in the enum', [{ fromRound: 1, method: 'top', value: 5 }]);
+  reject('rejects value 0', [{ fromRound: 1, method: 'count', value: 0 }]);
+  reject('rejects a negative value', [{ fromRound: 1, method: 'count', value: -3 }]);
+  reject('rejects percent > 100', [{ fromRound: 1, method: 'percent', value: 150 }]);
+  reject('rejects a non-integer count', [{ fromRound: 1, method: 'count', value: 2.5 }]);
+  // fromRound must be a transition the event actually has: 1..rounds-1.
+  reject('rejects fromRound equal to the last round', [{ fromRound: 3, method: 'count', value: 5 }]);
+  reject('rejects fromRound beyond the round count', [{ fromRound: 9, method: 'count', value: 5 }]);
+  reject('rejects fromRound 0', [{ fromRound: 0, method: 'count', value: 5 }]);
+  reject('rejects any advancement on a 1-round event', [{ fromRound: 1, method: 'count', value: 5 }], 1);
+  reject('rejects a duplicate fromRound', [
+    { fromRound: 1, method: 'count', value: 5 },
+    { fromRound: 1, method: 'percent', value: 50 },
+  ]);
+  reject('rejects a non-array advancement', 'nope');
+  reject('rejects a non-object entry', [42]);
+  reject('rejects a non-number value', [{ fromRound: 1, method: 'count', value: '5' }]);
+
+  // A 2.5 count is rejected but a 2.5 PERCENT is legal — mirroring
+  // validateQualifierInput, which only demands integers for a count.
+  ok(
+    'accepts a fractional percent (matches validateQualifierInput)',
+    validateCompetitionInput(
+      body({ events: [ADV_EVENT({ advancement: [{ fromRound: 1, method: 'percent', value: 12.5 }] })], status: 'upcoming' }),
+    ).ok,
+  );
 
   console.log(`\n  ${pass} passed, ${fail} failed\n`);
   fs.rmSync(OUT, { recursive: true, force: true });

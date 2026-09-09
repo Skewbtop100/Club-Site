@@ -297,8 +297,23 @@ function QualifyForm({
   onDone: () => Promise<void>;
   onCancel: () => void;
 }) {
-  const [method, setMethod] = useState<QualifierMethod>(row.qualifierMethod ?? 'count');
-  const [value, setValue] = useState<string>(row.qualifierValue != null ? String(row.qualifierValue) : '');
+  // Prefill precedence: what this round was LAST CUT TO wins over the
+  // plan, so re-running ШАЛГАРУУЛАХ on an already-committed round defaults
+  // to what actually happened rather than to an intention that may have
+  // been edited since. The plan only fills in a round never qualified yet.
+  // Both are only ever defaults — the admin sees them and can change them,
+  // and the value that gets used is the one submitted (the route refuses a
+  // request that omits it; see the comment there).
+  const [method, setMethod] = useState<QualifierMethod>(
+    row.qualifierMethod ?? row.plannedMethod ?? 'count',
+  );
+  const [value, setValue] = useState<string>(
+    row.qualifierValue != null
+      ? String(row.qualifierValue)
+      : row.plannedValue != null
+        ? String(row.plannedValue)
+        : '',
+  );
   const [preview, setPreview] = useState<QualifyResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
