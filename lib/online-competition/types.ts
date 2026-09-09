@@ -92,6 +92,25 @@ export interface OnlineCompetition {
    *  which clears it from every other document in the same transaction.
    *  Absent is equivalent to false; nothing reads it yet. */
   featured?: boolean;
+  /** Banner copy, e.g. "СЕЗОН 3 · БҮРТГЭЛ НЭЭЛТТЭЙ". Stored whether or not
+   *  `featured` is set: the admin form hides these three behind the
+   *  checkbox but does not discard them, so unchecking and re-checking
+   *  (in one session or across saves) restores what was typed. A reader
+   *  must therefore gate on `featured`, never on these being non-empty. */
+  featuredHeading?: string;
+  /** Banner call-to-action label, e.g. "Бүртгүүлэх". Same storage note. */
+  featuredCtaLabel?: string;
+  /** When the banner stops showing. null/absent = no expiry. Nothing
+   *  enforces it yet — the public banner does not exist. */
+  featuredUntil?: Timestamp;
+  /** Public competition instructions, rendered in the detail page's Заавар
+   *  section. Independent of `featured` — an ordinary competition has
+   *  instructions too. That section does not exist yet. */
+  instructions?: string;
+  /** Whether registration costs money. The toggle only: amount, bank
+   *  details, payment deadline and per-event surcharges belong to the
+   *  Төлбөр tab and have no fields yet. Absent = false = Төлбөргүй. */
+  paid?: boolean;
   createdAt?: Timestamp;
   /** e.g. "2026-spring" — groups competitions into onlineSeasonPoints
    *  leaderboards. Optional for the same legacy-doc reason as the fields
@@ -380,6 +399,13 @@ export interface OnlineCompetitionAdminView {
    *  always has a value to show. */
   format: string;
   featured: boolean;
+  /** '' when unset — the admin view always has something to show, same
+   *  reasoning as `description`/`season`. */
+  featuredHeading: string;
+  featuredCtaLabel: string;
+  featuredUntil: number | null;
+  instructions: string;
+  paid: boolean;
   createdAt: number | null;
   /** Count of distinct uids with a submission for this competition — a
    *  submissions-based proxy for "participants", since there's no separate
@@ -420,6 +446,11 @@ export interface OnlineCompetitionWriteInput {
   endAt: number | null;
   format: string;
   featured: boolean;
+  featuredHeading: string;
+  featuredCtaLabel: string;
+  featuredUntil: number | null;
+  instructions: string;
+  paid: boolean;
 }
 
 // ── Season points / leaderboard ─────────────────────────────────────────

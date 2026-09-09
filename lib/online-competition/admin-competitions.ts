@@ -76,6 +76,15 @@ export function validateCompetitionInput(body: unknown): ValidationResult {
       endAt: typeof b.endAt === 'number' ? b.endAt : null,
       format: typeof b.format === 'string' && b.format.trim() ? b.format.trim() : DEFAULT_COMPETITION_FORMAT,
       featured: b.featured === true,
+      // The banner three are stored regardless of `featured` — see the
+      // field comments in types.ts. Not trimmed to '' and dropped when the
+      // flag is off: that would silently discard an admin's copy the
+      // moment they unticked the box.
+      featuredHeading: typeof b.featuredHeading === 'string' ? b.featuredHeading.trim() : '',
+      featuredCtaLabel: typeof b.featuredCtaLabel === 'string' ? b.featuredCtaLabel.trim() : '',
+      featuredUntil: typeof b.featuredUntil === 'number' ? b.featuredUntil : null,
+      instructions: typeof b.instructions === 'string' ? b.instructions : '',
+      paid: b.paid === true,
     },
   };
 }
@@ -125,6 +134,11 @@ export function toFirestoreDoc(input: OnlineCompetitionWriteInput) {
     endAt: input.endAt !== null ? Timestamp.fromMillis(input.endAt) : null,
     format: input.format,
     featured: input.featured,
+    featuredHeading: input.featuredHeading,
+    featuredCtaLabel: input.featuredCtaLabel,
+    featuredUntil: input.featuredUntil !== null ? Timestamp.fromMillis(input.featuredUntil) : null,
+    instructions: input.instructions,
+    paid: input.paid,
   };
 }
 

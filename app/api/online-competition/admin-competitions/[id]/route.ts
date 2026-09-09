@@ -37,6 +37,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     endAt: data.endAt?.toMillis?.() ?? null,
     format: typeof data.format === 'string' && data.format ? data.format : DEFAULT_COMPETITION_FORMAT,
     featured: data.featured === true,
+    featuredHeading: typeof data.featuredHeading === 'string' ? data.featuredHeading : '',
+    featuredCtaLabel: typeof data.featuredCtaLabel === 'string' ? data.featuredCtaLabel : '',
+    featuredUntil: data.featuredUntil?.toMillis?.() ?? null,
+    instructions: typeof data.instructions === 'string' ? data.instructions : '',
+    paid: data.paid === true,
     createdAt: data.createdAt?.toMillis?.() ?? null,
     // Neither count is needed for the edit form (only the list view shows
     // them) — skip the extra queries here.

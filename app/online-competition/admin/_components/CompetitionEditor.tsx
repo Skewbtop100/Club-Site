@@ -43,6 +43,11 @@ const TABS: TabDef[] = [
   { num: '07', label: 'Хянах' },
 ];
 
+const PAID_OPTIONS: { value: boolean; label: string }[] = [
+  { value: false, label: 'Төлбөргүй' },
+  { value: true, label: 'Төлбөртэй' },
+];
+
 const STATUS_OPTIONS: { value: OnlineCompetitionStatus; label: string }[] = [
   { value: 'draft', label: 'Ноорог' },
   { value: 'upcoming', label: 'Удахгүй болох' },
@@ -108,6 +113,14 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
   const [endAt, setEndAt] = useState('');
   const [format, setFormat] = useState(DEFAULT_COMPETITION_FORMAT);
   const [featured, setFeatured] = useState(false);
+  // Held independently of `featured`, and never cleared when it is
+  // unticked — the fields hide, their values survive, in the form and in
+  // Firestore alike (see the field comments in types.ts).
+  const [featuredHeading, setFeaturedHeading] = useState('');
+  const [featuredCtaLabel, setFeaturedCtaLabel] = useState('');
+  const [featuredUntil, setFeaturedUntil] = useState('');
+  const [instructions, setInstructions] = useState('');
+  const [paid, setPaid] = useState(false);
   const [unlimited, setUnlimited] = useState(true);
   const [participantLimit, setParticipantLimit] = useState('');
 
@@ -148,6 +161,11 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
         setEndAt(msToDatetimeLocal(c.endAt));
         setFormat(c.format || DEFAULT_COMPETITION_FORMAT);
         setFeatured(c.featured);
+        setFeaturedHeading(c.featuredHeading);
+        setFeaturedCtaLabel(c.featuredCtaLabel);
+        setFeaturedUntil(msToDatetimeLocal(c.featuredUntil));
+        setInstructions(c.instructions);
+        setPaid(c.paid);
         setUnlimited(c.participantLimit === null);
         setParticipantLimit(c.participantLimit != null ? String(c.participantLimit) : '');
         setEvents(c.events);
@@ -239,6 +257,11 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
         season: season.trim(),
         format,
         featured,
+        featuredHeading,
+        featuredCtaLabel,
+        featuredUntil: datetimeLocalToMs(featuredUntil),
+        instructions,
+        paid,
       };
       const url = savedId
         ? `/api/online-competition/admin-competitions/${savedId}`
@@ -353,6 +376,16 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
               setFormat,
               featured,
               setFeatured,
+              featuredHeading,
+              setFeaturedHeading,
+              featuredCtaLabel,
+              setFeaturedCtaLabel,
+              featuredUntil,
+              setFeaturedUntil,
+              instructions,
+              setInstructions,
+              paid,
+              setPaid,
               season,
               setSeason,
               description,
@@ -443,6 +476,16 @@ interface GeneralTabProps {
   setFormat: (v: string) => void;
   featured: boolean;
   setFeatured: (v: boolean) => void;
+  featuredHeading: string;
+  setFeaturedHeading: (v: string) => void;
+  featuredCtaLabel: string;
+  setFeaturedCtaLabel: (v: string) => void;
+  featuredUntil: string;
+  setFeaturedUntil: (v: string) => void;
+  instructions: string;
+  setInstructions: (v: string) => void;
+  paid: boolean;
+  setPaid: (v: boolean) => void;
   season: string;
   setSeason: (v: string) => void;
   description: string;
@@ -558,15 +601,78 @@ function GeneralTab(p: GeneralTabProps) {
         />
       </div>
 
+      <div>
+        {/* The toggle ONLY. Amount, bank account, payment deadline and
+            per-event surcharges are the Төлбөр tab's, and have no fields
+            yet. Same .oc-v3-seg control as ХҮЙС on the athlete profile,
+            with the two-column modifier. */}
+        <FieldLabel>БҮРТГЭЛИЙН ХУРААМЖ</FieldLabel>
+        <div className="oc-v3-seg oc-v3-seg-2" style={MT2} role="radiogroup" aria-label="Бүртгэлийн хураамж">
+          {PAID_OPTIONS.map((o) => (
+            <button
+              key={String(o.value)}
+              type="button"
+              role="radio"
+              aria-checked={p.paid === o.value}
+              className={`oc-v3-seg-btn${p.paid === o.value ? ' oc-v3-seg-btn-active' : ''}`}
+              onClick={() => p.setPaid(o.value)}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="col-span-full">
-        <FieldLabel>НҮҮР ХУУДСАНД ОНЦЛОХ</FieldLabel>
-        <div style={MT2}>
+        <div className="oc-cf-featured-row">
           <SquareToggle
             checked={p.featured}
             onChange={p.setFeatured}
             label="Вэбний эхэнд өргөн баннераар байрлуулах"
           />
+          <span className="oc-cf-hint">Баннер зурагтайгаа нүүр хуудсын хамгийн дээр харагдана.</span>
         </div>
+
+        {/* Revealed by the checkbox, and UNMOUNTED when it is off rather
+            than hidden with CSS — but the state lives in the parent, so
+            unticking and re-ticking restores every value. Nothing is
+            cleared on unticking, here or on save. */}
+        {p.featured && (
+          <div className="oc-cf-subfields">
+            <div>
+              <FieldLabel>ОНЦЛОХ ГАРЧИГ</FieldLabel>
+              <input
+                className={INPUT_CLASS}
+                style={MT2}
+                value={p.featuredHeading}
+                onChange={(e) => p.setFeaturedHeading(e.target.value)}
+                placeholder="СЕЗОН 3 · БҮРТГЭЛ НЭЭЛТТЭЙ"
+                maxLength={80}
+              />
+            </div>
+            <div>
+              <FieldLabel>CTA БИЧВЭР</FieldLabel>
+              <input
+                className={INPUT_CLASS}
+                style={MT2}
+                value={p.featuredCtaLabel}
+                onChange={(e) => p.setFeaturedCtaLabel(e.target.value)}
+                placeholder="Бүртгүүлэх"
+                maxLength={40}
+              />
+            </div>
+            <div>
+              <FieldLabel>ХАРАГДАХ ХУГАЦАА</FieldLabel>
+              <input
+                type="datetime-local"
+                className={MONO_INPUT_CLASS}
+                style={MT2}
+                value={p.featuredUntil}
+                onChange={(e) => p.setFeaturedUntil(e.target.value)}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="col-span-full">
@@ -578,6 +684,23 @@ function GeneralTab(p: GeneralTabProps) {
           value={p.description}
           onChange={(e) => p.setDescription(e.target.value)}
         />
+      </div>
+
+      {/* Deliberately NOT inside the featured block: instructions are
+          public competition copy, shown on the detail page whether or not
+          the competition is featured. Last on the tab, after Тайлбар. */}
+      <div className="col-span-full">
+        <FieldLabel>ЗААВАР · НИЙТЭД ХАРАГДАХ</FieldLabel>
+        <textarea
+          className={INPUT_CLASS}
+          style={MT2}
+          rows={5}
+          value={p.instructions}
+          onChange={(e) => p.setInstructions(e.target.value)}
+        />
+        <p className="oc-cf-hint" style={{ marginTop: 8 }}>
+          Тэмцээний хуудсын ерөнхий хэсэгт «Заавар» гэж харагдана.
+        </p>
       </div>
     </div>
   );

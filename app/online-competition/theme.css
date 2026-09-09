@@ -3217,6 +3217,12 @@
   background: #DFFF4F;
   color: #08080A;
 }
+/* Two-segment variant (Төлбөргүй / Төлбөртэй on the competition editor).
+   A modifier rather than a change to .oc-v3-seg, whose 1fr 1fr 1fr is
+   load-bearing for the three-segment ХҮЙС control on the athlete profile. */
+.oc-v3-seg-2 {
+  grid-template-columns: 1fr 1fr;
+}
 
 .oc-v3-email-row {
   border: 1px solid #1C1C21;
@@ -4871,6 +4877,35 @@ button.oc-rv-cell:hover {
   outline: 2px solid #DFFF4F;
   outline-offset: -2px;
 }
+/* Muted helper line under a field, explaining where its value surfaces on
+   the public site. Mono at 9px to sit clearly below the field it annotates
+   without competing with .oc-field-label above it. */
+.oc-cf-hint {
+  font: 500 9px/1.6 var(--oc-font-mono), monospace;
+  letter-spacing: .1em;
+  color: #4A4740;
+}
+/* The featured checkbox and its hint share a row, hint right-aligned; it
+   drops beneath on a narrow viewport rather than crushing the label. */
+.oc-cf-featured-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+/* The three banner fields revealed by the checkbox. Indented and rule-led
+   so they read as belonging to it rather than as three more peers in the
+   grid. */
+.oc-cf-subfields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
+  margin-top: 16px;
+  padding-left: 14px;
+  border-left: 1px solid #2A2A31;
+}
+
 /* Placeholder body for the six tabs that have no content yet.
    --oc-font-heading, not --oc-font-body: the latter is never declared
    anywhere (layout.tsx defines only --oc-font-heading and --oc-font-mono),
