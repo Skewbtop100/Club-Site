@@ -24,6 +24,8 @@ function normalizeStoredEvents(raw: unknown): OnlineCompetitionEventConfig[] {
     label: typeof e?.label === 'string' ? e.label : '',
     rounds: typeof e?.rounds === 'number' ? e.rounds : 1,
     resultFormat: resolveResultFormat(e?.resultFormat),
+    // null = no limit. Never defaulted to a real value.
+    timeLimitCs: typeof e?.timeLimitCs === 'number' ? e.timeLimitCs : null,
     advancement: Array.isArray(e?.advancement) ? (e.advancement as OnlineCompetitionEventConfig['advancement']) : [],
   }));
 }

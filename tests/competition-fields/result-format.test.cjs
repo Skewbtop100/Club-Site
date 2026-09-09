@@ -22,6 +22,7 @@ execFileSync(
   [
     require.resolve('typescript/bin/tsc'),
     'lib/online-competition/ao5.ts',
+    'lib/online-competition/time-utils.ts',
     '--outDir', path.basename(OUT),
     '--module', 'commonjs',
     '--target', 'es2022',
@@ -41,6 +42,7 @@ const {
   effectiveAttemptTime,
   RESULT_FORMATS,
 } = require(path.join(OUT, 'ao5.js'));
+const { parseTimeLimit, fmtTimeLimit } = require(path.join(OUT, 'time-utils.js'));
 
 let pass = 0;
 let fail = 0;
@@ -177,7 +179,7 @@ ok(
 // sentinel there. These assert that boundary rather than a behaviour of
 // the format maths.
 console.log('\n  -- penalties are pre-applied (effectiveAttemptTime) --');
-const att = (o) => effectiveAttemptTime({ status: 'approved', reportedTime: 1000, penalty: null, ...o });
+const att = (o) => effectiveAttemptTime({ status: 'approved', reportedTime: 1000, penalty: null, ...o }, null);
 eq('no penalty -> raw time', att({}), 1000);
 eq('+2 adds 200cs', att({ penalty: '+2' }), 1200);
 eq('judge DNF -> sentinel', att({ penalty: 'DNF' }), 'DNF');
@@ -190,6 +192,58 @@ eq(
   val([1000, 1100, att({ penalty: '+2' }), 1300, 1400].map((t) => t), 'ao5'),
   Math.round((1100 + 1200 + 1300) / 3),
 );
+
+
+// ── time limit: parse / format / enforcement rule ─────────────────────
+console.log('\n  -- parseTimeLimit --');
+const pl = (t) => {
+  const r = parseTimeLimit(t);
+  return r.ok ? r.value : 'REJECTED';
+};
+eq('"10:00" -> 60000cs', pl('10:00'), 60000);
+eq('"1:30.00" -> 9000cs', pl('1:30.00'), 9000);
+eq('"1:30.50" -> 9050cs', pl('1:30.50'), 9050);
+eq('"0:30" -> 3000cs', pl('0:30'), 3000);
+eq('"30" (bare seconds) -> 3000cs', pl('30'), 3000);
+eq('"30.50" -> 3050cs', pl('30.50'), 3050);
+eq('"1:30.5" (one decimal) -> 9050cs', pl('1:30.5'), 9050);
+eq('whitespace is trimmed', pl('  10:00  '), 60000);
+// Empty is VALID and means no limit — not an error.
+eq('"" -> null (no limit)', pl(''), null);
+eq('"   " -> null (no limit)', pl('   '), null);
+// Rejections
+eq('"600" is REJECTED (ambiguous: 600s or 6:00?)', pl('600'), 'REJECTED');
+eq('"abc" is REJECTED', pl('abc'), 'REJECTED');
+eq('"10:60" is REJECTED (seconds must be 0-59)', pl('10:60'), 'REJECTED');
+eq('"0" is REJECTED (a zero limit DNFs everything)', pl('0'), 'REJECTED');
+eq('"0:00" is REJECTED', pl('0:00'), 'REJECTED');
+eq('"-1:00" is REJECTED', pl('-1:00'), 'REJECTED');
+eq('"1:2:3" is REJECTED', pl('1:2:3'), 'REJECTED');
+eq('"10:00.000" is REJECTED (max 2 decimals)', pl('10:00.000'), 'REJECTED');
+
+console.log('\n  -- fmtTimeLimit round-trips --');
+for (const t of ['10:00', '1:30.50', '0:30', '2:05']) {
+  const cs = pl(t);
+  eq(`"${t}" -> cs -> text`, fmtTimeLimit(cs), t);
+}
+
+console.log('\n  -- effectiveAttemptTime + the limit --');
+const at = (o, limit = null) =>
+  effectiveAttemptTime({ status: 'approved', reportedTime: 1000, penalty: null, ...o }, limit);
+// null limit changes nothing at all.
+eq('null limit: a time passes through', at({ reportedTime: 999999 }, null), 999999);
+eq('null limit: +2 still applies', at({ reportedTime: 1000, penalty: '+2' }, null), 1200);
+// Under / at / over.
+eq('under the limit is unaffected', at({ reportedTime: 5900 }, 6000), 5900);
+eq('EXACTLY the limit is allowed (not over)', at({ reportedTime: 6000 }, 6000), 6000);
+eq('one centisecond over is a DNF', at({ reportedTime: 6001 }, 6000), 'DNF');
+// The case a judge creates: legal until +2 pushes it over.
+eq('9:59 under a 10:00 limit is legal', at({ reportedTime: 59900 }, 60000), 59900);
+eq('9:59 + 2s under a 10:00 limit is a DNF', at({ reportedTime: 59900, penalty: '+2' }, 60000), 'DNF');
+eq('  ...and 9:57 + 2s is still legal', at({ reportedTime: 59700, penalty: '+2' }, 60000), 59900);
+// The limit never rescues an already-DNF attempt or a rejected one.
+eq('a rejected attempt is still DNF under a limit', at({ status: 'rejected', reportedTime: 1 }, 60000), 'DNF');
+eq('a self-reported DNF is still DNF', at({ isDnf: true }, 60000), 'DNF');
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 fs.rmSync(OUT, { recursive: true, force: true });

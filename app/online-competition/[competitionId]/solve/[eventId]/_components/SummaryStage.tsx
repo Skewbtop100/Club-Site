@@ -24,6 +24,7 @@ function PrTag() {
 export default function SummaryStage({
   attempts,
   resultFormat,
+  timeLimitCs,
   bests,
   onRedo,
   onSubmit,
@@ -35,6 +36,9 @@ export default function SummaryStage({
   /** The run's captured format — decides how these attempts collapse into
    *  one number, and which of them (if any) are excluded. */
   resultFormat: ResultFormat;
+  /** null = no limit. Applied here so the provisional result the athlete
+   *  sees matches what effectiveAttemptTime will compute at scoring. */
+  timeLimitCs: number | null;
   /** The athlete's stored bests for this event, or null while still
    *  loading / unavailable — in which case no marker is shown. */
   bests: StoredBests | null;
@@ -47,7 +51,12 @@ export default function SummaryStage({
   submitProgress: number;
   submitError: string;
 }) {
-  const times: AttemptTime[] = attempts.map((a) => (a.isDnf ? 'DNF' : (a.timeCs as number)));
+  // An over-limit attempt shows as DNF here, exactly as it will score.
+  const times: AttemptTime[] = attempts.map((a) =>
+    a.isDnf || a.timeCs === null || (timeLimitCs !== null && a.timeCs > timeLimitCs)
+      ? 'DNF'
+      : a.timeCs,
+  );
   const { value: ao5, excludedIndices } = computeResult(times, resultFormat);
 
   // Same predicate the live toast uses, so a row can't disagree with the

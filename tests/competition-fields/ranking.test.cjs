@@ -33,6 +33,7 @@ function compile() {
       'lib/online-competition/seasonPoints.ts',
       'lib/online-competition/athleteStats.ts',
     'lib/online-competition/rounds.ts',
+    'lib/online-competition/admin-competitions.ts',
       '--outDir', path.basename(OUT),
       '--module', 'commonjs',
       '--target', 'es2022',
@@ -251,6 +252,8 @@ const ONE_DNF_AO5 = 1200;
   // Same judged-not-approved rule, but the attempt count, the result and
   // the sort all come from the event's resultFormat now.
   const { selectQualifiers } = require(path.join(OUT, 'rounds.js'));
+  const { validateCompetitionInput, writeCompetitionDoc } = require(path.join(OUT, 'admin-competitions.js'));
+  const body = (over) => ({ name: 'x', status: 'draft', events: [], ...over });
 
   /** Seeds one competition whose single event runs `format`, with one
    *  athlete per spec. `times` may hold numbers or 'DNF'; a 'DNF' entry is
@@ -509,6 +512,130 @@ const ONE_DNF_AO5 = 1200;
     (regPts.get('full')?.totalPoints ?? 0) > 0 && (regPts.get('oneDnf')?.totalPoints ?? 0) > 0);
   ok('REGRESSION ao5: DNF-average athlete still unplaced',
     (regPts.get('twoDnf')?.breakdown ?? []).length === 0);
+
+
+  // ══ TIME LIMIT ═══════════════════════════════════════════════════════
+  // Enforced authoritatively in effectiveAttemptTime, which every scorer
+  // converges on. These drive it through the real ranker end to end.
+
+  /** Seeds an Ao5 competition with a per-attempt limit. `specs` values may
+   *  be a plain number, or [time, '+2'] to attach a judge penalty. */
+  async function seedLimit(compId, timeLimitCs, specs) {
+    await db.collection('onlineCompetitions').doc(compId).set({
+      name: compId, status: 'finished', season: 's5',
+      events: [{ eventId: EVENT, label: '3x3x3', rounds: 1, resultFormat: 'ao5', timeLimitCs }],
+    });
+    let t = 2_000_000_000_000;
+    for (const [uid, times] of Object.entries(specs)) {
+      await db.collection('onlineParticipants').doc(uid).set({ uid, displayName: uid }, { merge: true });
+      for (let i = 0; i < 5; i++) {
+        const raw = times[i];
+        const [ms, pen] = Array.isArray(raw) ? raw : [raw, null];
+        await db.collection('onlineSubmissions').add({
+          competitionId: compId, uid, event: EVENT, round: i + 1, competitionRound: ROUND,
+          videoUrl: 'x', cloudinaryPublicId: 'x',
+          reportedTime: ms, isDnf: false, penalty: pen, status: 'approved',
+          createdAt: Timestamp.fromMillis((t += 1000)),
+        });
+      }
+    }
+  }
+
+  // Limit 1:00 (6000cs).
+  await seedLimit('comp-limit', 6000, {
+    // all under -> ordinary Ao5: drop 1000 & 1400, mean(1100,1200,1300)
+    lUnder:  [1000, 1100, 1200, 1300, 1400],
+    // one attempt over -> that attempt is a DNF, dropped as the worst
+    lOneOver: [1000, 1100, 1200, 1300, 9000],
+    // two over -> two DNFs -> DNF average
+    lTwoOver: [1000, 1100, 1200, 9000, 9500],
+    // exactly the limit is allowed, not over
+    lExact:   [6000, 6000, 6000, 6000, 6000],
+    // legal until the judge's +2 crosses the limit: 59.90 + 2s = 61.90
+    lPlusTwo: [1000, 1100, 1200, 1300, [5990, '+2']],
+  });
+
+  const lim = new Map((await collectRoundResults(db, 'comp-limit', EVENT, ROUND)).map((r) => [r.uid, r]));
+  ok('limit: a time under the limit is unaffected', lim.get('lUnder')?.value === 1200, String(lim.get('lUnder')?.value));
+  ok('limit: one over-limit attempt becomes a DNF and is dropped as worst',
+    lim.get('lOneOver')?.value === 1200, String(lim.get('lOneOver')?.value));
+  ok('limit: two over-limit attempts give a DNF average',
+    lim.get('lTwoOver')?.value === null, String(lim.get('lTwoOver')?.value));
+  ok('limit: EXACTLY the limit is allowed (not over)', lim.get('lExact')?.value === 6000, String(lim.get('lExact')?.value));
+  ok('limit: a +2 that crosses the limit makes it a DNF',
+    lim.get('lPlusTwo')?.value === 1200, String(lim.get('lPlusTwo')?.value));
+  ok('limit: an over-limit time never contributes its value',
+    [...lim.values()].every((r) => r.value === null || r.value < 6100),
+    JSON.stringify([...lim.values()].map((r) => r.value)));
+
+  // The PR must not be set from an over-limit solve either.
+  await recomputeAthleteStatsForCompetition('comp-limit');
+  const overStats = (await db.collection('onlineParticipants').doc('lOneOver').get()).data()?.stats?.[EVENT];
+  ok('limit: PR ignores the over-limit attempt', overStats?.pr === 1000, JSON.stringify(overStats));
+  const twoOverStats = (await db.collection('onlineParticipants').doc('lTwoOver').get()).data()?.stats?.[EVENT];
+  ok('limit: a DNF-average athlete still has a PR from their legal solves',
+    twoOverStats?.pr === 1000, JSON.stringify(twoOverStats));
+  ok('limit: ...but no Ao5', twoOverStats?.ao5 === null, JSON.stringify(twoOverStats));
+
+  // ── null limit changes NOTHING ───────────────────────────────────────
+  // The assertion that matters most for existing data: the same attempts,
+  // with no limit stored, must score exactly as they always did.
+  await seedLimit('comp-nolimit', null, {
+    nUnder:  [1000, 1100, 1200, 1300, 1400],
+    nSlow:   [1000, 1100, 1200, 1300, 9000],   // would be DNF under a limit
+    nVerySlow: [90000, 91000, 92000, 93000, 94000], // all over any sane limit
+  });
+  const nolim = new Map((await collectRoundResults(db, 'comp-nolimit', EVENT, ROUND)).map((r) => [r.uid, r]));
+  ok('null limit: an ordinary set is unchanged', nolim.get('nUnder')?.value === 1200, String(nolim.get('nUnder')?.value));
+  ok('null limit: a slow attempt is NOT a DNF — it is just the worst, dropped',
+    nolim.get('nSlow')?.value === 1200, String(nolim.get('nSlow')?.value));
+  ok('null limit: very slow times still produce a real average',
+    nolim.get('nVerySlow')?.value === 92000, String(nolim.get('nVerySlow')?.value));
+
+  // An event with NO timeLimitCs field at all (every competition that
+  // predates this changeset) behaves identically to an explicit null.
+  await db.collection('onlineCompetitions').doc('comp-legacy-lim').set({
+    name: 'legacy', status: 'finished', season: 's5',
+    events: [{ eventId: EVENT, label: '3x3x3', rounds: 1 }], // no resultFormat, no timeLimitCs
+  });
+  let tl = 2_100_000_000_000;
+  for (let i = 0; i < 5; i++) {
+    await db.collection('onlineSubmissions').add({
+      competitionId: 'comp-legacy-lim', uid: 'legacyAth', event: EVENT, round: i + 1, competitionRound: ROUND,
+      videoUrl: 'x', cloudinaryPublicId: 'x',
+      reportedTime: [1000, 1100, 1200, 1300, 90000][i], isDnf: false, penalty: null, status: 'approved',
+      createdAt: Timestamp.fromMillis((tl += 1000)),
+    });
+  }
+  await db.collection('onlineParticipants').doc('legacyAth').set({ uid: 'legacyAth', displayName: 'legacyAth' }, { merge: true });
+  const legacyLim = await collectRoundResults(db, 'comp-legacy-lim', EVENT, ROUND);
+  ok('ABSENT timeLimitCs behaves exactly like null — no DNF, ordinary Ao5',
+    legacyLim[0]?.value === 1200, JSON.stringify(legacyLim.map((r) => r.value)));
+
+  // ── the lock covers the limit too ────────────────────────────────────
+  const LIMLOCK = 'comp-limlock';
+  const saveLimit = async (cs) => {
+    const r = validateCompetitionInput(body({
+      events: [{ eventId: EVENT, label: '3x3x3', rounds: 1, resultFormat: 'ao5', timeLimitCs: cs }],
+      status: 'upcoming',
+    }));
+    if (!r.ok) throw new Error(r.error);
+    return writeCompetitionDoc(db, LIMLOCK, r.data);
+  };
+  await db.collection('onlineCompetitions').doc(LIMLOCK).set({ name: 'l', status: 'draft', events: [] });
+  await saveLimit(6000);
+  ok('limit lock: changeable while nothing is judged',
+    await saveLimit(12000).then(() => true).catch((e) => e.message));
+  await db.collection('onlineSubmissions').add({
+    competitionId: LIMLOCK, uid: 'u1', event: EVENT, round: 1, competitionRound: 1,
+    reportedTime: 1000, penalty: null, status: 'approved',
+  });
+  let limRefused = null;
+  try { await saveLimit(6000); } catch (e) { limRefused = e; }
+  ok('limit lock: REFUSED once a judged submission exists', limRefused !== null, 'change was allowed');
+  ok('  ...with a message naming the time limit', /цагийн хязгаар/.test(limRefused?.message ?? ''), limRefused?.message);
+  ok('limit lock: re-saving the SAME limit is still allowed',
+    await saveLimit(12000).then(() => true).catch((e) => e.message));
 
   console.log(`\n  ${pass} passed, ${fail} failed\n`);
   fs.rmSync(OUT, { recursive: true, force: true });

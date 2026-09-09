@@ -29,8 +29,8 @@ interface JudgedSubmission {
 
 /** The one shared rule (ao5.ts) — literally the same function the
  *  season-points scorer and the round ranker use, not a third copy of it. */
-function effectiveTime(s: JudgedSubmission): AttemptTime {
-  return effectiveAttemptTime(s);
+function effectiveTime(s: JudgedSubmission, timeLimitCs: number | null): AttemptTime {
+  return effectiveAttemptTime(s, timeLimitCs);
 }
 
 export interface AthleteEventStats {
@@ -47,7 +47,13 @@ export interface AthleteEventStats {
   solveCount: number;
 }
 
-/** competitionId -> eventId -> that event's result format.
+interface EventScoringRules {
+  format: ResultFormat;
+  timeLimitCs: number | null;
+}
+
+/** competitionId -> eventId -> that event's scoring rules (format + time
+ *  limit).
  *
  *  Built from ONE read of the whole onlineCompetitions collection, once
  *  per recompute — NOT per athlete, and NOT per submission. The
@@ -56,15 +62,23 @@ export interface AthleteEventStats {
  *  a stale copy would silently re-derive an athlete's history under the
  *  wrong rule. That is the bug class the round-attribution work removed;
  *  it is not being reintroduced to save a read. */
-async function loadFormatIndex(db: Firestore): Promise<Map<string, Map<string, ResultFormat>>> {
+async function loadScoringRulesIndex(
+  db: Firestore,
+): Promise<Map<string, Map<string, EventScoringRules>>> {
   const snap = await db.collection('onlineCompetitions').select('events').get();
-  const index = new Map<string, Map<string, ResultFormat>>();
+  const index = new Map<string, Map<string, EventScoringRules>>();
   for (const doc of snap.docs) {
     const events = doc.get('events');
     if (!Array.isArray(events)) continue;
-    const byEvent = new Map<string, ResultFormat>();
+    const byEvent = new Map<string, EventScoringRules>();
     for (const e of events as Record<string, unknown>[]) {
-      if (typeof e?.eventId === 'string') byEvent.set(e.eventId, resolveResultFormat(e.resultFormat));
+      if (typeof e?.eventId !== 'string') continue;
+      byEvent.set(e.eventId, {
+        format: resolveResultFormat(e.resultFormat),
+        // null = no limit, for a legacy event and for one this build has
+        // never seen. Never defaulted to a real value.
+        timeLimitCs: typeof e.timeLimitCs === 'number' ? e.timeLimitCs : null,
+      });
     }
     index.set(doc.id, byEvent);
   }
@@ -95,9 +109,9 @@ export async function recomputeAthleteStatsForCompetition(
 ): Promise<{ athletesUpdated: number; events: number }> {
   const db = getOnlineCompAdminDb();
   // ONCE per recompute, before the per-athlete loop below.
-  const formatIndex = await loadFormatIndex(db);
-  const formatFor = (competitionId: string, eventId: string): ResultFormat =>
-    formatIndex.get(competitionId)?.get(eventId) ?? 'ao5';
+  const rulesIndex = await loadScoringRulesIndex(db);
+  const rulesFor = (competitionId: string, eventId: string): EventScoringRules =>
+    rulesIndex.get(competitionId)?.get(eventId) ?? { format: 'ao5', timeLimitCs: null };
 
   // Judged, not approved: an athlete whose attempts were all rejected has
   // no approved submission at all, and would otherwise never be
@@ -158,7 +172,12 @@ export async function recomputeAthleteStatsForCompetition(
       // someone's personal best. Belt and braces: the approved filter is
       // also explicit here rather than relying on that alone.
       const approvedSubs = subs.filter((x) => x.status === 'approved');
-      const times = approvedSubs.map(effectiveTime).filter((t): t is number => typeof t === 'number');
+      // The limit applies to the PR too: an attempt over its event's limit
+      // is a DNF, and a DNF is never a personal best. effectiveTime maps
+      // it to 'DNF', which the numeric filter then drops.
+      const times = approvedSubs
+        .map((x) => effectiveTime(x, rulesFor(x.competitionId, eventId).timeLimitCs))
+        .filter((t): t is number => typeof t === 'number');
       const pr = times.length > 0 ? Math.min(...times) : null;
 
       // Ao5: best average over complete attempt-1-5 sets, where COMPLETE
@@ -198,7 +217,7 @@ export async function recomputeAthleteStatsForCompetition(
       for (const set of byRoundSet.values()) {
         // The format of the round this set belongs to — every submission
         // in a set shares one competition, so the first is representative.
-        const format = formatFor(set[0].competitionId, eventId);
+        const { format, timeLimitCs } = rulesFor(set[0].competitionId, eventId);
         // A bo-N round's result is a single, not an average; it feeds the
         // PR above and is deliberately not stored as an average.
         if (!isAveragingFormat(format)) continue;
@@ -210,7 +229,7 @@ export async function recomputeAthleteStatsForCompetition(
         if (rounds.join(',') !== wanted.join(',')) continue;
         const byRound = new Map(set.map((s) => [s.round, s]));
         const { value } = computeResult(
-          wanted.map((r) => effectiveTime(byRound.get(r)!)),
+          wanted.map((r) => effectiveTime(byRound.get(r)!, timeLimitCs)),
           format,
         );
         if (value === null) continue; // DNF result isn't a result

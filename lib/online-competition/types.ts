@@ -68,6 +68,29 @@ export interface OnlineCompetitionEventConfig {
    *  NOT yet honoured by the solve flow or any scorer; see
    *  attemptsForFormat's warning. */
   resultFormat?: ResultFormat;
+  /** Per-ATTEMPT maximum, in centiseconds. An attempt whose effective time
+   *  (after any judge +2) exceeds it is a DNF — see effectiveAttemptTime,
+   *  the one place that is enforced.
+   *
+   *  THE DEFAULT IS null — NO LIMIT — AND MUST STAY THAT WAY. WCA's own
+   *  default is 10:00, and adopting it as this field's default would
+   *  retroactively DNF every historical solve slower than ten minutes:
+   *  scores already announced, season points already awarded, PRs already
+   *  shown. A limit only ever exists because an admin typed one.
+   *
+   *  Per EVENT, not per round. Real WCA time limits are per round, but
+   *  they rarely differ between rounds of the same event, so the
+   *  simplification is safe here. It is NOT safe for cutoff, which is
+   *  round-specific by nature (a first round thins the field, a final
+   *  does not) — that field, when it lands, must be keyed by round.
+   *
+   *  CUMULATIVE limits are deliberately unsupported. WCA allows a limit
+   *  shared across the attempts of a round, or across rounds, and it
+   *  exists for blindfolded events and the big cubes — 333bf, 444bf,
+   *  555bf, 333mbf, 666, 777. ONLINE_COMP_EVENTS contains none of them
+   *  (see the exclusion note there), so a cumulative limit could only ever
+   *  apply to an event this platform does not run. */
+  timeLimitCs?: number | null;
   /** The PLANNED cut for each round transition of this event, one entry
    *  per transition (a 3-round event has two: from round 1, and from
    *  round 2). Absent on every competition created before the Төрөл tab,

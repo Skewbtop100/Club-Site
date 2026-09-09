@@ -65,7 +65,7 @@ function normalizeEvents(raw: unknown): OnlineCompetitionEventConfig[] {
   const out: OnlineCompetitionEventConfig[] = [];
   for (const e of raw) {
     if (typeof e === 'string') {
-      out.push({ eventId: e, label: e.toUpperCase(), rounds: 1, resultFormat: 'ao5' });
+      out.push({ eventId: e, label: e.toUpperCase(), rounds: 1, resultFormat: 'ao5', timeLimitCs: null });
     } else if (e && typeof e === 'object' && typeof (e as Record<string, unknown>).eventId === 'string') {
       const obj = e as Partial<OnlineCompetitionEventConfig>;
       out.push({
@@ -75,6 +75,10 @@ function normalizeEvents(raw: unknown): OnlineCompetitionEventConfig[] {
         // Read-time default, no backfill — same treatment as the legacy
         // status and events shapes handled around it.
         resultFormat: resolveResultFormat((e as Record<string, unknown>).resultFormat),
+        timeLimitCs:
+          typeof (e as Record<string, unknown>).timeLimitCs === 'number'
+            ? ((e as Record<string, unknown>).timeLimitCs as number)
+            : null,
       });
     }
   }

@@ -43,16 +43,20 @@ import { normalizeRoundStatus, type RoundRanking, type RoundStateDoc } from './r
  *  Falls back to 'ao5' for an event with no stored format, or a
  *  competition/event that cannot be found — resolveResultFormat's rule,
  *  and what every competition ran before formats existed. */
-async function eventResultFormat(
+async function eventScoringRules(
   db: Firestore,
   competitionId: string,
   eventId: string,
-): Promise<ResultFormat> {
+): Promise<{ format: ResultFormat; timeLimitCs: number | null }> {
   const snap = await db.collection('onlineCompetitions').doc(competitionId).get();
   const events = snap.get('events');
-  if (!Array.isArray(events)) return 'ao5';
+  if (!Array.isArray(events)) return { format: 'ao5', timeLimitCs: null };
   const event = (events as Record<string, unknown>[]).find((e) => e?.eventId === eventId);
-  return resolveResultFormat(event?.resultFormat);
+  return {
+    format: resolveResultFormat(event?.resultFormat),
+    // null = no limit, for a legacy event and for a missing competition.
+    timeLimitCs: typeof event?.timeLimitCs === 'number' ? event.timeLimitCs : null,
+  };
 }
 
 interface ApprovedAttempt {
@@ -66,13 +70,13 @@ interface ApprovedAttempt {
  *  it claims. One shared implementation (ao5.ts) — this used to be a local
  *  copy, and the rule is now status-dependent enough that three copies of
  *  it was the bug. */
-function effectiveTime(data: FirebaseFirestore.DocumentData): AttemptTime {
+function effectiveTime(data: FirebaseFirestore.DocumentData, timeLimitCs: number | null): AttemptTime {
   return effectiveAttemptTime({
     status: data.status === 'approved' || data.status === 'rejected' ? data.status : 'pending',
     reportedTime: typeof data.reportedTime === 'number' ? data.reportedTime : 0,
     isDnf: data.isDnf === true,
     penalty: data.penalty ?? null,
-  });
+  }, timeLimitCs);
 }
 
 export async function fetchRoundStates(
@@ -138,7 +142,7 @@ export async function collectRoundResults(
   eventId: string,
   round: number,
 ): Promise<RoundResult[]> {
-  const resultFormat = await eventResultFormat(db, competitionId, eventId);
+  const { format: resultFormat, timeLimitCs } = await eventScoringRules(db, competitionId, eventId);
   const attemptsPerRound = attemptsForFormat(resultFormat);
 
   const snap = await db
@@ -176,7 +180,7 @@ export async function collectRoundResults(
     const uid = data.uid;
     if (typeof uid !== 'string') continue;
     if (!byUid.has(uid)) byUid.set(uid, []);
-    byUid.get(uid)!.push({ attempt, createdAt, time: effectiveTime(data) });
+    byUid.get(uid)!.push({ attempt, createdAt, time: effectiveTime(data, timeLimitCs) });
   }
 
   const results: RoundResult[] = [];

@@ -37,11 +37,30 @@ export interface JudgedAttempt {
  *  PENDING must never reach here — an unjudged attempt makes a round
  *  incomplete, and callers exclude it before scoring. Treated as a DNF if
  *  it somehow does, which is the conservative answer (it cannot invent a
- *  result), never a trusted time. */
-export function effectiveAttemptTime(a: JudgedAttempt): AttemptTime {
+ *  result), never a trusted time.
+ *
+ *  This is also the single authoritative place a TIME LIMIT is applied.
+ *  The solve flow warns the athlete at entry, but that check is
+ *  client-side, runs on a self-reported number, and cannot know about a
+ *  penalty a judge adds later. Every scorer — round-results, seasonPoints
+ *  and athleteStats — converges here, so enforcing it once here covers
+ *  all three and they cannot drift apart. */
+export function effectiveAttemptTime(a: JudgedAttempt, timeLimitCs: number | null): AttemptTime {
   if (a.status !== 'approved') return 'DNF';
   if (a.isDnf === true || a.penalty === 'DNF') return 'DNF';
-  return a.reportedTime + (a.penalty === '+2' ? 200 : 0);
+  const effective = a.reportedTime + (a.penalty === '+2' ? 200 : 0);
+  // THE TIME LIMIT, applied AFTER the +2. That order is the whole point:
+  // a 9:59 solve under a 10:00 limit is legal until a judge adds two
+  // seconds, and 10:01 is not. Checking the raw reported time would miss
+  // exactly the case a judge creates.
+  //
+  // `timeLimitCs` is a REQUIRED parameter, not an optional one, so that
+  // every caller has to decide. An optional limit would let a scorer that
+  // forgot it silently rank on unlimited times while the others did not —
+  // the same "miss one and it fails silently" shape as the seven-location
+  // field trap. null means no limit, and is the only way to opt out.
+  if (timeLimitCs !== null && effective > timeLimitCs) return 'DNF';
+  return effective;
 }
 
 // ── Result formats ───────────────────────────────────────────────────────

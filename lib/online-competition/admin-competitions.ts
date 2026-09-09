@@ -134,11 +134,22 @@ export function validateCompetitionInput(body: unknown): ValidationResult {
       return { ok: false, error: `${e.eventId}: invalid resultFormat` };
     }
     const resultFormat: ResultFormat = (e.resultFormat as ResultFormat | null) ?? 'ao5';
+    // Absent/null = NO LIMIT. Never defaulted to a real value — see the
+    // field comment in types.ts for why 10:00 would be destructive.
+    if (
+      e.timeLimitCs !== undefined &&
+      e.timeLimitCs !== null &&
+      (typeof e.timeLimitCs !== 'number' || !Number.isInteger(e.timeLimitCs) || e.timeLimitCs <= 0)
+    ) {
+      return { ok: false, error: `${e.eventId}: invalid timeLimitCs` };
+    }
+    const timeLimitCs: number | null = (e.timeLimitCs as number | null | undefined) ?? null;
     events.push({
       eventId: e.eventId,
       label: e.label,
       rounds: e.rounds,
       resultFormat,
+      timeLimitCs,
       advancement: advancement.value,
     });
   }
@@ -272,24 +283,57 @@ export function toFirestoreDoc(input: OnlineCompetitionWriteInput) {
  *  can reveal. Both routes turn it into a 400 with this message. */
 export class CompetitionWriteError extends Error {}
 
-/** eventIds of `events` whose resultFormat differs from what is stored. */
-function eventsChangingFormat(
-  stored: unknown,
-  incoming: OnlineCompetitionWriteInput['events'],
-): string[] {
-  if (!Array.isArray(stored)) return [];
-  const before = new Map<string, string>();
+/** The per-event settings that RE-DERIVE HISTORY if changed, so both are
+ *  locked once results exist.
+ *
+ *  timeLimitCs is locked for the same reason resultFormat is, and the case
+ *  for it is if anything stronger: a solve that was legal under a 15:00
+ *  limit becomes a DNF under 10:00, and adding a limit where there was
+ *  none can only ever turn valid solves into DNFs. Either silently
+ *  rewrites Ao5s, standings, season points and PRs for results that have
+ *  already been announced. Identical hazard, identical guard. */
+interface ScoringRules {
+  resultFormat: string;
+  timeLimitCs: number | null;
+}
+
+function storedScoringRules(stored: unknown): Map<string, ScoringRules> {
+  const before = new Map<string, ScoringRules>();
+  if (!Array.isArray(stored)) return before;
   for (const e of stored as Record<string, unknown>[]) {
-    if (typeof e?.eventId === 'string') {
+    if (typeof e?.eventId !== 'string') continue;
+    before.set(e.eventId, {
       // Absent reads as 'ao5' (resolveResultFormat's rule) — so adding the
       // field to a legacy event by SELECTING Ao5 is not a change, while
       // selecting anything else is.
-      before.set(e.eventId, RESULT_FORMATS.includes(e.resultFormat as ResultFormat) ? (e.resultFormat as string) : 'ao5');
+      resultFormat: RESULT_FORMATS.includes(e.resultFormat as ResultFormat) ? (e.resultFormat as string) : 'ao5',
+      // Absent reads as null (no limit), so setting one on a legacy event
+      // IS a change — which is correct: it can only add DNFs.
+      timeLimitCs: typeof e.timeLimitCs === 'number' ? e.timeLimitCs : null,
+    });
+  }
+  return before;
+}
+
+/** eventIds whose scoring rules differ from what is stored, with the field
+ *  that moved — so the refusal can name it. */
+function eventsChangingScoringRules(
+  stored: unknown,
+  incoming: OnlineCompetitionWriteInput['events'],
+): { eventId: string; field: 'resultFormat' | 'timeLimitCs' }[] {
+  const before = storedScoringRules(stored);
+  const out: { eventId: string; field: 'resultFormat' | 'timeLimitCs' }[] = [];
+  for (const e of incoming) {
+    const was = before.get(e.eventId);
+    if (!was) continue;
+    if (was.resultFormat !== (e.resultFormat ?? 'ao5')) {
+      out.push({ eventId: e.eventId, field: 'resultFormat' });
+    }
+    if (was.timeLimitCs !== (e.timeLimitCs ?? null)) {
+      out.push({ eventId: e.eventId, field: 'timeLimitCs' });
     }
   }
-  return incoming
-    .filter((e) => before.has(e.eventId) && before.get(e.eventId) !== (e.resultFormat ?? 'ao5'))
-    .map((e) => e.eventId);
+  return out;
 }
 
 /** eventIds of this competition that already have a JUDGED submission.
@@ -348,7 +392,7 @@ export async function writeCompetitionDoc(
     if (!isCreate) {
       const snap = await tx.get(ref);
       const storedEvents = snap.exists ? snap.get('events') : [];
-      const changing = snap.exists ? eventsChangingFormat(storedEvents, input.events) : [];
+      const changing = snap.exists ? eventsChangingScoringRules(storedEvents, input.events) : [];
       // REMOVING a locked event is refused too, and that is not belt-and-
       // braces — without it the format lock has a trivial two-save bypass:
       // save once dropping the event (nothing flags it, because the check
@@ -370,11 +414,18 @@ export async function writeCompetitionDoc(
 
       if (changing.length > 0 || removed.length > 0) {
         const locked = new Set(await lockedFormatEventIds(db, ref.id));
-        const refusedChange = changing.filter((id) => locked.has(id));
+        const refusedChange = changing.filter((c) => locked.has(c.eventId));
         const refusedRemoval = removed.filter((id) => locked.has(id));
-        if (refusedChange.length > 0) {
+        const refusedFormat = refusedChange.filter((c) => c.field === 'resultFormat');
+        const refusedLimit = refusedChange.filter((c) => c.field === 'timeLimitCs');
+        if (refusedFormat.length > 0) {
           throw new CompetitionWriteError(
-            `Үзүүлэлт орсон тул формат солих боломжгүй: ${refusedChange.join(', ')}`,
+            `Үзүүлэлт орсон тул формат солих боломжгүй: ${refusedFormat.map((c) => c.eventId).join(', ')}`,
+          );
+        }
+        if (refusedLimit.length > 0) {
+          throw new CompetitionWriteError(
+            `Үзүүлэлт орсон тул цагийн хязгаар солих боломжгүй: ${refusedLimit.map((c) => c.eventId).join(', ')}`,
           );
         }
         if (refusedRemoval.length > 0) {

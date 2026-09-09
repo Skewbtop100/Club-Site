@@ -51,8 +51,8 @@ interface AthleteEvent {
  *  called handling it "robustness" — it was in fact the bug: such an
  *  attempt never reached this function at all, and its athlete was
  *  dropped from the event outright. */
-function effectiveTime(s: JudgedSubmission): AttemptTime {
-  return effectiveAttemptTime(s);
+function effectiveTime(s: JudgedSubmission, timeLimitCs: number | null): AttemptTime {
+  return effectiveAttemptTime(s, timeLimitCs);
 }
 
 /** Recomputes season points for one competition and merges them into
@@ -101,10 +101,16 @@ export async function recomputeSeasonPointsForCompetition(
   // seasonPoints RE-DERIVES each athlete's result rather than reading the
   // round standings, so it needs the format itself. The competition
   // document is already in hand here — no extra read.
-  const formatByEvent = new Map<string, ResultFormat>(
+  const rulesByEvent = new Map<string, { format: ResultFormat; timeLimitCs: number | null }>(
     (Array.isArray(compData.events) ? (compData.events as Record<string, unknown>[]) : [])
       .filter((e) => typeof e?.eventId === 'string')
-      .map((e) => [e.eventId as string, resolveResultFormat(e.resultFormat)]),
+      .map((e) => [
+        e.eventId as string,
+        {
+          format: resolveResultFormat(e.resultFormat),
+          timeLimitCs: typeof e.timeLimitCs === 'number' ? e.timeLimitCs : null,
+        },
+      ]),
   );
   const season: string = typeof compData.season === 'string' && compData.season ? compData.season : '';
   if (!season) {
@@ -185,7 +191,8 @@ export async function recomputeSeasonPointsForCompetition(
     // SAME competition, so they all share one format — which is what makes
     // comparing their values below legitimate. There is no cross-format
     // comparison here to guard against.
-    const format = formatByEvent.get(eventId) ?? 'ao5';
+    const rules = rulesByEvent.get(eventId) ?? { format: 'ao5' as ResultFormat, timeLimitCs: null };
+    const format = rules.format;
     const expected = attemptsForFormat(format);
     const wanted = Array.from({ length: expected }, (_, i) => i + 1);
     const ranked: { uid: string; value: number; best: number | null }[] = [];
@@ -201,7 +208,7 @@ export async function recomputeSeasonPointsForCompetition(
       const rounds = subs.map((s) => s.round).sort((a, b) => a - b);
       if (rounds.join(',') !== wanted.join(',')) continue; // missing/duplicate attempt
       const byRound = new Map(subs.map((s) => [s.round, s]));
-      const times: AttemptTime[] = wanted.map((r) => effectiveTime(byRound.get(r)!));
+      const times: AttemptTime[] = wanted.map((r) => effectiveTime(byRound.get(r)!, rules.timeLimitCs));
       const { value } = computeResult(times, format);
       if (value === null) continue; // DNF result — excluded from ranking
       const finished = times.filter((t): t is number => t !== 'DNF');

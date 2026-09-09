@@ -13,6 +13,7 @@ import { roundKey } from '@/lib/online-competition/scrambles';
 import {
   attemptsForFormat,
   computeResult,
+  effectiveAttemptTime,
   resolveResultFormat,
   type AttemptTime,
   type ResultFormat,
@@ -66,10 +67,18 @@ function isDecided(s: OnlineSubmissionAdminView): boolean {
 function isDnf(s: OnlineSubmissionAdminView): boolean {
   return s.isDnf === true || s.penalty === 'DNF';
 }
-/** Effective time for Ao5: +2 adds 200 centiseconds, DNF is a DNF. */
-function effectiveTime(s: OnlineSubmissionAdminView): AttemptTime {
-  if (isDnf(s)) return 'DNF';
-  return s.penalty === '+2' ? s.reportedTime + 200 : s.reportedTime;
+/** Effective time, via THE shared rule (ao5.ts) rather than a local copy.
+ *
+ *  This used to be a fourth independent implementation of "+2 adds 200cs,
+ *  DNF is a DNF". Harmless while that was the whole rule; not harmless now
+ *  that a time limit is part of it — the judge's Дундаж column would have
+ *  shown an average the standings disagreed with, for exactly the solves
+ *  a limit is meant to catch. */
+function effectiveTime(s: OnlineSubmissionAdminView, timeLimitCs: number | null): AttemptTime {
+  return effectiveAttemptTime(
+    { status: s.status, reportedTime: s.reportedTime, isDnf: s.isDnf, penalty: s.penalty },
+    timeLimitCs,
+  );
 }
 
 export default function ReviewGrid() {
@@ -285,6 +294,8 @@ export default function ReviewGrid() {
     competition?.events.find((e) => e.eventId === eventId)?.resultFormat,
   );
   const attemptCount = attemptsForFormat(resultFormat);
+  const selectedEvent = competition?.events.find((e) => e.eventId === eventId);
+  const timeLimitCs = typeof selectedEvent?.timeLimitCs === 'number' ? selectedEvent.timeLimitCs : null;
   const ATTEMPTS = attemptColumns(attemptCount);
 
   if (competitions === null) return <p className="oc-v3-status">Ачааллаж байна...</p>;
@@ -422,6 +433,7 @@ export default function ReviewGrid() {
               onBulk={() => bulkApprove(row)}
               attemptCount={attemptCount}
               resultFormat={resultFormat}
+              timeLimitCs={timeLimitCs}
             />
           ))
         )}
@@ -450,6 +462,7 @@ function GridRow({
   onBulk,
   attemptCount,
   resultFormat,
+  timeLimitCs,
 }: {
   row: AthleteRow;
   selected: string | null;
@@ -459,6 +472,9 @@ function GridRow({
   /** From the selected event's resultFormat — see attemptColumns. */
   attemptCount: number;
   resultFormat: ResultFormat;
+  /** null = no limit. Applied to the Дундаж column so the judge sees the
+   *  same number the standings will. */
+  timeLimitCs: number | null;
 }) {
   const submitted = [...row.attempts.values()];
   const decided = submitted.filter(isDecided);
@@ -469,7 +485,7 @@ function GridRow({
   // format decided before the average column shows anything.
   const decidedByAttempt = ATTEMPTS.map((a) => {
     const s = row.attempts.get(a);
-    return s && isDecided(s) ? effectiveTime(s) : null;
+    return s && isDecided(s) ? effectiveTime(s, timeLimitCs) : null;
   });
   const allDecided = decidedByAttempt.every((t) => t !== null);
   const ao5 = allDecided ? computeResult(decidedByAttempt as AttemptTime[], resultFormat).value : undefined;

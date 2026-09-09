@@ -8,6 +8,7 @@ import { ROUND_GAP_TEXT, type RoundGapEvent } from './RoundGapWarning';
 import { uploadImageToCloudinary } from '@/lib/online-competition/cloudinary';
 import { ONLINE_COMP_EVENTS, onlineCompEventLabel } from '@/lib/online-competition/events';
 import { RESULT_FORMATS, formatLabel, resolveResultFormat, type ResultFormat } from '@/lib/online-competition/ao5';
+import { fmtTimeLimit, parseTimeLimit } from '@/lib/online-competition/time-utils';
 import { WcaEventIcon, hasWcaEventIcon } from '@/lib/wca-event-icon';
 import {
   COMPETITION_FORMAT_OPTIONS,
@@ -206,6 +207,15 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
    *  хадгалах" has to work on any subset. Only the name is unconditional. */
   function validate(): string | null {
     if (!name.trim()) return 'Нэрээ оруулна уу';
+
+    // An unparseable limit BLOCKS the save. Dropping it to "no limit"
+    // would look like it saved while quietly removing the constraint —
+    // the one outcome an admin would not check for.
+    for (const row of events) {
+      if (!parseTimeLimit(row.timeLimit).ok) {
+        return `${onlineCompEventLabel(row.eventId)}: цагийн хязгаар буруу форматтай (жишээ: 10:00)`;
+      }
+    }
 
     const opens = datetimeLocalToMs(registrationOpensAt);
     const deadline = datetimeLocalToMs(registrationDeadline);
@@ -519,6 +529,12 @@ interface EventRow {
   eventId: string;
   rounds: string;
   resultFormat: ResultFormat;
+  /** RAW TEXT as typed ("10:00"), not centiseconds — a number input would
+   *  destroy a half-written value on every keystroke, and the stored form
+   *  is not what the admin reads or writes. Parsed at save; an
+   *  unparseable value blocks the save with a message rather than being
+   *  silently dropped to "no limit". */
+  timeLimit: string;
   advancement: Record<number, { method: 'count' | 'percent'; value: string }>;
 }
 
@@ -531,6 +547,7 @@ function toEventRow(e: OnlineCompetitionEventConfig): EventRow {
     eventId: e.eventId,
     rounds: String(e.rounds),
     resultFormat: resolveResultFormat(e.resultFormat),
+    timeLimit: typeof e.timeLimitCs === 'number' ? fmtTimeLimit(e.timeLimitCs) : '',
     advancement,
   };
 }
@@ -554,6 +571,12 @@ function toEventConfig(row: EventRow): OnlineCompetitionEventConfig {
     label: onlineCompEventLabel(row.eventId),
     rounds,
     resultFormat: row.resultFormat,
+    // validate() has already refused an unparseable value, so a failed
+    // parse here can only mean empty -> no limit.
+    timeLimitCs: (() => {
+      const parsed = parseTimeLimit(row.timeLimit);
+      return parsed.ok ? parsed.value : null;
+    })(),
     advancement,
   };
 }
@@ -638,7 +661,7 @@ function EventsTab({
   }
 
   function addEvent(eventId: string) {
-    setEvents((prev) => [...prev, { eventId, rounds: '1', resultFormat: 'ao5', advancement: {} }]);
+    setEvents((prev) => [...prev, { eventId, rounds: '1', resultFormat: 'ao5', timeLimit: '', advancement: {} }]);
     setPickerOpen(false);
   }
 
@@ -732,24 +755,23 @@ function EventsTab({
               </div>
 
               <div className="oc-cf-ev-cell">
-                {/* TODO: ЛИМИТ is laid out but deliberately inert — there
-                    is NO schema field and nothing to store yet. A time
-                    limit only means something once it is ENFORCED, which
-                    needs the solve flow to compare against it and the
-                    review route to apply the DNF; neither exists. Storing
-                    a number that changes nothing would be worse than an
-                    empty column. When it lands: centiseconds (matching
-                    reportedTime), not a "10:00" display string. */}
+                {/* Per-attempt maximum. Typed as a human time and stored as
+                    centiseconds; empty means NO LIMIT, which is also the
+                    default for every event that predates the field.
+                    Deliberately not locked-looking when locked is false —
+                    but it IS locked once results exist, for the same
+                    reason the format is (see the lock in
+                    admin-competitions.ts). */}
                 <FieldLabel>ЛИМИТ</FieldLabel>
                 <input
                   className={MONO_INPUT_CLASS}
-                  value=""
-                  readOnly
-                  disabled
-                  placeholder="—"
-                  title="Хугацааны хязгаар удахгүй"
-                  aria-label="Хугацааны хязгаар (удахгүй)"
-                  style={{ opacity: 0.4 }}
+                  value={row.timeLimit}
+                  disabled={locked}
+                  placeholder="10:00"
+                  title={locked ? FORMAT_LOCKED_REASON : 'Жишээ: 10:00 · хоосон бол хязгааргүй'}
+                  aria-label="Цагийн хязгаар"
+                  onChange={(e) => update(i, { timeLimit: e.target.value })}
+                  style={locked ? { opacity: 0.5 } : undefined}
                 />
               </div>
 

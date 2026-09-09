@@ -21,6 +21,7 @@ import {
   type ResultFormat,
 } from '@/lib/online-competition/ao5';
 import { beatsPr } from './_lib/prCheck';
+import { fmtTimeLimit } from '@/lib/online-competition/time-utils';
 import Header from './_components/Header';
 import CameraSetupStage from './_components/CameraSetupStage';
 import ZeroDisplayStage from './_components/ZeroDisplayStage';
@@ -47,6 +48,16 @@ type Stage =
 /** Attempts in a run come from the event's resultFormat via
  *  attemptsForFormat — there is no constant here any more. See `runShape`
  *  below for why it is captured once rather than read per render. */
+
+/** One attempt's value for LOCAL display and the provisional result the
+ *  athlete is shown. Mirrors effectiveAttemptTime's limit rule for a time
+ *  that has not been judged yet — no status, no penalty, just the
+ *  athlete's own number against the limit. */
+function attemptTime(a: { timeCs: number | null; isDnf: boolean }, timeLimitCs: number | null): AttemptTime {
+  if (a.isDnf || a.timeCs === null) return 'DNF';
+  if (timeLimitCs !== null && a.timeCs > timeLimitCs) return 'DNF';
+  return a.timeCs;
+}
 
 interface Attempt {
   timeCs: number | null;
@@ -114,9 +125,16 @@ export default function SolvePage() {
    *  adding a refetch later cannot silently reintroduce the hazard. A redo
    *  deliberately keeps the captured shape: it restarts the run, it does
    *  not renegotiate its format. */
-  const [runShape, setRunShape] = useState<{ format: ResultFormat; attempts: number } | null>(null);
+  const [runShape, setRunShape] = useState<{
+    format: ResultFormat;
+    attempts: number;
+    timeLimitCs: number | null;
+  } | null>(null);
   const [bests, setBests] = useState<{ pr: number | null; ao5: number | null; mo3: number | null } | null>(null);
   const [prToast, setPrToast] = useState(false);
+  /** Set when the attempt just entered exceeds the event's time limit.
+   *  Cleared when the next attempt starts. */
+  const [overLimit, setOverLimit] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
 
   const recorder = useSolveRecorder();
@@ -128,8 +146,13 @@ export default function SolvePage() {
         if (cancelled) return;
         setCompetition(c);
         // Captured here, at the one moment the competition is read.
-        const format = resolveResultFormat(c?.events.find((e) => e.eventId === eventId)?.resultFormat);
-        setRunShape({ format, attempts: attemptsForFormat(format) });
+        const cfg = c?.events.find((e) => e.eventId === eventId);
+        const format = resolveResultFormat(cfg?.resultFormat);
+        setRunShape({
+          format,
+          attempts: attemptsForFormat(format),
+          timeLimitCs: typeof cfg?.timeLimitCs === 'number' ? cfg.timeLimitCs : null,
+        });
       })
       .catch(() => {
         if (!cancelled) setLoadError('Тэмцээний мэдээллийг ачааллаж чадсангүй');
@@ -249,9 +272,27 @@ export default function SolvePage() {
   }, [stage]);
 
   function handleEntryConfirm(result: { timeCs: number | null; isDnf: boolean }) {
+    // Over the event's per-attempt limit? The attempt still COUNTS as an
+    // attempt and the run continues — ending it here would be cutoff
+    // behaviour, which this is not.
+    //
+    // The attempt is stored with the athlete's REAL time and their own
+    // isDnf, deliberately NOT rewritten to isDnf:true. createSubmission
+    // zeroes reportedTime for a DNF, so flagging it here would destroy the
+    // evidence the judge needs to confirm it really was over the limit.
+    // It becomes a DNF where that matters instead: in the summary below,
+    // and authoritatively in effectiveAttemptTime at scoring.
+    const isOver =
+      !result.isDnf &&
+      result.timeCs !== null &&
+      runShape?.timeLimitCs != null &&
+      result.timeCs > runShape.timeLimitCs;
+    setOverLimit(isOver);
+
     // Provisional only — a first-ever time for this event counts as a PR
-    // too (there is nothing to beat yet).
-    if (beatsPr(result.timeCs, result.isDnf, bests)) setPrToast(true);
+    // too (there is nothing to beat yet). An over-limit attempt is a DNF
+    // and can never be one.
+    if (!isOver && beatsPr(result.timeCs, result.isDnf, bests)) setPrToast(true);
 
     const newAttempt: Attempt = { timeCs: result.timeCs, isDnf: result.isDnf, videoBlob: pendingBlobRef.current };
     const next = [...attempts, newAttempt];
@@ -273,6 +314,7 @@ export default function SolvePage() {
   function handleRedo() {
     setAttempts([]);
     setAttemptIndex(0);
+    setOverLimit(false);
     setSubmitError('');
     // Cleared so a failed re-fetch can't leave the previous run's round
     // attached to the new one; fetchScramble(1) re-resolves it.
@@ -332,7 +374,7 @@ export default function SolvePage() {
         reportAggregate();
       }
 
-      const times: AttemptTime[] = attempts.map((a) => (a.isDnf ? 'DNF' : (a.timeCs as number)));
+      const times: AttemptTime[] = attempts.map((a) => attemptTime(a, runShape?.timeLimitCs ?? null));
       // The captured format, not a re-read one — the value stored must be
       // the one the athlete was actually shown on the summary screen.
       const { value } = computeResult(times, runShape?.format ?? 'ao5');
@@ -446,6 +488,17 @@ export default function SolvePage() {
           <span className="oc-solve-pr-note">шүүгч баталгаажуулснаар эцэслэнэ</span>
         </div>
       )}
+      {/* Shown INSTEAD of moving on silently: the athlete has to know this
+          attempt will not count before they start the next one. The run
+          continues — a time limit does not end a round. */}
+      {overLimit && runShape.timeLimitCs !== null && (
+        <div className="oc-solve-limit-toast" role="alert">
+          <span className="oc-solve-limit-toast-title">ЦАГИЙН ХЯЗГААР ХЭТЭРСЭН · DNF</span>
+          <span className="oc-solve-pr-note">
+            Хязгаар {fmtTimeLimit(runShape.timeLimitCs)} · энэ оролдлого DNF болно
+          </span>
+        </div>
+      )}
       <div className="oc-solve-shell">
         {HEADER_STAGES.includes(stage) && (
           <Header
@@ -499,6 +552,7 @@ export default function SolvePage() {
             bests={bests}
             attempts={attempts.map((a) => ({ timeCs: a.timeCs, isDnf: a.isDnf }))}
             resultFormat={runShape.format}
+            timeLimitCs={runShape.timeLimitCs}
             onRedo={handleRedo}
             onSubmit={handleSubmit}
             submitting={submitting}
