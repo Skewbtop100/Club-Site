@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
-import { FieldValue, type Firestore } from 'firebase-admin/firestore';
+import { type Firestore } from 'firebase-admin/firestore';
 import { isOnlineCompAdmin } from '@/lib/online-competition/admin-auth';
 import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
-import { normalizeCompetitionStatus, toFirestoreDoc, validateCompetitionInput } from '@/lib/online-competition/admin-competitions';
+import { normalizeCompetitionStatus, validateCompetitionInput, writeCompetitionDoc } from '@/lib/online-competition/admin-competitions';
 import { resolveEventLiveRounds } from '@/lib/online-competition/round-access';
+import { DEFAULT_COMPETITION_FORMAT } from '@/lib/online-competition/types';
 import type { OnlineCompetitionAdminView } from '@/lib/online-competition/types';
 
 // Distinct-uid count of onlineSubmissions for this competition — a
@@ -72,6 +73,10 @@ export async function GET() {
         participantLimit: typeof data.participantLimit === 'number' ? data.participantLimit : null,
         events: Array.isArray(data.events) ? data.events : [],
         status,
+        registrationOpensAt: data.registrationOpensAt?.toMillis?.() ?? null,
+        endAt: data.endAt?.toMillis?.() ?? null,
+        format: typeof data.format === 'string' && data.format ? data.format : DEFAULT_COMPETITION_FORMAT,
+        featured: data.featured === true,
         createdAt: data.createdAt?.toMillis?.() ?? null,
         participantCount: await countDistinctParticipants(db, d.id),
         registeredCount: registeredByCompetition.get(d.id) ?? 0,
@@ -99,11 +104,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: result.error }, { status: 400 });
   }
 
+  // writeCompetitionDoc allocates the id, stamps createdAt, and keeps
+  // `featured` exclusive across the collection — see its comment.
   const db = getOnlineCompAdminDb();
-  const docRef = await db.collection('onlineCompetitions').add({
-    ...toFirestoreDoc(result.data),
-    createdAt: FieldValue.serverTimestamp(),
-  });
+  const id = await writeCompetitionDoc(db, null, result.data);
 
-  return NextResponse.json({ id: docRef.id });
+  return NextResponse.json({ id });
 }

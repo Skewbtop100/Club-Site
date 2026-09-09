@@ -4799,3 +4799,92 @@ button.oc-rv-cell:hover {
     min-height: 44px;
   }
 }
+
+/* ── Competition editor: wizard tab bar ─────────────────────────────────
+   Deliberately NOT .oc-tab. That class is the two-tab strip on the
+   competition detail page (600 13px heading, #F4F1EA when active); this
+   one is the mockup's numbered wizard strip, whose active state is the
+   volt accent and whose label carries a mono number prefix. Two different
+   components that happen to both be called "tabs" — sharing a class would
+   force one of them to fight the other's values. */
+.oc-cf-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-bottom: 14px;
+}
+.oc-cf-name {
+  font: 600 20px/1.2 var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+}
+.oc-cf-status {
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .18em;
+  color: #6E6A62;
+  white-space: nowrap;
+}
+.oc-cf-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid #1C1C21;
+  /* The strip scrolls rather than wraps: seven tabs do not fit a narrow
+     viewport, and a wrapped second row reads as a separate control. */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.oc-cf-tabs::-webkit-scrollbar {
+  display: none;
+}
+.oc-cf-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  padding: 12px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.oc-cf-tab-num {
+  font: 500 10px/1 var(--oc-font-mono), monospace;
+  color: #4A4740;
+}
+.oc-cf-tab-label {
+  font: 500 13px/1 var(--oc-font-heading), sans-serif;
+  color: #6E6A62;
+}
+.oc-cf-tab:hover .oc-cf-tab-label {
+  color: #F4F1EA;
+}
+.oc-cf-tab-active {
+  border-bottom-color: #DFFF4F;
+}
+.oc-cf-tab-active .oc-cf-tab-label,
+.oc-cf-tab-active:hover .oc-cf-tab-label {
+  color: #DFFF4F;
+}
+.oc-cf-tab:focus-visible {
+  outline: 2px solid #DFFF4F;
+  outline-offset: -2px;
+}
+/* Placeholder body for the six tabs that have no content yet.
+   --oc-font-heading, not --oc-font-body: the latter is never declared
+   anywhere (layout.tsx defines only --oc-font-heading and --oc-font-mono),
+   and Geologica is deliberately both the heading and body face. */
+.oc-cf-soon {
+  font: 400 13px/1.6 var(--oc-font-heading), sans-serif;
+  color: #6E6A62;
+}
+
+@media (max-width: 640px) {
+  .oc-cf-tab {
+    min-height: 44px;
+  }
+  .oc-cf-name {
+    font-size: 17px;
+  }
+}

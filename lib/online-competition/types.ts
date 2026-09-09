@@ -14,12 +14,34 @@ import type { Timestamp } from 'firebase/firestore';
  *    - VALID_STATUSES in lib/online-competition/admin-competitions.ts (server)
  *    - VALID_STATUSES in lib/online-competition/data.ts (client — a
  *      deliberate duplicate, since the server file imports firebase-admin)
- *    - STATUS_OPTIONS in app/online-competition/admin/_components/CompetitionForm
+ *    - STATUS_OPTIONS in app/online-competition/admin/_components/CompetitionEditor
  *  Both VALID_STATUSES lists feed a normalize function whose fallback is
  *  'upcoming'. A status missing from a list therefore does not fail loudly
  *  — it reads back as 'upcoming', which for 'draft' means an unfinished
  *  competition silently goes public. */
 export type OnlineCompetitionStatus = 'draft' | 'upcoming' | 'live' | 'finished';
+
+/** How a competition is run. Typed as a plain string, not a union: more
+ *  formats are expected (in-person, live-judged) and every consumer
+ *  resolves its label through competitionFormatLabel below, which falls
+ *  back rather than throwing on an unknown value — so adding one is a
+ *  data change, not a code change.
+ *
+ *  Exists so the admin list's meta line can read "онлайн" from the
+ *  document instead of hardcoding it. */
+export const DEFAULT_COMPETITION_FORMAT = 'online-video';
+
+export const COMPETITION_FORMAT_OPTIONS: { value: string; label: string }[] = [
+  { value: DEFAULT_COMPETITION_FORMAT, label: 'Онлайн · бичлэгээр' },
+];
+
+/** Display label for a stored format value. An unrecognised value renders
+ *  as itself rather than blank — a competition saved with a format this
+ *  build doesn't know about must not lose its meta line. */
+export function competitionFormatLabel(format: string | undefined | null): string {
+  if (!format) return COMPETITION_FORMAT_OPTIONS[0].label;
+  return COMPETITION_FORMAT_OPTIONS.find((o) => o.value === format)?.label ?? format;
+}
 
 /** One configured event within a competition — e.g. { eventId: '333',
  *  label: '3x3x3', rounds: 2 }. `label` is stored redundantly (rather than
@@ -55,6 +77,21 @@ export interface OnlineCompetition {
   participantLimit?: number | null;
   events: OnlineCompetitionEventConfig[];
   status: OnlineCompetitionStatus;
+  /** When registration OPENS. Optional for the same legacy-doc reason as
+   *  the fields above; absent means "no declared opening", not "open now"
+   *  — nothing gates on it yet. */
+  registrationOpensAt?: Timestamp;
+  /** When the competition ends. Optional, same reason. */
+  endAt?: Timestamp;
+  /** See COMPETITION_FORMAT_OPTIONS. Absent on every doc written before
+   *  this field existed; readers use competitionFormatLabel, which
+   *  substitutes the default label for a missing value. */
+  format?: string;
+  /** Front-page hero slot. AT MOST ONE competition may have this set —
+   *  enforced server-side in writeCompetitionDoc (admin-competitions.ts),
+   *  which clears it from every other document in the same transaction.
+   *  Absent is equivalent to false; nothing reads it yet. */
+  featured?: boolean;
   createdAt?: Timestamp;
   /** e.g. "2026-spring" — groups competitions into onlineSeasonPoints
    *  leaderboards. Optional for the same legacy-doc reason as the fields
@@ -335,6 +372,14 @@ export interface OnlineCompetitionAdminView {
   participantLimit: number | null;
   events: OnlineCompetitionEventConfig[];
   status: OnlineCompetitionStatus;
+  /** epoch-ms or null, like every other date here. */
+  registrationOpensAt: number | null;
+  endAt: number | null;
+  /** Never '' — the mappers substitute DEFAULT_COMPETITION_FORMAT for a
+   *  doc written before the field existed, so the edit form's select
+   *  always has a value to show. */
+  format: string;
+  featured: boolean;
   createdAt: number | null;
   /** Count of distinct uids with a submission for this competition — a
    *  submissions-based proxy for "participants", since there's no separate
@@ -371,6 +416,10 @@ export interface OnlineCompetitionWriteInput {
   events: OnlineCompetitionEventConfig[];
   status: OnlineCompetitionStatus;
   season: string;
+  registrationOpensAt: number | null;
+  endAt: number | null;
+  format: string;
+  featured: boolean;
 }
 
 // ── Season points / leaderboard ─────────────────────────────────────────

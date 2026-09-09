@@ -4,8 +4,9 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Badge, Button, EmptyState, type BadgeSpec } from '../../_components/ui';
 import type { OnlineCompetitionAdminView, OnlineCompetitionStatus } from '@/lib/online-competition/types';
-import CompetitionForm from './CompetitionForm';
 import RoundGapWarning from './RoundGapWarning';
+
+const LIST_BASE = '/online-competition/admin/competitions';
 
 // Record<OnlineCompetitionStatus, ...> — the compiler requires an entry
 // for every status, which is what keeps a new one from rendering blank.
@@ -39,17 +40,18 @@ function fmtDate(ms: number | null): string {
   return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}`;
 }
 
-/** Admin home page's main content — the competitions list. Each row now
- *  links to that competition's own detail page (Тамирчид / Шүүгчийн
- *  самбар tabs); the old per-row "Засах" button moved there too (see
- *  CompetitionDetail) — this page keeps only "create a new competition"
- *  as an inline action, via the exact same CompetitionForm used to
- *  create one. */
+/** Admin home page's main content — the competitions list.
+ *
+ *  Editing is its own route now (CompetitionEditor, the tabbed form), so
+ *  both ЗАСАХ and "Шинэ тэмцээн" are plain links rather than an inline
+ *  form rendered underneath the table. ЗАСАХ goes STRAIGHT to the editor:
+ *  it used to point at the detail page, which opens on its Тамирчид tab
+ *  and made editing a two-click job. БҮРТГЭЛ is the link that still wants
+ *  the detail page — that IS the registrations view. */
 export default function CompetitionsList() {
   const [competitions, setCompetitions] = useState<OnlineCompetitionAdminView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [creating, setCreating] = useState(false);
   const [recomputingId, setRecomputingId] = useState<string | null>(null);
   const [recomputeMsg, setRecomputeMsg] = useState<{ id: string; text: string; isError: boolean } | null>(null);
 
@@ -121,9 +123,9 @@ export default function CompetitionsList() {
         <span className="oc-v3-label">
           Тэмцээнүүд
         </span>
-        <Button variant="primary" onClick={() => setCreating(true)}>
+        <Link className="oc-btn oc-btn-primary" href={`${LIST_BASE}/new`}>
           Шинэ тэмцээн
-        </Button>
+        </Link>
       </div>
 
       {error && (
@@ -145,7 +147,8 @@ export default function CompetitionsList() {
             // changes some other way.
             const badge = STATUS_BADGE[c.status] ?? STATUS_BADGE.upcoming;
             const label = STATUS_LABEL[c.status] ?? c.status;
-            const detail = `/online-competition/admin/competitions/${c.id}`;
+            const detail = `${LIST_BASE}/${c.id}`;
+            const edit = `${detail}/edit`;
             const preselect = `?competitionId=${encodeURIComponent(c.id)}`;
             return (
               <div key={c.id}>
@@ -217,7 +220,7 @@ export default function CompetitionsList() {
                     </span>
                   </span>
 
-                  <Link className="oc-adm-comp-btn" href={detail}>
+                  <Link className="oc-adm-comp-btn" href={edit}>
                     ЗАСАХ
                   </Link>
                 </div>
@@ -274,17 +277,6 @@ export default function CompetitionsList() {
             );
           })}
         </div>
-      )}
-
-      {creating && (
-        <CompetitionForm
-          competition={null}
-          onClose={() => setCreating(false)}
-          onSaved={() => {
-            setCreating(false);
-            load();
-          }}
-        />
       )}
     </div>
   );

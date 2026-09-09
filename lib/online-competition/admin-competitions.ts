@@ -1,13 +1,14 @@
-import { Timestamp } from 'firebase-admin/firestore';
+import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore';
+import { DEFAULT_COMPETITION_FORMAT } from './types';
 import type { OnlineCompetitionEventConfig, OnlineCompetitionStatus, OnlineCompetitionWriteInput } from './types';
 
 // Server-only validation + Firestore-doc-shaping helpers shared by
 // app/api/online-competition/admin-competitions/route.ts (list, create)
 // and .../admin-competitions/[id]/route.ts (get, update). The admin
 // create/edit form does its own client-side validation with Mongolian
-// error messages (app/online-competition/admin/_components/CompetitionForm
-// .tsx) — this is a lighter server-side sanity check against a
-// malformed/malicious payload, not a duplicate of every UI rule.
+// error messages (app/online-competition/admin/_components/
+// CompetitionEditor.tsx) — this is a lighter server-side sanity check
+// against a malformed/malicious payload, not a duplicate of every UI rule.
 
 // MUST list every member of OnlineCompetitionStatus. A value missing here
 // is not rejected — normalizeCompetitionStatus below falls through to
@@ -31,7 +32,18 @@ export function validateCompetitionInput(body: unknown): ValidationResult {
   if (typeof b.status !== 'string' || !VALID_STATUSES.includes(b.status as OnlineCompetitionStatus)) {
     return { ok: false, error: 'invalid status' };
   }
-  if (!Array.isArray(b.events) || b.events.length === 0) {
+  // A draft may have no events yet. The Ерөнхий tab of the admin editor
+  // saves before the Төрөл tab has been built, let alone filled in, so a
+  // competition genuinely exists with events: [] for part of its life —
+  // rejecting that would make "Нооргоор хадгалах" impossible on a new
+  // competition. Every OTHER status keeps the original guarantee: nothing
+  // reaches the public site without at least one event. The publish-time
+  // readiness checklist (Хянах tab) is where a draft's completeness gets
+  // enforced.
+  if (!Array.isArray(b.events)) {
+    return { ok: false, error: 'events must be an array' };
+  }
+  if (b.events.length === 0 && b.status !== 'draft') {
     return { ok: false, error: 'at least one event is required' };
   }
 
@@ -56,6 +68,14 @@ export function validateCompetitionInput(body: unknown): ValidationResult {
       events,
       status: b.status as OnlineCompetitionStatus,
       season: typeof b.season === 'string' ? b.season.trim() : '',
+      // Same coerce-don't-reject treatment as the dates above: this is a
+      // sanity check against a malformed payload, and the form owns the
+      // ordering rules (opens < deadline <= start < end) with Mongolian
+      // messages. A draft is expected to have most of these unset.
+      registrationOpensAt: typeof b.registrationOpensAt === 'number' ? b.registrationOpensAt : null,
+      endAt: typeof b.endAt === 'number' ? b.endAt : null,
+      format: typeof b.format === 'string' && b.format.trim() ? b.format.trim() : DEFAULT_COMPETITION_FORMAT,
+      featured: b.featured === true,
     },
   };
 }
@@ -100,5 +120,64 @@ export function toFirestoreDoc(input: OnlineCompetitionWriteInput) {
     events: input.events,
     status: input.status,
     season: input.season,
+    registrationOpensAt:
+      input.registrationOpensAt !== null ? Timestamp.fromMillis(input.registrationOpensAt) : null,
+    endAt: input.endAt !== null ? Timestamp.fromMillis(input.endAt) : null,
+    format: input.format,
+    featured: input.featured,
   };
+}
+
+/** Creates or updates a competition, keeping `featured` exclusive.
+ *
+ *  At most one competition may be featured, so a save that sets the flag
+ *  has to clear it everywhere else. Done in a TRANSACTION rather than a
+ *  query-then-batch: the read of "who is featured now" and the writes that
+ *  act on it have to be one atomic unit, or two admins saving at once each
+ *  read an empty set, each clear nothing, and both end up featured — the
+ *  exact invariant this is here to hold. Firestore retries the transaction
+ *  on contention, so the loser re-reads and sees the winner's flag.
+ *
+ *  Firestore requires every read in a transaction to precede every write,
+ *  which is why the query runs before any tx.set/tx.update below.
+ *
+ *  The query needs no composite index — a single-field equality filter
+ *  uses the automatic index. Docs written before `featured` existed simply
+ *  don't match, which is correct: they aren't featured.
+ *
+ *  Pass `competitionId: null` to create. The id is allocated up front so
+ *  create and update share one path (and so a newly created competition
+ *  can be the one being featured).
+ *
+ *  Returns the competition's id. */
+export async function writeCompetitionDoc(
+  db: Firestore,
+  competitionId: string | null,
+  input: OnlineCompetitionWriteInput,
+): Promise<string> {
+  const col = db.collection('onlineCompetitions');
+  const ref = competitionId ? col.doc(competitionId) : col.doc();
+  const isCreate = competitionId === null;
+  const data = toFirestoreDoc(input);
+
+  await db.runTransaction(async (tx) => {
+    // ── every read first ──
+    const others = input.featured
+      ? (await tx.get(col.where('featured', '==', true))).docs.filter((d) => d.id !== ref.id)
+      : [];
+
+    // ── then every write ──
+    if (isCreate) {
+      tx.set(ref, { ...data, createdAt: FieldValue.serverTimestamp() });
+    } else {
+      // merge: true, as the update path has always used — it preserves
+      // createdAt and any field this form does not own.
+      tx.set(ref, data, { merge: true });
+    }
+    for (const other of others) {
+      tx.update(other.ref, { featured: false });
+    }
+  });
+
+  return ref.id;
 }

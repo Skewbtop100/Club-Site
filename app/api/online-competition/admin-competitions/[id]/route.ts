@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { isOnlineCompAdmin } from '@/lib/online-competition/admin-auth';
 import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
-import { normalizeCompetitionStatus, toFirestoreDoc, validateCompetitionInput } from '@/lib/online-competition/admin-competitions';
+import { normalizeCompetitionStatus, validateCompetitionInput, writeCompetitionDoc } from '@/lib/online-competition/admin-competitions';
 import { resolveEventLiveRounds } from '@/lib/online-competition/round-access';
+import { DEFAULT_COMPETITION_FORMAT } from '@/lib/online-competition/types';
 import type { OnlineCompetitionAdminView } from '@/lib/online-competition/types';
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -32,6 +33,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     participantLimit: typeof data.participantLimit === 'number' ? data.participantLimit : null,
     events: Array.isArray(data.events) ? data.events : [],
     status: normalizeCompetitionStatus(data.status),
+    registrationOpensAt: data.registrationOpensAt?.toMillis?.() ?? null,
+    endAt: data.endAt?.toMillis?.() ?? null,
+    format: typeof data.format === 'string' && data.format ? data.format : DEFAULT_COMPETITION_FORMAT,
+    featured: data.featured === true,
     createdAt: data.createdAt?.toMillis?.() ?? null,
     // Neither count is needed for the edit form (only the list view shows
     // them) — skip the extra queries here.
@@ -58,8 +63,10 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     return NextResponse.json({ error: result.error }, { status: 400 });
   }
 
+  // Same shared writer as POST — keeps `featured` exclusive, and keeps the
+  // merge:true semantics this route has always had.
   const db = getOnlineCompAdminDb();
-  await db.collection('onlineCompetitions').doc(id).set(toFirestoreDoc(result.data), { merge: true });
+  await writeCompetitionDoc(db, id, result.data);
 
   return NextResponse.json({ ok: true });
 }

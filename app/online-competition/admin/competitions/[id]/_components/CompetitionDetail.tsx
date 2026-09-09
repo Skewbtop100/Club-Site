@@ -1,18 +1,16 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Button, EmptyState } from '../../../../_components/ui';
+import { EmptyState } from '../../../../_components/ui';
 import type { OnlineCompetitionAdminView } from '@/lib/online-competition/types';
 import type { RegistrationAdminView } from '@/app/api/online-competition/admin-competitions/[id]/registrations/route';
 import Link from 'next/link';
-import CompetitionForm from '../../../_components/CompetitionForm';
 import RoundGapWarning from '../../../_components/RoundGapWarning';
 
 export default function CompetitionDetail({ competitionId }: { competitionId: string }) {
   const [competition, setCompetition] = useState<OnlineCompetitionAdminView | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [editing, setEditing] = useState(false);
 
   const loadCompetition = useCallback(async () => {
     setLoading(true);
@@ -44,9 +42,11 @@ export default function CompetitionDetail({ competitionId }: { competitionId: st
         <h1 className="font-[family-name:var(--oc-font-heading)] text-xl font-semibold" style={{ color: 'var(--color-ink)' }}>
           {competition.name}
         </h1>
-        <Button variant="outline" onClick={() => setEditing(true)}>
+        {/* The editor is its own route now (the tabbed form). This page
+            keeps only the registrations view. */}
+        <Link className="oc-btn oc-btn-outline" href={`/online-competition/admin/competitions/${competitionId}/edit`}>
           Засах
-        </Button>
+        </Link>
       </div>
 
       {/* Live, but at least one event has no round open — athletes on
@@ -75,17 +75,6 @@ export default function CompetitionDetail({ competitionId }: { competitionId: st
       </div>
 
       <AthletesTab competition={competition} />
-
-      {editing && (
-        <CompetitionForm
-          competition={competition}
-          onClose={() => setEditing(false)}
-          onSaved={() => {
-            setEditing(false);
-            loadCompetition();
-          }}
-        />
-      )}
     </div>
   );
 }
