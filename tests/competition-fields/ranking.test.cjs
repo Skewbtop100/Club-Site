@@ -65,6 +65,7 @@ process.env.ONLINE_COMP_FIREBASE_PRIVATE_KEY = require('node:crypto')
 compile();
 
 const { collectRoundResults, rankRoundResults } = require(path.join(OUT, 'round-results.js'));
+const { selectQualifiers: selectQualifiersFn } = require(path.join(OUT, 'rounds.js'));
 const { recomputeSeasonPointsForCompetition } = require(path.join(OUT, 'seasonPoints.js'));
 const { recomputeAthleteStatsForCompetition } = require(path.join(OUT, 'athleteStats.js'));
 const { initializeApp } = require('firebase-admin/app');
@@ -182,9 +183,17 @@ const ONE_DNF_AO5 = 1200;
   const rankedUids = ranked.map((r) => r.uid);
   ok('ranked: the 5-approved athlete', rankedUids.includes('full'), rankedUids.join(','));
   ok('ranked: the one-DNF athlete (the fix)', rankedUids.includes('oneDnf'), rankedUids.join(','));
-  ok('NOT ranked: DNF average', !rankedUids.includes('twoDnf'), rankedUids.join(','));
-  ok('NOT ranked: incomplete (pending)', !rankedUids.includes('pending'), rankedUids.join(','));
-  ok('exactly two athletes ranked', ranked.length === 2, String(ranked.length));
+  // Ranked, but BELOW both average-havers — the mixed-round rule. It used
+  // to be absent entirely; the "never advances" half of that guarantee is
+  // now asserted separately, against selectQualifiers.
+  ok('ranked: the DNF-average athlete, below the average-havers',
+    rankedUids.indexOf('twoDnf') === 2, rankedUids.join(','));
+  ok('NOT ranked: incomplete (pending) — unjudged, not unranked',
+    !rankedUids.includes('pending'), rankedUids.join(','));
+  ok('three athletes ranked; only the incomplete one is absent', ranked.length === 3, String(ranked.length));
+  ok('the DNF-average athlete can never be advanced',
+    !selectQualifiersFn(ranked, 'count', 99).some((r) => r.uid === 'twoDnf'),
+    JSON.stringify(selectQualifiersFn(ranked, 'count', 99).map((r) => r.uid)));
   // The qualify route ranks through this same function, so a cut of 2 now
   // includes the one-DNF athlete where it previously could not have.
   ok('a rejected attempt never contributes its reportedTime',
@@ -308,8 +317,8 @@ const ONE_DNF_AO5 = 1200;
   ok('mo3: DNF result sorts last among finishers', mo3All[mo3All.length - 1].uid === 'mOneDnf', mo3All.map((r) => r.uid).join(','));
 
   const mo3Ranked = await rankRoundResults(db, MO3, EVENT, ROUND);
-  ok('mo3: exactly the two finishers with a real mean are ranked',
-    mo3Ranked.map((r) => r.uid).join(',') === 'mClean,mSlower', mo3Ranked.map((r) => r.uid).join(','));
+  ok('mo3: the two real means rank first, the DNF mean below them',
+    mo3Ranked.map((r) => r.uid).join(',') === 'mClean,mSlower,mOneDnf', mo3Ranked.map((r) => r.uid).join(','));
   ok('mo3: a rejected attempt never contributes its reportedTime',
     mo3Ranked.every((r) => r.value !== 999), JSON.stringify(mo3Ranked.map((r) => r.value)));
 
@@ -334,8 +343,8 @@ const ONE_DNF_AO5 = 1200;
   ok('bo3: value equals best for a best-of format', bo3By.get('b3Fast')?.best === bo3By.get('b3Fast')?.value);
 
   const bo3Ranked = await rankRoundResults(db, BO3, EVENT, ROUND);
-  ok('bo3: ranked fastest-single first',
-    bo3Ranked.map((r) => r.uid).join(',') === 'b3Fast,b3OneDnf', bo3Ranked.map((r) => r.uid).join(','));
+  ok('bo3: ranked fastest-single first, the all-DNF athlete last',
+    bo3Ranked.map((r) => r.uid).join(',') === 'b3Fast,b3OneDnf,b3AllDnf', bo3Ranked.map((r) => r.uid).join(','));
 
   // ── Bo1 ───────────────────────────────────────────────────────────────
   const BO1 = 'comp-bo1';
@@ -636,6 +645,121 @@ const ONE_DNF_AO5 = 1200;
   ok('  ...with a message naming the time limit', /цагийн хязгаар/.test(limRefused?.message ?? ''), limRefused?.message);
   ok('limit lock: re-saving the SAME limit is still allowed',
     await saveLimit(12000).then(() => true).catch((e) => e.message));
+
+
+  // ══ MIXED-ROUND RANKING ══════════════════════════════════════════════
+  // Athletes with no result are now RANKED, below everyone with one and
+  // ordered by their best single — WCA's rule. They are still never
+  // advanced; that is now an explicit rule in selectQualifiers rather than
+  // an accident of their absence from the list.
+
+  const MIXED = 'comp-mixed';
+  await db.collection('onlineCompetitions').doc(MIXED).set({
+    name: 'mixed', status: 'finished', season: 's6',
+    events: [{ eventId: EVENT, label: '3x3x3', rounds: 1, resultFormat: 'ao5' }],
+  });
+  let mt = 2_200_000_000_000;
+  // 'D' marks a judge-rejected attempt (a DNF that counts toward completeness).
+  const MIXED_SPECS = {
+    // real averages
+    avgFast: [1000, 1100, 1200, 1300, 1400],           // Ao5 1200
+    avgSlow: [2000, 2100, 2200, 2300, 2400],           // Ao5 2200
+    // DNF averages (2+ DNFs), with DIFFERENT best singles
+    dnfBetterSingle: [800, 'D', 'D', 5000, 5100],      // no average, best 800
+    dnfWorseSingle: [900, 'D', 'D', 5000, 5100],       // no average, best 900
+    // every attempt DNF -> no average AND no single
+    allDnf: ['D', 'D', 'D', 'D', 'D'],
+  };
+  for (const [uid, times] of Object.entries(MIXED_SPECS)) {
+    await db.collection('onlineParticipants').doc(uid).set({ uid, displayName: uid }, { merge: true });
+    for (let i = 0; i < 5; i++) {
+      const v = times[i];
+      await db.collection('onlineSubmissions').add({
+        competitionId: MIXED, uid, event: EVENT, round: i + 1, competitionRound: ROUND,
+        videoUrl: 'x', cloudinaryPublicId: 'x',
+        reportedTime: v === 'D' ? 999 : v,
+        isDnf: false,
+        penalty: v === 'D' ? 'DNF' : null,
+        status: v === 'D' ? 'rejected' : 'approved',
+        createdAt: Timestamp.fromMillis((mt += 1000)),
+      });
+    }
+  }
+
+  const mixedRanked = await rankRoundResults(db, MIXED, EVENT, ROUND);
+  const mixedOrder = mixedRanked.map((r) => r.uid);
+
+  ok('mixed: a DNF-average athlete IS ranked (used to vanish)',
+    mixedOrder.includes('dnfBetterSingle'), mixedOrder.join(','));
+  ok('mixed: every athlete with an average ranks ABOVE every athlete without',
+    mixedOrder.indexOf('avgSlow') < mixedOrder.indexOf('dnfBetterSingle'), mixedOrder.join(','));
+  ok('mixed: athletes WITH averages keep their own order',
+    mixedOrder.indexOf('avgFast') < mixedOrder.indexOf('avgSlow'), mixedOrder.join(','));
+  // dnfBetterSingle's 800 beats dnfWorseSingle's 900 — even though 'dnfB...'
+  // sorts alphabetically before 'dnfW...' anyway, the singles are what is
+  // asserted, and the all-DNF case below proves it is not just uid order.
+  ok('mixed: two DNF-average athletes order by their best SINGLE',
+    mixedOrder.indexOf('dnfBetterSingle') < mixedOrder.indexOf('dnfWorseSingle'), mixedOrder.join(','));
+  ok('mixed: an all-DNF athlete (no single either) ranks LAST',
+    mixedOrder[mixedOrder.length - 1] === 'allDnf', mixedOrder.join(','));
+  ok('mixed: the full expected order',
+    mixedOrder.join(',') === 'avgFast,avgSlow,dnfBetterSingle,dnfWorseSingle,allDnf', mixedOrder.join(','));
+  ok('mixed: a DNF-average athlete carries value null but a real single',
+    mixedRanked.find((r) => r.uid === 'dnfBetterSingle')?.value === null &&
+      mixedRanked.find((r) => r.uid === 'dnfBetterSingle')?.best === 800,
+    JSON.stringify(mixedRanked.find((r) => r.uid === 'dnfBetterSingle')));
+  ok('mixed: an all-DNF athlete has neither value nor single',
+    mixedRanked.find((r) => r.uid === 'allDnf')?.value === null &&
+      mixedRanked.find((r) => r.uid === 'allDnf')?.best === null,
+    JSON.stringify(mixedRanked.find((r) => r.uid === 'allDnf')));
+
+  // ── they must never advance ──────────────────────────────────────────
+  const cut99 = selectQualifiers(mixedRanked, 'count', 99);
+  ok('advancement: a cut of 99 does NOT advance a DNF-average athlete',
+    !cut99.some((r) => r.uid === 'dnfBetterSingle'), JSON.stringify(cut99.map((r) => r.uid)));
+  ok('advancement: a cut of 99 does NOT advance the all-DNF athlete',
+    !cut99.some((r) => r.uid === 'allDnf'), JSON.stringify(cut99.map((r) => r.uid)));
+  ok('advancement: a cut of 99 advances exactly the two with averages',
+    cut99.map((r) => r.uid).join(',') === 'avgFast,avgSlow', cut99.map((r) => r.uid).join(','));
+  ok('advancement: 100% advances only the eligible, not everyone',
+    selectQualifiers(mixedRanked, 'percent', 100).map((r) => r.uid).join(',') === 'avgFast,avgSlow',
+    JSON.stringify(selectQualifiers(mixedRanked, 'percent', 100).map((r) => r.uid)));
+  // Percent is a share of the ELIGIBLE athletes, not of everyone who
+  // finished — 50% of 2 eligible is 1, not 50% of 5 finishers.
+  ok('advancement: percent is computed over eligible athletes only',
+    selectQualifiers(mixedRanked, 'percent', 50).map((r) => r.uid).join(',') === 'avgFast',
+    JSON.stringify(selectQualifiers(mixedRanked, 'percent', 50).map((r) => r.uid)));
+  ok('advancement: a top-1 cut is unaffected', selectQualifiers(mixedRanked, 'count', 1)[0]?.uid === 'avgFast');
+
+  // ── season points are deliberately NOT changed ───────────────────────
+  await recomputeSeasonPointsForCompetition(MIXED);
+  const mixedSeason = await db.collection('onlineSeasonPoints').doc('s6').collection('athletes').get();
+  const mixedPts = new Map(mixedSeason.docs.map((d) => [d.id, d.data()]));
+  const mixedPlace = (uid) => (mixedPts.get(uid)?.breakdown ?? []).find((b) => b.competitionId === MIXED)?.placement;
+  ok('season: a DNF-average athlete still earns NO placement', mixedPlace('dnfBetterSingle') === undefined,
+    String(mixedPlace('dnfBetterSingle')));
+  ok('season: the all-DNF athlete earns no placement', mixedPlace('allDnf') === undefined);
+  ok('season: average-having athletes place 1 and 2, unchanged',
+    mixedPlace('avgFast') === 1 && mixedPlace('avgSlow') === 2,
+    `${mixedPlace('avgFast')}, ${mixedPlace('avgSlow')}`);
+
+  // ── THE REGRESSION: inserting athletes BELOW must not move anyone ────
+  // The original Ao5 competition has one DNF-average athlete (twoDnf) who
+  // previously vanished from rankRoundResults. They now appear — and the
+  // two athletes with averages must keep placements 1 and 2.
+  const regRanked = await rankRoundResults(db, COMP, EVENT, ROUND);
+  const regOrder = regRanked.map((r) => r.uid);
+  ok('REGRESSION: the two average-having athletes still hold places 1-2',
+    regOrder[0] === 'full' || regOrder[0] === 'oneDnf', regOrder.join(','));
+  ok('REGRESSION: both average-havers rank above the DNF-average athlete',
+    regOrder.indexOf('twoDnf') > regOrder.indexOf('full') &&
+      regOrder.indexOf('twoDnf') > regOrder.indexOf('oneDnf'), regOrder.join(','));
+  ok('REGRESSION: the DNF-average athlete is now present', regOrder.includes('twoDnf'), regOrder.join(','));
+  ok('REGRESSION: the incomplete athlete is still ABSENT (unjudged, not unranked)',
+    !regOrder.includes('pending'), regOrder.join(','));
+  ok('REGRESSION: a cut of 2 still advances exactly the two average-havers',
+    selectQualifiers(regRanked, 'count', 2).map((r) => r.uid).sort().join(',') === 'full,oneDnf',
+    JSON.stringify(selectQualifiers(regRanked, 'count', 2).map((r) => r.uid)));
 
   console.log(`\n  ${pass} passed, ${fail} failed\n`);
   fs.rmSync(OUT, { recursive: true, force: true });

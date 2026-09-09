@@ -131,13 +131,14 @@ export async function notifyRoundFinalised(params: {
     // numbers, so it skips this entirely.
     const results = preResults ? [] : await collectRoundResults(db, competitionId, eventId, round);
 
-    // Placement is the athlete's index among the RANKED entries only.
-    // collectRoundResults sorts DNF averages last, so filtering preserves
-    // the order and these indices match the standings the qualifier saw.
+    // Placement is the athlete's index in the FULL standings. It used to
+    // be their index among result-havers only, because DNF-result athletes
+    // had no placement to print. They do now — WCA ranks them below
+    // everyone with a result, on their single — so every finisher gets a
+    // number, and these indices still match the standings exactly because
+    // nothing is filtered out of them.
     const placementByUid = new Map<string, number>();
-    results
-      .filter((r) => r.value !== null)
-      .forEach((r, i) => placementByUid.set(r.uid, i + 1));
+    results.forEach((r, i) => placementByUid.set(r.uid, i + 1));
 
     await db.runTransaction(async (tx) => {
       const snap = await tx.get(roundRef);
@@ -149,12 +150,13 @@ export async function notifyRoundFinalised(params: {
       if (!resultsDone && results.length > 0) {
         // ── Results announcement (both ШАЛГАРУУЛАХ-first and ХААХ) ──
         for (const r of results) {
-          // A DNF average has no time and no placement — printing either
-          // would be a fabrication, so the copy says plainly that the
-          // round was finished without a ranked result.
+          // A DNF result still has no TIME to print, but it does now have
+          // a placement, so the old "байр эзлээгүй" (took no place) copy
+          // would be wrong. Prints DNF in place of the time and the real
+          // placement beside it.
           const body =
             r.value === null
-              ? `${label} · ${roundLabel} дүн: DNF — байр эзлээгүй`
+              ? `${label} · ${roundLabel} дүн: DNF · ${placementByUid.get(r.uid)}-р байр`
               : `${label} · ${roundLabel} дүн: ${fmtCentiseconds(r.value)} · ${placementByUid.get(r.uid)}-р байр`;
 
           // Advancing folds into this message rather than adding a second

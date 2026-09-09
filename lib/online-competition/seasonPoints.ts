@@ -210,7 +210,19 @@ export async function recomputeSeasonPointsForCompetition(
       const byRound = new Map(subs.map((s) => [s.round, s]));
       const times: AttemptTime[] = wanted.map((r) => effectiveTime(byRound.get(r)!, rules.timeLimitCs));
       const { value } = computeResult(times, format);
-      if (value === null) continue; // DNF result — excluded from ranking
+      // DNF result — NO SEASON PLACEMENT, deliberately, and deliberately
+      // DIFFERENT from the round standings.
+      //
+      // The round standings now rank a DNF-result athlete (WCA does, below
+      // everyone with a result, on their single — see round-results.ts).
+      // Season points are not a WCA concept though; they are this
+      // platform's own scheme, and its floor is BASE_POINTS for "placed at
+      // all". Paying that for finishing a round without a result would
+      // put a DNF average level with a real 4th-place average, and would
+      // retroactively inflate every stored total the next time a season is
+      // recomputed. Ranking someone and rewarding them are separate
+      // questions, and only the first is what WCA settles.
+      if (value === null) continue;
       const finished = times.filter((t): t is number => t !== 'DNF');
       ranked.push({ uid, value, best: finished.length > 0 ? Math.min(...finished) : null });
     }

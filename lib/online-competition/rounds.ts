@@ -47,8 +47,13 @@ export interface RoundRanking {
    *  for bo3/bo2/bo1. Renamed from `ao5`, which was a lie for Mo3 and
    *  meaningless for Bo-N; free to rename because this type is in-memory
    *  and its one wire shape (QualifyResponse) is consumed only by
-   *  RoundsManager in this repo. */
-  value: number;
+   *  RoundsManager in this repo.
+   *
+   *  NULLABLE, because the standings now include athletes who finished the
+   *  round without a result (a DNF average, or every attempt DNF). They
+   *  are ranked below everyone with a result, on their single. Such an
+   *  athlete can never advance — see selectQualifiers. */
+  value: number | null;
   /** Best single of the round — the WCA tie-break for equal values. null
    *  only if every attempt DNF'd, which cannot coexist with a non-null
    *  value. */
@@ -71,11 +76,27 @@ export function selectQualifiers(
   value: number,
 ): RoundRanking[] {
   if (!Number.isFinite(value) || value <= 0) return [];
+
+  // AN ATHLETE WITH NO RESULT NEVER ADVANCES, whatever the cut.
+  //
+  // This was previously guaranteed by absence: rankRoundResults filtered
+  // DNF-result athletes out, so no cut could reach them. Now that the
+  // standings include them — because WCA ranks them, below everyone with
+  // a result — that guarantee is gone and has to be stated. A cut of 99,
+  // or 100%, must still not advance someone who never posted a result.
+  //
+  // Filtering FIRST also keeps `percent` meaning exactly what it always
+  // did: a share of the athletes eligible to advance, not of everyone who
+  // finished. Both halves of that matter — computing the percentage over
+  // the full list would silently shrink every percentage cut the moment
+  // one athlete DNF'd their average.
+  const eligible = ranked.filter((r) => r.value !== null);
+
   const take =
     method === 'count'
       ? Math.floor(value)
-      : Math.floor((ranked.length * Math.min(value, 100)) / 100);
-  return ranked.slice(0, Math.max(0, Math.min(take, ranked.length)));
+      : Math.floor((eligible.length * Math.min(value, 100)) / 100);
+  return eligible.slice(0, Math.max(0, Math.min(take, eligible.length)));
 }
 
 /** Mongolian validation message, or null when the input is usable. */

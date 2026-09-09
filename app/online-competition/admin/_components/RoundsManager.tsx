@@ -399,7 +399,7 @@ function QualifyForm({
       {preview && (
         <>
           <p className="oc-sc-hint">
-            {preview.ranked.length} тамирчин дүнтэй · {preview.qualifiers.length} тамирчин шалгарна.
+            {preview.ranked.length} тамирчин дүүргэсэн · {preview.qualifiers.length} тамирчин шалгарна.
             {preview.ranked.length === 0 &&
               ' Бүрэн шүүгдсэн дүн байхгүй тул шалгарах тамирчин алга.'}
           </p>
@@ -413,7 +413,11 @@ function QualifyForm({
                     <span className="oc-sc-num oc-sc-num-dim">{i + 1}</span>
                     <span className="oc-sc-name">{r.displayName}</span>
                     <span className="oc-sc-num" style={{ textAlign: 'right' }}>
-                      {fmtCentiseconds(r.value)}
+                      {/* A DNF-result athlete is in the standings now, so
+                          the preview shows them — ranked, on their single,
+                          and marked ШАЛГАРАХГҮЙ because selectQualifiers
+                          can never include them. */}
+                      {r.value === null ? 'DNF' : fmtCentiseconds(r.value)}
                     </span>
                     <span className={`oc-rd-badge${inCut ? ' oc-rd-badge-done' : ''}`}>
                       {inCut ? 'ШАЛГАРНА' : 'ШАЛГАРАХГҮЙ'}

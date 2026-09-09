@@ -218,27 +218,31 @@ export async function collectRoundResults(
     results.push({ uid, displayName: uid.slice(0, 10), value, best, attempts: bySlot.size });
   }
 
-  // Best first, DNF results last. rankRoundResults filters this list
-  // without re-sorting, so placement indices are identical in both.
+  // WCA MIXED-ROUND ORDER:
+  //   1. everyone WITH a result ranks above everyone without one
+  //   2. among those, by result ascending
+  //   3. ties, and everyone WITHOUT a result, by BEST SINGLE ascending
+  //   4. uid, purely for determinism
   //
-  // ONE sort serves every format, because `value` already means the right
-  // thing per format (an average for ao5/mo3, the best single for bo-N).
+  // Steps 3 and 4 are shared deliberately: the same key that breaks a tie
+  // between two equal averages also orders the athletes who have no
+  // average at all. That is exactly WCA's rule — a competitor with no
+  // average is ranked on their single, below everyone who has one — and
+  // writing it once means the two can never drift apart.
   //
-  // WCA TIE-BREAK, which the old sort did NOT do: equal ranking values are
-  // separated by the better SINGLE, and only then by uid for determinism.
-  // Previously a tie fell straight to uid — i.e. alphabetically by user
-  // id, which is arbitrary and was silently deciding who advanced. Ties
-  // are far likelier now: an Mo3 has no dropped attempts to differentiate
-  // it, and a Bo-N is a raw single that two athletes can genuinely match.
-  // For a bo-N round `best` IS `value`, so the tie-break is a no-op there
-  // and genuinely-tied athletes stay tied, as WCA intends.
+  // `value` already means the right thing per format (an average for
+  // ao5/mo3, the best single for bo-N), so one sort serves all five.
+  //
+  // An athlete whose every attempt DNF'd has NO single either (best ===
+  // null) and sorts to the very bottom, below the DNF-average athletes who
+  // at least completed something. WCA ranks them too — last, tied with
+  // each other — rather than omitting them; only a competitor who never
+  // started is unranked, and this platform has no DNS concept.
   results.sort((a, b) => {
-    if (a.value === null && b.value === null) return a.uid.localeCompare(b.uid);
-    if (a.value === null) return 1;
-    if (b.value === null) return -1;
-    if (a.value !== b.value) return a.value - b.value;
-    // Equal values — the better single wins. A null single cannot happen
-    // alongside a non-null value, but sorts last if it ever does.
+    const aHas = a.value !== null;
+    const bHas = b.value !== null;
+    if (aHas !== bHas) return aHas ? -1 : 1;
+    if (aHas && bHas && a.value !== b.value) return a.value! - b.value!;
     if (a.best === null && b.best === null) return a.uid.localeCompare(b.uid);
     if (a.best === null) return 1;
     if (b.best === null) return -1;
@@ -259,11 +263,20 @@ export async function collectRoundResults(
 
 /** Standings for one event+round, best result first.
  *
- *  Only athletes with every attempt THIS EVENT'S FORMAT asks for JUDGED,
- *  AND a real (non-DNF) result, are ranked — everyone else is simply
- *  absent, which is what makes them non-qualifying by construction rather
- *  than by a separate rule. The filter preserves collectRoundResults'
- *  order, so the Nth entry here is the Nth place there too. */
+ *  EVERY athlete who finished the round appears, including those with a
+ *  DNF result — they are ranked below everyone with a result, ordered by
+ *  their best single (see the sort above). Only athletes who have NOT had
+ *  every attempt judged are absent; those are incomplete, not unranked.
+ *
+ *  This used to drop DNF-result athletes entirely, so they finished a
+ *  round with no placement at all. That diverged from WCA, and it made
+ *  non-qualification an accident of absence rather than a rule: because
+ *  they were not in the list, no cut could reach them. They are in the
+ *  list now, so selectQualifiers (rounds.ts) states that rule explicitly
+ *  instead of relying on the omission.
+ *
+ *  Preserves collectRoundResults' order exactly — this is now a projection
+ *  with no filter, so the Nth entry here is the Nth place there. */
 export async function rankRoundResults(
   db: Firestore,
   competitionId: string,
@@ -271,7 +284,11 @@ export async function rankRoundResults(
   round: number,
 ): Promise<RoundRanking[]> {
   const results = await collectRoundResults(db, competitionId, eventId, round);
-  return results
-    .filter((r): r is RoundResult & { value: number } => r.value !== null)
-    .map(({ uid, displayName, value, best, attempts }) => ({ uid, displayName, value, best, attempts }));
+  return results.map(({ uid, displayName, value, best, attempts }) => ({
+    uid,
+    displayName,
+    value,
+    best,
+    attempts,
+  }));
 }
