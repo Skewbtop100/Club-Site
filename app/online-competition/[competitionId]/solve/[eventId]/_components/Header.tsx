@@ -7,7 +7,9 @@ export default function Header({
   competitionName: string;
   eventLabel: string;
   attemptIndex: number; // 0-based
-  /** The run's attempt count — always 5 (real Ao5). */
+  /** The run's attempt count, from attemptsForFormat(resultFormat) — 5 for
+   *  Ao5, 3 for Mo3/Bo3, 2 for Bo2, 1 for Bo1. Captured once at run start
+   *  by the page; this component just renders that many pips. */
   totalAttempts: number;
 }) {
   return (

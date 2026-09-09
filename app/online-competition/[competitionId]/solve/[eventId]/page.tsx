@@ -14,7 +14,12 @@ import { uploadVideoToCloudinary } from '@/lib/online-competition/cloudinary';
 import type { OnlineCompetition } from '@/lib/online-competition/types';
 import { useSolveRecorder } from './_lib/useSolveRecorder';
 import type { AttemptTime } from '@/lib/online-competition/ao5';
-import { computeSummaryStats } from './_lib/summaryStats';
+import {
+  attemptsForFormat,
+  computeResult,
+  resolveResultFormat,
+  type ResultFormat,
+} from '@/lib/online-competition/ao5';
 import { beatsPr } from './_lib/prCheck';
 import Header from './_components/Header';
 import CameraSetupStage from './_components/CameraSetupStage';
@@ -39,10 +44,9 @@ type Stage =
   | 'summary'
   | 'sent';
 
-/** Attempts in a run — the WCA Ao5 count, and the only value the flow
- *  ever uses. (A `?__testAttempts=N` URL override used to shorten manual
- *  test runs; it was removed with the rest of the test-data feature.) */
-const TOTAL_ATTEMPTS = 5;
+/** Attempts in a run come from the event's resultFormat via
+ *  attemptsForFormat — there is no constant here any more. See `runShape`
+ *  below for why it is captured once rather than read per render. */
 
 interface Attempt {
   timeCs: number | null;
@@ -95,6 +99,22 @@ export default function SolvePage() {
   // whole in the round it started in rather than being split across two.
   // A redo restarts the run and re-resolves it.
   const [competitionRound, setCompetitionRound] = useState<number | null>(null);
+  /** The run's SHAPE, captured once when the competition loads and never
+   *  re-read — the same "must not move a run that has already started"
+   *  rule competitionRound above follows.
+   *
+   *  An admin editing this event's resultFormat mid-run would otherwise
+   *  change how many attempts the athlete owes them, halfway through.
+   *  Step B's lock only bites once something has been JUDGED, and a run in
+   *  progress has nothing judged yet, so the lock does NOT cover this
+   *  window — capturing here is what does.
+   *
+   *  In practice `competition` is fetched exactly once and never
+   *  refreshed, so today this is belt-and-braces; it is explicit so that
+   *  adding a refetch later cannot silently reintroduce the hazard. A redo
+   *  deliberately keeps the captured shape: it restarts the run, it does
+   *  not renegotiate its format. */
+  const [runShape, setRunShape] = useState<{ format: ResultFormat; attempts: number } | null>(null);
   const [bests, setBests] = useState<{ pr: number | null; ao5: number | null } | null>(null);
   const [prToast, setPrToast] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
@@ -105,7 +125,11 @@ export default function SolvePage() {
     let cancelled = false;
     fetchCompetition(competitionId)
       .then((c) => {
-        if (!cancelled) setCompetition(c);
+        if (cancelled) return;
+        setCompetition(c);
+        // Captured here, at the one moment the competition is read.
+        const format = resolveResultFormat(c?.events.find((e) => e.eventId === eventId)?.resultFormat);
+        setRunShape({ format, attempts: attemptsForFormat(format) });
       })
       .catch(() => {
         if (!cancelled) setLoadError('Тэмцээний мэдээллийг ачааллаж чадсангүй');
@@ -113,7 +137,7 @@ export default function SolvePage() {
     return () => {
       cancelled = true;
     };
-  }, [competitionId]);
+  }, [competitionId, eventId]);
 
   // The real (non-anonymous) uid, or null while auth is still resolving.
   // Everything below the auth gate requires it, and the scramble fetch
@@ -234,7 +258,7 @@ export default function SolvePage() {
     setAttempts(next);
     pendingBlobRef.current = null;
 
-    if (next.length >= TOTAL_ATTEMPTS) {
+    if (next.length >= (runShape?.attempts ?? 0)) {
       setStage('summary');
     } else {
       setAttemptIndex((i) => i + 1);
@@ -309,9 +333,15 @@ export default function SolvePage() {
       }
 
       const times: AttemptTime[] = attempts.map((a) => (a.isDnf ? 'DNF' : (a.timeCs as number)));
-      const { ao5 } = computeSummaryStats(times);
-      await recordAo5Result(user.uid, competitionId, eventId, { ao5, attempts: times });
-      setFinalAo5(ao5);
+      // The captured format, not a re-read one — the value stored must be
+      // the one the athlete was actually shown on the summary screen.
+      const { value } = computeResult(times, runShape?.format ?? 'ao5');
+      // NOTE: recordAo5Result writes results.{eventId}.ao5 on the
+      // registration doc. For a non-Ao5 event that key now holds an Mo3 or
+      // a best single. Renaming it is a stored-field migration and belongs
+      // with step E's stats work, not here.
+      await recordAo5Result(user.uid, competitionId, eventId, { ao5: value, attempts: times });
+      setFinalAo5(value);
 
       recorder.releaseCamera();
       setStage('sent');
@@ -401,7 +431,7 @@ export default function SolvePage() {
     );
   }
 
-  if (!competition || !scramble) {
+  if (!competition || !scramble || !runShape) {
     return <div className="oc-solve-page" />;
   }
 
@@ -422,7 +452,7 @@ export default function SolvePage() {
             competitionName={competition.name}
             eventLabel={eventLabel}
             attemptIndex={attemptIndex}
-            totalAttempts={TOTAL_ATTEMPTS}
+            totalAttempts={runShape.attempts}
           />
         )}
 
@@ -468,6 +498,7 @@ export default function SolvePage() {
           <SummaryStage
             bests={bests}
             attempts={attempts.map((a) => ({ timeCs: a.timeCs, isDnf: a.isDnf }))}
+            resultFormat={runShape.format}
             onRedo={handleRedo}
             onSubmit={handleSubmit}
             submitting={submitting}

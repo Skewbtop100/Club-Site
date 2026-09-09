@@ -78,19 +78,22 @@ export function resolveResultFormat(raw: unknown): ResultFormat {
 
 /** How many attempts a format is solved over.
  *
- *  ⚠ NOT YET HONOURED ANYWHERE. As of step B the admin can SELECT a
- *  format, but the attempt count is still hardcoded to 5 in eight places
- *  and every one of them ignores this function:
- *    - computeAo5's caller in round-results.ts (ATTEMPTS_PER_ROUND)
- *    - the length-5 guards in athleteStats.ts and seasonPoints.ts
- *    - TOTAL_ATTEMPTS on the solve page
- *    - SCRAMBLES_PER_GROUP for the TNoodle import (scrambles.ts)
- *    - the length === 5 branch in summaryStats.ts
- *    - ATTEMPTS = [1..5] in the admin ReviewGrid
- *    - the unbounded `attempt` param on the scramble route
- *  Until step C threads this through all of them, a non-Ao5 competition
- *  cannot actually be run — which is why the editor shows an amber
- *  warning next to any non-Ao5 selection. */
+ *  ⚠ PARTIALLY HONOURED. As of step C a non-Ao5 competition can be RUN but
+ *  not yet RANKED.
+ *
+ *  Threaded through (step C):
+ *    - the solve page (captured once per run as `runShape`)
+ *    - the summary screen, via computeResult + excludedIndices
+ *    - ATTEMPTS columns in the admin ReviewGrid
+ *    - the TNoodle import (expectedScrambleCountFor in scrambles.ts)
+ *    - the scramble route's attempt bound
+ *
+ *  STILL HARDCODED TO 5 — these ignore this function, so a non-Ao5 event
+ *  produces no standings, no season points and no stats:
+ *    - ATTEMPTS_PER_ROUND in round-results.ts        (step D)
+ *    - the length-5 guards in seasonPoints.ts        (step E)
+ *    - the length-5 guards in athleteStats.ts        (step E)
+ *  The editor's amber warning says exactly this to the admin. */
 export function attemptsForFormat(format: ResultFormat): number {
   switch (format) {
     case 'ao5':

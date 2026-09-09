@@ -4,6 +4,7 @@ import { isOnlineCompAdmin } from '@/lib/online-competition/admin-auth';
 import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
 import { fetchScrambleRoster, type ScrambleRosterAthlete } from '@/lib/online-competition/scramble-roster';
 import {
+  expectedScrambleCountFor,
   parseTnoodleJson,
   roundKey,
   type ScrambleRoundData,
@@ -141,13 +142,21 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'JSON файлыг уншиж чадсангүй (буруу форматтай).' }, { status: 400 });
   }
 
-  const parsed = parseTnoodleJson(raw);
+  // The competition is read BEFORE the parse now: how many scrambles a
+  // round needs depends on that event's resultFormat, which only the
+  // competition knows. The client sends the same expectation, but this is
+  // the authoritative one — a stale or hand-made request must not import a
+  // round with the wrong number of scrambles.
+  const db = getOnlineCompAdminDb();
+  const compRef = db.collection('onlineCompetitions').doc(competitionId);
+  const compSnapForFormat = await compRef.get();
+  const compEvents = Array.isArray(compSnapForFormat.get('events')) ? compSnapForFormat.get('events') : [];
+
+  const parsed = parseTnoodleJson(raw, expectedScrambleCountFor(compEvents));
   if (!parsed.ok) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
 
-  const db = getOnlineCompAdminDb();
-  const compRef = db.collection('onlineCompetitions').doc(competitionId);
   if (!(await compRef.get()).exists) {
     return NextResponse.json({ error: 'Тэмцээн олдсонгүй.' }, { status: 404 });
   }

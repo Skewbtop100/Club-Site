@@ -1,3 +1,4 @@
+import { attemptsForFormat, resolveResultFormat, type ResultFormat } from './ao5';
 // ── Official scramble import + group assignment ────────────────────────
 // Pure logic shared by the admin UI (client-side preview parse) and the
 // admin API routes (authoritative re-parse before writing). Nothing here
@@ -27,10 +28,37 @@ export interface GroupAssignmentsDoc {
   assignments: Record<string, number>;
 }
 
-/** Attempts per round the solve flow records (Ao5). A scramble set with
- *  fewer than this can't drive a full round, so such rounds are reported
- *  as skipped rather than imported half-usable. */
-export const SCRAMBLES_PER_GROUP = 5;
+/** Fallback attempts-per-group when the caller supplies no expectation
+ *  for an (eventId, round) — an Ao5 round, which is what every
+ *  competition ran before per-event formats existed.
+ *
+ *  Was a hard 5 imposed on every group. The TNoodle file always carried
+ *  the real count (a 3-attempt round exports 3 scrambles per set); this
+ *  constant overrode it, so a legitimate Mo3/Bo3 export was rejected as
+ *  malformed with "нэг группэд 5 холилт байх ёстой (3 байна)". */
+export const DEFAULT_SCRAMBLES_PER_GROUP = 5;
+
+/** How many scrambles a given (eventId, round) needs — supplied by the
+ *  import UI from the competition's own event config. */
+export type ExpectedScrambleCount = (eventId: string, round: number) => number;
+
+/** Builds that lookup from a competition's events[].
+ *
+ *  The count is per EVENT, not per round: this schema has one resultFormat
+ *  for an event and every round of it is solved the same way. The `round`
+ *  parameter exists so that stops being a breaking change if per-round
+ *  formats ever arrive.
+ *
+ *  An event not in the competition falls back to the Ao5 default rather
+ *  than 0 — a file may legitimately carry events this competition does not
+ *  run, and those rounds should be judged by the old rule, not rejected
+ *  for needing zero scrambles. */
+export function expectedScrambleCountFor(
+  events: { eventId: string; resultFormat?: ResultFormat }[],
+): ExpectedScrambleCount {
+  const byEvent = new Map(events.map((e) => [e.eventId, attemptsForFormat(resolveResultFormat(e.resultFormat))]));
+  return (eventId) => byEvent.get(eventId) ?? DEFAULT_SCRAMBLES_PER_GROUP;
+}
 
 /** Firestore doc id for both subcollections. */
 export function roundKey(eventId: string, round: number): string {
@@ -95,7 +123,16 @@ function parseRoundNumber(roundId: unknown): number | null {
  *  which download you take, and rejecting the second would look like a
  *  broken file to the admin. Every failure returns a Mongolian message
  *  naming what was wrong; nothing is ever dropped silently. */
-export function parseTnoodleJson(raw: unknown): ParseResult {
+/** Parses a TNoodle export into per-round scramble groups.
+ *
+ *  NO LONGER A PURE FUNCTION OF THE FILE. It now needs to know how many
+ *  scrambles a round should contain, and that lives on the competition
+ *  (events[].resultFormat), not in the export. `expected` is that lookup;
+ *  the import UI supplies it from the competition it already has selected.
+ *  Omitting it falls back to 5 for every round, which is exactly the old
+ *  behaviour — so an existing caller that has not been updated still
+ *  imports Ao5 rounds identically. */
+export function parseTnoodleJson(raw: unknown, expected?: ExpectedScrambleCount): ParseResult {
   if (!isObject(raw)) {
     return { ok: false, error: 'JSON файлын бүтэц буруу байна (объект байх ёстой).' };
   }
@@ -134,6 +171,10 @@ export function parseTnoodleJson(raw: unknown): ParseResult {
       // so a slightly off-spec export still imports in the right order.
       const roundNumber = parseRoundNumber(round.id) ?? i + 1;
 
+      // How many this round actually needs — Ao5 rounds still want 5, an
+      // Mo3/Bo3 round wants 3, and so on.
+      const needed = expected?.(eventId, roundNumber) ?? DEFAULT_SCRAMBLES_PER_GROUP;
+
       const sets = round.scrambleSets;
       if (!Array.isArray(sets)) {
         return {
@@ -162,11 +203,13 @@ export function parseTnoodleJson(raw: unknown): ParseResult {
         const scrambles = set.scrambles.filter(
           (s: unknown): s is string => typeof s === 'string' && s.trim() !== '',
         );
-        if (scrambles.length < SCRAMBLES_PER_GROUP) {
-          skipReason = `нэг группэд ${SCRAMBLES_PER_GROUP} холилт байх ёстой (${scrambles.length} байна)`;
+        if (scrambles.length < needed) {
+          skipReason = `нэг группэд ${needed} холилт байх ёстой (${scrambles.length} байна)`;
           break;
         }
-        groups.push({ label: groupLabel(g), scrambles: scrambles.slice(0, SCRAMBLES_PER_GROUP) });
+        // Trimmed to `needed`, not to a constant: TNoodle also emits extra
+        // scrambles for extra attempts, which this importer does not use.
+        groups.push({ label: groupLabel(g), scrambles: scrambles.slice(0, needed) });
       }
 
       if (skipReason) {

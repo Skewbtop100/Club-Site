@@ -2,7 +2,7 @@
 
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
 import type { AttemptTime } from '@/lib/online-competition/ao5';
-import { computeSummaryStats } from '../_lib/summaryStats';
+import { computeResult, type ResultFormat } from '@/lib/online-competition/ao5';
 import { beatsAo5, beatsPr, type StoredBests } from '../_lib/prCheck';
 
 export interface AttemptResult {
@@ -23,6 +23,7 @@ function PrTag() {
 
 export default function SummaryStage({
   attempts,
+  resultFormat,
   bests,
   onRedo,
   onSubmit,
@@ -31,6 +32,9 @@ export default function SummaryStage({
   submitError,
 }: {
   attempts: AttemptResult[];
+  /** The run's captured format — decides how these attempts collapse into
+   *  one number, and which of them (if any) are excluded. */
+  resultFormat: ResultFormat;
   /** The athlete's stored bests for this event, or null while still
    *  loading / unavailable — in which case no marker is shown. */
   bests: StoredBests | null;
@@ -44,7 +48,7 @@ export default function SummaryStage({
   submitError: string;
 }) {
   const times: AttemptTime[] = attempts.map((a) => (a.isDnf ? 'DNF' : (a.timeCs as number)));
-  const { ao5, bestIndex, worstIndex } = computeSummaryStats(times);
+  const { value: ao5, excludedIndices } = computeResult(times, resultFormat);
 
   // Same predicate the live toast uses, so a row can't disagree with the
   // badge the athlete already saw mid-session.
@@ -68,8 +72,11 @@ export default function SummaryStage({
 
         <div className="oc-solve-attempt-list" style={{ marginTop: 10 }}>
           {attempts.map((a, i) => {
-            const isExcluded = i === bestIndex || i === worstIndex;
-            const tag = i === bestIndex ? 'ХАМГИЙН БАГА' : i === worstIndex ? 'ХАМГИЙН ИХ' : '';
+            // Ao5 drops its best and worst; Mo3 counts all three and a
+            // best-of excludes nothing, so for those excludedIndices is
+            // empty and no row is greyed or tagged.
+            const isExcluded = excludedIndices.includes(i);
+            const tag = excludedIndices[0] === i ? 'ХАМГИЙН БАГА' : excludedIndices[1] === i ? 'ХАМГИЙН ИХ' : '';
             return (
               <div key={i} className="oc-solve-attempt-row" style={isExcluded ? { opacity: 0.55 } : undefined}>
                 <span style={{ font: '500 10px var(--oc-font-mono), monospace', color: '#5B564B' }}>#{i + 1}</span>

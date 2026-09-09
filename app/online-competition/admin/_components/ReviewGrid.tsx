@@ -10,11 +10,26 @@ import type {
 import type { RegistrationAdminView } from '@/app/api/online-competition/admin-competitions/[id]/registrations/route';
 import type { ScramblesOverview } from '@/app/api/online-competition/admin-scrambles/route';
 import { roundKey } from '@/lib/online-competition/scrambles';
-import { computeAo5, type AttemptTime } from '@/lib/online-competition/ao5';
+import {
+  attemptsForFormat,
+  computeResult,
+  resolveResultFormat,
+  type AttemptTime,
+  type ResultFormat,
+} from '@/lib/online-competition/ao5';
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
 import SubmissionDetailPanel from './SubmissionDetailPanel';
 
-const ATTEMPTS = [1, 2, 3, 4, 5];
+// Attempt columns are PER EVENT, derived from that event's resultFormat —
+// a Bo3 event shows three columns, not five with two permanently empty.
+//
+// Safe to key off the single selected event because this grid only ever
+// shows one at a time: `eventId` is state, the tab row sets it, and every
+// row is filtered `s.event === eventId`. If it ever showed mixed events,
+// this would have to move onto the row.
+function attemptColumns(count: number): number[] {
+  return Array.from({ length: count }, (_, i) => i + 1);
+}
 
 // ── How attempts map to storage ──────────────────────────────────────────
 // The solve flow writes one onlineSubmissions doc per attempt with
@@ -263,6 +278,15 @@ export default function ReviewGrid() {
     [review, submissions, eventId],
   );
 
+  // The selected event's format decides how many attempt columns to draw
+  // and how the Дундаж column is computed. Falls back to Ao5 for a legacy
+  // event with no stored format (resolveResultFormat's rule).
+  const resultFormat = resolveResultFormat(
+    competition?.events.find((e) => e.eventId === eventId)?.resultFormat,
+  );
+  const attemptCount = attemptsForFormat(resultFormat);
+  const ATTEMPTS = attemptColumns(attemptCount);
+
   if (competitions === null) return <p className="oc-v3-status">Ачааллаж байна...</p>;
   if (competitions.length === 0) return <p className="oc-v3-status">Тэмцээн алга.</p>;
 
@@ -396,6 +420,8 @@ export default function ReviewGrid() {
               busy={busy}
               onOpen={setSelected}
               onBulk={() => bulkApprove(row)}
+              attemptCount={attemptCount}
+              resultFormat={resultFormat}
             />
           ))
         )}
@@ -422,24 +448,31 @@ function GridRow({
   busy,
   onOpen,
   onBulk,
+  attemptCount,
+  resultFormat,
 }: {
   row: AthleteRow;
   selected: string | null;
   busy: boolean;
   onOpen: (id: string) => void;
   onBulk: () => void;
+  /** From the selected event's resultFormat — see attemptColumns. */
+  attemptCount: number;
+  resultFormat: ResultFormat;
 }) {
   const submitted = [...row.attempts.values()];
   const decided = submitted.filter(isDecided);
+  const ATTEMPTS = attemptColumns(attemptCount);
 
-  // Ao5/single are computed from DECIDED attempts only — an undecided time
-  // isn't a result yet. Needs all five decided to be a real Ao5.
+  // The result and the single are computed from DECIDED attempts only — an
+  // undecided time isn't a result yet. Needs every attempt of the event's
+  // format decided before the average column shows anything.
   const decidedByAttempt = ATTEMPTS.map((a) => {
     const s = row.attempts.get(a);
     return s && isDecided(s) ? effectiveTime(s) : null;
   });
   const allDecided = decidedByAttempt.every((t) => t !== null);
-  const ao5 = allDecided ? computeAo5(decidedByAttempt as AttemptTime[]).ao5 : undefined;
+  const ao5 = allDecided ? computeResult(decidedByAttempt as AttemptTime[], resultFormat).value : undefined;
   const numeric = decidedByAttempt.filter((t): t is number => typeof t === 'number');
   const single = numeric.length > 0 ? Math.min(...numeric) : null;
 

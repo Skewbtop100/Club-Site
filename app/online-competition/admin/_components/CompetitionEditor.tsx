@@ -580,12 +580,18 @@ function transitionLabel(fromRound: number, rounds: number): string {
 
 const FORMAT_LOCKED_REASON = 'Үзүүлэлт орсон тул формат солих боломжгүй.';
 
-// Step B ships the control; step C makes it mean something. Until then a
-// non-Ao5 selection SAVES but cannot be run — the solve flow still demands
-// five attempts — so the editor says so rather than letting an admin
-// discover it on competition day.
+// Step C made a non-Ao5 competition RUNNABLE: the solve flow asks for the
+// right number of attempts, the review grid shows the right columns, and
+// the scramble import expects the right count. What it did NOT do is make
+// one RANKABLE — round-results, season points and athlete stats still
+// require exactly five judged attempts (steps D and E). So the warning
+// stopped being "not supported" and became "supported up to a point",
+// which is the more dangerous state to leave undocumented: an admin can
+// now run a whole Mo3 competition and only discover at the end that
+// nobody can be ranked.
 const FORMAT_UNSUPPORTED_WARNING =
-  'Ao5-аас өөр формат хараахан дэмжигдэхгүй байна. Тэмцээн эхлүүлэхээс өмнө шинэчлэлт хүлээнэ үү.';
+  'Ao5-аас өөр формат: тэмцээн явуулж, бичлэг шүүх боломжтой. Гэвч эрэмбэ, ' +
+  'улирлын оноо, тамирчны статистик хараахан тооцогдохгүй.';
 
 function EventsTab({
   events,

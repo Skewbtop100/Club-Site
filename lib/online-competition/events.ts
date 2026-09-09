@@ -8,13 +8,11 @@ import type { ScrambleableEventId } from './scramble-types';
 //
 // ── Why these ten, and not more ──────────────────────────────────────────
 // Every event here is a genuine WCA average-of-5. That is not a
-// preference, it is what the platform can actually run: the Ao5 rule and
-// the five-attempt count are hardcoded in seven places (computeAo5 in
-// ao5.ts, ATTEMPTS_PER_ROUND in round-results.ts, the >= 5 guards in
-// athleteStats.ts and seasonPoints.ts, TOTAL_ATTEMPTS on the solve page,
-// SCRAMBLES_PER_GROUP for the TNoodle import, and the length === 5 branch
-// in summaryStats.ts). An event whose real format is not Ao5 would be
-// silently run as one.
+// preference, it is what the platform can actually SCORE: the ranker,
+// the season scorer and the stats recompute still assume exactly five
+// judged attempts (see attemptsForFormat's note in ao5.ts for what is and
+// is not threaded through yet). An event whose real format is not Ao5
+// would run, but produce no standings.
 //
 // DELIBERATELY EXCLUDED — do not "fix" this by adding them:
 //

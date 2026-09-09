@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react';
 import type { OnlineCompetitionAdminView } from '@/lib/online-competition/types';
 import {
+  expectedScrambleCountFor,
   parseTnoodleJson,
   roundKey,
   type ParseResult,
@@ -94,7 +95,14 @@ export default function FileTab({
     setFileText(text);
     setOpen(true);
     try {
-      setParsed(parseTnoodleJson(JSON.parse(text)));
+      // The competition decides how many scrambles a round needs — the
+      // file alone cannot say, since that depends on each event's format.
+      setParsed(
+        parseTnoodleJson(
+          JSON.parse(text),
+          expectedScrambleCountFor(competition?.events ?? []),
+        ),
+      );
     } catch {
       setParsed({ ok: false, error: 'JSON файлыг уншиж чадсангүй (буруу форматтай).' });
     }

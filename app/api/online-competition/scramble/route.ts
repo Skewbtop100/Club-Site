@@ -29,13 +29,22 @@ import { ROUND_ACCESS_MESSAGE, resolveRoundAccess } from '@/lib/online-competiti
 // did before this route learned about groups.
 
 /** Looks up the athlete's official scramble; null means "fall back". */
+type GroupScrambleLookup =
+  | { scramble: string; groupLabel: string }
+  /** The athlete HAS an official group, but asked for an attempt beyond
+   *  the scrambles it holds — refuse rather than silently going random. */
+  | { outOfRange: true; max: number }
+  /** No official scramble applies (no import, or no group assignment) —
+   *  random generation is the correct answer. */
+  | null;
+
 async function lookupGroupScramble(params: {
   competitionId: string;
   eventId: string;
   round: number;
   uid: string;
   attempt: number;
-}): Promise<{ scramble: string; groupLabel: string } | null> {
+}): Promise<GroupScrambleLookup> {
   const { competitionId, eventId, round, uid, attempt } = params;
   const db = getOnlineCompAdminDb();
   const compRef = db.collection('onlineCompetitions').doc(competitionId);
@@ -53,10 +62,23 @@ async function lookupGroupScramble(params: {
   const groups = scrambleSnap.get('groups');
   if (!Array.isArray(groups)) return null;
   const group = groups[groupIndex] as ScrambleGroup | undefined;
-  const scramble = group?.scrambles?.[attempt - 1];
+  if (!group) return null;
+
+  // OUT OF RANGE IS AN ERROR, NOT A FALLBACK. This group has a definite
+  // number of scrambles; an attempt beyond it means the caller and the
+  // imported data disagree about the round's shape. Returning null here
+  // would fall through to random cstimer generation and hand the athlete
+  // an UNOFFICIAL scramble in an official round, silently. With a fixed 5
+  // that was nearly unreachable; with per-event formats an off-by-one is
+  // a real possibility, so it is surfaced instead.
+  if (attempt > group.scrambles.length) {
+    return { outOfRange: true as const, max: group.scrambles.length };
+  }
+
+  const scramble = group.scrambles[attempt - 1];
   if (typeof scramble !== 'string' || scramble.trim() === '') return null;
 
-  return { scramble, groupLabel: group?.label ?? '' };
+  return { scramble, groupLabel: group.label ?? '' };
 }
 
 export async function GET(req: Request) {
@@ -107,6 +129,15 @@ export async function GET(req: Request) {
   if (competitionId && uid && Number.isInteger(attempt) && attempt >= 1) {
     try {
       const official = await lookupGroupScramble({ competitionId, eventId, round, uid, attempt });
+      if (official && 'outOfRange' in official) {
+        return NextResponse.json(
+          {
+            error: `Attempt ${attempt} is out of range for this round (${official.max} scrambles).`,
+            message: 'Энэ раундад ийм олон оролдлого байхгүй байна.',
+          },
+          { status: 400 },
+        );
+      }
       if (official) {
         return NextResponse.json({
           scramble: official.scramble,

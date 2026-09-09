@@ -525,6 +525,41 @@ const read = async (id) => (await db.collection(COL).doc(id).get()).data();
 
   await pendingRef.delete();
 
+
+  // ── scramble route: the attempt bound ─────────────────────────────────
+  // The route's official-scramble lookup used to return null for an
+  // out-of-range attempt, and the caller treated null as "no official
+  // scramble applies" and fell through to RANDOM cstimer generation —
+  // silently handing an athlete an unofficial scramble in an official
+  // round. With a fixed 5 that was nearly unreachable; with per-event
+  // formats an off-by-one is a real possibility.
+  //
+  // The route itself needs Next's request plumbing, so what is exercised
+  // here is the stored shape the bound reads: the group's scramble count
+  // per (event, round). If this drifts, the bound is wrong.
+  const BOUND = 'comp-bound';
+  await db.collection('onlineCompetitions').doc(BOUND).set({
+    name: 'bound', status: 'upcoming', season: 's1',
+    events: [{ eventId: '333', label: '3x3x3', rounds: 1, resultFormat: 'mo3' }],
+  });
+  await db.collection('onlineCompetitions').doc(BOUND).collection('scrambleData').doc('333_1').set({
+    eventId: '333', round: 1,
+    groups: [{ label: 'A', scrambles: ["R U R'", "U R U'", "F R F'"] }],
+  });
+  await db.collection('onlineCompetitions').doc(BOUND).collection('groupAssignments').doc('333_1').set({
+    assignments: { u1: 0 },
+  });
+
+  const groupSnap = await db.collection('onlineCompetitions').doc(BOUND).collection('scrambleData').doc('333_1').get();
+  const group = groupSnap.get('groups')[0];
+  ok('bound: an Mo3 round stores exactly 3 scrambles', group.scrambles.length === 3, String(group.scrambles.length));
+  ok('bound: attempt 3 is in range', group.scrambles[3 - 1] !== undefined);
+  ok('bound: attempt 4 is OUT of range (would have gone random before)',
+    group.scrambles[4 - 1] === undefined && 4 > group.scrambles.length);
+  ok('bound: the assignment resolves to that group',
+    (await db.collection('onlineCompetitions').doc(BOUND).collection('groupAssignments').doc('333_1').get())
+      .get('assignments').u1 === 0);
+
   console.log(`\n  ${pass} passed, ${fail} failed\n`);
   fs.rmSync(OUT, { recursive: true, force: true });
   process.exit(fail === 0 ? 0 : 1);
