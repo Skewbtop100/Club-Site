@@ -5072,6 +5072,27 @@ button.oc-rv-cell:hover {
 }
 
 /* Reason shown beside a disabled ФОРМАТ select. */
+/* Cutoff explanation on the summary screen. Amber (the warning tone used
+   across the admin) rather than the DNF red: the athlete's attempts were
+   valid, the round simply ended. */
+.oc-solve-cutoff-note {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid #3A3018;
+  background: #14100A;
+  padding: 12px 14px;
+  border-radius: 2px;
+  font: 400 12px/1.6 var(--oc-font-heading), sans-serif;
+  color: #E0A020;
+  text-wrap: pretty;
+}
+.oc-solve-cutoff-title {
+  font: 700 10px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .14em;
+  color: #E0A020;
+}
+
 /* Over-the-time-limit notice on the solve flow. Same shape as the PR
    toast it sits beside, in the danger red used for a DNF elsewhere rather
    than the volt accent, which reads as a good result. */

@@ -7,7 +7,13 @@ import { Button, FieldLabel, INPUT_CLASS, MONO_INPUT_CLASS, SELECT_CLASS, Square
 import { ROUND_GAP_TEXT, type RoundGapEvent } from './RoundGapWarning';
 import { uploadImageToCloudinary } from '@/lib/online-competition/cloudinary';
 import { ONLINE_COMP_EVENTS, onlineCompEventLabel } from '@/lib/online-competition/events';
-import { RESULT_FORMATS, formatLabel, resolveResultFormat, type ResultFormat } from '@/lib/online-competition/ao5';
+import {
+  RESULT_FORMATS,
+  cutoffPhaseFor,
+  formatLabel,
+  resolveResultFormat,
+  type ResultFormat,
+} from '@/lib/online-competition/ao5';
 import { fmtTimeLimit, parseTimeLimit } from '@/lib/online-competition/time-utils';
 import { WcaEventIcon, hasWcaEventIcon } from '@/lib/wca-event-icon';
 import {
@@ -214,6 +220,11 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
     for (const row of events) {
       if (!parseTimeLimit(row.timeLimit).ok) {
         return `${onlineCompEventLabel(row.eventId)}: цагийн хязгаар буруу форматтай (жишээ: 10:00)`;
+      }
+      for (const round of cutoffRoundsFor(row)) {
+        if (!parseTimeLimit(row.cutoffs[round] ?? '').ok) {
+          return `${onlineCompEventLabel(row.eventId)} · раунд ${round}: шүүлтүүр буруу форматтай (жишээ: 1:00)`;
+        }
       }
     }
 
@@ -535,6 +546,10 @@ interface EventRow {
    *  unparseable value blocks the save with a message rather than being
    *  silently dropped to "no limit". */
   timeLimit: string;
+  /** round number -> RAW cutoff text, same reasoning as timeLimit. Not
+   *  pruned when the round count drops, so lowering and raising it again
+   *  restores what was typed — the treatment advancement already gets. */
+  cutoffs: Record<number, string>;
   advancement: Record<number, { method: 'count' | 'percent'; value: string }>;
 }
 
@@ -548,6 +563,7 @@ function toEventRow(e: OnlineCompetitionEventConfig): EventRow {
     rounds: String(e.rounds),
     resultFormat: resolveResultFormat(e.resultFormat),
     timeLimit: typeof e.timeLimitCs === 'number' ? fmtTimeLimit(e.timeLimitCs) : '',
+    cutoffs: Object.fromEntries((e.cutoffs ?? []).map((c) => [c.round, fmtTimeLimit(c.cutoffCs)])),
     advancement,
   };
 }
@@ -577,8 +593,25 @@ function toEventConfig(row: EventRow): OnlineCompetitionEventConfig {
       const parsed = parseTimeLimit(row.timeLimit);
       return parsed.ok ? parsed.value : null;
     })(),
+    // In-range, parseable, non-empty entries only. A blank round is "no
+    // cutoff", not an error — and an out-of-range one (the round count was
+    // lowered) is dropped rather than sent, exactly like advancement.
+    cutoffs: cutoffRoundsFor(row)
+      .map((round) => {
+        const parsed = parseTimeLimit(row.cutoffs[round] ?? '');
+        return parsed.ok && parsed.value !== null ? { round, cutoffCs: parsed.value } : null;
+      })
+      .filter((c): c is { round: number; cutoffCs: number } => c !== null),
     advancement,
   };
+}
+
+/** The rounds of this event that may carry a cutoff: all of them, but only
+ *  when the format has an established cutoff phase (ao5/bo3). Empty
+ *  otherwise, which is what hides the control. */
+function cutoffRoundsFor(row: EventRow): number[] {
+  if (cutoffPhaseFor(row.resultFormat) === null) return [];
+  return Array.from({ length: roundsOf(row) }, (_, i) => i + 1);
 }
 
 /** Parsed round count, floored at 1 — an empty or junk input must not
@@ -646,6 +679,12 @@ function EventsTab({
     setEvents((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
   }
 
+  function setCutoff(index: number, round: number, text: string) {
+    setEvents((prev) =>
+      prev.map((row, i) => (i === index ? { ...row, cutoffs: { ...row.cutoffs, [round]: text } } : row)),
+    );
+  }
+
   function setAdvancement(
     index: number,
     fromRound: number,
@@ -661,7 +700,7 @@ function EventsTab({
   }
 
   function addEvent(eventId: string) {
-    setEvents((prev) => [...prev, { eventId, rounds: '1', resultFormat: 'ao5', timeLimit: '', advancement: {} }]);
+    setEvents((prev) => [...prev, { eventId, rounds: '1', resultFormat: 'ao5', timeLimit: '', cutoffs: {}, advancement: {} }]);
     setPickerOpen(false);
   }
 
@@ -678,6 +717,7 @@ function EventsTab({
         const transitions = transitionsFor(rounds);
         const known = ONLINE_COMP_EVENTS.some((o) => o.id === row.eventId);
         const locked = lockedEventIds.includes(row.eventId);
+        const cutoffRounds = cutoffRoundsFor(row);
         return (
           <div key={i} className="oc-cf-ev">
             <div className="oc-cf-ev-grid">
@@ -796,6 +836,32 @@ function EventsTab({
               <p className="oc-cf-locked" style={{ marginTop: 8 }}>
                 {FORMAT_LOCKED_REASON}
               </p>
+            )}
+
+            {/* One row per round that may carry a cutoff. Only shown for
+                formats with an established cutoff phase — see
+                cutoffPhaseFor; Mo3/Bo2/Bo1 are omitted deliberately rather
+                than guessed at. */}
+            {cutoffRounds.length > 0 && (
+              <div className="oc-cf-adv">
+                <FieldLabel>ШҮҮЛТҮҮР · ЭХНИЙ {cutoffPhaseFor(row.resultFormat)} ОРОЛДЛОГО</FieldLabel>
+                {cutoffRounds.map((round) => (
+                  <div key={round} className="oc-cf-adv-row">
+                    <span className="oc-cf-adv-label">Раунд {round}</span>
+                    <input
+                      className={MONO_INPUT_CLASS}
+                      value={row.cutoffs[round] ?? ''}
+                      disabled={locked}
+                      placeholder="1:00"
+                      onChange={(e) => setCutoff(i, round, e.target.value)}
+                      aria-label={`Раунд ${round} шүүлтүүр`}
+                      title={locked ? FORMAT_LOCKED_REASON : 'Хоосон бол шүүлтүүргүй'}
+                      style={locked ? { width: 110, flexShrink: 0, opacity: 0.5 } : { width: 110, flexShrink: 0 }}
+                    />
+                    <span className="oc-cf-adv-suffix">хоосон = шүүлтүүргүй</span>
+                  </div>
+                ))}
+              </div>
             )}
 
             {/* One row per transition, derived from the round count. A

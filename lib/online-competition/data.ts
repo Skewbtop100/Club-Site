@@ -65,7 +65,7 @@ function normalizeEvents(raw: unknown): OnlineCompetitionEventConfig[] {
   const out: OnlineCompetitionEventConfig[] = [];
   for (const e of raw) {
     if (typeof e === 'string') {
-      out.push({ eventId: e, label: e.toUpperCase(), rounds: 1, resultFormat: 'ao5', timeLimitCs: null });
+      out.push({ eventId: e, label: e.toUpperCase(), rounds: 1, resultFormat: 'ao5', timeLimitCs: null, cutoffs: [] });
     } else if (e && typeof e === 'object' && typeof (e as Record<string, unknown>).eventId === 'string') {
       const obj = e as Partial<OnlineCompetitionEventConfig>;
       out.push({
@@ -79,6 +79,9 @@ function normalizeEvents(raw: unknown): OnlineCompetitionEventConfig[] {
           typeof (e as Record<string, unknown>).timeLimitCs === 'number'
             ? ((e as Record<string, unknown>).timeLimitCs as number)
             : null,
+        cutoffs: Array.isArray((e as Record<string, unknown>).cutoffs)
+          ? ((e as Record<string, unknown>).cutoffs as OnlineCompetitionEventConfig['cutoffs'])
+          : [],
       });
     }
   }

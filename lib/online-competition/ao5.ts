@@ -126,6 +126,36 @@ export function attemptsForFormat(format: ResultFormat): number {
   }
 }
 
+/** How many attempts a round's CUTOFF PHASE covers, or null when this
+ *  format does not support a cutoff in this build.
+ *
+ *  ao5 -> 2 and bo3 -> 1 are the WCA combined-round conventions.
+ *
+ *  mo3, bo2 and bo1 return null DELIBERATELY, and this is a "do not know"
+ *  rather than a "cannot": I could not establish from the WCA Regulations
+ *  what the cutoff phase for a combined Mean-of-3 round is — I believe it
+ *  is 1 attempt, but a wrong value here silently ends athletes' rounds an
+ *  attempt early or late, so it is not a thing to guess at. bo1 has no
+ *  meaningful phase (one attempt is the whole round) and bo2 is
+ *  unestablished for the same reason as mo3.
+ *
+ *  Consequences of null: validateCompetitionInput refuses a cutoff on such
+ *  an event, the admin UI does not offer one, and the scorer treats the
+ *  round as having none. Settle the regulation, add the number here, and
+ *  everything else follows — this is the only place it is defined. */
+export function cutoffPhaseFor(format: ResultFormat): number | null {
+  switch (format) {
+    case 'ao5':
+      return 2;
+    case 'bo3':
+      return 1;
+    case 'mo3':
+    case 'bo2':
+    case 'bo1':
+      return null;
+  }
+}
+
 /** Whether this format produces an AVERAGE (a number derived from several
  *  attempts) as opposed to a best single.
  *

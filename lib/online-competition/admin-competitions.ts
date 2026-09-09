@@ -1,8 +1,8 @@
 import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { DEFAULT_COMPETITION_FORMAT } from './types';
 import { validateQualifierInput } from './rounds';
-import { RESULT_FORMATS, type ResultFormat } from './ao5';
-import type { OnlineCompetitionAdvancement } from './types';
+import { RESULT_FORMATS, cutoffPhaseFor, type ResultFormat } from './ao5';
+import type { OnlineCompetitionAdvancement, OnlineCompetitionCutoff } from './types';
 import type { OnlineCompetitionEventConfig, OnlineCompetitionStatus, OnlineCompetitionWriteInput } from './types';
 
 // Server-only validation + Firestore-doc-shaping helpers shared by
@@ -80,6 +80,42 @@ function parseAdvancement(
   return { ok: true, value: out };
 }
 
+/** Validates one event's per-round cutoffs.
+ *
+ *  Refused when the format has no established cutoff phase (see
+ *  cutoffPhaseFor) — storing a cutoff the scorer will ignore is worse than
+ *  refusing it, because the admin would believe a round was gated when it
+ *  was not. */
+function parseCutoffs(
+  raw: unknown,
+  rounds: number,
+  format: ResultFormat,
+): { ok: true; value: OnlineCompetitionCutoff[] } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true, value: [] };
+  if (!Array.isArray(raw)) return { ok: false, error: 'cutoffs must be an array' };
+  if (raw.length > 0 && cutoffPhaseFor(format) === null) {
+    return { ok: false, error: `cutoff is not supported for format ${format}` };
+  }
+
+  const out: OnlineCompetitionCutoff[] = [];
+  const seen = new Set<number>();
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') return { ok: false, error: 'invalid cutoff entry' };
+    const c = entry as Record<string, unknown>;
+    if (typeof c.round !== 'number' || !Number.isInteger(c.round) || c.round < 1 || c.round > rounds) {
+      return { ok: false, error: `cutoff round ${String(c.round)} is out of range for ${rounds} round(s)` };
+    }
+    if (typeof c.cutoffCs !== 'number' || !Number.isInteger(c.cutoffCs) || c.cutoffCs <= 0) {
+      return { ok: false, error: 'cutoffCs must be a positive integer' };
+    }
+    if (seen.has(c.round)) return { ok: false, error: `duplicate cutoff for round ${c.round}` };
+    seen.add(c.round);
+    out.push({ round: c.round, cutoffCs: c.cutoffCs });
+  }
+  out.sort((a, b) => a.round - b.round);
+  return { ok: true, value: out };
+}
+
 export function validateCompetitionInput(body: unknown): ValidationResult {
   if (!body || typeof body !== 'object') return { ok: false, error: 'Invalid body' };
   const b = body as Record<string, unknown>;
@@ -144,12 +180,15 @@ export function validateCompetitionInput(body: unknown): ValidationResult {
       return { ok: false, error: `${e.eventId}: invalid timeLimitCs` };
     }
     const timeLimitCs: number | null = (e.timeLimitCs as number | null | undefined) ?? null;
+    const cutoffs = parseCutoffs(e.cutoffs, e.rounds, resultFormat);
+    if (!cutoffs.ok) return { ok: false, error: `${e.eventId}: ${cutoffs.error}` };
     events.push({
       eventId: e.eventId,
       label: e.label,
       rounds: e.rounds,
       resultFormat,
       timeLimitCs,
+      cutoffs: cutoffs.value,
       advancement: advancement.value,
     });
   }
@@ -295,6 +334,20 @@ export class CompetitionWriteError extends Error {}
 interface ScoringRules {
   resultFormat: string;
   timeLimitCs: number | null;
+  /** Serialised "round:cs,round:cs" so a set of cutoffs compares by value.
+   *  Changing one re-derives history the same way the other two do: it
+   *  decides whether an athlete's round ended at attempt 2, so moving it
+   *  can retroactively grant or revoke three attempts' worth of result. */
+  cutoffs: string;
+}
+
+function serialiseCutoffs(raw: unknown): string {
+  if (!Array.isArray(raw)) return '';
+  return (raw as Record<string, unknown>[])
+    .filter((c) => typeof c?.round === 'number' && typeof c?.cutoffCs === 'number')
+    .map((c) => `${c.round as number}:${c.cutoffCs as number}`)
+    .sort()
+    .join(',');
 }
 
 function storedScoringRules(stored: unknown): Map<string, ScoringRules> {
@@ -310,6 +363,7 @@ function storedScoringRules(stored: unknown): Map<string, ScoringRules> {
       // Absent reads as null (no limit), so setting one on a legacy event
       // IS a change — which is correct: it can only add DNFs.
       timeLimitCs: typeof e.timeLimitCs === 'number' ? e.timeLimitCs : null,
+      cutoffs: serialiseCutoffs(e.cutoffs),
     });
   }
   return before;
@@ -320,9 +374,9 @@ function storedScoringRules(stored: unknown): Map<string, ScoringRules> {
 function eventsChangingScoringRules(
   stored: unknown,
   incoming: OnlineCompetitionWriteInput['events'],
-): { eventId: string; field: 'resultFormat' | 'timeLimitCs' }[] {
+): { eventId: string; field: 'resultFormat' | 'timeLimitCs' | 'cutoffs' }[] {
   const before = storedScoringRules(stored);
-  const out: { eventId: string; field: 'resultFormat' | 'timeLimitCs' }[] = [];
+  const out: { eventId: string; field: 'resultFormat' | 'timeLimitCs' | 'cutoffs' }[] = [];
   for (const e of incoming) {
     const was = before.get(e.eventId);
     if (!was) continue;
@@ -331,6 +385,9 @@ function eventsChangingScoringRules(
     }
     if (was.timeLimitCs !== (e.timeLimitCs ?? null)) {
       out.push({ eventId: e.eventId, field: 'timeLimitCs' });
+    }
+    if (was.cutoffs !== serialiseCutoffs(e.cutoffs)) {
+      out.push({ eventId: e.eventId, field: 'cutoffs' });
     }
   }
   return out;
@@ -426,6 +483,12 @@ export async function writeCompetitionDoc(
         if (refusedLimit.length > 0) {
           throw new CompetitionWriteError(
             `Үзүүлэлт орсон тул цагийн хязгаар солих боломжгүй: ${refusedLimit.map((c) => c.eventId).join(', ')}`,
+          );
+        }
+        const refusedCutoff = refusedChange.filter((c) => c.field === 'cutoffs');
+        if (refusedCutoff.length > 0) {
+          throw new CompetitionWriteError(
+            `Үзүүлэлт орсон тул шүүлтүүр солих боломжгүй: ${refusedCutoff.map((c) => c.eventId).join(', ')}`,
           );
         }
         if (refusedRemoval.length > 0) {

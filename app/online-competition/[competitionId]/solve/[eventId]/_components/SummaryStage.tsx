@@ -1,8 +1,8 @@
 'use client';
 
-import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
+import { fmtCentiseconds, fmtTimeLimit } from '@/lib/online-competition/time-utils';
 import type { AttemptTime } from '@/lib/online-competition/ao5';
-import { computeResult, type ResultFormat } from '@/lib/online-competition/ao5';
+import { computeResult, formatLabel, type ResultFormat } from '@/lib/online-competition/ao5';
 import { beatsAverage, beatsPr, type StoredBests } from '../_lib/prCheck';
 
 export interface AttemptResult {
@@ -25,6 +25,8 @@ export default function SummaryStage({
   attempts,
   resultFormat,
   timeLimitCs,
+  cutOff,
+  cutoffCs,
   bests,
   onRedo,
   onSubmit,
@@ -39,6 +41,10 @@ export default function SummaryStage({
   /** null = no limit. Applied here so the provisional result the athlete
    *  sees matches what effectiveAttemptTime will compute at scoring. */
   timeLimitCs: number | null;
+  /** True when the run ended early because the cutoff was not beaten. The
+   *  result is then a SINGLE, not an average. */
+  cutOff: boolean;
+  cutoffCs: number | null;
   /** The athlete's stored bests for this event, or null while still
    *  loading / unavailable — in which case no marker is shown. */
   bests: StoredBests | null;
@@ -57,7 +63,16 @@ export default function SummaryStage({
       ? 'DNF'
       : a.timeCs,
   );
-  const { value: ao5, excludedIndices } = computeResult(times, resultFormat);
+  // A cut-off run has no average. computeResult is NOT called for one:
+  // its ao5 branch is deliberately unlength-guarded (step A), so a
+  // two-attempt slice returns a fabricated average faster than either
+  // attempt. The result is the best single, and nothing is "excluded" —
+  // no attempt was dropped, the round simply ended.
+  const finished = times.filter((t): t is number => t !== 'DNF');
+  const cutoffSingle = finished.length > 0 ? Math.min(...finished) : null;
+  const { value: ao5, excludedIndices } = cutOff
+    ? { value: cutoffSingle, excludedIndices: [] as number[] }
+    : computeResult(times, resultFormat);
 
   // Same predicate the live toast uses, so a row can't disagree with the
   // badge the athlete already saw mid-session.
@@ -105,9 +120,21 @@ export default function SummaryStage({
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {cutOff && cutoffCs !== null && (
+          <div className="oc-solve-cutoff-note" role="status">
+            <span className="oc-solve-cutoff-title">ШҮҮЛТҮҮР ДАВААГҮЙ</span>
+            <span>
+              Эхний {attempts.length} оролдлогод {fmtTimeLimit(cutoffCs)}-аас хурдан үр дүн
+              гараагүй тул раунд эндээ дуусч, зөвхөн ганц үзүүлэлт бүртгэгдэнэ.
+            </span>
+            <span className="oc-solve-pr-note">шүүгч баталгаажуулснаар эцэслэнэ</span>
+          </div>
+        )}
         <div className="oc-solve-ao5-box">
+          {/* A cut-off round produces a single, so labelling it AO5 would
+              be a lie about what the number is. */}
           <span style={{ font: '500 9px var(--oc-font-mono), monospace', letterSpacing: '.2em', color: '#8A8474' }}>
-            AO5
+            {cutOff ? 'ГАНЦ ҮЗҮҮЛЭЛТ' : formatLabel(resultFormat).toUpperCase()}
           </span>
           <span className="oc-solve-ao5-value">{ao5 === null ? 'DNF' : fmtCentiseconds(ao5)}</span>
           {ao5IsPr && (

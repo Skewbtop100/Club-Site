@@ -91,6 +91,23 @@ export interface OnlineCompetitionEventConfig {
    *  (see the exclusion note there), so a cumulative limit could only ever
    *  apply to an event this platform does not run. */
   timeLimitCs?: number | null;
+  /** PER-ROUND cutoffs, one entry per round that has one. Absent or empty
+   *  means no cutoff anywhere in this event.
+   *
+   *  Keyed by round — unlike timeLimitCs, which is per event — because a
+   *  cutoff is round-specific by nature: it exists to thin a large first
+   *  round, and a final normally has none. A per-event value would apply
+   *  one to the final too, which is wrong rather than merely imprecise.
+   *  Same shape as `advancement` above, for the same reason.
+   *
+   *  Semantics: in the cutoff phase (cutoffPhaseFor(resultFormat) — 2 for
+   *  Ao5, 1 for Bo3) the athlete must post a result STRICTLY BETTER than
+   *  cutoffCs. If they do, they complete the full attempt count. If they
+   *  do not, their round ends there and only a single is recorded — they
+   *  have no average, rank below everyone who does, and cannot advance.
+   *
+   *  Only offered for formats cutoffPhaseFor supports; see its comment. */
+  cutoffs?: OnlineCompetitionCutoff[];
   /** The PLANNED cut for each round transition of this event, one entry
    *  per transition (a 3-round event has two: from round 1, and from
    *  round 2). Absent on every competition created before the Төрөл tab,
@@ -111,6 +128,12 @@ export interface OnlineCompetitionEventConfig {
  *  so it is always 1..rounds-1. `method`/`value` mirror
  *  RoundStateDoc.qualifierMethod/qualifierValue exactly, and are validated
  *  with the same validateQualifierInput the qualify route uses. */
+/** One round's cutoff. `round` is 1..rounds. */
+export interface OnlineCompetitionCutoff {
+  round: number;
+  cutoffCs: number;
+}
+
 export interface OnlineCompetitionAdvancement {
   fromRound: number;
   method: 'count' | 'percent';

@@ -17,6 +17,7 @@ import type { AttemptTime } from '@/lib/online-competition/ao5';
 import {
   attemptsForFormat,
   computeResult,
+  cutoffPhaseFor,
   resolveResultFormat,
   type ResultFormat,
 } from '@/lib/online-competition/ao5';
@@ -57,6 +58,12 @@ function attemptTime(a: { timeCs: number | null; isDnf: boolean }, timeLimitCs: 
   if (a.isDnf || a.timeCs === null) return 'DNF';
   if (timeLimitCs !== null && a.timeCs > timeLimitCs) return 'DNF';
   return a.timeCs;
+}
+
+/** Fastest non-DNF attempt, or null if there was none. */
+function bestSingle(times: AttemptTime[]): number | null {
+  const finished = times.filter((t): t is number => t !== 'DNF');
+  return finished.length > 0 ? Math.min(...finished) : null;
 }
 
 interface Attempt {
@@ -125,16 +132,26 @@ export default function SolvePage() {
    *  adding a refetch later cannot silently reintroduce the hazard. A redo
    *  deliberately keeps the captured shape: it restarts the run, it does
    *  not renegotiate its format. */
+  /** This event's per-round cutoffs, kept until the run's round is known. */
+  const [eventCutoffs, setEventCutoffs] = useState<{ round: number; cutoffCs: number }[]>([]);
   const [runShape, setRunShape] = useState<{
     format: ResultFormat;
     attempts: number;
     timeLimitCs: number | null;
+    /** This ROUND's cutoff, and how many attempts its phase covers. Both
+     *  null when the round has none, or when the format has no established
+     *  phase (cutoffPhaseFor). */
+    cutoffCs: number | null;
+    cutoffPhase: number | null;
   } | null>(null);
   const [bests, setBests] = useState<{ pr: number | null; ao5: number | null; mo3: number | null } | null>(null);
   const [prToast, setPrToast] = useState(false);
   /** Set when the attempt just entered exceeds the event's time limit.
    *  Cleared when the next attempt starts. */
   const [overLimit, setOverLimit] = useState(false);
+  /** True once the athlete has failed this round's cutoff. Ends the run and
+   *  turns the result into a single. */
+  const [cutOff, setCutOff] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
 
   const recorder = useSolveRecorder();
@@ -152,7 +169,12 @@ export default function SolvePage() {
           format,
           attempts: attemptsForFormat(format),
           timeLimitCs: typeof cfg?.timeLimitCs === 'number' ? cfg.timeLimitCs : null,
+          // Resolved later, once the gate says which round this run is in
+          // — a cutoff is per round, and the round is not known yet here.
+          cutoffCs: null,
+          cutoffPhase: null,
         });
+        setEventCutoffs(Array.isArray(cfg?.cutoffs) ? cfg.cutoffs : []);
       })
       .catch(() => {
         if (!cancelled) setLoadError('Тэмцээний мэдээллийг ачааллаж чадсангүй');
@@ -201,12 +223,24 @@ export default function SolvePage() {
         // move a run that has already started.
         if (attemptNumber === 1 && typeof data.round === 'number') {
           setCompetitionRound(data.round);
+          // Captured with the round, and never re-read for the rest of the
+          // run — the same rule competitionRound itself follows.
+          const forRound = eventCutoffs.find((c) => c.round === data.round);
+          setRunShape((prev) =>
+            prev === null
+              ? prev
+              : {
+                  ...prev,
+                  cutoffCs: forRound?.cutoffCs ?? null,
+                  cutoffPhase: forRound ? cutoffPhaseFor(prev.format) : null,
+                },
+          );
         }
       } catch {
         setLoadError('Скрамбл авахад алдаа гарлаа');
       }
     },
-    [eventId, competitionId, solverUid],
+    [eventId, competitionId, solverUid, eventCutoffs],
   );
 
   // Fetch the first attempt's scramble once the athlete is known. Later
@@ -299,7 +333,25 @@ export default function SolvePage() {
     setAttempts(next);
     pendingBlobRef.current = null;
 
-    if (next.length >= (runShape?.attempts ?? 0)) {
+    // ── THE CUTOFF ──
+    // At the end of the cutoff phase, if nothing beat the cutoff the run
+    // ends here. STRICTLY better is required, and an over-limit attempt
+    // (already a DNF above) can never beat it.
+    const phase = runShape?.cutoffPhase ?? null;
+    const cutoffCs = runShape?.cutoffCs ?? null;
+    const failedCutoff =
+      phase !== null &&
+      cutoffCs !== null &&
+      next.length >= phase &&
+      next
+        .slice(0, phase)
+        .every((a) => attemptTime(a, runShape?.timeLimitCs ?? null) === 'DNF' ||
+          (a.timeCs as number) >= cutoffCs);
+
+    if (failedCutoff) {
+      setCutOff(true);
+      setStage('summary');
+    } else if (next.length >= (runShape?.attempts ?? 0)) {
       setStage('summary');
     } else {
       setAttemptIndex((i) => i + 1);
@@ -315,6 +367,7 @@ export default function SolvePage() {
     setAttempts([]);
     setAttemptIndex(0);
     setOverLimit(false);
+    setCutOff(false);
     setSubmitError('');
     // Cleared so a failed re-fetch can't leave the previous run's round
     // attached to the new one; fetchScramble(1) re-resolves it.
@@ -375,9 +428,12 @@ export default function SolvePage() {
       }
 
       const times: AttemptTime[] = attempts.map((a) => attemptTime(a, runShape?.timeLimitCs ?? null));
+      // A cut-off run has no average — its result is the best single, and
+      // the partial set never touches computeResult (whose ao5 branch
+      // would return a fabricated average from a two-attempt slice).
       // The captured format, not a re-read one — the value stored must be
       // the one the athlete was actually shown on the summary screen.
-      const { value } = computeResult(times, runShape?.format ?? 'ao5');
+      const value = cutOff ? bestSingle(times) : computeResult(times, runShape?.format ?? 'ao5').value;
       // NOTE: recordAo5Result writes results.{eventId}.ao5 on the
       // registration doc. For a non-Ao5 event that key now holds an Mo3 or
       // a best single. Renaming it is a stored-field migration and belongs
@@ -505,7 +561,7 @@ export default function SolvePage() {
             competitionName={competition.name}
             eventLabel={eventLabel}
             attemptIndex={attemptIndex}
-            totalAttempts={runShape.attempts}
+            totalAttempts={cutOff ? (runShape.cutoffPhase ?? runShape.attempts) : runShape.attempts}
           />
         )}
 
@@ -553,6 +609,8 @@ export default function SolvePage() {
             attempts={attempts.map((a) => ({ timeCs: a.timeCs, isDnf: a.isDnf }))}
             resultFormat={runShape.format}
             timeLimitCs={runShape.timeLimitCs}
+            cutOff={cutOff}
+            cutoffCs={runShape.cutoffCs}
             onRedo={handleRedo}
             onSubmit={handleSubmit}
             submitting={submitting}

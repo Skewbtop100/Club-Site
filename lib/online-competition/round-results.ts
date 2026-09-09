@@ -2,6 +2,7 @@ import type { Firestore } from 'firebase-admin/firestore';
 import {
   attemptsForFormat,
   computeResult,
+  cutoffPhaseFor,
   effectiveAttemptTime,
   resolveResultFormat,
   type AttemptTime,
@@ -47,15 +48,20 @@ async function eventScoringRules(
   db: Firestore,
   competitionId: string,
   eventId: string,
-): Promise<{ format: ResultFormat; timeLimitCs: number | null }> {
+  round: number,
+): Promise<{ format: ResultFormat; timeLimitCs: number | null; cutoffCs: number | null }> {
   const snap = await db.collection('onlineCompetitions').doc(competitionId).get();
   const events = snap.get('events');
-  if (!Array.isArray(events)) return { format: 'ao5', timeLimitCs: null };
+  if (!Array.isArray(events)) return { format: 'ao5', timeLimitCs: null, cutoffCs: null };
   const event = (events as Record<string, unknown>[]).find((e) => e?.eventId === eventId);
+  // The cutoff is PER ROUND, so pick out this round's entry.
+  const cutoffs = Array.isArray(event?.cutoffs) ? (event.cutoffs as Record<string, unknown>[]) : [];
+  const forRound = cutoffs.find((c) => c?.round === round);
   return {
     format: resolveResultFormat(event?.resultFormat),
     // null = no limit, for a legacy event and for a missing competition.
     timeLimitCs: typeof event?.timeLimitCs === 'number' ? event.timeLimitCs : null,
+    cutoffCs: typeof forRound?.cutoffCs === 'number' ? forRound.cutoffCs : null,
   };
 }
 
@@ -142,8 +148,16 @@ export async function collectRoundResults(
   eventId: string,
   round: number,
 ): Promise<RoundResult[]> {
-  const { format: resultFormat, timeLimitCs } = await eventScoringRules(db, competitionId, eventId);
+  const { format: resultFormat, timeLimitCs, cutoffCs } = await eventScoringRules(
+    db,
+    competitionId,
+    eventId,
+    round,
+  );
   const attemptsPerRound = attemptsForFormat(resultFormat);
+  // Non-null only when this round has a cutoff AND the format has an
+  // established phase for one (cutoffPhaseFor — ao5/bo3 only).
+  const phase = cutoffCs !== null ? cutoffPhaseFor(resultFormat) : null;
 
   const snap = await db
     .collection('onlineSubmissions')
@@ -202,20 +216,63 @@ export async function collectRoundResults(
       const existing = bySlot.get(a.attempt);
       if (!existing || a.createdAt < existing.createdAt) bySlot.set(a.attempt, a);
     }
-    // Judged attempts, not approved ones — see the query above. Complete
-    // now means "every attempt THIS FORMAT asks for", not five.
-    if (bySlot.size < attemptsPerRound) continue;
+    // ── THE CUTOFF, DERIVED SERVER-SIDE ──
+    //
+    // Whether an athlete was cut off is COMPUTED here from their judged
+    // times, never read from a flag the client wrote. That is what closes
+    // the redo hole: an athlete who fails the cutoff, presses Дахин and
+    // runs the full count leaves submissions in slots 3..N, but those
+    // slots are simply never consulted — the cutoff phase is decided from
+    // slots 1..phase, which "first run counts" (oldest-per-slot above)
+    // pins to their original run. There is nothing to tamper with and
+    // nothing to keep in sync, and it survives a page reload because it
+    // was never client state to begin with.
+    //
+    // It also means the JUDGED time decides, not the self-reported one the
+    // athlete saw. A +2 that pushes their only sub-cutoff attempt over
+    // retroactively cuts them off and discards attempts they should not
+    // have had — which is the correct WCA answer, if a harsh one.
+    const cutOff =
+      phase !== null &&
+      // every attempt of the phase must be judged before this can be decided
+      Array.from({ length: phase }, (_, i) => bySlot.get(i + 1)).every((a) => a !== undefined) &&
+      // ...and none of them beat the cutoff (STRICTLY better is required)
+      Array.from({ length: phase }, (_, i) => bySlot.get(i + 1)!.time).every(
+        (t) => t === 'DNF' || t >= cutoffCs!,
+      );
+
+    // Complete means "every attempt owed", and a cut-off athlete owes only
+    // the phase. Anyone else still owes the full count.
+    const owed = cutOff ? phase! : attemptsPerRound;
+    if (bySlot.size < owed) continue;
+
     const times: AttemptTime[] = [];
-    for (let i = 1; i <= attemptsPerRound; i++) times.push(bySlot.get(i)!.time);
-    // A DNF result is kept here (value: null) and dropped by
-    // rankRoundResults below — it is a finished round, just not a
-    // rankable one.
-    const { value } = computeResult(times, resultFormat);
+    for (let i = 1; i <= owed; i++) times.push(bySlot.get(i)!.time);
+
     // The tie-break single, independent of format: the fastest attempt
     // that was not a DNF.
     const finished = times.filter((t): t is number => t !== 'DNF');
     const best = finished.length > 0 ? Math.min(...finished) : null;
-    results.push({ uid, displayName: uid.slice(0, 10), value, best, attempts: bySlot.size });
+
+    // A cut-off athlete's partial set NEVER reaches computeResult. That is
+    // structural, not a guard: computeResult's ao5 branch is deliberately
+    // unlength-guarded for step-A compatibility, so handing it two attempts
+    // returns sum/3 over a one-element slice — a plausible-looking average
+    // FASTER than either attempt. A cutoff result is a single, so there is
+    // no average to compute and the averaging path is not entered at all.
+    //
+    // value === null is also what makes them unadvanceable: selectQualifiers
+    // filters on exactly that, so the "may not advance" decision needs no
+    // second rule. They still rank, below every athlete with a result,
+    // ordered on `best` — the mixed-round sort below.
+    const value = cutOff ? null : computeResult(times, resultFormat).value;
+
+    // `owed`, not bySlot.size: the attempts that COUNTED toward this
+    // result. They are the same number for everyone except a cut-off
+    // athlete who then re-ran the round — their extra slots exist but took
+    // no part, and reporting 5 there would describe a five-attempt result
+    // that was never computed.
+    results.push({ uid, displayName: uid.slice(0, 10), value, best, attempts: owed });
   }
 
   // WCA MIXED-ROUND ORDER:

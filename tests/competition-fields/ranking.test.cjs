@@ -761,6 +761,190 @@ const ONE_DNF_AO5 = 1200;
     selectQualifiers(regRanked, 'count', 2).map((r) => r.uid).sort().join(',') === 'full,oneDnf',
     JSON.stringify(selectQualifiers(regRanked, 'count', 2).map((r) => r.uid)));
 
+
+  // ══ CUTOFF ═══════════════════════════════════════════════════════════
+  // Ao5 with a round-1 cutoff of 1:00 (6000cs). Phase = 2 attempts; the
+  // athlete must post something STRICTLY better than the cutoff in them.
+  //
+  // The whole cutoff outcome is DERIVED here from the judged times — there
+  // is no stored flag — which is what makes the redo case below work.
+
+  const CUT = 'comp-cutoff';
+  /** `runs` is a list of runs; each run is a list of attempt times, written
+   *  in order so "oldest per slot" resolves to the FIRST run. */
+  async function seedCutoff(compId, cutoffCs, perUid) {
+    await db.collection('onlineCompetitions').doc(compId).set({
+      name: compId, status: 'finished', season: 's7',
+      events: [{
+        eventId: EVENT, label: '3x3x3', rounds: 1, resultFormat: 'ao5',
+        cutoffs: cutoffCs === null ? [] : [{ round: 1, cutoffCs }],
+      }],
+    });
+    let t = 2_300_000_000_000;
+    for (const [uid, runs] of Object.entries(perUid)) {
+      await db.collection('onlineParticipants').doc(uid).set({ uid, displayName: uid }, { merge: true });
+      for (const run of runs) {
+        for (let i = 0; i < run.length; i++) {
+          const v = run[i];
+          await db.collection('onlineSubmissions').add({
+            competitionId: compId, uid, event: EVENT, round: i + 1, competitionRound: ROUND,
+            videoUrl: 'x', cloudinaryPublicId: 'x',
+            reportedTime: v === 'D' ? 999 : v,
+            isDnf: false,
+            penalty: v === 'D' ? 'DNF' : null,
+            status: v === 'D' ? 'rejected' : 'approved',
+            createdAt: Timestamp.fromMillis((t += 1000)),
+          });
+        }
+      }
+    }
+  }
+
+  await seedCutoff(CUT, 6000, {
+    // beats the cutoff on attempt 1 -> owes the full five
+    cPass1: [[5000, 5100, 5200, 5300, 5400]],
+    // fails attempt 1, beats it on attempt 2 -> owes the full five
+    cPass2: [[9000, 5000, 5200, 5300, 5400]],
+    // fails both -> round ends at 2, single only
+    cFail:  [[9000, 9500]],
+    // fails both, then REDOES the whole round. The redo leaves slots 3-5
+    // populated; they must be ignored entirely.
+    cRedo:  [[9000, 9500], [1000, 1100, 1200, 1300, 1400]],
+    // fails both with a slower single than cFail -> ranks below them
+    cFailSlow: [[9900, 9950]],
+    // beat the cutoff but never finished the remaining attempts
+    cAbandon: [[5000, 5100]],
+  });
+
+  const cut = new Map((await collectRoundResults(db, CUT, EVENT, ROUND)).map((r) => [r.uid, r]));
+
+  ok('cutoff: beating it on attempt 1 -> full round, real average',
+    cut.get('cPass1')?.value === 5200, String(cut.get('cPass1')?.value));
+  ok('cutoff: beating it on attempt 2 -> full round, real average',
+    cut.get('cPass2')?.value !== null && cut.get('cPass2')?.attempts === 5,
+    JSON.stringify(cut.get('cPass2')));
+  ok('cutoff: failing both -> ranked, with NO average',
+    cut.has('cFail') && cut.get('cFail')?.value === null, JSON.stringify(cut.get('cFail')));
+  ok('cutoff: ...and the single is recorded', cut.get('cFail')?.best === 9000, String(cut.get('cFail')?.best));
+  ok('cutoff: ...from only the phase attempts', cut.get('cFail')?.attempts === 2, String(cut.get('cFail')?.attempts));
+  ok('cutoff: an athlete who beat it but never finished is INCOMPLETE, not ranked',
+    !cut.has('cAbandon'), JSON.stringify([...cut.keys()]));
+
+  // THE 35.00 BUG: a two-attempt Ao5 slice through computeResult returns
+  // sum/3 over one element — 3500 for [9000, 9500]. It must never appear.
+  ok('cutoff: the fabricated two-attempt "average" (3500) never appears',
+    [...cut.values()].every((r) => r.value !== 3500),
+    JSON.stringify([...cut.values()].map((r) => `${r.uid}:${r.value}`)));
+
+  // ── THE REDO HOLE ────────────────────────────────────────────────────
+  ok('REDO HOLE: a cut-off athlete who runs the full round again gets NO average',
+    cut.get('cRedo')?.value === null, JSON.stringify(cut.get('cRedo')));
+  ok('REDO HOLE: ...their round is still only the phase attempts',
+    cut.get('cRedo')?.attempts === 2, String(cut.get('cRedo')?.attempts));
+  ok('REDO HOLE: ...and the single is from the FIRST run, not the redo (1000)',
+    cut.get('cRedo')?.best === 9000, String(cut.get('cRedo')?.best));
+
+  // ── ranking + advancement ────────────────────────────────────────────
+  const cutRanked = await rankRoundResults(db, CUT, EVENT, ROUND);
+  const cutOrder = cutRanked.map((r) => r.uid);
+  ok('cutoff: athletes with averages rank above every cut-off athlete',
+    cutOrder.indexOf('cPass1') < cutOrder.indexOf('cFail') &&
+      cutOrder.indexOf('cPass2') < cutOrder.indexOf('cFail'), cutOrder.join(','));
+  ok('cutoff: cut-off athletes order by their single (9000 before 9900)',
+    cutOrder.indexOf('cFail') < cutOrder.indexOf('cFailSlow'), cutOrder.join(','));
+  const cutCut99 = selectQualifiers(cutRanked, 'count', 99);
+  ok('cutoff: a cut-off athlete is NOT advanced by a cut of 99',
+    !cutCut99.some((r) => r.uid === 'cFail') && !cutCut99.some((r) => r.uid === 'cRedo'),
+    JSON.stringify(cutCut99.map((r) => r.uid)));
+  ok('cutoff: only the two who beat it advance',
+    cutCut99.map((r) => r.uid).sort().join(',') === 'cPass1,cPass2',
+    JSON.stringify(cutCut99.map((r) => r.uid)));
+
+  // ── no cutoff configured -> nothing changes ──────────────────────────
+  const NOCUT = 'comp-nocutoff';
+  await seedCutoff(NOCUT, null, {
+    nFull: [[5000, 5100, 5200, 5300, 5400]],
+    // the same two-attempt run that WOULD be a cutoff result: with no
+    // cutoff it is simply an incomplete round, exactly as before.
+    nShort: [[9000, 9500]],
+  });
+  const nocut = new Map((await collectRoundResults(db, NOCUT, EVENT, ROUND)).map((r) => [r.uid, r]));
+  ok('no cutoff: a full round scores exactly as before', nocut.get('nFull')?.value === 5200, String(nocut.get('nFull')?.value));
+  ok('no cutoff: a two-attempt round is INCOMPLETE, not a cutoff result', !nocut.has('nShort'),
+    JSON.stringify([...nocut.keys()]));
+
+  // A format with no established cutoff phase ignores a cutoff entirely.
+  const MO3CUT = 'comp-mo3-cutoff';
+  await db.collection('onlineCompetitions').doc(MO3CUT).set({
+    name: 'mo3cut', status: 'finished', season: 's7',
+    events: [{
+      eventId: EVENT, label: '3x3x3', rounds: 1, resultFormat: 'mo3',
+      cutoffs: [{ round: 1, cutoffCs: 6000 }], // unsupported; must be ignored
+    }],
+  });
+  let mct = 2_400_000_000_000;
+  await db.collection('onlineParticipants').doc('mo3cutAth').set({ uid: 'mo3cutAth', displayName: 'x' }, { merge: true });
+  for (let i = 0; i < 3; i++) {
+    await db.collection('onlineSubmissions').add({
+      competitionId: MO3CUT, uid: 'mo3cutAth', event: EVENT, round: i + 1, competitionRound: ROUND,
+      videoUrl: 'x', cloudinaryPublicId: 'x',
+      reportedTime: [9000, 9100, 9200][i], isDnf: false, penalty: null, status: 'approved',
+      createdAt: Timestamp.fromMillis((mct += 1000)),
+    });
+  }
+  const mo3cut = await collectRoundResults(db, MO3CUT, EVENT, ROUND);
+  ok('unsupported format: a stored cutoff is ignored, the full mean stands',
+    mo3cut[0]?.value === 9100, JSON.stringify(mo3cut.map((r) => r.value)));
+
+  // ── validation + lock ────────────────────────────────────────────────
+  const okCut = validateCompetitionInput(body({
+    events: [{ eventId: '333', label: '3x3x3', rounds: 2, resultFormat: 'ao5', cutoffs: [{ round: 1, cutoffCs: 6000 }] }],
+    status: 'upcoming',
+  }));
+  ok('validate: a cutoff on an ao5 event is accepted', okCut.ok, okCut.ok ? '' : okCut.error);
+  ok('validate: it survives into the payload',
+    okCut.ok && okCut.data.events[0].cutoffs.length === 1 && okCut.data.events[0].cutoffs[0].cutoffCs === 6000,
+    okCut.ok ? JSON.stringify(okCut.data.events[0].cutoffs) : '');
+  const badFmt = validateCompetitionInput(body({
+    events: [{ eventId: '333', label: '3x3x3', rounds: 1, resultFormat: 'mo3', cutoffs: [{ round: 1, cutoffCs: 6000 }] }],
+    status: 'upcoming',
+  }));
+  ok('validate: a cutoff on an UNSUPPORTED format is refused', !badFmt.ok, badFmt.ok ? 'accepted' : badFmt.error);
+  const badRound = validateCompetitionInput(body({
+    events: [{ eventId: '333', label: '3x3x3', rounds: 1, resultFormat: 'ao5', cutoffs: [{ round: 5, cutoffCs: 6000 }] }],
+    status: 'upcoming',
+  }));
+  ok('validate: an out-of-range cutoff round is refused', !badRound.ok, badRound.ok ? 'accepted' : badRound.error);
+  const dupCut = validateCompetitionInput(body({
+    events: [{ eventId: '333', label: '3x3x3', rounds: 2, resultFormat: 'ao5', cutoffs: [{ round: 1, cutoffCs: 6000 }, { round: 1, cutoffCs: 7000 }] }],
+    status: 'upcoming',
+  }));
+  ok('validate: a duplicate cutoff round is refused', !dupCut.ok, dupCut.ok ? 'accepted' : dupCut.error);
+
+  const CUTLOCK = 'comp-cutlock';
+  const saveCutoff = async (cs) => {
+    const r = validateCompetitionInput(body({
+      events: [{ eventId: EVENT, label: '3x3x3', rounds: 1, resultFormat: 'ao5', cutoffs: cs === null ? [] : [{ round: 1, cutoffCs: cs }] }],
+      status: 'upcoming',
+    }));
+    if (!r.ok) throw new Error(r.error);
+    return writeCompetitionDoc(db, CUTLOCK, r.data);
+  };
+  await db.collection('onlineCompetitions').doc(CUTLOCK).set({ name: 'c', status: 'draft', events: [] });
+  await saveCutoff(6000);
+  ok('cutoff lock: changeable while nothing is judged',
+    await saveCutoff(7000).then(() => true).catch((e) => e.message));
+  await db.collection('onlineSubmissions').add({
+    competitionId: CUTLOCK, uid: 'u1', event: EVENT, round: 1, competitionRound: 1,
+    reportedTime: 1000, penalty: null, status: 'approved',
+  });
+  let cutRefused = null;
+  try { await saveCutoff(6000); } catch (e) { cutRefused = e; }
+  ok('cutoff lock: REFUSED once a judged submission exists', cutRefused !== null, 'change was allowed');
+  ok('  ...with a message naming the cutoff', /шүүлтүүр/.test(cutRefused?.message ?? ''), cutRefused?.message);
+  ok('cutoff lock: re-saving the SAME cutoff is still allowed',
+    await saveCutoff(7000).then(() => true).catch((e) => e.message));
+
   console.log(`\n  ${pass} passed, ${fail} failed\n`);
   fs.rmSync(OUT, { recursive: true, force: true });
   process.exit(fail === 0 ? 0 : 1);

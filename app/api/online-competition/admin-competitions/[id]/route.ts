@@ -26,6 +26,8 @@ function normalizeStoredEvents(raw: unknown): OnlineCompetitionEventConfig[] {
     resultFormat: resolveResultFormat(e?.resultFormat),
     // null = no limit. Never defaulted to a real value.
     timeLimitCs: typeof e?.timeLimitCs === 'number' ? e.timeLimitCs : null,
+    // Per-round cutoffs; absent/empty means none anywhere.
+    cutoffs: Array.isArray(e?.cutoffs) ? (e.cutoffs as OnlineCompetitionEventConfig['cutoffs']) : [],
     advancement: Array.isArray(e?.advancement) ? (e.advancement as OnlineCompetitionEventConfig['advancement']) : [],
   }));
 }
