@@ -326,6 +326,12 @@ export interface OnlineCompetitionAdminView {
    *  registration collection yet (Phase 1 is schema + CRUD only, no
    *  registration flow). */
   participantCount: number;
+  /** How many athletes have REGISTERED for this competition — distinct from
+   *  participantCount above, which counts uids that have SUBMITTED. The
+   *  admin list's ТАМИРЧИН column pairs this with participantLimit,
+   *  so it has to be registrations: an athlete who registered but has not
+   *  solved yet still occupies a place. */
+  registeredCount: number;
   /** '' when unset — the admin view always has *something* to show, same
    *  reasoning as every other field here. */
   season: string;

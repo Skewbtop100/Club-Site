@@ -21,11 +21,13 @@ const STATUS_BADGE: Record<OnlineCompetitionStatus, BadgeSpec> = {
   finished: { borderColor: '#16161B', background: '#131318', color: '#6E6A62' },
 };
 
-function fmtDateTime(ms: number | null): string {
+/** YYYY.MM.DD — the meta line has no room for a time, and the list is
+ *  scanned by date rather than read to the minute. */
+function fmtDate(ms: number | null): string {
   if (ms === null) return '—';
   const d = new Date(ms);
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}`;
 }
 
 /** Admin home page's main content — the competitions list. Each row now
@@ -124,13 +126,6 @@ export default function CompetitionsList() {
         <EmptyState text="Тэмцээн алга." />
       ) : (
         <div className="oc-table">
-          <div className="oc-table-header">
-            <span>Нэр</span>
-            <span>Эхлэх</span>
-            <span>Статус</span>
-            <span>Тамирчин</span>
-            <span />
-          </div>
           {competitions.map((c) => {
             // Cheap defensive fallback — the admin-competitions API already
             // normalizes `status` (normalizeCompetitionStatus), but this
@@ -138,31 +133,88 @@ export default function CompetitionsList() {
             // changes some other way.
             const badge = STATUS_BADGE[c.status] ?? STATUS_BADGE.upcoming;
             const label = STATUS_LABEL[c.status] ?? c.status;
+            const detail = `/online-competition/admin/competitions/${c.id}`;
+            const preselect = `?competitionId=${encodeURIComponent(c.id)}`;
             return (
               <div key={c.id}>
-                <Link
-                  href={`/online-competition/admin/competitions/${c.id}`}
-                  className="oc-table-row"
-                  style={{ textDecoration: 'none', color: 'inherit' }}
-                >
-                  <span className="oc-table-name">{c.name}</span>
-                  <span className="oc-table-date">{fmtDateTime(c.startAt)}</span>
-                  <span>
-                    <Badge {...badge} padding="5px 7px">
-                      {label}
-                    </Badge>
+                <div className="oc-adm-comp-row">
+                  {/* НЭР — the start date lives in the meta line beneath the
+                      name rather than in a column of its own. */}
+                  <div className="oc-adm-comp-name">
+                    <p style={{ font: '600 15px/1.2 var(--oc-font-heading), sans-serif', color: '#F4F1EA' }}>
+                      {c.name}
+                    </p>
+                    <p
+                      style={{
+                        marginTop: 5,
+                        font: '400 10px/1 var(--oc-font-mono), monospace',
+                        letterSpacing: '.06em',
+                        color: '#6E6A62',
+                      }}
+                    >
+                      {c.events.length} төрөл · онлайн · {fmtDate(c.startAt)}
+                    </p>
+                  </div>
+
+                  {/* ОНЦЛОХ — TODO: not wired. Featuring a competition needs
+                      a schema field on onlineCompetitions plus a public-page
+                      change to read it; neither exists yet, so this renders
+                      inert rather than pretending to toggle something. */}
+                  <button
+                    type="button"
+                    className="oc-adm-comp-btn oc-adm-comp-star"
+                    disabled
+                    title="Онцлох — удахгүй"
+                    aria-label="Онцлох"
+                  >
+                    ★
+                  </button>
+
+                  {/* Both of these pre-select the competition: RoundsManager
+                      and ReviewGrid each read ?competitionId= on mount. */}
+                  <Link className="oc-adm-comp-btn" href={`/online-competition/admin/rounds${preselect}`}>
+                    РАУНД
+                  </Link>
+                  <Link className="oc-adm-comp-btn" href={`/online-competition/admin/review${preselect}`}>
+                    ШҮҮЛТ
+                  </Link>
+                  {/* The registrations view IS the detail page's Тамирчид
+                      tab. No badge: registrations have a single status
+                      ('registered') — there is no pending-request state in
+                      the schema for a count to come from. */}
+                  <Link className="oc-adm-comp-btn" href={detail}>
+                    БҮРТГЭЛ
+                  </Link>
+
+                  <Badge {...badge} padding="5px 7px">
+                    {label}
+                  </Badge>
+
+                  {/* ТАМИРЧИН — registered against the cap. */}
+                  <span
+                    style={{
+                      font: '500 13px/1 var(--oc-font-mono), monospace',
+                      color: '#F4F1EA',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {c.registeredCount}
+                    <span style={{ color: '#6E6A62' }}>
+                      {' / '}
+                      {c.participantLimit === null ? '∞' : c.participantLimit}
+                    </span>
                   </span>
-                  <span className="oc-table-count">{c.participantCount}</span>
-                  <span aria-hidden style={{ color: '#6E6A62', textAlign: 'right' }}>
-                    →
-                  </span>
-                </Link>
+
+                  <Link className="oc-adm-comp-btn" href={detail}>
+                    ЗАСАХ
+                  </Link>
+                </div>
 
                 {/* A live competition with no round open silently refuses
-                    every solve attempt — surfaced here, on its own strip
-                    below the row, because the row's grid has no column
-                    wide enough for it (same reason as the recompute strip
-                    below). */}
+                    every solve attempt. Still a full-width strip directly
+                    under its row: the row is a wrapping flex line with no
+                    cell wide enough for a sentence, and the warning has to
+                    be readable at a glance. */}
                 {c.status === 'live' && (
                   <RoundGapWarning
                     events={c.eventsWithoutLiveRound ?? []}

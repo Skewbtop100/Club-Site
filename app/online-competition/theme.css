@@ -2795,6 +2795,80 @@
 /* Action column — fixed, so the row's text columns keep their proportions. */
 .oc-adm-ath-c7 { flex: 0 0 104px; text-align: right; }
 
+/* ── Admin: competitions list row ─────────────────────────────
+   One row per competition: name (with a muted meta line carrying the event
+   count and start date), the per-competition actions, status, athletes,
+   edit. Wraps rather than scrolls on a narrow admin window — the actions
+   are the part that has to stay reachable. */
+.oc-adm-comp-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 13px 14px;
+  border-bottom: 1px solid #16161B;
+}
+.oc-adm-comp-row:hover {
+  background: #131318;
+}
+/* The only flexible cell; everything else sizes to its content. */
+.oc-adm-comp-name {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.oc-adm-comp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid #2A2A31;
+  background: transparent;
+  color: #9A958A;
+  padding: 9px 13px;
+  font: 500 10px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.14em;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.oc-adm-comp-btn:hover {
+  border-color: #DFFF4F;
+  color: #DFFF4F;
+}
+/* Square, so the star sits centred rather than in a text-shaped box. */
+.oc-adm-comp-star {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  flex: none;
+}
+.oc-adm-comp-star-on {
+  background: #DFFF4F;
+  color: #08080A;
+  border-color: #DFFF4F;
+}
+/* ОНЦЛОХ is inert until the featured flag exists — it must not
+   invite a click that does nothing. */
+.oc-adm-comp-btn:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.oc-adm-comp-btn:disabled:hover {
+  border-color: #2A2A31;
+  color: #9A958A;
+}
+.oc-adm-comp-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  background: #DFFF4F;
+  color: #08080A;
+  font: 700 9px/1 var(--oc-font-mono), monospace;
+}
+
 /* ── Мэйл солих dialog (uid merge) ────────────────────────
    Same dark surface as the rest of the admin panel; nothing new invented. */
 .oc-adm-merge-overlay {

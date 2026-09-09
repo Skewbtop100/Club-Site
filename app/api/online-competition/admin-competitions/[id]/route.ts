@@ -33,9 +33,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     events: Array.isArray(data.events) ? data.events : [],
     status: normalizeCompetitionStatus(data.status),
     createdAt: data.createdAt?.toMillis?.() ?? null,
-    // Not needed for the edit form (only the list view shows it) — skip
-    // the extra onlineSubmissions query here.
+    // Neither count is needed for the edit form (only the list view shows
+    // them) — skip the extra queries here.
     participantCount: 0,
+    registeredCount: 0,
     season: typeof data.season === 'string' ? data.season : '',
     eventsWithoutLiveRound: liveRounds
       .filter((e) => e.liveRound === null)

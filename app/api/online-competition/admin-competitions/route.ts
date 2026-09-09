@@ -24,6 +24,24 @@ async function countDistinctParticipants(db: Firestore, competitionId: string): 
   return uids.size;
 }
 
+/** competitionId -> how many athletes have REGISTERED, in ONE query for
+ *  the whole list rather than one per competition.
+ *
+ *  The grandparent guard is load-bearing: the club site has an unrelated
+ *  top-level `registrations` collection that a bare collectionGroup query
+ *  also matches (see the same guard in scramble-roster.ts). */
+async function countRegistrationsByCompetition(db: Firestore): Promise<Map<string, number>> {
+  const snap = await db.collectionGroup('registrations').get();
+  const counts = new Map<string, number>();
+  for (const d of snap.docs) {
+    if (d.ref.parent.parent?.parent.id !== 'onlineParticipants') continue;
+    const competitionId = d.get('competitionId');
+    if (typeof competitionId !== 'string') continue;
+    counts.set(competitionId, (counts.get(competitionId) ?? 0) + 1);
+  }
+  return counts;
+}
+
 export async function GET() {
   if (!(await isOnlineCompAdmin())) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -35,6 +53,7 @@ export async function GET() {
   // orderBy field from the results — sorting in JS (nulls last) keeps it
   // visible in the admin list instead of vanishing.
   const snap = await db.collection('onlineCompetitions').get();
+  const registeredByCompetition = await countRegistrationsByCompetition(db);
 
   const competitions: OnlineCompetitionAdminView[] = await Promise.all(
     snap.docs.map(async (d) => {
@@ -55,6 +74,7 @@ export async function GET() {
         status,
         createdAt: data.createdAt?.toMillis?.() ?? null,
         participantCount: await countDistinctParticipants(db, d.id),
+        registeredCount: registeredByCompetition.get(d.id) ?? 0,
         season: typeof data.season === 'string' ? data.season : '',
         eventsWithoutLiveRound: liveRounds
           .filter((e) => e.liveRound === null)
