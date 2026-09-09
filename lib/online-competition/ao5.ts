@@ -81,7 +81,9 @@ export function resolveResultFormat(raw: unknown): ResultFormat {
  *  ⚠ PARTIALLY HONOURED. As of step C a non-Ao5 competition can be RUN but
  *  not yet RANKED.
  *
- *  Threaded through (step C):
+ *  Threaded through (steps C-D):
+ *    - round-results.ts: the attempt count, the completeness check, the
+ *      result itself, and the WCA tie-break on single
  *    - the solve page (captured once per run as `runShape`)
  *    - the summary screen, via computeResult + excludedIndices
  *    - ATTEMPTS columns in the admin ReviewGrid
@@ -89,8 +91,7 @@ export function resolveResultFormat(raw: unknown): ResultFormat {
  *    - the scramble route's attempt bound
  *
  *  STILL HARDCODED TO 5 — these ignore this function, so a non-Ao5 event
- *  produces no standings, no season points and no stats:
- *    - ATTEMPTS_PER_ROUND in round-results.ts        (step D)
+ *  ranks and qualifies but earns no season points and no stats:
  *    - the length-5 guards in seasonPoints.ts        (step E)
  *    - the length-5 guards in athleteStats.ts        (step E)
  *  The editor's amber warning says exactly this to the admin. */

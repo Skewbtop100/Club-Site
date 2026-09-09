@@ -32,6 +32,7 @@ function compile() {
       'lib/online-competition/round-results.ts',
       'lib/online-competition/seasonPoints.ts',
       'lib/online-competition/athleteStats.ts',
+    'lib/online-competition/rounds.ts',
       '--outDir', path.basename(OUT),
       '--module', 'commonjs',
       '--target', 'es2022',
@@ -156,18 +157,18 @@ const ONE_DNF_AO5 = 1200;
   const byUid = new Map(results.map((r) => [r.uid, r]));
 
   ok('5 approved -> present in results', byUid.has('full'));
-  ok('  ...with the expected Ao5', byUid.get('full')?.ao5 === FULL_AO5, String(byUid.get('full')?.ao5));
+  ok('  ...with the expected Ao5', byUid.get('full')?.value === FULL_AO5, String(byUid.get('full')?.value));
 
   ok('4 approved + 1 REJECTED -> present (the bug: used to vanish)', byUid.has('oneDnf'));
   ok(
     '  ...DNF dropped as the worst, valid average',
-    byUid.get('oneDnf')?.ao5 === ONE_DNF_AO5,
-    String(byUid.get('oneDnf')?.ao5),
+    byUid.get('oneDnf')?.value === ONE_DNF_AO5,
+    String(byUid.get('oneDnf')?.value),
   );
   ok('  ...counted as a complete 5-attempt set', byUid.get('oneDnf')?.attempts === 5, String(byUid.get('oneDnf')?.attempts));
 
   ok('3 approved + 2 REJECTED -> present as a finisher', byUid.has('twoDnf'));
-  ok('  ...with a DNF average (ao5 null)', byUid.get('twoDnf')?.ao5 === null, String(byUid.get('twoDnf')?.ao5));
+  ok('  ...with a DNF average (ao5 null)', byUid.get('twoDnf')?.value === null, String(byUid.get('twoDnf')?.value));
 
   ok('4 approved + 1 PENDING -> absent (incomplete, unchanged)', !byUid.has('pending'));
 
@@ -186,7 +187,7 @@ const ONE_DNF_AO5 = 1200;
   // The qualify route ranks through this same function, so a cut of 2 now
   // includes the one-DNF athlete where it previously could not have.
   ok('a rejected attempt never contributes its reportedTime',
-    ranked.every((r) => r.ao5 !== 999 && r.ao5 < 1500), JSON.stringify(ranked.map((r) => r.ao5)));
+    ranked.every((r) => r.value !== 999 && r.value < 1500), JSON.stringify(ranked.map((r) => r.value)));
 
   // ── season points ───────────────────────────────────────────────────
   await recomputeSeasonPointsForCompetition(COMP);
@@ -240,6 +241,142 @@ const ONE_DNF_AO5 = 1200;
   ok('stats: solveCount counts APPROVED only (4, not 5)', stats.get('oneDnf')?.solveCount === 4, String(stats.get('oneDnf')?.solveCount));
   ok('stats: solveCount for the all-approved athlete is 5', stats.get('full')?.solveCount === 5, String(stats.get('full')?.solveCount));
   ok('stats: pending athlete solveCount is 4 (pending is not judged)', stats.get('pending')?.solveCount === 4, String(stats.get('pending')?.solveCount));
+
+
+  // ══ NON-Ao5 FORMATS ══════════════════════════════════════════════════
+  // Same judged-not-approved rule, but the attempt count, the result and
+  // the sort all come from the event's resultFormat now.
+  const { selectQualifiers } = require(path.join(OUT, 'rounds.js'));
+
+  /** Seeds one competition whose single event runs `format`, with one
+   *  athlete per spec. `times` may hold numbers or 'DNF'; a 'DNF' entry is
+   *  seeded as a judge-REJECTED attempt, which is how a DNF actually
+   *  reaches the ranker. `pending` marks trailing attempts as unjudged. */
+  async function seedFormat(compId, format, attemptCount, specs) {
+    await db.collection('onlineCompetitions').doc(compId).set({
+      name: compId, status: 'finished', season: 's1',
+      events: [{ eventId: EVENT, label: '3x3x3', rounds: 1, resultFormat: format }],
+    });
+    let t = 1_800_000_000_000;
+    for (const [uid, spec] of Object.entries(specs)) {
+      await db.collection('onlineParticipants').doc(uid).set({ uid, displayName: uid });
+      for (let i = 0; i < attemptCount; i++) {
+        const v = spec.times[i];
+        const isPending = spec.pending?.includes(i);
+        if (v === undefined) continue;
+        await db.collection('onlineSubmissions').add({
+          competitionId: compId, uid, event: EVENT, round: i + 1, competitionRound: ROUND,
+          videoUrl: 'x', cloudinaryPublicId: 'x',
+          reportedTime: v === 'DNF' ? 999 : v,
+          isDnf: false,
+          penalty: v === 'DNF' ? 'DNF' : null,
+          status: isPending ? 'pending' : v === 'DNF' ? 'rejected' : 'approved',
+          createdAt: Timestamp.fromMillis((t += 1000)),
+        });
+      }
+    }
+  }
+
+  // ── Mo3 ───────────────────────────────────────────────────────────────
+  const MO3 = 'comp-mo3';
+  await seedFormat(MO3, 'mo3', 3, {
+    // mean(1000,1100,1200) = 1100
+    clean:   { times: [1000, 1100, 1200] },
+    // mean(1200,1300,1400) = 1300
+    slower:  { times: [1200, 1300, 1400] },
+    // ANY DNF kills an Mo3 — no cushion
+    oneDnf:  { times: [1000, 1100, 'DNF'] },
+    // only 2 of 3 judged
+    partial: { times: [1000, 1100, 1200], pending: [2] },
+  });
+
+  const mo3All = await collectRoundResults(db, MO3, EVENT, ROUND);
+  const mo3By = new Map(mo3All.map((r) => [r.uid, r]));
+  ok('mo3: reads 3 attempts, not 5 — clean set is ranked', mo3By.has('clean'));
+  ok('mo3: clean mean is right (no trimming)', mo3By.get('clean')?.value === 1100, String(mo3By.get('clean')?.value));
+  ok('mo3: slower athlete ranked too', mo3By.get('slower')?.value === 1300, String(mo3By.get('slower')?.value));
+  ok('mo3: ONE DNF is a DNF result (no cushion)', mo3By.get('oneDnf')?.value === null, String(mo3By.get('oneDnf')?.value));
+  ok('mo3: DNF-result athlete still FINISHED the round', mo3By.has('oneDnf'));
+  ok('mo3: an unjudged attempt means incomplete, not ranked', !mo3By.has('partial'));
+  ok('mo3: DNF result sorts last among finishers', mo3All[mo3All.length - 1].uid === 'oneDnf', mo3All.map((r) => r.uid).join(','));
+
+  const mo3Ranked = await rankRoundResults(db, MO3, EVENT, ROUND);
+  ok('mo3: exactly the two finishers with a real mean are ranked',
+    mo3Ranked.map((r) => r.uid).join(',') === 'clean,slower', mo3Ranked.map((r) => r.uid).join(','));
+  ok('mo3: a rejected attempt never contributes its reportedTime',
+    mo3Ranked.every((r) => r.value !== 999), JSON.stringify(mo3Ranked.map((r) => r.value)));
+
+  // ── Bo3 ───────────────────────────────────────────────────────────────
+  const BO3 = 'comp-bo3';
+  await seedFormat(BO3, 'bo3', 3, {
+    // best of the three = 900
+    fast:    { times: [1200, 900, 1500] },
+    // one DNF, still ranked on the best of what remains = 1000
+    oneDnf:  { times: ['DNF', 1000, 1400] },
+    // every attempt DNF -> no result
+    allDnf:  { times: ['DNF', 'DNF', 'DNF'] },
+    partial: { times: [800, 900, 1000], pending: [2] },
+  });
+
+  const bo3All = await collectRoundResults(db, BO3, EVENT, ROUND);
+  const bo3By = new Map(bo3All.map((r) => [r.uid, r]));
+  ok('bo3: value is the BEST SINGLE, not an average', bo3By.get('fast')?.value === 900, String(bo3By.get('fast')?.value));
+  ok('bo3: one DNF still ranks on the best of the rest', bo3By.get('oneDnf')?.value === 1000, String(bo3By.get('oneDnf')?.value));
+  ok('bo3: all-DNF has no result', bo3By.get('allDnf')?.value === null, String(bo3By.get('allDnf')?.value));
+  ok('bo3: an unjudged attempt means incomplete, not ranked', !bo3By.has('partial'));
+  ok('bo3: value equals best for a best-of format', bo3By.get('fast')?.best === bo3By.get('fast')?.value);
+
+  const bo3Ranked = await rankRoundResults(db, BO3, EVENT, ROUND);
+  ok('bo3: ranked fastest-single first',
+    bo3Ranked.map((r) => r.uid).join(',') === 'fast,oneDnf', bo3Ranked.map((r) => r.uid).join(','));
+
+  // ── Bo1 ───────────────────────────────────────────────────────────────
+  const BO1 = 'comp-bo1';
+  await seedFormat(BO1, 'bo1', 1, {
+    solo: { times: [1234] },
+    dnf:  { times: ['DNF'] },
+  });
+  const bo1All = await collectRoundResults(db, BO1, EVENT, ROUND);
+  const bo1By = new Map(bo1All.map((r) => [r.uid, r]));
+  ok('bo1: a single attempt is a complete round', bo1By.get('solo')?.value === 1234, String(bo1By.get('solo')?.value));
+  ok('bo1: a DNF single has no result', bo1By.get('dnf')?.value === null, String(bo1By.get('dnf')?.value));
+
+  // ── the WCA tie-break ────────────────────────────────────────────────
+  // Equal Mo3 means, different singles. Before this changeset a tie fell
+  // straight to uid (alphabetical), which silently decided who advanced.
+  // 'zzz' is deliberately alphabetically LAST so a uid tie-break would put
+  // it second — it must come first on the better single.
+  const TIE = 'comp-tie';
+  await seedFormat(TIE, 'mo3', 3, {
+    // mean(1000,1100,1200) = 1100, best single 1000
+    aaa: { times: [1000, 1100, 1200] },
+    // mean(900,1100,1300)  = 1100, best single 900  <- better single
+    zzz: { times: [900, 1100, 1300] },
+  });
+  const tieRanked = await rankRoundResults(db, TIE, EVENT, ROUND);
+  ok('tie-break: both athletes have the SAME mean',
+    tieRanked[0]?.value === 1100 && tieRanked[1]?.value === 1100,
+    JSON.stringify(tieRanked.map((r) => r.value)));
+  ok('tie-break: the better SINGLE ranks first (not alphabetical uid)',
+    tieRanked[0]?.uid === 'zzz', tieRanked.map((r) => `${r.uid}:${r.best}`).join(','));
+  ok('tie-break: best single is carried on the ranking',
+    tieRanked[0]?.best === 900 && tieRanked[1]?.best === 1000,
+    JSON.stringify(tieRanked.map((r) => r.best)));
+
+  // ── qualification on a non-Ao5 round ─────────────────────────────────
+  // The qualify route ranks through rankRoundResults, so it inherits all
+  // of the above; selectQualifiers is the pure selection it then applies.
+  const bo3Cut = selectQualifiers(bo3Ranked, 'count', 1);
+  ok('qualify: top-1 of a Bo3 round selects the fastest single',
+    bo3Cut.length === 1 && bo3Cut[0].uid === 'fast', JSON.stringify(bo3Cut.map((r) => r.uid)));
+  const mo3Cut = selectQualifiers(mo3Ranked, 'count', 1);
+  ok('qualify: top-1 of an Mo3 round selects the best mean',
+    mo3Cut.length === 1 && mo3Cut[0].uid === 'clean', JSON.stringify(mo3Cut.map((r) => r.uid)));
+  const tieCut = selectQualifiers(tieRanked, 'count', 1);
+  ok('qualify: a tie is broken by single, so the cut is not arbitrary',
+    tieCut.length === 1 && tieCut[0].uid === 'zzz', JSON.stringify(tieCut.map((r) => r.uid)));
+  ok('qualify: a DNF-result athlete is never selected',
+    selectQualifiers(mo3Ranked, 'count', 99).every((r) => r.uid !== 'oneDnf'));
 
   console.log(`\n  ${pass} passed, ${fail} failed\n`);
   fs.rmSync(OUT, { recursive: true, force: true });

@@ -136,7 +136,7 @@ export async function notifyRoundFinalised(params: {
     // the order and these indices match the standings the qualifier saw.
     const placementByUid = new Map<string, number>();
     results
-      .filter((r) => r.ao5 !== null)
+      .filter((r) => r.value !== null)
       .forEach((r, i) => placementByUid.set(r.uid, i + 1));
 
     await db.runTransaction(async (tx) => {
@@ -153,14 +153,14 @@ export async function notifyRoundFinalised(params: {
           // would be a fabrication, so the copy says plainly that the
           // round was finished without a ranked result.
           const body =
-            r.ao5 === null
+            r.value === null
               ? `${label} · ${roundLabel} дүн: DNF — байр эзлээгүй`
-              : `${label} · ${roundLabel} дүн: ${fmtCentiseconds(r.ao5)} · ${placementByUid.get(r.uid)}-р байр`;
+              : `${label} · ${roundLabel} дүн: ${fmtCentiseconds(r.value)} · ${placementByUid.get(r.uid)}-р байр`;
 
           // Advancing folds into this message rather than adding a second
           // one — one notification per athlete when both are announced
           // together.
-          const advanced = r.ao5 !== null && announceAdvanced && qualified.has(r.uid);
+          const advanced = r.value !== null && announceAdvanced && qualified.has(r.uid);
 
           tx.create(db.collection(ONLINE_NOTIFICATIONS).doc(), {
             uid: r.uid,

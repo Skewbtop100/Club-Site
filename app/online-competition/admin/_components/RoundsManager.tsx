@@ -401,7 +401,7 @@ function QualifyForm({
           <p className="oc-sc-hint">
             {preview.ranked.length} тамирчин дүнтэй · {preview.qualifiers.length} тамирчин шалгарна.
             {preview.ranked.length === 0 &&
-              ' Бүрэн шүүгдсэн дүн (5 оролдлого) байхгүй тул шалгарах тамирчин алга.'}
+              ' Бүрэн шүүгдсэн дүн байхгүй тул шалгарах тамирчин алга.'}
           </p>
 
           {preview.ranked.length > 0 && (
@@ -413,7 +413,7 @@ function QualifyForm({
                     <span className="oc-sc-num oc-sc-num-dim">{i + 1}</span>
                     <span className="oc-sc-name">{r.displayName}</span>
                     <span className="oc-sc-num" style={{ textAlign: 'right' }}>
-                      {fmtCentiseconds(r.ao5)}
+                      {fmtCentiseconds(r.value)}
                     </span>
                     <span className={`oc-rd-badge${inCut ? ' oc-rd-badge-done' : ''}`}>
                       {inCut ? 'ШАЛГАРНА' : 'ШАЛГАРАХГҮЙ'}

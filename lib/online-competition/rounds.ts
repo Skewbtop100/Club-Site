@@ -43,7 +43,16 @@ export function normalizeRoundStatus(value: unknown): RoundStatus {
 export interface RoundRanking {
   uid: string;
   displayName: string;
-  ao5: number;
+  /** The round's ranking value — an average for ao5/mo3, the best single
+   *  for bo3/bo2/bo1. Renamed from `ao5`, which was a lie for Mo3 and
+   *  meaningless for Bo-N; free to rename because this type is in-memory
+   *  and its one wire shape (QualifyResponse) is consumed only by
+   *  RoundsManager in this repo. */
+  value: number;
+  /** Best single of the round — the WCA tie-break for equal values. null
+   *  only if every attempt DNF'd, which cannot coexist with a non-null
+   *  value. */
+  best: number | null;
   attempts: number;
 }
 
