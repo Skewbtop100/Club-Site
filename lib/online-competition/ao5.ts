@@ -61,8 +61,36 @@ export type ResultFormat = 'ao5' | 'mo3' | 'bo3' | 'bo2' | 'bo1';
 
 export const RESULT_FORMATS: ResultFormat[] = ['ao5', 'mo3', 'bo3', 'bo2', 'bo1'];
 
-/** How many attempts a format is solved over — the single source step C
- *  will read, instead of a literal 5 in each of the eight sites. */
+/** A stored value coerced to a usable ResultFormat.
+ *
+ *  Every event saved before this field existed has none, so this defaults
+ *  to 'ao5' at READ time rather than backfilling the collection — the same
+ *  pattern normalizeCompetitionStatus and normalizeEvents already use for
+ *  their legacy shapes. 'ao5' is the right default because it is what the
+ *  platform has always actually run.
+ *
+ *  An unrecognised string also lands on 'ao5' rather than throwing: a
+ *  competition must stay readable even if a future build writes a format
+ *  this one does not know. */
+export function resolveResultFormat(raw: unknown): ResultFormat {
+  return RESULT_FORMATS.includes(raw as ResultFormat) ? (raw as ResultFormat) : 'ao5';
+}
+
+/** How many attempts a format is solved over.
+ *
+ *  ⚠ NOT YET HONOURED ANYWHERE. As of step B the admin can SELECT a
+ *  format, but the attempt count is still hardcoded to 5 in eight places
+ *  and every one of them ignores this function:
+ *    - computeAo5's caller in round-results.ts (ATTEMPTS_PER_ROUND)
+ *    - the length-5 guards in athleteStats.ts and seasonPoints.ts
+ *    - TOTAL_ATTEMPTS on the solve page
+ *    - SCRAMBLES_PER_GROUP for the TNoodle import (scrambles.ts)
+ *    - the length === 5 branch in summaryStats.ts
+ *    - ATTEMPTS = [1..5] in the admin ReviewGrid
+ *    - the unbounded `attempt` param on the scramble route
+ *  Until step C threads this through all of them, a non-Ao5 competition
+ *  cannot actually be run — which is why the editor shows an amber
+ *  warning next to any non-Ao5 selection. */
 export function attemptsForFormat(format: ResultFormat): number {
   switch (format) {
     case 'ao5':

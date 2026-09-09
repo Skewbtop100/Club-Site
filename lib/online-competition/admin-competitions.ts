@@ -1,6 +1,7 @@
 import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { DEFAULT_COMPETITION_FORMAT } from './types';
 import { validateQualifierInput } from './rounds';
+import { RESULT_FORMATS, type ResultFormat } from './ao5';
 import type { OnlineCompetitionAdvancement } from './types';
 import type { OnlineCompetitionEventConfig, OnlineCompetitionStatus, OnlineCompetitionWriteInput } from './types';
 
@@ -118,7 +119,28 @@ export function validateCompetitionInput(body: unknown): ValidationResult {
     }
     const advancement = parseAdvancement(e.advancement, e.rounds);
     if (!advancement.ok) return { ok: false, error: `${e.eventId}: ${advancement.error}` };
-    events.push({ eventId: e.eventId, label: e.label, rounds: e.rounds, advancement: advancement.value });
+    // Absent is legal (every event stored before this field existed) and
+    // means 'ao5'; a PRESENT but unrecognised value is a malformed payload
+    // and is refused rather than quietly defaulted — silently rewriting an
+    // admin's choice is worse than telling them it was invalid.
+    // null counts as ABSENT, not as invalid — JSON has no `undefined`, so a
+    // client that spells an unset optional field as null must mean the same
+    // thing as omitting it. Same rule parseAdvancement above applies.
+    if (
+      e.resultFormat !== undefined &&
+      e.resultFormat !== null &&
+      !RESULT_FORMATS.includes(e.resultFormat as ResultFormat)
+    ) {
+      return { ok: false, error: `${e.eventId}: invalid resultFormat` };
+    }
+    const resultFormat: ResultFormat = (e.resultFormat as ResultFormat | null) ?? 'ao5';
+    events.push({
+      eventId: e.eventId,
+      label: e.label,
+      rounds: e.rounds,
+      resultFormat,
+      advancement: advancement.value,
+    });
   }
 
   return {
@@ -246,6 +268,51 @@ export function toFirestoreDoc(input: OnlineCompetitionWriteInput) {
  *  can be the one being featured).
  *
  *  Returns the competition's id. */
+/** Thrown when a write is refused for a reason only the stored document
+ *  can reveal. Both routes turn it into a 400 with this message. */
+export class CompetitionWriteError extends Error {}
+
+/** eventIds of `events` whose resultFormat differs from what is stored. */
+function eventsChangingFormat(
+  stored: unknown,
+  incoming: OnlineCompetitionWriteInput['events'],
+): string[] {
+  if (!Array.isArray(stored)) return [];
+  const before = new Map<string, string>();
+  for (const e of stored as Record<string, unknown>[]) {
+    if (typeof e?.eventId === 'string') {
+      // Absent reads as 'ao5' (resolveResultFormat's rule) — so adding the
+      // field to a legacy event by SELECTING Ao5 is not a change, while
+      // selecting anything else is.
+      before.set(e.eventId, RESULT_FORMATS.includes(e.resultFormat as ResultFormat) ? (e.resultFormat as string) : 'ao5');
+    }
+  }
+  return incoming
+    .filter((e) => before.has(e.eventId) && before.get(e.eventId) !== (e.resultFormat ?? 'ao5'))
+    .map((e) => e.eventId);
+}
+
+/** eventIds of this competition that already have a JUDGED submission.
+ *  Judged = approved or rejected, matching the completeness rule every
+ *  scorer now uses: a rejected attempt is a DNF that counts, so it is just
+ *  as much a result as an approved one and just as much at risk from a
+ *  format change. Pending work does not lock anything — nothing has been
+ *  derived from it yet. */
+export async function lockedFormatEventIds(db: Firestore, competitionId: string): Promise<string[]> {
+  const snap = await db
+    .collection('onlineSubmissions')
+    .where('competitionId', '==', competitionId)
+    .where('status', 'in', ['approved', 'rejected'])
+    .select('event')
+    .get();
+  const ids = new Set<string>();
+  for (const d of snap.docs) {
+    const event = d.get('event');
+    if (typeof event === 'string') ids.add(event);
+  }
+  return [...ids];
+}
+
 export async function writeCompetitionDoc(
   db: Firestore,
   competitionId: string | null,
@@ -261,6 +328,36 @@ export async function writeCompetitionDoc(
     const others = input.featured
       ? (await tx.get(col.where('featured', '==', true))).docs.filter((d) => d.id !== ref.id)
       : [];
+
+    // ── the resultFormat lock ──
+    // Changing an event's format once results exist would silently
+    // re-derive that history under a different rule: an Ao5 recomputed as
+    // an Mo3 is a different number from the same attempts, and stored
+    // season points and athlete stats would shift with no record of why.
+    //
+    // Enforced HERE, not in validateCompetitionInput, for the simple
+    // reason that validateCompetitionInput is a pure function of the
+    // request body — it cannot see the stored document and so cannot know
+    // what the format was before, or whether anything has been judged.
+    // This is also the only place that sees BOTH, and it sees them inside
+    // the transaction that performs the write, so a submission judged
+    // between the check and the save cannot slip through.
+    //
+    // A create can never trip this: there is no stored document and no
+    // submission can reference an id that did not exist.
+    if (!isCreate) {
+      const snap = await tx.get(ref);
+      const changing = snap.exists ? eventsChangingFormat(snap.get('events'), input.events) : [];
+      if (changing.length > 0) {
+        const locked = new Set(await lockedFormatEventIds(db, ref.id));
+        const refused = changing.filter((id) => locked.has(id));
+        if (refused.length > 0) {
+          throw new CompetitionWriteError(
+            `Үзүүлэлт орсон тул формат солих боломжгүй: ${refused.join(', ')}`,
+          );
+        }
+      }
+    }
 
     // ── then every write ──
     if (isCreate) {

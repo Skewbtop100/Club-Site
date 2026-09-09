@@ -2,9 +2,16 @@ import { NextResponse } from 'next/server';
 import { type Firestore } from 'firebase-admin/firestore';
 import { isOnlineCompAdmin } from '@/lib/online-competition/admin-auth';
 import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
-import { normalizeCompetitionStatus, validateCompetitionInput, writeCompetitionDoc } from '@/lib/online-competition/admin-competitions';
+import {
+  CompetitionWriteError,
+  normalizeCompetitionStatus,
+  validateCompetitionInput,
+  writeCompetitionDoc,
+} from '@/lib/online-competition/admin-competitions';
 import { resolveEventLiveRounds } from '@/lib/online-competition/round-access';
 import { DEFAULT_COMPETITION_FORMAT } from '@/lib/online-competition/types';
+import { resolveResultFormat } from '@/lib/online-competition/ao5';
+import type { OnlineCompetitionEventConfig } from '@/lib/online-competition/types';
 import type { OnlineCompetitionAdminView } from '@/lib/online-competition/types';
 
 // Distinct-uid count of onlineSubmissions for this competition — a
@@ -43,6 +50,20 @@ async function countRegistrationsByCompetition(db: Firestore): Promise<Map<strin
   return counts;
 }
 
+/** Stored events, with resultFormat resolved. Every event saved before
+ *  that field existed reads back as 'ao5' — the read-time default, so no
+ *  backfill is needed (same pattern as normalizeCompetitionStatus). */
+function normalizeStoredEvents(raw: unknown): OnlineCompetitionEventConfig[] {
+  if (!Array.isArray(raw)) return [];
+  return (raw as Record<string, unknown>[]).map((e) => ({
+    eventId: typeof e?.eventId === 'string' ? e.eventId : '',
+    label: typeof e?.label === 'string' ? e.label : '',
+    rounds: typeof e?.rounds === 'number' ? e.rounds : 1,
+    resultFormat: resolveResultFormat(e?.resultFormat),
+    advancement: Array.isArray(e?.advancement) ? (e.advancement as OnlineCompetitionEventConfig['advancement']) : [],
+  }));
+}
+
 export async function GET() {
   if (!(await isOnlineCompAdmin())) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -71,7 +92,7 @@ export async function GET() {
         startAt: data.startAt?.toMillis?.() ?? null,
         registrationDeadline: data.registrationDeadline?.toMillis?.() ?? null,
         participantLimit: typeof data.participantLimit === 'number' ? data.participantLimit : null,
-        events: Array.isArray(data.events) ? data.events : [],
+        events: normalizeStoredEvents(data.events),
         status,
         registrationOpensAt: data.registrationOpensAt?.toMillis?.() ?? null,
         endAt: data.endAt?.toMillis?.() ?? null,
@@ -90,6 +111,9 @@ export async function GET() {
         participantCount: await countDistinctParticipants(db, d.id),
         registeredCount: registeredByCompetition.get(d.id) ?? 0,
         season: typeof data.season === 'string' ? data.season : '',
+        // Not computed here — the list has no format editor and this
+        // would cost a query per competition. See the field's comment.
+        lockedEventIds: [],
         eventsWithoutLiveRound: liveRounds
           .filter((e) => e.liveRound === null)
           .map((e) => ({ eventId: e.eventId, label: e.label })),
@@ -116,7 +140,13 @@ export async function POST(req: Request) {
   // writeCompetitionDoc allocates the id, stamps createdAt, and keeps
   // `featured` exclusive across the collection — see its comment.
   const db = getOnlineCompAdminDb();
-  const id = await writeCompetitionDoc(db, null, result.data);
-
-  return NextResponse.json({ id });
+  try {
+    const id = await writeCompetitionDoc(db, null, result.data);
+    return NextResponse.json({ id });
+  } catch (err) {
+    if (err instanceof CompetitionWriteError) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
+    throw err;
+  }
 }

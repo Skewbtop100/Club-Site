@@ -406,6 +406,125 @@ const read = async (id) => (await db.collection(COL).doc(id).get()).data();
     ).ok,
   );
 
+
+  // ── events[].resultFormat ─────────────────────────────────────────────
+  // Same rebuild trap as advancement: validateCompetitionInput reconstructs
+  // each event field by field, so an unlisted property is silently dropped.
+  const FMT_EVENT = (over = {}) => ({ eventId: '333', label: '3x3x3', rounds: 1, ...over });
+
+  const vFmt = validateCompetitionInput(
+    body({ events: [FMT_EVENT({ resultFormat: 'mo3' })], status: 'upcoming' }),
+  );
+  ok('resultFormat survives validation', vFmt.ok && vFmt.data.events[0].resultFormat === 'mo3',
+    vFmt.ok ? String(vFmt.data.events[0].resultFormat) : vFmt.error);
+
+  const fmtId = await writeCompetitionDoc(db, null, vFmt.data);
+  ok('resultFormat round-trips through Firestore',
+    (await read(fmtId)).events?.[0]?.resultFormat === 'mo3',
+    JSON.stringify((await read(fmtId)).events?.[0]));
+
+  for (const f of ['ao5', 'mo3', 'bo3', 'bo2', 'bo1']) {
+    const r = validateCompetitionInput(body({ events: [FMT_EVENT({ resultFormat: f })], status: 'upcoming' }));
+    ok(`accepts resultFormat '${f}'`, r.ok && r.data.events[0].resultFormat === f, r.ok ? '' : r.error);
+  }
+
+  // Absent -> 'ao5' at write time; no backfill needed for legacy events.
+  const vNoFmt = validateCompetitionInput(body({ events: [FMT_EVENT()], status: 'upcoming' }));
+  ok('omitted resultFormat defaults to ao5', vNoFmt.ok && vNoFmt.data.events[0].resultFormat === 'ao5',
+    vNoFmt.ok ? String(vNoFmt.data.events[0].resultFormat) : vNoFmt.error);
+
+  // A PRESENT but bogus value is refused rather than silently defaulted —
+  // quietly rewriting an admin's choice is worse than saying it was wrong.
+  for (const bad of ['ao3', 'AO5', '', 5, null, {}]) {
+    const r = validateCompetitionInput(body({ events: [FMT_EVENT({ resultFormat: bad })], status: 'upcoming' }));
+    // null/undefined are "absent" and legal; everything else must fail.
+    const shouldPass = bad === null;
+    ok(`resultFormat ${JSON.stringify(bad)} is ${shouldPass ? 'treated as absent' : 'REJECTED'}`,
+      r.ok === shouldPass, r.ok ? 'accepted' : r.error);
+  }
+
+  // ── the format lock ───────────────────────────────────────────────────
+  // An event's resultFormat may not change once a JUDGED submission exists
+  // for it. Enforced in writeCompetitionDoc, inside the same transaction
+  // that performs the write.
+  const LOCK = 'comp-lock';
+  const lockEvents = (fmt) => [
+    { eventId: '333', label: '3x3x3', rounds: 1, resultFormat: fmt },
+    { eventId: '222', label: '2x2x2', rounds: 1, resultFormat: 'ao5' },
+  ];
+  const saveLock = async (fmt) => {
+    const r = validateCompetitionInput(body({ events: lockEvents(fmt), status: 'upcoming' }));
+    if (!r.ok) throw new Error(r.error);
+    return writeCompetitionDoc(db, LOCK, r.data);
+  };
+
+  await db.collection('onlineCompetitions').doc(LOCK).set({ name: 'lock', status: 'draft', events: [] });
+  await saveLock('ao5');
+  ok('lock: format is freely changeable while nothing is judged',
+    await saveLock('mo3').then(() => true).catch((e) => e.message));
+  ok('  ...and the change actually landed', (await read(LOCK)).events?.[0]?.resultFormat === 'mo3',
+    JSON.stringify((await read(LOCK)).events?.[0]));
+  await saveLock('ao5');
+
+  // A PENDING submission must NOT lock — nothing has been derived from it.
+  const pendingRef = await db.collection('onlineSubmissions').add({
+    competitionId: LOCK, uid: 'u1', event: '333', round: 1, competitionRound: 1,
+    reportedTime: 1000, penalty: null, status: 'pending',
+  });
+  ok('lock: a PENDING submission does not lock the format',
+    await saveLock('bo3').then(() => true).catch((e) => e.message));
+  await saveLock('ao5');
+
+  // An APPROVED submission locks it.
+  const approvedRef = await db.collection('onlineSubmissions').add({
+    competitionId: LOCK, uid: 'u1', event: '333', round: 1, competitionRound: 1,
+    reportedTime: 1000, penalty: null, status: 'approved',
+  });
+  let refused = null;
+  try { await saveLock('mo3'); } catch (e) { refused = e; }
+  ok('lock: an APPROVED submission REFUSES a format change', refused !== null, 'change was allowed');
+  ok('  ...with a CompetitionWriteError', refused?.constructor?.name === 'CompetitionWriteError', refused?.constructor?.name);
+  ok('  ...naming the event', /333/.test(refused?.message ?? ''), refused?.message);
+  ok('  ...and the stored format is untouched', (await read(LOCK)).events?.[0]?.resultFormat === 'ao5',
+    JSON.stringify((await read(LOCK)).events?.[0]));
+
+  // The whole write is refused, so the sibling event's edit is rolled back
+  // too — the transaction is all-or-nothing, not a partial save.
+  ok('lock: an unrelated event in the same save is unchanged',
+    (await read(LOCK)).events?.[1]?.resultFormat === 'ao5',
+    JSON.stringify((await read(LOCK)).events?.[1]));
+
+  // Saving WITHOUT changing the locked format still works — an admin must
+  // still be able to edit everything else about a running competition.
+  ok('lock: re-saving the same format is allowed',
+    await saveLock('ao5').then(() => true).catch((e) => e.message));
+
+  // A REJECTED submission locks it too: a rejected attempt is a DNF that
+  // counts toward a result, so it is just as much at risk.
+  await approvedRef.delete();
+  await db.collection('onlineSubmissions').add({
+    competitionId: LOCK, uid: 'u1', event: '333', round: 1, competitionRound: 1,
+    reportedTime: 0, penalty: 'DNF', status: 'rejected',
+  });
+  let refusedRejected = null;
+  try { await saveLock('bo1'); } catch (e) { refusedRejected = e; }
+  ok('lock: a REJECTED submission also refuses a format change', refusedRejected !== null, 'change was allowed');
+
+  // A judged submission for a DIFFERENT event does not lock this one.
+  ok('lock: only the event with results is locked',
+    await (async () => {
+      const r = validateCompetitionInput(body({
+        events: [
+          { eventId: '333', label: '3x3x3', rounds: 1, resultFormat: 'ao5' },
+          { eventId: '222', label: '2x2x2', rounds: 1, resultFormat: 'bo3' },
+        ],
+        status: 'upcoming',
+      }));
+      return writeCompetitionDoc(db, LOCK, r.data).then(() => true).catch((e) => e.message);
+    })());
+
+  await pendingRef.delete();
+
   console.log(`\n  ${pass} passed, ${fail} failed\n`);
   fs.rmSync(OUT, { recursive: true, force: true });
   process.exit(fail === 0 ? 0 : 1);

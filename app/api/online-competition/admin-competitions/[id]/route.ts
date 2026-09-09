@@ -1,10 +1,32 @@
 import { NextResponse } from 'next/server';
 import { isOnlineCompAdmin } from '@/lib/online-competition/admin-auth';
 import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
-import { normalizeCompetitionStatus, validateCompetitionInput, writeCompetitionDoc } from '@/lib/online-competition/admin-competitions';
+import {
+  CompetitionWriteError,
+  lockedFormatEventIds,
+  normalizeCompetitionStatus,
+  validateCompetitionInput,
+  writeCompetitionDoc,
+} from '@/lib/online-competition/admin-competitions';
 import { resolveEventLiveRounds } from '@/lib/online-competition/round-access';
 import { DEFAULT_COMPETITION_FORMAT } from '@/lib/online-competition/types';
+import { resolveResultFormat } from '@/lib/online-competition/ao5';
+import type { OnlineCompetitionEventConfig } from '@/lib/online-competition/types';
 import type { OnlineCompetitionAdminView } from '@/lib/online-competition/types';
+
+/** Stored events, with resultFormat resolved. Every event saved before
+ *  that field existed reads back as 'ao5' — the read-time default, so no
+ *  backfill is needed (same pattern as normalizeCompetitionStatus). */
+function normalizeStoredEvents(raw: unknown): OnlineCompetitionEventConfig[] {
+  if (!Array.isArray(raw)) return [];
+  return (raw as Record<string, unknown>[]).map((e) => ({
+    eventId: typeof e?.eventId === 'string' ? e.eventId : '',
+    label: typeof e?.label === 'string' ? e.label : '',
+    rounds: typeof e?.rounds === 'number' ? e.rounds : 1,
+    resultFormat: resolveResultFormat(e?.resultFormat),
+    advancement: Array.isArray(e?.advancement) ? (e.advancement as OnlineCompetitionEventConfig['advancement']) : [],
+  }));
+}
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   if (!(await isOnlineCompAdmin())) {
@@ -24,6 +46,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   // edit form's "switching to live with no round open" confirmation,
   // which by definition asks about a competition that is not live yet.
   const liveRounds = await resolveEventLiveRounds(db, id);
+  // One extra query, only on the endpoint the EDITOR loads, so the ФОРМАТ
+  // control can be disabled with a reason instead of the admin finding out
+  // by having their save refused.
+  const lockedEventIds = await lockedFormatEventIds(db, id);
   const competition: OnlineCompetitionAdminView = {
     id: snap.id,
     name: data.name ?? '',
@@ -31,7 +57,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     startAt: data.startAt?.toMillis?.() ?? null,
     registrationDeadline: data.registrationDeadline?.toMillis?.() ?? null,
     participantLimit: typeof data.participantLimit === 'number' ? data.participantLimit : null,
-    events: Array.isArray(data.events) ? data.events : [],
+    events: normalizeStoredEvents(data.events),
     status: normalizeCompetitionStatus(data.status),
     registrationOpensAt: data.registrationOpensAt?.toMillis?.() ?? null,
     endAt: data.endAt?.toMillis?.() ?? null,
@@ -52,6 +78,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     participantCount: 0,
     registeredCount: 0,
     season: typeof data.season === 'string' ? data.season : '',
+    lockedEventIds,
     eventsWithoutLiveRound: liveRounds
       .filter((e) => e.liveRound === null)
       .map((e) => ({ eventId: e.eventId, label: e.label })),
@@ -75,7 +102,15 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   // Same shared writer as POST — keeps `featured` exclusive, and keeps the
   // merge:true semantics this route has always had.
   const db = getOnlineCompAdminDb();
-  await writeCompetitionDoc(db, id, result.data);
+  try {
+    await writeCompetitionDoc(db, id, result.data);
+  } catch (err) {
+    // The resultFormat lock — a reason only the stored document knows.
+    if (err instanceof CompetitionWriteError) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
+    throw err;
+  }
 
   return NextResponse.json({ ok: true });
 }

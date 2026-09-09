@@ -7,6 +7,7 @@ import { Button, FieldLabel, INPUT_CLASS, MONO_INPUT_CLASS, SELECT_CLASS, Square
 import { ROUND_GAP_TEXT, type RoundGapEvent } from './RoundGapWarning';
 import { uploadImageToCloudinary } from '@/lib/online-competition/cloudinary';
 import { ONLINE_COMP_EVENTS, onlineCompEventLabel } from '@/lib/online-competition/events';
+import { RESULT_FORMATS, formatLabel, resolveResultFormat, type ResultFormat } from '@/lib/online-competition/ao5';
 import { WcaEventIcon, hasWcaEventIcon } from '@/lib/wca-event-icon';
 import {
   COMPETITION_FORMAT_OPTIONS,
@@ -142,6 +143,8 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
   // Same: the status this competition had when loaded, so the round-gap
   // confirm can tell a transition INTO live from an already-live save.
   const [loadedStatus, setLoadedStatus] = useState<OnlineCompetitionStatus | null>(null);
+  // Server-computed; empty for a competition that does not exist yet.
+  const [lockedEventIds, setLockedEventIds] = useState<string[]>([]);
 
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -185,6 +188,7 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
         setUnlimited(c.participantLimit === null);
         setParticipantLimit(c.participantLimit != null ? String(c.participantLimit) : '');
         setEvents(c.events.map(toEventRow));
+        setLockedEventIds(c.lockedEventIds ?? []);
         setLoading(false);
       })
       .catch(() => {
@@ -423,7 +427,7 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
             }}
           />
         ) : tab === 2 ? (
-          <EventsTab events={events} setEvents={setEvents} />
+          <EventsTab events={events} setEvents={setEvents} lockedEventIds={lockedEventIds} />
         ) : tab === 1 ? (
           <ImagesTab
             {...{
@@ -514,6 +518,7 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
 interface EventRow {
   eventId: string;
   rounds: string;
+  resultFormat: ResultFormat;
   advancement: Record<number, { method: 'count' | 'percent'; value: string }>;
 }
 
@@ -522,7 +527,12 @@ function toEventRow(e: OnlineCompetitionEventConfig): EventRow {
   for (const a of e.advancement ?? []) {
     advancement[a.fromRound] = { method: a.method, value: String(a.value) };
   }
-  return { eventId: e.eventId, rounds: String(e.rounds), advancement };
+  return {
+    eventId: e.eventId,
+    rounds: String(e.rounds),
+    resultFormat: resolveResultFormat(e.resultFormat),
+    advancement,
+  };
 }
 
 function toEventConfig(row: EventRow): OnlineCompetitionEventConfig {
@@ -543,6 +553,7 @@ function toEventConfig(row: EventRow): OnlineCompetitionEventConfig {
     // updates, but falls back to the id for an event no longer offered.
     label: onlineCompEventLabel(row.eventId),
     rounds,
+    resultFormat: row.resultFormat,
     advancement,
   };
 }
@@ -567,18 +578,34 @@ function transitionLabel(fromRound: number, rounds: number): string {
   return `Раунд ${fromRound} → ${to >= rounds ? 'Финал' : `Раунд ${to}`}`;
 }
 
+const FORMAT_LOCKED_REASON = 'Үзүүлэлт орсон тул формат солих боломжгүй.';
+
+// Step B ships the control; step C makes it mean something. Until then a
+// non-Ao5 selection SAVES but cannot be run — the solve flow still demands
+// five attempts — so the editor says so rather than letting an admin
+// discover it on competition day.
+const FORMAT_UNSUPPORTED_WARNING =
+  'Ao5-аас өөр формат хараахан дэмжигдэхгүй байна. Тэмцээн эхлүүлэхээс өмнө шинэчлэлт хүлээнэ үү.';
+
 function EventsTab({
   events,
   setEvents,
+  lockedEventIds,
 }: {
   events: EventRow[];
   setEvents: React.Dispatch<React.SetStateAction<EventRow[]>>;
+  /** Events whose format the server will refuse to change, because a
+   *  judged submission already exists for them. Comes down with the
+   *  competition itself (OnlineCompetitionAdminView.lockedEventIds), so
+   *  disabling the control costs no extra round trip. */
+  lockedEventIds: string[];
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const pickerWrapRef = useRef<HTMLDivElement | null>(null);
 
   const used = new Set(events.map((e) => e.eventId));
   const allAdded = ONLINE_COMP_EVENTS.every((o) => used.has(o.id));
+  const unsupported = events.filter((e) => e.resultFormat !== 'ao5');
 
   // Close on an outside click or Escape. Both listeners are only attached
   // while the picker is open, so a closed picker costs nothing.
@@ -619,12 +646,25 @@ function EventsTab({
   }
 
   function addEvent(eventId: string) {
-    setEvents((prev) => [...prev, { eventId, rounds: '1', advancement: {} }]);
+    setEvents((prev) => [...prev, { eventId, rounds: '1', resultFormat: 'ao5', advancement: {} }]);
     setPickerOpen(false);
   }
 
   return (
     <div>
+      {unsupported.length > 0 && (
+        <div className="oc-sc-warn" style={{ marginBottom: 14, display: 'flex', gap: 9, flexWrap: 'wrap' }}>
+          <span aria-hidden>▲</span>
+          <span>{FORMAT_UNSUPPORTED_WARNING}</span>
+          <span style={{ color: '#8A6A28' }}>
+            ·{' '}
+            {unsupported
+              .map((e) => `${onlineCompEventLabel(e.eventId)}: ${formatLabel(e.resultFormat)}`)
+              .join(', ')}
+          </span>
+        </div>
+      )}
+
       {events.length === 0 && (
         <p className="oc-cf-soon" style={{ marginBottom: 12 }}>
           Төрөл нэмээгүй байна. Тэмцээнийг нийтлэхийн тулд дор хаяж нэг төрөл нэмнэ үү.
@@ -635,6 +675,7 @@ function EventsTab({
         const rounds = roundsOf(row);
         const transitions = transitionsFor(rounds);
         const known = ONLINE_COMP_EVENTS.some((o) => o.id === row.eventId);
+        const locked = lockedEventIds.includes(row.eventId);
         return (
           <div key={i} className="oc-cf-ev">
             <div className="oc-cf-ev-grid">
@@ -688,20 +729,27 @@ function EventsTab({
               </div>
 
               <div className="oc-cf-ev-cell">
-                {/* ФОРМАТ holds its column but is a fixed readout, NOT a
-                    dropdown, and there is no schema field behind it. Ao5 is
-                    hardcoded in seven places — computeAo5 (ao5.ts),
-                    ATTEMPTS_PER_ROUND (round-results.ts), the length-5
-                    guards in athleteStats.ts and seasonPoints.ts,
-                    TOTAL_ATTEMPTS on the solve page, SCRAMBLES_PER_GROUP
-                    for the TNoodle import, and the length === 5 branch in
-                    summaryStats.ts — so a control offering Bo3 or Mo3 would
-                    change nothing while implying it had. Swap this span for
-                    a select once those seven agree. */}
+                {/* A real control now. It is NOT yet honoured by the solve
+                    flow or any scorer — the attempt count is still
+                    hardcoded to 5 in eight places; see attemptsForFormat's
+                    warning in ao5.ts for the list. That is why selecting
+                    anything but Ao5 raises the amber notice below. */}
                 <FieldLabel>ФОРМАТ</FieldLabel>
-                <span className="oc-cf-ev-format" title="Формат тогтмол — Ao5">
-                  Ao5
-                </span>
+                <select
+                  className={SELECT_CLASS}
+                  value={row.resultFormat}
+                  disabled={locked}
+                  title={locked ? FORMAT_LOCKED_REASON : undefined}
+                  onChange={(e) => update(i, { resultFormat: e.target.value as ResultFormat })}
+                  aria-label="Формат"
+                  style={locked ? { opacity: 0.5 } : undefined}
+                >
+                  {RESULT_FORMATS.map((f) => (
+                    <option key={f} value={f}>
+                      {formatLabel(f)}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div className="oc-cf-ev-cell">
@@ -742,6 +790,12 @@ function EventsTab({
                 </button>
               </div>
             </div>
+
+            {locked && (
+              <p className="oc-cf-locked" style={{ marginTop: 8 }}>
+                {FORMAT_LOCKED_REASON}
+              </p>
+            )}
 
             {/* One row per transition, derived from the round count. A
                 single-round event has none. */}

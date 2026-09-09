@@ -1,4 +1,5 @@
 import type { Timestamp } from 'firebase/firestore';
+import type { ResultFormat } from './ao5';
 
 // ── Firestore doc shapes for the public online-competition feature ─────────
 // Fully separate from the club's internal `athletes` / `results` /
@@ -52,6 +53,21 @@ export interface OnlineCompetitionEventConfig {
   eventId: string;
   label: string;
   rounds: number;
+  /** How this event's rounds are scored: Ao5, Mo3, Bo3, Bo2 or Bo1.
+   *
+   *  Named resultFormat, NOT `format` — OnlineCompetition.format already
+   *  exists and means Хэлбэр ('online-video'), how the competition is
+   *  DELIVERED. Two unrelated concepts; keeping the names apart is the
+   *  point.
+   *
+   *  Optional because every event stored before this field existed lacks
+   *  it. Readers must go through resolveResultFormat (ao5.ts), which
+   *  defaults to 'ao5' — what the platform has always actually run — so
+   *  no backfill is needed.
+   *
+   *  NOT yet honoured by the solve flow or any scorer; see
+   *  attemptsForFormat's warning. */
+  resultFormat?: ResultFormat;
   /** The PLANNED cut for each round transition of this event, one entry
    *  per transition (a 3-round event has two: from round 1, and from
    *  round 2). Absent on every competition created before the Төрөл tab,
@@ -477,6 +493,18 @@ export interface OnlineCompetitionAdminView {
    *  an open round; the list endpoint only computes it for live
    *  competitions, where it is the state the admin needs warning about. */
   eventsWithoutLiveRound: { eventId: string; label: string }[];
+  /** eventIds whose resultFormat is LOCKED because a judged (approved or
+   *  rejected) submission already exists for them — changing the format
+   *  now would silently re-derive existing results under a different rule.
+   *  The server refuses such a change (writeCompetitionDoc); this is what
+   *  lets the editor disable the control and say why, instead of the admin
+   *  discovering it as a save error.
+   *
+   *  Computed only by the single-competition GET, which is what the editor
+   *  loads. The LIST endpoint returns [] — it has no format editor, and
+   *  the check costs a query per competition. Same "empty means not
+   *  computed here" caveat as eventsWithoutLiveRound above. */
+  lockedEventIds: string[];
 }
 
 /** Payload for POST/PUT admin-competitions — what the create/edit form

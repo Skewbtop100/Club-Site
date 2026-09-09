@@ -15,6 +15,7 @@ import {
   collection,
 } from 'firebase/firestore';
 import { onlineCompDb } from './firebase';
+import { resolveResultFormat } from './ao5';
 import type {
   OnlineCompetition,
   OnlineCompetitionEventConfig,
@@ -64,13 +65,16 @@ function normalizeEvents(raw: unknown): OnlineCompetitionEventConfig[] {
   const out: OnlineCompetitionEventConfig[] = [];
   for (const e of raw) {
     if (typeof e === 'string') {
-      out.push({ eventId: e, label: e.toUpperCase(), rounds: 1 });
+      out.push({ eventId: e, label: e.toUpperCase(), rounds: 1, resultFormat: 'ao5' });
     } else if (e && typeof e === 'object' && typeof (e as Record<string, unknown>).eventId === 'string') {
       const obj = e as Partial<OnlineCompetitionEventConfig>;
       out.push({
         eventId: obj.eventId as string,
         label: typeof obj.label === 'string' ? obj.label : (obj.eventId as string).toUpperCase(),
         rounds: typeof obj.rounds === 'number' && obj.rounds > 0 ? obj.rounds : 1,
+        // Read-time default, no backfill — same treatment as the legacy
+        // status and events shapes handled around it.
+        resultFormat: resolveResultFormat((e as Record<string, unknown>).resultFormat),
       });
     }
   }

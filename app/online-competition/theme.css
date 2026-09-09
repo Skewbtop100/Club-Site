@@ -5071,6 +5071,13 @@ button.oc-rv-cell:hover {
   color: #4A4740;
 }
 
+/* Reason shown beside a disabled ФОРМАТ select. */
+.oc-cf-locked {
+  font: 500 9px/1.5 var(--oc-font-mono), monospace;
+  letter-spacing: .1em;
+  color: #6E6A62;
+}
+
 /* Advancement rows, indented under their event. */
 .oc-cf-adv {
   margin-top: 12px;
