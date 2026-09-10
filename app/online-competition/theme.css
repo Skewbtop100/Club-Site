@@ -4877,6 +4877,109 @@ button.oc-rv-cell:hover {
   outline: 2px solid #DFFF4F;
   outline-offset: -2px;
 }
+/* ── Хуваарь tab ───────────────────────────────────────────────────────
+   The header summary: what the competition claims, what the schedule
+   actually adds up to, and whether the two agree. Three cells so the
+   comparison is side by side — the whole point is reading one against
+   the other. */
+.oc-cf-sch-head {
+  display: flex;
+  gap: 1px;
+  flex-wrap: wrap;
+  background: #1C1C21;
+  border: 1px solid #1C1C21;
+}
+.oc-cf-sch-head-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex: 1;
+  min-width: 160px;
+  padding: 14px;
+  background: #0D0D10;
+}
+/* The verdict cell takes the right edge and is read last. */
+.oc-cf-sch-head-total {
+  justify-content: center;
+  align-items: flex-end;
+  text-align: right;
+}
+.oc-cf-sch-total {
+  font: 500 9px/1.6 var(--oc-font-mono), monospace;
+  letter-spacing: .14em;
+  color: #6E6A62;
+}
+/* Amber, never red: an overrun is a warning about a programme the admin
+   may still be halfway through building, and nothing downstream acts on
+   it. */
+.oc-cf-sch-over {
+  color: #E0A020;
+}
+
+/* The rows. A grid rather than a flex row so every cell lines up down the
+   column — a schedule is read vertically, comparing start times. */
+.oc-cf-sch {
+  border: 1px solid #1C1C21;
+  background: #0D0D10;
+  /* Seven columns do not fit a phone; the table scrolls inside itself
+     rather than widening the page. */
+  overflow-x: auto;
+}
+.oc-cf-sch-row {
+  display: grid;
+  grid-template-columns: auto 62px 84px 62px minmax(190px, 1.2fr) minmax(150px, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  min-width: 720px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #16161B;
+}
+.oc-cf-sch-row:last-child {
+  border-bottom: none;
+}
+/* The column captions. Not a <th> — this is a grid, and a real table
+   would fight the drag-and-drop rows. */
+.oc-cf-sch-header {
+  padding-top: 12px;
+  padding-bottom: 8px;
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .18em;
+  color: #6E6A62;
+}
+.oc-cf-sch-header:hover {
+  background: transparent;
+}
+/* Computed cells: mono, so the times line up digit for digit, and muted,
+   because they are readouts rather than controls. */
+.oc-cf-sch-clock {
+  padding-top: 12px;
+  font: 500 12px/1 var(--oc-font-mono), monospace;
+  color: #9A958A;
+  white-space: nowrap;
+}
+/* Grip column: the handle and the two buttons side by side rather than
+   stacked, so a row stays one line tall. */
+.oc-cf-sch-grip {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+}
+/* ХӨТӨЛБӨР holds a select and, for a custom row, a text input beneath it
+   — one column, two controls, so the grid never reflows when a row
+   switches kind. */
+.oc-cf-sch-prog {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.oc-cf-sch-stale {
+  font: 500 9px/1.4 var(--oc-font-mono), monospace;
+  letter-spacing: .14em;
+  color: #E0A020;
+}
+
 /* ── Төлбөр tab ────────────────────────────────────────────────────────
    One row per configured event: icon | name | Суурьд багтсан | НЭМЭЛТ · ₮.
    Same card treatment as .oc-cf-ev, but a row rather than a card, because

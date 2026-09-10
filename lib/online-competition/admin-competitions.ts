@@ -3,11 +3,13 @@ import { DEFAULT_COMPETITION_FORMAT } from './types';
 import { validateQualifierInput } from './rounds';
 import { RESULT_FORMATS, cutoffPhaseFor, resolveResultFormat, type ResultFormat } from './ao5';
 import { parseVideoUrl } from './video-url';
-import { MAX_BLOCKS_PER_SECTION, MAX_SECTIONS } from './types';
+import { MAX_BLOCKS_PER_SECTION, MAX_SCHEDULE_ENTRIES, MAX_SECTIONS } from './types';
 import type { OnlineCompetitionAdvancement, OnlineCompetitionCutoff } from './types';
 import type {
   OnlineCompetitionBlock,
   OnlineCompetitionBlockType,
+  OnlineCompetitionScheduleEntry,
+  OnlineCompetitionScheduleKind,
   OnlineCompetitionSection,
 } from './types';
 import type { OnlineCompetitionEventConfig, OnlineCompetitionStatus, OnlineCompetitionWriteInput } from './types';
@@ -438,6 +440,210 @@ function parseSurcharge(raw: unknown): ParseResult<number | null> {
   return { ok: true, value: raw };
 }
 
+// ── schedule[] ──────────────────────────────────────────────────────────
+// The fourth structure through this file, and the third to use the
+// manifest: an unregistered key is a REFUSED WRITE naming the field, not a
+// value that vanishes on reload.
+//
+// Here the manifest is per-KIND, exactly like BLOCK_PAYLOAD_FIELDS — a
+// 'round' entry and an 'other' entry carry different payloads, and a key
+// belonging to the other kind is what "kind does not match its payload"
+// means. `note` is on both kinds, so it is listed on both rather than
+// special-cased.
+
+/** Keys every schedule entry carries whatever its kind. */
+const SCHEDULE_COMMON_FIELDS = ['id', 'startMin', 'durationMin', 'kind'] as const;
+
+/** Per-kind payload keys, and whether each is required. */
+const SCHEDULE_PAYLOAD_FIELDS: Record<
+  OnlineCompetitionScheduleKind,
+  { key: 'eventId' | 'round' | 'label' | 'note'; required: boolean }[]
+> = {
+  round: [
+    { key: 'eventId', required: true },
+    { key: 'round', required: true },
+    { key: 'note', required: false },
+  ],
+  other: [
+    // A row with no label is a slot on the timeline that says nothing —
+    // an athlete reads "10:00, 30 minutes, ???". Refused.
+    { key: 'label', required: true },
+    { key: 'note', required: false },
+  ],
+};
+
+const SCHEDULE_KINDS = Object.keys(SCHEDULE_PAYLOAD_FIELDS) as OnlineCompetitionScheduleKind[];
+/** Union across kinds — the "carries the other kind's payload" test.
+ *  Derived, never restated. */
+const ALL_SCHEDULE_PAYLOAD_KEYS = new Set<string>(
+  SCHEDULE_KINDS.flatMap((k) => SCHEDULE_PAYLOAD_FIELDS[k].map((f) => f.key)),
+);
+
+/** Longest a single slot may be. A day; anything more is a typo or a
+ *  runaway client, and the UI's own select tops out at two hours. */
+const MAX_SLOT_MINUTES = 1440;
+/** Ceiling on the derived start. Two weeks of minutes — high enough that
+ *  no real programme reaches it, low enough that a corrupt accumulation
+ *  is caught rather than stored. */
+const MAX_START_MINUTES = MAX_SLOT_MINUTES * 14;
+
+function parseScheduleEntry(raw: unknown, where: string): ParseResult<OnlineCompetitionScheduleEntry> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, error: `${where}: invalid schedule entry` };
+  }
+  const e = raw as Record<string, unknown>;
+
+  const kind = e.kind;
+  if (typeof kind !== 'string' || !SCHEDULE_KINDS.includes(kind as OnlineCompetitionScheduleKind)) {
+    return { ok: false, error: `${where}: unknown schedule kind ${JSON.stringify(e.kind)}` };
+  }
+  const entryKind = kind as OnlineCompetitionScheduleKind;
+
+  const id = requiredString(e.id);
+  if (id === null) return { ok: false, error: `${where}: schedule id is required` };
+
+  const allowed = SCHEDULE_PAYLOAD_FIELDS[entryKind];
+  const allowedKeys = new Set<string>([...SCHEDULE_COMMON_FIELDS, ...allowed.map((f) => f.key)]);
+  for (const key of Object.keys(e)) {
+    if (e[key] === undefined) continue;
+    if (allowedKeys.has(key)) continue;
+    if (ALL_SCHEDULE_PAYLOAD_KEYS.has(key)) {
+      return { ok: false, error: `${where}: a ${entryKind} entry cannot carry ${key}` };
+    }
+    return { ok: false, error: `${where}: unknown schedule field ${key}` };
+  }
+
+  // Derived by the editor from the competition's startAt plus every
+  // preceding duration, so this only has to refuse something impossible.
+  if (typeof e.startMin !== 'number' || !Number.isInteger(e.startMin) || e.startMin < 0) {
+    return { ok: false, error: `${where}: startMin must be a non-negative whole number of minutes` };
+  }
+  if (e.startMin > MAX_START_MINUTES) {
+    return { ok: false, error: `${where}: startMin ${e.startMin} is implausibly far from the start` };
+  }
+  // Deliberately NOT restricted to SCHEDULE_DURATIONS. That list is what
+  // the select offers today; enshrining it here would turn a UI decision
+  // into a schema one and refuse a document the next design writes.
+  if (typeof e.durationMin !== 'number' || !Number.isInteger(e.durationMin) || e.durationMin <= 0) {
+    return { ok: false, error: `${where}: durationMin must be a whole number of minutes above zero` };
+  }
+  if (e.durationMin > MAX_SLOT_MINUTES) {
+    return { ok: false, error: `${where}: durationMin ${e.durationMin} is longer than a day` };
+  }
+
+  const out: OnlineCompetitionScheduleEntry = {
+    id,
+    startMin: e.startMin,
+    durationMin: e.durationMin,
+    kind: entryKind,
+  };
+
+  // Built from the manifest, the only place a payload field is written.
+  for (const field of allowed) {
+    const value = e[field.key];
+    if (value === undefined || value === null) {
+      if (field.required) return { ok: false, error: `${where}: a ${entryKind} entry requires ${field.key}` };
+      continue;
+    }
+    if (field.key === 'round') {
+      if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+        return { ok: false, error: `${where}: round must be a whole number from 1` };
+      }
+      out.round = value;
+      continue;
+    }
+    if (typeof value !== 'string') return { ok: false, error: `${where}: ${field.key} must be a string` };
+    // `note` is the one field allowed to be empty — an added row has no
+    // note yet, and that is not an error.
+    if (field.key === 'note') {
+      out.note = value;
+      continue;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+      if (field.required) return { ok: false, error: `${where}: a ${entryKind} entry requires ${field.key}` };
+      continue;
+    }
+    if (field.key === 'eventId') out.eventId = trimmed;
+    if (field.key === 'label') out.label = trimmed;
+  }
+
+  return { ok: true, value: out };
+}
+
+/** Absent/null/[] -> []. Every other malformation is refused.
+ *
+ *  Note what is NOT checked: that a 'round' entry names an event the
+ *  competition actually has. An admin legitimately drafts a programme
+ *  before finishing the Төрөл tab, and removing an event should not make
+ *  every save fail until they also fix the schedule. The editor flags a
+ *  stale row instead. */
+function parseSchedule(raw: unknown): ParseResult<OnlineCompetitionScheduleEntry[]> {
+  if (raw === undefined || raw === null) return { ok: true, value: [] };
+  if (!Array.isArray(raw)) return { ok: false, error: 'schedule must be an array' };
+  if (raw.length > MAX_SCHEDULE_ENTRIES) {
+    return { ok: false, error: `at most ${MAX_SCHEDULE_ENTRIES} schedule entries are allowed (got ${raw.length})` };
+  }
+
+  const out: OnlineCompetitionScheduleEntry[] = [];
+  const seen = new Set<string>();
+  for (const [index, entry] of raw.entries()) {
+    const parsed = parseScheduleEntry(entry, `schedule row ${index + 1}`);
+    if (!parsed.ok) return parsed;
+    if (seen.has(parsed.value.id)) {
+      return { ok: false, error: `schedule row ${index + 1}: duplicate schedule id ${parsed.value.id}` };
+    }
+    seen.add(parsed.value.id);
+    out.push(parsed.value);
+  }
+  // ARRAY ORDER IS THE ORDER. Not sorted by startMin: the accumulation is
+  // what produces startMin, so sorting by it would be circular, and a
+  // half-edited schedule whose rows are briefly out of sequence must not
+  // be silently rearranged under the admin.
+  return { ok: true, value: out };
+}
+
+/** Stored schedule, read defensively for the two GET mappers. Same
+ *  read-side stance as normalizeStoredSections: drop what cannot be
+ *  understood rather than throwing, so an odd document can still be
+ *  opened and fixed. */
+export function normalizeStoredSchedule(raw: unknown): OnlineCompetitionScheduleEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const out: OnlineCompetitionScheduleEntry[] = [];
+  for (const [index, item] of (raw as unknown[]).entries()) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const e = item as Record<string, unknown>;
+    if (typeof e.kind !== 'string' || !SCHEDULE_KINDS.includes(e.kind as OnlineCompetitionScheduleKind)) continue;
+    const kind = e.kind as OnlineCompetitionScheduleKind;
+    if (typeof e.durationMin !== 'number' || e.durationMin <= 0) continue;
+    const entry: OnlineCompetitionScheduleEntry = {
+      id: typeof e.id === 'string' && e.id.trim() ? e.id.trim() : `sch${index + 1}`,
+      // Recomputed by the editor on the next save anyway; a missing or
+      // junk value reads as 0 rather than dropping an announced row.
+      startMin: typeof e.startMin === 'number' && e.startMin >= 0 ? Math.trunc(e.startMin) : 0,
+      durationMin: Math.trunc(e.durationMin),
+      kind,
+    };
+    for (const field of SCHEDULE_PAYLOAD_FIELDS[kind]) {
+      const value = e[field.key];
+      if (field.key === 'round') {
+        if (typeof value === 'number' && value >= 1) entry.round = Math.trunc(value);
+        continue;
+      }
+      if (typeof value !== 'string') continue;
+      if (field.key === 'eventId') entry.eventId = value;
+      else if (field.key === 'label') entry.label = value;
+      else if (field.key === 'note') entry.note = value;
+    }
+    // A row whose required payload did not survive says nothing on a
+    // timeline, so it is dropped rather than rendered blank.
+    if (kind === 'round' && (!entry.eventId || entry.round === undefined)) continue;
+    if (kind === 'other' && !entry.label) continue;
+    out.push(entry);
+  }
+  return out;
+}
+
 export function validateCompetitionInput(body: unknown): ValidationResult {
   if (!body || typeof body !== 'object') return { ok: false, error: 'Invalid body' };
   const b = body as Record<string, unknown>;
@@ -544,6 +750,9 @@ export function validateCompetitionInput(body: unknown): ValidationResult {
   const baseFee = parseBaseFee(b.baseFeeMnt);
   if (!baseFee.ok) return { ok: false, error: baseFee.error };
 
+  const schedule = parseSchedule(b.schedule);
+  if (!schedule.ok) return { ok: false, error: schedule.error };
+
   return {
     ok: true,
     data: {
@@ -585,6 +794,7 @@ export function validateCompetitionInput(body: unknown): ValidationResult {
       bannerUrl: nullableString(b.bannerUrl),
       bannerPublicId: nullableString(b.bannerPublicId),
       sections: sections.value,
+      schedule: schedule.value,
     },
   };
 }
@@ -675,6 +885,10 @@ export function toFirestoreDoc(input: OnlineCompetitionWriteInput) {
     // what this needs, and is worth stating because the opposite would
     // leave a deleted tail behind.
     sections: input.sections,
+    // Written whole, like sections and for the same reason: the array IS
+    // the schedule, so a shorter one after a deletion has to replace the
+    // stored one rather than merge into it.
+    schedule: input.schedule,
   };
 }
 

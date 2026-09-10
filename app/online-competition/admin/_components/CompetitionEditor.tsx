@@ -18,6 +18,14 @@ import { fmtTimeLimit, parseTimeLimit } from '@/lib/online-competition/time-util
 import { evaluateReadiness, type Readiness } from '@/lib/online-competition/publish-readiness';
 import { describeVideo, parseVideoUrl } from '@/lib/online-competition/video-url';
 import { competitionFeeTotals, formatMnt } from '@/lib/online-competition/fees';
+import {
+  SCHEDULE_DURATIONS,
+  fmtClock,
+  fmtDurationMn,
+  minutesOfDay,
+  scheduleSummary,
+  scheduleTimings,
+} from '@/lib/online-competition/schedule';
 import { WcaEventIcon, hasWcaEventIcon } from '@/lib/wca-event-icon';
 import {
   COMPETITION_FORMAT_OPTIONS,
@@ -29,7 +37,10 @@ import {
   type OnlineCompetitionBlock,
   type OnlineCompetitionBlockType,
   type OnlineCompetitionEventConfig,
+  type OnlineCompetitionScheduleEntry,
+  type OnlineCompetitionScheduleKind,
   type OnlineCompetitionSection,
+  MAX_SCHEDULE_ENTRIES,
   type OnlineCompetitionStatus,
   type OnlineCompetitionWriteInput,
 } from '@/lib/online-competition/types';
@@ -202,6 +213,30 @@ function feeFingerprint(
   return `${baseFeeMnt ?? ''}|${parts.join(',')}`;
 }
 
+/** One schedule row while it is being edited.
+ *
+ *  Everything the stored entry has EXCEPT `startMin`, which is derived
+ *  from the competition's startAt plus every preceding duration and is
+ *  written only at save (toScheduleEntries below). Holding it in the row
+ *  would give one fact two homes, and the one the admin cannot edit would
+ *  be the one that drifted. */
+type ScheduleRow = Omit<OnlineCompetitionScheduleEntry, 'startMin'>;
+
+/** Rows -> stored entries, stamping each with the start time the running
+ *  clock puts it at. Recomputed on EVERY save, so a change to the
+ *  competition's start time, a reorder, or an edited duration all
+ *  re-time the whole programme with no separate migration — and a
+ *  startMin can never disagree with the durations that produced it.
+ *
+ *  With no startAt the anchor is midnight; the values are still
+ *  internally consistent and are restamped the moment a start time is
+ *  set. */
+function toScheduleEntries(rows: ScheduleRow[], startAtLocal: string): OnlineCompetitionScheduleEntry[] {
+  const anchor = minutesOfDay(datetimeLocalToMs(startAtLocal));
+  const timings = scheduleTimings(anchor, rows.map((r) => r.durationMin));
+  return rows.map((row, i) => ({ ...row, startMin: timings[i].startMin }));
+}
+
 function msToDatetimeLocal(ms: number | null): string {
   if (ms === null) return '';
   const d = new Date(ms);
@@ -270,6 +305,9 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
   // half-typed, so the editor edits the stored objects directly and a save
   // sends them as they are.
   const [sections, setSections] = useState<OnlineCompetitionSection[]>([]);
+  // Owned by the Хуваарь tab. DISPLAY ONLY — nothing here opens or closes
+  // a round; that is roundState and the Раунд удирдах screen, untouched.
+  const [schedule, setSchedule] = useState<ScheduleRow[]>([]);
   // Focus the title of a section the moment it is created, so the admin
   // types the name rather than hunting for the field. Holds the section id
   // (never an index — an index would go stale the instant anything moved).
@@ -347,6 +385,10 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
         setParticipantLimit(c.participantLimit != null ? String(c.participantLimit) : '');
         setEvents(c.events.map(toEventRow));
         setSections(c.sections ?? []);
+        // startMin is dropped on the way in and recomputed on the way out
+        // — the stored value is a projection of the durations, and the
+        // durations are what the admin actually edits.
+        setSchedule((c.schedule ?? []).map(({ startMin: _startMin, ...row }) => row));
         setRegisteredCount(c.registeredCount);
         setLoadedFees(feeFingerprint(c.baseFeeMnt, c.events));
         setLockedEventIds(c.lockedEventIds ?? []);
@@ -590,6 +632,7 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
         // refuses anything malformed rather than dropping it — so a section
         // that reaches the server either saves whole or fails loudly.
         sections,
+        schedule: toScheduleEntries(schedule, startAt),
       };
       const url = savedId
         ? `/api/online-competition/admin-competitions/${savedId}`
@@ -819,6 +862,8 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
           />
         ) : tabIndex === 3 ? (
           <FeesTab {...{ paid, baseFee, setBaseFee, events, setEvents }} />
+        ) : tabIndex === 4 ? (
+          <ScheduleTab {...{ schedule, setSchedule, events, startAt, endAt }} />
         ) : activeTab.kind === 'section' ? (
           <SectionTab
             key={sections[activeTab.sectionIndex!].id}
@@ -846,6 +891,7 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
               endAt,
               paid,
               baseFee,
+              schedule,
               readiness,
             }}
           />
@@ -1650,6 +1696,20 @@ interface FeesTabProps {
  *  can never quote a number the fee tab does not show. A range only when
  *  there is one — "15 000₮ – 15 000₮" for a competition with no surcharges
  *  would be noise. */
+/** The ХУВААРЬ cell's value: how many rows and how long they run. Reads
+ *  the same scheduleSummary the tab's own header does, so the review can
+ *  never quote a total the schedule tab does not show.
+ *
+ *  Deliberately NOT flagged when it overruns the competition window: that
+ *  warning belongs on the tab where it can be acted on, and a checklist
+ *  row for it would imply a schedule is required to publish, which it is
+ *  not. */
+function scheduleCellSummary(schedule: ScheduleRow[]): string {
+  if (schedule.length === 0) return 'Оруулаагүй';
+  const { totalMin } = scheduleSummary(null, null, schedule.map((r) => r.durationMin));
+  return `${schedule.length} эгнээ · ${fmtDurationMn(totalMin)}`;
+}
+
 function feeSummary(paid: boolean, baseFee: string, events: EventRow[]): string {
   if (!paid) return 'Төлбөргүй';
   const base = parseBaseFeeText(baseFee);
@@ -1794,6 +1854,374 @@ function FeesTab(p: FeesTabProps) {
         Хамгийн бага = суурь хураамж. Бүх төрөлд орвол = суурь дээр бүх нэмэлт хураамж нэмсэн дүн.
       </p>
     </div>
+  );
+}
+
+// ── 05 Хуваарь ───────────────────────────────────────────────────────────
+// The announced programme. DISPLAY ONLY: this tab writes an array of times
+// and labels and nothing else reads it. Opening and closing rounds is
+// roundState and the Раунд удирдах screen, which do not know this field
+// exists — a schedule row is a promise to athletes, not an instruction.
+
+/** The ХӨТӨЛБӨР select's value for a round slot. One string, so a single
+ *  <select> can offer rounds and the custom option together — see
+ *  ProgrammeCell. */
+const roundValue = (eventId: string, round: number) => `round:${eventId}:${round}`;
+const OTHER_VALUE = 'other';
+
+/** "3x3x3 · Раунд 1" / "2x2x2 · Финал". The last round of an event is its
+ *  final, including a one-round event, whose only round IS the final. */
+function programmeLabel(eventId: string, round: number, totalRounds: number): string {
+  const event = onlineCompEventLabel(eventId);
+  return round >= totalRounds ? `${event} · Финал` : `${event} · Раунд ${round}`;
+}
+
+/** Every event+round the competition is configured for, in Төрөл order. */
+function programmeOptions(events: EventRow[]): { value: string; label: string }[] {
+  const out: { value: string; label: string }[] = [];
+  for (const row of events) {
+    const total = roundsOf(row);
+    for (let round = 1; round <= total; round++) {
+      out.push({ value: roundValue(row.eventId, round), label: programmeLabel(row.eventId, round, total) });
+    }
+  }
+  return out;
+}
+
+interface ScheduleTabProps {
+  schedule: ScheduleRow[];
+  setSchedule: React.Dispatch<React.SetStateAction<ScheduleRow[]>>;
+  events: EventRow[];
+  startAt: string;
+  endAt: string;
+}
+
+function ScheduleTab(p: ScheduleTabProps) {
+  // Same plain HTML5 drag as the section blocks, and the same reason for
+  // the ▲▼ buttons beside it: drag events never fire for a touch drag,
+  // and this panel is used on a phone.
+  const [armed, setArmed] = useState<string | null>(null);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
+
+  const startMs = datetimeLocalToMs(p.startAt);
+  const endMs = datetimeLocalToMs(p.endAt);
+  const anchor = minutesOfDay(startMs);
+  const durations = p.schedule.map((r) => r.durationMin);
+  const timings = scheduleTimings(anchor, durations);
+  const summary = scheduleSummary(startMs, endMs, durations);
+  const options = programmeOptions(p.events);
+  const optionValues = new Set(options.map((o) => o.value));
+
+  const move = (from: number, to: number) => {
+    if (to < 0 || to >= p.schedule.length) return;
+    p.setSchedule((prev) => moveItem(prev, from, to));
+  };
+  const setRow = (id: string, patch: Partial<ScheduleRow>) =>
+    p.setSchedule((prev) => prev.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+  const removeRow = (id: string) => p.setSchedule((prev) => prev.filter((row) => row.id !== id));
+
+  function addRow() {
+    if (p.schedule.length >= MAX_SCHEDULE_ENTRIES) return;
+    // Defaults to the first configured round when there is one, so the
+    // common case is one click; falls back to a custom row for a
+    // competition whose Төрөл tab is still empty.
+    const first = options[0];
+    const base = { id: newId(), durationMin: 30, note: '' };
+    p.setSchedule((prev) => [
+      ...prev,
+      first
+        ? { ...base, kind: 'round' as const, eventId: parseRoundValue(first.value)!.eventId, round: parseRoundValue(first.value)!.round }
+        : { ...base, kind: 'other' as const, label: '' },
+    ]);
+  }
+
+  // "—" rather than 00:00 when there is no start time to anchor against:
+  // a computed clock cell showing midnight would be a wrong answer
+  // presented as a right one.
+  const clock = (minutes: number) => (anchor === null ? '—' : fmtClock(minutes));
+  const full = p.schedule.length >= MAX_SCHEDULE_ENTRIES;
+
+  return (
+    <div>
+      <div className="oc-cf-sch-head">
+        <div className="oc-cf-sch-head-cell">
+          <span className="oc-cf-sum-label">ТЭМЦЭЭН · ЕРӨНХИЙ ХЭСГЭЭС</span>
+          <span className="oc-cf-sum-value">
+            {startMs === null || endMs === null
+              ? '—'
+              : `${fmtClock(minutesOfDay(startMs)!)} → ${fmtClock(minutesOfDay(endMs)!)}`}
+          </span>
+        </div>
+        <div className="oc-cf-sch-head-cell">
+          <span className="oc-cf-sum-label">ХУВААРЬ</span>
+          <span className="oc-cf-sum-value">
+            {summary.firstMin === null || summary.lastEndMin === null
+              ? '—'
+              : `${fmtClock(summary.firstMin)} → ${fmtClock(summary.lastEndMin)}`}
+          </span>
+        </div>
+        <div className="oc-cf-sch-head-cell oc-cf-sch-head-total">
+          <ScheduleTotal
+            hasRows={p.schedule.length > 0}
+            totalMin={summary.totalMin}
+            overflowMin={summary.overflowMin}
+            hasWindow={startMs !== null && endMs !== null && endMs > startMs}
+          />
+        </div>
+      </div>
+
+      <p className="oc-cf-hint" style={{ marginTop: 12 }}>
+        Цаг тэмцээн эхлэх цагаас автоматаар үргэлжилнэ · Эгнээг чирэхэд хөтөлбөр ба тайлбар аль нь зөөгдөнө.
+      </p>
+
+      {p.schedule.length > 0 && (
+        <div className="oc-cf-sch" style={{ marginTop: 16 }}>
+          <div className="oc-cf-sch-row oc-cf-sch-header" aria-hidden>
+            <span />
+            <span>ЭХЛЭХ</span>
+            <span>ХУГАЦАА</span>
+            <span>ДУУСАХ</span>
+            <span>ХӨТӨЛБӨР</span>
+            <span>ТАЙЛБАР</span>
+            <span />
+          </div>
+
+          {p.schedule.map((row, i) => (
+            <div
+              key={row.id}
+              className={`oc-cf-sch-row${dragId === row.id ? ' oc-cf-blk-dragging' : ''}${
+                overIndex === i && dragId !== null && dragId !== row.id ? ' oc-cf-blk-over' : ''
+              }`}
+              draggable={armed === row.id}
+              onDragStart={(e) => {
+                setDragId(row.id);
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', row.id);
+              }}
+              onDragOver={(e) => {
+                if (dragId === null) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                setOverIndex(i);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                const from = p.schedule.findIndex((r) => r.id === dragId);
+                if (from !== -1) move(from, i);
+                setDragId(null);
+                setOverIndex(null);
+                setArmed(null);
+              }}
+              onDragEnd={() => {
+                setDragId(null);
+                setOverIndex(null);
+                setArmed(null);
+              }}
+            >
+              <span className="oc-cf-blk-grip oc-cf-sch-grip">
+                <span
+                  className="oc-cf-blk-handle"
+                  role="presentation"
+                  title="Чирж байрлуулах"
+                  onPointerDown={() => setArmed(row.id)}
+                  onPointerUp={() => setArmed(null)}
+                >
+                  ⣿
+                </span>
+                <span style={{ display: 'flex', gap: 2 }}>
+                  <button
+                    type="button"
+                    className="oc-cf-blk-move"
+                    aria-label="Дээш зөөх"
+                    disabled={i === 0}
+                    onClick={() => move(i, i - 1)}
+                  >
+                    ▲
+                  </button>
+                  <button
+                    type="button"
+                    className="oc-cf-blk-move"
+                    aria-label="Доош зөөх"
+                    disabled={i === p.schedule.length - 1}
+                    onClick={() => move(i, i + 1)}
+                  >
+                    ▼
+                  </button>
+                </span>
+              </span>
+
+              {/* Computed, never entered — row 1 from the competition's
+                  start time, every other row from the one before it. */}
+              <span className="oc-cf-sch-clock">{clock(timings[i].startMin)}</span>
+
+              <select
+                className={SELECT_CLASS}
+                aria-label="Үргэлжлэх хугацаа"
+                value={row.durationMin}
+                onChange={(e) => setRow(row.id, { durationMin: Number(e.target.value) })}
+              >
+                {/* A stored duration outside the offered set (an older
+                    document, or a future select) keeps its own option
+                    rather than being silently snapped to 30. */}
+                {!SCHEDULE_DURATIONS.includes(row.durationMin) && (
+                  <option value={row.durationMin}>{row.durationMin}м</option>
+                )}
+                {SCHEDULE_DURATIONS.map((d) => (
+                  <option key={d} value={d}>
+                    {d}м
+                  </option>
+                ))}
+              </select>
+
+              <span className="oc-cf-sch-clock">{clock(timings[i].endMin)}</span>
+
+              <ProgrammeCell row={row} options={options} optionValues={optionValues} onChange={(patch) => setRow(row.id, patch)} />
+
+              <input
+                className={INPUT_CLASS}
+                aria-label="Тайлбар"
+                placeholder="Шүүгч: ..."
+                value={row.note ?? ''}
+                onChange={(e) => setRow(row.id, { note: e.target.value })}
+              />
+
+              <button
+                type="button"
+                className="oc-cf-blk-x"
+                aria-label="Эгнээг устгах"
+                onClick={() => removeRow(row.id)}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ marginTop: 12 }}>
+        <button
+          type="button"
+          className="oc-v3-ghost-btn"
+          disabled={full}
+          title={full ? `Хамгийн ихдээ ${MAX_SCHEDULE_ENTRIES} эгнээ нэмэх боломжтой` : undefined}
+          onClick={addRow}
+        >
+          + Хуваарь нэмэх
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** "НИЙТ 2ц 40м · ТЭМЦЭЭНИЙ ХУГАЦААНД БАГТСАН", or the amber overrun.
+ *
+ *  A WARNING, never a blocker: an admin part-way through building a
+ *  programme is legitimately over the end time for a minute, and nothing
+ *  downstream acts on the schedule anyway. It also does not appear on the
+ *  Хянах checklist — a competition with no schedule, or an overrunning
+ *  one, is publishable. */
+function ScheduleTotal({
+  hasRows,
+  totalMin,
+  overflowMin,
+  hasWindow,
+}: {
+  hasRows: boolean;
+  totalMin: number;
+  overflowMin: number | null;
+  hasWindow: boolean;
+}) {
+  if (!hasRows) return <span className="oc-cf-sch-total">ХУВААРЬ ХООСОН</span>;
+  const total = `НИЙТ ${fmtDurationMn(totalMin)}`;
+  if (overflowMin !== null) {
+    // Says BY HOW MUCH. "хэтэрсэн" alone would send the admin back to
+    // count the rows themselves.
+    return (
+      <span className="oc-cf-sch-total oc-cf-sch-over">
+        {total} · ТЭМЦЭЭНИЙ ХУГАЦААНААС {fmtDurationMn(overflowMin)} ХЭТЭРСЭН
+      </span>
+    );
+  }
+  // Nothing to compare against is not the same as fitting, and must not
+  // claim it does.
+  if (!hasWindow) return <span className="oc-cf-sch-total">{total} · ЭХЛЭХ/ДУУСАХ ЦАГ ТОХИРУУЛААГҮЙ</span>;
+  return <span className="oc-cf-sch-total">{total} · ТЭМЦЭЭНИЙ ХУГАЦААНД БАГТСАН</span>;
+}
+
+function parseRoundValue(value: string): { eventId: string; round: number } | null {
+  const parts = value.split(':');
+  if (parts.length !== 3 || parts[0] !== 'round') return null;
+  const round = Number(parts[2]);
+  return Number.isInteger(round) && round >= 1 ? { eventId: parts[1], round } : null;
+}
+
+/** ХӨТӨЛБӨР: ONE control covering both a configured round and a custom
+ *  label.
+ *
+ *  The select carries every event+round plus a final "Бусад" option, and
+ *  choosing it is what flips the row's `kind` — so the two are never
+ *  separate controls that could disagree about what the row is. Picking
+ *  Бусад reveals a text input directly beneath, inside the same column, so
+ *  the row keeps one cell per column and the grid does not reflow.
+ *
+ *  A row naming an event+round the Төрөл tab no longer has keeps its own
+ *  option, marked, rather than snapping to the first available round: the
+ *  admin ANNOUNCED that slot, and silently re-pointing it at a different
+ *  event would be worse than showing it as stale. */
+function ProgrammeCell({
+  row,
+  options,
+  optionValues,
+  onChange,
+}: {
+  row: ScheduleRow;
+  options: { value: string; label: string }[];
+  optionValues: Set<string>;
+  onChange: (patch: Partial<ScheduleRow>) => void;
+}) {
+  const current = row.kind === 'round' && row.eventId ? roundValue(row.eventId, row.round ?? 1) : OTHER_VALUE;
+  const stale = row.kind === 'round' && !optionValues.has(current);
+
+  function pick(value: string) {
+    if (value === OTHER_VALUE) {
+      // eventId/round are DROPPED, not carried along: the validator
+      // refuses an 'other' entry holding a round's payload, and keeping
+      // them would be keeping a claim the row no longer makes.
+      onChange({ kind: 'other' as OnlineCompetitionScheduleKind, label: row.label ?? '', eventId: undefined, round: undefined });
+      return;
+    }
+    const parsed = parseRoundValue(value);
+    if (!parsed) return;
+    onChange({ kind: 'round' as OnlineCompetitionScheduleKind, eventId: parsed.eventId, round: parsed.round, label: undefined });
+  }
+
+  return (
+    <span className="oc-cf-sch-prog">
+      <select className={SELECT_CLASS} aria-label="Хөтөлбөр" value={current} onChange={(e) => pick(e.target.value)}>
+        {stale && (
+          <option value={current}>
+            {onlineCompEventLabel(row.eventId!)} · Раунд {row.round} (төрөл алга)
+          </option>
+        )}
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+        <option value={OTHER_VALUE}>Бусад — өөрөө бичих</option>
+      </select>
+      {row.kind === 'other' && (
+        <input
+          className={INPUT_CLASS}
+          aria-label="Хөтөлбөрийн нэр"
+          placeholder="Бүртгэл / танилцуулга"
+          value={row.label ?? ''}
+          onChange={(e) => onChange({ label: e.target.value })}
+        />
+      )}
+      {stale && <span className="oc-cf-sch-stale">▲ Энэ төрөл «Төрөл» хэсэгт алга</span>}
+    </span>
   );
 }
 
@@ -2482,6 +2910,7 @@ interface ReviewTabProps {
   endAt: string;
   paid: boolean;
   baseFee: string;
+  schedule: ScheduleRow[];
   readiness: Readiness;
 }
 
@@ -2508,10 +2937,9 @@ function imagesSummary(posterUrl: string | null, bannerUrl: string | null): stri
  *  lives in the editor's shared footer, beside Нооргоор хадгалах, rather
  *  than in here — it is a save, and every save button belongs in one row.
  *
- *  ХУВААРЬ is in the mockup's grid but not here: that tab does not exist
- *  yet, and a cell that can only ever say "—" teaches the admin to ignore
- *  the grid. ХУРААМЖ arrived with the Төлбөр tab, as that note said it
- *  should. Add ХУВААРЬ with its own. */
+ *  Every cell the mockup's grid has is now here: ХУРААМЖ arrived with the
+ *  Төлбөр tab and ХУВААРЬ with the Хуваарь tab, each as the note that
+ *  stood here said it should. A new tab adds its cell alongside. */
 function ReviewTab(p: ReviewTabProps) {
   const cells: { label: string; value: string }[] = [
     { label: 'НЭР', value: p.name.trim() || '—' },
@@ -2526,6 +2954,7 @@ function ReviewTab(p: ReviewTabProps) {
     },
     { label: 'ЗУРАГ', value: imagesSummary(p.posterUrl, p.bannerUrl) },
     { label: 'ХУРААМЖ', value: feeSummary(p.paid, p.baseFee, p.events) },
+    { label: 'ХУВААРЬ', value: scheduleCellSummary(p.schedule) },
     { label: 'БҮРТГЭЛ', value: `${fmtMoment(p.registrationOpensAt)} → ${fmtMoment(p.registrationDeadline)}` },
     { label: 'ТЭМЦЭЭН', value: `${fmtMoment(p.startAt)} → ${fmtMoment(p.endAt)}` },
   ];

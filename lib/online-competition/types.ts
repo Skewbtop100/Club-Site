@@ -220,12 +220,71 @@ export interface OnlineCompetitionSection {
   blocks: OnlineCompetitionBlock[];
 }
 
+// ── Schedule ────────────────────────────────────────────────────────────
+// The day's programme, as announced. DISPLAY ONLY: nothing reads this to
+// open or close a round — that is roundState and the admin Раунд удирдах
+// screen, and neither knows this field exists. A schedule row saying
+// "3x3x3 Раунд 1 at 10:30" is a promise to athletes, not an instruction to
+// the system.
+
+export type OnlineCompetitionScheduleKind = 'round' | 'other';
+
+/** One programme item.
+ *
+ *  Order is array order, and the array is a CONTINUOUS accumulation: each
+ *  row begins when the one before it ends. There are no gaps, which is why
+ *  `startMin` is derived rather than typed — see below. */
+export interface OnlineCompetitionScheduleEntry {
+  /** Client-generated (crypto.randomUUID), stable across saves and
+   *  reorders — the same treatment sections and blocks get, for the same
+   *  reason: a row keyed by index would swap contents with its neighbour
+   *  when moved. */
+  id: string;
+  /** Minutes from midnight of the competition's FIRST day.
+   *
+   *  DERIVED, NOT TYPED. The editor computes it by accumulating durations
+   *  from the competition's startAt and writes the result at save; the
+   *  admin never enters a start time, and ЭХЛЭХ is a read-only cell.
+   *  Stored anyway so the public timeline can render without re-deriving,
+   *  and recomputed on every save so it cannot drift from the durations
+   *  that produced it.
+   *
+   *  NOT wrapped at 1440: a schedule running past midnight keeps counting,
+   *  so 1830 means 06:30 on the second day. See the header comment in
+   *  schedule.ts for what this does and does not express about multi-day
+   *  competitions. */
+  startMin: number;
+  /** Length in minutes; always > 0. */
+  durationMin: number;
+  kind: OnlineCompetitionScheduleKind;
+  /** kind 'round' — which event this slot runs. Required for that kind
+   *  and refused for the other. May name an event no longer configured
+   *  on the competition; the editor flags that rather than deleting the
+   *  row, since deleting an announced programme item silently is worse
+   *  than showing it as stale. */
+  eventId?: string;
+  /** kind 'round' — which round of it, 1-based. */
+  round?: number;
+  /** kind 'other' — the admin's own label, e.g. "Бүртгэл / танилцуулга".
+   *  Required for that kind, refused for 'round', whose label comes from
+   *  the event catalogue and would otherwise have two spellings. */
+  label?: string;
+  /** Free text on either kind, e.g. "Шүүгч: Б.Ууганбаяр". Optional and
+   *  may be '' — an added row legitimately has no note yet. */
+  note?: string;
+}
+
 /** Hard ceilings, enforced server-side in validateCompetitionInput and
  *  surfaced in the editor as a disabled add button with a reason. They
  *  exist because a competition document has a 1MiB Firestore limit and
  *  because a tab strip stops being navigable long before 20 tabs. */
 export const MAX_SECTIONS = 20;
 export const MAX_BLOCKS_PER_SECTION = 50;
+/** Same reasoning as the two above: a competition document has a 1MiB
+ *  limit, and a day has 1440 minutes — at the shortest offered duration
+ *  that is 144 slots, so 120 is roomy for any real programme while still
+ *  refusing a runaway payload. */
+export const MAX_SCHEDULE_ENTRIES = 120;
 
 /** onlineCompetitions/{competitionId}
  *
@@ -321,6 +380,13 @@ export interface OnlineCompetition {
    *  field is populated; the shape is final and needs no migration for
    *  that. */
   sections?: OnlineCompetitionSection[];
+  /** The announced programme. Absent or [] = no schedule, which is what
+   *  every competition written before this field existed reads as, and a
+   *  perfectly normal state — a schedule is optional and is NOT a publish
+   *  requirement. Nothing renders it publicly yet; the detail page's
+   *  ХУВААРЬ tab reads this array in order and lays it out as a timeline,
+   *  which needs no shape change. */
+  schedule?: OnlineCompetitionScheduleEntry[];
   /** e.g. "2026-spring" — groups competitions into onlineSeasonPoints
    *  leaderboards. Optional for the same legacy-doc reason as the fields
    *  above; a competition without one simply doesn't contribute to any
@@ -668,6 +734,10 @@ export interface OnlineCompetitionAdminView {
    *  a mapper that returned [] for "not computed here" would hand the
    *  editor an empty structure to save back over the real one. */
   sections: OnlineCompetitionSection[];
+  /** Always present, [] when the competition has none. Returned in full by
+   *  both mappers for the same reason `sections` is: stored content, not a
+   *  derived hint. */
+  schedule: OnlineCompetitionScheduleEntry[];
   /** eventIds whose resultFormat is LOCKED because a judged (approved or
    *  rejected) submission already exists for them — changing the format
    *  now would silently re-derive existing results under a different rule.
@@ -709,6 +779,7 @@ export interface OnlineCompetitionWriteInput {
   bannerUrl: string | null;
   bannerPublicId: string | null;
   sections: OnlineCompetitionSection[];
+  schedule: OnlineCompetitionScheduleEntry[];
 }
 
 // ── Season points / leaderboard ─────────────────────────────────────────

@@ -64,6 +64,7 @@ const {
   writeCompetitionDoc,
   normalizeStoredSections,
   normalizeStoredEvents,
+  normalizeStoredSchedule,
   countRegistrationsFor,
 } = require(path.join(OUT, 'admin-competitions.js'));
 const { initializeApp } = require('firebase-admin/app');
@@ -809,11 +810,11 @@ const read = async (id) => (await db.collection(COL).doc(id).get()).data();
     'name', 'description', 'startAt', 'registrationDeadline', 'participantLimit', 'events', 'status',
     'season', 'registrationOpensAt', 'endAt', 'format', 'featured', 'featuredHeading', 'featuredCtaLabel',
     'featuredUntil', 'instructions', 'paid', 'baseFeeMnt', 'posterUrl', 'posterPublicId', 'bannerUrl',
-    'bannerPublicId', 'sections',
+    'bannerPublicId', 'sections', 'schedule',
   ];
   // The subset that predates custom sections and fees — what "unchanged
   // for a competition that uses neither" means.
-  const beforeKeys = DOC_KEYS.filter((k) => k !== 'sections' && k !== 'baseFeeMnt');
+  const beforeKeys = DOC_KEYS.filter((k) => k !== 'sections' && k !== 'baseFeeMnt' && k !== 'schedule');
   const plainId = await writeCompetitionDoc(db, null, validateCompetitionInput(body()).data);
   const dPlain = await read(plainId);
   ok('a competition with no sections stores sections: []',
@@ -825,9 +826,9 @@ const read = async (id) => (await db.collection(COL).doc(id).get()).data();
     Object.keys(dPlain).filter((k) => k !== 'createdAt').sort().join(',') === DOC_KEYS.slice().sort().join(','),
     `unexpected: ${Object.keys(dPlain).filter((k) => k !== 'createdAt' && !DOC_KEYS.includes(k)).join(',') || 'none'}` +
       ` / missing: ${DOC_KEYS.filter((k) => !(k in dPlain)).join(',') || 'none'}`);
-  ok('  ...and the two later additions are the only ones beyond the old shape',
+  ok('  ...and the later additions are the only ones beyond the old shape',
     Object.keys(dPlain).filter((k) => k !== 'createdAt' && !beforeKeys.includes(k)).sort().join(',') ===
-      'baseFeeMnt,sections',
+      'baseFeeMnt,schedule,sections',
     Object.keys(dPlain).filter((k) => k !== 'createdAt' && !beforeKeys.includes(k)).join(','));
 
   // ── malformed sections are REFUSED, never dropped ─────────────────────
@@ -940,6 +941,181 @@ const read = async (id) => (await db.collection(COL).doc(id).get()).data();
   ok('read: a section with no title is dropped (it could not be saved back)',
     messy.every((s) => s.id !== 'no-title'), JSON.stringify(messy.map((s) => s.id)));
   ok('read: junk entries are dropped', messy.length === 2, String(messy.length));
+
+
+
+  // ── schedule[] — the announced programme ──────────────────────────────
+  // The fourth structure through validateCompetitionInput and the third to
+  // use the manifest, this time per-KIND: a 'round' entry and an 'other'
+  // entry carry different payloads, and a key belonging to the other kind
+  // is what "kind does not match its payload" means.
+  const SCHEDULE = () => [
+    { id: 'sch-1', startMin: 600, durationMin: 30, kind: 'other', label: 'Бүртгэл / танилцуулга', note: '' },
+    { id: 'sch-2', startMin: 630, durationMin: 60, kind: 'round', eventId: '333', round: 1, note: 'Шүүгч: Б.Ууганбаяр' },
+    { id: 'sch-3', startMin: 690, durationMin: 45, kind: 'round', eventId: '222', round: 2 },
+  ];
+  const schBody = (schedule) => body({ schedule });
+
+  const vSch = validateCompetitionInput(schBody(SCHEDULE()));
+  ok('the schedule validates', vSch.ok, vSch.ok ? '' : vSch.error);
+  ok('  ...all three rows, in order',
+    vSch.ok && vSch.data.schedule.map((r) => r.id).join(',') === 'sch-1,sch-2,sch-3',
+    vSch.ok ? JSON.stringify(vSch.data.schedule.map((r) => r.id)) : '');
+  ok('  ...startMin survives', vSch.ok && vSch.data.schedule[1].startMin === 630);
+  ok('  ...durationMin survives', vSch.ok && vSch.data.schedule[1].durationMin === 60);
+  ok('  ...eventId and round survive the per-kind rebuild',
+    vSch.ok && vSch.data.schedule[1].eventId === '333' && vSch.data.schedule[1].round === 1,
+    vSch.ok ? JSON.stringify(vSch.data.schedule[1]) : '');
+  ok('  ...label survives on an other row', vSch.ok && vSch.data.schedule[0].label === 'Бүртгэл / танилцуулга');
+  ok('  ...note survives', vSch.ok && vSch.data.schedule[1].note === 'Шүүгч: Б.Ууганбаяр');
+  ok('  ...an empty note is kept as ""', vSch.ok && vSch.data.schedule[0].note === '');
+  ok('  ...an omitted note is simply absent (never undefined)',
+    vSch.ok && !('note' in vSch.data.schedule[2]), JSON.stringify(vSch.data.schedule[2]));
+  // No key from the other kind, and no undefined — Firestore refuses one.
+  ok('a round row carries ONLY its own keys',
+    vSch.ok && Object.keys(vSch.data.schedule[2]).sort().join(',') === 'durationMin,eventId,id,kind,round,startMin',
+    vSch.ok ? Object.keys(vSch.data.schedule[2]).join(',') : '');
+  ok('an other row carries ONLY its own keys',
+    vSch.ok && Object.keys(vSch.data.schedule[0]).sort().join(',') === 'durationMin,id,kind,label,note,startMin',
+    vSch.ok ? Object.keys(vSch.data.schedule[0]).join(',') : '');
+
+  // ── the Firestore round trip ──────────────────────────────────────────
+  const schId = await writeCompetitionDoc(db, null, vSch.data);
+  const dSch = await read(schId);
+  ok('the schedule round-trips byte-identical',
+    JSON.stringify(dSch.schedule) === JSON.stringify(vSch.data.schedule), JSON.stringify(dSch.schedule));
+  ok('  ...with row order intact', dSch.schedule?.map((r) => r.id).join(',') === 'sch-1,sch-2,sch-3');
+  ok('  ...and the read normaliser agrees',
+    JSON.stringify(normalizeStoredSchedule(dSch.schedule)) === JSON.stringify(vSch.data.schedule),
+    JSON.stringify(normalizeStoredSchedule(dSch.schedule)));
+
+  // ── ids survive a reorder ─────────────────────────────────────────────
+  // The same property sections and blocks have, for the same reason: the
+  // editor's moveItem moves the ELEMENT, so an id travels with its own
+  // programme and note rather than being reassigned to a new slot.
+  const schMoved = SCHEDULE();
+  schMoved.reverse();
+  const vSchMove = validateCompetitionInput(schBody(schMoved));
+  ok('a reorder validates', vSchMove.ok, vSchMove.ok ? '' : vSchMove.error);
+  ok('reordering keeps the ids, in the new order',
+    vSchMove.ok && vSchMove.data.schedule.map((r) => r.id).join(',') === 'sch-3,sch-2,sch-1',
+    vSchMove.ok ? JSON.stringify(vSchMove.data.schedule.map((r) => r.id)) : '');
+  ok('  ...and each id still carries its OWN programme',
+    vSchMove.ok &&
+      vSchMove.data.schedule[0].eventId === '222' &&
+      vSchMove.data.schedule[1].eventId === '333' &&
+      vSchMove.data.schedule[2].label === 'Бүртгэл / танилцуулга',
+    vSchMove.ok ? JSON.stringify(vSchMove.data.schedule) : '');
+  await writeCompetitionDoc(db, schId, vSchMove.data);
+  ok('the reorder PERSISTS (the array is replaced, not merged element-wise)',
+    (await read(schId)).schedule?.map((r) => r.id).join(',') === 'sch-3,sch-2,sch-1',
+    JSON.stringify((await read(schId)).schedule?.map((r) => r.id)));
+  // Rows are NOT re-sorted by startMin: the accumulation is what produces
+  // startMin, so sorting by it would be circular, and a half-edited
+  // schedule must not be silently rearranged under the admin.
+  ok('rows are NOT re-sorted by startMin',
+    vSchMove.ok && vSchMove.data.schedule.map((r) => r.startMin).join(',') === '690,630,600',
+    vSchMove.ok ? JSON.stringify(vSchMove.data.schedule.map((r) => r.startMin)) : '');
+
+  // Deleting rows shortens the stored array rather than leaving a tail.
+  await writeCompetitionDoc(db, schId, validateCompetitionInput(schBody([SCHEDULE()[0]])).data);
+  const dSchDel = await read(schId);
+  ok('deleting rows shortens the stored array', dSchDel.schedule?.length === 1, JSON.stringify(dSchDel.schedule));
+  ok('  ...leaving the right one', dSchDel.schedule?.[0]?.id === 'sch-1');
+
+  // ── absent / empty defaults cleanly ───────────────────────────────────
+  for (const [label, raw] of [['omitted', undefined], ['null', null], ['empty array', []]]) {
+    const r = validateCompetitionInput(schBody(raw));
+    ok(`${label} schedule defaults to []`,
+      r.ok && Array.isArray(r.data.schedule) && r.data.schedule.length === 0,
+      r.ok ? JSON.stringify(r.data.schedule) : r.error);
+  }
+  ok('a payload with no schedule key at all validates',
+    validateCompetitionInput({ name: 'legacy', status: 'draft', events: [] }).data.schedule.length === 0);
+  ok('normalizeStoredSchedule(undefined) is [] (a legacy doc)', normalizeStoredSchedule(undefined).length === 0);
+  ok('normalizeStoredSchedule of junk is []', normalizeStoredSchedule('nope').length === 0);
+  const dNoSch = await read(await writeCompetitionDoc(db, null, validateCompetitionInput(body()).data));
+  ok('a competition with no schedule stores schedule: []',
+    Array.isArray(dNoSch.schedule) && dNoSch.schedule.length === 0, JSON.stringify(dNoSch.schedule));
+
+  // ── malformed rows are REFUSED, never dropped ─────────────────────────
+  const rejectSch = (name, schedule) => {
+    const r = validateCompetitionInput(schBody(schedule));
+    ok(name, !r.ok, r.ok ? `accepted! -> ${JSON.stringify(r.data.schedule)}` : r.error);
+  };
+  const oneRound = (over = {}) => [{ id: 's', startMin: 600, durationMin: 30, kind: 'round', eventId: '333', round: 1, ...over }];
+  const oneOther = (over = {}) => [{ id: 's', startMin: 600, durationMin: 30, kind: 'other', label: 'Бүртгэл', ...over }];
+
+  rejectSch('rejects a non-array schedule', 'nope');
+  rejectSch('rejects a non-object row', [42]);
+  rejectSch('rejects an unknown kind', [{ id: 's', startMin: 600, durationMin: 30, kind: 'lunch', label: 'x' }]);
+  rejectSch('rejects a row with no kind', [{ id: 's', startMin: 600, durationMin: 30, label: 'x' }]);
+  rejectSch('rejects a row with no id', [{ startMin: 600, durationMin: 30, kind: 'other', label: 'x' }]);
+  rejectSch('rejects duplicate ids', [...oneOther(), ...oneOther()]);
+  rejectSch('rejects an unknown schedule field', oneRound({ colour: 'red' }));
+
+  // The two the brief calls out by name.
+  rejectSch('rejects a ROUND row with NO eventId',
+    [{ id: 's', startMin: 600, durationMin: 30, kind: 'round', round: 1 }]);
+  rejectSch('rejects an OTHER row with NO label',
+    [{ id: 's', startMin: 600, durationMin: 30, kind: 'other' }]);
+  rejectSch('rejects a round row with no round', [{ id: 's', startMin: 600, durationMin: 30, kind: 'round', eventId: '333' }]);
+  rejectSch('rejects an other row with an empty label', oneOther({ label: '   ' }));
+  rejectSch('rejects a round row with an empty eventId', oneRound({ eventId: '  ' }));
+
+  // Kind/payload mismatch — what the per-kind manifest exists to catch.
+  rejectSch('rejects a round row carrying label', oneRound({ label: 'Бүртгэл' }));
+  rejectSch('rejects an other row carrying eventId', oneOther({ eventId: '333' }));
+  rejectSch('rejects an other row carrying round', oneOther({ round: 1 }));
+
+  // Numbers.
+  rejectSch('rejects a negative startMin', oneRound({ startMin: -1 }));
+  rejectSch('rejects a fractional startMin', oneRound({ startMin: 600.5 }));
+  rejectSch('rejects a string startMin', oneRound({ startMin: '600' }));
+  rejectSch('rejects a missing startMin', [{ id: 's', durationMin: 30, kind: 'other', label: 'x' }]);
+  rejectSch('rejects an implausibly distant startMin', oneRound({ startMin: 1440 * 15 }));
+  rejectSch('rejects a durationMin of 0', oneRound({ durationMin: 0 }));
+  rejectSch('rejects a negative durationMin', oneRound({ durationMin: -30 }));
+  rejectSch('rejects a fractional durationMin', oneRound({ durationMin: 30.5 }));
+  rejectSch('rejects a durationMin longer than a day', oneRound({ durationMin: 1441 }));
+  rejectSch('rejects a round of 0', oneRound({ round: 0 }));
+  rejectSch('rejects a fractional round', oneRound({ round: 1.5 }));
+  rejectSch('rejects a string round', oneRound({ round: '1' }));
+  rejectSch('rejects a non-string note', oneRound({ note: 42 }));
+
+  // Ceiling.
+  const manyRows = (n) =>
+    Array.from({ length: n }, (_, i) => ({ id: `s${i}`, startMin: i * 10, durationMin: 10, kind: 'other', label: `T${i}` }));
+  ok('exactly 120 schedule rows is accepted', validateCompetitionInput(schBody(manyRows(120))).ok);
+  rejectSch('rejects 121 schedule rows', manyRows(121));
+
+  // ── accepted edge shapes ──────────────────────────────────────────────
+  ok('startMin 0 (a midnight anchor) is accepted', validateCompetitionInput(schBody(oneRound({ startMin: 0 }))).ok);
+  ok('a startMin past midnight is accepted — a schedule may run overnight',
+    validateCompetitionInput(schBody(oneRound({ startMin: 1830 }))).ok);
+  ok('a round row naming an event the competition does not have is ACCEPTED',
+    validateCompetitionInput(schBody(oneRound({ eventId: '777' }))).ok,
+    'a draft programme legitimately precedes the Төрөл tab');
+  ok('a duration of exactly a day is accepted', validateCompetitionInput(schBody(oneRound({ durationMin: 1440 }))).ok);
+
+  // ── the read normaliser is FORGIVING where the writer is strict ───────
+  const messySch = normalizeStoredSchedule([
+    { startMin: 600, durationMin: 30, kind: 'other', label: 'ID-гүй' },
+    { id: 'x', durationMin: 30, kind: 'round', eventId: '333', round: 1 },
+    { id: 'bad-kind', startMin: 600, durationMin: 30, kind: 'lunch' },
+    { id: 'no-label', startMin: 600, durationMin: 30, kind: 'other' },
+    { id: 'no-event', startMin: 600, durationMin: 30, kind: 'round', round: 1 },
+    { id: 'no-duration', startMin: 600, kind: 'other', label: 'x' },
+    'junk',
+  ]);
+  ok('read: a row with no id gets a positional fallback', messySch[0]?.id === 'sch1', JSON.stringify(messySch[0]));
+  ok('read: a missing startMin reads as 0 rather than dropping the row',
+    messySch[1]?.startMin === 0 && messySch[1]?.id === 'x', JSON.stringify(messySch[1]));
+  ok('read: an unknown kind is dropped, not thrown on', messySch.every((r) => r.id !== 'bad-kind'));
+  ok('read: an other row with no label is dropped', messySch.every((r) => r.id !== 'no-label'));
+  ok('read: a round row with no eventId is dropped', messySch.every((r) => r.id !== 'no-event'));
+  ok('read: a row with no duration is dropped', messySch.every((r) => r.id !== 'no-duration'));
+  ok('read: junk entries are dropped', messySch.length === 2, String(messySch.length));
 
 
   // ── scramble route: the attempt bound ─────────────────────────────────

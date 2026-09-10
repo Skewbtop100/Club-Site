@@ -6,6 +6,7 @@ import {
   CompetitionWriteError,
   normalizeCompetitionStatus,
   normalizeStoredEvents,
+  normalizeStoredSchedule,
   normalizeStoredSections,
   validateCompetitionInput,
   writeCompetitionDoc,
@@ -99,6 +100,7 @@ export async function GET() {
         // array would be handing a future writer an empty structure to
         // save back over a real one.
         sections: normalizeStoredSections(data.sections),
+        schedule: normalizeStoredSchedule(data.schedule),
         createdAt: data.createdAt?.toMillis?.() ?? null,
         participantCount: await countDistinctParticipants(db, d.id),
         registeredCount: registeredByCompetition.get(d.id) ?? 0,

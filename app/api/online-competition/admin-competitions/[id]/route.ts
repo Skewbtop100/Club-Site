@@ -7,6 +7,7 @@ import {
   lockedFormatEventIds,
   normalizeCompetitionStatus,
   normalizeStoredEvents,
+  normalizeStoredSchedule,
   normalizeStoredSections,
   validateCompetitionInput,
   writeCompetitionDoc,
@@ -61,6 +62,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     bannerUrl: typeof data.bannerUrl === 'string' && data.bannerUrl ? data.bannerUrl : null,
     bannerPublicId: typeof data.bannerPublicId === 'string' && data.bannerPublicId ? data.bannerPublicId : null,
     sections: normalizeStoredSections(data.sections),
+    schedule: normalizeStoredSchedule(data.schedule),
     createdAt: data.createdAt?.toMillis?.() ?? null,
     // participantCount is not needed by the edit form — skip that query.
     participantCount: 0,
