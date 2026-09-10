@@ -63,6 +63,8 @@ const {
   validateCompetitionInput,
   writeCompetitionDoc,
   normalizeStoredSections,
+  normalizeStoredEvents,
+  countRegistrationsFor,
 } = require(path.join(OUT, 'admin-competitions.js'));
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
@@ -531,6 +533,166 @@ const read = async (id) => (await db.collection(COL).doc(id).get()).data();
 
 
 
+
+  // ── baseFeeMnt + events[].surchargeMnt ────────────────────────────────
+  // Two new fields, one top-level and one NESTED on events[]. The nested
+  // one goes through the same field-by-field rebuild that ate
+  // `advancement` and nearly ate `resultFormat`, so these pin that it is
+  // actually carried — and that EVENT_FIELDS now makes a forgotten field a
+  // loud refusal instead of a silent drop.
+  const FEE_EVENTS = [
+    { eventId: '333', label: '3x3x3', rounds: 1 },
+    { eventId: '222', label: '2x2x2', rounds: 1, surchargeMnt: null },
+    { eventId: '444', label: '4x4x4', rounds: 1, surchargeMnt: 5000 },
+  ];
+  const feeBody = (over = {}) => body({ paid: true, baseFeeMnt: 15000, events: FEE_EVENTS, status: 'upcoming', ...over });
+
+  const vFee = validateCompetitionInput(feeBody());
+  ok('the fee payload validates', vFee.ok, vFee.ok ? '' : vFee.error);
+  ok('baseFeeMnt survives validation', vFee.ok && vFee.data.baseFeeMnt === 15000,
+    vFee.ok ? String(vFee.data.baseFeeMnt) : '');
+  ok('surchargeMnt survives the per-event rebuild', vFee.ok && vFee.data.events[2].surchargeMnt === 5000,
+    vFee.ok ? JSON.stringify(vFee.data.events[2]) : '');
+  ok('an OMITTED surchargeMnt becomes an explicit null (included)',
+    vFee.ok && vFee.data.events[0].surchargeMnt === null, vFee.ok ? JSON.stringify(vFee.data.events[0]) : '');
+  ok('an explicit null surchargeMnt stays null', vFee.ok && vFee.data.events[1].surchargeMnt === null);
+
+  const feeId = await writeCompetitionDoc(db, null, vFee.data);
+  const dFee = await read(feeId);
+  ok('baseFeeMnt round-trips through Firestore', dFee.baseFeeMnt === 15000, String(dFee.baseFeeMnt));
+  ok('surchargeMnt round-trips through Firestore', dFee.events?.[2]?.surchargeMnt === 5000,
+    JSON.stringify(dFee.events?.[2]));
+  ok('  ...and the included events store null, not undefined',
+    dFee.events?.[0]?.surchargeMnt === null && dFee.events?.[1]?.surchargeMnt === null,
+    JSON.stringify(dFee.events?.map((e) => e.surchargeMnt)));
+  ok('normalizeStoredEvents reads the surcharge back',
+    normalizeStoredEvents(dFee.events)[2].surchargeMnt === 5000,
+    JSON.stringify(normalizeStoredEvents(dFee.events).map((e) => e.surchargeMnt)));
+
+  // ── the fee is NOT gated on `paid` ────────────────────────────────────
+  // The Төлбөр tab hides its contents when Төлбөргүй but never clears
+  // them, so toggling back must restore what was configured — exactly the
+  // treatment the featured banner copy gets.
+  await writeCompetitionDoc(db, feeId, validateCompetitionInput(feeBody({ paid: false })).data);
+  const dUnpaid = await read(feeId);
+  ok('switching to Төлбөргүй does NOT clear baseFeeMnt', dUnpaid.paid === false && dUnpaid.baseFeeMnt === 15000,
+    String(dUnpaid.baseFeeMnt));
+  ok('  ...nor the per-event surcharges', dUnpaid.events?.[2]?.surchargeMnt === 5000,
+    JSON.stringify(dUnpaid.events?.[2]));
+  await writeCompetitionDoc(db, feeId, validateCompetitionInput(feeBody({ paid: true })).data);
+  ok('switching back to Төлбөртэй finds the fee still there', (await read(feeId)).baseFeeMnt === 15000);
+
+  // ── removing an event takes its surcharge with it ─────────────────────
+  // The surcharge is NESTED on the event, so there is no orphan to clean
+  // up: deleting the event on the Төрөл tab deletes the fee that was
+  // attached to it. A parallel surcharges-by-eventId map would strand one.
+  await writeCompetitionDoc(db, feeId, validateCompetitionInput(feeBody({
+    events: [{ eventId: '333', label: '3x3x3', rounds: 1 }],
+  })).data);
+  const dDropped = await read(feeId);
+  ok('removing the surcharged event leaves NO trace of its surcharge',
+    dDropped.events?.length === 1 &&
+      dDropped.events[0].eventId === '333' &&
+      dDropped.events.every((e) => e.surchargeMnt === null),
+    JSON.stringify(dDropped.events));
+  // And re-adding it comes back included, not silently still charging.
+  await writeCompetitionDoc(db, feeId, validateCompetitionInput(feeBody({
+    events: [{ eventId: '333', label: '3x3x3', rounds: 1 }, { eventId: '444', label: '4x4x4', rounds: 1 }],
+  })).data);
+  ok('re-adding the event comes back INCLUDED, not still surcharged',
+    (await read(feeId)).events?.[1]?.surchargeMnt === null,
+    JSON.stringify((await read(feeId)).events?.[1]));
+
+  // ── defaults ──────────────────────────────────────────────────────────
+  const vNoFee = validateCompetitionInput({ name: 'legacy', status: 'draft', events: [] });
+  ok('omitted baseFeeMnt defaults to null', vNoFee.ok && vNoFee.data.baseFeeMnt === null);
+  ok('null baseFeeMnt stays null', validateCompetitionInput(body({ baseFeeMnt: null })).data.baseFeeMnt === null);
+  ok('a baseFeeMnt of 0 is kept as 0, NOT flattened to null',
+    validateCompetitionInput(body({ baseFeeMnt: 0 })).data.baseFeeMnt === 0,
+    String(validateCompetitionInput(body({ baseFeeMnt: 0 })).data.baseFeeMnt));
+  ok('a legacy event with no surchargeMnt reads as null',
+    normalizeStoredEvents([{ eventId: '333', label: '3x3x3', rounds: 1 }])[0].surchargeMnt === null);
+
+  // ── malformed fees are REFUSED ────────────────────────────────────────
+  const rejectFee = (name, over) => {
+    const r = validateCompetitionInput(feeBody(over));
+    ok(name, !r.ok, r.ok ? 'accepted!' : r.error);
+  };
+  rejectFee('rejects a negative baseFeeMnt', { baseFeeMnt: -1 });
+  rejectFee('rejects a fractional baseFeeMnt', { baseFeeMnt: 15000.5 });
+  rejectFee('rejects a string baseFeeMnt', { baseFeeMnt: '15000' });
+  rejectFee('rejects NaN baseFeeMnt', { baseFeeMnt: NaN });
+  rejectFee('rejects Infinity baseFeeMnt', { baseFeeMnt: Infinity });
+
+  const rejectSur = (name, surchargeMnt) =>
+    rejectFee(name, { events: [{ eventId: '333', label: '3x3x3', rounds: 1, surchargeMnt }] });
+  // 0 is the load-bearing one: "costs nothing extra" is already spelled
+  // null, and accepting both would give one fact two representations.
+  rejectSur('rejects a surchargeMnt of 0 (null already means included)', 0);
+  rejectSur('rejects a negative surchargeMnt', -5000);
+  rejectSur('rejects a fractional surchargeMnt', 2500.5);
+  rejectSur('rejects a string surchargeMnt', '5000');
+  rejectSur('rejects NaN surchargeMnt', NaN);
+
+  // ── the events allow-list ─────────────────────────────────────────────
+  // EVENT_FIELDS turns the rebuild trap inside out: a per-event key that
+  // is not registered is now a REFUSED WRITE naming the field, not a value
+  // that vanishes on reload. This is the assertion that would have caught
+  // the advancement and resultFormat drops.
+  const unknownField = validateCompetitionInput(feeBody({
+    events: [{ eventId: '333', label: '3x3x3', rounds: 1, surchargeUsd: 5 }],
+  }));
+  ok('an UNKNOWN per-event field is REFUSED, not silently dropped', !unknownField.ok,
+    unknownField.ok ? 'accepted!' : unknownField.error);
+  ok('  ...and the refusal names the field', /surchargeUsd/.test(unknownField.error ?? ''), unknownField.error);
+  // Every registered field still passes together, in one event.
+  const allFields = validateCompetitionInput(feeBody({
+    events: [{
+      eventId: '333', label: '3x3x3', rounds: 2, resultFormat: 'ao5', timeLimitCs: 60000,
+      cutoffs: [{ round: 1, cutoffCs: 30000 }],
+      advancement: [{ fromRound: 1, method: 'count', value: 8 }],
+      surchargeMnt: 5000,
+    }],
+  }));
+  ok('every registered per-event field survives together', allFields.ok, allFields.ok ? '' : allFields.error);
+  ok('  ...all seven of them', allFields.ok &&
+    allFields.data.events[0].resultFormat === 'ao5' &&
+    allFields.data.events[0].timeLimitCs === 60000 &&
+    allFields.data.events[0].cutoffs.length === 1 &&
+    allFields.data.events[0].advancement.length === 1 &&
+    allFields.data.events[0].surchargeMnt === 5000 &&
+    allFields.data.events[0].rounds === 2 &&
+    allFields.data.events[0].label === '3x3x3',
+    allFields.ok ? JSON.stringify(allFields.data.events[0]) : '');
+
+  // ── a competition with no fee is unchanged ────────────────────────────
+  const plainFeeId = await writeCompetitionDoc(db, null, validateCompetitionInput(body()).data);
+  const dPlainFee = await read(plainFeeId);
+  ok('a competition with no fee stores baseFeeMnt: null', dPlainFee.baseFeeMnt === null, String(dPlainFee.baseFeeMnt));
+  ok('  ...and paid stays false', dPlainFee.paid === false);
+
+  // ── countRegistrationsFor — what the fee-change warning counts ────────
+  const REG = 'comp-fee-reg';
+  await db.collection('onlineCompetitions').doc(REG).set({ name: 'reg', status: 'upcoming', events: [] });
+  ok('no registrations -> 0', (await countRegistrationsFor(db, REG)) === 0);
+  await db.collection('onlineParticipants').doc('p1').collection('registrations').doc(REG)
+    .set({ competitionId: REG, events: ['333'], status: 'registered' });
+  await db.collection('onlineParticipants').doc('p2').collection('registrations').doc(REG)
+    .set({ competitionId: REG, events: ['333', '444'], status: 'registered' });
+  ok('two registrations -> 2', (await countRegistrationsFor(db, REG)) === 2,
+    String(await countRegistrationsFor(db, REG)));
+  // Another competition's registrations must not be counted.
+  await db.collection('onlineParticipants').doc('p1').collection('registrations').doc('other')
+    .set({ competitionId: 'other', events: ['333'], status: 'registered' });
+  ok('another competition’s registrations are not counted', (await countRegistrationsFor(db, REG)) === 2);
+  // The grandparent guard: an unrelated top-level `registrations`
+  // collection exists in this database and the same collectionGroup query
+  // pulls it in without the check.
+  await db.collection('registrations').doc('decoy').set({ competitionId: REG });
+  ok('a top-level registrations doc is EXCLUDED by the grandparent guard',
+    (await countRegistrationsFor(db, REG)) === 2, String(await countRegistrationsFor(db, REG)));
+
+
   // ── sections[] — admin-authored custom tabs ───────────────────────────
   // The THIRD nested structure through validateCompetitionInput, and the
   // first with two levels of nesting. The rebuild trap that ate
@@ -639,11 +801,19 @@ const read = async (id) => (await db.collection(COL).doc(id).get()).data();
   // The whole point of "absent/empty = no custom sections": adding this
   // field must not change a single existing document beyond an empty
   // array, and must not perturb any other field.
-  const beforeKeys = [
+  // EVERY key toFirestoreDoc writes, listed once. Asserted as an exact set
+  // rather than as "one more than last time": a field that silently
+  // appears is as much a bug as one that silently vanishes, and this
+  // catches both without needing an edit per changeset.
+  const DOC_KEYS = [
     'name', 'description', 'startAt', 'registrationDeadline', 'participantLimit', 'events', 'status',
     'season', 'registrationOpensAt', 'endAt', 'format', 'featured', 'featuredHeading', 'featuredCtaLabel',
-    'featuredUntil', 'instructions', 'paid', 'posterUrl', 'posterPublicId', 'bannerUrl', 'bannerPublicId',
+    'featuredUntil', 'instructions', 'paid', 'baseFeeMnt', 'posterUrl', 'posterPublicId', 'bannerUrl',
+    'bannerPublicId', 'sections',
   ];
+  // The subset that predates custom sections and fees — what "unchanged
+  // for a competition that uses neither" means.
+  const beforeKeys = DOC_KEYS.filter((k) => k !== 'sections' && k !== 'baseFeeMnt');
   const plainId = await writeCompetitionDoc(db, null, validateCompetitionInput(body()).data);
   const dPlain = await read(plainId);
   ok('a competition with no sections stores sections: []',
@@ -651,8 +821,13 @@ const read = async (id) => (await db.collection(COL).doc(id).get()).data();
   ok('  ...and every pre-existing field is untouched',
     beforeKeys.every((k) => JSON.stringify(dPlain[k]) === JSON.stringify(dSec[k]) || k === 'sections'),
     beforeKeys.filter((k) => JSON.stringify(dPlain[k]) !== JSON.stringify(dSec[k])).join(','));
-  ok('  ...and the document gains EXACTLY one key over the old shape',
-    Object.keys(dPlain).filter((k) => k !== 'createdAt' && !beforeKeys.includes(k)).join(',') === 'sections',
+  ok('  ...and the stored key set is EXACTLY the documented one',
+    Object.keys(dPlain).filter((k) => k !== 'createdAt').sort().join(',') === DOC_KEYS.slice().sort().join(','),
+    `unexpected: ${Object.keys(dPlain).filter((k) => k !== 'createdAt' && !DOC_KEYS.includes(k)).join(',') || 'none'}` +
+      ` / missing: ${DOC_KEYS.filter((k) => !(k in dPlain)).join(',') || 'none'}`);
+  ok('  ...and the two later additions are the only ones beyond the old shape',
+    Object.keys(dPlain).filter((k) => k !== 'createdAt' && !beforeKeys.includes(k)).sort().join(',') ===
+      'baseFeeMnt,sections',
     Object.keys(dPlain).filter((k) => k !== 'createdAt' && !beforeKeys.includes(k)).join(','));
 
   // ── malformed sections are REFUSED, never dropped ─────────────────────

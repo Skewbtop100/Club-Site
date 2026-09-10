@@ -4877,6 +4877,78 @@ button.oc-rv-cell:hover {
   outline: 2px solid #DFFF4F;
   outline-offset: -2px;
 }
+/* ── Төлбөр tab ────────────────────────────────────────────────────────
+   One row per configured event: icon | name | Суурьд багтсан | НЭМЭЛТ · ₮.
+   Same card treatment as .oc-cf-ev, but a row rather than a card, because
+   an event's fee is one decision and one number — not the five labelled
+   controls the Төрөл tab gives it. */
+.oc-cf-fee-list {
+  border: 1px solid #1C1C21;
+  background: #0D0D10;
+}
+.oc-cf-fee-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 11px 14px;
+  border-bottom: 1px solid #16161B;
+}
+.oc-cf-fee-row:last-child {
+  border-bottom: none;
+}
+/* Takes the slack, so the toggle and the amount sit right no matter how
+   long the event name is. */
+.oc-cf-fee-name {
+  flex: 1;
+  min-width: 90px;
+  font: 500 13px/1.3 var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+}
+.oc-cf-fee-amount {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.oc-cf-fee-amount-label {
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .14em;
+  color: #6E6A62;
+  white-space: nowrap;
+}
+/* A fee is at most six digits; a full-width input here would read as the
+   most important control on the row, which it is not. */
+.oc-cf-fee-amount input {
+  width: 96px;
+}
+/* The summary line naming what the base fee covers. */
+.oc-cf-fee-included {
+  font: 500 9px/1.6 var(--oc-font-mono), monospace;
+  letter-spacing: .14em;
+  color: #6E6A62;
+}
+/* Rows that cannot be saved, named before the admin presses save rather
+   than only in the error afterwards. */
+.oc-cf-fee-bad {
+  font: 500 9px/1.6 var(--oc-font-mono), monospace;
+  letter-spacing: .14em;
+  color: #E0A020;
+}
+@media (max-width: 560px) {
+  /* The row becomes two lines: identity above, controls below. Left-pad
+     the controls to the icon's width so they read as belonging to the
+     name above them. */
+  .oc-cf-fee-name {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  .oc-cf-fee-amount {
+    flex: 1;
+    justify-content: flex-end;
+  }
+}
+
 /* A custom section's tab marker, in the slot the two-digit number
    occupies on a fixed tab — so the strip keeps one rhythm while saying
    "this one is yours". Volt because it is the admin's own content; the

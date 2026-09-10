@@ -122,6 +122,25 @@ export interface OnlineCompetitionEventConfig {
    *  prefill and nothing more. The qualify route must never fall back to
    *  it; see the comment at that spot for why. */
   advancement?: OnlineCompetitionAdvancement[];
+  /** What entering THIS event costs on top of the competition's
+   *  baseFeeMnt, in whole tugrik.
+   *
+   *  null or absent = INCLUDED IN THE BASE FEE. That is the default and
+   *  the common case; a competition where every event is included has this
+   *  absent everywhere and a single baseFeeMnt.
+   *
+   *  A number is always > 0. Zero is REFUSED at save, because "costs
+   *  nothing extra" is already spelled `null` — allowing both would give
+   *  one fact two representations, and a reader would have to handle a 0
+   *  that means the same as an absent field. Same reasoning as the ''
+   *  -> null normalisation on the image urls.
+   *
+   *  Deliberately nested on the event rather than held in a
+   *  `surcharges: { [eventId]: number }` map beside the fee: the surcharge
+   *  belongs to the event, so deleting the event on the Төрөл tab deletes
+   *  its surcharge with it. A parallel map would strand an entry for an
+   *  event that no longer exists, and nothing would ever notice. */
+  surchargeMnt?: number | null;
 }
 
 /** One planned round transition. `fromRound` is the round being cut FROM,
@@ -261,10 +280,22 @@ export interface OnlineCompetition {
    *  section. Independent of `featured` — an ordinary competition has
    *  instructions too. That section does not exist yet. */
   instructions?: string;
-  /** Whether registration costs money. The toggle only: amount, bank
-   *  details, payment deadline and per-event surcharges belong to the
-   *  Төлбөр tab and have no fields yet. Absent = false = Төлбөргүй. */
+  /** Whether registration costs money. Absent = false = Төлбөргүй.
+   *
+   *  THE GATE, not the amount. baseFeeMnt and events[].surchargeMnt hold
+   *  the numbers and are stored whether or not this is set — the Төлбөр
+   *  tab hides them when it is off but never clears them, exactly like the
+   *  featured banner fields. A reader must therefore gate on `paid`, never
+   *  on baseFeeMnt being non-null. */
   paid?: boolean;
+  /** The fee every registrant pays, in whole tugrik, before any per-event
+   *  surcharge. null/absent = not set.
+   *
+   *  Integer tugrik: there are no decimal subunits in circulation, and a
+   *  fractional fee would render as "15 000.5₮". Refused at save.
+   *
+   *  Only meaningful when `paid` is true — see the note there. */
+  baseFeeMnt?: number | null;
   /** Square (1:1) artwork for the detail page's general-info block, and
    *  the wide (16:5) artwork for the hub's featured banner. Cloudinary
    *  secure_url plus the public_id needed to manage the asset later.
@@ -600,6 +631,9 @@ export interface OnlineCompetitionAdminView {
   featuredUntil: number | null;
   instructions: string;
   paid: boolean;
+  /** null when unset. Present regardless of `paid`, so toggling the
+   *  competition back to Төлбөртэй restores what was configured. */
+  baseFeeMnt: number | null;
   /** null when unset — unlike the string fields above, which flatten to
    *  '', these stay nullable end to end: '' is not a meaningful image. */
   posterUrl: string | null;
@@ -669,6 +703,7 @@ export interface OnlineCompetitionWriteInput {
   featuredUntil: number | null;
   instructions: string;
   paid: boolean;
+  baseFeeMnt: number | null;
   posterUrl: string | null;
   posterPublicId: string | null;
   bannerUrl: string | null;

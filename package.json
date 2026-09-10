@@ -12,6 +12,7 @@
     "test:formats": "node tests/competition-fields/result-format.test.cjs",
     "test:readiness": "node tests/competition-fields/readiness.test.cjs",
     "test:video": "node tests/competition-fields/video-url.test.cjs",
+    "test:fees": "node tests/competition-fields/fees.test.cjs",
     "test:scrambles": "node tests/competition-fields/scrambles.test.cjs",
     "test:ranking": "firebase emulators:exec --only firestore \"node tests/competition-fields/ranking.test.cjs\"",
     "test:merge": "firebase emulators:exec --only firestore \"node tests/merge-athlete-uid/merge.test.mjs\""

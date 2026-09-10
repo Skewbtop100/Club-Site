@@ -5,14 +5,13 @@ import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
 import {
   CompetitionWriteError,
   normalizeCompetitionStatus,
+  normalizeStoredEvents,
   normalizeStoredSections,
   validateCompetitionInput,
   writeCompetitionDoc,
 } from '@/lib/online-competition/admin-competitions';
 import { resolveEventLiveRounds } from '@/lib/online-competition/round-access';
 import { DEFAULT_COMPETITION_FORMAT } from '@/lib/online-competition/types';
-import { resolveResultFormat } from '@/lib/online-competition/ao5';
-import type { OnlineCompetitionEventConfig } from '@/lib/online-competition/types';
 import type { OnlineCompetitionAdminView } from '@/lib/online-competition/types';
 
 // Distinct-uid count of onlineSubmissions for this competition — a
@@ -49,24 +48,6 @@ async function countRegistrationsByCompetition(db: Firestore): Promise<Map<strin
     counts.set(competitionId, (counts.get(competitionId) ?? 0) + 1);
   }
   return counts;
-}
-
-/** Stored events, with resultFormat resolved. Every event saved before
- *  that field existed reads back as 'ao5' — the read-time default, so no
- *  backfill is needed (same pattern as normalizeCompetitionStatus). */
-function normalizeStoredEvents(raw: unknown): OnlineCompetitionEventConfig[] {
-  if (!Array.isArray(raw)) return [];
-  return (raw as Record<string, unknown>[]).map((e) => ({
-    eventId: typeof e?.eventId === 'string' ? e.eventId : '',
-    label: typeof e?.label === 'string' ? e.label : '',
-    rounds: typeof e?.rounds === 'number' ? e.rounds : 1,
-    resultFormat: resolveResultFormat(e?.resultFormat),
-    // null = no limit. Never defaulted to a real value.
-    timeLimitCs: typeof e?.timeLimitCs === 'number' ? e.timeLimitCs : null,
-    // Per-round cutoffs; absent/empty means none anywhere.
-    cutoffs: Array.isArray(e?.cutoffs) ? (e.cutoffs as OnlineCompetitionEventConfig['cutoffs']) : [],
-    advancement: Array.isArray(e?.advancement) ? (e.advancement as OnlineCompetitionEventConfig['advancement']) : [],
-  }));
 }
 
 export async function GET() {
@@ -108,6 +89,7 @@ export async function GET() {
         featuredUntil: data.featuredUntil?.toMillis?.() ?? null,
         instructions: typeof data.instructions === 'string' ? data.instructions : '',
         paid: data.paid === true,
+        baseFeeMnt: typeof data.baseFeeMnt === 'number' ? data.baseFeeMnt : null,
         posterUrl: typeof data.posterUrl === 'string' && data.posterUrl ? data.posterUrl : null,
         posterPublicId: typeof data.posterPublicId === 'string' && data.posterPublicId ? data.posterPublicId : null,
         bannerUrl: typeof data.bannerUrl === 'string' && data.bannerUrl ? data.bannerUrl : null,

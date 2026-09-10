@@ -1,7 +1,7 @@
 import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { DEFAULT_COMPETITION_FORMAT } from './types';
 import { validateQualifierInput } from './rounds';
-import { RESULT_FORMATS, cutoffPhaseFor, type ResultFormat } from './ao5';
+import { RESULT_FORMATS, cutoffPhaseFor, resolveResultFormat, type ResultFormat } from './ao5';
 import { parseVideoUrl } from './video-url';
 import { MAX_BLOCKS_PER_SECTION, MAX_SECTIONS } from './types';
 import type { OnlineCompetitionAdvancement, OnlineCompetitionCutoff } from './types';
@@ -372,6 +372,72 @@ export function normalizeStoredSections(raw: unknown): OnlineCompetitionSection[
   return out;
 }
 
+/** Stored events, read defensively for the two GET mappers.
+ *
+ *  Lived in BOTH route files as an identical copy until the fee fields
+ *  landed — which meant the field-by-field rebuild trap had FOUR sites
+ *  per per-event field (two writers' worth of validate + two readers'
+ *  worth of this), and the two readers are the pair the compiler cannot
+ *  help with, since every field on OnlineCompetitionEventConfig is
+ *  optional for legacy docs. One copy, imported twice.
+ *
+ *  Read-side stance, the same as normalizeStoredSections: coerce and
+ *  default rather than refuse, because a GET that 500s on an odd document
+ *  is a document the admin cannot open to fix. */
+export function normalizeStoredEvents(raw: unknown): OnlineCompetitionEventConfig[] {
+  if (!Array.isArray(raw)) return [];
+  return (raw as Record<string, unknown>[]).map((e) => ({
+    eventId: typeof e?.eventId === 'string' ? e.eventId : '',
+    label: typeof e?.label === 'string' ? e.label : '',
+    rounds: typeof e?.rounds === 'number' ? e.rounds : 1,
+    resultFormat: resolveResultFormat(e?.resultFormat),
+    // null = no limit. Never defaulted to a real value.
+    timeLimitCs: typeof e?.timeLimitCs === 'number' ? e.timeLimitCs : null,
+    // Per-round cutoffs; absent/empty means none anywhere.
+    cutoffs: Array.isArray(e?.cutoffs) ? (e.cutoffs as OnlineCompetitionEventConfig['cutoffs']) : [],
+    advancement: Array.isArray(e?.advancement) ? (e.advancement as OnlineCompetitionEventConfig['advancement']) : [],
+    // null = included in the base fee, which is also what a non-positive
+    // or fractional stored value reads as (surchargeOf's rule) — the write
+    // path refuses those, so this only catches a hand-edited document.
+    surchargeMnt:
+      typeof e?.surchargeMnt === 'number' && Number.isInteger(e.surchargeMnt) && e.surchargeMnt > 0
+        ? e.surchargeMnt
+        : null,
+  }));
+}
+
+/** Every key an EVENT may carry. Anything else is refused rather than
+ *  dropped — see the note at the events loop. */
+const EVENT_FIELDS = [
+  'eventId',
+  'label',
+  'rounds',
+  'resultFormat',
+  'timeLimitCs',
+  'cutoffs',
+  'advancement',
+  'surchargeMnt',
+] as const;
+
+/** A per-event surcharge in whole tugrik, on top of baseFeeMnt.
+ *
+ *  Absent/null = included in the base fee. A PRESENT value must be a
+ *  positive integer: 0 is refused because "included" already has a
+ *  spelling (null), and two representations of one fact is exactly the
+ *  ambiguity every reader would then have to handle. */
+function parseSurcharge(raw: unknown): ParseResult<number | null> {
+  if (raw === undefined || raw === null) return { ok: true, value: null };
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+    return { ok: false, error: 'surchargeMnt must be a number' };
+  }
+  if (!Number.isInteger(raw)) return { ok: false, error: 'surchargeMnt must be a whole number of tugrik' };
+  if (raw === 0) {
+    return { ok: false, error: 'surchargeMnt of 0 is not allowed — omit it to include the event in the base fee' };
+  }
+  if (raw < 0) return { ok: false, error: 'surchargeMnt must be greater than 0' };
+  return { ok: true, value: raw };
+}
+
 export function validateCompetitionInput(body: unknown): ValidationResult {
   if (!body || typeof body !== 'object') return { ok: false, error: 'Invalid body' };
   const b = body as Record<string, unknown>;
@@ -397,15 +463,32 @@ export function validateCompetitionInput(body: unknown): ValidationResult {
     return { ok: false, error: 'at least one event is required' };
   }
 
-  // NOTE: this loop REBUILDS each event object field by field rather than
-  // passing it through, so any property not named here is silently
-  // dropped. That is the trap `advancement` has to be added to — a new
-  // per-event field that is not listed below saves as undefined with no
-  // error anywhere.
+  // This loop REBUILDS each event object field by field, so a property not
+  // named below would be silently dropped — the trap that ate
+  // `advancement` and nearly ate `resultFormat`.
+  //
+  // EVENT_FIELDS closes it, using the same half of the manifest idea that
+  // sections[] uses: an event key that is not on the list is a REJECTED
+  // WRITE, not a dropped field. The other half — driving the rebuild from
+  // the manifest — does NOT transfer here, and deliberately so: a block's
+  // fields are independent strings, while an event's are interdependent
+  // (rounds bounds advancement, resultFormat gates cutoffs), so parsing
+  // has to stay hand-written. The allow-list is the part that makes
+  // forgetting loud, and that is the part worth having.
+  //
+  // Adding a per-event field means adding it here, to the push() below,
+  // and to OnlineCompetitionEventConfig. Miss the first and the save fails
+  // with `unknown event field`; miss the third and tsc fails.
   const events: OnlineCompetitionEventConfig[] = [];
   for (const raw of b.events) {
     if (!raw || typeof raw !== 'object') return { ok: false, error: 'invalid event config' };
     const e = raw as Record<string, unknown>;
+    for (const key of Object.keys(e)) {
+      if (e[key] === undefined) continue;
+      if (!(EVENT_FIELDS as readonly string[]).includes(key)) {
+        return { ok: false, error: `${String(e.eventId)}: unknown event field ${key}` };
+      }
+    }
     if (typeof e.eventId !== 'string' || typeof e.label !== 'string' || typeof e.rounds !== 'number' || e.rounds < 1) {
       return { ok: false, error: 'invalid event config' };
     }
@@ -438,6 +521,8 @@ export function validateCompetitionInput(body: unknown): ValidationResult {
     const timeLimitCs: number | null = (e.timeLimitCs as number | null | undefined) ?? null;
     const cutoffs = parseCutoffs(e.cutoffs, e.rounds, resultFormat);
     if (!cutoffs.ok) return { ok: false, error: `${e.eventId}: ${cutoffs.error}` };
+    const surcharge = parseSurcharge(e.surchargeMnt);
+    if (!surcharge.ok) return { ok: false, error: `${e.eventId}: ${surcharge.error}` };
     events.push({
       eventId: e.eventId,
       label: e.label,
@@ -446,11 +531,18 @@ export function validateCompetitionInput(body: unknown): ValidationResult {
       timeLimitCs,
       cutoffs: cutoffs.value,
       advancement: advancement.value,
+      // null = included in the base fee. Stored as an explicit null rather
+      // than omitted so the field's absence never has to be told apart
+      // from its being unset — the same treatment timeLimitCs gets.
+      surchargeMnt: surcharge.value,
     });
   }
 
   const sections = parseSections(b.sections);
   if (!sections.ok) return { ok: false, error: sections.error };
+
+  const baseFee = parseBaseFee(b.baseFeeMnt);
+  if (!baseFee.ok) return { ok: false, error: baseFee.error };
 
   return {
     ok: true,
@@ -480,6 +572,11 @@ export function validateCompetitionInput(body: unknown): ValidationResult {
       featuredUntil: typeof b.featuredUntil === 'number' ? b.featuredUntil : null,
       instructions: typeof b.instructions === 'string' ? b.instructions : '',
       paid: b.paid === true,
+      // NOT gated on `paid`: the fee is stored whether or not the
+      // competition currently charges one, so toggling Төлбөргүй and back
+      // restores what was configured — the treatment the featured banner
+      // fields get, for the same reason.
+      baseFeeMnt: baseFee.value,
       // Images: null unless a non-empty string arrives. An empty string is
       // normalised to null so "removed" has exactly one representation in
       // the document rather than two ('' and null) for readers to handle.
@@ -490,6 +587,23 @@ export function validateCompetitionInput(body: unknown): ValidationResult {
       sections: sections.value,
     },
   };
+}
+
+/** The competition's base fee in whole tugrik.
+ *
+ *  Absent/null = not set, which is legal at every status: a draft is
+ *  expected to be half-filled, and a Төлбөргүй competition has no fee to
+ *  set. A PRESENT value must be a non-negative whole number — unlike a
+ *  surcharge, 0 is allowed here and means a base fee of nothing, which is
+ *  a real configuration (every event surcharged, no entry fee). */
+function parseBaseFee(raw: unknown): ParseResult<number | null> {
+  if (raw === undefined || raw === null) return { ok: true, value: null };
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+    return { ok: false, error: 'baseFeeMnt must be a number' };
+  }
+  if (!Number.isInteger(raw)) return { ok: false, error: 'baseFeeMnt must be a whole number of tugrik' };
+  if (raw < 0) return { ok: false, error: 'baseFeeMnt cannot be negative' };
+  return { ok: true, value: raw };
 }
 
 /** '' / non-string / absent -> null; otherwise the trimmed string. */
@@ -549,6 +663,7 @@ export function toFirestoreDoc(input: OnlineCompetitionWriteInput) {
     featuredUntil: input.featuredUntil !== null ? Timestamp.fromMillis(input.featuredUntil) : null,
     instructions: input.instructions,
     paid: input.paid,
+    baseFeeMnt: input.baseFeeMnt,
     posterUrl: input.posterUrl,
     posterPublicId: input.posterPublicId,
     bannerUrl: input.bannerUrl,
@@ -679,6 +794,22 @@ export async function lockedFormatEventIds(db: Firestore, competitionId: string)
     if (typeof event === 'string') ids.add(event);
   }
   return [...ids];
+}
+
+/** How many athletes have REGISTERED for this competition.
+ *
+ *  Targeted at one competition, unlike the list endpoint's
+ *  countRegistrationsByCompetition which scans every registration to build
+ *  a map. The grandparent check is load-bearing for the same reason it is
+ *  there and in scramble-roster.ts: this database has an unrelated
+ *  top-level `registrations` collection that the same collectionGroup
+ *  query otherwise pulls in.
+ *
+ *  Used by the editor's fee-change warning, which needs to know whether
+ *  anyone has already registered under the current fee. */
+export async function countRegistrationsFor(db: Firestore, competitionId: string): Promise<number> {
+  const snap = await db.collectionGroup('registrations').where('competitionId', '==', competitionId).get();
+  return snap.docs.filter((d) => d.ref.parent.parent?.parent.id === 'onlineParticipants').length;
 }
 
 export async function writeCompetitionDoc(

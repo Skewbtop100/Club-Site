@@ -17,6 +17,7 @@ import {
 import { fmtTimeLimit, parseTimeLimit } from '@/lib/online-competition/time-utils';
 import { evaluateReadiness, type Readiness } from '@/lib/online-competition/publish-readiness';
 import { describeVideo, parseVideoUrl } from '@/lib/online-competition/video-url';
+import { competitionFeeTotals, formatMnt } from '@/lib/online-competition/fees';
 import { WcaEventIcon, hasWcaEventIcon } from '@/lib/wca-event-icon';
 import {
   COMPETITION_FORMAT_OPTIONS,
@@ -45,6 +46,14 @@ import {
 // finished flow is visible.
 
 const ADMIN_COMPETITIONS = '/online-competition/admin/competitions';
+
+/** One thing a save wants the admin to acknowledge before it goes ahead.
+ *  `headline` is what is about to happen; `detail` is the specifics —
+ *  which events, how many athletes. */
+interface SaveWarning {
+  headline: string;
+  detail: string;
+}
 
 /** The fixed tabs, in order. Хянах is NOT here — it is always appended
  *  last, after however many custom sections exist. */
@@ -167,6 +176,32 @@ function moveItem<T>(list: T[], from: number, to: number): T[] {
   return next;
 }
 
+/** The typed base fee as a number, or null for "not set". Junk parses to
+ *  null here and is refused by validate() before any save, so it can never
+ *  reach the payload as a silent 0. */
+function parseBaseFeeText(text: string): number | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const n = Number(trimmed);
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
+/** Everything about a competition's money, as one comparable string.
+ *
+ *  Used to answer "did this save change the fee" without a field-by-field
+ *  diff that would need updating every time a fee field is added. Event
+ *  order is normalised out (sorted by id) so reordering the Төрөл tab is
+ *  not mistaken for a price change. */
+function feeFingerprint(
+  baseFeeMnt: number | null,
+  events: { eventId: string; surchargeMnt?: number | null }[],
+): string {
+  const parts = events
+    .map((e) => `${e.eventId}:${typeof e.surchargeMnt === 'number' && e.surchargeMnt > 0 ? e.surchargeMnt : 0}`)
+    .sort();
+  return `${baseFeeMnt ?? ''}|${parts.join(',')}`;
+}
+
 function msToDatetimeLocal(ms: number | null): string {
   if (ms === null) return '';
   const d = new Date(ms);
@@ -215,6 +250,11 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
   const [featuredUntil, setFeaturedUntil] = useState('');
   const [instructions, setInstructions] = useState('');
   const [paid, setPaid] = useState(false);
+  // Төлбөр tab. RAW TEXT for the same reason the per-event surcharge is —
+  // and, like the featured banner fields, NEVER cleared when `paid` is
+  // switched off. The tab hides its contents; the values survive, in the
+  // form and in Firestore alike.
+  const [baseFee, setBaseFee] = useState('');
   // Зураг tab. Uploaded to Cloudinary the moment a file is chosen (see
   // ImageSlot), so these hold a real remote URL, not a local preview —
   // they then persist with every other field on the next save.
@@ -247,15 +287,26 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
   const [loadedStatus, setLoadedStatus] = useState<OnlineCompetitionStatus | null>(null);
   // Server-computed; empty for a competition that does not exist yet.
   const [lockedEventIds, setLockedEventIds] = useState<string[]>([]);
+  // How many athletes have registered, and what the fee was when this
+  // form loaded — the pair the fee-change warning compares against. Both
+  // start at "nothing yet", which is correct for a new competition: it has
+  // no registrants and no stored fee to change.
+  const [registeredCount, setRegisteredCount] = useState(0);
+  const [loadedFees, setLoadedFees] = useState<string | null>(null);
 
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [savedNote, setSavedNote] = useState('');
-  // Non-null while the "going live with no round open" confirmation is up;
-  // holds the affected events so the dialog can name them, and the action
-  // to run if the admin proceeds.
-  const [confirmGaps, setConfirmGaps] = useState<{
-    events: RoundGapEvent[];
+  // Non-null while a save is waiting on the admin's confirmation.
+  //
+  // ONE panel holding N reasons, not one panel per reason. There are two
+  // things that can want confirming on the same save — going live with no
+  // round open, and changing the fee under people who have registered —
+  // and asking twice in a row, where confirming the first only reveals a
+  // second, is the shape that trains an admin to click through both
+  // without reading either.
+  const [confirmSave, setConfirmSave] = useState<{
+    warnings: SaveWarning[];
     then: 'stay' | 'next';
     status: OnlineCompetitionStatus;
   } | null>(null);
@@ -287,6 +338,7 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
         setFeaturedUntil(msToDatetimeLocal(c.featuredUntil));
         setInstructions(c.instructions);
         setPaid(c.paid);
+        setBaseFee(c.baseFeeMnt !== null ? String(c.baseFeeMnt) : '');
         setPosterUrl(c.posterUrl);
         setPosterPublicId(c.posterPublicId);
         setBannerUrl(c.bannerUrl);
@@ -295,6 +347,8 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
         setParticipantLimit(c.participantLimit != null ? String(c.participantLimit) : '');
         setEvents(c.events.map(toEventRow));
         setSections(c.sections ?? []);
+        setRegisteredCount(c.registeredCount);
+        setLoadedFees(feeFingerprint(c.baseFeeMnt, c.events));
         setLockedEventIds(c.lockedEventIds ?? []);
         setLoading(false);
       })
@@ -324,6 +378,33 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
       for (const round of cutoffRoundsFor(row)) {
         if (!parseTimeLimit(row.cutoffs[round] ?? '').ok) {
           return `${onlineCompEventLabel(row.eventId)} · раунд ${round}: шүүлтүүр буруу форматтай (жишээ: 1:00)`;
+        }
+      }
+    }
+
+    // The fee. Blocks the save rather than being coerced, for the reason
+    // the time limit above does: an amount that quietly became "included
+    // in the base" would look like it saved while changing what athletes
+    // are charged — the one outcome an admin would not re-check.
+    //
+    // Only when Төлбөртэй. A Төлбөргүй competition may carry any leftover
+    // fee text; it is hidden, it is not charged, and it must not stand
+    // between the admin and their save.
+    if (paid) {
+      const baseText = baseFee.trim();
+      if (baseText) {
+        const n = Number(baseText);
+        if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) {
+          return 'Суурь хураамж бүхэл тоо байх ёстой (жишээ: 15000)';
+        }
+      }
+      for (const row of events) {
+        const problem = surchargeErrorOf(row);
+        if (problem === 'empty') {
+          return `${onlineCompEventLabel(row.eventId)}: нэмэлт хураамжийн дүнг оруулна уу`;
+        }
+        if (problem === 'invalid') {
+          return `${onlineCompEventLabel(row.eventId)}: нэмэлт хураамж 0-ээс их бүхэл тоо байх ёстой`;
         }
       }
     }
@@ -427,6 +508,39 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
     setTab((t) => Math.max(0, t - 1));
   }
 
+  /** The warning this save should raise about its fee, if any.
+   *
+   *  RECOMMENDATION IMPLEMENTED HERE: warn, do not lock. resultFormat,
+   *  timeLimitCs and cutoffs are locked because a saved result was DERIVED
+   *  under them — change one and history silently becomes a different
+   *  number. A fee derives nothing: no payment is recorded, no total is
+   *  stored, nothing recomputes. Locking it would stop an admin fixing a
+   *  typo in a fee nobody has paid, to protect a record that does not
+   *  exist. But an athlete who registered expecting 15 000₮ should not
+   *  quietly come to owe 20 000₮ either, so the admin is told, by name and
+   *  number, before it happens — and may proceed, because a fee genuinely
+   *  can need correcting after registration opens.
+   *
+   *  ONCE PAYMENT STATUS IS TRACKED this should become a LOCK, matching
+   *  the scoring rules: at that point a fee change does re-derive
+   *  something — an athlete's recorded 15 000₮ payment turns into a 5 000₮
+   *  debt with no record of why. The shape to add then is the one
+   *  writeCompetitionDoc already uses for the format lock: refuse
+   *  server-side, inside the write transaction, when any PAID registration
+   *  exists, and let the admin re-price only the unpaid ones.
+   *
+   *  Only fires for a competition that exists AND has registrants: a
+   *  create has neither. */
+  const feeChangeWarning = useCallback((): SaveWarning | null => {
+    if (savedId === null || loadedFees === null || registeredCount === 0) return null;
+    const now = feeFingerprint(parseBaseFeeText(baseFee), events.map(toEventConfig));
+    if (now === loadedFees) return null;
+    return {
+      headline: 'Бүртгэл эхэлсний дараа хураамж өөрчлөгдөж байна.',
+      detail: `${registeredCount} тамирчин одоогийн хураамжаар бүртгүүлсэн байна. Тэдэнд мэдэгдэх нь таны үүрэг.`,
+    };
+  }, [savedId, loadedFees, registeredCount, baseFee, events]);
+
   // url and publicId always move together — a stale publicId beside a new
   // url would point cleanup at the wrong asset.
   const setPoster = useCallback((url: string | null, publicId: string | null) => {
@@ -444,7 +558,7 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
    *  longer offers a way out — see GeneralTab). Defaults to the form's
    *  own value, so every other save path is unchanged. */
   async function doSave(then: 'stay' | 'next', nextStatus: OnlineCompetitionStatus = status) {
-    setConfirmGaps(null);
+    setConfirmSave(null);
     setError('');
     setSavedNote('');
     setSaving(true);
@@ -467,6 +581,7 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
         featuredUntil: datetimeLocalToMs(featuredUntil),
         instructions,
         paid,
+        baseFeeMnt: parseBaseFeeText(baseFee),
         posterUrl,
         posterPublicId,
         bannerUrl,
@@ -499,6 +614,9 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
       // control immediately, and a second save does not re-publish.
       setStatus(nextStatus);
       setLoadedStatus(nextStatus);
+      // The saved fee is the new baseline: a second save that changes
+      // nothing must not warn again.
+      setLoadedFees(feeFingerprint(payload.baseFeeMnt, payload.events));
       setSavedNote(nextStatus === 'upcoming' && status === 'draft' ? 'Зарлагдлаа' : 'Хадгалагдлаа');
       // Bounded by the CURRENT strip length, which grows and shrinks with
       // the section list.
@@ -527,14 +645,28 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
     // never trips this — going live stays a separate, later act, still
     // guarded exactly as before.
     const nextStatus = statusOverride ?? status;
+    const warnings: SaveWarning[] = [];
+
+    // Fee first: it is about people who are already registered, which is
+    // the more consequential of the two.
+    const fee = feeChangeWarning();
+    if (fee) warnings.push(fee);
+
     if (nextStatus === 'live' && loadedStatus !== 'live') {
       setSaving(true);
       const gaps = await eventsGoingLiveWithoutRound();
       setSaving(false);
       if (gaps.length > 0) {
-        setConfirmGaps({ events: gaps, then, status: nextStatus });
-        return;
+        warnings.push({
+          headline: ROUND_GAP_TEXT,
+          detail: `Раунд нээгдээгүй төрөл: ${gaps.map((e) => e.label).join(', ')}`,
+        });
       }
+    }
+
+    if (warnings.length > 0) {
+      setConfirmSave({ warnings, then, status: nextStatus });
+      return;
     }
     await doSave(then, nextStatus);
   }
@@ -548,6 +680,8 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
     registrationDeadline: datetimeLocalToMs(registrationDeadline),
     posterUrl,
     bannerUrl,
+    paid,
+    baseFeeMnt: parseBaseFeeText(baseFee),
     // roundsOf() floors at 1, so a row edited in this form always has a
     // round; the roundless check guards a stored event that arrived with
     // none, not a state the Төрөл tab can produce.
@@ -555,6 +689,10 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
       eventId: e.eventId,
       label: onlineCompEventLabel(e.eventId),
       rounds: roundsOf(e),
+      // The one editor-only fact the checklist needs: marked as costing
+      // extra, amount not typed. surchargeErrorOf covers both an empty and
+      // an unusable amount — either way the fee is unknowable.
+      surchargeIncomplete: surchargeErrorOf(e) !== null,
     })),
   });
   const isDraft = status === 'draft';
@@ -679,6 +817,8 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
               setBanner,
             }}
           />
+        ) : tabIndex === 3 ? (
+          <FeesTab {...{ paid, baseFee, setBaseFee, events, setEvents }} />
         ) : activeTab.kind === 'section' ? (
           <SectionTab
             key={sections[activeTab.sectionIndex!].id}
@@ -704,6 +844,8 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
               registrationDeadline,
               startAt,
               endAt,
+              paid,
+              baseFee,
               readiness,
             }}
           />
@@ -723,24 +865,28 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
         </p>
       )}
 
-      {/* Warning, not a block: a staged opening (go live now, open round 1
-          when the field is ready) is a legitimate thing to do, so the admin
-          can proceed — they just can't do it unknowingly. */}
-      {confirmGaps && (
+      {/* Warnings, never blocks. Both of these describe something an admin
+          may legitimately want to do — a staged opening (go live now, open
+          round 1 when the field is ready), or a fee corrected after
+          registration opened — so each one says what will happen and lets
+          them proceed. They just can't do it unknowingly. */}
+      {confirmSave && (
         <div className="oc-sc-warn" style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <span>▲ {ROUND_GAP_TEXT}</span>
-          <span style={{ color: '#8A6A28' }}>
-            Раунд нээгдээгүй төрөл: {confirmGaps.events.map((e) => e.label).join(', ')}
-          </span>
+          {confirmSave.warnings.map((w) => (
+            <div key={w.headline} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span>▲ {w.headline}</span>
+              <span style={{ color: '#8A6A28' }}>{w.detail}</span>
+            </div>
+          ))}
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={() => setConfirmGaps(null)}>
+            <Button type="button" variant="outline" onClick={() => setConfirmSave(null)}>
               Буцах
             </Button>
             <Button
               type="button"
               variant="primary"
               disabled={saving}
-              onClick={() => doSave(confirmGaps.then, confirmGaps.status)}
+              onClick={() => doSave(confirmSave.then, confirmSave.status)}
             >
               Харин хадгалах
             </Button>
@@ -826,6 +972,26 @@ interface EventRow {
    *  pruned when the round count drops, so lowering and raising it again
    *  restores what was typed — the treatment advancement already gets. */
   cutoffs: Record<number, string>;
+  /** Whether this event is covered by the base fee — the `Суурьд багтсан`
+   *  toggle.
+   *
+   *  Held SEPARATELY from the amount rather than inferred from it being
+   *  empty, because those are three states, not two: included, surcharged
+   *  with an amount, and surcharged with the amount not typed yet. The
+   *  third is the one an inferred flag cannot express, and it is exactly
+   *  the one that has to BLOCK THE SAVE — an event the admin marked as
+   *  costing extra, with no idea how much. */
+  feeIncluded: boolean;
+  /** RAW surcharge text as typed ("5000"), for the same reason timeLimit
+   *  is text: a number input is legitimately empty or half-typed mid-edit,
+   *  and a Number() on every keystroke would fight the admin.
+   *
+   *  NOT cleared when feeIncluded is switched back on — the input renders
+   *  empty and disabled, but the text survives in state, so toggling back
+   *  off restores what was typed. The same within-session undo advancement
+   *  and cutoffs already get, for the same reason: an accidental click
+   *  should not destroy a typed value. */
+  surcharge: string;
   advancement: Record<number, { method: 'count' | 'percent'; value: string }>;
 }
 
@@ -839,9 +1005,42 @@ function toEventRow(e: OnlineCompetitionEventConfig): EventRow {
     rounds: String(e.rounds),
     resultFormat: resolveResultFormat(e.resultFormat),
     timeLimit: typeof e.timeLimitCs === 'number' ? fmtTimeLimit(e.timeLimitCs) : '',
+    // null/absent = included in the base fee, which is the default for
+    // every event stored before this field existed.
+    feeIncluded: !(typeof e.surchargeMnt === 'number' && e.surchargeMnt > 0),
+    surcharge: typeof e.surchargeMnt === 'number' && e.surchargeMnt > 0 ? String(e.surchargeMnt) : '',
     cutoffs: Object.fromEntries((e.cutoffs ?? []).map((c) => [c.round, fmtTimeLimit(c.cutoffCs)])),
     advancement,
   };
+}
+
+/** This row's surcharge as it will be STORED: null when the event is
+ *  included in the base fee — whatever text is retained behind the
+ *  disabled input — otherwise the parsed amount.
+ *
+ *  An unparseable amount returns null here, but validate() refuses the
+ *  save before that can happen, so it is never silently downgraded to
+ *  "included". The same contract parseTimeLimit has with an unparseable
+ *  time limit. */
+function surchargeOfRow(row: EventRow): number | null {
+  if (row.feeIncluded) return null;
+  const n = Number(row.surcharge.trim());
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/** Why this row's surcharge cannot be saved, or null if it can.
+ *
+ *  'empty'   — marked as costing extra, with no amount typed.
+ *  'invalid' — an amount that is not a whole number above zero.
+ *  An INCLUDED row is always fine, whatever text is retained behind its
+ *  disabled input. */
+function surchargeErrorOf(row: EventRow): 'empty' | 'invalid' | null {
+  if (row.feeIncluded) return null;
+  const text = row.surcharge.trim();
+  if (!text) return 'empty';
+  const n = Number(text);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) return 'invalid';
+  return null;
 }
 
 function toEventConfig(row: EventRow): OnlineCompetitionEventConfig {
@@ -879,6 +1078,9 @@ function toEventConfig(row: EventRow): OnlineCompetitionEventConfig {
       })
       .filter((c): c is { round: number; cutoffCs: number } => c !== null),
     advancement,
+    // null = included in the base fee. validate() has already refused an
+    // unparseable amount, so a null here can only mean "included".
+    surchargeMnt: surchargeOfRow(row),
   };
 }
 
@@ -976,7 +1178,22 @@ function EventsTab({
   }
 
   function addEvent(eventId: string) {
-    setEvents((prev) => [...prev, { eventId, rounds: '1', resultFormat: 'ao5', timeLimit: '', cutoffs: {}, advancement: {} }]);
+    // feeIncluded: true — a NEW event is covered by the base fee until the
+    // admin says otherwise on the Төлбөр tab. The opposite default would
+    // silently raise the price of every competition that gains an event.
+    setEvents((prev) => [
+      ...prev,
+      {
+        eventId,
+        rounds: '1',
+        resultFormat: 'ao5',
+        timeLimit: '',
+        cutoffs: {},
+        advancement: {},
+        feeIncluded: true,
+        surcharge: '',
+      },
+    ]);
     setPickerOpen(false);
   }
 
@@ -1406,6 +1623,176 @@ function ImageSlot({
           {error}
         </p>
       )}
+    </div>
+  );
+}
+
+// ── 04 Төлбөр ────────────────────────────────────────────────────────────
+
+// The mockup's ТӨЛӨХ ХУГАЦАА and ДАНС are deliberately NOT here. The
+// registration window (Ерөнхий) already bounds when payment can happen, so
+// a second deadline would be a second source of truth for the same fact;
+// and bank details are prose that changes per competition, which is what
+// the custom sections exist for — the admin writes a "Төлбөр" section and
+// owns the wording.
+
+interface FeesTabProps {
+  paid: boolean;
+  baseFee: string;
+  setBaseFee: (v: string) => void;
+  events: EventRow[];
+  setEvents: React.Dispatch<React.SetStateAction<EventRow[]>>;
+}
+
+/** The ХУРААМЖ cell's value on the Хянах tab.
+ *
+ *  Reads the same competitionFeeTotals the Төлбөр tab does, so the review
+ *  can never quote a number the fee tab does not show. A range only when
+ *  there is one — "15 000₮ – 15 000₮" for a competition with no surcharges
+ *  would be noise. */
+function feeSummary(paid: boolean, baseFee: string, events: EventRow[]): string {
+  if (!paid) return 'Төлбөргүй';
+  const base = parseBaseFeeText(baseFee);
+  const totals = competitionFeeTotals(
+    base,
+    events.map((row) => ({ eventId: row.eventId, surchargeMnt: surchargeOfRow(row) })),
+  );
+  // Told apart from a real 0: a base fee of nothing is a legitimate
+  // configuration (every event surcharged), and it must not read as
+  // "unset" — nor the reverse.
+  if (base === null && totals.maxMnt === 0) return 'Тохируулаагүй';
+  return totals.maxMnt > totals.minMnt
+    ? `${formatMnt(totals.minMnt)} – ${formatMnt(totals.maxMnt)}`
+    : formatMnt(totals.minMnt);
+}
+
+function FeesTab(p: FeesTabProps) {
+  // The tab itself is never hidden — an admin who opens it must be able to
+  // learn WHY it is empty and where the switch is. A missing tab teaches
+  // nothing.
+  if (!p.paid) {
+    return (
+      <div>
+        <span className="oc-v3-label">ХУРААМЖ</span>
+        <p className="oc-cf-soon" style={{ marginTop: 10, maxWidth: 640, textWrap: 'pretty' }}>
+          Энэ тэмцээн хураамжгүй. Ерөнхий хэсэгт «Төлбөртэй» сонгосноор хураамж тохируулна.
+        </p>
+      </div>
+    );
+  }
+
+  const setRow = (index: number, patch: Partial<EventRow>) =>
+    p.setEvents((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+
+  // Derived from the STORED shape, via the same pure function the public
+  // pages will use — so the admin's totals and the athlete's cannot drift
+  // apart. surchargeOfRow resolves the toggle, so a retained amount behind
+  // a re-ticked Суурьд багтсан never reaches the maths.
+  const totals = competitionFeeTotals(
+    parseBaseFeeText(p.baseFee),
+    p.events.map((row) => ({ eventId: row.eventId, surchargeMnt: surchargeOfRow(row) })),
+  );
+  const includedLabels = totals.includedEventIds.map((id) => onlineCompEventLabel(id));
+
+  return (
+    <div>
+      <div style={{ maxWidth: 280 }}>
+        <FieldLabel>СУУРЬ ХУРААМЖ · ₮</FieldLabel>
+        <input
+          className={MONO_INPUT_CLASS}
+          style={MT2}
+          inputMode="numeric"
+          placeholder="15000"
+          value={p.baseFee}
+          onChange={(e) => p.setBaseFee(e.target.value)}
+        />
+        <p className="oc-cf-hint" style={{ marginTop: 8 }}>
+          Бүх бүртгүүлэгчийн төлөх дүн. Бүхэл тоо, аравтын оронгүй.
+        </p>
+      </div>
+
+      <div style={{ marginTop: 28 }}>
+        <FieldLabel>ТӨРӨЛ ТУС БҮР</FieldLabel>
+        {p.events.length === 0 ? (
+          <p className="oc-cf-soon" style={{ marginTop: 10 }}>
+            Төрөл нэмээгүй байна. «Төрөл» хэсэгт төрөл нэмсний дараа энд нэмэлт хураамж тохируулна.
+          </p>
+        ) : (
+          <>
+            <div className="oc-cf-fee-list" style={{ marginTop: 10 }}>
+              {/* Driven by `events` — the Төрөл tab's own list — so an event
+                  added there appears here included, and an event removed
+                  there takes its surcharge with it. There is no separate
+                  fee list that could disagree with the event list, and no
+                  orphan is possible: the surcharge lives ON the event. */}
+              {p.events.map((row, i) => {
+                const problem = surchargeErrorOf(row);
+                return (
+                  <div key={`${row.eventId}-${i}`} className="oc-cf-fee-row">
+                    <span className="oc-cf-ev-icon" aria-hidden>
+                      {hasWcaEventIcon(row.eventId) ? (
+                        <WcaEventIcon eventId={row.eventId} size={16} />
+                      ) : (
+                        row.eventId.slice(0, 4).toUpperCase()
+                      )}
+                    </span>
+                    <span className="oc-cf-fee-name">{onlineCompEventLabel(row.eventId)}</span>
+                    <SquareToggle
+                      checked={row.feeIncluded}
+                      onChange={(v) => setRow(i, { feeIncluded: v })}
+                      label="Суурьд багтсан"
+                    />
+                    <span className="oc-cf-fee-amount">
+                      <span className="oc-cf-fee-amount-label">НЭМЭЛТ · ₮</span>
+                      <input
+                        className={MONO_INPUT_CLASS}
+                        inputMode="numeric"
+                        placeholder="5000"
+                        disabled={row.feeIncluded}
+                        aria-label={`${onlineCompEventLabel(row.eventId)} нэмэлт хураамж`}
+                        // Renders EMPTY while included, but the state keeps
+                        // what was typed — untick and it comes back.
+                        value={row.feeIncluded ? '' : row.surcharge}
+                        onChange={(e) => setRow(i, { surcharge: e.target.value })}
+                      />
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            {/* Named per row rather than only in the save error, so the
+                admin sees which row is unfinished before they press save. */}
+            {p.events.some((row) => surchargeErrorOf(row) !== null) && (
+              <p className="oc-cf-fee-bad" style={{ marginTop: 10 }}>
+                ▲ Дүн оруулаагүй эсвэл буруу төрөл байна:{' '}
+                {p.events
+                  .filter((row) => surchargeErrorOf(row) !== null)
+                  .map((row) => onlineCompEventLabel(row.eventId))
+                  .join(' · ')}
+              </p>
+            )}
+            <p className="oc-cf-fee-included" style={{ marginTop: 12 }}>
+              {includedLabels.length > 0
+                ? `Суурь хураамжид багтсан: ${includedLabels.join(' · ')}`
+                : 'Суурь хураамжид багтсан төрөл алга — бүх төрөл нэмэлт хураамжтай.'}
+            </p>
+          </>
+        )}
+      </div>
+
+      <div className="oc-cf-sum" style={{ marginTop: 28 }}>
+        <div className="oc-cf-sum-cell">
+          <span className="oc-cf-sum-label">ХАМГИЙН БАГА</span>
+          <span className="oc-cf-sum-value">{formatMnt(totals.minMnt)}</span>
+        </div>
+        <div className="oc-cf-sum-cell">
+          <span className="oc-cf-sum-label">БҮХ ТӨРӨЛД ОРВОЛ</span>
+          <span className="oc-cf-sum-value">{formatMnt(totals.maxMnt)}</span>
+        </div>
+      </div>
+      <p className="oc-cf-hint" style={{ marginTop: 8 }}>
+        Хамгийн бага = суурь хураамж. Бүх төрөлд орвол = суурь дээр бүх нэмэлт хураамж нэмсэн дүн.
+      </p>
     </div>
   );
 }
@@ -2093,6 +2480,8 @@ interface ReviewTabProps {
   registrationDeadline: string;
   startAt: string;
   endAt: string;
+  paid: boolean;
+  baseFee: string;
   readiness: Readiness;
 }
 
@@ -2119,9 +2508,10 @@ function imagesSummary(posterUrl: string | null, bannerUrl: string | null): stri
  *  lives in the editor's shared footer, beside Нооргоор хадгалах, rather
  *  than in here — it is a save, and every save button belongs in one row.
  *
- *  ХУВААРЬ and ХУРААМЖ are in the mockup's grid but not here: those tabs
- *  do not exist yet, and a cell that can only ever say "—" teaches the
- *  admin to ignore the grid. Add each cell with its tab. */
+ *  ХУВААРЬ is in the mockup's grid but not here: that tab does not exist
+ *  yet, and a cell that can only ever say "—" teaches the admin to ignore
+ *  the grid. ХУРААМЖ arrived with the Төлбөр tab, as that note said it
+ *  should. Add ХУВААРЬ with its own. */
 function ReviewTab(p: ReviewTabProps) {
   const cells: { label: string; value: string }[] = [
     { label: 'НЭР', value: p.name.trim() || '—' },
@@ -2135,6 +2525,7 @@ function ReviewTab(p: ReviewTabProps) {
           `${Math.max(1, parseInt(p.participantLimit, 10) || 0)} тамирчин`,
     },
     { label: 'ЗУРАГ', value: imagesSummary(p.posterUrl, p.bannerUrl) },
+    { label: 'ХУРААМЖ', value: feeSummary(p.paid, p.baseFee, p.events) },
     { label: 'БҮРТГЭЛ', value: `${fmtMoment(p.registrationOpensAt)} → ${fmtMoment(p.registrationDeadline)}` },
     { label: 'ТЭМЦЭЭН', value: `${fmtMoment(p.startAt)} → ${fmtMoment(p.endAt)}` },
   ];
