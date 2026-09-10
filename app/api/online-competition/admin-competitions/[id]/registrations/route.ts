@@ -1,67 +1,45 @@
 import { NextResponse } from 'next/server';
 import { isOnlineCompAdmin } from '@/lib/online-competition/admin-auth';
 import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
+import {
+  RegistrationPatchError,
+  applyRegistrationPatch,
+  listCompetitionRegistrations,
+} from '@/lib/online-competition/admin-registrations';
+import { parseBulkPatch } from '@/lib/online-competition/registration-review';
 
-export interface RegistrationAdminView {
-  uid: string;
-  displayName: string;
-  events: string[];
-  /** The athlete's note to the organiser, or null when they left none.
-   *  The registration form promises the organiser sees it "on the
-   *  registration page" — this is the path that keeps that promise. */
-  note: string | null;
-}
+// Admin-only registrations for one competition: the review table's data
+// (GET) and its bulk action (PATCH). The single-registration change is
+// ./[uid]/route.ts. Both writes go through applyRegistrationPatch — the
+// only code that may set a registration's status or statusNote.
 
-// Admin-only listing for the competition detail page's "Тамирчид" tab.
-// Registrations live at onlineParticipants/{uid}/registrations/
-// {competitionId} — there's no per-competitionId collection-group index
-// for that subcollection (and, at this project's current scale, adding
-// one isn't worth it): this fetches the whole `registrations` collection
-// group and filters by competitionId in memory, the same pragmatic
-// approach the submissions list already uses for its "all statuses" case.
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   if (!(await isOnlineCompAdmin())) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-
   const { id } = await params;
-  const db = getOnlineCompAdminDb();
-
-  const snap = await db.collectionGroup('registrations').get();
-  // A `collectionGroup('registrations')` query matches every collection
-  // named "registrations" anywhere in this Firestore database, not just
-  // onlineParticipants/{uid}/registrations — confirmed live: this project
-  // also has a completely unrelated top-level `registrations` collection
-  // (a club membership/event signup form, fullName/phone/email/age
-  // fields) that the same query pulls in. Only trust docs that are
-  // actually nested two levels under onlineParticipants — anything else
-  // (no grandparent, or a different grandparent collection) is filtered
-  // out before even checking competitionId.
-  const matches = snap.docs.filter(
-    (d) => d.ref.parent.parent?.parent.id === 'onlineParticipants' && d.data().competitionId === id,
-  );
-
-  // registrations docs don't carry displayName themselves — join against
-  // onlineParticipants/{uid} (the doc's own parent) for it.
-  const uids = [...new Set(matches.map((d) => d.ref.parent.parent!.id))];
-  const participantDocs = uids.length > 0
-    ? await db.getAll(...uids.map((uid) => db.collection('onlineParticipants').doc(uid)))
-    : [];
-  const nameByUid = new Map(participantDocs.map((d) => [d.id, (d.data()?.displayName as string | undefined) ?? d.id]));
-
-  const registrations: RegistrationAdminView[] = matches.map((d) => {
-    const uid = d.ref.parent.parent!.id;
-    const events = d.data().events;
-    const note = d.data().note;
-    return {
-      uid,
-      displayName: nameByUid.get(uid) ?? uid,
-      events: Array.isArray(events) ? events : [],
-      // Mapped field by field like the rest, so it has to be named here —
-      // an unnamed field is simply not in the response.
-      note: typeof note === 'string' && note.trim() ? note : null,
-    };
-  });
-
+  const registrations = await listCompetitionRegistrations(getOnlineCompAdminDb(), id);
   return NextResponse.json({ registrations });
+}
+
+/** Bulk: `{ uids: string[], status?, statusNote? }`. ALL OR NOTHING — see
+ *  applyRegistrationPatch for why. The participant limit is NOT enforced
+ *  (PR-4). */
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  if (!(await isOnlineCompAdmin())) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  const { id } = await params;
+  const parsed = parseBulkPatch(await req.json().catch(() => null));
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
+
+  try {
+    const updated = await applyRegistrationPatch(getOnlineCompAdminDb(), id, parsed.value.uids, parsed.value.patch);
+    return NextResponse.json({ updated });
+  } catch (err) {
+    if (err instanceof RegistrationPatchError) {
+      return NextResponse.json({ error: err.message, missing: err.missing }, { status: err.status });
+    }
+    throw err;
+  }
 }

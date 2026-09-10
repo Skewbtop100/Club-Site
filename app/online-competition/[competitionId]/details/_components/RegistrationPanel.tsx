@@ -2,12 +2,23 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import type { OnlineCompetition, OnlineParticipantProfileStatus } from '@/lib/online-competition/types';
+import type {
+  OnlineCompetition,
+  OnlineParticipantProfileStatus,
+  OnlineRegistration,
+  OnlineRegistrationStatus,
+} from '@/lib/online-competition/types';
 import { REGISTRATION_NOTE_MAX } from '@/lib/online-competition/types';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import { onlineCompAuth } from '@/lib/online-competition/firebase';
-import { fetchParticipant, fetchRegistration, registerForCompetition, resolveProfileStatus } from '@/lib/online-competition/data';
-import { feeView, profileGateCopy, registrationWindow } from '@/lib/online-competition/registration-view';
+import { fetchParticipant, registerForCompetition, resolveProfileStatus } from '@/lib/online-competition/data';
+import {
+  feeView,
+  profileGateCopy,
+  registrationStatusCopy,
+  registrationWindow,
+} from '@/lib/online-competition/registration-view';
+import RegistrationStatusBadge from '../../../_components/RegistrationStatusBadge';
 import { WcaEventIcon, hasWcaEventIcon } from '@/lib/wca-event-icon';
 
 // ── The Бүртгүүлэх panel ────────────────────────────────────────────────
@@ -45,7 +56,21 @@ interface Saved {
  *  closes itself. The submit handler checks the clock again anyway. */
 const WINDOW_TICK_MS = 30_000;
 
-export default function RegistrationPanel({ competition }: { competition: OnlineCompetition }) {
+export default function RegistrationPanel({
+  competition,
+  registration,
+  loadingRegistration,
+  onSaved,
+}: {
+  competition: OnlineCompetition;
+  /** The signed-in athlete's registration, from useMyRegistration — the
+   *  same copy the page's sidebar reads, so the two never disagree. */
+  registration: OnlineRegistration | null;
+  loadingRegistration: boolean;
+  /** Called after a successful save, so the page re-reads the stored
+   *  document (its review status included). */
+  onSaved: () => void;
+}) {
   const { user, signInWithGoogle } = useOnlineAuth();
   const competitionId = competition.id;
   const events = competition.events;
@@ -58,7 +83,6 @@ export default function RegistrationPanel({ competition }: { competition: Online
   const [saved, setSaved] = useState<Saved | null>(null);
   const [gate, setGate] = useState<{ status: Exclude<OnlineParticipantProfileStatus, 'approved'>; reason: string | null } | null>(null);
   const [authError, setAuthError] = useState('');
-  const [checkingExisting, setCheckingExisting] = useState(true);
   const [checkingProfile, setCheckingProfile] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
@@ -72,36 +96,26 @@ export default function RegistrationPanel({ competition }: { competition: Online
   const deadlineMs = competition.registrationDeadline ? competition.registrationDeadline.toMillis() : null;
   const regWindow = registrationWindow({ status: competition.status, registrationDeadlineMs: deadlineMs }, now);
 
-  // Load any existing registration for this user + competition so a reload
-  // (or a later visit) shows their real status instead of resetting to idle.
+  // Adopt the stored registration whenever it (re)loads — on mount, after
+  // a sign-in, and after every save's refresh. The one exception is an
+  // edit in progress: a refresh must not wipe what the athlete is typing.
+  // Their status and the admin's note are read straight from the prop
+  // below, so those stay current even mid-edit.
+  const [editing, setEditing] = useState(false);
   useEffect(() => {
-    if (!user || user.isAnonymous) {
-      setCheckingExisting(false);
-      return;
-    }
-    let cancelled = false;
-    setCheckingExisting(true);
-    fetchRegistration(user.uid, competitionId)
-      .then((reg) => {
-        if (cancelled || !reg) return;
-        const snapshot = { events: new Set(reg.events), note: reg.note ?? '' };
-        setSaved(snapshot);
-        setSelected(new Set(snapshot.events));
-        setNote(snapshot.note);
-        setState('summary');
-      })
-      .catch((err) => {
-        // Best-effort, as before: on failure the athlete sees the idle
-        // state and can register (or re-register) normally.
-        console.error('RegistrationPanel: loading the existing registration failed:', err);
-      })
-      .finally(() => {
-        if (!cancelled) setCheckingExisting(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [user, competitionId]);
+    if (!registration || editing) return;
+    const snapshot = { events: new Set(registration.events), note: registration.note ?? '' };
+    setSaved(snapshot);
+    setSelected(new Set(snapshot.events));
+    setNote(snapshot.note);
+    setState('summary');
+  }, [registration, editing]);
+
+  // The review status. A registration saved a moment ago but not yet
+  // re-read is 'pending' by construction — that is the only status a
+  // first save may write.
+  const status: OnlineRegistrationStatus | null = registration?.status ?? (saved ? 'pending' : null);
+  const statusCopy = status ? registrationStatusCopy(status) : null;
 
   async function handleRegisterClick() {
     // Anonymous (solve-page) sessions don't count — registering needs a
@@ -146,6 +160,11 @@ export default function RegistrationPanel({ competition }: { competition: Online
     setState('picking');
   }
 
+  function startEdit() {
+    setEditing(true);
+    setState('picking');
+  }
+
   function toggle(eventId: string) {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -161,6 +180,7 @@ export default function RegistrationPanel({ competition }: { competition: Online
    *  still sitting in the selection. */
   function handleCancel() {
     setSaveError('');
+    setEditing(false);
     if (saved) {
       setSelected(new Set(saved.events));
       setNote(saved.note);
@@ -207,7 +227,9 @@ export default function RegistrationPanel({ competition }: { competition: Online
       setSaved({ events: new Set(chosen), note: trimmed });
       setSelected(new Set(chosen));
       setNote(trimmed);
+      setEditing(false);
       setState('summary');
+      onSaved();
     } catch (err) {
       console.error('RegistrationPanel: saving the registration failed:', err);
       setSaveError('Бүртгэл хадгалахад алдаа гарлаа. Дахин оролдоно уу.');
@@ -229,7 +251,7 @@ export default function RegistrationPanel({ competition }: { competition: Online
     saved.events.size !== selected.size ||
     [...selected].some((id) => !saved.events.has(id));
 
-  if (checkingExisting) {
+  if (loadingRegistration) {
     return <p className="oc-rp-muted">Ачааллаж байна...</p>;
   }
 
@@ -246,7 +268,13 @@ export default function RegistrationPanel({ competition }: { competition: Online
           events={events}
           saved={saved}
           fee={savedFee}
-          footer={<p className="oc-rp-muted">{closedLine} Сонголтоо өөрчлөх боломжгүй.</p>}
+          status={status}
+          statusNote={registration?.statusNote ?? null}
+          footer={
+            <div className="oc-rp-foot">
+              <p className="oc-rp-muted">{closedLine} Сонголтоо өөрчлөх боломжгүй.</p>
+            </div>
+          }
         />
       );
     }
@@ -350,7 +378,13 @@ export default function RegistrationPanel({ competition }: { competition: Online
         {saveError && <p className="oc-rp-error" style={{ padding: '0 16px' }}>{saveError}</p>}
 
         <div className="oc-rp-foot">
-          <p className="oc-rp-muted">Бүртгэл хаагдах хүртэл төрлөө сольж болно.</p>
+          <div className="oc-rp-foot-left">
+            {/* Editing an existing registration: its status sits beside the
+                button, as in the mockup — changing events does not change
+                it (an edit never writes the status). */}
+            {editing && status && <RegistrationStatusBadge status={status} withDetail />}
+            <p className="oc-rp-muted">Бүртгэл хаагдах хүртэл төрлөө сольж болно.</p>
+          </div>
           <div className="oc-rp-actions">
             {/* Only when editing. A first-time athlete who changes their
                 mind simply does not submit; an athlete editing a saved
@@ -381,14 +415,22 @@ export default function RegistrationPanel({ competition }: { competition: Online
       events={events}
       saved={saved}
       fee={savedFee}
+      status={status}
+      statusNote={registration?.statusNote ?? null}
       footer={
         <div className="oc-rp-foot">
-          <Link href="/online-competition/dashboard" className="oc-rp-link">
-            Миний тэмцээнүүд →
-          </Link>
-          <button type="button" className="oc-rp-submit" onClick={() => setState('picking')}>
-            БҮРТГЭЛЭЭ ЗАСАХ
-          </button>
+          <div className="oc-rp-foot-left">
+            {status && <RegistrationStatusBadge status={status} withDetail />}
+          </div>
+          {/* Cancelled and rejected get no edit button. An edit never
+              changes the status, so ticking different events would change
+              nothing that matters while looking as if it did — the admin's
+              note above says why, and what to do is to ask the organiser. */}
+          {statusCopy?.canEdit !== false && (
+            <button type="button" className="oc-rp-submit" onClick={startEdit}>
+              БҮРТГЭЛЭЭ ЗАСАХ
+            </button>
+          )}
         </div>
       }
     />
@@ -427,14 +469,19 @@ function RegisteredSummary({
   events,
   saved,
   fee,
+  status,
+  statusNote,
   footer,
 }: {
   events: OnlineCompetition['events'];
   saved: Saved;
   fee: ReturnType<typeof feeView>;
+  status: OnlineRegistrationStatus | null;
+  statusNote: string | null;
   footer: React.ReactNode;
 }) {
   const chosen = events.filter((e) => saved.events.has(e.eventId));
+  const tone = status ? registrationStatusCopy(status).tone : 'muted';
   return (
     <div className="oc-rp">
       <div className="oc-rp-head">
@@ -443,6 +490,16 @@ function RegisteredSummary({
         </span>
         <span className="oc-rp-count">{chosen.length} төрөл</span>
       </div>
+      {/* The organiser's note — "Төлбөр хүлээгдэж буй", "Мэдээлэл дутуу".
+          First, above the events, because when there is one it is the
+          thing the athlete most needs to read; edged in the status's own
+          colour so it reads as belonging to that status. */}
+      {statusNote && (
+        <div className={`oc-rp-statusnote oc-rp-statusnote-${tone}`}>
+          <span className="oc-rp-label">ЗОХИОН БАЙГУУЛАГЧААС</span>
+          <p className="oc-rp-body oc-rp-note-text">{statusNote}</p>
+        </div>
+      )}
       <div className="oc-rp-list">
         {chosen.map((e) => (
           <div key={e.eventId} className="oc-rp-row oc-rp-row-static">
@@ -462,7 +519,11 @@ function RegisteredSummary({
       )}
       <FeeBlock fee={fee} />
       <p className="oc-rp-muted" style={{ padding: '14px 16px 0' }}>
-        Раунд эхлэхэд «Миний тэмцээнүүд» дээр «Эхлүүлэх» товч нээгдэнэ.
+        Раунд эхлэхэд{' '}
+        <Link href="/online-competition/dashboard" className="oc-rp-link">
+          «Миний тэмцээнүүд»
+        </Link>{' '}
+        дээр «Эхлүүлэх» товч нээгдэнэ.
       </p>
       {footer}
     </div>

@@ -1,11 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { EmptyState } from '../../../../_components/ui';
 import type { OnlineCompetitionAdminView } from '@/lib/online-competition/types';
-import type { RegistrationAdminView } from '@/app/api/online-competition/admin-competitions/[id]/registrations/route';
 import Link from 'next/link';
 import RoundGapWarning from '../../../_components/RoundGapWarning';
+import RegistrationReview from './RegistrationReview';
 
 export default function CompetitionDetail({ competitionId }: { competitionId: string }) {
   const [competition, setCompetition] = useState<OnlineCompetitionAdminView | null>(null);
@@ -75,75 +74,10 @@ export default function CompetitionDetail({ competitionId }: { competitionId: st
         </Link>
       </div>
 
-      <AthletesTab competition={competition} />
-    </div>
-  );
-}
-
-/** Registered athletes for this competition, grouped by event (in the
- *  competition's own configured event order) — a simple displayName list
- *  per group, empty state per group with zero registrants. */
-function AthletesTab({ competition }: { competition: OnlineCompetitionAdminView }) {
-  const [registrations, setRegistrations] = useState<RegistrationAdminView[] | null>(null);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    let cancelled = false;
-    setRegistrations(null);
-    setError('');
-    fetch(`/api/online-competition/admin-competitions/${competition.id}/registrations`)
-      .then((res) => {
-        if (!res.ok) throw new Error('failed');
-        return res.json() as Promise<{ registrations: RegistrationAdminView[] }>;
-      })
-      .then((data) => {
-        if (!cancelled) setRegistrations(data.registrations);
-      })
-      .catch((err) => {
-        console.error('CompetitionDetail: loading registrations failed:', err);
-        if (!cancelled) setError('Бүртгэлийг ачааллаж чадсангүй');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [competition.id]);
-
-  if (error) return <p className="text-sm text-[#E8543C]">{error}</p>;
-  if (registrations === null) return <p className="text-[#6E6A62]">Ачааллаж байна...</p>;
-
-  return (
-    <div className="flex flex-col gap-8">
-      {competition.events.map((eventConfig) => {
-        const athletes = registrations.filter((r) => r.events.includes(eventConfig.eventId));
-        return (
-          <div key={eventConfig.eventId}>
-            <span className="oc-v3-label">
-              {eventConfig.label}
-            </span>
-            <div style={{ marginTop: 10 }}>
-              {athletes.length === 0 ? (
-                <EmptyState text="Бүртгүүлсэн тамирчин алга." />
-              ) : (
-                <div className="oc-table">
-                  {athletes.map((a) => (
-                    <div key={a.uid} className="oc-table-row" style={{ gridTemplateColumns: '1fr' }}>
-                      <span className="oc-table-name">{a.displayName}</span>
-                      {/* The athlete's note to the organiser. The public
-                          registration form tells them "Зохион байгуулагч энэ
-                          тайлбарыг бүртгэлийн хуудсанд харна" — this is where
-                          that is true. Repeated under every event the
-                          athlete entered, because this tab is grouped by
-                          event and an organiser reading one group should not
-                          have to go looking in another. */}
-                      {a.note && <span className="oc-adm-reg-note">{a.note}</span>}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        );
-      })}
+      {/* The registration review table: one row per registration, one
+          section per review status, bulk actions. Replaced the
+          grouped-by-event name list. */}
+      <RegistrationReview competition={competition} />
     </div>
   );
 }

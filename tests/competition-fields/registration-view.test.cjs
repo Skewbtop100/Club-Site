@@ -37,7 +37,7 @@ execFileSync(
   { cwd: ROOT, stdio: 'inherit' },
 );
 
-const { registrationWindow, feeView, profileGateCopy } = require(path.join(OUT, 'registration-view.js'));
+const { registrationWindow, feeView, profileGateCopy, registrationStatusCopy } = require(path.join(OUT, 'registration-view.js'));
 
 let pass = 0;
 let fail = 0;
@@ -133,6 +133,31 @@ console.log('\n  -- profileGateCopy: three states, three messages --');
 ok('rejected WITH a reason shows it', /Зураг тод биш/.test(profileGateCopy('rejected', 'Зураг тод биш').body));
 eq('rejected with a blank reason does not print "Шалтгаан: ."',
   /Шалтгаан/.test(profileGateCopy('rejected', '   ').body), false);
+
+console.log('\n  -- registrationStatusCopy: what the athlete is told --');
+{
+  const pending = registrationStatusCopy('pending');
+  eq('pending: the mockup copy', `${pending.label} · ${pending.detail}`, 'ХҮЛЭЭГДЭЖ БУЙ · Зохион байгуулагч хянаж байна');
+  eq('pending: amber', pending.tone, 'amber');
+  eq('approved: green БАТАЛГААЖСАН, no detail', `${registrationStatusCopy('approved').label}|${registrationStatusCopy('approved').detail}|${registrationStatusCopy('approved').tone}`,
+    'БАТАЛГААЖСАН|null|green');
+  eq('waitlisted: amber', registrationStatusCopy('waitlisted').tone, 'amber');
+  // No notification mechanism exists, so the copy must not promise one.
+  ok('waitlisted copy promises no notification', !/мэдэгдэ/.test(registrationStatusCopy('waitlisted').detail));
+  eq('rejected: red', registrationStatusCopy('rejected').tone, 'red');
+  eq('cancelled: muted', registrationStatusCopy('cancelled').tone, 'muted');
+}
+{
+  // An edit never changes the status, so editing a cancelled or rejected
+  // registration would change nothing that matters.
+  const can = (s) => registrationStatusCopy(s).canEdit;
+  eq('pending, waitlisted and approved can edit', [can('pending'), can('waitlisted'), can('approved')].join(','), 'true,true,true');
+  eq('cancelled and rejected cannot', [can('cancelled'), can('rejected')].join(','), 'false,false');
+}
+{
+  const labels = ['pending', 'waitlisted', 'approved', 'cancelled', 'rejected'].map((s) => registrationStatusCopy(s).label);
+  ok('all five labels are distinct', new Set(labels).size === 5, labels.join(' / '));
+}
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 fs.rmSync(OUT, { recursive: true, force: true });

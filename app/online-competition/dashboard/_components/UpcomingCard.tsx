@@ -1,5 +1,6 @@
 import type { OnlineCompetition, OnlineRegistration } from '@/lib/online-competition/types';
 import { fmtDateTime } from '../../_components/hub/format';
+import RegistrationStatusBadge from '../../_components/RegistrationStatusBadge';
 
 export default function UpcomingCard({
   competition,
@@ -36,7 +37,13 @@ export default function UpcomingCard({
           УДАХГҮЙ
         </span>
       </div>
-      <p style={{ marginTop: 10, font: '400 11px var(--oc-font-mono), monospace', color: '#9A958A' }}>
+      {/* The registration's review status, with its explanation — on the
+          dashboard there is room, and "pending" without "the organiser is
+          reviewing it" invites the athlete to wonder what they did wrong. */}
+      <div style={{ marginTop: 10 }}>
+        <RegistrationStatusBadge status={registration.status} withDetail />
+      </div>
+      <p style={{ marginTop: 8, font: '400 11px var(--oc-font-mono), monospace', color: '#9A958A' }}>
         {codes} · эхлэхэд сануулга ирнэ
       </p>
     </div>

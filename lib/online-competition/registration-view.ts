@@ -5,18 +5,19 @@
 // tested in tests/competition-fields/registration-view.test.cjs.
 //
 // EVERY GATE HERE IS CLIENT-SIDE. firestore.rules for
-// onlineParticipants/{uid}/registrations checks only that the writer owns
-// the document, that competitionId matches, that `events` is a non-empty
-// list, and the note's length. It does NOT check the deadline, the
-// competition's status, the athlete's profile status, or the participant
-// limit. These functions make the panel honest; they do not make the data
-// safe from a hand-crafted write. See the handover note on hardening.
+// onlineParticipants/{uid}/registrations checks ownership, the fields an
+// athlete may write, that a new registration is 'pending', and that the
+// review status and admin note are untouched. It does NOT check the
+// deadline, the competition's status, the athlete's profile status, or
+// the participant limit. These functions make the panel honest; they do
+// not make the data safe from a hand-crafted write.
 
 import { athleteFeeMnt, formatMnt, surchargeOf } from './fees';
 import type {
   OnlineCompetitionEventConfig,
   OnlineCompetitionStatus,
   OnlineParticipantProfileStatus,
+  OnlineRegistrationStatus,
 } from './types';
 
 // ── is registration open? ──────────────────────────────────────────────
@@ -136,4 +137,57 @@ export function profileGateCopy(
     body: 'Тэмцээнд бүртгүүлэхийн тулд эхлээд профайлаа бөглөж, админаар баталгаажуулах шаардлагатай.',
     action: 'Профайл бөглөх →',
   };
+}
+
+// ── the athlete's own registration status ──────────────────────────────
+
+export type StatusTone = 'amber' | 'green' | 'muted' | 'red';
+
+export interface RegistrationStatusCopy {
+  /** The badge word(s), uppercase. */
+  label: string;
+  /** A short line after the label, or null. */
+  detail: string | null;
+  tone: StatusTone;
+  /** Whether the panel offers БҮРТГЭЛЭЭ ЗАСАХ. An edit never changes the
+   *  status, so for a cancelled or rejected registration editing events
+   *  would change nothing that matters — and would look like it did. */
+  canEdit: boolean;
+}
+
+/** What the athlete is told about their registration's review status —
+ *  one wording for the Бүртгүүлэх panel, the sidebar, the dashboard and the
+ *  hub card, so the four cannot say different things.
+ *
+ *  Nothing here promises a notification: there is no mechanism that tells
+ *  a waitlisted athlete they got a place. The copy says who acts, not that
+ *  the athlete will hear about it. */
+export function registrationStatusCopy(status: OnlineRegistrationStatus): RegistrationStatusCopy {
+  switch (status) {
+    case 'pending':
+      return { label: 'ХҮЛЭЭГДЭЖ БУЙ', detail: 'Зохион байгуулагч хянаж байна', tone: 'amber', canEdit: true };
+    case 'waitlisted':
+      return {
+        label: 'ХҮЛЭЭЛГИЙН ЖАГСААЛТАД',
+        detail: 'Орон тоо гарвал зохион байгуулагч баталгаажуулна',
+        tone: 'amber',
+        canEdit: true,
+      };
+    case 'approved':
+      return { label: 'БАТАЛГААЖСАН', detail: null, tone: 'green', canEdit: true };
+    case 'cancelled':
+      return {
+        label: 'ЦУЦЛАГДСАН',
+        detail: 'Асуух зүйл байвал зохион байгуулагчтай холбогдоно уу',
+        tone: 'muted',
+        canEdit: false,
+      };
+    case 'rejected':
+      return {
+        label: 'ТАТГАЛЗСАН',
+        detail: 'Асуух зүйл байвал зохион байгуулагчтай холбогдоно уу',
+        tone: 'red',
+        canEdit: false,
+      };
+  }
 }

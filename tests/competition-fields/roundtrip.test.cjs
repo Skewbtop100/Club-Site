@@ -65,6 +65,7 @@ function compile() {
     [
       require.resolve('typescript/bin/tsc'),
       'lib/online-competition/admin-competitions.ts',
+      'lib/online-competition/admin-registrations.ts',
       '--outDir', path.basename(OUT),
       '--module', 'commonjs',
       '--target', 'es2022',
@@ -97,6 +98,11 @@ const {
   normalizeStoredEvents,
   normalizeStoredSchedule,
 } = require(path.join(OUT, 'competition-shape.js'));
+const {
+  listCompetitionRegistrations,
+  applyRegistrationPatch,
+  RegistrationPatchError,
+} = require(path.join(OUT, 'admin-registrations.js'));
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
 
@@ -1171,6 +1177,105 @@ const read = async (id) => (await db.collection(COL).doc(id).get()).data();
   ok('read: a round row with no eventId is dropped', messySch.every((r) => r.id !== 'no-event'));
   ok('read: a row with no duration is dropped', messySch.every((r) => r.id !== 'no-duration'));
   ok('read: junk entries are dropped', messySch.length === 2, String(messySch.length));
+
+
+  // ── registration review: the admin read and write (Admin SDK) ─────────
+  // The only code allowed to set a registration's status or statusNote.
+  // Run with the real Admin SDK against the emulator — which, like
+  // production, bypasses firestore.rules — so this is the admin half of the
+  // contract whose athlete half is tests/firestore-rules/participants.test.mjs.
+  const { Timestamp: RTS } = require('firebase-admin/firestore');
+  const RC = 'comp-review';
+  const regRef = (uid, comp = RC) => db.collection('onlineParticipants').doc(uid).collection('registrations').doc(comp);
+  const at = (d) => RTS.fromMillis(Date.UTC(2026, 2, d, 9, 0));
+
+  await db.collection('onlineParticipants').doc('ath-a').set({
+    uid: 'ath-a', displayName: 'Google A', email: 'a@example.com', lastName: 'Бат', firstName: 'Эрдэнэ',
+    approvedLastName: 'Батаа', approvedFirstName: 'Эрдэнэ', citizenship: 'kz', approvedCitizenship: 'mn',
+    dateOfBirth: '2003-04-12', wcaId: '2019BATA01',
+  });
+  await db.collection('onlineParticipants').doc('ath-b').set({ uid: 'ath-b', displayName: 'Google B' });
+  await db.collection('onlineParticipants').doc('ath-c').set({ uid: 'ath-c', displayName: 'Google C', firstName: 'Сараа' });
+  // ath-a registered BEFORE review existed (legacy status), and also for
+  // another competition — so ath-a is not new.
+  await regRef('ath-a').set({ competitionId: RC, events: ['333'], status: 'registered', registeredAt: at(2),
+    results: { '333': { ao5: 1234 } } });
+  await regRef('ath-a', 'comp-elsewhere').set({ competitionId: 'comp-elsewhere', events: ['333'], status: 'registered', registeredAt: at(1) });
+  await regRef('ath-b').set({ competitionId: RC, events: ['333', '222'], status: 'pending', registeredAt: at(4), note: 'Утас 9911' });
+  await regRef('ath-c').set({ competitionId: RC, events: ['222'], status: 'pending', registeredAt: at(3) });
+
+  const listed = await listCompetitionRegistrations(db, RC);
+  ok('review list: only this competition’s three registrations', listed.length === 3, JSON.stringify(listed.map((r) => r.uid)));
+  ok('review list: in REGISTRATION order (registeredAt ascending)',
+    listed.map((r) => r.uid).join(',') === 'ath-a,ath-c,ath-b', listed.map((r) => r.uid).join(','));
+  const A = listed.find((r) => r.uid === 'ath-a');
+  const B = listed.find((r) => r.uid === 'ath-b');
+  const C = listed.find((r) => r.uid === 'ath-c');
+  ok('review list: the legacy "registered" reads as approved', A.status === 'approved', A.status);
+  ok('review list: the APPROVED identity is preferred for the name', A.name === 'Батаа Эрдэнэ', A.name);
+  ok('review list: the approved citizenship is preferred', A.citizenship === 'mn', A.citizenship);
+  ok('review list: wcaId, dateOfBirth and email come from the profile',
+    A.wcaId === '2019BATA01' && A.dateOfBirth === '2003-04-12' && A.email === 'a@example.com');
+  ok('review list: a name falls back to what exists', C.name === 'Сараа' && B.name === 'Google B', `${C.name} / ${B.name}`);
+  ok('review list: the athlete’s note', B.note === 'Утас 9911' && A.note === null);
+  ok('review list: registeredAt as epoch-ms', B.registeredAt === at(4).toMillis());
+  // "шинэ": a first competition on the platform — no registration anywhere else.
+  ok('review list: an athlete registered elsewhere is NOT new', A.isNew === false);
+  ok('review list: an athlete with only this registration IS new', B.isNew === true && C.isNew === true);
+
+  // ── the write: single, bulk, and all-or-nothing ──
+  await applyRegistrationPatch(db, RC, ['ath-b', 'ath-c'], { status: 'approved' });
+  ok('bulk approve: both approved',
+    (await regRef('ath-b').get()).get('status') === 'approved' && (await regRef('ath-c').get()).get('status') === 'approved');
+
+  await applyRegistrationPatch(db, RC, ['ath-b'], { statusNote: 'Төлбөр хүлээгдэж буй' });
+  const b1 = (await regRef('ath-b').get()).data();
+  ok('single: a statusNote is set', b1.statusNote === 'Төлбөр хүлээгдэж буй', b1.statusNote);
+  ok('single: a note-only patch leaves the status alone', b1.status === 'approved', b1.status);
+  ok('the admin write touches NOTHING of the athlete’s', b1.note === 'Утас 9911' && b1.events.join(',') === '333,222' &&
+    b1.registeredAt.toMillis() === at(4).toMillis());
+
+  await applyRegistrationPatch(db, RC, ['ath-b'], { statusNote: null });
+  ok('a null statusNote DELETES the key', !('statusNote' in (await regRef('ath-b').get()).data()));
+
+  await applyRegistrationPatch(db, RC, ['ath-a'], { status: 'rejected', statusNote: 'Мэдээлэл дутуу' });
+  const a1 = (await regRef('ath-a').get()).data();
+  ok('status and note together', a1.status === 'rejected' && a1.statusNote === 'Мэдээлэл дутуу');
+  ok('the athlete’s results map survives an admin write', a1.results?.['333']?.ao5 === 1234);
+
+  // ALL OR NOTHING: one uid with no registration — nothing is written.
+  let bulkErr = null;
+  try {
+    await applyRegistrationPatch(db, RC, ['ath-c', 'ghost'], { status: 'cancelled' });
+  } catch (e) {
+    bulkErr = e;
+  }
+  ok('bulk with a missing uid is REFUSED', bulkErr instanceof RegistrationPatchError, String(bulkErr));
+  ok('  ...as a 404 naming the missing uid', bulkErr?.status === 404 && bulkErr?.missing?.join(',') === 'ghost',
+    JSON.stringify({ status: bulkErr?.status, missing: bulkErr?.missing }));
+  ok('  ...and the PRESENT uid was NOT changed (all or nothing)',
+    (await regRef('ath-c').get()).get('status') === 'approved', (await regRef('ath-c').get()).get('status'));
+
+  // A registration for ANOTHER competition is not reachable through this one.
+  let wrongComp = null;
+  try {
+    await applyRegistrationPatch(db, 'comp-elsewhere-not', ['ath-b'], { status: 'approved' });
+  } catch (e) {
+    wrongComp = e;
+  }
+  ok('a uid registered for a different competition is refused', wrongComp instanceof RegistrationPatchError);
+
+  // PR-4 is not here: approving past the participant limit is possible.
+  // (There is no limit read in this path at all — asserted by construction:
+  // the bulk above approved without the competition document existing.)
+  ok('the limit is NOT enforced yet (PR-4): approvals succeed with no competition document at all',
+    !(await db.collection('onlineCompetitions').doc(RC).get()).exists);
+
+  const relisted = await listCompetitionRegistrations(db, RC);
+  ok('after the writes, the list reflects them',
+    relisted.map((r) => `${r.uid}:${r.status}`).join(',') === 'ath-a:rejected,ath-c:approved,ath-b:approved',
+    relisted.map((r) => `${r.uid}:${r.status}`).join(','));
+  ok('  ...with the admin note', relisted.find((r) => r.uid === 'ath-a').statusNote === 'Мэдээлэл дутуу');
 
 
   // ── scramble route: the attempt bound ─────────────────────────────────

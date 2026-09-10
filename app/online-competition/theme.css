@@ -2149,6 +2149,348 @@
   }
 }
 
+/* ── Registration status badge (RegistrationStatusBadge.tsx) ─────────
+   One look for the athlete's review status wherever it appears: panel,
+   sidebar, dashboard, hub card. Tone, not shape, carries the meaning. */
+.oc-rs {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font: 600 9px/1.4 var(--oc-font-mono), monospace;
+  letter-spacing: .12em;
+}
+/* The label never breaks mid-phrase; the detail after it may wrap. */
+.oc-rs-label {
+  white-space: nowrap;
+}
+.oc-rs-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  background: currentColor;
+}
+.oc-rs-detail {
+  font-weight: 400;
+  letter-spacing: .04em;
+  color: #9A958A;
+}
+.oc-rs-amber { color: #E0A020; }
+.oc-rs-green { color: #4FD07A; }
+.oc-rs-muted { color: #6E6A62; }
+.oc-rs-red   { color: #E8543C; }
+
+/* The panel's footer, left side: the status above the deadline promise. */
+.oc-rp-foot-left {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+/* The organiser's note to the athlete, edged in the status's colour. */
+.oc-rp-statusnote {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #16161B;
+  border-left: 2px solid #4A4740;
+}
+.oc-rp-statusnote-amber { border-left-color: #E0A020; }
+.oc-rp-statusnote-green { border-left-color: #4FD07A; }
+.oc-rp-statusnote-red   { border-left-color: #E8543C; }
+
+/* ── Admin: the registration review table (RegistrationReview.tsx) ────
+   Prefixed .oc-rr- — .oc-rv- is the judging grid's, and sharing a prefix
+   is how this file has twice ended up with one class name meaning two
+   components. */
+.oc-rr {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.oc-rr-summary {
+  font: 500 10px/1.4 var(--oc-font-mono), monospace;
+  letter-spacing: .16em;
+  color: #9A958A;
+}
+.oc-rr-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.oc-rr-search {
+  flex: 1;
+  min-width: 200px;
+  max-width: 320px;
+  border: 1px solid #2A2A31;
+  border-radius: 2px;
+  background: #08080A;
+  padding: 9px 11px;
+  font: 400 13px/1 var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+}
+.oc-rr-search:focus-visible {
+  outline: none;
+  border-color: #DFFF4F;
+}
+.oc-rr-cols {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.oc-rr-col {
+  border: 1px solid #2A2A31;
+  border-radius: 2px;
+  background: transparent;
+  padding: 6px 9px;
+  cursor: pointer;
+  font: 500 10px/1 var(--oc-font-heading), sans-serif;
+  color: #6E6A62;
+}
+.oc-rr-col-on {
+  border-color: #DFFF4F;
+  color: #DFFF4F;
+}
+/* The bulk bar: count, optional note, the four actions. */
+.oc-rr-bulk {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  border: 1px solid #1C1C21;
+  background: #0D0D10;
+  padding: 10px 12px;
+}
+.oc-rr-bulk-count {
+  font: 600 10px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .14em;
+  color: #F4F1EA;
+  white-space: nowrap;
+}
+.oc-rr-bulk-note {
+  flex: 1;
+  min-width: 180px;
+  border: 1px solid #2A2A31;
+  border-radius: 2px;
+  background: #08080A;
+  padding: 8px 10px;
+  font: 400 12px/1 var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+}
+.oc-rr-bulk-note:disabled {
+  opacity: .5;
+}
+.oc-rr-bulk-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.oc-rr-action {
+  border: 1px solid #2A2A31;
+  border-radius: 2px;
+  background: transparent;
+  padding: 8px 11px;
+  cursor: pointer;
+  font: 600 10px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .12em;
+  color: #F4F1EA;
+}
+.oc-rr-action:disabled {
+  opacity: .35;
+  cursor: not-allowed;
+}
+.oc-rr-action-approved:not(:disabled) {
+  border-color: #DFFF4F;
+  background: #DFFF4F;
+  color: #08080A;
+}
+.oc-rr-action-waitlisted:not(:disabled):hover { border-color: #E0A020; color: #E0A020; }
+.oc-rr-action-cancelled:not(:disabled):hover  { border-color: #9A958A; }
+.oc-rr-action-rejected:not(:disabled):hover   { border-color: #E8543C; color: #E8543C; }
+.oc-rr-hint {
+  font: 500 9px/1.6 var(--oc-font-mono), monospace;
+  letter-spacing: .1em;
+  color: #6E6A62;
+}
+.oc-rr-error {
+  font: 400 12px/1.5 var(--oc-font-heading), sans-serif;
+  color: #E8543C;
+}
+
+/* One collapsible section per review status. */
+.oc-rr-section {
+  border: 1px solid #1C1C21;
+  background: #0D0D10;
+}
+.oc-rr-section-head {
+  display: flex;
+  align-items: stretch;
+}
+.oc-rr-section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: none;
+  border-left: 2px solid #4A4740;
+  background: transparent;
+  padding: 12px 14px;
+  cursor: pointer;
+  text-align: left;
+}
+.oc-rr-section-pending .oc-rr-section-toggle    { border-left-color: #E0A020; }
+.oc-rr-section-waitlisted .oc-rr-section-toggle { border-left-color: #E0A020; }
+.oc-rr-section-approved .oc-rr-section-toggle   { border-left-color: #4FD07A; }
+.oc-rr-section-rejected .oc-rr-section-toggle   { border-left-color: #E8543C; }
+.oc-rr-caret {
+  width: 10px;
+  font: 500 11px/1 var(--oc-font-mono), monospace;
+  color: #6E6A62;
+}
+.oc-rr-section-label {
+  flex: 1;
+  font: 600 13px/1 var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+}
+.oc-rr-section-count {
+  font: 600 11px/1 var(--oc-font-mono), monospace;
+  color: #9A958A;
+}
+/* Rows scroll sideways inside the section when the visible columns are
+   wider than the panel — the page itself never does. */
+.oc-rr-table {
+  overflow-x: auto;
+  border-top: 1px solid #1C1C21;
+}
+.oc-rr-row {
+  display: grid;
+  gap: 10px;
+  align-items: center;
+  min-width: 720px;
+  padding: 9px 14px;
+  border-bottom: 1px solid #16161B;
+  font: 400 12px/1.4 var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+}
+.oc-rr-row-on {
+  background: #131318;
+}
+.oc-rr-row-head {
+  padding-top: 10px;
+  padding-bottom: 8px;
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .14em;
+  color: #6E6A62;
+}
+.oc-rr-right {
+  text-align: right;
+}
+.oc-rr-mono {
+  font: 500 11px/1.3 var(--oc-font-mono), monospace;
+  color: #9A958A;
+}
+.oc-rr-clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oc-rr-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-weight: 500;
+}
+/* First competition on the platform — the footer's "шинэ" count. */
+.oc-rr-new {
+  flex: none;
+  border: 1px solid #DFFF4F;
+  padding: 2px 4px;
+  font: 600 8px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .12em;
+  color: #DFFF4F;
+}
+.oc-rr-flag {
+  display: block;
+  width: 20px;
+  height: auto;
+  border: 1px solid #1C1C21;
+}
+.oc-rr-events {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.oc-rr-ev {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid #2A2A31;
+  color: #9A958A;
+  font: 600 8px/1 var(--oc-font-mono), monospace;
+}
+.oc-rr-note {
+  color: #9A958A;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* The admin's note, right-aligned and editable in place. */
+.oc-rr-statusnote {
+  justify-self: end;
+  max-width: 100%;
+  border: none;
+  background: transparent;
+  padding: 4px 0;
+  cursor: pointer;
+  text-align: right;
+  font: 500 12px/1.4 var(--oc-font-heading), sans-serif;
+  color: #E0A020;
+  overflow-wrap: anywhere;
+}
+.oc-rr-statusnote-empty {
+  color: #4A4740;
+}
+.oc-rr-statusnote:hover:not(:disabled) {
+  color: #DFFF4F;
+}
+.oc-rr-statusnote-input {
+  width: 100%;
+  border: 1px solid #DFFF4F;
+  border-radius: 2px;
+  background: #08080A;
+  padding: 6px 8px;
+  font: 400 12px/1 var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+}
+.oc-rr-empty {
+  padding: 14px;
+  font: 400 12px/1.4 var(--oc-font-heading), sans-serif;
+  color: #6E6A62;
+}
+.oc-rr-footer {
+  padding: 10px 14px;
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .14em;
+  color: #6E6A62;
+}
+@media (max-width: 640px) {
+  .oc-rr-action,
+  .oc-rr-col,
+  .oc-rr-section-toggle {
+    min-height: 44px;
+  }
+  .oc-rr-bulk-actions {
+    width: 100%;
+  }
+  .oc-rr-action {
+    flex: 1;
+  }
+}
+
 /* ── ТӨРЛҮҮД: the event/round table ─────────────────────────────────
    A real <table>. Six columns do not fit a phone, so the table keeps its
    shape and scrolls inside this frame instead — wrapping cells would

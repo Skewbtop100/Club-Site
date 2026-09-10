@@ -7,7 +7,7 @@ import type {
   OnlineCompetitionAdminView,
   OnlineSubmissionAdminView,
 } from '@/lib/online-competition/types';
-import type { RegistrationAdminView } from '@/app/api/online-competition/admin-competitions/[id]/registrations/route';
+import type { RegistrationAdminView } from '@/lib/online-competition/admin-registrations';
 import type { ScramblesOverview } from '@/app/api/online-competition/admin-scrambles/route';
 import { roundKey } from '@/lib/online-competition/scrambles';
 import {

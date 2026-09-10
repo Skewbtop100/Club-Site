@@ -271,13 +271,21 @@ await check('E7. approved athlete changes photoPublicId alone (not a reviewed fi
 // writes it directly — there is no API route in between — so these rules
 // are the only server-side validation a registration ever gets.
 const reg = (ref, competitionId = 'comp1') => doc(ref, 'registrations', competitionId);
-const REG = { competitionId: 'comp1', events: ['333'], status: 'registered' };
+// A registration exactly as a first save writes it under the PR-1 rule:
+// status 'pending', and a registeredAt that is the server's own clock.
+const REG = {
+  competitionId: 'comp1',
+  events: ['333'],
+  status: 'pending',
+  registeredAt: serverTimestamp(),
+  updatedAt: serverTimestamp(),
+};
 const NOTE_300 = 'а'.repeat(300); // Cyrillic: size() counts characters
 
 await check('R1. owner registers with events', 'ALLOW', APPROVED, (ref) =>
-  setDoc(reg(ref), { ...REG, registeredAt: serverTimestamp() }),
+  setDoc(reg(ref), REG),
 );
-await check('R2. registration with NO note (every doc before the field)', 'ALLOW', APPROVED, (ref) =>
+await check('R2. registration with NO note', 'ALLOW', APPROVED, (ref) =>
   setDoc(reg(ref), REG),
 );
 await check('R3. note of exactly 300 characters', 'ALLOW', APPROVED, (ref) =>
@@ -292,9 +300,9 @@ await check('R5. a non-string note is REFUSED', 'DENY', APPROVED, (ref) =>
 await check('R6. a map smuggled in as the note is REFUSED', 'DENY', APPROVED, (ref) =>
   setDoc(reg(ref), { ...REG, note: { text: 'x' } }),
 );
-await check('R7. editing: overwrite that DROPS the note (clearing it)', 'ALLOW', APPROVED, async (ref) => {
+await check('R7. editing: an update that DELETES the note (clearing it)', 'ALLOW', APPROVED, async (ref) => {
   await setDoc(reg(ref), { ...REG, note: 'хамт ирнэ' });
-  return setDoc(reg(ref), REG);
+  return updateDoc(reg(ref), { note: deleteField(), updatedAt: serverTimestamp() });
 });
 await check('R8. empty events list is refused (pre-existing rule)', 'DENY', APPROVED, (ref) =>
   setDoc(reg(ref), { ...REG, events: [] }),
@@ -409,7 +417,7 @@ await scenario('RW1. a FIRST registration creates the document with both timesta
   expect(d, 'no document');
   expect(Object.keys(d).sort().join(',') === 'competitionId,events,note,registeredAt,status,updatedAt',
     `fields: ${Object.keys(d).sort().join(',')}`);
-  expect(d.status === 'registered', `status ${d.status}`);
+  expect(d.status === 'pending', `status ${d.status}`);
   expect(d.registeredAt && d.updatedAt, 'timestamps missing');
 });
 
@@ -457,16 +465,105 @@ await scenario('RW5. the one EXISTING registration (only an overwritten register
   expect(d.updatedAt, 'updatedAt not added');
 });
 
-await scenario('RW6. what the athlete READS back: the legacy status converts to approved', async () => {
+await scenario('RW6. what the athlete READS back: a new registration is pending, a legacy one approved', async () => {
   await saveRegistration(athlete(UID), UID, 'comp1', ['333'], 'x');
-  const snap = await getDoc(doc(athlete(UID), 'onlineParticipants', UID, 'registrations', 'comp1'));
-  const r = normalizeStoredRegistration(snap.data(), 'comp1');
-  expect(r.status === 'approved', `read as ${r.status}`);
-  expect(r.events.join(',') === '333' && r.note === 'x', 'shape wrong');
+  const fresh = normalizeStoredRegistration(
+    (await getDoc(doc(athlete(UID), 'onlineParticipants', UID, 'registrations', 'comp1'))).data(), 'comp1');
+  expect(fresh.status === 'pending', `new registration read as ${fresh.status}`);
+  expect(fresh.events.join(',') === '333' && fresh.note === 'x', 'shape wrong');
+  await seedReg(UID, 'old', { competitionId: 'old', events: ['333'], status: 'registered' });
+  const legacy = normalizeStoredRegistration(
+    (await getDoc(doc(athlete(UID), 'onlineParticipants', UID, 'registrations', 'old'))).data(), 'old');
+  expect(legacy.status === 'approved', `legacy read as ${legacy.status}`);
 });
 
 await scenario('RW7. another athlete CANNOT save into my registration via the write path', async () => {
   await assertFails(saveRegistration(athlete('someoneElse'), UID, 'comp1', ['333'], ''));
+});
+
+// ── PR-1: the status and the admin's note are ADMIN-ONLY ────────────
+// An athlete writes their own registration directly, so everything here
+// is the rules alone. The Admin SDK bypasses rules; the admin API's own
+// behaviour is tested against the emulator in roundtrip.test.cjs.
+const { Timestamp: TS } = await import('firebase/firestore');
+const FIRST = TS.fromMillis(Date.UTC(2026, 0, 5, 9, 0));
+const STORED = { competitionId: 'comp1', events: ['333'], status: 'pending', registeredAt: FIRST };
+const mine = () => doc(athlete(UID), 'onlineParticipants', UID, 'registrations', 'comp1');
+
+await scenario('S1. an athlete CANNOT register themselves as approved', async () => {
+  await assertFails(setDoc(mine(), { ...REG, status: 'approved' }));
+});
+await scenario('S2. an athlete CANNOT promote their own pending registration to approved', async () => {
+  await seedReg(UID, 'comp1', STORED);
+  await assertFails(updateDoc(mine(), { status: 'approved' }));
+});
+await scenario('S3. an athlete CANNOT create a registration carrying a statusNote', async () => {
+  await assertFails(setDoc(mine(), { ...REG, statusNote: 'Төлбөр төлсөн' }));
+});
+await scenario('S4. an athlete CANNOT add a statusNote to their registration', async () => {
+  await seedReg(UID, 'comp1', STORED);
+  await assertFails(updateDoc(mine(), { statusNote: 'Төлбөр төлсөн' }));
+});
+await scenario('S5. an athlete CANNOT change or clear the admin’s statusNote', async () => {
+  await seedReg(UID, 'comp1', { ...STORED, statusNote: 'Мэдээлэл дутуу' });
+  await assertFails(updateDoc(mine(), { statusNote: 'Бүгд зүгээр' }));
+  await assertFails(updateDoc(mine(), { statusNote: deleteField() }));
+});
+await scenario('S6. an athlete CANNOT change registeredAt (their waitlist place)', async () => {
+  await seedReg(UID, 'comp1', STORED);
+  await assertFails(updateDoc(mine(), { registeredAt: TS.fromMillis(Date.UTC(2025, 0, 1)) }));
+  await assertFails(updateDoc(mine(), { registeredAt: serverTimestamp() }));
+});
+await scenario('S7. an athlete CANNOT backdate registeredAt on create', async () => {
+  await assertFails(setDoc(mine(), { ...REG, registeredAt: TS.fromMillis(Date.UTC(2025, 0, 1)) }));
+});
+await scenario('S8. an athlete CANNOT add any other field (an admin-only field)', async () => {
+  await seedReg(UID, 'comp1', STORED);
+  await assertFails(updateDoc(mine(), { reviewedBy: 'me' }));
+  await assertFails(setDoc(doc(athlete(UID), 'onlineParticipants', UID, 'registrations', 'comp2'),
+    { ...REG, competitionId: 'comp2', reviewedBy: 'me' }));
+});
+await scenario('S9. an edit leaves an approved status approved (D4: edit never writes status)', async () => {
+  await seedReg(UID, 'comp1', { ...STORED, status: 'approved', statusNote: 'Төлбөр төлсөн' });
+  await saveRegistration(athlete(UID), UID, 'comp1', ['333', '444'], 'шинэ тайлбар');
+  const d = await readRaw(UID, 'comp1');
+  expect(d.status === 'approved', `status became ${d.status}`);
+  expect(d.statusNote === 'Төлбөр төлсөн', 'the admin note was lost');
+  expect(d.events.join(',') === '333,444', 'events not saved');
+});
+await scenario('S10. recordAo5Result can still write results onto the registration', async () => {
+  await seedReg(UID, 'comp1', { ...STORED, status: 'approved' });
+  // recordAo5Result's exact write: a mergeFields set of one event's result.
+  await assertSucceeds(setDoc(mine(),
+    { results: { '333': { ao5: 1234, attempts: [1200, 1234, 1300, 1250, 1180], submittedAt: serverTimestamp() } } },
+    { mergeFields: ['results.333'] }));
+});
+await scenario('S11. a LEGACY "registered" registration still edits — the status is unchanged', async () => {
+  await seedReg(UID, 'comp1', { competitionId: 'comp1', events: ['333', '222'], status: 'registered', registeredAt: FIRST });
+  await saveRegistration(athlete(UID), UID, 'comp1', ['333'], '');
+  expect((await readRaw(UID, 'comp1')).status === 'registered', 'legacy status was changed');
+});
+await scenario('S12. OLD TAB (pre-PR-0 writer, whole-document replace) is refused — it re-stamps registeredAt', async () => {
+  await seedReg(UID, 'comp1', { competitionId: 'comp1', events: ['333'], status: 'registered', registeredAt: FIRST });
+  await assertFails(setDoc(mine(), { competitionId: 'comp1', events: ['222'], registeredAt: serverTimestamp(), status: 'registered' }));
+});
+await scenario('S13. OLD TAB (PR-0 writer) can still EDIT, but its create writes "registered" and is refused', async () => {
+  await seedReg(UID, 'comp1', STORED);
+  await assertSucceeds(updateDoc(mine(), { events: ['222'], updatedAt: serverTimestamp(), note: deleteField() }));
+  await assertFails(setDoc(doc(athlete(UID), 'onlineParticipants', UID, 'registrations', 'comp9'),
+    { competitionId: 'comp9', events: ['333'], status: 'registered', registeredAt: serverTimestamp(), updatedAt: serverTimestamp() }));
+});
+await scenario('S14. the ADMIN (Admin SDK: rules bypassed) CAN set status, statusNote and registeredAt', async () => {
+  await seedReg(UID, 'comp1', STORED);
+  await testEnv.withSecurityRulesDisabled((ctx) =>
+    updateDoc(doc(ctx.firestore(), 'onlineParticipants', UID, 'registrations', 'comp1'), {
+      status: 'approved',
+      statusNote: 'Төлбөр төлсөн',
+      registeredAt: TS.fromMillis(Date.UTC(2025, 11, 31)),
+    }));
+  const d = await readRaw(UID, 'comp1');
+  expect(d.status === 'approved' && d.statusNote === 'Төлбөр төлсөн', 'admin write did not land');
+  expect(d.registeredAt.toMillis() === Date.UTC(2025, 11, 31), 'admin registeredAt did not land');
 });
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);

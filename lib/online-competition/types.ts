@@ -539,14 +539,21 @@ export interface OnlineParticipantAdminView {
   rejectionReason: string | null;
 }
 
-/** Where a registration stands in the (upcoming) admin review.
+/** Where a registration stands in the admin review.
  *
- *  GROUNDWORK: nothing writes these values yet and nothing reads the
- *  status yet. Every stored registration today holds the legacy value
- *  'registered', written before review existed; normalizeRegistrationStatus
- *  (registration-shape.ts) reads it as 'approved'. 'registered' is
- *  deliberately NOT a member of this union — it is a stored spelling only,
- *  never a state the code reasons about. */
+ *  An athlete's first registration is written as 'pending'; ONLY an admin
+ *  (API route, Admin SDK) moves it anywhere else — firestore.rules refuses
+ *  an athlete changing it. An edit never touches it, so an approved athlete
+ *  who changes events stays approved.
+ *
+ *  Registrations written before review existed hold the legacy value
+ *  'registered'; normalizeRegistrationStatus (registration-shape.ts) reads
+ *  it as 'approved'. 'registered' is deliberately NOT a member of this
+ *  union — it is a stored spelling only, never a state the code reasons
+ *  about.
+ *
+ *  PR-1 makes this real but gates NOTHING on it: a pending athlete can
+ *  still solve. PR-2 gates solving and the scramble roster on 'approved'. */
 export type OnlineRegistrationStatus = 'pending' | 'waitlisted' | 'approved' | 'cancelled' | 'rejected';
 
 /** onlineParticipants/{uid}/registrations/{competitionId} — one doc per
@@ -583,6 +590,19 @@ export interface OnlineRegistration {
   /** Always a current value — the reader converts the legacy stored
    *  'registered' (see OnlineRegistrationStatus). */
   status: OnlineRegistrationStatus;
+  /** The ADMIN's note on this registration — "Төлбөр хүлээгдэж буй",
+   *  "Мэдээлэл дутуу". Written only through the admin API; firestore.rules
+   *  refuses an athlete creating or changing it.
+   *
+   *  THE ATHLETE SEES IT: it sits on their own registration document, which
+   *  they can read, and the Бүртгүүлэх panel shows it under their status.
+   *  The admin review table says so beside the field. There is no
+   *  internal-only note; one would need a location the athlete cannot read.
+   *
+   *  Absent means none — clearing it deletes the key. At most
+   *  REGISTRATION_STATUS_NOTE_MAX characters. Distinct from `note`, which
+   *  is the ATHLETE's message to the organiser. */
+  statusNote?: string;
   /** The athlete's optional note to the organiser — someone coming with
    *  them, a special requirement, a phone number. Shown to the admin on
    *  the competition's Тамирчид tab.
@@ -601,6 +621,10 @@ export interface OnlineRegistration {
  *  (`note.size() <= 300`) — rules cannot import it, so the two must be
  *  changed together. */
 export const REGISTRATION_NOTE_MAX = 300;
+
+/** The admin status note's ceiling. Enforced by the admin API (the only
+ *  writer); firestore.rules keeps athletes from writing it at all. */
+export const REGISTRATION_STATUS_NOTE_MAX = 200;
 
 export type OnlineSubmissionStatus = 'pending' | 'approved' | 'rejected';
 

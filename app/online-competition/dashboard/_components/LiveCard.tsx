@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { OnlineCompetition, OnlineRegistration } from '@/lib/online-competition/types';
+import RegistrationStatusBadge from '../../_components/RegistrationStatusBadge';
 import type { RoundAccess } from '@/lib/online-competition/round-access';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import { fmtDateTime } from '../../_components/hub/format';
@@ -110,6 +111,11 @@ export default function LiveCard({
             <p style={{ marginTop: 4, font: '400 10px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
               {fmtDateTime(competition.startAt)}
             </p>
+            {/* Shown, NOT enforced: a pending athlete can still solve until
+                PR-2 gates solving on an approved registration. */}
+            <div style={{ marginTop: 8 }}>
+              <RegistrationStatusBadge status={registration.status} withDetail />
+            </div>
           </div>
           <span className="oc-v3-chip oc-v3-chip-pending" style={{ alignSelf: 'flex-start' }}>
             <span className="oc-v3-dot" aria-hidden />

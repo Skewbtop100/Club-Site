@@ -9,6 +9,7 @@ import type {
 } from '@/lib/online-competition/types';
 import { fmtDate } from './util';
 import { EventChip } from './CompetitionCells';
+import RegistrationStatusBadge from '../../RegistrationStatusBadge';
 import EmptyBlock from './EmptyBlock';
 
 const HUB = '/online-competition';
@@ -19,12 +20,9 @@ export interface RegisteredView {
   competition: OnlineCompetition;
 }
 
-// Status treatment keyed off the competition's real status. There is no
-// second axis to show YET: OnlineRegistration.status now has review values
-// (pending / waitlisted / approved / ...), but nothing writes them until
-// registration review lands, and every stored registration reads as
-// 'approved'. So for now a row's presence here IS the registration. When
-// review ships, this card must show the registration's own status too.
+// Status treatment keyed off the COMPETITION's status. The registration's
+// own review status (pending / approved / ...) is the second axis, shown
+// as a badge under the season caption — see Row.
 const STATUS: Record<OnlineCompetitionStatus, { dot: string; text: string; label: string }> = {
   // Unreachable in practice: you cannot register for a draft, and a
   // competition moved back to draft drops out of the join in
@@ -122,6 +120,11 @@ function Row({ view }: { view: RegisteredView }) {
         <p className="oc-v3-mine-sub" style={{ marginTop: 4 }}>
           {competition.season ? competition.season.toUpperCase() : 'ОНЛАЙН'}
         </p>
+        {/* Where this athlete's registration stands in the admin review. A
+            row here no longer means "you are in" — it may be pending. */}
+        <div style={{ marginTop: 6 }}>
+          <RegistrationStatusBadge status={registration.status} />
+        </div>
       </div>
 
       <span className="oc-v3-date">{competition.startAt ? fmtDate(competition.startAt) : '—'}</span>

@@ -4,9 +4,9 @@
 // (tests/competition-fields/registration-shape.test.cjs) and exercised
 // against the real rules in tests/firestore-rules/participants.test.mjs.
 //
-// GROUNDWORK FOR REGISTRATION REVIEW. Nothing writes the new status values
-// yet and nothing reads the status yet. What this file fixes today is the
-// document being REPLACED on every edit — see buildRegistrationWrite.
+// Registration review: an athlete's first save writes 'pending'; only an
+// admin moves it on. An athlete's edit writes only their own fields, so an
+// admin's status and note survive it — see buildRegistrationWrite.
 
 import { REGISTRATION_NOTE_MAX } from './types';
 import type { OnlineRegistration, OnlineRegistrationStatus } from './types';
@@ -74,6 +74,8 @@ export function normalizeStoredRegistration(raw: unknown, competitionIdFallback:
   // Typed by the athlete, pre-fills a form: a non-string (a hand edit)
   // reads as no note rather than reaching a textarea as "[object Object]".
   if (typeof d.note === 'string' && d.note.trim()) out.note = d.note;
+  // The admin's note, shown to the athlete. Same defensive read.
+  if (typeof d.statusNote === 'string' && d.statusNote.trim()) out.statusNote = d.statusNote;
   return out;
 }
 
@@ -99,11 +101,9 @@ export type RegistrationWrite<T> =
 /** Exactly which fields a save writes.
  *
  *  CREATE — the document does not exist yet:
- *    competitionId, events, status: 'registered', registeredAt, updatedAt,
- *    and `note` only when non-blank.
- *    status stays the LEGACY 'registered' on purpose: nothing may write the
- *    new values until review exists, and 'registered' reads as 'approved',
- *    so a first registration behaves exactly as it always has.
+ *    competitionId, events, status: 'pending', registeredAt, updatedAt,
+ *    and `note` only when non-blank. 'pending' is the ONLY status an
+ *    athlete may create with (firestore.rules); an admin moves it on.
  *
  *  UPDATE — the document exists (an edit):
  *    events, updatedAt, and `note` — set to the text, or DELETED when the
@@ -128,7 +128,7 @@ export function buildRegistrationWrite<T>(
       data: {
         competitionId: input.competitionId,
         events: input.events,
-        status: 'registered',
+        status: 'pending',
         registeredAt: sentinels.now,
         updatedAt: sentinels.now,
         ...(note ? { note } : {}),

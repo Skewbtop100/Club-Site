@@ -7,7 +7,7 @@ import type {
   OnlineParticipantAdminView,
   OnlineSubmissionAdminView,
 } from '@/lib/online-competition/types';
-import type { RegistrationAdminView } from '@/app/api/online-competition/admin-competitions/[id]/registrations/route';
+import type { RegistrationAdminView } from '@/lib/online-competition/admin-registrations';
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
 import RoundGapWarning from './RoundGapWarning';
 import { WcaEventIcon, hasWcaEventIcon } from '@/lib/wca-event-icon';

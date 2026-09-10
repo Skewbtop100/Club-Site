@@ -12,6 +12,8 @@ import HubNav from '../../_components/hub/v3/HubNav';
 import Countdown from './_components/Countdown';
 import { EventsTab, ScheduleTab, SectionTab } from './_components/DetailTabs';
 import RegistrationPanel from './_components/RegistrationPanel';
+import { useMyRegistration } from './_components/useMyRegistration';
+import RegistrationStatusBadge from '../../_components/RegistrationStatusBadge';
 
 const COMPETITIONS = '/online-competition/competitions';
 
@@ -70,6 +72,9 @@ export default function CompetitionDetailPage() {
   const [error, setError] = useState('');
   const [side, setSide] = useState<SideKey>('general');
   const [tab, setTab] = useState<TabKey>('general');
+  // The athlete's own registration — read here rather than inside the
+  // panel so the sidebar can show its status before the panel is opened.
+  const myRegistration = useMyRegistration(competitionId);
 
   useEffect(() => {
     let cancelled = false;
@@ -244,7 +249,16 @@ export default function CompetitionDetailPage() {
               active={side === 'register'}
               onClick={() => setSide('register')}
               label="Бүртгүүлэх"
-              count={`${competition.events.length} төрөл`}
+              // Registered: the review status in the count's place — the
+              // thing an athlete comes back to this page to check. Not
+              // registered: the event count, as before.
+              count={
+                myRegistration.registration ? (
+                  <RegistrationStatusBadge status={myRegistration.registration.status} />
+                ) : (
+                  `${competition.events.length} төрөл`
+                )
+              }
             />
             {/* No count: see the ТАМИРЧИН cell above — the number does not
                 exist publicly, and a 0 here would be a lie rather than a
@@ -325,13 +339,15 @@ export default function CompetitionDetailPage() {
             ) : side === 'register' ? (
               <>
                 <h2 className="oc-cd-section-label">Бүртгүүлэх</h2>
-                {/* The EXISTING registration flow, moved here rather than
-                    replaced by a placeholder. The rebuilt page has no
-                    other home for it, and dropping it would take live
-                    registration off the public site — see the note in the
-                    handover. Its own redesign is a later changeset. */}
+                {/* The registration flow. Its data comes from
+                    useMyRegistration above, shared with the sidebar. */}
                 <div style={{ marginTop: 14 }}>
-                  <RegistrationPanel competition={competition} />
+                  <RegistrationPanel
+                    competition={competition}
+                    registration={myRegistration.registration}
+                    loadingRegistration={myRegistration.loading}
+                    onSaved={myRegistration.refresh}
+                  />
                 </div>
               </>
             ) : (
@@ -356,7 +372,7 @@ function SideItem({
   active: boolean;
   onClick: () => void;
   label: string;
-  count?: string;
+  count?: React.ReactNode;
 }) {
   return (
     <button

@@ -95,6 +95,9 @@ eq('a missing competitionId falls back to the document id',
 eq('non-string events are dropped', normalizeStoredRegistration({ events: ['333', 7, null, ''] }, 'c').events.join(','), '333');
 eq('a non-string note reads as no note', 'note' in normalizeStoredRegistration({ note: { x: 1 } }, 'c'), false);
 eq('a blank note reads as no note', 'note' in normalizeStoredRegistration({ note: '   ' }, 'c'), false);
+eq('the admin statusNote is read', normalizeStoredRegistration({ statusNote: 'Төлбөр хүлээгдэж буй' }, 'c').statusNote,
+  'Төлбөр хүлээгдэж буй');
+eq('a non-string statusNote reads as none', 'statusNote' in normalizeStoredRegistration({ statusNote: 7 }, 'c'), false);
 eq('junk in, a usable shape out', normalizeStoredRegistration(null, 'c').status, 'approved');
 
 console.log('\n  -- what a FIRST registration writes --');
@@ -103,9 +106,9 @@ const S = { now: '<serverTimestamp>', remove: '<deleteField>' };
   const w = buildRegistrationWrite(false, { competitionId: 'c1', events: ['333'], note: '  хамт ирнэ  ' }, S);
   eq('kind', w.kind, 'create');
   eq('fields: exactly these six', keys(w.data), 'competitionId,events,note,registeredAt,status,updatedAt');
-  // The legacy value on purpose: nothing may write the new ones yet, and
-  // 'registered' reads as 'approved' — first registration is unchanged.
-  eq('status is the LEGACY "registered", not a new value', w.data.status, 'registered');
+  // PR-1: an athlete registers as 'pending' — the only status the rules
+  // let them create with. An admin moves it on.
+  eq('status is "pending" (review)', w.data.status, 'pending');
   eq('registeredAt is stamped', w.data.registeredAt, S.now);
   eq('updatedAt is stamped', w.data.updatedAt, S.now);
   eq('the note is trimmed', w.data.note, 'хамт ирнэ');
@@ -131,6 +134,13 @@ console.log('\n  -- what an EDIT writes: the athlete’s own fields and nothing 
   const w = buildRegistrationWrite(true, { competitionId: 'c1', events: ['333'], note: '' }, S);
   // A merge cannot remove a field by omitting it; clearing must delete.
   eq('clearing the note on an edit DELETES it', w.data.note, S.remove);
+}
+{
+  // An edit NEVER writes the admin's fields — D4: an approved athlete who
+  // changes events stays approved, and the admin's note stays.
+  const w = buildRegistrationWrite(true, { competitionId: 'c', events: ['333'], note: 'x' }, S);
+  ok('an edit never writes statusNote', !('statusNote' in w.data));
+  ok('an edit never writes status', !('status' in w.data));
 }
 {
   const long = 'а'.repeat(350);

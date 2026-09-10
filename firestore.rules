@@ -335,19 +335,62 @@ service cloud.firestore {
         // Admin SDK, which bypasses these rules. isAdmin() is deliberately
         // NOT added — no client-side admin read exists to need it.
         allow read: if isSignedIn() && request.auth.uid == uid;
-        // `note` — optional, a string of at most 300 characters. 300 is
+        // ── WRITES: the athlete's own fields only ───────────────────────
+        // The athlete's client writes this document directly — there is no
+        // API route in between — so these rules are the only server-side
+        // check it gets. ADMINS write status and statusNote through the
+        // admin API with the Admin SDK, which bypasses these rules; nothing
+        // here grants an athlete either field.
+        //
+        // `note` is optional, a string of at most 300 characters. 300 is
         // REGISTRATION_NOTE_MAX in lib/online-competition/types.ts; rules
-        // cannot import it, so change both together. This is the only
-        // server-side validation a registration gets: the athlete's client
-        // writes it directly, with no API route in between.
-        allow create, update: if isSignedIn() &&
-                                  request.auth.uid == uid &&
-                                  request.resource.data.competitionId == competitionId &&
-                                  request.resource.data.events is list &&
-                                  request.resource.data.events.size() > 0 &&
-                                  (!('note' in request.resource.data) ||
-                                   (request.resource.data.note is string &&
-                                    request.resource.data.note.size() <= 300));
+        // cannot import it, so change both together.
+        function registrationShapeOk() {
+          return request.resource.data.competitionId == competitionId &&
+                 request.resource.data.events is list &&
+                 request.resource.data.events.size() > 0 &&
+                 (!('note' in request.resource.data) ||
+                  (request.resource.data.note is string &&
+                   request.resource.data.note.size() <= 300));
+        }
+
+        // CREATE — exactly the fields registerForCompetition's first save
+        // writes (buildRegistrationWrite), and nothing else: so no
+        // statusNote, and no admin field of any kind. The status must be
+        // 'pending' — an athlete cannot register themselves as approved.
+        // registeredAt must be the server's own clock: it orders a future
+        // waitlist, and a client-supplied time would let an athlete date
+        // their registration earlier than everyone else's.
+        allow create: if isSignedIn() &&
+                         request.auth.uid == uid &&
+                         registrationShapeOk() &&
+                         request.resource.data.keys().hasOnly(
+                           ['competitionId', 'events', 'status', 'registeredAt', 'updatedAt', 'note']) &&
+                         request.resource.data.status == 'pending' &&
+                         request.resource.data.registeredAt == request.time;
+
+        // UPDATE — the athlete may change ONLY these four fields:
+        //   events, note, updatedAt  — an edit (buildRegistrationWrite)
+        //   results                  — recordAo5Result's per-event map
+        // Everything else must be byte-for-byte what is already stored.
+        // That one condition is what makes status, statusNote, registeredAt
+        // and competitionId unchangeable, AND stops an athlete adding a new
+        // admin-only field, without listing any of them.
+        //
+        // A LEGACY 'registered' status is "unchanged" when it stays
+        // 'registered': the diff compares stored against written, never
+        // against the enum, so an edit that does not touch the status passes
+        // whatever value is stored — which is exactly what the current
+        // writer does. An OLD tab still running the pre-PR-0 writer (whole-
+        // document setDoc) is refused: that writer re-stamps registeredAt,
+        // which is now fixed. Reloading the page fixes it. That breakage is
+        // the minimum: allowing it would mean letting an athlete move their
+        // own place in the waitlist.
+        allow update: if isSignedIn() &&
+                         request.auth.uid == uid &&
+                         registrationShapeOk() &&
+                         request.resource.data.diff(resource.data).affectedKeys()
+                           .hasOnly(['events', 'note', 'updatedAt', 'results']);
         allow delete: if false;
       }
     }
