@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:rules": "firebase emulators:exec --only firestore \"node tests/firestore-rules/participants.test.mjs && node tests/firestore-rules/competitions.test.mjs\"",
+    "test:rules": "firebase emulators:exec --only firestore \"node tests/firestore-rules/participants.test.mjs && node tests/firestore-rules/competitions.test.mjs && node tests/firestore-rules/submissions.test.mjs\"",
     "test:fields": "firebase emulators:exec --only firestore \"node tests/competition-fields/roundtrip.test.cjs\"",
     "test:formats": "node tests/competition-fields/result-format.test.cjs",
     "test:readiness": "node tests/competition-fields/readiness.test.cjs",
@@ -20,7 +20,8 @@
     "test:registration": "node tests/competition-fields/registration-view.test.cjs",
     "test:regshape": "node tests/competition-fields/registration-shape.test.cjs",
     "test:review": "node tests/competition-fields/registration-review.test.cjs",
-    "test:solve": "node tests/solve-flow/scramble-wait.test.cjs",
+    "test:solve": "node tests/solve-flow/scramble-wait.test.cjs && node tests/solve-flow/run-protection.test.cjs",
+    "test:subid": "node tests/competition-fields/submission-id.test.cjs",
     "test:scrambles": "node tests/competition-fields/scrambles.test.cjs",
     "test:ranking": "firebase emulators:exec --only firestore \"node tests/competition-fields/ranking.test.cjs\"",
     "test:merge": "firebase emulators:exec --only firestore \"node tests/merge-athlete-uid/merge.test.mjs\""

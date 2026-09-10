@@ -9,6 +9,7 @@ import {
   createSubmission,
   fetchParticipant,
   recordAo5Result,
+  SubmissionAlreadyFiledError,
 } from '@/lib/online-competition/data';
 import { uploadVideoToCloudinary } from '@/lib/online-competition/cloudinary';
 import type { OnlineCompetition } from '@/lib/online-competition/types';
@@ -32,6 +33,7 @@ import ReadyPromptStage from './_components/ReadyPromptStage';
 import RecStage from './_components/RecStage';
 import EntryStage from './_components/EntryStage';
 import SummaryStage from './_components/SummaryStage';
+import RecordingFailedStage from './_components/RecordingFailedStage';
 import ScrambleWaitStage from './_components/ScrambleWaitStage';
 import SentStage from './_components/SentStage';
 import AuthModal from '@/app/online-competition/_components/hub/v3/AuthModal';
@@ -43,6 +45,10 @@ type Stage =
    *  recording) without a scramble in hand. */
   | 'scrambleWait'
   | 'zeroDisplay'
+  /** The camera stopped being a camera: MediaRecorder would not start, or
+   *  it started and gave back an empty file. The attempt does not
+   *  continue without a recording — see RecordingFailedStage. */
+  | 'recordingFailed'
   | 'scrambleReveal'
   | 'orientationHold'
   | 'readyPrompt'
@@ -77,7 +83,36 @@ interface Attempt {
   videoBlob: Blob | null;
 }
 
-const HEADER_STAGES: Stage[] = ['scrambleWait', 'zeroDisplay', 'scrambleReveal', 'orientationHold', 'readyPrompt', 'rec', 'entry'];
+const HEADER_STAGES: Stage[] = [
+  'scrambleWait',
+  'zeroDisplay',
+  'recordingFailed',
+  'scrambleReveal',
+  'orientationHold',
+  'readyPrompt',
+  'rec',
+  'entry',
+];
+
+/** Below this, the file is not a recording — it is an empty container.
+ *
+ *  A real attempt is at least the 5-second frozen "0.00" plus the reveal,
+ *  the orientation hold and the solve itself; at the recorder's 250 kbps
+ *  that is hundreds of kilobytes. A MediaRecorder that produced nothing
+ *  yields ~110 bytes (measured — see the note in useSolveRecorder about
+ *  the second audio track that once did exactly this to every attempt).
+ *  1 KB sits two orders of magnitude below the smallest real clip and an
+ *  order above an empty one, so it cannot reject a genuine recording. */
+const MIN_RECORDING_BYTES = 1024;
+
+/** The browser's own dialog wording is not ours to choose, so
+ *  beforeunload gets no message. Ours is for in-app navigation. */
+function leaveConfirmMessage(recordedAttempts: number): string {
+  return (
+    `Та ${recordedAttempts} оролдлого бичсэн байна. Хуудаснаас гарвал бичлэгүүд устаж, ` +
+    'оролдлогуудаа эхнээс нь дахин хийх шаардлагатай болно. Гарах уу?'
+  );
+}
 
 export default function SolvePage() {
   const params = useParams<{ competitionId: string; eventId: string }>();
@@ -92,6 +127,15 @@ export default function SolvePage() {
   const [scramble, setScramble] = useState('');
   const [attempts, setAttempts] = useState<Attempt[]>([]);
   const pendingBlobRef = useRef<Blob | null>(null);
+  /** Why the recording for the current attempt is unusable, or null.
+   *  Drives the recordingFailed stage. */
+  const [recordingFailure, setRecordingFailure] = useState<'start' | 'empty' | null>(null);
+  /** Attempt numbers already filed as submissions in THIS session, so a
+   *  retry after a partial submit re-uploads only what is missing. Purely
+   *  a bandwidth saver: correctness comes from submissionDocId, which
+   *  makes a re-file overwrite rather than duplicate even when this set
+   *  is gone (a reload) or wrong. */
+  const filedAttemptsRef = useRef<Set<number>>(new Set());
 
   const [submitting, setSubmitting] = useState(false);
   const [submitProgress, setSubmitProgress] = useState(0);
@@ -319,6 +363,60 @@ export default function SolvePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── Leaving with a run in progress ───────────────────────────────────
+  // Every solved attempt is a video blob in memory, uploaded only when the
+  // whole run is submitted. Leaving throws all of them away, and until now
+  // nothing said so.
+  const runAtRisk = attempts.length > 0 && stage !== 'sent';
+  // Read inside the listeners below, which are installed once per
+  // at-risk run and must not be re-installed on every attempt (each
+  // install pushes a history entry).
+  const attemptCountRef = useRef(0);
+  useEffect(() => {
+    attemptCountRef.current = attempts.length;
+  }, [attempts.length]);
+
+  useEffect(() => {
+    if (!runAtRisk) return;
+
+    // Reload, tab close, and any navigation that really unloads the
+    // document. The browser shows ITS OWN wording here; a message set on
+    // the event has been ignored by every current browser for years.
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+
+    // Back, in an app this size, is usually NOT an unload: Next handles
+    // it client-side, beforeunload never fires, and the run would vanish
+    // silently. So we keep one spare history entry to absorb the first
+    // Back, and ask in our own words.
+    //
+    // The pushed state is a COPY of Next's current one: popping an entry
+    // whose state the router does not recognise can make it fall back to
+    // a full page load — which would destroy the very run this is
+    // protecting.
+    window.history.pushState(window.history.state, '', window.location.href);
+    let leaving = false;
+    const onPopState = () => {
+      if (leaving) return;
+      if (window.confirm(leaveConfirmMessage(attemptCountRef.current))) {
+        leaving = true;
+        window.removeEventListener('beforeunload', onBeforeUnload);
+        window.history.back();
+        return;
+      }
+      window.history.pushState(window.history.state, '', window.location.href);
+    };
+    window.addEventListener('popstate', onPopState);
+
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      window.removeEventListener('popstate', onPopState);
+    };
+  }, [runAtRisk]);
+
   // One fetch per session, keyed on the real (non-anonymous) uid.
   useEffect(() => {
     if (!user || user.isAnonymous) return;
@@ -358,10 +456,18 @@ export default function SolvePage() {
   // whose scramble never arrived.
   useEffect(() => {
     if (stage === 'zeroDisplay') {
-      recorder.startRecording();
+      // The return value used to be discarded. It is false when the
+      // stream is gone — phone locked, camera taken by another app,
+      // permission revoked — and the attempt then ran to completion and
+      // uploaded a 0-byte video that only a judge ever discovered.
+      if (!recorder.startRecording()) setRecordingFailure('start');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage]);
+
+  useEffect(() => {
+    if (recordingFailure !== null) setStage('recordingFailed');
+  }, [recordingFailure]);
 
   function handleEntryConfirm(result: { timeCs: number | null; isDnf: boolean }) {
     // Over the event's per-attempt limit? The attempt still COUNTS as an
@@ -434,6 +540,11 @@ export default function SolvePage() {
     // Cleared so a failed re-fetch can't leave the previous run's round
     // attached to the new one; fetchScramble(1) re-resolves it.
     setCompetitionRound(null);
+    // A redo is a NEW run for the same round. Its attempts file to the
+    // same deterministic ids and overwrite the old ones, so the session
+    // set has to be cleared or the new videos would never be uploaded.
+    filedAttemptsRef.current = new Set();
+    setRecordingFailure(null);
     setStage('scrambleWait');
     fetchScramble(1);
   }
@@ -468,6 +579,16 @@ export default function SolvePage() {
 
     try {
       for (let i = 0; i < attempts.length; i++) {
+        const attemptNumber = i + 1;
+        // Already filed earlier in this session (a submit that failed
+        // part-way through). Re-uploading it would cost the athlete the
+        // bandwidth again and orphan the video already in Cloudinary;
+        // re-filing it would land on the same document id anyway.
+        if (filedAttemptsRef.current.has(attemptNumber)) {
+          perAttemptProgress[i] = 100;
+          reportAggregate();
+          continue;
+        }
         const attempt = attempts[i];
         const blob = attempt.videoBlob ?? new Blob([], { type: 'video/webm' });
         const { secureUrl, publicId } = await uploadVideoToCloudinary(blob, (pct) => {
@@ -478,13 +599,16 @@ export default function SolvePage() {
           competitionId,
           uid: user.uid,
           event: eventId,
-          round: i + 1,
+          round: attemptNumber,
           competitionRound,
           videoUrl: secureUrl,
           cloudinaryPublicId: publicId,
           reportedTime: attempt.isDnf ? 0 : (attempt.timeCs as number),
           isDnf: attempt.isDnf,
         });
+        // Only after the write lands — an upload that succeeded and a
+        // file that did not must still be retried.
+        filedAttemptsRef.current.add(attemptNumber);
         perAttemptProgress[i] = 100;
         reportAggregate();
       }
@@ -507,7 +631,16 @@ export default function SolvePage() {
       setStage('sent');
     } catch (err) {
       console.error('Submit failed:', err);
-      setSubmitError('Илгээхэд алдаа гарлаа. Дахин оролдоно уу.');
+      // A filed attempt is immutable (firestore.rules). Reached today only
+      // after a submit that failed part-way through and was then REDONE:
+      // the redone attempts carry new times and cannot replace the ones
+      // already filed. Retrying will not help, so the message says so
+      // rather than inviting it. The redo button itself goes in PR-2.
+      setSubmitError(
+        err instanceof SubmissionAlreadyFiledError
+          ? 'Энэ оролдлого өмнө нь өөр цагтайгаар илгээгдсэн байна. Зохион байгуулагчид хандана уу.'
+          : 'Илгээхэд алдаа гарлаа. Дахин оролдоно уу.',
+      );
     } finally {
       setSubmitting(false);
     }
@@ -575,6 +708,12 @@ export default function SolvePage() {
           </p>
           <Link
             href="/online-competition/dashboard"
+            /* Only rendered when the FIRST attempt was refused, so there
+               is normally nothing to lose — but a link is a link, and
+               beforeunload does not fire for a client-side one. */
+            onClick={(e) => {
+              if (runAtRisk && !window.confirm(leaveConfirmMessage(attempts.length))) e.preventDefault();
+            }}
             style={{
               border: '1px solid #2A2A31',
               color: '#9A958A',
@@ -654,6 +793,30 @@ export default function SolvePage() {
           />
         )}
 
+        {stage === 'recordingFailed' && recordingFailure !== null && (
+          <RecordingFailedStage
+            reason={recordingFailure}
+            attemptNumber={attempts.length + 1}
+            cameraError={recorder.error}
+            hasCamera={recorder.hasCamera}
+            recordedAttempts={attempts.length}
+            videoRef={recorder.videoRef}
+            /* Released first: requestCamera is a no-op while a stream
+               object still exists, and the stream here is exactly the one
+               that just failed. */
+            onReconnectCamera={() => {
+              recorder.releaseCamera();
+              void recorder.requestCamera();
+            }}
+            /* Restarts THIS attempt from the top, on the same scramble —
+               nothing about it has been kept. */
+            onRestartAttempt={() => {
+              setRecordingFailure(null);
+              setStage('zeroDisplay');
+            }}
+          />
+        )}
+
         {stage === 'zeroDisplay' && <ZeroDisplayStage onDone={() => setStage('scrambleReveal')} />}
 
         {stage === 'scrambleReveal' && (
@@ -674,6 +837,13 @@ export default function SolvePage() {
             onBeep={recorder.playBeep}
             onFinish={async () => {
               const blob = await recorder.stopRecording();
+              // A recorder that started and still produced nothing —
+              // the stream died mid-attempt. Accepting this hands the
+              // judge an empty file with a time attached to it.
+              if (blob.size < MIN_RECORDING_BYTES) {
+                setRecordingFailure('empty');
+                return;
+              }
               pendingBlobRef.current = blob;
               setStage('entry');
             }}

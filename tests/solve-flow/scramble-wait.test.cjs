@@ -61,12 +61,18 @@ console.log('\n  -- the run cannot start recording without a scramble --');
 {
   // zeroDisplay is what starts the MediaRecorder. Exactly two places may
   // enter it, and both require a scramble in hand.
+  // Three, and only three, and each one already holds a scramble.
   const intoZero = page.match(/setStage\([^)]*zeroDisplay/g) ?? [];
-  ok('exactly two transitions into zeroDisplay', intoZero.length === 2, intoZero.join(' | '));
+  ok('exactly three transitions into zeroDisplay', intoZero.length === 3, intoZero.join(' | '));
   ok('  ...the promotion effect, which requires a scramble',
     page.includes("if (stage === 'scrambleWait' && scramble) setStage('zeroDisplay');"));
-  ok('  ...and cameraSetup, which falls back to the wait when there is none',
+  ok('  ...cameraSetup, which falls back to the wait when there is none',
     page.includes("onDone={() => setStage(scramble ? 'zeroDisplay' : 'scrambleWait')}"));
+  // Restarting an attempt whose recording failed. It re-enters the attempt
+  // it was already in, on the scramble that attempt was given — no fetch,
+  // so nothing can have cleared it.
+  ok('  ...and the recording-failure restart, which replays the same attempt',
+    /setRecordingFailure\(null\);\s*\n\s*setStage\('zeroDisplay'\);/.test(page));
   // The two places an attempt begins mid-run.
   const confirm = page.slice(page.indexOf('function handleEntryConfirm'), page.indexOf('function handleRedo'));
   const redo = page.slice(page.indexOf('function handleRedo'), page.indexOf('async function handleSubmit'));

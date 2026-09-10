@@ -395,16 +395,108 @@ service cloud.firestore {
       }
     }
 
+    // ── One attempt of one run ──────────────────────────────────────────
+    // The ONLY thing an athlete may write here is a fresh, unjudged
+    // attempt of their own. Before this, `create` checked nothing but the
+    // uid — so a crafted client could file a submission already marked
+    // status:'approved', with any time on it, and round-results,
+    // seasonPoints and the athlete stats all trust that status. That was
+    // the hole; everything below exists to close it.
     match /onlineSubmissions/{submissionId} {
+      // Every field the client writer produces (createSubmission in
+      // lib/online-competition/data.ts). hasOnly REFUSES anything else, so
+      // a field nobody validates cannot be smuggled in alongside; hasAll
+      // refuses a partial document that would read as a submission with
+      // holes in it.
+      function submissionKeysOk() {
+        return request.resource.data.keys().hasOnly([
+          'competitionId', 'uid', 'event', 'round', 'competitionRound',
+          'videoUrl', 'cloudinaryPublicId', 'reportedTime', 'isDnf',
+          'penalty', 'status', 'createdAt', 'retentionExpiresAt'
+        ]) &&
+        request.resource.data.keys().hasAll([
+          'competitionId', 'uid', 'event', 'round', 'competitionRound',
+          'videoUrl', 'cloudinaryPublicId', 'reportedTime', 'isDnf',
+          'penalty', 'status', 'createdAt', 'retentionExpiresAt'
+        ]);
+      }
+
+      function submissionTypesOk() {
+        return request.resource.data.competitionId is string &&
+               request.resource.data.competitionId.size() > 0 &&
+               request.resource.data.event is string &&
+               request.resource.data.event.size() > 0 &&
+               // The attempt within the run, and the competition round the
+               // run belongs to. Ints, so the id built from them below is
+               // "1" and never "1.0".
+               request.resource.data.round is int &&
+               request.resource.data.round >= 1 &&
+               // 5 is the most attempts any current resultFormat has
+               // (attemptsForFormat: ao5 5, mo3/bo3 3, bo2 2, bo1 1). A
+               // longer format would have to raise this.
+               request.resource.data.round <= 5 &&
+               request.resource.data.competitionRound is int &&
+               request.resource.data.competitionRound >= 1 &&
+               // The evidence. A submission without a video is one a judge
+               // can only reject.
+               request.resource.data.videoUrl is string &&
+               request.resource.data.videoUrl.size() > 0 &&
+               request.resource.data.cloudinaryPublicId is string &&
+               request.resource.data.cloudinaryPublicId.size() > 0 &&
+               // Centiseconds; 0 is what a DNF stores.
+               request.resource.data.reportedTime is number &&
+               request.resource.data.reportedTime >= 0 &&
+               request.resource.data.isDnf is bool &&
+               // Not range-checked: the client computes it as now + 30
+               // days, and a device clock far enough out would otherwise
+               // fail a legitimate write.
+               request.resource.data.retentionExpiresAt is timestamp;
+      }
+
+      // THE DOCUMENT ID MUST DESCRIBE ITS OWN CONTENTS. The id is built by
+      // submissionDocId (lib/online-competition/submission-id.ts) and is
+      // what makes filing an attempt twice an overwrite rather than a
+      // duplicate — but the client picks it, so without this a run could
+      // file attempt 3's solve under attempt 5's id and the deterministic
+      // id would be describing a lie.
+      //
+      // string() on the two ints is exact because they are checked `is int`
+      // above.
+      function submissionIdMatchesContents() {
+        return submissionId ==
+          request.resource.data.uid + '__' +
+          request.resource.data.competitionId + '__' +
+          request.resource.data.event + '__r' +
+          string(request.resource.data.competitionRound) + '__a' +
+          string(request.resource.data.round);
+      }
+
       allow read: if isSignedIn() &&
                      (resource.data.uid == request.auth.uid || isAdmin());
-      allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
-      allow update: if isAdmin() ||
-                       (isSignedIn() &&
-                        resource.data.uid == request.auth.uid &&
-                        request.resource.data.uid == resource.data.uid &&
-                        request.resource.data.status == resource.data.status &&
-                        request.resource.data.penalty == resource.data.penalty);
+
+      // A PENDING attempt, owned by the writer, at its own id. The judge's
+      // verdict is not the athlete's to write: status and penalty are
+      // pinned here and may only move later, through the review route,
+      // which uses the Admin SDK and bypasses these rules entirely.
+      allow create: if isSignedIn() &&
+                       request.resource.data.uid == request.auth.uid &&
+                       submissionKeysOk() &&
+                       submissionTypesOk() &&
+                       submissionIdMatchesContents() &&
+                       request.resource.data.status == 'pending' &&
+                       request.resource.data.penalty == null &&
+                       request.resource.data.createdAt == request.time;
+
+      // ATHLETES HAVE NO UPDATE. A filed attempt is immutable to the
+      // person who filed it: the old rule let an athlete rewrite their own
+      // pending attempt's reportedTime and videoUrl, which is the same
+      // thing as re-solving a bad attempt. Nothing in the client updates a
+      // submission — createSubmission is the only client writer, and it
+      // only ever creates.
+      //
+      // The judge's route does not come through here (Admin SDK), so this
+      // leaves only the club-site admin, who could already write anything.
+      allow update: if isAdmin();
       allow delete: if isAdmin();
     }
 

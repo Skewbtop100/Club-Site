@@ -12,7 +12,6 @@ import {
   where,
   setDoc,
   Timestamp,
-  addDoc,
   collection,
 } from 'firebase/firestore';
 import { onlineCompDb } from './firebase';
@@ -22,6 +21,7 @@ import {
   normalizeStoredSections,
 } from './competition-shape';
 import { buildRegistrationWrite, normalizeStoredRegistration } from './registration-shape';
+import { submissionDocId } from './submission-id';
 import type {
   OnlineCompetition,
   OnlineCompetitionStatus,
@@ -391,6 +391,31 @@ export async function fetchMySubmissions(uid: string, count = 5): Promise<Online
     .slice(0, count);
 }
 
+/** Thrown when this attempt is ALREADY FILED with different contents —
+ *  a different time or DNF flag than the one being written now.
+ *
+ *  Distinguished from the harmless case on purpose. A retry after a
+ *  network failure re-files the SAME attempt with the SAME time, and that
+ *  must read as success: the write had already landed, the athlete just
+ *  never saw the acknowledgement. A different time means something else
+ *  entirely — the attempt was solved again — and the rules refuse it,
+ *  because rewriting a filed attempt is how a bad solve would be
+ *  discarded. */
+export class SubmissionAlreadyFiledError extends Error {
+  readonly submissionId: string;
+  readonly filedTime: number;
+  constructor(submissionId: string, filedTime: number) {
+    super(`Submission ${submissionId} is already filed with a different result`);
+    this.name = 'SubmissionAlreadyFiledError';
+    this.submissionId = submissionId;
+    this.filedTime = filedTime;
+  }
+}
+
+function isPermissionDenied(e: unknown): boolean {
+  return typeof e === 'object' && e !== null && (e as { code?: string }).code === 'permission-denied';
+}
+
 export async function createSubmission(input: {
   competitionId: string;
   uid: string;
@@ -414,22 +439,62 @@ export async function createSubmission(input: {
   const retentionExpiresAt = Timestamp.fromMillis(
     Date.now() + RETENTION_DAYS * 24 * 60 * 60 * 1000,
   );
-  const docRef = await addDoc(collection(onlineCompDb, 'onlineSubmissions'), {
-    competitionId: input.competitionId,
+  // setDoc at a deterministic id, NOT addDoc: see submission-id.ts. A
+  // second file of the same attempt replaces the first — a re-uploaded
+  // video, a re-solved redo of the same round — instead of adding a
+  // duplicate nobody can adjudicate.
+  const id = submissionDocId({
     uid: input.uid,
+    competitionId: input.competitionId,
     event: input.event,
-    round: input.round,
     competitionRound: input.competitionRound,
-    videoUrl: input.videoUrl,
-    cloudinaryPublicId: input.cloudinaryPublicId,
-    reportedTime: input.reportedTime,
-    isDnf: input.isDnf ?? false,
-    penalty: null,
-    status: 'pending',
-    createdAt: serverTimestamp(),
-    retentionExpiresAt,
+    attempt: input.round,
   });
-  return docRef.id;
+  const ref = doc(onlineCompDb, 'onlineSubmissions', id);
+  const isDnf = input.isDnf ?? false;
+  try {
+    await setDoc(ref, {
+      competitionId: input.competitionId,
+      uid: input.uid,
+      event: input.event,
+      round: input.round,
+      competitionRound: input.competitionRound,
+      videoUrl: input.videoUrl,
+      cloudinaryPublicId: input.cloudinaryPublicId,
+      reportedTime: input.reportedTime,
+      isDnf,
+      penalty: null,
+      status: 'pending',
+      createdAt: serverTimestamp(),
+      retentionExpiresAt,
+    });
+    return id;
+  } catch (e) {
+    // ALREADY FILED IS SUCCESS. An athlete may create a submission but not
+    // update one (firestore.rules), so re-filing an attempt that already
+    // landed comes back permission-denied — and a retry after a network
+    // failure does exactly that. Telling the athlete their attempt failed
+    // when it is safely stored would send them to solve it again.
+    //
+    // Only a denial is worth a second look; anything else (offline, a
+    // Firestore outage) is a real failure and is rethrown untouched.
+    if (!isPermissionDenied(e)) throw e;
+    let filed;
+    try {
+      filed = await getDoc(ref);
+    } catch {
+      // A get of a document that does not exist is ALSO denied by the read
+      // rule (it dereferences resource.data.uid), so this tells us
+      // nothing new — the original denial stands.
+      throw e;
+    }
+    if (!filed.exists()) throw e;
+    const data = filed.data();
+    // The identity fields cannot disagree: they are what the id is built
+    // from. The result can, and that is the case worth separating.
+    if (data.reportedTime === input.reportedTime && (data.isDnf ?? false) === isDnf) return id;
+    throw new SubmissionAlreadyFiledError(id, data.reportedTime as number);
+  }
 }
 
 // Where the computed Ao5 lives: nested on the athlete's OWN registration
