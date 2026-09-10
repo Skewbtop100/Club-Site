@@ -26,16 +26,20 @@ export default function FeaturedBanner({ competition }: { competition: OnlineCom
 
   const meta = [
     competition.events.length > 0 ? `${competition.events.length} төрөл` : null,
-    // The spec's meta line is "{registered} / {limit} тамирчин", but the
-    // registered half is NOT PUBLICLY READABLE: registrations live at
+    // "{registered} / {limit}", with the registered half as an em dash
+    // because it is NOT PUBLICLY READABLE: registrations live at
     // onlineParticipants/{uid}/registrations, whose rule is
     // `allow read: if isSignedIn()` on the individual document, with no
     // collection-group rule — so an anonymous hub visitor cannot count
-    // them, and a signed-in one cannot query across uids either. LiveHero
-    // hit the same wall and resolved it the same way: show the capacity
-    // the competition actually declares rather than invent a count.
+    // them, and a signed-in one cannot query across uids either.
+    //
+    // The dash, rather than the bare capacity this first shipped with:
+    // "64 тамирчин" reads as sixty-four ALREADY REGISTERED, which is the
+    // one thing it does not mean. Now identical to the detail header's
+    // ТАМИРЧИН cell — the same unknown, stated the same way, in both
+    // places an athlete meets it.
     // ∞ for unlimited, matching the admin list's ТАМИРЧИН column.
-    `${competition.participantLimit ?? '∞'} тамирчин`,
+    `— / ${competition.participantLimit ?? '∞'} тамирчин`,
     competition.startAt ? fmtMonthDay(competition.startAt.toMillis()) : null,
     competition.startAt ? fmtTime(competition.startAt) : null,
   ].filter(Boolean) as string[];
@@ -50,8 +54,11 @@ export default function FeaturedBanner({ competition }: { competition: OnlineCom
     >
       {/* The gradient sits in its own layer rather than being stacked into
           background-image, so the artwork above can be swapped by the
-          inline style without restating the gradient every render. */}
-      <div className="oc-v3-feat-scrim" aria-hidden />
+          inline style without restating the gradient every render.
+          .oc-scrim-lr is SHARED with the competition detail header — one
+          set of stops, so the two banner surfaces cannot drift into
+          different contrast. */}
+      <div className="oc-scrim-lr" aria-hidden />
 
       <div className="oc-v3-feat-body">
         <div className="oc-v3-feat-content">

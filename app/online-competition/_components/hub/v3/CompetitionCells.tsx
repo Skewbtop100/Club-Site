@@ -123,7 +123,7 @@ export function RegistrationCell({
  *  doesn't publish. */
 export function EventChip({ eventId }: { eventId: string }) {
   return (
-    <span className="oc-v3-event-chip" title={eventId.toUpperCase()}>
+    <span className="oc-v3-ev-icon" title={eventId.toUpperCase()}>
       {hasWcaEventIcon(eventId) ? <WcaEventIcon eventId={eventId} size={16} /> : eventId.toUpperCase()}
     </span>
   );

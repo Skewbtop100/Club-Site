@@ -1666,6 +1666,370 @@
 
 /* ── Live hero banner ─────────────────────────────────────────────── */
 
+/* ── Public competition detail page ────────────────────────────────────
+   /online-competition/[competitionId]/details. Prefixed .oc-cd- rather
+   than reusing the .oc-v3-dhero block the old page used: that was a
+   single hero with a stat block and an inline registration panel, and
+   this is a banner header over a sidebar + tab layout. Nothing but the
+   scrim is shared, and that IS shared (.oc-scrim-lr). */
+.oc-cd-hero {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid #1C1C21;
+  /* Shows through when there is no bannerUrl — the header is never
+     hidden, it just stops being artwork. */
+  background-color: #0D0D10;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+.oc-cd-hero-body {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 26px;
+  align-items: center;
+  padding: 34px 36px;
+}
+.oc-cd-hero-left {
+  min-width: 0;
+}
+.oc-cd-back {
+  display: inline-block;
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .18em;
+  color: #6E6A62;
+  text-decoration: none;
+}
+.oc-cd-back:hover {
+  color: #DFFF4F;
+}
+.oc-cd-title {
+  margin-top: 14px;
+  font: 600 40px/1.1 var(--oc-font-heading), sans-serif;
+  letter-spacing: -.02em;
+  color: #F4F1EA;
+  overflow-wrap: anywhere;
+}
+.oc-cd-meta {
+  margin-top: 14px;
+  font: 400 12px/1 var(--oc-font-mono), monospace;
+  color: #6E6A62;
+}
+/* The two stat cells. A 1px gap over the border colour draws the rule
+   between them, so the pair reads as one bordered block split in two
+   rather than two separate boxes. */
+.oc-cd-cells {
+  display: flex;
+  flex: none;
+  gap: 1px;
+  background: #1C1C21;
+  border: 1px solid #1C1C21;
+}
+.oc-cd-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 132px;
+  padding: 16px 18px;
+  /* Its own ground, so the cells stay readable over artwork the scrim
+     has only partly darkened at the right edge. */
+  background: #0D0D10;
+}
+.oc-cd-cell-label {
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .18em;
+  color: #6E6A62;
+  white-space: nowrap;
+}
+.oc-cd-cell-value {
+  font: 500 16px/1 var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #F4F1EA;
+  white-space: nowrap;
+}
+.oc-cd-cell-volt .oc-v3-cd-days {
+  font: 500 13px/1.2 var(--oc-font-mono), monospace;
+  letter-spacing: .06em;
+  color: #DFFF4F;
+}
+/* A passed deadline and an undeclared one are both facts about time you
+   do not have, so neither gets the volt. */
+.oc-cd-cell-volt .oc-cd-muted {
+  color: #6E6A62;
+}
+
+/* ── sidebar + content ───────────────────────────────────────────────── */
+.oc-cd-layout {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+  margin-top: 20px;
+}
+.oc-cd-side {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #1C1C21;
+  background: #0D0D10;
+}
+.oc-cd-side-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  /* The active state's 2px volt edge lives in this border so the label
+     never shifts by 2px when the item is selected. */
+  border: none;
+  border-left: 2px solid transparent;
+  background: transparent;
+  padding: 13px 14px;
+  cursor: pointer;
+  text-align: left;
+}
+.oc-cd-side-item + .oc-cd-side-item {
+  border-top: 1px solid #16161B;
+}
+.oc-cd-side-label {
+  flex: 1;
+  min-width: 0;
+  font: 500 13px/1.3 var(--oc-font-heading), sans-serif;
+  color: #9A958A;
+}
+.oc-cd-side-count {
+  flex: none;
+  font: 400 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .12em;
+  color: #4A4740;
+  white-space: nowrap;
+}
+.oc-cd-side-item:hover .oc-cd-side-label {
+  color: #F4F1EA;
+}
+.oc-cd-side-item-active {
+  border-left-color: #DFFF4F;
+  background: #16161B;
+}
+.oc-cd-side-item-active .oc-cd-side-label {
+  color: #F4F1EA;
+}
+.oc-cd-side-item:focus-visible {
+  outline: 2px solid #DFFF4F;
+  outline-offset: -2px;
+}
+.oc-cd-content {
+  min-width: 0;
+}
+
+/* ── the tab strip ───────────────────────────────────────────────────── */
+.oc-cd-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid #1C1C21;
+  /* Custom sections make this list unbounded, so it scrolls rather than
+     wrapping into a second row that reads as a separate control. */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.oc-cd-tabs::-webkit-scrollbar {
+  display: none;
+}
+.oc-cd-tab {
+  flex: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  padding: 11px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+  font: 500 11px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .14em;
+  color: #6E6A62;
+}
+.oc-cd-tab:hover {
+  color: #F4F1EA;
+}
+.oc-cd-tab-active {
+  border-bottom-color: #DFFF4F;
+  color: #DFFF4F;
+}
+.oc-cd-tab:focus-visible {
+  outline: 2px solid #DFFF4F;
+  outline-offset: -2px;
+}
+
+/* ── the Ерөнхий tab ─────────────────────────────────────────────────── */
+/* Тайлбар, as the tab's opening paragraph. Deliberately unlabelled and
+   above the poster/fact grid: it is prose about the competition, not one
+   more fact about it, and a ТАЙЛБАР caption would file it back among the
+   fields it is meant to introduce. Measure-capped for the same reason
+   ЗААВАР is. */
+.oc-cd-lead {
+  margin-top: 22px;
+  max-width: 68ch;
+  font: 400 14px/1.7 var(--oc-font-heading), sans-serif;
+  color: #9A958A;
+  /* Admin-authored prose from a textarea: its newlines are meaningful. */
+  white-space: pre-wrap;
+  text-wrap: pretty;
+}
+/* The lead already opens the tab, so the grid below it needs less air
+   than it does when it is first. */
+.oc-cd-lead + .oc-cd-general {
+  margin-top: 20px;
+}
+
+.oc-cd-general {
+  display: grid;
+  grid-template-columns: minmax(0, 200px) minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+  margin-top: 22px;
+}
+/* No poster renders no element at all, so the grid collapses to one
+   column — there is no empty box to hide. Driven by a class from the
+   component rather than :has(), which would make the layout depend on
+   selector support for something the component already knows.  */
+.oc-cd-general-noposter {
+  grid-template-columns: minmax(0, 1fr);
+}
+.oc-cd-poster {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border: 1px solid #1C1C21;
+}
+/* Two columns of facts, 1px rules between them drawn by the gap over the
+   border colour — the same treatment the admin Хянах summary uses, so the
+   two readings of the same data look like the same material. */
+.oc-cd-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: #1C1C21;
+  border: 1px solid #1C1C21;
+}
+.oc-cd-fact {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  padding: 14px;
+  background: #0D0D10;
+}
+.oc-cd-fact-label {
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .18em;
+  color: #6E6A62;
+}
+.oc-cd-fact-value {
+  font: 500 14px/1.3 var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+  overflow-wrap: anywhere;
+}
+
+.oc-cd-section-label {
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .2em;
+  color: #6E6A62;
+  text-transform: uppercase;
+}
+.oc-cd-instructions {
+  margin-top: 26px;
+  padding-top: 20px;
+  border-top: 1px solid #1C1C21;
+}
+.oc-cd-instructions-body {
+  margin-top: 12px;
+  max-width: 68ch;
+  font: 400 13px/1.7 var(--oc-font-heading), sans-serif;
+  color: #9A958A;
+  /* Admin-authored prose: newlines are meaningful, and the field is a
+     textarea. */
+  white-space: pre-wrap;
+  text-wrap: pretty;
+}
+.oc-cd-soon {
+  margin-top: 22px;
+  font: 400 13px/1.6 var(--oc-font-heading), sans-serif;
+  color: #6E6A62;
+}
+
+@media (max-width: 860px) {
+  /* The sidebar becomes a horizontal row above the content well before
+     phone width — at 210px fixed it starves the fact grid first. */
+  .oc-cd-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .oc-cd-side {
+    flex-direction: row;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .oc-cd-side::-webkit-scrollbar {
+    display: none;
+  }
+  .oc-cd-side-item {
+    flex: 1;
+    min-width: 128px;
+    /* Horizontal now, so the active edge moves from the left to the
+       bottom — a left border on a row reads as a divider. */
+    border-left: none;
+    border-bottom: 2px solid transparent;
+  }
+  .oc-cd-side-item + .oc-cd-side-item {
+    border-top: none;
+    border-left: 1px solid #16161B;
+  }
+  .oc-cd-side-item-active {
+    border-left-color: transparent;
+    border-bottom-color: #DFFF4F;
+  }
+}
+
+@media (max-width: 640px) {
+  .oc-cd-hero-body {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+    padding: 22px 18px;
+  }
+  .oc-cd-title {
+    font-size: 27px;
+  }
+  .oc-cd-cells {
+    /* Full width, the two cells splitting it evenly. */
+    width: 100%;
+  }
+  .oc-cd-cell {
+    flex: 1;
+    min-width: 0;
+    padding: 13px 14px;
+  }
+  .oc-cd-cell-label,
+  .oc-cd-cell-value {
+    /* The countdown string is long ("БҮРТГЭЛ ХААГДСАН"); at 375px it has
+       to wrap rather than push the cell past the viewport. */
+    white-space: normal;
+  }
+  .oc-cd-general {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .oc-cd-poster {
+    max-width: 200px;
+  }
+  .oc-cd-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .oc-cd-side-item {
+    min-height: 44px;
+  }
+  .oc-cd-tab {
+    min-height: 44px;
+  }
+}
+
 /* ── Hub: the featured-competition banner ──────────────────────────────
    The admin's chosen lead item, above everything including the live hero.
    Related to .oc-v3-hero below but deliberately its own class: this one is
@@ -1685,14 +2049,23 @@
   background-position: center;
   background-repeat: no-repeat;
 }
-/* Left-to-right scrim over the artwork.
+/* SHARED left-to-right scrim over banner artwork.
+   Used by the hub's featured banner AND the competition detail header —
+   the two places a stored bannerUrl is rendered behind text. Extracted
+   rather than duplicated: the whole job of these stops is to guarantee
+   contrast over an image nobody has seen, so two copies drifting apart
+   means one of them quietly becoming unreadable.
+
    Near-opaque on the left where the eyebrow, title and meta sit, easing to
    45% at the right edge — enough of the image survives to be worth
-   uploading, and the volt CTA has a dark enough ground at every stop to
-   stay legible over any photograph. Not a flat rgba fill: that would
-   either wash out the artwork or leave 42px white-on-white text on a pale
-   image, and there is no way to tune one value for both. */
-.oc-v3-feat-scrim {
+   uploading, and volt-on-dark stays legible at every stop over any
+   photograph. Not a flat rgba fill: that would either wash out the artwork
+   or leave 40px white-on-white text on a pale image, and there is no way
+   to tune one value for both.
+
+   The consumer supplies `position: relative` and the artwork; this is
+   only the overlay. */
+.oc-scrim-lr {
   position: absolute;
   inset: 0;
   pointer-events: none;
@@ -1702,6 +2075,20 @@
     rgba(8, 8, 10, 0.88) 42%,
     rgba(8, 8, 10, 0.45) 100%
   );
+}
+@media (max-width: 640px) {
+  /* Stacked, the text no longer sits in the gradient's dark left end, so
+     it becomes a vertical scrim — otherwise the lower half of the content
+     sits over bare artwork. Shared by both consumers for the same reason
+     the stops are. */
+  .oc-scrim-lr {
+    background: linear-gradient(
+      180deg,
+      rgba(8, 8, 10, 0.92) 0%,
+      rgba(8, 8, 10, 0.88) 60%,
+      rgba(8, 8, 10, 0.8) 100%
+    );
+  }
 }
 .oc-v3-feat-body {
   position: relative;
@@ -1779,17 +2166,6 @@
     grid-template-columns: minmax(0, 1fr);
     gap: 20px;
     padding: 24px 20px;
-  }
-  /* Stacked, the text no longer sits in the gradient's dark left end, so
-     the scrim becomes a vertical one — otherwise the CTA and the lower
-     half of the meta line sit over bare artwork. */
-  .oc-v3-feat-scrim {
-    background: linear-gradient(
-      180deg,
-      rgba(8, 8, 10, 0.92) 0%,
-      rgba(8, 8, 10, 0.88) 60%,
-      rgba(8, 8, 10, 0.8) 100%
-    );
   }
   .oc-v3-feat-title {
     font-size: 28px;
@@ -2243,24 +2619,39 @@
   white-space: nowrap;
 }
 
-/* Event chips — 28px squares. @cubing/icons is already a project
+/* The 28px event icon square. @cubing/icons is already a project
    dependency (imported globally in app/layout.tsx and bridged by
    lib/wca-event-icon.tsx), so these carry the real WCA glyph; the event
    code is only the fallback for an id that set doesn't publish.
 
-   NAMED `-event-chip`, not `-chip`: this used to be `.oc-v3-chip`, which
-   collided with the text status pill of the same name further down. Same
-   specificity, so the later rule won per-property — but `width`/`height`
-   are declared only here, so every status pill was silently forced into a
-   28px box and its nowrap text spilled over whatever sat next to it (on
-   the profile page, the photo). Two different components, two names. */
+   RENAMED TWICE, BY TWO SEPARATE COLLISIONS, WHICH IS THE POINT:
+
+   1. It was `.oc-v3-chip`, which collided with the text status pill of the
+      same name further down. Same specificity, so the later rule won
+      per-property — and `width`/`height` are declared only here, so every
+      status pill was forced into a 28px box and its nowrap text spilled
+      over whatever sat beside it (on the profile page, the photo).
+
+   2. The fix renamed it to `.oc-v3-event-chip` — straight into a SECOND
+      collision, with the competition detail page's event card (still
+      below, now `.oc-v3-detail-event`). That one's `padding: 13px 14px`
+      landed on this 28px box and squashed the glyph inside it. Nobody
+      noticed for as long as the first one went unnoticed.
+
+   Hence `-ev-icon`: a name that says what this IS (one event's icon)
+   rather than what it looks like (a chip), because "chip" is what both
+   collisions had in common. If a third component wants to be a chip, it
+   does not get to be this one.
+
+   NOT `.oc-v3-ev-square`, which exists ~130 lines below at 38px with
+   different colours — a different square, and currently unused. */
 .oc-v3-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
 }
-.oc-v3-event-chip {
+.oc-v3-ev-icon {
   width: 28px;
   height: 28px;
   flex-shrink: 0;
@@ -2568,13 +2959,19 @@
   color: #DFFF4F;
 }
 
-/* Detail page's "Төрлүүд" list, dark. */
-.oc-v3-event-chip-grid {
+/* The competition detail page's ТӨРЛҮҮД list — one padded card per event,
+   name on the left and round count on the right.
+
+   Was `.oc-v3-event-chip`, the same name as the 28px icon square above.
+   Two different components, two names — see the long note up there for
+   what that cost the first two times. Renamed with its grid so the pair
+   still read as one block. */
+.oc-v3-detail-event-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 9px;
 }
-.oc-v3-event-chip {
+.oc-v3-detail-event {
   border: 1px solid #1C1C21;
   background: #0D0D10;
   padding: 13px 14px;

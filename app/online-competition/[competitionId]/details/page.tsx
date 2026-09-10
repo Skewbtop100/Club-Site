@@ -1,28 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { fetchCompetition } from '@/lib/online-competition/data';
-import type { OnlineCompetition, OnlineCompetitionStatus } from '@/lib/online-competition/types';
-import { WcaEventIcon, hasWcaEventIcon } from '@/lib/wca-event-icon';
-import { fmtDateTime, toMillisOrNull } from '../../_components/hub/format';
+import { competitionFeeTotals, formatMnt } from '@/lib/online-competition/fees';
+import { competitionFormatLabel, type OnlineCompetition } from '@/lib/online-competition/types';
+import { toMillisOrNull } from '../../_components/hub/format';
 import HubNav from '../../_components/hub/v3/HubNav';
 import Countdown from './_components/Countdown';
 import RegistrationPanel from './_components/RegistrationPanel';
 
 const COMPETITIONS = '/online-competition/competitions';
-
-// A draft never reaches this page — fetchCompetition returns null for one
-// (the rules refuse it) and the page renders "Тэмцээн олдсонгүй". The
-// entry exists because the Record demands one, and so that a draft can
-// never render as a blank badge if that ever changes.
-const STATUS_LABEL: Record<OnlineCompetitionStatus, string> = {
-  draft: 'Ноорог',
-  upcoming: 'Удахгүй болох',
-  live: 'Явагдаж буй',
-  finished: 'Дууссан',
-};
 
 /** Dark v3 shell. `live` is this competition when it's the one running —
  *  HubNav's live tab has no other source on this route. */
@@ -35,6 +24,41 @@ function Shell({ competition, children }: { competition: OnlineCompetition | nul
   );
 }
 
+// ── the left sidebar ─────────────────────────────────────────────────────
+type SideKey = 'general' | 'register' | 'athletes';
+
+// ── the tab strip, right of the sidebar ──────────────────────────────────
+// ЕРӨНХИЙ is always present. ТӨРЛҮҮД is present whenever there are events
+// to list. ХУВААРЬ and the custom-section tabs are CONDITIONAL — see
+// visibleTabs.
+type TabKey = string;
+
+/** Rows of the fact grid on the Ерөнхий tab. */
+interface Fact {
+  label: string;
+  value: string;
+}
+
+/** "2026.03.25 · 10:00" split into its two halves, or "—" for an unset
+ *  timestamp. The header meta line and the fact grid both want these, in
+ *  different combinations. */
+function fmtDay(ms: number | null): string {
+  if (ms === null) return '—';
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}`;
+}
+function fmtHm(ms: number | null): string {
+  if (ms === null) return '—';
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+/** "2026.03.25 · 10:00", or "—" when unset — the fact grid's date cells. */
+function fmtMoment(ms: number | null): string {
+  return ms === null ? '—' : `${fmtDay(ms)} · ${fmtHm(ms)}`;
+}
+
 export default function CompetitionDetailPage() {
   const params = useParams<{ competitionId: string }>();
   const competitionId = params.competitionId;
@@ -42,25 +66,61 @@ export default function CompetitionDetailPage() {
   const [competition, setCompetition] = useState<OnlineCompetition | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState('');
+  const [side, setSide] = useState<SideKey>('general');
+  const [tab, setTab] = useState<TabKey>('general');
 
   useEffect(() => {
     let cancelled = false;
     fetchCompetition(competitionId)
       .then((c) => {
         if (cancelled) return;
-        if (!c) {
-          setNotFound(true);
-        } else {
-          setCompetition(c);
-        }
+        if (!c) setNotFound(true);
+        else setCompetition(c);
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error('CompetitionDetailPage: loading the competition failed:', err);
         if (!cancelled) setError('Тэмцээний мэдээллийг ачааллаж чадсангүй');
       });
     return () => {
       cancelled = true;
     };
   }, [competitionId]);
+
+  /** Which tabs exist for THIS competition.
+   *
+   *  ХУВААРЬ and each custom section are conditional: a tab that opens on
+   *  nothing is worse than an absent one, because the reader has already
+   *  paid the click. So ХУВААРЬ appears only when the schedule array has
+   *  entries, and a custom section appears only when it has at least one
+   *  block — a titled-but-empty section is exactly the state the admin
+   *  editor warns about, and this is the consequence it warns of.
+   *
+   *  Read defensively: `fetchCompetition` spreads the raw document, so
+   *  these arrive unnormalised (unlike the admin GET, which runs them
+   *  through normalizeStoredSections / normalizeStoredSchedule). This
+   *  checks only what tab VISIBILITY needs. When these tabs gain content,
+   *  those normalisers should move to a firebase-admin-free module and be
+   *  shared rather than a second reader growing here. */
+  const tabs = useMemo(() => {
+    const out: { key: TabKey; label: string }[] = [{ key: 'general', label: 'ЕРӨНХИЙ' }];
+    const events = competition?.events ?? [];
+    if (events.length > 0) out.push({ key: 'events', label: 'ТӨРЛҮҮД' });
+
+    const schedule = Array.isArray(competition?.schedule) ? competition.schedule : [];
+    if (schedule.length > 0) out.push({ key: 'schedule', label: 'ХУВААРЬ' });
+
+    const sections = Array.isArray(competition?.sections) ? competition.sections : [];
+    for (const sec of sections) {
+      const hasBlocks = Array.isArray(sec?.blocks) && sec.blocks.length > 0;
+      const title = typeof sec?.title === 'string' ? sec.title.trim() : '';
+      if (hasBlocks && title) out.push({ key: `section:${sec.id}`, label: title.toUpperCase() });
+    }
+    return out;
+  }, [competition]);
+
+  // A tab that disappears (the admin emptied a section between loads)
+  // must not leave the strip pointing at nothing.
+  const activeTab = tabs.some((t) => t.key === tab) ? tab : 'general';
 
   if (error) {
     return (
@@ -69,7 +129,6 @@ export default function CompetitionDetailPage() {
       </Shell>
     );
   }
-
   if (notFound) {
     return (
       <Shell competition={null}>
@@ -77,7 +136,6 @@ export default function CompetitionDetailPage() {
       </Shell>
     );
   }
-
   if (!competition) {
     return (
       <Shell competition={null}>
@@ -87,145 +145,239 @@ export default function CompetitionDetailPage() {
   }
 
   const startAtMs = toMillisOrNull(competition.startAt);
+  const deadlineMs = toMillisOrNull(competition.registrationDeadline);
   const limit = competition.participantLimit ?? null;
+  const bannerUrl = competition.bannerUrl ?? null;
+  const posterUrl = competition.posterUrl ?? null;
+  const instructions = (competition.instructions ?? '').trim();
+  const description = (competition.description ?? '').trim();
+
+  // Fees, through the same pure module the admin Төлбөр tab and the
+  // registration total use — one set of arithmetic, so what an athlete
+  // reads here cannot disagree with what the admin configured.
+  const paid = competition.paid === true;
+  const totals = competitionFeeTotals(competition.baseFeeMnt ?? null, competition.events);
+  const includedLabels = totals.includedEventIds
+    .map((id) => competition.events.find((e) => e.eventId === id)?.label ?? id)
+    .join(', ');
+
+  const facts: Fact[] = [
+    { label: 'БҮРТГЭЛ НЭЭГДЭХ', value: fmtMoment(toMillisOrNull(competition.registrationOpensAt)) },
+    { label: 'БҮРТГЭЛ ХААГДАХ', value: fmtMoment(deadlineMs) },
+    { label: 'ТЭМЦЭЭН ЭХЛЭХ', value: fmtMoment(startAtMs) },
+    { label: 'ТЭМЦЭЭН ДУУСАХ', value: fmtMoment(toMillisOrNull(competition.endAt)) },
+    { label: 'ФОРМАТ', value: competitionFormatLabel(competition.format) },
+    { label: 'ТАМИРЧНЫ ХЯЗГААР', value: limit === null ? 'Хязгааргүй' : `${limit} тамирчин` },
+    {
+      label: 'СУУРЬ ХУРААМЖ',
+      // `paid` is THE GATE, never baseFeeMnt being set — the fee fields
+      // deliberately persist when the toggle is switched off (see the
+      // field comments in types.ts), so a stored amount on a free
+      // competition must not surface here.
+      value: !paid
+        ? 'Хураамжгүй'
+        : competition.baseFeeMnt == null
+          ? '—'
+          : includedLabels
+            ? `${formatMnt(totals.minMnt)} · ${includedLabels} багтсан`
+            : formatMnt(totals.minMnt),
+    },
+  ];
+  // НЭМЭЛТ ХУРААМЖ is not rendered at all for a free competition, and not
+  // rendered when nothing is surcharged — an empty "extras" cell invites
+  // the reader to wonder what they missed.
+  if (paid && totals.surcharged.length > 0) {
+    facts.push({
+      label: 'НЭМЭЛТ ХУРААМЖ',
+      value: totals.surcharged
+        .map((s) => {
+          const label = competition.events.find((e) => e.eventId === s.eventId)?.label ?? s.eventId;
+          return `${label} +${formatMnt(s.surchargeMnt)}`;
+        })
+        .join(' · '),
+    });
+  }
 
   return (
     <Shell competition={competition}>
       <main className="oc-v3-main">
-        <div>
-          <Link href={COMPETITIONS} className="oc-v3-back-link">
-            ← Тэмцээнүүд
-          </Link>
-        </div>
+        <header className="oc-cd-hero" style={bannerUrl ? { backgroundImage: `url(${bannerUrl})` } : undefined}>
+          {/* Only when there is artwork to darken — over the plain
+              fallback the scrim would just deepen an already-flat block. */}
+          {bannerUrl && <div className="oc-scrim-lr" aria-hidden />}
 
-        <header className="oc-v3-dhero">
-          <div className="oc-v3-dhero-left">
-            <span className="oc-v3-status-badge">{STATUS_LABEL[competition.status]}</span>
-            <h1
-              style={{
-                marginTop: 12,
-                font: '600 32px var(--oc-font-heading), sans-serif',
-                letterSpacing: '-.015em',
-                color: '#F4F1EA',
-              }}
-            >
-              {competition.name}
-            </h1>
-            <div className="oc-v3-dhero-metarow" style={{ marginTop: 16 }}>
-              <span style={{ font: '400 12px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
-                {fmtDateTime(competition.startAt)}
-              </span>
-              {competition.events.length > 0 && (
-                <>
-                  <span className="oc-v3-divider-v" aria-hidden />
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                    {competition.events.map((e) => (
-                      <span key={e.eventId} className="oc-v3-ev-square" title={e.label}>
-                        {hasWcaEventIcon(e.eventId) ? (
-                          <WcaEventIcon eventId={e.eventId} size={20} />
-                        ) : (
-                          e.eventId.toUpperCase()
-                        )}
-                      </span>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-
-          <div className="oc-v3-dhero-right">
-            <div className="oc-v3-statblock">
-              <div className="oc-v3-statcell">
-                <p
-                  style={{
-                    font: '500 9px var(--oc-font-mono), monospace',
-                    letterSpacing: '.18em',
-                    color: '#6E6A62',
-                  }}
-                >
-                  ЭХЛЭХЭД
-                </p>
-                <div style={{ marginTop: 10 }}>
-                  <Countdown startAtMs={startAtMs} />
-                </div>
-              </div>
-
-              <div className="oc-v3-statdiv" aria-hidden />
-
-              <div className="oc-v3-statcell">
-                <p
-                  style={{
-                    font: '500 9px var(--oc-font-mono), monospace',
-                    letterSpacing: '.18em',
-                    color: '#6E6A62',
-                  }}
-                >
-                  БҮРТГЭЛ ХААГДАХ
-                </p>
-                <p
-                  style={{
-                    marginTop: 10,
-                    font: '500 16px var(--oc-font-mono), monospace',
-                    fontVariantNumeric: 'tabular-nums',
-                    color: '#F4F1EA',
-                  }}
-                >
-                  {fmtDateTime(competition.registrationDeadline)}
-                </p>
-
-                {/* Registered counts have no public read path — see
-                    CompetitionCells.tsx — so this shows "—" over the real
-                    declared capacity and an unfilled track. */}
-                <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid #2A2A31' }}>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                    <span
-                      style={{
-                        font: '500 9px var(--oc-font-mono), monospace',
-                        letterSpacing: '.18em',
-                        color: '#6E6A62',
-                      }}
-                    >
-                      ТАМИРЧИН
-                    </span>
-                    <span style={{ flex: 1 }} />
-                    <span
-                      style={{
-                        font: '700 14px var(--oc-font-mono), monospace',
-                        fontVariantNumeric: 'tabular-nums',
-                        color: '#F4F1EA',
-                      }}
-                    >
-                      {limit === null ? '—' : `— / ${limit}`}
-                    </span>
-                  </div>
-                  <div className="oc-v3-bar" style={{ marginTop: 8 }} />
-                </div>
-              </div>
+          <div className="oc-cd-hero-body">
+            <div className="oc-cd-hero-left">
+              <Link href={COMPETITIONS} className="oc-cd-back">
+                ← ТЭМЦЭЭН
+              </Link>
+              <h1 className="oc-cd-title">{competition.name}</h1>
+              <p className="oc-cd-meta">
+                {fmtDay(startAtMs)} · {fmtHm(startAtMs)} · {competitionFormatLabel(competition.format)}
+              </p>
             </div>
 
-            <RegistrationPanel competitionId={competition.id} events={competition.events} />
+            <div className="oc-cd-cells">
+              <div className="oc-cd-cell">
+                <span className="oc-cd-cell-label">ТАМИРЧИН</span>
+                {/* Registered counts have NO public read path:
+                    registrations live at onlineParticipants/{uid}/
+                    registrations, whose rule is `allow read: if
+                    isSignedIn()` on the individual document with no
+                    collection-group rule — so neither an anonymous nor a
+                    signed-in visitor can count across athletes. The
+                    denominator is the real declared capacity; the
+                    numerator is an em dash rather than an invented
+                    number. "— / 64" is deliberately kept over a bare
+                    "64", which under a ТАМИРЧИН label would read as
+                    "64 registered". */}
+                <span className="oc-cd-cell-value">— / {limit === null ? '∞' : limit}</span>
+              </div>
+              <div className="oc-cd-cell">
+                <span className="oc-cd-cell-label">БҮРТГЭЛ ХААГДАХАД</span>
+                <span className="oc-cd-cell-value oc-cd-cell-volt">
+                  <Countdown targetMs={deadlineMs} />
+                </span>
+              </div>
+            </div>
           </div>
         </header>
 
-        <section>
-          <p className="oc-v3-label" style={{ display: 'block', marginBottom: 10 }}>
-            Төрлүүд
-          </p>
-          <div className="oc-v3-event-chip-grid">
-            {competition.events.map((e) => (
-              <div key={e.eventId} className="oc-v3-event-chip">
-                <span style={{ font: '600 13px var(--oc-font-mono), monospace', color: '#F4F1EA' }}>
-                  {e.label}
-                </span>
-                <span style={{ font: '400 11px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
-                  {e.rounds} раунд
-                </span>
-              </div>
-            ))}
+        <div className="oc-cd-layout">
+          <nav className="oc-cd-side" aria-label="Хэсэг">
+            <SideItem active={side === 'general'} onClick={() => setSide('general')} label="Ерөнхий мэдээлэл" />
+            <SideItem
+              active={side === 'register'}
+              onClick={() => setSide('register')}
+              label="Бүртгүүлэх"
+              count={`${competition.events.length} төрөл`}
+            />
+            {/* No count: see the ТАМИРЧИН cell above — the number does not
+                exist publicly, and a 0 here would be a lie rather than a
+                gap. */}
+            <SideItem active={side === 'athletes'} onClick={() => setSide('athletes')} label="Тамирчид" count="—" />
+          </nav>
+
+          <div className="oc-cd-content">
+            {side === 'general' ? (
+              <>
+                <div className="oc-cd-tabs" role="tablist">
+                  {tabs.map((t) => (
+                    <button
+                      key={t.key}
+                      type="button"
+                      role="tab"
+                      aria-selected={t.key === activeTab}
+                      className={`oc-cd-tab${t.key === activeTab ? ' oc-cd-tab-active' : ''}`}
+                      onClick={() => setTab(t.key)}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+
+                {activeTab === 'general' ? (
+                  <>
+                    {/* Тайлбар. No label — it reads as an intro to the
+                        competition, not as another field of it, which is
+                        why it sits above the grid rather than in it. The
+                        whole block goes when there is nothing to say. */}
+                    {description && <p className="oc-cd-lead">{description}</p>}
+                    <div className={`oc-cd-general${posterUrl ? '' : ' oc-cd-general-noposter'}`}>
+                      {/* No poster, no poster block — not an empty box. */}
+                      {posterUrl && (
+                        // eslint-disable-next-line @next/next/no-img-element -- a
+                        // Cloudinary url of unknown dimensions.
+                        <img src={posterUrl} alt="" className="oc-cd-poster" />
+                      )}
+                      <div className="oc-cd-facts">
+                        {facts.map((f) => (
+                          <div key={f.label} className="oc-cd-fact">
+                            <span className="oc-cd-fact-label">{f.label}</span>
+                            <span className="oc-cd-fact-value">{f.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                ) : activeTab === 'events' ? (
+                  /* INTERIM. The old page's chip grid, ported verbatim so
+                     the event list is not missing from the page while the
+                     mockup's full table — round, format, limit, cutoff,
+                     advancement — is still to be built. Every value it
+                     shows is real; it just shows fewer of them. Replaced
+                     wholesale next changeset. */
+                  <div className="oc-v3-detail-event-grid" style={{ marginTop: 22 }}>
+                    {competition.events.map((e) => (
+                      <div key={e.eventId} className="oc-v3-detail-event">
+                        <span style={{ font: '600 13px var(--oc-font-mono), monospace', color: '#F4F1EA' }}>
+                          {e.label}
+                        </span>
+                        <span style={{ font: '400 11px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
+                          {e.rounds} раунд
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="oc-cd-soon">Энэ хэсэг удахгүй нэмэгдэнэ.</p>
+                )}
+
+                {/* Whole block hidden when there are no instructions —
+                    a ЗААВАР heading over nothing reads as a page that
+                    failed to load. */}
+                {activeTab === 'general' && instructions && (
+                  <section className="oc-cd-instructions">
+                    <h2 className="oc-cd-section-label">ЗААВАР</h2>
+                    <p className="oc-cd-instructions-body">{instructions}</p>
+                  </section>
+                )}
+              </>
+            ) : side === 'register' ? (
+              <>
+                <h2 className="oc-cd-section-label">Бүртгүүлэх</h2>
+                {/* The EXISTING registration flow, moved here rather than
+                    replaced by a placeholder. The rebuilt page has no
+                    other home for it, and dropping it would take live
+                    registration off the public site — see the note in the
+                    handover. Its own redesign is a later changeset. */}
+                <div style={{ marginTop: 14 }}>
+                  <RegistrationPanel competitionId={competition.id} events={competition.events} />
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 className="oc-cd-section-label">Тамирчид</h2>
+                <p className="oc-cd-soon">Энэ хэсэг удахгүй нэмэгдэнэ.</p>
+              </>
+            )}
           </div>
-        </section>
+        </div>
       </main>
     </Shell>
+  );
+}
+
+function SideItem({
+  active,
+  onClick,
+  label,
+  count,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  count?: string;
+}) {
+  return (
+    <button
+      type="button"
+      aria-current={active ? 'true' : undefined}
+      className={`oc-cd-side-item${active ? ' oc-cd-side-item-active' : ''}`}
+      onClick={onClick}
+    >
+      <span className="oc-cd-side-label">{label}</span>
+      {count && <span className="oc-cd-side-count">{count}</span>}
+    </button>
   );
 }

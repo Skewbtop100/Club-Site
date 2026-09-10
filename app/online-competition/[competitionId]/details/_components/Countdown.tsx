@@ -2,14 +2,22 @@
 
 import { useEffect, useState } from 'react';
 
-/** Live-ticking countdown to `startAtMs`. Updates every second on the
- *  client only (SSR renders the initial static value from a fresh
- *  Date.now() call, then the interval takes over after mount).
+/** Live-ticking countdown to a deadline, for the detail header's
+ *  БҮРТГЭЛ ХААГДАХАД cell.
  *
- *  The tick logic is unchanged from the original; only the output markup
- *  changed — the days figure and the HH:MM:SS clock are now two stacked
- *  elements so the v3 hero can size them independently. */
-export default function Countdown({ startAtMs }: { startAtMs: number | null }) {
+ *  Retargeted from `startAtMs` to a general `targetMs`: the rebuilt header
+ *  has no "time until the competition starts" cell — the mockup's two
+ *  cells are ТАМИРЧИН and БҮРТГЭЛ ХААГДАХАД — so what this counts down to
+ *  is now the registration deadline. The tick logic is unchanged.
+ *
+ *  Coarser output than before, and deliberately. The old cell rendered a
+ *  days figure plus a live HH:MM:SS clock; the mockup asks for
+ *  "N ӨДӨР ҮЛДСЭН", so the seconds clock is gone. It still ticks every
+ *  second, because the unit steps down as the deadline nears: below a day
+ *  it reads hours and below an hour minutes, rather than sitting on
+ *  "0 ӨДӨР ҮЛДСЭН" for the last twenty-three hours of registration —
+ *  which is exactly the window in which the number matters most. */
+export default function Countdown({ targetMs }: { targetMs: number | null }) {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -17,28 +25,23 @@ export default function Countdown({ startAtMs }: { startAtMs: number | null }) {
     return () => clearInterval(id);
   }, []);
 
-  if (startAtMs === null) {
-    return <span className="oc-v3-cd-days">—</span>;
-  }
+  // No deadline declared is not the same as a passed one, and must not
+  // render as "closed" — an em dash says "not stated", which is true.
+  if (targetMs === null) return <span className="oc-v3-cd-days oc-cd-muted">—</span>;
 
-  const remaining = startAtMs - now;
+  const remaining = targetMs - now;
   if (remaining <= 0) {
-    return <span className="oc-v3-cd-days">ЭХЭЛСЭН</span>;
+    // Muted, not volt: volt is the colour of time you still have.
+    return <span className="oc-v3-cd-days oc-cd-muted">БҮРТГЭЛ ХААГДСАН</span>;
   }
 
   const totalSeconds = Math.floor(remaining / 1000);
   const days = Math.floor(totalSeconds / 86400);
-  const hours = Math.floor((totalSeconds % 86400) / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  const pad = (n: number) => String(n).padStart(2, '0');
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor(totalSeconds / 60);
 
-  return (
-    <>
-      <span className="oc-v3-cd-days">{days} ӨДӨР</span>
-      <span className="oc-v3-cd-clock">
-        {pad(hours)}:{pad(minutes)}:{pad(seconds)}
-      </span>
-    </>
-  );
+  const text =
+    days >= 1 ? `${days} ӨДӨР ҮЛДСЭН` : hours >= 1 ? `${hours} ЦАГ ҮЛДСЭН` : `${Math.max(1, minutes)} МИН ҮЛДСЭН`;
+
+  return <span className="oc-v3-cd-days">{text}</span>;
 }
