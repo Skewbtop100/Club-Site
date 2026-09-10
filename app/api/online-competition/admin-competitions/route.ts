@@ -5,12 +5,16 @@ import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
 import {
   CompetitionWriteError,
   normalizeCompetitionStatus,
-  normalizeStoredEvents,
-  normalizeStoredSchedule,
-  normalizeStoredSections,
   validateCompetitionInput,
   writeCompetitionDoc,
 } from '@/lib/online-competition/admin-competitions';
+// The SAME normalisers the public fetchers in data.ts use — one reader for
+// the admin and the athlete, so the two cannot drift apart again.
+import {
+  normalizeStoredEvents,
+  normalizeStoredSchedule,
+  normalizeStoredSections,
+} from '@/lib/online-competition/competition-shape';
 import { resolveEventLiveRounds } from '@/lib/online-competition/round-access';
 import { DEFAULT_COMPETITION_FORMAT } from '@/lib/online-competition/types';
 import type { OnlineCompetitionAdminView } from '@/lib/online-competition/types';

@@ -15,10 +15,13 @@ import {
   collection,
 } from 'firebase/firestore';
 import { onlineCompDb } from './firebase';
-import { resolveResultFormat } from './ao5';
+import {
+  normalizeStoredEvents,
+  normalizeStoredSchedule,
+  normalizeStoredSections,
+} from './competition-shape';
 import type {
   OnlineCompetition,
-  OnlineCompetitionEventConfig,
   OnlineCompetitionStatus,
   OnlineParticipant,
   OnlineParticipantProfileInput,
@@ -53,39 +56,31 @@ function normalizeStatus(raw: unknown): OnlineCompetitionStatus {
   return 'upcoming';
 }
 
-// `events` used to be a plain string[] before the Phase 1 schema update
-// added { eventId, label, rounds } objects. Firestore reads aren't
-// runtime-validated against the type, so a doc created before that
-// migration (e.g. the original test-comp-1 seed) still has the old shape
-// — every consumer (hub groups, detail page, registration panel) assumes
-// the new object shape and calls `.eventId`/`.rounds` directly, so this
-// normalizes once here rather than making every call site defensive.
-function normalizeEvents(raw: unknown): OnlineCompetitionEventConfig[] {
-  if (!Array.isArray(raw)) return [];
-  const out: OnlineCompetitionEventConfig[] = [];
-  for (const e of raw) {
-    if (typeof e === 'string') {
-      out.push({ eventId: e, label: e.toUpperCase(), rounds: 1, resultFormat: 'ao5', timeLimitCs: null, cutoffs: [] });
-    } else if (e && typeof e === 'object' && typeof (e as Record<string, unknown>).eventId === 'string') {
-      const obj = e as Partial<OnlineCompetitionEventConfig>;
-      out.push({
-        eventId: obj.eventId as string,
-        label: typeof obj.label === 'string' ? obj.label : (obj.eventId as string).toUpperCase(),
-        rounds: typeof obj.rounds === 'number' && obj.rounds > 0 ? obj.rounds : 1,
-        // Read-time default, no backfill — same treatment as the legacy
-        // status and events shapes handled around it.
-        resultFormat: resolveResultFormat((e as Record<string, unknown>).resultFormat),
-        timeLimitCs:
-          typeof (e as Record<string, unknown>).timeLimitCs === 'number'
-            ? ((e as Record<string, unknown>).timeLimitCs as number)
-            : null,
-        cutoffs: Array.isArray((e as Record<string, unknown>).cutoffs)
-          ? ((e as Record<string, unknown>).cutoffs as OnlineCompetitionEventConfig['cutoffs'])
-          : [],
-      });
-    }
-  }
-  return out;
+// Events, sections and schedule go through the SHARED normalisers in
+// competition-shape.ts — the same functions the admin GET routes call.
+//
+// This file used to carry its own `normalizeEvents`, which rebuilt each
+// event field by field and had never been taught `advancement` or
+// `surchargeMnt`. Every public page therefore read every event as
+// included in the base fee (so the detail page's НЭМЭЛТ ХУРААМЖ could
+// never appear) and had no advancement plan to show. One reader now, so
+// a field the admin can save is a field the public can see. The legacy
+// string[] shape this function handled is handled there too.
+//
+// `sections` and `schedule` used to arrive here as the raw document
+// spread, unnormalised; they are normalised now as well.
+
+/** The one mapping from a raw competition document to the public shape,
+ *  shared by both fetchers so they cannot disagree. */
+function toPublicCompetition(id: string, data: Omit<OnlineCompetition, 'id'>): OnlineCompetition {
+  return {
+    id,
+    ...data,
+    status: normalizeStatus(data.status),
+    events: normalizeStoredEvents(data.events),
+    sections: normalizeStoredSections(data.sections),
+    schedule: normalizeStoredSchedule(data.schedule),
+  };
 }
 
 /** One competition, by id. Returns null both when the doc does not exist
@@ -109,8 +104,7 @@ export async function fetchCompetition(competitionId: string): Promise<OnlineCom
     throw err;
   }
   if (!snap.exists()) return null;
-  const data = snap.data() as Omit<OnlineCompetition, 'id'>;
-  return { id: snap.id, ...data, status: normalizeStatus(data.status), events: normalizeEvents(data.events) };
+  return toPublicCompetition(snap.id, snap.data() as Omit<OnlineCompetition, 'id'>);
 }
 
 // Public read for the hub and the competitions page — every NON-DRAFT
@@ -146,10 +140,7 @@ export async function fetchAllCompetitions(): Promise<OnlineCompetition[]> {
   const snap = await getDocs(
     query(collection(onlineCompDb, 'onlineCompetitions'), where('status', '!=', 'draft')),
   );
-  return snap.docs.map((d) => {
-    const data = d.data() as Omit<OnlineCompetition, 'id'>;
-    return { id: d.id, ...data, status: normalizeStatus(data.status), events: normalizeEvents(data.events) };
-  });
+  return snap.docs.map((d) => toPublicCompetition(d.id, d.data() as Omit<OnlineCompetition, 'id'>));
 }
 
 // Public read for the hub's "ОНООНЫ ХҮСНЭГТ" section — points are
@@ -225,7 +216,8 @@ export async function fetchParticipant(uid: string): Promise<OnlineParticipant |
 // athlete who has signed in but never opened the profile form) has no
 // `profileStatus` field at all — treated as 'incomplete' here rather than
 // writing that value onto every doc on sign-in, same reasoning as
-// normalizeStatus()/normalizeEvents() above for legacy competition docs.
+// normalizeStatus() above and the shared event normaliser for legacy
+// competition docs.
 export function resolveProfileStatus(participant: OnlineParticipant | null): OnlineParticipantProfileStatus {
   return participant?.profileStatus ?? 'incomplete';
 }

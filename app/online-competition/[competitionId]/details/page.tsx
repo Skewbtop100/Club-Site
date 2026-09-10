@@ -4,11 +4,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { fetchCompetition } from '@/lib/online-competition/data';
+import { renderableSections } from '@/lib/online-competition/competition-shape';
 import { competitionFeeTotals, formatMnt } from '@/lib/online-competition/fees';
 import { competitionFormatLabel, type OnlineCompetition } from '@/lib/online-competition/types';
 import { toMillisOrNull } from '../../_components/hub/format';
 import HubNav from '../../_components/hub/v3/HubNav';
 import Countdown from './_components/Countdown';
+import { EventsTab, ScheduleTab, SectionTab } from './_components/DetailTabs';
 import RegistrationPanel from './_components/RegistrationPanel';
 
 const COMPETITIONS = '/online-competition/competitions';
@@ -86,37 +88,29 @@ export default function CompetitionDetailPage() {
     };
   }, [competitionId]);
 
+  /** The custom sections this page shows, each holding only the blocks
+   *  that render something. Shared logic (competition-shape.ts): a section
+   *  needs a title AND at least one renderable block, so an empty text
+   *  block or a video whose url no longer parses cannot open a blank tab. */
+  const sections = useMemo(() => renderableSections(competition?.sections ?? []), [competition]);
+
   /** Which tabs exist for THIS competition.
    *
-   *  ХУВААРЬ and each custom section are conditional: a tab that opens on
-   *  nothing is worse than an absent one, because the reader has already
-   *  paid the click. So ХУВААРЬ appears only when the schedule array has
-   *  entries, and a custom section appears only when it has at least one
-   *  block — a titled-but-empty section is exactly the state the admin
-   *  editor warns about, and this is the consequence it warns of.
+   *  ТӨРЛҮҮД, ХУВААРЬ and each custom section are conditional: a tab that
+   *  opens on nothing is worse than an absent one, because the reader has
+   *  already paid the click.
    *
-   *  Read defensively: `fetchCompetition` spreads the raw document, so
-   *  these arrive unnormalised (unlike the admin GET, which runs them
-   *  through normalizeStoredSections / normalizeStoredSchedule). This
-   *  checks only what tab VISIBILITY needs. When these tabs gain content,
-   *  those normalisers should move to a firebase-admin-free module and be
-   *  shared rather than a second reader growing here. */
+   *  No defensive reading here any more. `fetchCompetition` now runs
+   *  events, sections and schedule through the same normalisers the admin
+   *  GET uses (competition-shape.ts), so every array below is already
+   *  typed and cleaned. */
   const tabs = useMemo(() => {
     const out: { key: TabKey; label: string }[] = [{ key: 'general', label: 'ЕРӨНХИЙ' }];
-    const events = competition?.events ?? [];
-    if (events.length > 0) out.push({ key: 'events', label: 'ТӨРЛҮҮД' });
-
-    const schedule = Array.isArray(competition?.schedule) ? competition.schedule : [];
-    if (schedule.length > 0) out.push({ key: 'schedule', label: 'ХУВААРЬ' });
-
-    const sections = Array.isArray(competition?.sections) ? competition.sections : [];
-    for (const sec of sections) {
-      const hasBlocks = Array.isArray(sec?.blocks) && sec.blocks.length > 0;
-      const title = typeof sec?.title === 'string' ? sec.title.trim() : '';
-      if (hasBlocks && title) out.push({ key: `section:${sec.id}`, label: title.toUpperCase() });
-    }
+    if ((competition?.events ?? []).length > 0) out.push({ key: 'events', label: 'ТӨРЛҮҮД' });
+    if ((competition?.schedule ?? []).length > 0) out.push({ key: 'schedule', label: 'ХУВААРЬ' });
+    for (const sec of sections) out.push({ key: `section:${sec.id}`, label: sec.title.trim().toUpperCase() });
     return out;
-  }, [competition]);
+  }, [competition, sections]);
 
   // A tab that disappears (the admin emptied a section between loads)
   // must not leave the strip pointing at nothing.
@@ -301,26 +295,21 @@ export default function CompetitionDetailPage() {
                     </div>
                   </>
                 ) : activeTab === 'events' ? (
-                  /* INTERIM. The old page's chip grid, ported verbatim so
-                     the event list is not missing from the page while the
-                     mockup's full table — round, format, limit, cutoff,
-                     advancement — is still to be built. Every value it
-                     shows is real; it just shows fewer of them. Replaced
-                     wholesale next changeset. */
-                  <div className="oc-v3-detail-event-grid" style={{ marginTop: 22 }}>
-                    {competition.events.map((e) => (
-                      <div key={e.eventId} className="oc-v3-detail-event">
-                        <span style={{ font: '600 13px var(--oc-font-mono), monospace', color: '#F4F1EA' }}>
-                          {e.label}
-                        </span>
-                        <span style={{ font: '400 11px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
-                          {e.rounds} раунд
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+                  <EventsTab events={competition.events} />
+                ) : activeTab === 'schedule' ? (
+                  <ScheduleTab
+                    schedule={competition.schedule ?? []}
+                    events={competition.events}
+                    startAtMs={startAtMs}
+                  />
                 ) : (
-                  <p className="oc-cd-soon">Энэ хэсэг удахгүй нэмэгдэнэ.</p>
+                  // Every remaining tab key is `section:<id>`, and tabs only
+                  // exists for sections that survived renderableSections —
+                  // so the lookup cannot miss for a key in the strip.
+                  (() => {
+                    const section = sections.find((sec) => `section:${sec.id}` === activeTab);
+                    return section ? <SectionTab section={section} /> : null;
+                  })()
                 )}
 
                 {/* Whole block hidden when there are no instructions —

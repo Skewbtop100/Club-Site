@@ -16,6 +16,12 @@ export interface ParsedVideo {
   provider: VideoProvider;
   /** YouTube: the 11-char id. Vimeo: the numeric id, digits only. */
   id: string;
+  /** Vimeo only: the privacy hash of an UNLISTED video — the `abc123` in
+   *  vimeo.com/123456789/abc123, or the `h=` query parameter. The embed
+   *  player refuses an unlisted video without it ("because of its privacy
+   *  settings, this video cannot be played here"), so it has to survive
+   *  the parse even though it is not part of the video's identity. */
+  hash?: string;
 }
 
 /** YouTube ids are exactly 11 chars of [A-Za-z0-9_-]. Anchored, so a
@@ -81,19 +87,72 @@ export function parseVideoUrl(raw: string): ParsedVideo | null {
   }
 
   // ── vimeo.com ──
-  // The id is the LAST numeric segment, not the first: an unlisted link is
-  // vimeo.com/<id>/<hash> (first wins) but a group link is
-  // vimeo.com/groups/<name>/videos/<id> (last wins). Taking the last
-  // numeric segment that looks like an id handles both, and the private
-  // hash is not numeric so it never competes.
+  // Three shapes, tried most specific first:
+  //
+  //   vimeo.com/<id>[/<hash>]            a plain or UNLISTED video link
+  //   player.vimeo.com/video/<id>[?h=]   an embed link
+  //   vimeo.com/groups/x/videos/<id>,    a video inside a channel, group
+  //   vimeo.com/channels/x/<id> ...      or showcase: the id is LAST
+  //
+  // The first shape used to fall through to the "last numeric segment"
+  // scan too, which was wrong twice over: it discarded the unlisted hash
+  // the embed needs, and a hash that happened to be all digits (it is
+  // hex, so roughly 1 in 110 are) matched the id pattern and was taken
+  // AS the id — a different video, or none. Reading the positions the
+  // shapes actually define fixes both.
   if (host === 'vimeo.com' || host === 'player.vimeo.com') {
+    const queryHash = cleanHash(url.searchParams.get('h'));
+
+    if (host === 'player.vimeo.com') {
+      return segments[0] === 'video' && segments[1] && VIMEO_ID.test(segments[1])
+        ? withHash({ provider: 'vimeo', id: segments[1] }, queryHash)
+        : null;
+    }
+    if (segments[0] && VIMEO_ID.test(segments[0])) {
+      return withHash({ provider: 'vimeo', id: segments[0] }, cleanHash(segments[1]) ?? queryHash);
+    }
     for (let i = segments.length - 1; i >= 0; i--) {
-      if (VIMEO_ID.test(segments[i])) return { provider: 'vimeo', id: segments[i] };
+      if (VIMEO_ID.test(segments[i])) return withHash({ provider: 'vimeo', id: segments[i] }, queryHash);
     }
     return null;
   }
 
   return null;
+}
+
+/** A Vimeo privacy hash: hex, ten characters in every link seen so far,
+ *  accepted from six to twenty. Hex rather than any alphanumeric run so a
+ *  trailing path word ("vimeo.com/123456789/likes") is not mistaken for a
+ *  hash and sent to the player as `h=likes` — and so nothing that could
+ *  carry a path or query ever reaches the embed url. */
+function cleanHash(raw: string | null | undefined): string | undefined {
+  return typeof raw === 'string' && /^[0-9a-f]{6,20}$/i.test(raw) ? raw.toLowerCase() : undefined;
+}
+
+function withHash(parsed: ParsedVideo, hash: string | undefined): ParsedVideo {
+  return hash ? { ...parsed, hash } : parsed;
+}
+
+/** The iframe src for a parsed video. Built ONLY from a ParsedVideo, never
+ *  from the raw url, so nothing an admin typed reaches the iframe except an
+ *  id and hash that already passed the strict patterns above.
+ *
+ *  Privacy defaults, both chosen because this is a public page that a
+ *  visitor did not come to in order to be tracked by a video host:
+ *
+ *   YouTube — the youtube-nocookie.com host, YouTube's "privacy-enhanced
+ *             mode": no tracking cookies are set until the viewer presses
+ *             play. Same player, same controls.
+ *   Vimeo   — `dnt=1`, Vimeo's do-not-track flag: the player sets no
+ *             cookies and records no session data. An unlisted video's
+ *             `h=` hash is carried, or the player refuses to play it. */
+export function videoEmbedUrl(parsed: ParsedVideo): string {
+  if (parsed.provider === 'youtube') {
+    return `https://www.youtube-nocookie.com/embed/${parsed.id}`;
+  }
+  const params = new URLSearchParams({ dnt: '1' });
+  if (parsed.hash) params.set('h', parsed.hash);
+  return `https://player.vimeo.com/video/${parsed.id}?${params.toString()}`;
 }
 
 /** "YouTube · dQw4w9WgXcQ" — the readback shown under the url input, so

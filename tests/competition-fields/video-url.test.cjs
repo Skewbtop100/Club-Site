@@ -35,7 +35,7 @@ execFileSync(
   { cwd: ROOT, stdio: 'inherit' },
 );
 
-const { parseVideoUrl, describeVideo } = require(path.join(OUT, 'video-url.js'));
+const { parseVideoUrl, describeVideo, videoEmbedUrl } = require(path.join(OUT, 'video-url.js'));
 
 let pass = 0;
 let fail = 0;
@@ -49,6 +49,7 @@ function ok(name, cond, detail) {
     if (detail !== undefined) console.log(`          -> ${detail}`);
   }
 }
+const eq = (name, got, want) => ok(name, got === want, `got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
 
 const ID = 'dQw4w9WgXcQ';
 const accept = (url, provider, id) => {
@@ -139,6 +140,51 @@ ok('describeVideo names YouTube and the id',
   describeVideo({ provider: 'youtube', id: ID }));
 ok('describeVideo names Vimeo and the id',
   describeVideo({ provider: 'vimeo', id: '123456789' }) === 'Vimeo · 123456789');
+
+console.log('\n  -- Vimeo unlisted hash: kept, because the embed needs it --');
+// An unlisted Vimeo video will NOT play in an embed without its `h=` hash
+// ("because of its privacy settings, this video cannot be played here").
+// The parse used to recognise the hash and throw it away.
+{
+  const p = parseVideoUrl('https://vimeo.com/123456789/a1b2c3d4e5');
+  ok('an unlisted link keeps its id', p?.id === '123456789', JSON.stringify(p));
+  ok('  ...AND its hash', p?.hash === 'a1b2c3d4e5', JSON.stringify(p));
+}
+{
+  // ~1 in 110 hex hashes are all digits, which the id pattern also
+  // matches. The old last-numeric-segment scan took such a hash AS the id.
+  const p = parseVideoUrl('https://vimeo.com/123456789/1234567890');
+  ok('an ALL-DIGIT hash is not mistaken for the id', p?.id === '123456789', JSON.stringify(p));
+  ok('  ...and is kept as the hash', p?.hash === '1234567890', JSON.stringify(p));
+}
+ok('a player link carries its ?h= hash',
+  parseVideoUrl('https://player.vimeo.com/video/123456789?h=a1b2c3d4e5')?.hash === 'a1b2c3d4e5');
+ok('an ?h= on a plain link is picked up too',
+  parseVideoUrl('https://vimeo.com/123456789?h=abcdef1234')?.hash === 'abcdef1234');
+ok('a public link has NO hash key at all',
+  !('hash' in (parseVideoUrl('https://vimeo.com/123456789') ?? {})));
+ok('a group link has no hash', !('hash' in (parseVideoUrl('https://vimeo.com/groups/cubing/videos/123456789') ?? {})));
+// Hex only: a trailing path word must not be sent to the player as h=.
+ok('a non-hex trailing segment is NOT a hash',
+  !('hash' in (parseVideoUrl('https://vimeo.com/123456789/likes') ?? {})));
+ok('  ...and the id still parses', parseVideoUrl('https://vimeo.com/123456789/likes')?.id === '123456789');
+ok('a hash is normalised to lowercase', parseVideoUrl('https://vimeo.com/123456789/A1B2C3D4E5')?.hash === 'a1b2c3d4e5');
+refuse('https://player.vimeo.com/123456789', 'a player link without /video/');
+
+console.log('\n  -- videoEmbedUrl: built from the PARSE, never the raw url --');
+const embed = (url) => videoEmbedUrl(parseVideoUrl(url));
+eq('YouTube embeds on the privacy-enhanced nocookie host',
+  embed(`https://www.youtube.com/watch?v=${ID}&t=42s&si=track`), `https://www.youtube-nocookie.com/embed/${ID}`);
+ok('  ...and every YouTube shape yields the same src',
+  [embed(`https://youtu.be/${ID}`), embed(`https://www.youtube.com/shorts/${ID}`), embed(`https://www.youtube.com/embed/${ID}`)]
+    .every((u) => u === `https://www.youtube-nocookie.com/embed/${ID}`));
+eq('a public Vimeo video embeds with dnt=1',
+  embed('https://vimeo.com/123456789'), 'https://player.vimeo.com/video/123456789?dnt=1');
+eq('an UNLISTED Vimeo video embeds with dnt=1 and its hash',
+  embed('https://vimeo.com/123456789/a1b2c3d4e5'), 'https://player.vimeo.com/video/123456789?dnt=1&h=a1b2c3d4e5');
+// Query noise the admin pasted must not reach the iframe.
+ok('tracking params from the pasted url are NOT carried into the src',
+  !/si=|t=42/.test(embed(`https://www.youtube.com/watch?v=${ID}&t=42s&si=track`)));
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 fs.rmSync(OUT, { recursive: true, force: true });

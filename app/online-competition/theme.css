@@ -1860,6 +1860,206 @@
 }
 
 /* ── the Ерөнхий tab ─────────────────────────────────────────────────── */
+/* ── ТӨРЛҮҮД: the event/round table ─────────────────────────────────
+   A real <table>. Six columns do not fit a phone, so the table keeps its
+   shape and scrolls inside this frame instead — wrapping cells would
+   break the across-and-down reading the table exists for. */
+.oc-cd-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #1C1C21;
+  background: #0D0D10;
+}
+.oc-cd-table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+}
+.oc-cd-table th {
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid #1C1C21;
+  text-align: left;
+  white-space: nowrap;
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .18em;
+  color: #6E6A62;
+}
+.oc-cd-table td {
+  padding: 11px 14px;
+  vertical-align: middle;
+  white-space: nowrap;
+  font: 500 13px/1.3 var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+}
+/* The rule sits ABOVE an event's first row and nowhere else, so each
+   event reads as one block of rounds rather than a flat list of rows. */
+.oc-cd-table tbody tr.oc-cd-table-first:not(:first-child) td {
+  border-top: 1px solid #1C1C21;
+}
+.oc-cd-table-event {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+/* Figures in mono so limits and cutoffs line up digit for digit. Scoped
+   to the cell so it outranks the td font shorthand without !important. */
+.oc-cd-table td.oc-cd-mono {
+  font-family: var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+}
+/* The advancement plan is prose, not a figure; it may wrap on a narrow
+   column where the others hold their width. */
+.oc-cd-table td.oc-cd-table-next {
+  white-space: normal;
+  min-width: 190px;
+  color: #9A958A;
+}
+
+/* ЛИМИТ / CUTOFF explanations. Label and text on one line where there is
+   room, as the mockup has them. */
+.oc-cd-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 18px;
+}
+.oc-cd-note {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.oc-cd-note-label {
+  flex: none;
+  min-width: 64px;
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .18em;
+  color: #6E6A62;
+}
+.oc-cd-note-body {
+  flex: 1;
+  min-width: 220px;
+  font: 400 13px/1.6 var(--oc-font-heading), sans-serif;
+  color: #9A958A;
+}
+
+/* ── ХУВААРЬ: the timeline ───────────────────────────────────────────
+   An <ol>: the order IS the information. time | glyph | label | note. */
+.oc-cd-sched {
+  margin-top: 22px;
+  list-style: none;
+  border: 1px solid #1C1C21;
+  background: #0D0D10;
+}
+.oc-cd-sched-row {
+  display: grid;
+  grid-template-columns: 128px 28px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 10px 14px;
+}
+.oc-cd-sched-row + .oc-cd-sched-row {
+  border-top: 1px solid #16161B;
+}
+.oc-cd-sched-time {
+  font: 500 12px/1 var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #9A958A;
+  white-space: nowrap;
+}
+/* Neutral slot-filler where an event glyph would sit: 'other' rows, and
+   a stale round that has lost its icon on purpose. Same 28px box as
+   .oc-v3-ev-icon so the labels still line up down the column. */
+.oc-cd-sched-marker {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.oc-cd-sched-marker::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  background: #4A4740;
+}
+.oc-cd-sched-label {
+  min-width: 0;
+  font: 500 13px/1.3 var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+}
+.oc-cd-sched-note {
+  font: 400 12px/1.3 var(--oc-font-heading), sans-serif;
+  color: #6E6A62;
+  text-align: right;
+}
+/* A round naming an event the competition no longer has. Muted, so it
+   does not read as a round an athlete can enter; kept, so its time slot
+   does not shift every later row. */
+.oc-cd-sched-stale .oc-cd-sched-label {
+  color: #6E6A62;
+}
+
+/* ── custom section tabs ─────────────────────────────────────────────── */
+.oc-cd-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 22px;
+}
+/* The text block borrows .oc-cd-instructions-body; that class carries its
+   own top margin for its original home, which the gap above replaces.
+   Two classes deep ON PURPOSE: .oc-cd-instructions-body is defined further
+   down this file at the same one-class specificity, so a lone
+   `.oc-cd-block-text` would lose to it on source order alone. */
+.oc-cd-blocks .oc-cd-block-text {
+  margin-top: 0;
+}
+/* Full content-column width for a landscape image; a tall one is capped
+   so it cannot push the rest of the section off the screen. Natural
+   aspect ratio either way — no crop, no letterbox bars. */
+.oc-cd-block-img {
+  display: block;
+  max-width: 100%;
+  width: auto;
+  height: auto;
+  max-height: 560px;
+  border: 1px solid #1C1C21;
+}
+.oc-cd-block-video {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid #1C1C21;
+  background: #08080A;
+}
+.oc-cd-block-video iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+@media (max-width: 640px) {
+  /* The timeline stacks: time on its own line, then glyph + label, then
+     the note — four columns do not fit 375px and the time is what an
+     athlete scans for first. */
+  .oc-cd-sched-row {
+    grid-template-columns: 28px minmax(0, 1fr);
+    row-gap: 6px;
+  }
+  .oc-cd-sched-time {
+    grid-column: 1 / -1;
+  }
+  .oc-cd-sched-note {
+    grid-column: 2;
+    text-align: left;
+  }
+  .oc-cd-block-img {
+    max-height: 420px;
+  }
+}
+
 /* Тайлбар, as the tab's opening paragraph. Deliberately unlabelled and
    above the poster/fact grid: it is prose about the competition, not one
    more fact about it, and a ТАЙЛБАР caption would file it back among the
@@ -2633,18 +2833,18 @@
       over whatever sat beside it (on the profile page, the photo).
 
    2. The fix renamed it to `.oc-v3-event-chip` — straight into a SECOND
-      collision, with the competition detail page's event card (still
-      below, now `.oc-v3-detail-event`). That one's `padding: 13px 14px`
-      landed on this 28px box and squashed the glyph inside it. Nobody
-      noticed for as long as the first one went unnoticed.
+      collision, with the competition detail page's event card. That one's
+      `padding: 13px 14px` landed on this 28px box and squashed the glyph
+      inside it. (The card has since been retired: the detail page's
+      ТӨРЛҮҮД tab is a table now, and uses THIS square for its icons.)
 
    Hence `-ev-icon`: a name that says what this IS (one event's icon)
    rather than what it looks like (a chip), because "chip" is what both
    collisions had in common. If a third component wants to be a chip, it
    does not get to be this one.
 
-   NOT `.oc-v3-ev-square`, which exists ~130 lines below at 38px with
-   different colours — a different square, and currently unused. */
+   Used by the hub (CompetitionCells.EventChip) and by the detail page's
+   ТӨРЛҮҮД table and ХУВААРЬ timeline (DetailTabs.tsx). */
 .oc-v3-chips {
   display: flex;
   flex-wrap: wrap;
@@ -2779,19 +2979,6 @@
   flex-shrink: 0;
   background: #2A2A31;
 }
-.oc-v3-ev-square {
-  width: 38px;
-  height: 38px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid #2A2A31;
-  background: transparent;
-  color: #F4F1EA;
-  font: 600 10px var(--oc-font-mono), monospace;
-}
-
 .oc-v3-statblock {
   display: grid;
   grid-template-columns: auto 1px auto;
@@ -2957,28 +3144,6 @@
 .oc-v3-btn-edit-reg:hover {
   border-color: #DFFF4F;
   color: #DFFF4F;
-}
-
-/* The competition detail page's ТӨРЛҮҮД list — one padded card per event,
-   name on the left and round count on the right.
-
-   Was `.oc-v3-event-chip`, the same name as the 28px icon square above.
-   Two different components, two names — see the long note up there for
-   what that cost the first two times. Renamed with its grid so the pair
-   still read as one block. */
-.oc-v3-detail-event-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 9px;
-}
-.oc-v3-detail-event {
-  border: 1px solid #1C1C21;
-  background: #0D0D10;
-  padding: 13px 14px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
 }
 
 .oc-v3-back-link {

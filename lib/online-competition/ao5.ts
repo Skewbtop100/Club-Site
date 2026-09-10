@@ -84,7 +84,7 @@ export const RESULT_FORMATS: ResultFormat[] = ['ao5', 'mo3', 'bo3', 'bo2', 'bo1'
  *
  *  Every event saved before this field existed has none, so this defaults
  *  to 'ao5' at READ time rather than backfilling the collection — the same
- *  pattern normalizeCompetitionStatus and normalizeEvents already use for
+ *  pattern normalizeCompetitionStatus and normalizeStoredEvents use for
  *  their legacy shapes. 'ao5' is the right default because it is what the
  *  platform has always actually run.
  *

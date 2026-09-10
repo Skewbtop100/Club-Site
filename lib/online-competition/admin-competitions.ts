@@ -1,8 +1,18 @@
 import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { DEFAULT_COMPETITION_FORMAT } from './types';
 import { validateQualifierInput } from './rounds';
-import { RESULT_FORMATS, cutoffPhaseFor, resolveResultFormat, type ResultFormat } from './ao5';
+import { RESULT_FORMATS, cutoffPhaseFor, type ResultFormat } from './ao5';
 import { parseVideoUrl } from './video-url';
+import {
+  ALL_PAYLOAD_KEYS,
+  ALL_SCHEDULE_PAYLOAD_KEYS,
+  BLOCK_PAYLOAD_FIELDS,
+  BLOCK_TYPES,
+  SCHEDULE_COMMON_FIELDS,
+  SCHEDULE_KINDS,
+  SCHEDULE_PAYLOAD_FIELDS,
+  SECTION_FIELDS,
+} from './competition-shape';
 import { MAX_BLOCKS_PER_SECTION, MAX_SCHEDULE_ENTRIES, MAX_SECTIONS } from './types';
 import type { OnlineCompetitionAdvancement, OnlineCompetitionCutoff } from './types';
 import type {
@@ -143,35 +153,10 @@ function parseCutoffs(
 // OnlineCompetitionBlock. Forget the first and the save fails loudly;
 // forget the second and tsc fails. There is no quiet path.
 
-/** Every key a SECTION may carry. Anything else is refused. */
-const SECTION_FIELDS = ['id', 'title', 'blocks'] as const;
-
-/** Every key a BLOCK may carry, keyed by type, PLUS how each is parsed.
- *  `required` payload fields must be present and non-empty; optional ones
- *  may be absent. A key belonging to a DIFFERENT type is what makes a
- *  block "type does not match its payload" — checked against the union of
- *  all types' fields, so {type:'text', videoUrl:...} is refused rather
- *  than quietly stored with an ignored videoUrl. */
-const BLOCK_PAYLOAD_FIELDS: Record<
-  OnlineCompetitionBlockType,
-  { key: 'text' | 'imageUrl' | 'imagePublicId' | 'videoUrl'; required: boolean }[]
-> = {
-  // '' is legal for text: a block added and not yet typed into renders as
-  // nothing and is a normal intermediate state. An image or video block
-  // with no payload is NOT — it is a slot that can never render — so
-  // those are required and non-empty.
-  text: [{ key: 'text', required: true }],
-  image: [
-    { key: 'imageUrl', required: true },
-    { key: 'imagePublicId', required: false },
-  ],
-  video: [{ key: 'videoUrl', required: true }],
-};
-
-const BLOCK_TYPES = Object.keys(BLOCK_PAYLOAD_FIELDS) as OnlineCompetitionBlockType[];
-/** Union of every payload key across every type — the "does this block
- *  carry another type's payload" test. Derived, never restated. */
-const ALL_PAYLOAD_KEYS = new Set<string>(BLOCK_TYPES.flatMap((t) => BLOCK_PAYLOAD_FIELDS[t].map((f) => f.key)));
+// SECTION_FIELDS, BLOCK_PAYLOAD_FIELDS, BLOCK_TYPES and ALL_PAYLOAD_KEYS
+// live in competition-shape.ts, shared with the read normalisers — which
+// the PUBLIC fetchers now use too, so this module (firebase-admin) could
+// no longer be their home.
 
 type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -316,97 +301,9 @@ function parseSections(raw: unknown): ParseResult<OnlineCompetitionSection[]> {
   return { ok: true, value: out };
 }
 
-/** Stored sections, read defensively for the two GET mappers.
- *
- *  The mirror of parseSections, and deliberately the OPPOSITE stance: a
- *  write is refused when it is malformed, but a READ must never 500 on a
- *  document — hand-edited, half-migrated or written by an older client —
- *  or the admin cannot open the competition to fix it. So this DROPS what
- *  it cannot understand instead of throwing, and supplies a positional
- *  fallback id for a section or block stored without one.
- *
- *  That fallback is deterministic (`s2`, `s2-b3`) rather than random: the
- *  editor saves back whatever it read, and a fresh random id on every GET
- *  would make each save look like a wholesale replacement of the page. */
-export function normalizeStoredSections(raw: unknown): OnlineCompetitionSection[] {
-  if (!Array.isArray(raw)) return [];
-  const out: OnlineCompetitionSection[] = [];
-  for (const [index, entry] of (raw as unknown[]).entries()) {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
-    const sec = entry as Record<string, unknown>;
-    const title = typeof sec.title === 'string' ? sec.title : '';
-    // A section with no title cannot be shown as a tab and cannot be saved
-    // back (the title is required), so it is dropped rather than handed to
-    // the editor as an unsaveable row.
-    if (!title.trim()) continue;
-    const id = typeof sec.id === 'string' && sec.id.trim() ? sec.id.trim() : `s${index + 1}`;
-
-    const blocks: OnlineCompetitionBlock[] = [];
-    const rawBlocks = Array.isArray(sec.blocks) ? (sec.blocks as unknown[]) : [];
-    for (const [bIndex, rawBlock] of rawBlocks.entries()) {
-      if (!rawBlock || typeof rawBlock !== 'object' || Array.isArray(rawBlock)) continue;
-      const b = rawBlock as Record<string, unknown>;
-      if (typeof b.type !== 'string' || !BLOCK_TYPES.includes(b.type as OnlineCompetitionBlockType)) continue;
-      const type = b.type as OnlineCompetitionBlockType;
-      const block: OnlineCompetitionBlock = {
-        id: typeof b.id === 'string' && b.id.trim() ? b.id.trim() : `${id}-b${bIndex + 1}`,
-        type,
-      };
-      // Same manifest the write path uses, so a field readable here is a
-      // field writable there — one list, two directions.
-      for (const field of BLOCK_PAYLOAD_FIELDS[type]) {
-        const value = b[field.key];
-        if (typeof value !== 'string') continue;
-        if (field.key === 'text') block.text = value;
-        else if (field.key === 'imageUrl') block.imageUrl = value;
-        else if (field.key === 'imagePublicId') block.imagePublicId = value;
-        else if (field.key === 'videoUrl') block.videoUrl = value;
-      }
-      // A media block whose payload did not survive is a slot that renders
-      // nothing; a text block legitimately has none yet.
-      if (type === 'image' && !block.imageUrl) continue;
-      if (type === 'video' && !block.videoUrl) continue;
-      if (type === 'text' && block.text === undefined) block.text = '';
-      blocks.push(block);
-    }
-    out.push({ id, title, blocks });
-  }
-  return out;
-}
-
-/** Stored events, read defensively for the two GET mappers.
- *
- *  Lived in BOTH route files as an identical copy until the fee fields
- *  landed — which meant the field-by-field rebuild trap had FOUR sites
- *  per per-event field (two writers' worth of validate + two readers'
- *  worth of this), and the two readers are the pair the compiler cannot
- *  help with, since every field on OnlineCompetitionEventConfig is
- *  optional for legacy docs. One copy, imported twice.
- *
- *  Read-side stance, the same as normalizeStoredSections: coerce and
- *  default rather than refuse, because a GET that 500s on an odd document
- *  is a document the admin cannot open to fix. */
-export function normalizeStoredEvents(raw: unknown): OnlineCompetitionEventConfig[] {
-  if (!Array.isArray(raw)) return [];
-  return (raw as Record<string, unknown>[]).map((e) => ({
-    eventId: typeof e?.eventId === 'string' ? e.eventId : '',
-    label: typeof e?.label === 'string' ? e.label : '',
-    rounds: typeof e?.rounds === 'number' ? e.rounds : 1,
-    resultFormat: resolveResultFormat(e?.resultFormat),
-    // null = no limit. Never defaulted to a real value.
-    timeLimitCs: typeof e?.timeLimitCs === 'number' ? e.timeLimitCs : null,
-    // Per-round cutoffs; absent/empty means none anywhere.
-    cutoffs: Array.isArray(e?.cutoffs) ? (e.cutoffs as OnlineCompetitionEventConfig['cutoffs']) : [],
-    advancement: Array.isArray(e?.advancement) ? (e.advancement as OnlineCompetitionEventConfig['advancement']) : [],
-    // null = included in the base fee, which is also what a non-positive
-    // or fractional stored value reads as (surchargeOf's rule) — the write
-    // path refuses those, so this only catches a hand-edited document.
-    surchargeMnt:
-      typeof e?.surchargeMnt === 'number' && Number.isInteger(e.surchargeMnt) && e.surchargeMnt > 0
-        ? e.surchargeMnt
-        : null,
-  }));
-}
+// normalizeStoredSections and normalizeStoredEvents moved to
+// competition-shape.ts: the admin GET routes and the public fetchers in
+// data.ts now call the same functions.
 
 /** Every key an EVENT may carry. Anything else is refused rather than
  *  dropped — see the note at the events loop. */
@@ -451,33 +348,9 @@ function parseSurcharge(raw: unknown): ParseResult<number | null> {
 // means. `note` is on both kinds, so it is listed on both rather than
 // special-cased.
 
-/** Keys every schedule entry carries whatever its kind. */
-const SCHEDULE_COMMON_FIELDS = ['id', 'startMin', 'durationMin', 'kind'] as const;
-
-/** Per-kind payload keys, and whether each is required. */
-const SCHEDULE_PAYLOAD_FIELDS: Record<
-  OnlineCompetitionScheduleKind,
-  { key: 'eventId' | 'round' | 'label' | 'note'; required: boolean }[]
-> = {
-  round: [
-    { key: 'eventId', required: true },
-    { key: 'round', required: true },
-    { key: 'note', required: false },
-  ],
-  other: [
-    // A row with no label is a slot on the timeline that says nothing —
-    // an athlete reads "10:00, 30 minutes, ???". Refused.
-    { key: 'label', required: true },
-    { key: 'note', required: false },
-  ],
-};
-
-const SCHEDULE_KINDS = Object.keys(SCHEDULE_PAYLOAD_FIELDS) as OnlineCompetitionScheduleKind[];
-/** Union across kinds — the "carries the other kind's payload" test.
- *  Derived, never restated. */
-const ALL_SCHEDULE_PAYLOAD_KEYS = new Set<string>(
-  SCHEDULE_KINDS.flatMap((k) => SCHEDULE_PAYLOAD_FIELDS[k].map((f) => f.key)),
-);
+// SCHEDULE_COMMON_FIELDS, SCHEDULE_PAYLOAD_FIELDS, SCHEDULE_KINDS and
+// ALL_SCHEDULE_PAYLOAD_KEYS live in competition-shape.ts, beside the
+// schedule read normaliser that shares them.
 
 /** Longest a single slot may be. A day; anything more is a typo or a
  *  runaway client, and the UI's own select tops out at two hours. */
@@ -603,46 +476,7 @@ function parseSchedule(raw: unknown): ParseResult<OnlineCompetitionScheduleEntry
   return { ok: true, value: out };
 }
 
-/** Stored schedule, read defensively for the two GET mappers. Same
- *  read-side stance as normalizeStoredSections: drop what cannot be
- *  understood rather than throwing, so an odd document can still be
- *  opened and fixed. */
-export function normalizeStoredSchedule(raw: unknown): OnlineCompetitionScheduleEntry[] {
-  if (!Array.isArray(raw)) return [];
-  const out: OnlineCompetitionScheduleEntry[] = [];
-  for (const [index, item] of (raw as unknown[]).entries()) {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
-    const e = item as Record<string, unknown>;
-    if (typeof e.kind !== 'string' || !SCHEDULE_KINDS.includes(e.kind as OnlineCompetitionScheduleKind)) continue;
-    const kind = e.kind as OnlineCompetitionScheduleKind;
-    if (typeof e.durationMin !== 'number' || e.durationMin <= 0) continue;
-    const entry: OnlineCompetitionScheduleEntry = {
-      id: typeof e.id === 'string' && e.id.trim() ? e.id.trim() : `sch${index + 1}`,
-      // Recomputed by the editor on the next save anyway; a missing or
-      // junk value reads as 0 rather than dropping an announced row.
-      startMin: typeof e.startMin === 'number' && e.startMin >= 0 ? Math.trunc(e.startMin) : 0,
-      durationMin: Math.trunc(e.durationMin),
-      kind,
-    };
-    for (const field of SCHEDULE_PAYLOAD_FIELDS[kind]) {
-      const value = e[field.key];
-      if (field.key === 'round') {
-        if (typeof value === 'number' && value >= 1) entry.round = Math.trunc(value);
-        continue;
-      }
-      if (typeof value !== 'string') continue;
-      if (field.key === 'eventId') entry.eventId = value;
-      else if (field.key === 'label') entry.label = value;
-      else if (field.key === 'note') entry.note = value;
-    }
-    // A row whose required payload did not survive says nothing on a
-    // timeline, so it is dropped rather than rendered blank.
-    if (kind === 'round' && (!entry.eventId || entry.round === undefined)) continue;
-    if (kind === 'other' && !entry.label) continue;
-    out.push(entry);
-  }
-  return out;
-}
+// normalizeStoredSchedule moved to competition-shape.ts with the rest.
 
 export function validateCompetitionInput(body: unknown): ValidationResult {
   if (!body || typeof body !== 'object') return { ok: false, error: 'Invalid body' };

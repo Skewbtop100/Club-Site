@@ -84,14 +84,19 @@ function compile() {
 process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
 compile();
 
+const admin = require(path.join(OUT, 'admin-competitions.js'));
+const { validateCompetitionInput, writeCompetitionDoc, countRegistrationsFor } = admin;
+// The read normalisers moved out of admin-competitions.ts into the
+// firebase-free competition-shape.ts, which BOTH the admin GET routes and
+// the public fetchers in data.ts import. tsc compiles it into OUT as a
+// dependency of admin-competitions.ts, so this is the same module the
+// routes load. Pure-function coverage lives in competition-shape.test.cjs;
+// here they are exercised against documents that went through Firestore.
 const {
-  validateCompetitionInput,
-  writeCompetitionDoc,
   normalizeStoredSections,
   normalizeStoredEvents,
   normalizeStoredSchedule,
-  countRegistrationsFor,
-} = require(path.join(OUT, 'admin-competitions.js'));
+} = require(path.join(OUT, 'competition-shape.js'));
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
 
@@ -370,6 +375,23 @@ const read = async (id) => (await db.collection(COL).doc(id).get()).data();
         { fromRound: 2, method: 'count', value: 12 },
       ]),
     JSON.stringify(dAdv.events?.[0]?.advancement),
+  );
+  // ...AND survives the shared READER — the one the public detail page now
+  // uses. The public side's old private reader dropped this field, so the
+  // write could be perfect and athletes would still never see the plan.
+  ok(
+    'advancement survives the shared reader both admin and public use',
+    JSON.stringify(normalizeStoredEvents(dAdv.events)[0].advancement) ===
+      JSON.stringify(dAdv.events?.[0]?.advancement),
+    JSON.stringify(normalizeStoredEvents(dAdv.events)[0].advancement),
+  );
+  // The readers now live in exactly one module. If admin-competitions ever
+  // re-grows its own copy, the two could drift the way the public one did.
+  ok(
+    'admin-competitions no longer exports its own readers',
+    admin.normalizeStoredEvents === undefined &&
+      admin.normalizeStoredSections === undefined &&
+      admin.normalizeStoredSchedule === undefined,
   );
 
   // Entries are normalised into fromRound order regardless of input order.
