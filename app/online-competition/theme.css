@@ -2014,20 +2014,45 @@
 .oc-cd-blocks .oc-cd-block-text {
   margin-top: 0;
 }
-/* Full content-column width for a landscape image; a tall one is capped
-   so it cannot push the rest of the section off the screen. Natural
-   aspect ratio either way — no crop, no letterbox bars. */
+/* ── media in a custom section: capped at 720 x 420 (x 280 on a phone) ──
+   Images and video share one media column, 720px wide at most and left-
+   aligned, so a section reads as prose with pictures in it rather than a
+   gallery with captions. Text blocks are NOT in this column — they keep
+   their own 68ch measure (.oc-cd-instructions-body).
+
+   `align-self: flex-start` is the load-bearing line. .oc-cd-blocks is a
+   column flexbox, whose default `align-items: stretch` forced every
+   image's WIDTH to the full content column while max-height capped only
+   its HEIGHT — so anything not already landscape was squashed: a portrait
+   photo rendered at 36% of its true proportions, a square at 62%, and a
+   small 300x200 image was stretched up to fill 900px. Opting the media out
+   of the stretch lets width AND height shrink together from the image's
+   own size, which is the only way both caps can apply without distorting
+   it.
+
+   width/height stay `auto`, so the browser scales by whichever cap binds
+   first and keeps the ratio: a landscape image is width-bound (720 wide),
+   a portrait or square one height-bound (420 tall). An image smaller than
+   both caps is shown at its own size, never enlarged. No object-fit is
+   needed — the box always has the image's own ratio, so there is nothing
+   to crop and no letterbox bars. */
 .oc-cd-block-img {
   display: block;
-  max-width: 100%;
+  align-self: flex-start;
   width: auto;
   height: auto;
-  max-height: 560px;
+  /* min(): never wider than the column on a narrow screen either. */
+  max-width: min(100%, 720px);
+  max-height: 420px;
   border: 1px solid #1C1C21;
 }
+/* The 16:9 box takes the same 720px column and shrinks with it; its
+   height follows from the ratio (405px at full width). */
 .oc-cd-block-video {
   position: relative;
+  align-self: flex-start;
   width: 100%;
+  max-width: 720px;
   aspect-ratio: 16 / 9;
   border: 1px solid #1C1C21;
   background: #08080A;
@@ -2056,7 +2081,7 @@
     text-align: left;
   }
   .oc-cd-block-img {
-    max-height: 420px;
+    max-height: 280px;
   }
 }
 
