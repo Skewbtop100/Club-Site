@@ -66,6 +66,7 @@ function compile() {
       require.resolve('typescript/bin/tsc'),
       'lib/online-competition/admin-competitions.ts',
       'lib/online-competition/admin-registrations.ts',
+      'lib/online-competition/scramble-roster.ts',
       '--outDir', path.basename(OUT),
       '--module', 'commonjs',
       '--target', 'es2022',
@@ -103,6 +104,7 @@ const {
   applyRegistrationPatch,
   RegistrationPatchError,
 } = require(path.join(OUT, 'admin-registrations.js'));
+const { fetchScrambleRoster } = require(path.join(OUT, 'scramble-roster.js'));
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
 
@@ -754,6 +756,25 @@ const read = async (id) => (await db.collection(COL).doc(id).get()).data();
   ok('a top-level registrations doc is EXCLUDED by the grandparent guard',
     (await countRegistrationsFor(db, REG)) === 2, String(await countRegistrationsFor(db, REG)));
 
+  // D7: the fee warning counts everyone who was QUOTED the fee — every
+  // status except cancelled and rejected. Wider than the roster on
+  // purpose: a pending athlete filled the form in under the current fee
+  // and may still be approved at it.
+  const feeReg = (uid, status) =>
+    db.collection('onlineParticipants').doc(uid).collection('registrations').doc(REG)
+      .set({ competitionId: REG, events: ['333'], status });
+  await feeReg('p3', 'pending');
+  await feeReg('p4', 'waitlisted');
+  await feeReg('p5', 'approved');
+  ok('pending, waitlisted and approved are all counted for the fee warning',
+    (await countRegistrationsFor(db, REG)) === 5, String(await countRegistrationsFor(db, REG)));
+  await feeReg('p6', 'cancelled');
+  await feeReg('p7', 'rejected');
+  ok('cancelled and rejected are NOT counted (nobody will charge them)',
+    (await countRegistrationsFor(db, REG)) === 5, String(await countRegistrationsFor(db, REG)));
+  // p1/p2 are the legacy 'registered' spelling, and they are inside that 5.
+  ok('the legacy "registered" is still counted', (await countRegistrationsFor(db, REG)) === 5);
+
 
   // ── sections[] — admin-authored custom tabs ───────────────────────────
   // The THIRD nested structure through validateCompetitionInput, and the
@@ -1277,6 +1298,68 @@ const read = async (id) => (await db.collection(COL).doc(id).get()).data();
     relisted.map((r) => `${r.uid}:${r.status}`).join(','));
   ok('  ...with the admin note', relisted.find((r) => r.uid === 'ath-a').statusNote === 'Мэдээлэл дутуу');
 
+
+  // ── the roster: APPROVED ONLY (D7) ────────────────────────────────────
+  // fetchScrambleRoster is what group assignments and official scrambles
+  // are built from. Before PR-2 it returned every registration, so a
+  // pending athlete was seeded into a group and served an official
+  // scramble before anyone agreed to let them compete.
+  const D7 = 'comp-d7';
+  const d7Reg = (uid, status, events = ['333']) =>
+    db.collection('onlineParticipants').doc(uid).collection('registrations').doc(D7)
+      .set({ competitionId: D7, events, status });
+  for (const [uid, status] of [
+    ['d7-pending', 'pending'],
+    ['d7-waitlisted', 'waitlisted'],
+    ['d7-approved', 'approved'],
+    ['d7-cancelled', 'cancelled'],
+    ['d7-rejected', 'rejected'],
+  ]) {
+    await db.collection('onlineParticipants').doc(uid).set({ uid, displayName: uid });
+    await d7Reg(uid, status);
+  }
+  // Registered before review existed: still in, and still gets a group.
+  await db.collection('onlineParticipants').doc('d7-legacy').set({ uid: 'd7-legacy', displayName: 'Legacy' });
+  await d7Reg('d7-legacy', 'registered');
+  // A junk status must not smuggle anyone in (normalizeRegistrationStatus
+  // fails closed to 'pending').
+  await db.collection('onlineParticipants').doc('d7-junk').set({ uid: 'd7-junk', displayName: 'Junk' });
+  await d7Reg('d7-junk', 'APPROVED');
+
+  const roster = await fetchScrambleRoster(db, D7);
+  const rosterUids = roster.map((a) => a.uid).sort().join(',');
+  ok('the roster is the approved athletes and nobody else',
+    rosterUids === 'd7-approved,d7-legacy', rosterUids);
+  for (const uid of ['d7-pending', 'd7-waitlisted', 'd7-cancelled', 'd7-rejected', 'd7-junk']) {
+    ok(`  ...${uid} is NOT in it`, !roster.some((a) => a.uid === uid));
+  }
+  // Approving one puts them in, with no other change to the document —
+  // the admin write is the whole mechanism.
+  await applyRegistrationPatch(db, D7, ['d7-pending'], { status: 'approved' });
+  const roster2 = await fetchScrambleRoster(db, D7);
+  ok('approving an athlete adds them to the roster', roster2.some((a) => a.uid === 'd7-pending'));
+  ok('  ...and the roster is still registration-ordered',
+    roster2.length === 3, String(roster2.length));
+  // ...and cancelling takes them back out.
+  await applyRegistrationPatch(db, D7, ['d7-approved'], { status: 'cancelled' });
+  const roster3 = await fetchScrambleRoster(db, D7);
+  ok('cancelling an athlete removes them from the roster', !roster3.some((a) => a.uid === 'd7-approved'));
+  // What PR-2 does NOT do: a group assignment written while they were
+  // approved is still sitting in groupAssignments. Nothing clears it —
+  // the next auto-assign rewrites the map from this roster, and until
+  // then the scramble route still finds the uid there. Pinned so the gap
+  // is visible rather than discovered.
+  await db.collection('onlineCompetitions').doc(D7).collection('groupAssignments').doc('333_1')
+    .set({ eventId: '333', round: 1, assignments: { 'd7-approved': 0 } });
+  const lingering = await db.collection('onlineCompetitions').doc(D7)
+    .collection('groupAssignments').doc('333_1').get();
+  ok('a cancelled athlete’s group assignment LINGERS (PR-2 does not clear it)',
+    lingering.get('assignments')['d7-approved'] === 0);
+
+  // The listing the review table reads is deliberately NOT filtered — the
+  // admin has to see every status to act on it.
+  const allForD7 = await listCompetitionRegistrations(db, D7);
+  ok('the admin review listing still shows every status', allForD7.length === 7, String(allForD7.length));
 
   // ── scramble route: the attempt bound ─────────────────────────────────
   // The route's official-scramble lookup used to return null for an

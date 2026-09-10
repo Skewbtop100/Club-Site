@@ -244,12 +244,17 @@ function EmptyRow({ text }: { text: string }) {
  *  competition.
  *
  *  Denominator approximation: there is no "expected submissions for this
- *  round" anywhere in the schema, so it uses the number of athletes
- *  registered for that EVENT (the same registrations query the competition
- *  detail page's Тамирчид tab uses). That is per-event, not per-round —
- *  for a multi-round event every round shows the same denominator, which
- *  over-counts if athletes are cut between rounds. There is no cut/advance
- *  model to derive a truer number from. */
+ *  round" anywhere in the schema, so it uses the number of APPROVED
+ *  athletes registered for that EVENT (D7 — a pending athlete is not
+ *  expected to solve, and counting them made every round look permanently
+ *  behind). That is per-event, not per-round — for a multi-round event
+ *  every round shows the same denominator, which over-counts if athletes
+ *  are cut between rounds. There is no cut/advance model to derive a
+ *  truer number from.
+ *
+ *  `registrations` arrives unfiltered, because the review table on the
+ *  same page needs every status; the filter belongs here, at the one place
+ *  that means "expected to compete". */
 function RoundProgress({
   competition,
   submissions,
@@ -261,7 +266,7 @@ function RoundProgress({
 }) {
   const rows: { key: string; label: string; done: number; expected: number }[] = [];
   for (const ev of competition.events) {
-    const expected = registrations.filter((r) => r.events.includes(ev.eventId)).length;
+    const expected = registrations.filter((r) => r.status === 'approved' && r.events.includes(ev.eventId)).length;
     for (let round = 1; round <= ev.rounds; round += 1) {
       const done = submissions.filter((s) => s.event === ev.eventId && s.round === round).length;
       if (done === 0) continue;

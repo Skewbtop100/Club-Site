@@ -10,6 +10,7 @@ import type {
 import { fmtDate } from './util';
 import { EventChip } from './CompetitionCells';
 import RegistrationStatusBadge from '../../RegistrationStatusBadge';
+import { competeGateCopy } from '@/lib/online-competition/registration-view';
 import EmptyBlock from './EmptyBlock';
 
 const HUB = '/online-competition';
@@ -103,7 +104,16 @@ function ms(v: RegisteredView): number {
 
 function Row({ view }: { view: RegisteredView }) {
   const { competition, registration } = view;
-  const tone = STATUS[competition.status];
+  // Approved only (D7). Two of this row's elements speak for the ATHLETE
+  // rather than the competition: the upcoming label БҮРТГҮҮЛСЭН ("you are
+  // registered") and the live action ОРОХ ("go in"). Neither is true of a
+  // pending or rejected registration, so they fall back to the
+  // competition's own state — the badge below the name says the rest.
+  const gate = competeGateCopy(registration.status);
+  const tone =
+    gate && competition.status === 'upcoming'
+      ? { dot: '#4A4740', text: '#6E6A62', label: 'УДАХГҮЙ' }
+      : STATUS[competition.status];
   // The events the athlete actually signed up for, not the competition's
   // full event list.
   const events = registration.events;
@@ -149,7 +159,7 @@ function Row({ view }: { view: RegisteredView }) {
       </div>
 
       <Link href={`${HUB}/${competition.id}/details`} className="oc-v3-row-action">
-        {competition.status === 'live' ? 'ОРОХ' : 'ДЭЛГЭРЭНГҮЙ'}
+        {competition.status === 'live' && !gate ? 'ОРОХ' : 'ДЭЛГЭРЭНГҮЙ'}
       </Link>
     </div>
   );

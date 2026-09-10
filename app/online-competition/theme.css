@@ -4613,6 +4613,28 @@
   white-space: nowrap;
 }
 
+/* The registration review gate on a live card: this athlete is not
+   approved, so the row shows their status where Эхлүүлэх would be.
+   Muted, not red — pending is not a rejection, and the accompanying
+   line says which it is. */
+.oc-v3-lock-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #2A2A31;
+  background: #131318;
+  color: #9A958A;
+  padding: 9px 11px;
+  font: 500 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+.oc-v3-gate-line {
+  font: 400 11px var(--oc-font-mono), monospace;
+  color: #9A958A;
+  line-height: 1.5;
+}
+
 /* Recent submissions */
 .oc-v3-sub-row {
   display: grid;

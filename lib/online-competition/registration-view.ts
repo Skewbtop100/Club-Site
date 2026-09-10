@@ -191,3 +191,37 @@ export function registrationStatusCopy(status: OnlineRegistrationStatus): Regist
       };
   }
 }
+
+
+/** Why this athlete cannot start solving, or null when they can.
+ *
+ *  APPROVED ONLY (D7) — the same rule the roster and the ТАМИРЧИН count
+ *  use. The dashboard asks this instead of hiding the button silently: a
+ *  pending athlete who finds Эхлүүлэх gone needs to know it is the review
+ *  and not a bug, and a rejected one needs to know it is not coming back.
+ *
+ *  ── THIS IS A UI COURTESY, NOT A CONTROL ──
+ *  Nothing here stops anyone. The solve page does not read a registration,
+ *  and firestore.rules lets any signed-in athlete write their own
+ *  onlineSubmissions doc, so an athlete who opens the solve URL directly
+ *  still solves and still submits. The server-side gate is PR-3.
+ *
+ *  `label` is the status badge's own word, so the row chip and the badge
+ *  above it cannot disagree. */
+export function competeGateCopy(status: OnlineRegistrationStatus): { label: string; message: string } | null {
+  if (status === 'approved') return null;
+  const { label } = registrationStatusCopy(status);
+  switch (status) {
+    case 'pending':
+      return { label, message: 'Бүртгэл баталгаажаагүй тул эхлүүлэх боломжгүй. Зохион байгуулагч хянаж байна.' };
+    case 'waitlisted':
+      return {
+        label,
+        message: 'Хүлээлгийн жагсаалтад байгаа тул эхлүүлэх боломжгүй. Орон тоо гарч баталгаажсаны дараа нээгдэнэ.',
+      };
+    case 'cancelled':
+      return { label, message: 'Бүртгэл цуцлагдсан тул энэ тэмцээнд оролцохгүй.' };
+    case 'rejected':
+      return { label, message: 'Бүртгэлээс татгалзсан тул энэ тэмцээнд оролцохгүй.' };
+  }
+}

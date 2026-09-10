@@ -49,6 +49,35 @@ export function normalizeRegistrationStatus(raw: unknown): OnlineRegistrationSta
   return 'pending';
 }
 
+// ── what a status MEANS (D7) ───────────────────────────────────────────
+// Two questions get asked of a registration, and they have different
+// answers. Both take the RAW stored value and normalise it first, so the
+// legacy 'registered' (and an absent status) counts as approved wherever
+// these are used — those athletes registered under a system with no
+// review, and must not drop out of a roster or a count.
+
+/** May this athlete COMPETE? Approved only.
+ *
+ *  The roster the official scrambles and group assignments are built
+ *  from, the ТАМИРЧИН count the participant limit is measured against,
+ *  round progress, and the dashboard's Эхлүүлэх button all ask this.
+ *  Pending is not a competitor: nobody has agreed to let them in yet. */
+export function isCompetingRegistration(rawStatus: unknown): boolean {
+  return normalizeRegistrationStatus(rawStatus) === 'approved';
+}
+
+/** Was this athlete QUOTED A PRICE? Everyone except cancelled and
+ *  rejected.
+ *
+ *  Only the fee-change warning asks this. A pending athlete filled in the
+ *  form under a fee they could see and may still be approved at it, so
+ *  changing the fee behind their back is exactly the thing the warning is
+ *  for. A cancelled or rejected one will never be charged. */
+export function isFeeQuotedRegistration(rawStatus: unknown): boolean {
+  const status = normalizeRegistrationStatus(rawStatus);
+  return status !== 'cancelled' && status !== 'rejected';
+}
+
 // ── read shape ─────────────────────────────────────────────────────────
 
 /** A raw registration document as the typed OnlineRegistration.

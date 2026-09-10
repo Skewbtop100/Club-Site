@@ -3,6 +3,7 @@ import { DEFAULT_COMPETITION_FORMAT } from './types';
 import { validateQualifierInput } from './rounds';
 import { RESULT_FORMATS, cutoffPhaseFor, type ResultFormat } from './ao5';
 import { parseVideoUrl } from './video-url';
+import { isFeeQuotedRegistration } from './registration-shape';
 import {
   ALL_PAYLOAD_KEYS,
   ALL_SCHEDULE_PAYLOAD_KEYS,
@@ -844,10 +845,16 @@ export async function lockedFormatEventIds(db: Firestore, competitionId: string)
   return [...ids];
 }
 
-/** How many athletes have REGISTERED for this competition.
+/** How many athletes were QUOTED THIS COMPETITION'S FEE — every status
+ *  except cancelled and rejected (D7).
  *
- *  Used by the editor's fee-change warning, which needs to know whether
- *  anyone has already registered under the current fee.
+ *  Used by the editor's fee-change warning, and only by it: it needs to
+ *  know whether anyone has already registered under the current fee. That
+ *  is a wider question than "who is competing", which is why this does
+ *  NOT match the list route's approved-only ТАМИРЧИН count. A pending
+ *  athlete filled the form in under a fee they could see and may still be
+ *  approved at it, so re-pricing behind their back is exactly what the
+ *  warning is for; a cancelled or rejected one will never be charged.
  *
  *  ── DO NOT ADD `.where('competitionId', '==', id)` TO THIS QUERY ──
  *  It reads the WHOLE `registrations` collection group and filters in
@@ -867,7 +874,7 @@ export async function lockedFormatEventIds(db: Firestore, competitionId: string)
  *  registrations/route.ts:12-17 — "there's no per-competitionId
  *  collection-group index for that subcollection (and, at this project's
  *  current scale, adding one isn't worth it)" — and every other caller
- *  follows it: countRegistrationsByCompetition (the list route),
+ *  follows it: countApprovedByCompetition (the list route),
  *  fetchScrambleRoster (scramble-roster.ts) and that registrations route
  *  all do the same unfiltered read plus an in-memory filter.
  *
@@ -885,7 +892,10 @@ export async function lockedFormatEventIds(db: Firestore, competitionId: string)
 export async function countRegistrationsFor(db: Firestore, competitionId: string): Promise<number> {
   const snap = await db.collectionGroup('registrations').get();
   return snap.docs.filter(
-    (d) => d.ref.parent.parent?.parent.id === 'onlineParticipants' && d.data().competitionId === competitionId,
+    (d) =>
+      d.ref.parent.parent?.parent.id === 'onlineParticipants' &&
+      d.data().competitionId === competitionId &&
+      isFeeQuotedRegistration(d.data().status),
   ).length;
 }
 

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { OnlineCompetition, OnlineRegistration } from '@/lib/online-competition/types';
 import RegistrationStatusBadge from '../../_components/RegistrationStatusBadge';
+import { competeGateCopy } from '@/lib/online-competition/registration-view';
 import type { RoundAccess } from '@/lib/online-competition/round-access';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import { fmtDateTime } from '../../_components/hub/format';
@@ -15,11 +16,25 @@ function EventStatus({
   competitionId,
   eventId,
   state,
+  gate,
 }: {
   competitionId: string;
   eventId: string;
   state: ReturnType<typeof deriveEventState>;
+  /** Non-null when this athlete's registration is not approved — see
+   *  competeGateCopy. Decided before anything else: a round being live
+   *  does not matter to someone who has not been let into the
+   *  competition. */
+  gate: ReturnType<typeof competeGateCopy>;
 }) {
+  if (gate) {
+    return (
+      <span className="oc-v3-lock-chip" title={gate.message}>
+        <span aria-hidden style={{ width: 11, height: 11, border: '1.5px solid #4A4740', borderRadius: '50%' }} />
+        {gate.label}
+      </span>
+    );
+  }
   if (state === 'done') {
     return (
       <span className="oc-v3-done-chip">
@@ -95,6 +110,9 @@ export default function LiveCard({
   }, [uid, competition.id]);
 
   const myEvents = competition.events.filter((e) => registration.events.includes(e.eventId));
+  // Approved only (D7). Hiding the button is all this can do — the solve
+  // page itself is not gated until PR-3.
+  const gate = competeGateCopy(registration.status);
   const state = deriveEventState(competition);
   const completed = state === 'done' ? myEvents.length : 0;
   const total = myEvents.length;
@@ -111,8 +129,9 @@ export default function LiveCard({
             <p style={{ marginTop: 4, font: '400 10px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
               {fmtDateTime(competition.startAt)}
             </p>
-            {/* Shown, NOT enforced: a pending athlete can still solve until
-                PR-2 gates solving on an approved registration. */}
+            {/* The review status, and — when it is not approved — the
+                reason there is no Эхлүүлэх below. Still not ENFORCED:
+                the solve page reads no registration (PR-3). */}
             <div style={{ marginTop: 8 }}>
               <RegistrationStatusBadge status={registration.status} withDetail />
             </div>
@@ -122,14 +141,23 @@ export default function LiveCard({
             ЯВАГДАЖ БУЙ
           </span>
         </div>
-        <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div className="oc-v3-bar" style={{ flex: 1, height: 4 }}>
-            <div className="oc-v3-bar-fill" style={{ width: `${pct}%` }} />
+        {gate ? (
+          /* No progress bar: "0/2 төрөл дууссан" under a registration
+             that cannot solve reads as a competition already under way
+             for this athlete. The reason takes its place. */
+          <p className="oc-v3-gate-line" style={{ marginTop: 12 }}>
+            {gate.message}
+          </p>
+        ) : (
+          <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div className="oc-v3-bar" style={{ flex: 1, height: 4 }}>
+              <div className="oc-v3-bar-fill" style={{ width: `${pct}%` }} />
+            </div>
+            <span style={{ font: '500 10px var(--oc-font-mono), monospace', color: '#9A958A', whiteSpace: 'nowrap' }}>
+              {completed}/{total} төрөл дууссан
+            </span>
           </div>
-          <span style={{ font: '500 10px var(--oc-font-mono), monospace', color: '#9A958A', whiteSpace: 'nowrap' }}>
-            {completed}/{total} төрөл дууссан
-          </span>
-        </div>
+        )}
       </div>
 
       {myEvents.map((e) => (
@@ -146,6 +174,7 @@ export default function LiveCard({
             competitionId={competition.id}
             eventId={e.eventId}
             state={deriveEventState(competition, access?.[e.eventId])}
+            gate={gate}
           />
         </div>
       ))}

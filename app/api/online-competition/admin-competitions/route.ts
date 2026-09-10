@@ -15,6 +15,7 @@ import {
   normalizeStoredSchedule,
   normalizeStoredSections,
 } from '@/lib/online-competition/competition-shape';
+import { isCompetingRegistration } from '@/lib/online-competition/registration-shape';
 import { resolveEventLiveRounds } from '@/lib/online-competition/round-access';
 import { DEFAULT_COMPETITION_FORMAT } from '@/lib/online-competition/types';
 import type { OnlineCompetitionAdminView } from '@/lib/online-competition/types';
@@ -37,19 +38,29 @@ async function countDistinctParticipants(db: Firestore, competitionId: string): 
   return uids.size;
 }
 
-/** competitionId -> how many athletes have REGISTERED, in ONE query for
+/** competitionId -> how many APPROVED athletes it has, in ONE query for
  *  the whole list rather than one per competition.
+ *
+ *  APPROVED ONLY (D7): this is the numerator of the list's
+ *  ТАМИРЧИН "12 / 64" cell, and the denominator is the participant limit
+ *  — so counting pending athletes here would read as places already
+ *  taken by people nobody has let in. (Nothing enforces that limit yet;
+ *  that is PR-4. The number is at least honest about what it means.)
+ *
+ *  The fee-change warning counts something DIFFERENT — see
+ *  countRegistrationsFor in admin-competitions.ts.
  *
  *  The grandparent guard is load-bearing: the club site has an unrelated
  *  top-level `registrations` collection that a bare collectionGroup query
  *  also matches (see the same guard in scramble-roster.ts). */
-async function countRegistrationsByCompetition(db: Firestore): Promise<Map<string, number>> {
+async function countApprovedByCompetition(db: Firestore): Promise<Map<string, number>> {
   const snap = await db.collectionGroup('registrations').get();
   const counts = new Map<string, number>();
   for (const d of snap.docs) {
     if (d.ref.parent.parent?.parent.id !== 'onlineParticipants') continue;
     const competitionId = d.get('competitionId');
     if (typeof competitionId !== 'string') continue;
+    if (!isCompetingRegistration(d.get('status'))) continue;
     counts.set(competitionId, (counts.get(competitionId) ?? 0) + 1);
   }
   return counts;
@@ -66,7 +77,7 @@ export async function GET() {
   // orderBy field from the results — sorting in JS (nulls last) keeps it
   // visible in the admin list instead of vanishing.
   const snap = await db.collection('onlineCompetitions').get();
-  const registeredByCompetition = await countRegistrationsByCompetition(db);
+  const approvedByCompetition = await countApprovedByCompetition(db);
 
   const competitions: OnlineCompetitionAdminView[] = await Promise.all(
     snap.docs.map(async (d) => {
@@ -107,7 +118,7 @@ export async function GET() {
         schedule: normalizeStoredSchedule(data.schedule),
         createdAt: data.createdAt?.toMillis?.() ?? null,
         participantCount: await countDistinctParticipants(db, d.id),
-        registeredCount: registeredByCompetition.get(d.id) ?? 0,
+        registeredCount: approvedByCompetition.get(d.id) ?? 0,
         season: typeof data.season === 'string' ? data.season : '',
         // Not computed here — the list has no format editor and this
         // would cost a query per competition. See the field's comment.

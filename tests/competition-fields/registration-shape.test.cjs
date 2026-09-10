@@ -41,6 +41,8 @@ const {
   normalizeRegistrationStatus,
   normalizeStoredRegistration,
   buildRegistrationWrite,
+  isCompetingRegistration,
+  isFeeQuotedRegistration,
 } = require(path.join(OUT, 'registration-shape.js'));
 
 let pass = 0;
@@ -71,6 +73,69 @@ for (const junk of ['APPROVED', 'accepted', '', 1, {}, true]) {
 }
 eq('the list covers exactly the five states', REGISTRATION_STATUSES.join(','), 'pending,waitlisted,approved,cancelled,rejected');
 ok('"registered" is NOT a member of the enum — a stored spelling only', !REGISTRATION_STATUSES.includes('registered'));
+
+console.log('\n  -- what a status MEANS: the two questions (D7) --');
+// COMPETING — the roster, the ТАМИРЧИН count, round progress, Эхлүүлэх.
+eq('approved competes', isCompetingRegistration('approved'), true);
+for (const s of ['pending', 'waitlisted', 'cancelled', 'rejected']) {
+  eq(`${s} does NOT compete`, isCompetingRegistration(s), false);
+}
+// The legacy spellings: these athletes registered under a system with no
+// review, and must not drop out of a roster they are already in.
+eq('the legacy "registered" competes', isCompetingRegistration('registered'), true);
+eq('an absent status competes', isCompetingRegistration(undefined), true);
+eq('junk does NOT compete (fail closed)', isCompetingRegistration('APPROVED'), false);
+
+// QUOTED A FEE — the fee-change warning, and only it.
+for (const s of ['pending', 'waitlisted', 'approved']) {
+  eq(`${s} was quoted the fee`, isFeeQuotedRegistration(s), true);
+}
+eq('cancelled was NOT', isFeeQuotedRegistration('cancelled'), false);
+eq('rejected was NOT', isFeeQuotedRegistration('rejected'), false);
+eq('the legacy "registered" was quoted the fee', isFeeQuotedRegistration('registered'), true);
+// Junk reads as pending, which IS quoted — the two predicates disagree
+// about it deliberately: fail closed on who competes, fail open on
+// warning the admin that someone may be affected by a re-pricing.
+eq('junk counts as quoted (a warning is the safe side)', isFeeQuotedRegistration('APPROVED'), true);
+ok('the two questions differ for exactly pending and waitlisted',
+  REGISTRATION_STATUSES.filter((s) => isCompetingRegistration(s) !== isFeeQuotedRegistration(s)).join(',') ===
+    'pending,waitlisted');
+
+console.log('\n  -- D7 call sites: every reader asks one of the two questions --');
+// A source audit, not a behaviour test: these five sites are React
+// components and Next route handlers that cannot be loaded here, and the
+// whole point of PR-2 is that NONE of them treats a registration as a
+// competitor on its own. The roster's and the counts' real behaviour is
+// pinned against the emulator in roundtrip.test.cjs.
+{
+  const src = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
+  const uses = (rel, needle) => ok(`${rel} -> ${needle}`, src(rel).includes(needle));
+
+  // Approved only.
+  uses('lib/online-competition/scramble-roster.ts', 'isCompetingRegistration(d.data().status)');
+  uses('app/api/online-competition/admin-competitions/route.ts', "isCompetingRegistration(d.get('status'))");
+  uses('app/online-competition/admin/_components/AdminOverview.tsx', "r.status === 'approved'");
+  // Everyone who was quoted a price — the ONE site that is deliberately wider.
+  uses('lib/online-competition/admin-competitions.ts', 'isFeeQuotedRegistration(d.data().status)');
+
+  // The athlete's own views, all through the same copy function.
+  for (const rel of [
+    'app/online-competition/dashboard/_components/LiveCard.tsx',
+    'app/online-competition/dashboard/_components/UpcomingCard.tsx',
+    'app/online-competition/_components/hub/v3/MyCompetitions.tsx',
+    'app/online-competition/[competitionId]/details/_components/RegistrationPanel.tsx',
+  ]) {
+    uses(rel, 'competeGateCopy(');
+  }
+  // The start button is behind the gate, not merely styled differently.
+  const live = src('app/online-competition/dashboard/_components/LiveCard.tsx');
+  ok('LiveCard returns the locked chip BEFORE it can reach the Эхлүүлэх link',
+    live.indexOf('if (gate) {') < live.indexOf('oc-v3-start-btn"'));
+  // The admin review listing must NOT be filtered — the review table is
+  // the one place that has to see every status.
+  ok('the admin registrations listing stays unfiltered',
+    !src('lib/online-competition/admin-registrations.ts').includes('isCompetingRegistration'));
+}
 
 console.log('\n  -- read shape --');
 {

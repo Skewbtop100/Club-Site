@@ -37,7 +37,13 @@ execFileSync(
   { cwd: ROOT, stdio: 'inherit' },
 );
 
-const { registrationWindow, feeView, profileGateCopy, registrationStatusCopy } = require(path.join(OUT, 'registration-view.js'));
+const {
+  registrationWindow,
+  feeView,
+  profileGateCopy,
+  registrationStatusCopy,
+  competeGateCopy,
+} = require(path.join(OUT, 'registration-view.js'));
 
 let pass = 0;
 let fail = 0;
@@ -158,6 +164,41 @@ console.log('\n  -- registrationStatusCopy: what the athlete is told --');
   const labels = ['pending', 'waitlisted', 'approved', 'cancelled', 'rejected'].map((s) => registrationStatusCopy(s).label);
   ok('all five labels are distinct', new Set(labels).size === 5, labels.join(' / '));
 }
+
+console.log('\n  -- competeGateCopy: who may start solving (D7) --');
+// APPROVED ONLY. This is the single answer the dashboard's Эхлүүлэх
+// button, the upcoming card's reminder line and the panel's "the button
+// will open" promise all read — so the three cannot contradict each other.
+eq('approved: NO gate, the button appears', competeGateCopy('approved'), null);
+for (const s of ['pending', 'waitlisted', 'cancelled', 'rejected']) {
+  ok(`${s}: gated — no start button`, competeGateCopy(s) !== null);
+}
+{
+  const g = (s) => competeGateCopy(s);
+  // The row chip is the status badge's own word: the badge above it and
+  // the chip in the button's place must not say different things.
+  for (const s of ['pending', 'waitlisted', 'cancelled', 'rejected']) {
+    eq(`${s}: the chip is the status label`, g(s).label, registrationStatusCopy(s).label);
+  }
+  const messages = ['pending', 'waitlisted', 'cancelled', 'rejected'].map((s) => g(s).message);
+  ok('all four reasons are different', new Set(messages).size === 4, messages.join(' / '));
+  // A pending athlete must be told it is the REVIEW, not a fault of
+  // theirs and not a bug.
+  ok('pending names the review', /хянаж/.test(g('pending').message), g('pending').message);
+  ok('waitlisted names the place opening up', /Орон тоо/.test(g('waitlisted').message), g('waitlisted').message);
+  // Cancelled and rejected are final: they must not suggest waiting for
+  // something that is not coming.
+  for (const s of ['cancelled', 'rejected']) {
+    ok(`${s} does not promise a button later`, !/нээгдэнэ/.test(g(s).message), g(s).message);
+  }
+  // No mechanism notifies anyone — the copy must not claim one.
+  ok('no reason promises a notification',
+    messages.every((m) => !/мэдэгдэ|сануулга/.test(m)), messages.join(' / '));
+}
+// The gate and the edit button are separate questions: a pending athlete
+// may still change their events, they just may not solve.
+ok('pending: gated from solving but still allowed to edit',
+  competeGateCopy('pending') !== null && registrationStatusCopy('pending').canEdit === true);
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 fs.rmSync(OUT, { recursive: true, force: true });

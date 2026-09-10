@@ -1,5 +1,9 @@
 import type { Firestore } from 'firebase-admin/firestore';
-import type { OnlineParticipantProfileStatus } from '@/lib/online-competition/types';
+// Relative, like every other module in this directory — the alias worked
+// but kept this file out of the tsc-to-CommonJS harness the emulator
+// suites use.
+import { isCompetingRegistration } from './registration-shape';
+import type { OnlineParticipantProfileStatus } from './types';
 
 /** One registered athlete, with everything the group-assignment UI and the
  *  auto-seeder need: which events they signed up for, when they registered
@@ -32,8 +36,24 @@ function resolveStatus(value: unknown): OnlineParticipantProfileStatus {
     : 'incomplete';
 }
 
-/** Registered athletes for one competition, joined against their
+/** APPROVED athletes for one competition, joined against their
  *  onlineParticipants profile for displayName + stats.
+ *
+ *  APPROVED ONLY (D7). This roster is what group assignments and official
+ *  scrambles are built from, so a pending athlete appearing here would be
+ *  given a group and an official scramble before anyone agreed to let
+ *  them compete. The legacy 'registered' spelling counts as approved —
+ *  see isCompetingRegistration.
+ *
+ *  A status change does NOT reach back into
+ *  onlineCompetitions/{id}/groupAssignments: an athlete assigned to a
+ *  group and later cancelled keeps their entry in that map until the
+ *  round is auto-assigned again (which rewrites the map wholesale from
+ *  this roster). They stop appearing in the groups tab, because it renders
+ *  from this list — but the entry is still there, and the scramble route
+ *  still looks a uid up in it directly. That route is gated on round
+ *  access, not on registration status; the server-side solve gate is
+ *  PR-3.
  *
  *  Uses the same `collectionGroup('registrations')` + grandparent filter as
  *  GET /admin-competitions/[id]/registrations — see the long comment there
@@ -46,7 +66,10 @@ export async function fetchScrambleRoster(
 ): Promise<ScrambleRosterAthlete[]> {
   const snap = await db.collectionGroup('registrations').get();
   const matches = snap.docs.filter(
-    (d) => d.ref.parent.parent?.parent.id === 'onlineParticipants' && d.data().competitionId === competitionId,
+    (d) =>
+      d.ref.parent.parent?.parent.id === 'onlineParticipants' &&
+      d.data().competitionId === competitionId &&
+      isCompetingRegistration(d.data().status),
   );
   if (matches.length === 0) return [];
 

@@ -13,6 +13,7 @@ import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import { onlineCompAuth } from '@/lib/online-competition/firebase';
 import { fetchParticipant, registerForCompetition, resolveProfileStatus } from '@/lib/online-competition/data';
 import {
+  competeGateCopy,
   feeView,
   profileGateCopy,
   registrationStatusCopy,
@@ -482,6 +483,9 @@ function RegisteredSummary({
 }) {
   const chosen = events.filter((e) => saved.events.has(e.eventId));
   const tone = status ? registrationStatusCopy(status).tone : 'muted';
+  // null while the status is still unknown (a save that has not re-read
+  // yet): say nothing rather than guess.
+  const gate = status ? competeGateCopy(status) : null;
   return (
     <div className="oc-rp">
       <div className="oc-rp-head">
@@ -518,12 +522,22 @@ function RegisteredSummary({
         </div>
       )}
       <FeeBlock fee={fee} />
+      {/* This line PROMISES a button. Only an approved registration gets
+          one (D7), so for every other status it says what actually
+          happens instead — a pending athlete told to wait for Эхлүүлэх
+          would wait for something that is not coming. */}
       <p className="oc-rp-muted" style={{ padding: '14px 16px 0' }}>
-        Раунд эхлэхэд{' '}
-        <Link href="/online-competition/dashboard" className="oc-rp-link">
-          «Миний тэмцээнүүд»
-        </Link>{' '}
-        дээр «Эхлүүлэх» товч нээгдэнэ.
+        {gate ? (
+          gate.message
+        ) : (
+          <>
+            Раунд эхлэхэд{' '}
+            <Link href="/online-competition/dashboard" className="oc-rp-link">
+              «Миний тэмцээнүүд»
+            </Link>{' '}
+            дээр «Эхлүүлэх» товч нээгдэнэ.
+          </>
+        )}
       </p>
       {footer}
     </div>

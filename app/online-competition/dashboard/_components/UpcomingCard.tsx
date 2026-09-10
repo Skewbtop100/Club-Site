@@ -1,6 +1,7 @@
 import type { OnlineCompetition, OnlineRegistration } from '@/lib/online-competition/types';
 import { fmtDateTime } from '../../_components/hub/format';
 import RegistrationStatusBadge from '../../_components/RegistrationStatusBadge';
+import { competeGateCopy } from '@/lib/online-competition/registration-view';
 
 export default function UpcomingCard({
   competition,
@@ -11,6 +12,10 @@ export default function UpcomingCard({
 }) {
   const myEvents = competition.events.filter((e) => registration.events.includes(e.eventId));
   const codes = myEvents.map((e) => e.eventId.toUpperCase()).join(', ');
+  // Approved only (D7). This card has no button to hide — what it has is
+  // a line promising the competition will start FOR THIS ATHLETE, which
+  // is the claim that has to go.
+  const gate = competeGateCopy(registration.status);
 
   return (
     <div style={{ padding: '15px 18px', borderBottom: '1px solid #16161B' }}>
@@ -43,9 +48,17 @@ export default function UpcomingCard({
       <div style={{ marginTop: 10 }}>
         <RegistrationStatusBadge status={registration.status} withDetail />
       </div>
+      {/* "эхлэхэд сануулга ирнэ" is a promise about a competition this
+          athlete is in. Not approved: the events they asked for, and then
+          why nothing will open. */}
       <p style={{ marginTop: 8, font: '400 11px var(--oc-font-mono), monospace', color: '#9A958A' }}>
-        {codes} · эхлэхэд сануулга ирнэ
+        {gate ? codes : `${codes} · эхлэхэд сануулга ирнэ`}
       </p>
+      {gate && (
+        <p className="oc-v3-gate-line" style={{ marginTop: 6 }}>
+          {gate.message}
+        </p>
+      )}
     </div>
   );
 }
