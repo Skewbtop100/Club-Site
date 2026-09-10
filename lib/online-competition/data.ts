@@ -20,6 +20,7 @@ import {
   normalizeStoredSchedule,
   normalizeStoredSections,
 } from './competition-shape';
+import { REGISTRATION_NOTE_MAX } from './types';
 import type {
   OnlineCompetition,
   OnlineCompetitionStatus,
@@ -306,23 +307,39 @@ function registrationRef(uid: string, competitionId: string) {
 // Plain setDoc (no merge) — the doc ID is the competitionId, so
 // re-registering for the same competition overwrites the previous
 // selection wholesale rather than merging stale array entries into it.
+// That wholesale overwrite is also what makes CLEARING the note work: a
+// save with no note writes a document with no `note` key, and the old one
+// is gone.
 export async function registerForCompetition(
   uid: string,
   competitionId: string,
   eventIds: string[],
+  note = '',
 ): Promise<void> {
+  // Trimmed, capped, and OMITTED when blank — absent is the one spelling
+  // of "no note" (see the field comment in types.ts). The cap is also
+  // enforced by firestore.rules; slicing here means a paste one character
+  // over never reaches the rules as a refused write.
+  const trimmed = note.trim().slice(0, REGISTRATION_NOTE_MAX);
   await setDoc(registrationRef(uid, competitionId), {
     competitionId,
     events: eventIds,
     registeredAt: serverTimestamp(),
     status: 'registered',
+    ...(trimmed ? { note: trimmed } : {}),
   });
 }
 
 export async function fetchRegistration(uid: string, competitionId: string): Promise<OnlineRegistration | null> {
   const snap = await getDoc(registrationRef(uid, competitionId));
   if (!snap.exists()) return null;
-  return snap.data() as OnlineRegistration;
+  const data = snap.data() as OnlineRegistration;
+  // The note is typed by the athlete and pre-fills a form, so it is read
+  // defensively: a non-string (a hand edit) reads as no note rather than
+  // reaching a textarea as "[object Object]".
+  const note = typeof data.note === 'string' && data.note.trim() ? data.note : undefined;
+  const { note: _raw, ...rest } = data;
+  return note === undefined ? rest : { ...rest, note };
 }
 
 // For the "Миний тэмцээнүүд" dashboard — every competition this user has

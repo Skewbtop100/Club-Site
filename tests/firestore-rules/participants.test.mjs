@@ -233,6 +233,70 @@ await check('E7. approved athlete changes photoPublicId alone (not a reviewed fi
   updateDoc(ref, { photoPublicId: 'other' }),
 );
 
+// ── Registrations: onlineParticipants/{uid}/registrations/{competitionId} ──
+// This collection had NO rules coverage until the `note` field. The client
+// writes it directly — there is no API route in between — so these rules
+// are the only server-side validation a registration ever gets.
+const reg = (ref, competitionId = 'comp1') => doc(ref, 'registrations', competitionId);
+const REG = { competitionId: 'comp1', events: ['333'], status: 'registered' };
+const NOTE_300 = 'а'.repeat(300); // Cyrillic: size() counts characters
+
+await check('R1. owner registers with events', 'ALLOW', APPROVED, (ref) =>
+  setDoc(reg(ref), { ...REG, registeredAt: serverTimestamp() }),
+);
+await check('R2. registration with NO note (every doc before the field)', 'ALLOW', APPROVED, (ref) =>
+  setDoc(reg(ref), REG),
+);
+await check('R3. note of exactly 300 characters', 'ALLOW', APPROVED, (ref) =>
+  setDoc(reg(ref), { ...REG, note: NOTE_300 }),
+);
+await check('R4. note of 301 characters is REFUSED', 'DENY', APPROVED, (ref) =>
+  setDoc(reg(ref), { ...REG, note: NOTE_300 + 'а' }),
+);
+await check('R5. a non-string note is REFUSED', 'DENY', APPROVED, (ref) =>
+  setDoc(reg(ref), { ...REG, note: 42 }),
+);
+await check('R6. a map smuggled in as the note is REFUSED', 'DENY', APPROVED, (ref) =>
+  setDoc(reg(ref), { ...REG, note: { text: 'x' } }),
+);
+await check('R7. editing: overwrite that DROPS the note (clearing it)', 'ALLOW', APPROVED, async (ref) => {
+  await setDoc(reg(ref), { ...REG, note: 'хамт ирнэ' });
+  return setDoc(reg(ref), REG);
+});
+await check('R8. empty events list is refused (pre-existing rule)', 'DENY', APPROVED, (ref) =>
+  setDoc(reg(ref), { ...REG, events: [] }),
+);
+await check('R9. competitionId must match the doc id (pre-existing rule)', 'DENY', APPROVED, (ref) =>
+  setDoc(reg(ref), { ...REG, competitionId: 'other' }),
+);
+await check('R10. writing ANOTHER athlete\'s registration is refused', 'DENY', APPROVED, (ref) =>
+  setDoc(doc(ref.firestore, 'onlineParticipants', 'someoneElse', 'registrations', 'comp1'), REG),
+);
+await check('R11. deleting a registration is refused', 'DENY', APPROVED, async (ref) => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'onlineParticipants', UID, 'registrations', 'comp1'), REG);
+  });
+  const { deleteDoc } = await import('firebase/firestore');
+  return deleteDoc(reg(ref));
+});
+
+// ── KNOWN GAPS — these document what the rules do NOT enforce today ──
+// Each is a gate the registration panel applies CLIENT-SIDE only. They are
+// asserted as ALLOW so that hardening the rules makes these fail loudly
+// and forces whoever hardened them to update this list, rather than the
+// gap being invisible.
+await check('GAP-1. an UNAPPROVED athlete can write a registration directly', 'ALLOW', null, (ref) =>
+  setDoc(reg(ref), REG),
+);
+await check('GAP-2. a registration for a competition id that does not exist is accepted', 'ALLOW', APPROVED, (ref) =>
+  setDoc(reg(ref, 'no-such-comp'), { ...REG, competitionId: 'no-such-comp' }),
+);
+await check('GAP-3. event ids are not checked against the competition', 'ALLOW', APPROVED, (ref) =>
+  setDoc(reg(ref), { ...REG, events: ['not-an-event'] }),
+);
+// The deadline, status and participant limit are not checked either — the
+// rule never reads the competition document at all, so GAP-2 covers them.
+
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 await testEnv.cleanup();
 process.exit(fail === 0 ? 0 : 1);

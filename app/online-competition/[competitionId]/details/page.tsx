@@ -331,7 +331,7 @@ export default function CompetitionDetailPage() {
                     registration off the public site — see the note in the
                     handover. Its own redesign is a later changeset. */}
                 <div style={{ marginTop: 14 }}>
-                  <RegistrationPanel competitionId={competition.id} events={competition.events} />
+                  <RegistrationPanel competition={competition} />
                 </div>
               </>
             ) : (

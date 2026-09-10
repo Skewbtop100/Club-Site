@@ -324,11 +324,19 @@ service cloud.firestore {
 
       match /registrations/{competitionId} {
         allow read: if isSignedIn();
+        // `note` — optional, a string of at most 300 characters. 300 is
+        // REGISTRATION_NOTE_MAX in lib/online-competition/types.ts; rules
+        // cannot import it, so change both together. This is the only
+        // server-side validation a registration gets: the athlete's client
+        // writes it directly, with no API route in between.
         allow create, update: if isSignedIn() &&
                                   request.auth.uid == uid &&
                                   request.resource.data.competitionId == competitionId &&
                                   request.resource.data.events is list &&
-                                  request.resource.data.events.size() > 0;
+                                  request.resource.data.events.size() > 0 &&
+                                  (!('note' in request.resource.data) ||
+                                   (request.resource.data.note is string &&
+                                    request.resource.data.note.size() <= 300));
         allow delete: if false;
       }
     }

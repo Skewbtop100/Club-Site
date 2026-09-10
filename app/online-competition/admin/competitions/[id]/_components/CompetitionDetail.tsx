@@ -99,7 +99,8 @@ function AthletesTab({ competition }: { competition: OnlineCompetitionAdminView 
       .then((data) => {
         if (!cancelled) setRegistrations(data.registrations);
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error('CompetitionDetail: loading registrations failed:', err);
         if (!cancelled) setError('Бүртгэлийг ачааллаж чадсангүй');
       });
     return () => {
@@ -127,6 +128,14 @@ function AthletesTab({ competition }: { competition: OnlineCompetitionAdminView 
                   {athletes.map((a) => (
                     <div key={a.uid} className="oc-table-row" style={{ gridTemplateColumns: '1fr' }}>
                       <span className="oc-table-name">{a.displayName}</span>
+                      {/* The athlete's note to the organiser. The public
+                          registration form tells them "Зохион байгуулагч энэ
+                          тайлбарыг бүртгэлийн хуудсанд харна" — this is where
+                          that is true. Repeated under every event the
+                          athlete entered, because this tab is grouped by
+                          event and an organiser reading one group should not
+                          have to go looking in another. */}
+                      {a.note && <span className="oc-adm-reg-note">{a.note}</span>}
                     </div>
                   ))}
                 </div>

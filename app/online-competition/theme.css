@@ -1860,6 +1860,295 @@
 }
 
 /* ── the Ерөнхий tab ─────────────────────────────────────────────────── */
+/* ── Бүртгүүлэх: the registration panel ────────────────────────────
+   RegistrationPanel.tsx. One bordered card for every state — intro,
+   profile gate, form, registered summary, closed — so moving between
+   them changes the contents, never the frame. */
+.oc-rp {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #1C1C21;
+  background: #0D0D10;
+}
+/* The short states (intro, gate, closed) are padded blocks of prose. */
+.oc-rp-intro,
+.oc-rp-message {
+  gap: 12px;
+  padding: 18px 16px;
+}
+.oc-rp-intro {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.oc-rp-title {
+  font: 600 15px/1.3 var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+}
+/* Amber, not red: an unapproved profile is a step still to take. */
+.oc-rp-title-warn {
+  color: #E0A020;
+}
+.oc-rp-body {
+  max-width: 60ch;
+  font: 400 13px/1.6 var(--oc-font-heading), sans-serif;
+  color: #9A958A;
+}
+.oc-rp-muted {
+  font: 400 12px/1.5 var(--oc-font-heading), sans-serif;
+  color: #6E6A62;
+}
+.oc-rp-error {
+  font: 400 12px/1.5 var(--oc-font-heading), sans-serif;
+  color: #E8543C;
+}
+
+/* Header row over the event list: ЯМАР ТӨРӨЛД ОРОХ · N сонгогдсон. */
+.oc-rp-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #1C1C21;
+}
+.oc-rp-label {
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .18em;
+  color: #6E6A62;
+}
+.oc-rp-count {
+  font: 500 10px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .14em;
+  color: #9A958A;
+  white-space: nowrap;
+}
+.oc-rp-done {
+  font: 600 11px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .1em;
+  color: #4FD07A;
+}
+
+/* The event rows' container; the rows draw their own dividers. */
+.oc-rp-list {
+  display: flex;
+  flex-direction: column;
+}
+/* One row per event: checkbox · icon · name · N раунд. The whole row is a
+   <label>, so all of it toggles the box. */
+.oc-rp-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #16161B;
+  cursor: pointer;
+}
+.oc-rp-row:hover {
+  background: #131318;
+}
+/* The registered summary reuses the row for its read-only list. */
+.oc-rp-row-static {
+  cursor: default;
+}
+.oc-rp-row-static:hover {
+  background: transparent;
+}
+/* The real checkbox, visually hidden but still focusable and announced;
+   .oc-rp-box after it is what is seen. */
+.oc-rp-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.oc-rp-box {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid #2A2A31;
+  border-radius: 2px;
+  background: transparent;
+}
+.oc-rp-row-on .oc-rp-box {
+  border-color: #DFFF4F;
+  background: #DFFF4F;
+}
+.oc-rp-input:focus-visible + .oc-rp-box {
+  outline: 2px solid #DFFF4F;
+  outline-offset: 2px;
+}
+.oc-rp-name {
+  flex: 1;
+  min-width: 0;
+  font: 500 14px/1 var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+}
+.oc-rp-rounds {
+  flex: none;
+  font: 500 10px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .14em;
+  color: #6E6A62;
+  white-space: nowrap;
+}
+
+/* ТАЙЛБАР · СОНГОЛТТОЙ */
+.oc-rp-note {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border-bottom: 1px solid #16161B;
+}
+.oc-rp-textarea {
+  width: 100%;
+  min-height: 84px;
+  resize: vertical;
+  border: 1px solid #2A2A31;
+  border-radius: 2px;
+  background: #08080A;
+  padding: 11px 12px;
+  font: 400 13px/1.5 var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+}
+.oc-rp-textarea::placeholder {
+  color: #4A4740;
+}
+.oc-rp-textarea:focus-visible {
+  outline: none;
+  border-color: #DFFF4F;
+}
+.oc-rp-hint {
+  font: 500 9px/1.6 var(--oc-font-mono), monospace;
+  letter-spacing: .1em;
+  color: #6E6A62;
+}
+/* The saved note in the registered summary: the athlete's own words,
+   line breaks intact. */
+.oc-rp-note-text {
+  white-space: pre-wrap;
+  color: #F4F1EA;
+}
+
+/* ТӨЛӨХ ДҮН — paid competitions only. */
+.oc-rp-fee {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #16161B;
+}
+.oc-rp-fee-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.oc-rp-fee-total {
+  font: 600 18px/1 var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #F4F1EA;
+}
+
+/* The submit row: the deadline promise on the left, the action right. */
+.oc-rp-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+}
+.oc-rp-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.oc-rp-submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 2px;
+  background: #DFFF4F;
+  padding: 13px 20px;
+  cursor: pointer;
+  white-space: nowrap;
+  font: 600 11px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .12em;
+  color: #08080A;
+  text-decoration: none;
+}
+.oc-rp-submit:hover:not(:disabled) {
+  background: #E9FF7A;
+}
+.oc-rp-submit:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
+.oc-rp-submit:focus-visible,
+.oc-rp-cancel:focus-visible {
+  outline: 2px solid #DFFF4F;
+  outline-offset: 2px;
+}
+.oc-rp-cancel {
+  border: 1px solid #2A2A31;
+  border-radius: 2px;
+  background: transparent;
+  padding: 12px 16px;
+  cursor: pointer;
+  font: 500 12px/1 var(--oc-font-heading), sans-serif;
+  color: #9A958A;
+}
+.oc-rp-cancel:hover:not(:disabled) {
+  color: #F4F1EA;
+}
+.oc-rp-link {
+  font: 500 12px/1 var(--oc-font-heading), sans-serif;
+  color: #9A958A;
+  text-decoration: none;
+}
+.oc-rp-link:hover {
+  color: #DFFF4F;
+}
+
+/* The athlete's note on the admin Тамирчид tab, under their name. */
+.oc-adm-reg-note {
+  font: 400 12px/1.5 var(--oc-font-heading), sans-serif;
+  color: #9A958A;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 640px) {
+  /* Stacked: the promise above, the action full width below it. */
+  .oc-rp-foot {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .oc-rp-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+  .oc-rp-submit,
+  .oc-rp-cancel {
+    width: 100%;
+    min-height: 44px;
+  }
+  .oc-rp-intro {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .oc-rp-row {
+    min-height: 52px;
+  }
+}
+
 /* ── ТӨРЛҮҮД: the event/round table ─────────────────────────────────
    A real <table>. Six columns do not fit a phone, so the table keeps its
    shape and scrolls inside this frame instead — wrapping cells would
@@ -3034,143 +3323,6 @@
   white-space: nowrap;
 }
 
-/* ── Registration panel, dark chrome ──────────────────────────────────
-   Only the container/button styling changes — RegistrationPanel.tsx's
-   idle -> picking -> registered state machine is untouched. */
-.oc-v3-reg-idle {
-  border-top: 1px solid #1C1C21;
-  padding-top: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.oc-v3-btn-register {
-  display: inline-block;
-  border: none;
-  background: #DFFF4F;
-  color: #08080A;
-  padding: 14px 26px;
-  font: 700 13px var(--oc-font-heading), sans-serif;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  text-align: center;
-  text-decoration: none;
-  cursor: pointer;
-}
-.oc-v3-btn-register:hover {
-  background: #E9FF7A;
-}
-.oc-v3-btn-register:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-.oc-v3-reg-pill {
-  border: 1px solid #4FD07A;
-  background: #0F1A12;
-  padding: 12px 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-}
-.oc-v3-check {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  border: 1.5px solid #4FD07A;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #4FD07A;
-  font-size: 9px;
-  font-weight: 700;
-}
-.oc-v3-reg-gated {
-  border: 1px solid #7A5E12;
-  background: #1A1608;
-  padding: 18px;
-}
-.oc-v3-reg-picking {
-  border: 1px solid #2A2A31;
-  background: #0D0D10;
-}
-.oc-v3-reg-picking-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 15px 16px;
-  border-bottom: 1px solid #1C1C21;
-}
-.oc-v3-reg-picking-body {
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.oc-v3-reg-toggle-row {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  border: 1px solid #2A2A31;
-  background: transparent;
-  padding: 12px 13px;
-  text-align: left;
-  cursor: pointer;
-}
-.oc-v3-reg-toggle-row:hover {
-  border-color: #DFFF4F;
-}
-.oc-v3-reg-picking-foot {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  padding: 14px 16px;
-  border-top: 1px solid #1C1C21;
-}
-.oc-v3-btn-cancel {
-  border: 1px solid #2A2A31;
-  background: transparent;
-  color: #9A958A;
-  padding: 12px 16px;
-  font: 500 12px var(--oc-font-heading), sans-serif;
-  cursor: pointer;
-}
-.oc-v3-btn-cancel:hover {
-  border-color: #6E6A62;
-  color: #F4F1EA;
-}
-.oc-v3-reg-registered {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.oc-v3-reg-chip {
-  display: inline-block;
-  border: 1px solid #2B3410;
-  background: #101408;
-  color: #DFFF4F;
-  padding: 7px 9px;
-  font: 600 10px var(--oc-font-mono), monospace;
-  letter-spacing: 0.06em;
-}
-.oc-v3-btn-edit-reg {
-  border: 1px solid #2A2A31;
-  background: transparent;
-  color: #9A958A;
-  padding: 10px 14px;
-  font: 600 9px var(--oc-font-mono), monospace;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-.oc-v3-btn-edit-reg:hover {
-  border-color: #DFFF4F;
-  color: #DFFF4F;
-}
-
 .oc-v3-back-link {
   display: inline-block;
   font: 400 11px var(--oc-font-mono), monospace;
@@ -3338,10 +3490,6 @@
   .oc-v3-live-btn,
   .oc-v3-hero-cta,
   .oc-v3-section-toggle,
-  .oc-v3-btn-register,
-  .oc-v3-btn-cancel,
-  .oc-v3-btn-edit-reg,
-  .oc-v3-reg-toggle-row,
   .oc-v3-back-link,
   .oc-v3-label-link {
     min-height: 44px;
@@ -3354,8 +3502,7 @@
   .oc-v3-hero-cta,
   .oc-v3-row-action,
   .oc-v3-back-link,
-  .oc-v3-label-link,
-  .oc-v3-btn-register {
+  .oc-v3-label-link {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -3439,8 +3586,7 @@
   .oc-v3-hero-cta-wrap {
     width: 100%;
   }
-  .oc-v3-hero-cta,
-  .oc-v3-reg-idle .oc-v3-btn-register {
+  .oc-v3-hero-cta {
     width: 100%;
   }
   .oc-v3-dhero {
@@ -3457,10 +3603,6 @@
   }
   .oc-v3-cd-days {
     font-size: 30px;
-  }
-  /* Confirm/cancel share the footer width rather than one stretching. */
-  .oc-v3-reg-picking-foot > * {
-    flex: 1;
   }
 
   .oc-v3-main {

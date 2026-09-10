@@ -549,9 +549,29 @@ export interface OnlineRegistration {
   competitionId: string;
   /** eventIds the athlete selected, e.g. ["333", "222"]. */
   events: string[];
+  /** Server time of the LAST write — registerForCompetition overwrites
+   *  the whole document on every save, including an edit, so this is when
+   *  the current selection was made, not when the athlete first joined. */
   registeredAt?: Timestamp;
   status: OnlineRegistrationStatus;
+  /** The athlete's optional note to the organiser — someone coming with
+   *  them, a special requirement, a phone number. Shown to the admin on
+   *  the competition's Тамирчид tab.
+   *
+   *  ABSENT means no note. Never stored as '': registerForCompetition omits
+   *  the key when the text is blank, so there is one representation of
+   *  "none", and every registration written before this field existed
+   *  already has it. At most REGISTRATION_NOTE_MAX characters — enforced
+   *  by firestore.rules, which is the only server-side check this
+   *  collection has (the client writes it directly; there is no API
+   *  route in between). */
+  note?: string;
 }
+
+/** The note's ceiling, in characters. firestore.rules repeats the number
+ *  (`note.size() <= 300`) — rules cannot import it, so the two must be
+ *  changed together. */
+export const REGISTRATION_NOTE_MAX = 300;
 
 export type OnlineSubmissionStatus = 'pending' | 'approved' | 'rejected';
 

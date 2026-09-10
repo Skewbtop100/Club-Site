@@ -6,6 +6,10 @@ export interface RegistrationAdminView {
   uid: string;
   displayName: string;
   events: string[];
+  /** The athlete's note to the organiser, or null when they left none.
+   *  The registration form promises the organiser sees it "on the
+   *  registration page" — this is the path that keeps that promise. */
+  note: string | null;
 }
 
 // Admin-only listing for the competition detail page's "Тамирчид" tab.
@@ -48,10 +52,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const registrations: RegistrationAdminView[] = matches.map((d) => {
     const uid = d.ref.parent.parent!.id;
     const events = d.data().events;
+    const note = d.data().note;
     return {
       uid,
       displayName: nameByUid.get(uid) ?? uid,
       events: Array.isArray(events) ? events : [],
+      // Mapped field by field like the rest, so it has to be named here —
+      // an unnamed field is simply not in the response.
+      note: typeof note === 'string' && note.trim() ? note : null,
     };
   });
 
