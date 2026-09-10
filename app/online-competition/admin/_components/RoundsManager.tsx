@@ -88,7 +88,8 @@ export default function RoundsManager() {
       };
       setRounds(d.rounds ?? []);
       setGaps(d.eventsWithoutLiveRound ?? []);
-    } catch {
+    } catch (err) {
+      console.error('RoundsManager: loading rounds failed:', err);
       setRounds(null);
       setGaps([]);
       setLoadError('Раундын мэдээллийг ачааллаж чадсангүй');
@@ -119,7 +120,8 @@ export default function RoundsManager() {
         return;
       }
       await load();
-    } catch {
+    } catch (err) {
+      console.error('RoundsManager: the round open/close action failed:', err);
       setRowError({ key, message: 'Үйлдэл амжилтгүй боллоо. Дахин оролдоно уу.' });
     } finally {
       setBusyKey(null);
@@ -344,7 +346,8 @@ function QualifyForm({
         return;
       }
       setPreview(data);
-    } catch {
+    } catch (err) {
+      console.error('RoundsManager: the qualify action failed:', err);
       setError('Шалгаруулахад алдаа гарлаа. Дахин оролдоно уу.');
     } finally {
       setBusy(false);

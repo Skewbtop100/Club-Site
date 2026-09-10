@@ -14,6 +14,31 @@
 // compiler covers them instead: OnlineCompetitionAdminView types every
 // field as REQUIRED, so a mapper that omits one fails `tsc`.
 //
+// ── WHAT THIS SUITE CANNOT TELL YOU: INDEXES ──────────────────────────
+// The emulator SERVES ANY QUERY, whatever indexes exist. Production
+// Firestore does not. So a query needing an index that has not been
+// created passes here forever and fails live with
+// `9 FAILED_PRECONDITION: The query requires an index`.
+//
+// That is not hypothetical either: countRegistrationsFor shipped with a
+// FILTERED collection-group query, passed all four of its assertions
+// below, and 500'd the single-competition GET in production — taking out
+// the competition editor and the admin detail page. See the long note at
+// countRegistrationsFor in admin-competitions.ts.
+//
+// Every OTHER query shape in the online-competition code has since been
+// run against production read-only and confirmed to work: the two
+// composite onlineSubmissions shapes (competitionId+status, uid+status,
+// and competitionId+status+competitionRound), status+orderBy createdAt,
+// uid+orderBy createdAt on notifications, the retentionExpiresAt range,
+// every single-field equality, and the UNFILTERED registrations
+// collection group. The filtered collection-group query was the only gap.
+//
+// So: adding a query with more than one filter, or an orderBy on a field
+// other than the one being filtered, or ANY filter on a collectionGroup,
+// means checking firestore.indexes.json — a green run here is not
+// evidence.
+//
 // Run: npm run test:fields   (wraps the Firestore emulator)
 
 const { execFileSync } = require('node:child_process');
@@ -673,6 +698,14 @@ const read = async (id) => (await db.collection(COL).doc(id).get()).data();
   ok('  ...and paid stays false', dPlainFee.paid === false);
 
   // ── countRegistrationsFor — what the fee-change warning counts ────────
+  // THESE FOUR ASSERTIONS CANNOT SEE THE BUG THIS FUNCTION ONCE HAD. It
+  // used `.where('competitionId', '==', id)` on the collection group,
+  // which the emulator serves happily and production refuses for want of
+  // a COLLECTION_GROUP_ASC index — so this suite was green while the
+  // editor was down. What they DO pin is the behaviour: the right count,
+  // scoped to one competition, with the grandparent guard excluding the
+  // unrelated top-level `registrations` collection. Keep them; just do
+  // not read a pass here as "the query works in production".
   const REG = 'comp-fee-reg';
   await db.collection('onlineCompetitions').doc(REG).set({ name: 'reg', status: 'upcoming', events: [] });
   ok('no registrations -> 0', (await countRegistrationsFor(db, REG)) === 0);

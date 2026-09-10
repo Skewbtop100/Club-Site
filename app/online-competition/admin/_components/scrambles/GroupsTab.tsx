@@ -225,7 +225,8 @@ function EventGroupTable({
       setLocal(data.assignments ?? {});
       setConfirming(false);
       await onChanged();
-    } catch {
+    } catch (err) {
+      console.error('GroupsTab: assigning groups failed:', err);
       setError('Хуваарилахад алдаа гарлаа. Дахин оролдоно уу.');
     } finally {
       setBusy(false);
@@ -246,7 +247,8 @@ function EventGroupTable({
       });
       if (!res.ok) throw new Error('failed');
       await onChanged();
-    } catch {
+    } catch (err) {
+      console.error('GroupsTab: moving the athlete between groups failed:', err);
       // Put the athlete back — the table must never show a group the
       // server didn't accept.
       setLocal((prev) => {

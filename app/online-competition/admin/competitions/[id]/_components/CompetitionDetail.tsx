@@ -20,7 +20,8 @@ export default function CompetitionDetail({ competitionId }: { competitionId: st
       if (!res.ok) throw new Error('failed');
       const data = (await res.json()) as { competition: OnlineCompetitionAdminView };
       setCompetition(data.competition);
-    } catch {
+    } catch (err) {
+      console.error('CompetitionDetail: loading the competition failed:', err);
       setError('Тэмцээний мэдээллийг ачааллаж чадсангүй');
     } finally {
       setLoading(false);

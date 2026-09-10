@@ -175,7 +175,8 @@ export default function EmailChangeDialog({
       } else {
         setStage('preview');
       }
-    } catch {
+    } catch (err) {
+      console.error('EmailChangeDialog: the email change request failed:', err);
       setFetchError('Сервертэй холбогдоход алдаа гарлаа. Дахин оролдоно уу.');
     } finally {
       setBusy(false);

@@ -28,7 +28,10 @@ export default function LoginForm() {
       // Cookie is now set — re-run the server component so it renders
       // the dashboard instead of this form.
       router.refresh();
-    } catch {
+    } catch (err) {
+      // The network failure only — a wrong password comes back as a
+      // non-OK response, not a throw, so nothing secret reaches here.
+      console.error('LoginForm: the admin login request failed:', err);
       setError('Сүлжээний алдаа гарлаа');
     } finally {
       setLoading(false);

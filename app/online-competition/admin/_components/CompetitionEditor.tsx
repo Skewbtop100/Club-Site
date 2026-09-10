@@ -394,7 +394,16 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
         setLockedEventIds(c.lockedEventIds ?? []);
         setLoading(false);
       })
-      .catch(() => {
+      .catch((err) => {
+        // Logged BEFORE the cancelled check: a real failure is worth
+        // seeing whether or not the editor is still mounted.
+        //
+        // This .catch covers the fetch AND everything the .then above
+        // does with the response, so a mapping bug (toEventRow on a
+        // malformed event, say) surfaces here wearing the same message a
+        // 500 does. The console is what tells the two apart — a stack
+        // trace pointing into this file means the server was fine.
+        console.error('CompetitionEditor: loading the competition failed:', err);
         if (cancelled) return;
         setLoadError('Тэмцээний мэдээллийг ачааллаж чадсангүй');
         setLoading(false);
@@ -516,9 +525,12 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
       const gapIds = new Set((d.competition.eventsWithoutLiveRound ?? []).map((e) => e.eventId));
       const storedIds = new Set(d.competition.events.map((e) => e.eventId));
       return formEvents.filter((e) => gapIds.has(e.eventId) || !storedIds.has(e.eventId));
-    } catch {
+    } catch (err) {
       // A failed lookup must not stand between the admin and their save —
-      // this is a warning, not a precondition.
+      // this is a warning, not a precondition. Still logged: silently
+      // degrading to "no gaps" is exactly the kind of thing that should
+      // not be invisible when it starts happening on every save.
+      console.error('CompetitionEditor: the round-gap lookup failed, treating it as no gaps:', err);
       return [];
     }
   }, [events, savedId]);
@@ -664,7 +676,8 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
       // Bounded by the CURRENT strip length, which grows and shrinks with
       // the section list.
       if (then === 'next') setTab((t) => Math.min(t + 1, FIXED_TABS.length + sections.length));
-    } catch {
+    } catch (err) {
+      console.error('CompetitionEditor: saving the competition failed:', err);
       setError('Хадгалахад алдаа гарлаа');
     } finally {
       setSaving(false);
@@ -1601,9 +1614,10 @@ function ImageSlot({
     try {
       const uploaded = await uploadImageToCloudinary(file, setProgress);
       onChange(uploaded.secureUrl, uploaded.publicId);
-    } catch {
+    } catch (err) {
       // Deliberately does NOT call onChange — a failed upload leaves
       // whatever image was already there in place.
+      console.error('CompetitionEditor: the poster/banner upload failed:', err);
       setError('Зураг илгээхэд алдаа гарлаа');
     } finally {
       setProgress(null);
@@ -2538,9 +2552,10 @@ function BlockImage({
     try {
       const uploaded = await uploadImageToCloudinary(file, setProgress);
       onChange(uploaded.secureUrl, uploaded.publicId);
-    } catch {
+    } catch (err) {
       // Same as the poster slot: a failed upload leaves whatever was
       // already there untouched.
+      console.error('CompetitionEditor: a section image upload failed:', err);
       setError('Зураг илгээхэд алдаа гарлаа');
     } finally {
       setProgress(null);

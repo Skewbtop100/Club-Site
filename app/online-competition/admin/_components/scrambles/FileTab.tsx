@@ -82,7 +82,8 @@ export default function FileTab({
         `${data.removedScrambleData ?? 0} раундын холилт устгагдлаа` +
           `${data.removedGroupAssignments ? ` (${data.removedGroupAssignments} группын хуваарилалт хамт)` : ''}.`,
       );
-    } catch {
+    } catch (err) {
+      console.error('FileTab: deleting the scramble file failed:', err);
       setParsed({ ok: false, error: 'Устгахад алдаа гарлаа. Дахин оролдоно уу.' });
     } finally {
       setDeleting(false);
@@ -103,7 +104,10 @@ export default function FileTab({
           expectedScrambleCountFor(competition?.events ?? []),
         ),
       );
-    } catch {
+    } catch (err) {
+      // The parse error names the line and column, which the admin-facing
+      // message deliberately does not.
+      console.error('FileTab: parsing the chosen JSON file failed:', err);
       setParsed({ ok: false, error: 'JSON файлыг уншиж чадсангүй (буруу форматтай).' });
     }
   }
@@ -122,7 +126,8 @@ export default function FileTab({
       // real scramble docs, so the admin must be able to see at a glance
       // that these aren't their competition's official scrambles.
       load('ЖИШЭЭ ФАЙЛ (ТУРШИЛТЫН ХОЛИЛТ)', await res.text());
-    } catch {
+    } catch (err) {
+      console.error('FileTab: loading the sample file failed:', err);
       setParsed({ ok: false, error: 'Жишээ файлыг ачааллаж чадсангүй.' });
     }
   }
@@ -152,7 +157,8 @@ export default function FileTab({
         `${data.saved ?? 0} раундын холилт хадгалагдлаа` +
           `${data.removed ? ` · өмнөх ${data.removed} раунд устгагдлаа` : ''}.`,
       );
-    } catch {
+    } catch (err) {
+      console.error('FileTab: saving the scrambles failed:', err);
       setParsed({ ok: false, error: 'Хадгалахад алдаа гарлаа. Дахин оролдоно уу.' });
     } finally {
       setSaving(false);

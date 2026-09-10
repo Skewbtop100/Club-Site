@@ -69,7 +69,8 @@ export default function ScramblesManager() {
       );
       if (!res.ok) throw new Error('failed');
       setOverview((await res.json()) as ScramblesOverview);
-    } catch {
+    } catch (err) {
+      console.error('ScramblesManager: loading the scramble overview failed:', err);
       setOverview(null);
       setLoadError('Холилтын мэдээллийг ачааллаж чадсангүй');
     }

@@ -42,7 +42,8 @@ export default function SubmissionDetailPanel({
       // Panel stays open and re-renders against the patched submission, so
       // the judge can see the decision land instead of the panel vanishing
       // under them. The grid cell recolours at the same time.
-    } catch {
+    } catch (err) {
+      console.error('SubmissionDetailPanel: saving the judgement failed:', err);
       setError('Хадгалахад алдаа гарлаа. Дахин оролдоно уу.');
     } finally {
       setBusy(false);
@@ -202,7 +203,8 @@ export default function SubmissionDetailPanel({
                   setError('');
                   try {
                     await onDelete(submission.id);
-                  } catch {
+                  } catch (err) {
+                    console.error('SubmissionDetailPanel: deleting the submission failed:', err);
                     setError('Устгаж чадсангүй');
                     setBusy(false);
                   }

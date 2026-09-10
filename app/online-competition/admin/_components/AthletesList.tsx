@@ -44,7 +44,8 @@ export default function AthletesList() {
       const approvedData = (await approvedRes.json()) as { athletes: OnlineParticipantAdminView[] };
       setPending(pendingData.athletes);
       setApproved(approvedData.athletes);
-    } catch {
+    } catch (err) {
+      console.error('AthletesList: loading athletes failed:', err);
       setError('Тамирчдын мэдээллийг ачааллаж чадсангүй');
     } finally {
       setLoading(false);
@@ -72,7 +73,8 @@ export default function AthletesList() {
           { ...athlete, profileStatus: 'approved', approvedPhotoUrl: athlete.photoUrl, reviewedAt: Date.now() },
         ]);
       }
-    } catch {
+    } catch (err) {
+      console.error('AthletesList: approving the athlete failed:', err);
       setError('Зөвшөөрөхөд алдаа гарлаа, дахин оролдоно уу');
     } finally {
       setActionLoadingUid(null);
@@ -92,7 +94,8 @@ export default function AthletesList() {
       setPending((prev) => prev.filter((a) => a.uid !== uid));
       setRejectingUid(null);
       setRejectReason('');
-    } catch {
+    } catch (err) {
+      console.error('AthletesList: rejecting the athlete failed:', err);
       setError('Татгалзахад алдаа гарлаа, дахин оролдоно уу');
     } finally {
       setActionLoadingUid(null);

@@ -1012,18 +1012,47 @@ export async function lockedFormatEventIds(db: Firestore, competitionId: string)
 
 /** How many athletes have REGISTERED for this competition.
  *
- *  Targeted at one competition, unlike the list endpoint's
- *  countRegistrationsByCompetition which scans every registration to build
- *  a map. The grandparent check is load-bearing for the same reason it is
- *  there and in scramble-roster.ts: this database has an unrelated
- *  top-level `registrations` collection that the same collectionGroup
- *  query otherwise pulls in.
- *
  *  Used by the editor's fee-change warning, which needs to know whether
- *  anyone has already registered under the current fee. */
+ *  anyone has already registered under the current fee.
+ *
+ *  ── DO NOT ADD `.where('competitionId', '==', id)` TO THIS QUERY ──
+ *  It reads the WHOLE `registrations` collection group and filters in
+ *  memory, which looks wasteful and is deliberate. A FILTERED
+ *  collection-group query needs an index Firestore does not create
+ *  automatically — auto single-field indexes are COLLECTION scope, and
+ *  this needs COLLECTION_GROUP — so the filtered form fails in production
+ *  with:
+ *
+ *    9 FAILED_PRECONDITION: The query requires a COLLECTION_GROUP_ASC
+ *    index for collection registrations and field competitionId
+ *
+ *  That is not hypothetical: this function shipped with the filter and
+ *  500'd the single-competition GET, which took out both the competition
+ *  editor and the admin detail page. The decision not to create that index
+ *  is recorded at app/api/online-competition/admin-competitions/[id]/
+ *  registrations/route.ts:12-17 — "there's no per-competitionId
+ *  collection-group index for that subcollection (and, at this project's
+ *  current scale, adding one isn't worth it)" — and every other caller
+ *  follows it: countRegistrationsByCompetition (the list route),
+ *  fetchScrambleRoster (scramble-roster.ts) and that registrations route
+ *  all do the same unfiltered read plus an in-memory filter.
+ *
+ *  Revisit only when registrations reach a scale where the full read
+ *  actually hurts, and then add the index FIRST, deploy it, and change
+ *  this second — the code does not work until the index exists.
+ *
+ *  THE EMULATOR WILL NOT CATCH A REGRESSION HERE: it serves any query
+ *  regardless of indexes, so tests/competition-fields/roundtrip.test.cjs
+ *  passes either way. See the note above those assertions.
+ *
+ *  The grandparent check is load-bearing for its own separate reason: this
+ *  database has an unrelated top-level `registrations` collection that the
+ *  same collectionGroup query otherwise pulls in. */
 export async function countRegistrationsFor(db: Firestore, competitionId: string): Promise<number> {
-  const snap = await db.collectionGroup('registrations').where('competitionId', '==', competitionId).get();
-  return snap.docs.filter((d) => d.ref.parent.parent?.parent.id === 'onlineParticipants').length;
+  const snap = await db.collectionGroup('registrations').get();
+  return snap.docs.filter(
+    (d) => d.ref.parent.parent?.parent.id === 'onlineParticipants' && d.data().competitionId === competitionId,
+  ).length;
 }
 
 export async function writeCompetitionDoc(

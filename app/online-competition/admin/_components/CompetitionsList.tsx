@@ -66,7 +66,8 @@ export default function CompetitionsList() {
       // the public site — so no status filter belongs here.
       const data = (await res.json()) as { competitions: OnlineCompetitionAdminView[] };
       setCompetitions(data.competitions);
-    } catch {
+    } catch (err) {
+      console.error('CompetitionsList: loading competitions failed:', err);
       setError('Тэмцээнүүдийг ачааллаж чадсангүй');
     } finally {
       setLoading(false);
@@ -100,6 +101,10 @@ export default function CompetitionsList() {
         isError: false,
       });
     } catch (err) {
+      // Logged as well as shown: the branch below reads err.message, which
+      // is empty for a network failure, so the console is the only place
+      // that kind of failure is visible.
+      console.error('CompetitionsList: the points recompute failed:', err);
       // The per-athlete stats recompute runs first and independently of
       // the season, so points can fail while stats succeeded — the server
       // says so in its message and it would be misleading to replace that
