@@ -5183,7 +5183,111 @@ button.oc-rv-cell:hover {
   }
 }
 
-/* Placeholder body for the six tabs that have no content yet.
+/* ── Хянах tab: summary grid + readiness checklist ─────────────────────
+   Both borrow .oc-cf-ev's card treatment (1px #1C1C21 on #0D0D10) — this
+   tab is a read-out of the other tabs, so it should look like the same
+   material rather than a new surface. The grid draws its cell rules with
+   a 1px gap over a #1C1C21 background instead of per-cell borders, which
+   is what keeps them single-width where four cells meet. */
+.oc-cf-sum {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: #1C1C21;
+  border: 1px solid #1C1C21;
+}
+.oc-cf-sum-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  padding: 14px;
+  background: #0D0D10;
+}
+.oc-cf-sum-label {
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .18em;
+  color: #6E6A62;
+}
+.oc-cf-sum-value {
+  font: 500 14px/1.3 var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+  /* A БҮРТГЭЛ cell holds two timestamps and an arrow; it wraps rather
+     than forcing the column wider than its half. */
+  overflow-wrap: anywhere;
+}
+
+.oc-cf-check {
+  border: 1px solid #1C1C21;
+  background: #0D0D10;
+}
+.oc-cf-check-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #16161B;
+}
+.oc-cf-check-row:last-child {
+  border-bottom: none;
+}
+/* The state marker. A square, not a tick: an unmet row has no tick to
+   show, and a greyed tick reads as "done, dimmed". */
+.oc-cf-check-mark {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  background: #4A4740;
+}
+.oc-cf-check-row-ready .oc-cf-check-mark {
+  background: #DFFF4F;
+}
+.oc-cf-check-label {
+  min-width: 0;
+  font: 500 13px/1.3 var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+}
+/* Amber by default — the status word only ever appears in colour when
+   something is missing. БЭЛЭН is the muted one: a satisfied requirement
+   is not news, and a wall of volt БЭЛЭН would drown the amber row that
+   is the whole point of the list. */
+.oc-cf-check-status {
+  margin-left: auto;
+  text-align: right;
+  font: 500 9px/1.4 var(--oc-font-mono), monospace;
+  letter-spacing: .14em;
+  color: #E0A020;
+}
+.oc-cf-check-row-ready .oc-cf-check-status {
+  color: #4A4740;
+}
+/* Why Зарлах is disabled, above the button row. */
+.oc-cf-blocked {
+  font: 500 9px/1.6 var(--oc-font-mono), monospace;
+  letter-spacing: .14em;
+  color: #E0A020;
+}
+/* Sits where Зарлах was once the competition is announced. Deliberately
+   button-shaped and button-sized so the footer does not reflow, but
+   inert and muted — there is nothing left to press. */
+.oc-cf-published {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #1C1C21;
+  border-radius: 2px;
+  background: #131318;
+  padding: 10px 14px;
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .14em;
+  color: #6E6A62;
+}
+@media (max-width: 560px) {
+  .oc-cf-sum {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Placeholder body for the three tabs that have no content yet.
    --oc-font-heading, not --oc-font-body: the latter is never declared
    anywhere (layout.tsx defines only --oc-font-heading and --oc-font-mono),
    and Geologica is deliberately both the heading and body face. */

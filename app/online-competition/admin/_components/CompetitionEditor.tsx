@@ -15,6 +15,7 @@ import {
   type ResultFormat,
 } from '@/lib/online-competition/ao5';
 import { fmtTimeLimit, parseTimeLimit } from '@/lib/online-competition/time-utils';
+import { evaluateReadiness, type Readiness } from '@/lib/online-competition/publish-readiness';
 import { WcaEventIcon, hasWcaEventIcon } from '@/lib/wca-event-icon';
 import {
   COMPETITION_FORMAT_OPTIONS,
@@ -32,9 +33,9 @@ import {
 // route in both cases — /competitions/new and /competitions/[id]/edit —
 // rendering the same component, exactly as the old form served both.
 //
-// Only Ерөнхий has content in this changeset. The other six render their
-// header and a placeholder line; they are deliberately CLICKABLE rather
-// than disabled, so the shape of the finished flow is visible.
+// Ерөнхий, Зураг, Төрөл and Хянах have content. The remaining three render
+// their header and a placeholder line; they are deliberately CLICKABLE
+// rather than disabled, so the shape of the finished flow is visible.
 
 const ADMIN_COMPETITIONS = '/online-competition/admin/competitions';
 
@@ -66,6 +67,25 @@ const STATUS_OPTIONS: { value: OnlineCompetitionStatus; label: string }[] = [
   { value: 'live', label: 'Явагдаж буй' },
   { value: 'finished', label: 'Дууссан' },
 ];
+
+/** The statuses the СТАТУС control may offer, given the one it currently
+ *  holds.
+ *
+ *  A DRAFT IS OFFERED NOTHING BUT DRAFT. Leaving draft is publishing, and
+ *  publishing is Зарлах on Хянах, behind the readiness checklist — an
+ *  admin who can also do it from this dropdown can announce a competition
+ *  with no name, no start time and no events, which is precisely what the
+ *  checklist exists to prevent. Making the option absent rather than
+ *  disabling the whole control keeps every other Ерөнхий edit available
+ *  while a competition is still a draft.
+ *
+ *  In the other direction the full list stays: publishing is reversible,
+ *  and un-publishing back to Ноорог is a legitimate correction that needs
+ *  no gate — nobody can be harmed by a competition leaving the public
+ *  site. From there, Зарлах is again the only way out. */
+function statusOptionsFor(current: OnlineCompetitionStatus) {
+  return current === 'draft' ? STATUS_OPTIONS.filter((o) => o.value === 'draft') : STATUS_OPTIONS;
+}
 
 /** Header line, right-aligned: status, then whether the public site can
  *  see it. Only 'draft' is unannounced — every other status is, by
@@ -159,7 +179,11 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
   // Non-null while the "going live with no round open" confirmation is up;
   // holds the affected events so the dialog can name them, and the action
   // to run if the admin proceeds.
-  const [confirmGaps, setConfirmGaps] = useState<{ events: RoundGapEvent[]; then: 'stay' | 'next' } | null>(null);
+  const [confirmGaps, setConfirmGaps] = useState<{
+    events: RoundGapEvent[];
+    then: 'stay' | 'next';
+    status: OnlineCompetitionStatus;
+  } | null>(null);
 
   useEffect(() => {
     if (competitionId === null) return;
@@ -289,7 +313,12 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
     setBannerPublicId(publicId);
   }, []);
 
-  async function doSave(then: 'stay' | 'next') {
+  /** `nextStatus` is the status this save WRITES, which is not always the
+   *  one in the form: Зарлах publishes a draft as 'upcoming' without the
+   *  admin having touched the СТАТУС control (which, for a draft, no
+   *  longer offers a way out — see GeneralTab). Defaults to the form's
+   *  own value, so every other save path is unchanged. */
+  async function doSave(then: 'stay' | 'next', nextStatus: OnlineCompetitionStatus = status) {
     setConfirmGaps(null);
     setError('');
     setSavedNote('');
@@ -304,7 +333,7 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
         endAt: datetimeLocalToMs(endAt),
         participantLimit: unlimited ? null : Math.max(1, parseInt(participantLimit, 10) || 0),
         events: events.map(toEventConfig),
-        status,
+        status: nextStatus,
         season: season.trim(),
         format,
         featured,
@@ -337,8 +366,11 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
         setSavedId(id);
         router.replace(`${ADMIN_COMPETITIONS}/${id}/edit`);
       }
-      setLoadedStatus(status);
-      setSavedNote('Хадгалагдлаа');
+      // Both, so a publish is reflected in the header line and the СТАТУС
+      // control immediately, and a second save does not re-publish.
+      setStatus(nextStatus);
+      setLoadedStatus(nextStatus);
+      setSavedNote(nextStatus === 'upcoming' && status === 'draft' ? 'Зарлагдлаа' : 'Хадгалагдлаа');
       if (then === 'next') setTab((t) => Math.min(t + 1, TABS.length - 1));
     } catch {
       setError('Хадгалахад алдаа гарлаа');
@@ -347,7 +379,7 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
     }
   }
 
-  async function handleSave(then: 'stay' | 'next') {
+  async function handleSave(then: 'stay' | 'next', statusOverride?: OnlineCompetitionStatus) {
     const validationError = validate();
     if (validationError) {
       setError(validationError);
@@ -357,19 +389,45 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
 
     // Only on the transition INTO live — a competition that is already live
     // is covered by the standing warnings on the list, detail and Раунд
-    // удирдах screens. Applies to BOTH save buttons: either one can be the
-    // save that flips a competition live.
-    if (status === 'live' && loadedStatus !== 'live') {
+    // удирдах screens. Sits BELOW the publish decision and above every
+    // save: Нооргоор хадгалах and Дараах both reach it, because either can
+    // be the save that flips a competition live once the СТАТУС control is
+    // set to Явагдаж буй. Зарлах writes 'upcoming', never 'live', so it
+    // never trips this — going live stays a separate, later act, still
+    // guarded exactly as before.
+    const nextStatus = statusOverride ?? status;
+    if (nextStatus === 'live' && loadedStatus !== 'live') {
       setSaving(true);
       const gaps = await eventsGoingLiveWithoutRound();
       setSaving(false);
       if (gaps.length > 0) {
-        setConfirmGaps({ events: gaps, then });
+        setConfirmGaps({ events: gaps, then, status: nextStatus });
         return;
       }
     }
-    await doSave(then);
+    await doSave(then, nextStatus);
   }
+
+  // Derived, never stored: the Хянах tab and the Зарлах button both read
+  // this, and the button asks only `canPublish` — which requirements are
+  // blocking is declared in publish-readiness.ts, not decided here.
+  const readiness: Readiness = evaluateReadiness({
+    name,
+    startAt: datetimeLocalToMs(startAt),
+    registrationDeadline: datetimeLocalToMs(registrationDeadline),
+    posterUrl,
+    bannerUrl,
+    // roundsOf() floors at 1, so a row edited in this form always has a
+    // round; the roundless check guards a stored event that arrived with
+    // none, not a state the Төрөл tab can produce.
+    events: events.map((e) => ({
+      eventId: e.eventId,
+      label: onlineCompEventLabel(e.eventId),
+      rounds: roundsOf(e),
+    })),
+  });
+  const isDraft = status === 'draft';
+  const onReviewTab = tab === TABS.length - 1;
 
   if (loading) return <p className="oc-v3-status">Ачааллаж байна...</p>;
   if (loadError) return <p className="text-sm text-[#E8543C]">{loadError}</p>;
@@ -460,6 +518,22 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
               setBanner,
             }}
           />
+        ) : onReviewTab ? (
+          <ReviewTab
+            {...{
+              name,
+              events,
+              unlimited,
+              participantLimit,
+              posterUrl,
+              bannerUrl,
+              registrationOpensAt,
+              registrationDeadline,
+              startAt,
+              endAt,
+              readiness,
+            }}
+          />
         ) : (
           <div>
             <span className="oc-v3-label">{TABS[tab].label}</span>
@@ -489,11 +563,25 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
             <Button type="button" variant="outline" onClick={() => setConfirmGaps(null)}>
               Буцах
             </Button>
-            <Button type="button" variant="primary" disabled={saving} onClick={() => doSave(confirmGaps.then)}>
+            <Button
+              type="button"
+              variant="primary"
+              disabled={saving}
+              onClick={() => doSave(confirmGaps.then, confirmGaps.status)}
+            >
               Харин хадгалах
             </Button>
           </div>
         </div>
+      )}
+
+      {/* The reason has to be READABLE, not a title attribute on a disabled
+          button — a disabled button does not reliably show one, and the
+          admin needs to know what to go fix. */}
+      {onReviewTab && isDraft && readiness.blockedReason && (
+        <p className="oc-cf-blocked" style={{ marginTop: 16, textAlign: 'right' }}>
+          {readiness.blockedReason}
+        </p>
       )}
 
       <div className="flex flex-wrap items-center justify-end gap-2" style={{ marginTop: 24 }}>
@@ -502,20 +590,35 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
             {savedNote}
           </span>
         )}
-        {/* No publish button here by design — publishing belongs on the
-            Хянах tab behind its readiness checklist. Saving from this tab
-            never changes a draft's status on its own. */}
+        {/* Нооргоор хадгалах never changes status — on every tab, including
+            this one, it writes the form as it stands. Only Зарлах moves a
+            draft out of 'draft'. */}
         <Button type="button" variant="outline" disabled={saving} onClick={() => handleSave('stay')}>
           {saving ? 'Хадгалж байна...' : 'Нооргоор хадгалах'}
         </Button>
-        <Button
-          type="button"
-          variant="primary"
-          disabled={saving || tab === TABS.length - 1}
-          onClick={() => handleSave('next')}
-        >
-          Дараах
-        </Button>
+        {onReviewTab ? (
+          isDraft ? (
+            <Button
+              type="button"
+              variant="primary"
+              // The ONLY publish gate. It names no requirement — a fourth
+              // one added to REQUIREMENT_SPECS as blocking disables this
+              // button with no change here.
+              disabled={saving || !readiness.canPublish}
+              onClick={() => handleSave('stay', 'upcoming')}
+            >
+              {saving ? 'Хадгалж байна...' : 'Зарлах'}
+            </Button>
+          ) : (
+            // Already announced. Not a disabled Зарлах — that reads as
+            // "you may not publish" rather than "already published".
+            <span className="oc-cf-published">Зарласан</span>
+          )
+        ) : (
+          <Button type="button" variant="primary" disabled={saving} onClick={() => handleSave('next')}>
+            Дараах
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -1189,12 +1292,17 @@ function GeneralTab(p: GeneralTabProps) {
           value={p.status}
           onChange={(e) => p.setStatus(e.target.value as OnlineCompetitionStatus)}
         >
-          {STATUS_OPTIONS.map((o) => (
+          {statusOptionsFor(p.status).map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
             </option>
           ))}
         </select>
+        {p.status === 'draft' && (
+          <p className="oc-cf-hint" style={{ marginTop: 8 }}>
+            Зарлах товч «Хянах» табд байна.
+          </p>
+        )}
       </div>
 
       <div>
@@ -1382,6 +1490,96 @@ function GeneralTab(p: GeneralTabProps) {
         <p className="oc-cf-hint" style={{ marginTop: 8 }}>
           Тэмцээний хуудсын ерөнхий хэсэгт «Заавар» гэж харагдана.
         </p>
+      </div>
+    </div>
+  );
+}
+
+// ── 07 Хянах ─────────────────────────────────────────────────────────────
+
+interface ReviewTabProps {
+  name: string;
+  events: EventRow[];
+  unlimited: boolean;
+  participantLimit: string;
+  posterUrl: string | null;
+  bannerUrl: string | null;
+  registrationOpensAt: string;
+  registrationDeadline: string;
+  startAt: string;
+  endAt: string;
+  readiness: Readiness;
+}
+
+/** YYYY.MM.DD HH:mm — this is the tab where an admin verifies the exact
+ *  moment registration closes, so unlike the list's fmtDate it keeps the
+ *  time. Takes a datetime-local string because that is what the editor
+ *  holds; an unset field is the empty string, which reads as "—". */
+function fmtMoment(value: string): string {
+  const ms = datetimeLocalToMs(value);
+  if (ms === null) return '—';
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function imagesSummary(posterUrl: string | null, bannerUrl: string | null): string {
+  if (posterUrl && bannerUrl) return 'Постер · баннер';
+  if (posterUrl) return 'Постер';
+  if (bannerUrl) return 'Баннер';
+  return 'Оруулаагүй';
+}
+
+/** Read-only overview + the readiness checklist. The publish button itself
+ *  lives in the editor's shared footer, beside Нооргоор хадгалах, rather
+ *  than in here — it is a save, and every save button belongs in one row.
+ *
+ *  ХУВААРЬ and ХУРААМЖ are in the mockup's grid but not here: those tabs
+ *  do not exist yet, and a cell that can only ever say "—" teaches the
+ *  admin to ignore the grid. Add each cell with its tab. */
+function ReviewTab(p: ReviewTabProps) {
+  const cells: { label: string; value: string }[] = [
+    { label: 'НЭР', value: p.name.trim() || '—' },
+    { label: 'ТӨРӨЛ', value: `${p.events.length} төрөл` },
+    {
+      label: 'ХЯЗГААР',
+      value: p.unlimited
+        ? 'Хязгааргүй'
+        : // Mirrors the save's own coercion (Math.max(1, …)), so the grid
+          // never promises a limit different from the one that is written.
+          `${Math.max(1, parseInt(p.participantLimit, 10) || 0)} тамирчин`,
+    },
+    { label: 'ЗУРАГ', value: imagesSummary(p.posterUrl, p.bannerUrl) },
+    { label: 'БҮРТГЭЛ', value: `${fmtMoment(p.registrationOpensAt)} → ${fmtMoment(p.registrationDeadline)}` },
+    { label: 'ТЭМЦЭЭН', value: `${fmtMoment(p.startAt)} → ${fmtMoment(p.endAt)}` },
+  ];
+
+  return (
+    <div>
+      <div className="oc-cf-sum">
+        {cells.map((c) => (
+          <div key={c.label} className="oc-cf-sum-cell">
+            <span className="oc-cf-sum-label">{c.label}</span>
+            <span className="oc-cf-sum-value">{c.value}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Shown whatever the status. An admin editing an already-announced
+          competition still wants to see that it has no poster — hiding the
+          checklist after publishing would hide the one place those gaps
+          are ever named. */}
+      <div style={{ marginTop: 28 }}>
+        <span className="oc-v3-label">ЗАРЛАХААС ӨМНӨ</span>
+        <div className="oc-cf-check" style={{ marginTop: 10 }}>
+          {p.readiness.requirements.map((r) => (
+            <div key={r.key} className={`oc-cf-check-row${r.met ? ' oc-cf-check-row-ready' : ''}`}>
+              <span className="oc-cf-check-mark" aria-hidden />
+              <span className="oc-cf-check-label">{r.label}</span>
+              <span className="oc-cf-check-status">{r.status}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
