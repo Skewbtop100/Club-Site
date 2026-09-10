@@ -20,6 +20,7 @@
     "test:registration": "node tests/competition-fields/registration-view.test.cjs",
     "test:regshape": "node tests/competition-fields/registration-shape.test.cjs",
     "test:review": "node tests/competition-fields/registration-review.test.cjs",
+    "test:solve": "node tests/solve-flow/scramble-wait.test.cjs",
     "test:scrambles": "node tests/competition-fields/scrambles.test.cjs",
     "test:ranking": "firebase emulators:exec --only firestore \"node tests/competition-fields/ranking.test.cjs\"",
     "test:merge": "firebase emulators:exec --only firestore \"node tests/merge-athlete-uid/merge.test.mjs\""

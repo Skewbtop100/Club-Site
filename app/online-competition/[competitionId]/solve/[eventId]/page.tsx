@@ -32,11 +32,16 @@ import ReadyPromptStage from './_components/ReadyPromptStage';
 import RecStage from './_components/RecStage';
 import EntryStage from './_components/EntryStage';
 import SummaryStage from './_components/SummaryStage';
+import ScrambleWaitStage from './_components/ScrambleWaitStage';
 import SentStage from './_components/SentStage';
 import AuthModal from '@/app/online-competition/_components/hub/v3/AuthModal';
 
 type Stage =
   | 'cameraSetup'
+  /** Waiting for THIS attempt's scramble — and where the run parks if
+   *  that fetch fails. Nothing may enter zeroDisplay (which starts the
+   *  recording) without a scramble in hand. */
+  | 'scrambleWait'
   | 'zeroDisplay'
   | 'scrambleReveal'
   | 'orientationHold'
@@ -72,7 +77,7 @@ interface Attempt {
   videoBlob: Blob | null;
 }
 
-const HEADER_STAGES: Stage[] = ['zeroDisplay', 'scrambleReveal', 'orientationHold', 'readyPrompt', 'rec', 'entry'];
+const HEADER_STAGES: Stage[] = ['scrambleWait', 'zeroDisplay', 'scrambleReveal', 'orientationHold', 'readyPrompt', 'rec', 'entry'];
 
 export default function SolvePage() {
   const params = useParams<{ competitionId: string; eventId: string }>();
@@ -100,11 +105,30 @@ export default function SolvePage() {
   // by the admin recompute after a judge approves (see
   // lib/online-competition/athleteStats.ts), which is also why every
   // indicator below is labelled provisional.
-  // Set when the API refuses this attempt on round grounds (no live round,
-  // or not qualified into the live one). Distinct from loadError: this is
-  // a legitimate "you can't solve right now" answer, not a failure, and
-  // gets its own explanatory screen rather than a red error line.
+  // Set when the API refuses the FIRST attempt on round grounds (no live
+  // round, or not qualified into the live one). Distinct from loadError:
+  // this is a legitimate "you can't solve right now" answer, not a
+  // failure, and gets its own explanatory screen rather than a red error
+  // line.
+  //
+  // FIRST attempt only. This screen replaces the run, and from attempt 2
+  // on the run is holding video blobs that exist nowhere else — so a
+  // refusal that arrives mid-run goes to scrambleError below, which the
+  // athlete can retry from without losing them.
   const [blockedMessage, setBlockedMessage] = useState('');
+  /** Why this attempt's scramble did not arrive, or '' while it is in
+   *  flight / once it has. Rendered by ScrambleWaitStage, which is the
+   *  only screen a mid-run failure is allowed to reach. */
+  const [scrambleError, setScrambleError] = useState('');
+  /** Which attempt the pending scramble request is for — what the retry
+   *  button re-requests. */
+  const [pendingAttempt, setPendingAttempt] = useState(1);
+  /** Bumped per scramble request; a response whose number is no longer
+   *  the current one is DROPPED. Without it a late reply (a retry racing
+   *  the request it replaced) could overwrite the scramble of an attempt
+   *  the run had already started — the same class of bug as the stale
+   *  scramble this changeset removes, arriving from the other direction. */
+  const scrambleRequestRef = useRef(0);
   // ── Which competition round this run belongs to ──────────────────────
   // Taken from the scramble route's response, which is the SAME call that
   // gates access (resolveRoundAccess decides both whether the athlete may
@@ -191,6 +215,15 @@ export default function SolvePage() {
 
   const fetchScramble = useCallback(
     async (attemptNumber: number) => {
+      // Cleared BEFORE the request, every time. The old code only ever
+      // SET this, so a failed fetch left the previous attempt's scramble
+      // in state — and the run walked straight into revealing it again.
+      setScramble('');
+      setScrambleError('');
+      setPendingAttempt(attemptNumber);
+      const requestId = scrambleRequestRef.current + 1;
+      scrambleRequestRef.current = requestId;
+      const superseded = () => scrambleRequestRef.current !== requestId;
       try {
         // competitionId/uid/round/attempt let the API hand back this
         // athlete's assigned group's official scramble for this attempt
@@ -206,10 +239,19 @@ export default function SolvePage() {
         });
         if (solverUid) qs.set('uid', solverUid);
         const res = await fetch(`/api/online-competition/scramble?${qs.toString()}`);
+        if (superseded()) return;
         if (!res.ok) {
           const body = (await res.json().catch(() => ({}))) as { message?: string };
           // A round-gating refusal carries a Mongolian `message`; anything
-          // else is a genuine failure.
+          // else is a genuine failure. Either way, from attempt 2 on it
+          // must NOT reach the blocked screen: that screen replaces the
+          // run, and the run is holding every video recorded so far.
+          if (attemptNumber > 1) {
+            setScrambleError(
+              body.message || 'Скрамбл авахад алдаа гарлаа. Холболтоо шалгаад дахин оролдоно уу.',
+            );
+            return;
+          }
           if (body.message) {
             setBlockedMessage(body.message);
             return;
@@ -237,7 +279,11 @@ export default function SolvePage() {
           );
         }
       } catch {
-        setLoadError('Скрамбл авахад алдаа гарлаа');
+        if (superseded()) return;
+        // Never loadError: its screen is guarded by `!competition`, so
+        // mid-run it rendered NOTHING while the run marched on. The wait
+        // stage shows this and offers a retry.
+        setScrambleError('Скрамбл авахад алдаа гарлаа. Холболтоо шалгаад дахин оролдоно уу.');
       }
     },
     [eventId, competitionId, solverUid, eventCutoffs],
@@ -258,6 +304,15 @@ export default function SolvePage() {
     fetchScramble(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [solverUid]);
+
+  // THE WAIT. Every attempt now enters scrambleWait first and is promoted
+  // to zeroDisplay — which is what starts the recording — only once a
+  // scramble has actually arrived. A fetch that fails simply never
+  // promotes: the run sits on the wait stage with a retry button instead
+  // of recording an attempt it has no scramble for.
+  useEffect(() => {
+    if (stage === 'scrambleWait' && scramble) setStage('zeroDisplay');
+  }, [stage, scramble]);
 
   useEffect(() => {
     return () => recorder.releaseCamera();
@@ -294,10 +349,13 @@ export default function SolvePage() {
   // before the scramble was applied) and runs uninterrupted through
   // scrambleReveal -> orientationHold -> readyPrompt -> rec, stopping
   // only when the athlete clicks "Дуусгах" in rec. `stage` only takes the
-  // value 'zeroDisplay' at the start of a fresh attempt (from
-  // cameraSetup, from handleEntryConfirm, or from handleRedo) — never as
-  // an intermediate value while already sitting in zeroDisplay — so this
+  // value 'zeroDisplay' at the start of a fresh attempt — never as an
+  // intermediate value while already sitting in zeroDisplay — so this
   // fires exactly once per attempt.
+  //
+  // Every route into it now runs through scrambleWait and its promotion
+  // effect above, so the recording can no longer start for an attempt
+  // whose scramble never arrived.
   useEffect(() => {
     if (stage === 'zeroDisplay') {
       recorder.startRecording();
@@ -358,8 +416,12 @@ export default function SolvePage() {
       // next.length is the count of completed attempts, so the attempt now
       // starting is next.length + 1 (1-based, matching the group scramble
       // array index the API reads).
+      //
+      // scrambleWait, NOT zeroDisplay: this fetch is still in flight, and
+      // zeroDisplay would start recording an attempt whose scramble may
+      // never arrive. The effect above promotes the run when it does.
+      setStage('scrambleWait');
       fetchScramble(next.length + 1);
-      setStage('zeroDisplay');
     }
   }
 
@@ -372,8 +434,8 @@ export default function SolvePage() {
     // Cleared so a failed re-fetch can't leave the previous run's round
     // attached to the new one; fetchScramble(1) re-resolves it.
     setCompetitionRound(null);
+    setStage('scrambleWait');
     fetchScramble(1);
-    setStage('zeroDisplay');
   }
 
   async function handleSubmit() {
@@ -529,7 +591,11 @@ export default function SolvePage() {
     );
   }
 
-  if (!competition || !scramble || !runShape) {
+  // `scramble` is deliberately NOT part of this guard any more. It is
+  // empty for the whole of every scrambleWait, and blanking the page
+  // there would hide the one screen that explains a failure — and the
+  // retry that recovers from it.
+  if (!competition || !runShape) {
     return <div className="oc-solve-page" />;
   }
 
@@ -571,7 +637,20 @@ export default function SolvePage() {
             hasCamera={recorder.hasCamera}
             error={recorder.error}
             onRequestCamera={recorder.requestCamera}
-            onDone={() => setStage('zeroDisplay')}
+            /* Attempt 1's fetch runs alongside the camera prompt. If it
+               has not landed by the time the athlete is ready, the run
+               waits on scrambleWait rather than recording without a
+               scramble. */
+            onDone={() => setStage(scramble ? 'zeroDisplay' : 'scrambleWait')}
+          />
+        )}
+
+        {stage === 'scrambleWait' && (
+          <ScrambleWaitStage
+            attemptNumber={pendingAttempt}
+            error={scrambleError}
+            recordedAttempts={attempts.length}
+            onRetry={() => fetchScramble(pendingAttempt)}
           />
         )}
 
