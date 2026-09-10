@@ -1666,6 +1666,150 @@
 
 /* ── Live hero banner ─────────────────────────────────────────────── */
 
+/* ── Hub: the featured-competition banner ──────────────────────────────
+   The admin's chosen lead item, above everything including the live hero.
+   Related to .oc-v3-hero below but deliberately its own class: this one is
+   artwork-backed (a real uploaded bannerUrl) at a larger scale, while the
+   hero is a fixed CSS gradient. Sharing a class would mean one of them
+   permanently fighting the other's padding and type sizes. */
+.oc-v3-feat {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid #1C1C21;
+  min-height: 200px;
+  /* The fallback for a competition with no bannerUrl — a plain dark block
+     rather than no banner at all. The inline background-image, when there
+     is one, paints over this. */
+  background-color: #0D0D10;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+/* Left-to-right scrim over the artwork.
+   Near-opaque on the left where the eyebrow, title and meta sit, easing to
+   45% at the right edge — enough of the image survives to be worth
+   uploading, and the volt CTA has a dark enough ground at every stop to
+   stay legible over any photograph. Not a flat rgba fill: that would
+   either wash out the artwork or leave 42px white-on-white text on a pale
+   image, and there is no way to tune one value for both. */
+.oc-v3-feat-scrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    rgba(8, 8, 10, 0.95) 0%,
+    rgba(8, 8, 10, 0.88) 42%,
+    rgba(8, 8, 10, 0.45) 100%
+  );
+}
+.oc-v3-feat-body {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 26px;
+  align-items: center;
+  min-height: 200px;
+  padding: 40px;
+}
+.oc-v3-feat-content {
+  min-width: 0;
+}
+.oc-v3-feat-eyebrow {
+  font: 500 10px/1 var(--oc-font-mono), monospace;
+  letter-spacing: .2em;
+  color: #DFFF4F;
+}
+.oc-v3-feat-title {
+  margin-top: 14px;
+  font: 600 42px/1.1 var(--oc-font-heading), sans-serif;
+  letter-spacing: -.02em;
+  color: #F4F1EA;
+  /* A long competition name breaks rather than widening the banner past
+     the viewport. */
+  overflow-wrap: anywhere;
+}
+/* The meta line is a flex row of segments, not a pre-joined string, so
+   the separators can be drawn by CSS. Wrapping is what makes that
+   necessary: a joined "a · b · c" that wraps puts a leading "·" at the
+   start of the second row. */
+.oc-v3-feat-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  margin-top: 14px;
+  font: 400 13px/1 var(--oc-font-mono), monospace;
+  color: #9A958A;
+}
+.oc-v3-feat-meta-part {
+  /* Line-height room for a wrapped second row, since the font shorthand
+     above pins line-height to 1. */
+  padding: 3px 0;
+}
+.oc-v3-feat-meta-part + .oc-v3-feat-meta-part::before {
+  content: '·';
+  padding: 0 8px;
+  color: #4A4740;
+}
+.oc-v3-feat-cta-wrap {
+  min-width: 0;
+}
+.oc-v3-feat-cta {
+  display: inline-block;
+  border: none;
+  border-radius: 2px;
+  background: #DFFF4F;
+  color: #08080A;
+  padding: 18px 32px;
+  font: 600 13px/1 var(--oc-font-heading), sans-serif;
+  text-align: center;
+  white-space: nowrap;
+}
+.oc-v3-feat-cta:hover {
+  background: #E9FF7A;
+}
+.oc-v3-feat-cta:focus-visible {
+  outline: 2px solid #DFFF4F;
+  outline-offset: 3px;
+}
+
+@media (max-width: 640px) {
+  .oc-v3-feat-body {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+    padding: 24px 20px;
+  }
+  /* Stacked, the text no longer sits in the gradient's dark left end, so
+     the scrim becomes a vertical one — otherwise the CTA and the lower
+     half of the meta line sit over bare artwork. */
+  .oc-v3-feat-scrim {
+    background: linear-gradient(
+      180deg,
+      rgba(8, 8, 10, 0.92) 0%,
+      rgba(8, 8, 10, 0.88) 60%,
+      rgba(8, 8, 10, 0.8) 100%
+    );
+  }
+  .oc-v3-feat-title {
+    font-size: 28px;
+  }
+  /* The meta line KEEPS every segment on narrow screens rather than
+     dropping any: each one is a fact an athlete needs, and the flex row
+     above already wraps cleanly with its separators intact. Only the
+     scale comes down, and the inter-segment gap with it. */
+  .oc-v3-feat-meta {
+    font-size: 11px;
+  }
+  .oc-v3-feat-meta-part + .oc-v3-feat-meta-part::before {
+    padding: 0 6px;
+  }
+  .oc-v3-feat-cta {
+    display: block;
+    width: 100%;
+  }
+}
+
 .oc-v3-hero {
   position: relative;
   overflow: hidden;

@@ -14,6 +14,7 @@
     "test:video": "node tests/competition-fields/video-url.test.cjs",
     "test:fees": "node tests/competition-fields/fees.test.cjs",
     "test:schedule": "node tests/competition-fields/schedule.test.cjs",
+    "test:featured": "node tests/competition-fields/featured.test.cjs",
     "test:scrambles": "node tests/competition-fields/scrambles.test.cjs",
     "test:ranking": "firebase emulators:exec --only firestore \"node tests/competition-fields/ranking.test.cjs\"",
     "test:merge": "firebase emulators:exec --only firestore \"node tests/merge-athlete-uid/merge.test.mjs\""

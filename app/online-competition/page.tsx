@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { fetchAllCompetitions, fetchSeasonLeaderboard } from '@/lib/online-competition/data';
+import { pickFeatured } from '@/lib/online-competition/featured';
 import type { OnlineCompetition, OnlineSeasonAthletePoints } from '@/lib/online-competition/types';
 import { toMillisOrNull } from './_components/hub/format';
+import FeaturedBanner from './_components/hub/v3/FeaturedBanner';
 import HubNav from './_components/hub/v3/HubNav';
 import LiveHero from './_components/hub/v3/LiveHero';
 import UpcomingCard from './_components/hub/v3/UpcomingCard';
@@ -30,13 +32,32 @@ export default function OnlineCompetitionHubPage() {
     };
   }, []);
 
-  const { live, upcoming } = useMemo(() => {
+  const { live, upcoming, featured } = useMemo(() => {
     const list = competitions ?? [];
     return {
       live: list.filter((c) => c.status === 'live'),
       upcoming: list
         .filter((c) => c.status === 'upcoming')
         .sort((a, b) => (toMillisOrNull(a.startAt) ?? Infinity) - (toMillisOrNull(b.startAt) ?? Infinity)),
+      // Drafts cannot reach here: fetchAllCompetitions queries
+      // `status != 'draft'`, so an unannounced competition is never in
+      // `list` to be picked — the banner inherits that guarantee rather
+      // than restating it.
+      //
+      // Date.now() is read HERE, not inside pickFeatured, so the whole
+      // frame is decided against one instant. It is evaluated only after
+      // the fetch resolves (competitions is null until then), so there is
+      // no server-rendered banner for a client clock to disagree with.
+      featured: pickFeatured(
+        list.map((c) => ({
+          competition: c,
+          id: c.id,
+          featured: c.featured,
+          featuredUntilMs: toMillisOrNull(c.featuredUntil),
+          createdAtMs: toMillisOrNull(c.createdAt),
+        })),
+        Date.now(),
+      )?.competition ?? null,
     };
   }, [competitions]);
 
@@ -71,6 +92,10 @@ export default function OnlineCompetitionHubPage() {
         <p className="oc-v3-status oc-v3-status-error">{error}</p>
       ) : (
         <main className="oc-v3-main">
+          {/* Above everything, including the live hero — a featured
+              competition is the one the admin chose to lead with. */}
+          {featured && <FeaturedBanner competition={featured} />}
+
           {live[0] && <LiveHero competition={live[0]} />}
 
           <div className="oc-v3-grid">
