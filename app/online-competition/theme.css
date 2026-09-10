@@ -4877,6 +4877,196 @@ button.oc-rv-cell:hover {
   outline: 2px solid #DFFF4F;
   outline-offset: -2px;
 }
+/* A custom section's tab marker, in the slot the two-digit number
+   occupies on a fixed tab — so the strip keeps one rhythm while saying
+   "this one is yours". Volt because it is the admin's own content; the
+   fixed tabs' numbers stay muted. Sized to the number's optical weight
+   rather than its box, which is why it is 8px against their 10px. */
+.oc-cf-tab-dot {
+  font: 500 8px/1 var(--oc-font-mono), monospace;
+  color: #DFFF4F;
+}
+/* The "+" at the end of the strip. Sits inside the same bottom border as
+   the tabs and is deliberately NOT a tab: no active state, no label, and
+   it never becomes the selected item. */
+.oc-cf-tab-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 34px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  padding: 12px 0;
+  cursor: pointer;
+  font: 500 15px/1 var(--oc-font-mono), monospace;
+  color: #4A4740;
+}
+.oc-cf-tab-add:hover:not(:disabled) {
+  color: #DFFF4F;
+}
+.oc-cf-tab-add:disabled {
+  cursor: not-allowed;
+  opacity: .4;
+}
+.oc-cf-tab-add:focus-visible {
+  outline: 2px solid #DFFF4F;
+  outline-offset: -2px;
+}
+
+/* ── A custom section's editor ─────────────────────────────────────────── */
+/* Title field and ХЭСГИЙГ УСТГАХ share a row, the button aligned to the
+   input's own baseline rather than the label's — it drops beneath on a
+   narrow viewport instead of crushing the field. */
+.oc-cf-sec-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.oc-cf-sec-del {
+  flex: none;
+}
+/* The empty-section warning. Amber, not red: an empty section is a page
+   that will look wrong, not a broken save — it is allowed through. */
+.oc-cf-sec-empty {
+  font: 500 9px/1.6 var(--oc-font-mono), monospace;
+  letter-spacing: .14em;
+  color: #E0A020;
+}
+.oc-cf-sec-add {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+/* ── One content block ────────────────────────────────────────────────── */
+/* grip | body | X. The body is minmax(0,1fr) so a long unbroken url in a
+   video block scrolls its own input rather than widening the row. */
+.oc-cf-blk {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  border: 1px solid #1C1C21;
+  background: #0D0D10;
+  padding: 12px;
+}
+.oc-cf-blk + .oc-cf-blk {
+  margin-top: 10px;
+}
+/* The row being dragged. Kept visible but faded — hiding it would make
+   the list jump under the cursor. */
+.oc-cf-blk-dragging {
+  opacity: .4;
+}
+/* The row the pointer is currently over. A top rule, not a full border:
+   it reads as "it will land here", which a box outline does not. */
+.oc-cf-blk-over {
+  box-shadow: inset 0 2px 0 0 #DFFF4F;
+}
+.oc-cf-blk-grip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+.oc-cf-blk-handle {
+  cursor: grab;
+  padding: 2px 4px;
+  font: 500 13px/1 var(--oc-font-mono), monospace;
+  color: #4A4740;
+  /* The handle must not be text-selectable, or a press-and-drag selects
+     the glyph instead of starting the drag. */
+  user-select: none;
+  touch-action: none;
+}
+.oc-cf-blk-handle:hover {
+  color: #9A958A;
+}
+/* ▲ / ▼. Not a fallback for the handle above — on touch they are the ONLY
+   way to reorder, since HTML5 drag events never fire for a touch drag. */
+.oc-cf-blk-move {
+  border: 1px solid #1C1C21;
+  background: #131318;
+  cursor: pointer;
+  width: 22px;
+  height: 18px;
+  padding: 0;
+  font: 500 8px/1 var(--oc-font-mono), monospace;
+  color: #6E6A62;
+}
+.oc-cf-blk-move:hover:not(:disabled) {
+  border-color: #DFFF4F;
+  color: #DFFF4F;
+}
+.oc-cf-blk-move:disabled {
+  cursor: not-allowed;
+  opacity: .35;
+}
+.oc-cf-blk-x {
+  flex: none;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 2px 4px;
+  font: 500 12px/1 var(--oc-font-mono), monospace;
+  color: #4A4740;
+}
+.oc-cf-blk-x:hover {
+  color: #E8543C;
+}
+/* A section image has NO fixed ratio, unlike the poster (1:1) and banner
+   (16:5) — the admin places whatever they place — so it renders at its
+   natural one, capped in height so a tall image cannot push the controls
+   off the screen. */
+.oc-cf-blk-img {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  border: 1px solid #1C1C21;
+}
+.oc-cf-blk-drop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed #2A2A31;
+  background: #08080A;
+  padding: 28px;
+  font: 500 9px var(--oc-font-mono), monospace;
+  letter-spacing: .1em;
+  color: #4A4740;
+}
+/* The parsed-video readback: this is the line that tells the admin the
+   url was understood and WHICH video it resolved to. */
+.oc-cf-blk-parsed {
+  font: 500 9px/1.6 var(--oc-font-mono), monospace;
+  letter-spacing: .14em;
+  color: #4FD07A;
+  overflow-wrap: anywhere;
+}
+.oc-cf-blk-bad {
+  font: 500 9px/1.6 var(--oc-font-mono), monospace;
+  letter-spacing: .14em;
+  color: #E0A020;
+}
+@media (max-width: 640px) {
+  .oc-cf-tab-add {
+    min-height: 44px;
+  }
+  /* Touch targets: these are the only reorder control on a phone, so they
+     get a real tap area rather than the desktop's 22x18. */
+  .oc-cf-blk-move {
+    width: 34px;
+    height: 30px;
+  }
+  .oc-cf-blk-x {
+    padding: 8px;
+  }
+}
+
 /* Muted helper line under a field, explaining where its value surfaces on
    the public site. Mono at 9px to sit clearly below the field it annotates
    without competing with .oc-field-label above it. */

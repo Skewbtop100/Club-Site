@@ -2,7 +2,14 @@ import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore'
 import { DEFAULT_COMPETITION_FORMAT } from './types';
 import { validateQualifierInput } from './rounds';
 import { RESULT_FORMATS, cutoffPhaseFor, type ResultFormat } from './ao5';
+import { parseVideoUrl } from './video-url';
+import { MAX_BLOCKS_PER_SECTION, MAX_SECTIONS } from './types';
 import type { OnlineCompetitionAdvancement, OnlineCompetitionCutoff } from './types';
+import type {
+  OnlineCompetitionBlock,
+  OnlineCompetitionBlockType,
+  OnlineCompetitionSection,
+} from './types';
 import type { OnlineCompetitionEventConfig, OnlineCompetitionStatus, OnlineCompetitionWriteInput } from './types';
 
 // Server-only validation + Firestore-doc-shaping helpers shared by
@@ -116,6 +123,255 @@ function parseCutoffs(
   return { ok: true, value: out };
 }
 
+// ── sections[] / sections[].blocks[] ───────────────────────
+// This is the third nested structure to go through validateCompetitionInput,
+// and the field-by-field rebuild above has now silently dropped a field
+// TWICE (advancement, then nearly resultFormat). A nested structure doubles
+// the surface: a dropped section field and a dropped block field are two
+// separate ways to lose data with no error.
+//
+// So this pair does NOT rebuild by naming fields inline. Both levels are
+// driven by a MANIFEST of allowed keys, and a key that is not in the
+// manifest is a REJECTED WRITE, not a dropped field. That inverts the
+// trap: the failure mode of forgetting to list a new field is now a loud
+// 400 at save time — the admin sees it, and so does whoever added the
+// field — instead of a value that vanishes on reload with no trace.
+//
+// Adding a block field means adding it to BLOCK_PAYLOAD_FIELDS and to
+// OnlineCompetitionBlock. Forget the first and the save fails loudly;
+// forget the second and tsc fails. There is no quiet path.
+
+/** Every key a SECTION may carry. Anything else is refused. */
+const SECTION_FIELDS = ['id', 'title', 'blocks'] as const;
+
+/** Every key a BLOCK may carry, keyed by type, PLUS how each is parsed.
+ *  `required` payload fields must be present and non-empty; optional ones
+ *  may be absent. A key belonging to a DIFFERENT type is what makes a
+ *  block "type does not match its payload" — checked against the union of
+ *  all types' fields, so {type:'text', videoUrl:...} is refused rather
+ *  than quietly stored with an ignored videoUrl. */
+const BLOCK_PAYLOAD_FIELDS: Record<
+  OnlineCompetitionBlockType,
+  { key: 'text' | 'imageUrl' | 'imagePublicId' | 'videoUrl'; required: boolean }[]
+> = {
+  // '' is legal for text: a block added and not yet typed into renders as
+  // nothing and is a normal intermediate state. An image or video block
+  // with no payload is NOT — it is a slot that can never render — so
+  // those are required and non-empty.
+  text: [{ key: 'text', required: true }],
+  image: [
+    { key: 'imageUrl', required: true },
+    { key: 'imagePublicId', required: false },
+  ],
+  video: [{ key: 'videoUrl', required: true }],
+};
+
+const BLOCK_TYPES = Object.keys(BLOCK_PAYLOAD_FIELDS) as OnlineCompetitionBlockType[];
+/** Union of every payload key across every type — the "does this block
+ *  carry another type's payload" test. Derived, never restated. */
+const ALL_PAYLOAD_KEYS = new Set<string>(BLOCK_TYPES.flatMap((t) => BLOCK_PAYLOAD_FIELDS[t].map((f) => f.key)));
+
+type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
+
+/** Non-empty string after trimming, or null. */
+function requiredString(raw: unknown): string | null {
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : null;
+}
+
+function parseBlock(raw: unknown, where: string): ParseResult<OnlineCompetitionBlock> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, error: `${where}: invalid block` };
+  }
+  const b = raw as Record<string, unknown>;
+
+  const type = b.type;
+  if (typeof type !== 'string' || !BLOCK_TYPES.includes(type as OnlineCompetitionBlockType)) {
+    return { ok: false, error: `${where}: unknown block type ${JSON.stringify(b.type)}` };
+  }
+  const blockType = type as OnlineCompetitionBlockType;
+
+  const id = requiredString(b.id);
+  if (id === null) return { ok: false, error: `${where}: block id is required` };
+
+  const allowed = BLOCK_PAYLOAD_FIELDS[blockType];
+  const allowedKeys = new Set<string>(['id', 'type', ...allowed.map((f) => f.key)]);
+  for (const key of Object.keys(b)) {
+    // undefined is how a client spells an absent optional; treat a key
+    // explicitly set to undefined as absent rather than as junk.
+    if (b[key] === undefined) continue;
+    if (allowedKeys.has(key)) continue;
+    // A payload key belonging to another type is the "type does not match
+    // its payload" case, and says so in those words.
+    if (ALL_PAYLOAD_KEYS.has(key)) {
+      return { ok: false, error: `${where}: a ${blockType} block cannot carry ${key}` };
+    }
+    return { ok: false, error: `${where}: unknown block field ${key}` };
+  }
+
+  // Built key by key FROM THE MANIFEST — the only place a payload field is
+  // written, so there is no second list to keep in step. Absent optionals
+  // are left off entirely rather than set to undefined: Firestore refuses
+  // an undefined value, and `imagePublicId` in the document would then be
+  // a key that sometimes exists holding nothing.
+  const out: OnlineCompetitionBlock = { id, type: blockType };
+  for (const field of allowed) {
+    const value = b[field.key];
+    if (value === undefined || value === null) {
+      if (field.required) return { ok: false, error: `${where}: a ${blockType} block requires ${field.key}` };
+      continue;
+    }
+    if (typeof value !== 'string') return { ok: false, error: `${where}: ${field.key} must be a string` };
+    // `text` is the one field allowed to be empty, and is stored VERBATIM
+    // — trimming an admin's paragraph would eat their deliberate spacing.
+    if (field.key === 'text') {
+      out.text = value;
+      continue;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+      if (field.required) return { ok: false, error: `${where}: a ${blockType} block requires ${field.key}` };
+      continue;
+    }
+    if (field.key === 'videoUrl') {
+      // The SAME parser the editor shows the id back with, so a url the
+      // editor accepted can never be refused here, or the reverse.
+      if (parseVideoUrl(trimmed) === null) {
+        return { ok: false, error: `${where}: ${trimmed} is not a YouTube or Vimeo video url` };
+      }
+      out.videoUrl = trimmed;
+      continue;
+    }
+    if (field.key === 'imageUrl') out.imageUrl = trimmed;
+    if (field.key === 'imagePublicId') out.imagePublicId = trimmed;
+  }
+  return { ok: true, value: out };
+}
+
+/** Absent/null/[] -> []. Every other malformation is refused. */
+function parseSections(raw: unknown): ParseResult<OnlineCompetitionSection[]> {
+  if (raw === undefined || raw === null) return { ok: true, value: [] };
+  if (!Array.isArray(raw)) return { ok: false, error: 'sections must be an array' };
+  if (raw.length > MAX_SECTIONS) {
+    return { ok: false, error: `at most ${MAX_SECTIONS} sections are allowed (got ${raw.length})` };
+  }
+
+  const out: OnlineCompetitionSection[] = [];
+  const seenSectionIds = new Set<string>();
+  for (const [index, entry] of raw.entries()) {
+    const where = `section ${index + 1}`;
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      return { ok: false, error: `${where}: invalid section` };
+    }
+    const sec = entry as Record<string, unknown>;
+    for (const key of Object.keys(sec)) {
+      if (sec[key] === undefined) continue;
+      if (!(SECTION_FIELDS as readonly string[]).includes(key)) {
+        return { ok: false, error: `${where}: unknown section field ${key}` };
+      }
+    }
+
+    const id = requiredString(sec.id);
+    if (id === null) return { ok: false, error: `${where}: section id is required` };
+    // Duplicate ids would make two sections one identity: React renders
+    // them under one key, and a reorder would move whichever it found
+    // first — the exact failure ids exist to prevent.
+    if (seenSectionIds.has(id)) return { ok: false, error: `${where}: duplicate section id ${id}` };
+    seenSectionIds.add(id);
+
+    const title = requiredString(sec.title);
+    if (title === null) return { ok: false, error: `${where}: section title is required` };
+
+    const rawBlocks = sec.blocks;
+    if (rawBlocks !== undefined && rawBlocks !== null && !Array.isArray(rawBlocks)) {
+      return { ok: false, error: `${where}: blocks must be an array` };
+    }
+    const blockList: unknown[] = Array.isArray(rawBlocks) ? rawBlocks : [];
+    if (blockList.length > MAX_BLOCKS_PER_SECTION) {
+      return {
+        ok: false,
+        error: `${where}: at most ${MAX_BLOCKS_PER_SECTION} blocks are allowed (got ${blockList.length})`,
+      };
+    }
+
+    const blocks: OnlineCompetitionBlock[] = [];
+    const seenBlockIds = new Set<string>();
+    for (const [bIndex, rawBlock] of blockList.entries()) {
+      const parsed = parseBlock(rawBlock, `${where} block ${bIndex + 1}`);
+      if (!parsed.ok) return parsed;
+      if (seenBlockIds.has(parsed.value.id)) {
+        return { ok: false, error: `${where}: duplicate block id ${parsed.value.id}` };
+      }
+      seenBlockIds.add(parsed.value.id);
+      blocks.push(parsed.value);
+    }
+
+    // ARRAY ORDER IS THE ORDER, at both levels. Nothing is sorted here —
+    // unlike advancement and cutoffs, which have a natural key to sort by,
+    // the admin's chosen order is the only order there is, and sorting
+    // would silently rearrange their page.
+    out.push({ id, title, blocks });
+  }
+  return { ok: true, value: out };
+}
+
+/** Stored sections, read defensively for the two GET mappers.
+ *
+ *  The mirror of parseSections, and deliberately the OPPOSITE stance: a
+ *  write is refused when it is malformed, but a READ must never 500 on a
+ *  document — hand-edited, half-migrated or written by an older client —
+ *  or the admin cannot open the competition to fix it. So this DROPS what
+ *  it cannot understand instead of throwing, and supplies a positional
+ *  fallback id for a section or block stored without one.
+ *
+ *  That fallback is deterministic (`s2`, `s2-b3`) rather than random: the
+ *  editor saves back whatever it read, and a fresh random id on every GET
+ *  would make each save look like a wholesale replacement of the page. */
+export function normalizeStoredSections(raw: unknown): OnlineCompetitionSection[] {
+  if (!Array.isArray(raw)) return [];
+  const out: OnlineCompetitionSection[] = [];
+  for (const [index, entry] of (raw as unknown[]).entries()) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const sec = entry as Record<string, unknown>;
+    const title = typeof sec.title === 'string' ? sec.title : '';
+    // A section with no title cannot be shown as a tab and cannot be saved
+    // back (the title is required), so it is dropped rather than handed to
+    // the editor as an unsaveable row.
+    if (!title.trim()) continue;
+    const id = typeof sec.id === 'string' && sec.id.trim() ? sec.id.trim() : `s${index + 1}`;
+
+    const blocks: OnlineCompetitionBlock[] = [];
+    const rawBlocks = Array.isArray(sec.blocks) ? (sec.blocks as unknown[]) : [];
+    for (const [bIndex, rawBlock] of rawBlocks.entries()) {
+      if (!rawBlock || typeof rawBlock !== 'object' || Array.isArray(rawBlock)) continue;
+      const b = rawBlock as Record<string, unknown>;
+      if (typeof b.type !== 'string' || !BLOCK_TYPES.includes(b.type as OnlineCompetitionBlockType)) continue;
+      const type = b.type as OnlineCompetitionBlockType;
+      const block: OnlineCompetitionBlock = {
+        id: typeof b.id === 'string' && b.id.trim() ? b.id.trim() : `${id}-b${bIndex + 1}`,
+        type,
+      };
+      // Same manifest the write path uses, so a field readable here is a
+      // field writable there — one list, two directions.
+      for (const field of BLOCK_PAYLOAD_FIELDS[type]) {
+        const value = b[field.key];
+        if (typeof value !== 'string') continue;
+        if (field.key === 'text') block.text = value;
+        else if (field.key === 'imageUrl') block.imageUrl = value;
+        else if (field.key === 'imagePublicId') block.imagePublicId = value;
+        else if (field.key === 'videoUrl') block.videoUrl = value;
+      }
+      // A media block whose payload did not survive is a slot that renders
+      // nothing; a text block legitimately has none yet.
+      if (type === 'image' && !block.imageUrl) continue;
+      if (type === 'video' && !block.videoUrl) continue;
+      if (type === 'text' && block.text === undefined) block.text = '';
+      blocks.push(block);
+    }
+    out.push({ id, title, blocks });
+  }
+  return out;
+}
+
 export function validateCompetitionInput(body: unknown): ValidationResult {
   if (!body || typeof body !== 'object') return { ok: false, error: 'Invalid body' };
   const b = body as Record<string, unknown>;
@@ -193,6 +449,9 @@ export function validateCompetitionInput(body: unknown): ValidationResult {
     });
   }
 
+  const sections = parseSections(b.sections);
+  if (!sections.ok) return { ok: false, error: sections.error };
+
   return {
     ok: true,
     data: {
@@ -228,6 +487,7 @@ export function validateCompetitionInput(body: unknown): ValidationResult {
       posterPublicId: nullableString(b.posterPublicId),
       bannerUrl: nullableString(b.bannerUrl),
       bannerPublicId: nullableString(b.bannerPublicId),
+      sections: sections.value,
     },
   };
 }
@@ -293,6 +553,13 @@ export function toFirestoreDoc(input: OnlineCompetitionWriteInput) {
     posterPublicId: input.posterPublicId,
     bannerUrl: input.bannerUrl,
     bannerPublicId: input.bannerPublicId,
+    // Written WHOLE, never merged into: sections ARE the array, so a
+    // shorter array after a deletion has to replace the stored one. The
+    // enclosing tx.set uses merge:true, which replaces an array field
+    // wholesale rather than merging element by element — which is exactly
+    // what this needs, and is worth stating because the opposite would
+    // leave a deleted tail behind.
+    sections: input.sections,
   };
 }
 

@@ -16,13 +16,19 @@ import {
 } from '@/lib/online-competition/ao5';
 import { fmtTimeLimit, parseTimeLimit } from '@/lib/online-competition/time-utils';
 import { evaluateReadiness, type Readiness } from '@/lib/online-competition/publish-readiness';
+import { describeVideo, parseVideoUrl } from '@/lib/online-competition/video-url';
 import { WcaEventIcon, hasWcaEventIcon } from '@/lib/wca-event-icon';
 import {
   COMPETITION_FORMAT_OPTIONS,
   DEFAULT_COMPETITION_FORMAT,
+  MAX_BLOCKS_PER_SECTION,
+  MAX_SECTIONS,
   type OnlineCompetitionAdminView,
   type OnlineCompetitionAdvancement,
+  type OnlineCompetitionBlock,
+  type OnlineCompetitionBlockType,
   type OnlineCompetitionEventConfig,
+  type OnlineCompetitionSection,
   type OnlineCompetitionStatus,
   type OnlineCompetitionWriteInput,
 } from '@/lib/online-competition/types';
@@ -33,28 +39,52 @@ import {
 // route in both cases — /competitions/new and /competitions/[id]/edit —
 // rendering the same component, exactly as the old form served both.
 //
-// Ерөнхий, Зураг, Төрөл and Хянах have content. The remaining three render
-// their header and a placeholder line; they are deliberately CLICKABLE
-// rather than disabled, so the shape of the finished flow is visible.
+// Ерөнхий, Зураг, Төрөл, the custom sections and Хянах have content. Төлбөр
+// and Хуваарь render their header and a placeholder line; they are
+// deliberately CLICKABLE rather than disabled, so the shape of the
+// finished flow is visible.
 
 const ADMIN_COMPETITIONS = '/online-competition/admin/competitions';
 
+/** The fixed tabs, in order. Хянах is NOT here — it is always appended
+ *  last, after however many custom sections exist. */
+const FIXED_TABS = ['Ерөнхий', 'Зураг', 'Төрөл', 'Төлбөр', 'Хуваарь'];
+const REVIEW_LABEL = 'Хянах';
+
+/** The mockup's un-numbered Шагнал tab is GONE as a hardcoded placeholder:
+ *  it was a stand-in for exactly this feature, and an admin who wants a
+ *  Шагнал tab now adds one with "+". Leaving both would put two things
+ *  called Шагнал in the same position, one of them permanently empty. */
+
 interface TabDef {
-  /** The mockup's two-digit prefix. Шагнал has none, so it is optional —
-   *  the numbering in the mockup skips it and resumes at 07 for Хянах. */
-  num?: string;
+  kind: 'fixed' | 'section' | 'review';
   label: string;
+  /** The two-digit prefix, on fixed and review tabs only. */
+  num?: string;
+  /** Index into `sections`, on a section tab only. */
+  sectionIndex?: number;
 }
 
-const TABS: TabDef[] = [
-  { num: '01', label: 'Ерөнхий' },
-  { num: '02', label: 'Зураг' },
-  { num: '03', label: 'Төрөл' },
-  { num: '04', label: 'Төлбөр' },
-  { num: '05', label: 'Хуваарь' },
-  { label: 'Шагнал' },
-  { num: '07', label: 'Хянах' },
-];
+/** The whole strip, derived from the section list.
+ *
+ *  EVERY number is computed from the tab's own 1-based position, including
+ *  the fixed ones — nothing is hardcoded. That is what keeps Хянах correct
+ *  as sections come and go: it is last, so its number is the strip length,
+ *  and with one custom section it reads 07 exactly as the mockup shows.
+ *  Custom tabs occupy a position and consume a number without DISPLAYING
+ *  one, which is likewise what the mockup does with Шагнал between 05 and
+ *  07. Adding, deleting or reordering a section renumbers Хянах with no
+ *  code change, because there is no literal to update. */
+function buildTabs(sections: OnlineCompetitionSection[]): TabDef[] {
+  const tabs: TabDef[] = [
+    ...FIXED_TABS.map((label): TabDef => ({ kind: 'fixed', label })),
+    ...sections.map((sec, i): TabDef => ({ kind: 'section', label: sec.title, sectionIndex: i })),
+    { kind: 'review', label: REVIEW_LABEL },
+  ];
+  return tabs.map((t, i) =>
+    t.kind === 'section' ? t : { ...t, num: String(i + 1).padStart(2, '0') },
+  );
+}
 
 const PAID_OPTIONS: { value: boolean; label: string }[] = [
   { value: false, label: 'Төлбөргүй' },
@@ -104,6 +134,38 @@ const HEADER_STATUS: Record<OnlineCompetitionStatus, string> = {
 // this file instead, since inline styles always win regardless of layers.
 // Carried over from CompetitionForm, where the same constraint applied.
 const MT2: React.CSSProperties = { marginTop: 8 };
+
+/** A stable id for a section or block.
+ *
+ *  Generated ONCE, when the thing is created, and never regenerated —
+ *  which is the whole point. Reordering moves array ELEMENTS (see moveItem
+ *  below), so an id travels with its content: a block dragged to the top
+ *  keeps the id it was born with, and every React key, every future
+ *  anchor, and every diff against the stored document stays pointed at
+ *  the same block. Keying by array index instead would make "reorder" and
+ *  "swap the contents of two blocks" indistinguishable.
+ *
+ *  crypto.randomUUID needs a secure context; the admin panel is always
+ *  https or localhost, but the getRandomValues fallback costs two lines
+ *  and removes the question. */
+function newId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Moves one element of an array to another index, returning a new array.
+ *  The ELEMENT moves — it is never rebuilt — so ids and content travel
+ *  together. Used by both the drag drop and the up/down buttons, so the
+ *  two cannot disagree about what a move means. */
+function moveItem<T>(list: T[], from: number, to: number): T[] {
+  if (from === to || from < 0 || to < 0 || from >= list.length || to >= list.length) return list;
+  const next = list.slice();
+  const [item] = next.splice(from, 1);
+  next.splice(to, 0, item);
+  return next;
+}
 
 function msToDatetimeLocal(ms: number | null): string {
   if (ms === null) return '';
@@ -163,6 +225,19 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
   const [unlimited, setUnlimited] = useState(true);
   const [participantLimit, setParticipantLimit] = useState('');
 
+  // Owned by the custom-section tabs. Stored SHAPE, not a form shape:
+  // unlike EventRow there is nothing here a number input can leave
+  // half-typed, so the editor edits the stored objects directly and a save
+  // sends them as they are.
+  const [sections, setSections] = useState<OnlineCompetitionSection[]>([]);
+  // Focus the title of a section the moment it is created, so the admin
+  // types the name rather than hunting for the field. Holds the section id
+  // (never an index — an index would go stale the instant anything moved).
+  const [focusSectionId, setFocusSectionId] = useState<string | null>(null);
+  // Non-null while a "delete this section" confirm is up; holds the id, so
+  // the confirm survives a reorder happening behind it.
+  const [confirmDeleteSection, setConfirmDeleteSection] = useState<string | null>(null);
+
   // Owned by the Төрөл tab. Kept as EventRow (rounds as a string,
   // advancement keyed by fromRound) rather than the stored shape — see
   // EventRow's comment for why.
@@ -219,6 +294,7 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
         setUnlimited(c.participantLimit === null);
         setParticipantLimit(c.participantLimit != null ? String(c.participantLimit) : '');
         setEvents(c.events.map(toEventRow));
+        setSections(c.sections ?? []);
         setLockedEventIds(c.lockedEventIds ?? []);
         setLoading(false);
       })
@@ -248,6 +324,28 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
       for (const round of cutoffRoundsFor(row)) {
         if (!parseTimeLimit(row.cutoffs[round] ?? '').ok) {
           return `${onlineCompEventLabel(row.eventId)} · раунд ${round}: шүүлтүүр буруу форматтай (жишээ: 1:00)`;
+        }
+      }
+    }
+
+    // Custom sections. A title is required (a nameless tab cannot be
+    // rendered), and a media block with no media is refused rather than
+    // saved as a slot that renders nothing — the same stance the time
+    // limit above takes, for the same reason: a save that quietly drops
+    // what the admin built is the one outcome they would not check for.
+    //
+    // An EMPTY SECTION is deliberately NOT refused here — see the warning
+    // rendered inside SectionTab.
+    for (const [i, sec] of sections.entries()) {
+      if (!sec.title.trim()) return `${i + 1}-р хэсгийн нэр хоосон байна`;
+      for (const [j, block] of sec.blocks.entries()) {
+        const at = `«${sec.title.trim()}» хэсгийн ${j + 1}-р блок`;
+        if (block.type === 'image' && !block.imageUrl) return `${at}: зураг оруулаагүй байна`;
+        if (block.type === 'video') {
+          if (!block.videoUrl?.trim()) return `${at}: видео холбоос оруулаагүй байна`;
+          if (parseVideoUrl(block.videoUrl) === null) {
+            return `${at}: зөвхөн YouTube эсвэл Vimeo холбоос оруулна уу`;
+          }
         }
       }
     }
@@ -302,6 +400,33 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
     }
   }, [events, savedId]);
 
+  /** Appends a section and opens it with the title focused. The new tab
+   *  lands immediately before Хянах, which is where buildTabs puts every
+   *  section — so switching to `tabs.length - 1` of the OLD list is the
+   *  new section's index. */
+  function addSection() {
+    if (sections.length >= MAX_SECTIONS) return;
+    const id = newId();
+    setSections((prev) => [...prev, { id, title: 'Шинэ хэсэг', blocks: [] }]);
+    setTab(FIXED_TABS.length + sections.length);
+    setFocusSectionId(id);
+  }
+
+  /** Replaces one section, by id rather than index — every block-level
+   *  edit routes through this, so a reorder that happened between render
+   *  and click cannot write to the wrong section. */
+  const updateSection = useCallback((id: string, patch: Partial<OnlineCompetitionSection>) => {
+    setSections((prev) => prev.map((sec) => (sec.id === id ? { ...sec, ...patch } : sec)));
+  }, []);
+
+  function deleteSection(id: string) {
+    setConfirmDeleteSection(null);
+    setSections((prev) => prev.filter((sec) => sec.id !== id));
+    // Land on the tab before the deleted one rather than wherever the
+    // index now points — which, for the last section, is Хянах.
+    setTab((t) => Math.max(0, t - 1));
+  }
+
   // url and publicId always move together — a stale publicId beside a new
   // url would point cleanup at the wrong asset.
   const setPoster = useCallback((url: string | null, publicId: string | null) => {
@@ -346,6 +471,10 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
         posterPublicId,
         bannerUrl,
         bannerPublicId,
+        // Sent as-is. Array order is the order, and validateCompetitionInput
+        // refuses anything malformed rather than dropping it — so a section
+        // that reaches the server either saves whole or fails loudly.
+        sections,
       };
       const url = savedId
         ? `/api/online-competition/admin-competitions/${savedId}`
@@ -371,7 +500,9 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
       setStatus(nextStatus);
       setLoadedStatus(nextStatus);
       setSavedNote(nextStatus === 'upcoming' && status === 'draft' ? 'Зарлагдлаа' : 'Хадгалагдлаа');
-      if (then === 'next') setTab((t) => Math.min(t + 1, TABS.length - 1));
+      // Bounded by the CURRENT strip length, which grows and shrinks with
+      // the section list.
+      if (then === 'next') setTab((t) => Math.min(t + 1, FIXED_TABS.length + sections.length));
     } catch {
       setError('Хадгалахад алдаа гарлаа');
     } finally {
@@ -427,7 +558,13 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
     })),
   });
   const isDraft = status === 'draft';
-  const onReviewTab = tab === TABS.length - 1;
+  const tabs = buildTabs(sections);
+  // Clamped, and every branch below reads THIS rather than `tab`: deleting
+  // the last section while its own tab is open leaves the raw index one
+  // past the end for a frame, and an unclamped read there is a crash.
+  const tabIndex = Math.min(tab, tabs.length - 1);
+  const activeTab = tabs[tabIndex];
+  const onReviewTab = activeTab.kind === 'review';
 
   if (loading) return <p className="oc-v3-status">Ачааллаж байна...</p>;
   if (loadError) return <p className="text-sm text-[#E8543C]">{loadError}</p>;
@@ -446,27 +583,51 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
       </div>
 
       <div className="oc-cf-tabs" role="tablist">
-        {TABS.map((t, i) => (
+        {tabs.map((t, i) => (
           <button
-            key={t.label}
+            // Section tabs key on the SECTION ID, not the label: two
+            // sections may legitimately share a title, and a key that
+            // changes as the admin types the title would remount the
+            // button on every keystroke.
+            key={t.kind === 'section' ? sections[t.sectionIndex!].id : t.label}
             type="button"
             role="tab"
             aria-selected={i === tab}
             className={`oc-cf-tab${i === tab ? ' oc-cf-tab-active' : ''}`}
             onClick={() => setTab(i)}
           >
-            {t.num && (
+            {t.kind === 'section' ? (
+              // The volt ◆ sits exactly where a number would, so the strip
+              // keeps one rhythm while saying "this one is yours".
+              <span className="oc-cf-tab-dot" aria-hidden>
+                ◆
+              </span>
+            ) : (
               <span className="oc-cf-tab-num" aria-hidden>
                 {t.num}
               </span>
             )}
-            <span className="oc-cf-tab-label">{t.label}</span>
+            <span className="oc-cf-tab-label">{t.label || 'Нэргүй хэсэг'}</span>
           </button>
         ))}
+        <button
+          type="button"
+          className="oc-cf-tab-add"
+          title={
+            sections.length >= MAX_SECTIONS
+              ? `Хамгийн ихдээ ${MAX_SECTIONS} хэсэг нэмэх боломжтой`
+              : 'Нийтэд харагдах шинэ хэсэг нэмэх'
+          }
+          aria-label="Нийтэд харагдах шинэ хэсэг нэмэх"
+          disabled={sections.length >= MAX_SECTIONS}
+          onClick={addSection}
+        >
+          +
+        </button>
       </div>
 
       <div style={{ paddingTop: 24 }}>
-        {tab === 0 ? (
+        {tabIndex === 0 ? (
           <GeneralTab
             {...{
               name,
@@ -505,9 +666,9 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
               setDescription,
             }}
           />
-        ) : tab === 2 ? (
+        ) : tabIndex === 2 ? (
           <EventsTab events={events} setEvents={setEvents} lockedEventIds={lockedEventIds} />
-        ) : tab === 1 ? (
+        ) : tabIndex === 1 ? (
           <ImagesTab
             {...{
               posterUrl,
@@ -517,6 +678,18 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
               bannerPublicId,
               setBanner,
             }}
+          />
+        ) : activeTab.kind === 'section' ? (
+          <SectionTab
+            key={sections[activeTab.sectionIndex!].id}
+            section={sections[activeTab.sectionIndex!]}
+            autoFocusTitle={focusSectionId === sections[activeTab.sectionIndex!].id}
+            onFocused={() => setFocusSectionId(null)}
+            onChange={updateSection}
+            confirmingDelete={confirmDeleteSection === sections[activeTab.sectionIndex!].id}
+            onRequestDelete={() => setConfirmDeleteSection(sections[activeTab.sectionIndex!].id)}
+            onCancelDelete={() => setConfirmDeleteSection(null)}
+            onDelete={() => deleteSection(sections[activeTab.sectionIndex!].id)}
           />
         ) : onReviewTab ? (
           <ReviewTab
@@ -536,7 +709,7 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
           />
         ) : (
           <div>
-            <span className="oc-v3-label">{TABS[tab].label}</span>
+            <span className="oc-v3-label">{activeTab.label}</span>
             <p className="oc-cf-soon" style={{ marginTop: 10 }}>
               Энэ хэсэг удахгүй нэмэгдэнэ.
             </p>
@@ -1231,6 +1404,418 @@ function ImageSlot({
       {error && (
         <p className="text-sm text-[#E8543C]" style={{ marginTop: 8 }}>
           {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ── Custom sections ──────────────────────────────────────────────────────
+// One tab per admin-authored section. Everything here edits the STORED
+// shape directly (OnlineCompetitionSection / OnlineCompetitionBlock) —
+// there is no form-row intermediate like EventRow, because nothing in a
+// section is a number that can be half-typed.
+
+const BLOCK_KIND: { type: OnlineCompetitionBlockType; label: string }[] = [
+  { type: 'text', label: '+ Текст' },
+  { type: 'image', label: '+ Зураг' },
+  { type: 'video', label: '+ Видео' },
+];
+
+/** A new block of the given type, with its payload field already present
+ *  and empty. Built from one switch so a new type is added in exactly one
+ *  place on the client, mirroring BLOCK_PAYLOAD_FIELDS on the server. */
+function newBlock(type: OnlineCompetitionBlockType): OnlineCompetitionBlock {
+  const id = newId();
+  if (type === 'text') return { id, type, text: '' };
+  if (type === 'image') return { id, type };
+  return { id, type, videoUrl: '' };
+}
+
+interface SectionTabProps {
+  section: OnlineCompetitionSection;
+  autoFocusTitle: boolean;
+  onFocused: () => void;
+  onChange: (id: string, patch: Partial<OnlineCompetitionSection>) => void;
+  confirmingDelete: boolean;
+  onRequestDelete: () => void;
+  onCancelDelete: () => void;
+  onDelete: () => void;
+}
+
+function SectionTab(p: SectionTabProps) {
+  const { section } = p;
+  const titleRef = useRef<HTMLInputElement | null>(null);
+
+  // Only for a section that was just created — onFocused clears the flag,
+  // so switching back to this tab later does not steal focus from
+  // wherever the admin actually clicked.
+  const { autoFocusTitle, onFocused } = p;
+  useEffect(() => {
+    if (!autoFocusTitle) return;
+    titleRef.current?.focus();
+    titleRef.current?.select();
+    onFocused();
+  }, [autoFocusTitle, onFocused]);
+
+  // ── drag state ───────────────────────────────────────────────────────
+  // Plain HTML5 drag-and-drop, no library. `armed` is what makes the row
+  // draggable ONLY when the pointer went down on the handle: with
+  // `draggable` set unconditionally, a click-drag inside a textarea would
+  // start a row drag instead of selecting text, which makes the text
+  // blocks unusable. Pressing the handle arms the row, and dragend or
+  // pointerup disarms it.
+  const [armed, setArmed] = useState<string | null>(null);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
+
+  const setBlocks = (blocks: OnlineCompetitionBlock[]) => p.onChange(section.id, { blocks });
+
+  /** The one move primitive. Drag-drop and the up/down buttons both land
+   *  here, so the two paths cannot disagree — and both move the ELEMENT,
+   *  which is what carries the id along with the content. */
+  const move = (from: number, to: number) => {
+    if (to < 0 || to >= section.blocks.length) return;
+    setBlocks(moveItem(section.blocks, from, to));
+  };
+
+  const addBlock = (type: OnlineCompetitionBlockType) => {
+    if (section.blocks.length >= MAX_BLOCKS_PER_SECTION) return;
+    setBlocks([...section.blocks, newBlock(type)]);
+  };
+
+  const updateBlock = (id: string, patch: Partial<OnlineCompetitionBlock>) => {
+    setBlocks(section.blocks.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+  };
+
+  const removeBlock = (id: string) => setBlocks(section.blocks.filter((b) => b.id !== id));
+
+  const full = section.blocks.length >= MAX_BLOCKS_PER_SECTION;
+
+  return (
+    <div>
+      <div className="oc-cf-sec-head">
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <FieldLabel>ХЭСГИЙН НЭР</FieldLabel>
+          <input
+            ref={titleRef}
+            className={INPUT_CLASS}
+            style={MT2}
+            value={section.title}
+            maxLength={40}
+            onChange={(e) => p.onChange(section.id, { title: e.target.value })}
+          />
+        </div>
+        <button type="button" className="oc-v3-ghost-btn oc-cf-sec-del" onClick={p.onRequestDelete}>
+          ХЭСГИЙГ УСТГАХ
+        </button>
+      </div>
+
+      {/* A section can hold a great deal of typed content, and deleting it
+          takes all of it — so this one asks, unlike publishing, which is
+          reversible. Inline rather than window.confirm, matching the
+          round-gap confirmation. */}
+      {p.confirmingDelete && (
+        <div className="oc-sc-warn" style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <span>
+            ▲ «{section.title.trim() || 'Нэргүй хэсэг'}» хэсгийг устгах уу?
+            {section.blocks.length > 0 && ` ${section.blocks.length} блок хамт устана.`}
+          </span>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={p.onCancelDelete}>
+              Буцах
+            </Button>
+            <Button type="button" variant="primary" onClick={p.onDelete}>
+              Устгах
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Not a publish blocker and NOT dropped on save — see the note in
+          the editor's validate(). Said here, where the admin can act on
+          it, rather than on Хянах where it would be a checklist row for
+          something that is not a requirement. */}
+      {section.blocks.length === 0 && (
+        <p className="oc-cf-sec-empty" style={{ marginTop: 12 }}>
+          ▲ Хоосон хэсэг нийтэд хоосон таб болж харагдана. Агуулга нэмнэ үү, эсвэл хэсгийг устгана уу.
+        </p>
+      )}
+
+      <div style={{ marginTop: 28 }}>
+        <FieldLabel>АГУУЛГА</FieldLabel>
+        <div className="oc-cf-sec-add" style={{ marginTop: 10 }}>
+          {BLOCK_KIND.map((k) => (
+            <button
+              key={k.type}
+              type="button"
+              className="oc-v3-ghost-btn"
+              disabled={full}
+              title={full ? `Нэг хэсэгт хамгийн ихдээ ${MAX_BLOCKS_PER_SECTION} блок багтана` : undefined}
+              onClick={() => addBlock(k.type)}
+            >
+              {k.label}
+            </button>
+          ))}
+        </div>
+        <p className="oc-cf-hint" style={{ marginTop: 8 }}>
+          Зургийг эхэнд, дунд, сүүлд гэж чирээд байрлуулна.
+        </p>
+      </div>
+
+      <div style={{ marginTop: 16 }}>
+        {section.blocks.map((block, i) => (
+          <div
+            key={block.id}
+            className={`oc-cf-blk${dragId === block.id ? ' oc-cf-blk-dragging' : ''}${
+              overIndex === i && dragId !== null && dragId !== block.id ? ' oc-cf-blk-over' : ''
+            }`}
+            draggable={armed === block.id}
+            onDragStart={(e) => {
+              setDragId(block.id);
+              e.dataTransfer.effectAllowed = 'move';
+              // Firefox refuses to start a drag unless some data is set.
+              e.dataTransfer.setData('text/plain', block.id);
+            }}
+            onDragOver={(e) => {
+              if (dragId === null) return;
+              // preventDefault is what marks this a valid drop target;
+              // without it the browser refuses the drop outright.
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              setOverIndex(i);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              const from = section.blocks.findIndex((b) => b.id === dragId);
+              if (from !== -1) move(from, i);
+              setDragId(null);
+              setOverIndex(null);
+              setArmed(null);
+            }}
+            onDragEnd={() => {
+              setDragId(null);
+              setOverIndex(null);
+              setArmed(null);
+            }}
+          >
+            <div className="oc-cf-blk-grip">
+              {/* Arming the row here, rather than making it permanently
+                  draggable, is what keeps the textarea selectable. */}
+              <span
+                className="oc-cf-blk-handle"
+                role="presentation"
+                title="Чирж байрлуулах"
+                onPointerDown={() => setArmed(block.id)}
+                onPointerUp={() => setArmed(null)}
+              >
+                ⣿
+              </span>
+              {/* The reason both exist: HTML5 drag events never fire for a
+                  touch drag, and this panel is used on a phone. These are
+                  the only way to reorder there — not a convenience. */}
+              <button
+                type="button"
+                className="oc-cf-blk-move"
+                aria-label="Дээш зөөх"
+                disabled={i === 0}
+                onClick={() => move(i, i - 1)}
+              >
+                ▲
+              </button>
+              <button
+                type="button"
+                className="oc-cf-blk-move"
+                aria-label="Доош зөөх"
+                disabled={i === section.blocks.length - 1}
+                onClick={() => move(i, i + 1)}
+              >
+                ▼
+              </button>
+            </div>
+
+            <div className="oc-cf-blk-body">
+              <BlockEditor block={block} onChange={(patch) => updateBlock(block.id, patch)} />
+            </div>
+
+            <button
+              type="button"
+              className="oc-cf-blk-x"
+              aria-label="Блокыг устгах"
+              onClick={() => removeBlock(block.id)}
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** The per-type body of one block. Kept apart from the row chrome (grip,
+ *  X, drag wiring) so adding a fourth block type touches only this switch
+ *  and newBlock above. */
+function BlockEditor({
+  block,
+  onChange,
+}: {
+  block: OnlineCompetitionBlock;
+  onChange: (patch: Partial<OnlineCompetitionBlock>) => void;
+}) {
+  if (block.type === 'text') {
+    return (
+      <textarea
+        className={INPUT_CLASS}
+        rows={5}
+        placeholder="Текст бичнэ үү"
+        value={block.text ?? ''}
+        onChange={(e) => onChange({ text: e.target.value })}
+      />
+    );
+  }
+
+  if (block.type === 'image') {
+    return (
+      <BlockImage
+        url={block.imageUrl ?? null}
+        onChange={(imageUrl, imagePublicId) =>
+          // Both together, always — a stale publicId beside a new url
+          // would point a future cleanup at the wrong Cloudinary asset.
+          // undefined rather than null: these are optional fields on the
+          // stored block, and Firestore refuses a null-vs-absent muddle.
+          onChange({ imageUrl: imageUrl ?? undefined, imagePublicId: imagePublicId ?? undefined })
+        }
+      />
+    );
+  }
+
+  return <BlockVideo url={block.videoUrl ?? ''} onChange={(videoUrl) => onChange({ videoUrl })} />;
+}
+
+/** An image block's upload slot.
+ *
+ *  Uses the SAME uploadImageToCloudinary and the SAME imageFileError rules
+ *  as the Зураг tab's poster and banner — there is deliberately no second
+ *  upload path. What differs is only the frame: a section image has no
+ *  fixed ratio, so it renders at its natural one instead of in a 1:1 or
+ *  16:5 box. */
+function BlockImage({
+  url,
+  onChange,
+}: {
+  url: string | null;
+  onChange: (url: string | null, publicId: string | null) => void;
+}) {
+  const [progress, setProgress] = useState<number | null>(null);
+  const [error, setError] = useState('');
+  const uploading = progress !== null;
+
+  async function handleFile(file: File | null) {
+    if (!file) return;
+    const invalid = imageFileError(file);
+    if (invalid) {
+      setError(invalid);
+      return;
+    }
+    setError('');
+    setProgress(0);
+    try {
+      const uploaded = await uploadImageToCloudinary(file, setProgress);
+      onChange(uploaded.secureUrl, uploaded.publicId);
+    } catch {
+      // Same as the poster slot: a failed upload leaves whatever was
+      // already there untouched.
+      setError('Зураг илгээхэд алдаа гарлаа');
+    } finally {
+      setProgress(null);
+    }
+  }
+
+  return (
+    <div>
+      {url ? (
+        // eslint-disable-next-line @next/next/no-img-element -- a Cloudinary
+        // url of unknown dimensions, shown only in the admin editor.
+        <img src={url} alt="" className="oc-cf-blk-img" />
+      ) : (
+        <div className="oc-cf-blk-drop">ЗУРАГГҮЙ</div>
+      )}
+      <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap', marginTop: 10 }}>
+        <label className="oc-v3-ghost-btn" style={uploading ? { opacity: 0.5, cursor: 'default' } : undefined}>
+          {url ? 'ЗУРАГ СОЛИХ' : 'ЗУРАГ НЭМЭХ'}
+          <input
+            type="file"
+            accept={IMAGE_ACCEPT}
+            className="oc-v3-file-input"
+            disabled={uploading}
+            onChange={(e) => {
+              handleFile(e.target.files?.[0] ?? null);
+              e.target.value = '';
+            }}
+          />
+        </label>
+        {url && (
+          <button
+            type="button"
+            className="oc-v3-ghost-btn"
+            disabled={uploading}
+            onClick={() => {
+              setError('');
+              onChange(null, null);
+            }}
+          >
+            УСТГАХ
+          </button>
+        )}
+      </div>
+      {uploading && (
+        <p style={{ marginTop: 8, font: '400 11px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
+          Зураг илгээж байна... {progress}%
+        </p>
+      )}
+      {error && (
+        <p className="text-sm text-[#E8543C]" style={{ marginTop: 8 }}>
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** A video block's url input, with the parse read back underneath.
+ *
+ *  An unrecognised url is NOT cleared, corrected or discarded — the typed
+ *  text stays exactly as entered and an amber line says it was not
+ *  understood. Silently emptying an admin's paste would leave them with no
+ *  idea what went wrong, and "fixing" it would mean guessing at a link we
+ *  could not parse. The save is what refuses it (validate(), and
+ *  independently the server with the same parser), so an unparseable url
+ *  can be left in place while the admin goes and finds the right one, but
+ *  can never reach Firestore. */
+function BlockVideo({ url, onChange }: { url: string; onChange: (url: string) => void }) {
+  const trimmed = url.trim();
+  const parsed = trimmed ? parseVideoUrl(trimmed) : null;
+
+  return (
+    <div>
+      <input
+        className={INPUT_CLASS}
+        placeholder="https://youtube.com/watch?v=... эсвэл https://vimeo.com/..."
+        value={url}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      {trimmed === '' ? (
+        <p className="oc-cf-hint" style={{ marginTop: 8 }}>
+          YOUTUBE ЭСВЭЛ VIMEO ХОЛБООС
+        </p>
+      ) : parsed ? (
+        <p className="oc-cf-blk-parsed" style={{ marginTop: 8 }}>
+          ✓ {describeVideo(parsed)}
+        </p>
+      ) : (
+        <p className="oc-cf-blk-bad" style={{ marginTop: 8 }}>
+          ▲ Холбоос танигдсангүй. Зөвхөн YouTube эсвэл Vimeo видеоны холбоос оруулна уу.
         </p>
       )}
     </div>

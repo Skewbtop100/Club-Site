@@ -140,6 +140,74 @@ export interface OnlineCompetitionAdvancement {
   value: number;
 }
 
+// ── Custom sections ─────────────────────────────────────────────────────
+// Admin-authored content sections, rendered on the public detail page as
+// extra tabs after the fixed ones. Unlike every other field on a
+// competition, the STRUCTURE is editable: the admin decides how many
+// sections there are, what they are called and what each contains.
+//
+// Тайлбар and Заавар are NOT these. They are fixed fields of the general
+// section and stay exactly where they are — a section named "Дүрэм" is an
+// addition beside them, never a replacement for them.
+
+export type OnlineCompetitionBlockType = 'text' | 'image' | 'video';
+
+/** One piece of content inside a section.
+ *
+ *  The payload fields are optional PER TYPE, and exactly the ones for the
+ *  block's own type are present — a stored text block has `text` and no
+ *  `imageUrl` key at all, not `imageUrl: undefined`. That is enforced by
+ *  BLOCK_PAYLOAD_FIELDS in admin-competitions.ts, which is also what makes
+ *  a mismatched payload a rejected write rather than a stored oddity.
+ *
+ *  `id` is generated CLIENT-SIDE (crypto.randomUUID) when the block is
+ *  added and never regenerated. Order is array order; the id exists so a
+ *  reorder moves an identity rather than renaming positions — a block
+ *  keyed by index would swap contents with its neighbour under React on
+ *  every move, and a future comment/anchor pointing at a block would
+ *  follow the wrong one. */
+export interface OnlineCompetitionBlock {
+  id: string;
+  type: OnlineCompetitionBlockType;
+  /** type 'text'. May be '' — an added-but-not-yet-typed block is a legal
+   *  intermediate state and renders as nothing. */
+  text?: string;
+  /** type 'image'. Always a non-empty Cloudinary secure_url when stored:
+   *  an image block with no image is refused at save, client and server,
+   *  rather than stored as a blank slot. Same upload path as the poster
+   *  and banner (uploadImageToCloudinary) — there is no second path. */
+  imageUrl?: string;
+  /** type 'image'. The Cloudinary public_id, kept beside the url for the
+   *  same reason posterPublicId is: a future cleanup needs it. Absent when
+   *  Cloudinary did not return one. */
+  imagePublicId?: string;
+  /** type 'video'. The YouTube or Vimeo URL AS THE ADMIN TYPED IT, not a
+   *  normalised embed url and not the bare id. parseVideoUrl (video-url.ts)
+   *  derives provider + id from it at render time; storing the raw url
+   *  keeps the admin's own link intact and lets the parse rule improve
+   *  later without a migration. A url that does not parse is refused at
+   *  save, so every stored value is parseable. */
+  videoUrl?: string;
+}
+
+/** One custom section = one public tab. Order is array order. */
+export interface OnlineCompetitionSection {
+  id: string;
+  /** Non-empty; the tab label. An untitled section would render as a
+   *  nameless tab, so it is refused at save. */
+  title: string;
+  /** May be empty. An empty section is WARNED about in the editor rather
+   *  than dropped on save — see the note in CompetitionEditor. */
+  blocks: OnlineCompetitionBlock[];
+}
+
+/** Hard ceilings, enforced server-side in validateCompetitionInput and
+ *  surfaced in the editor as a disabled add button with a reason. They
+ *  exist because a competition document has a 1MiB Firestore limit and
+ *  because a tab strip stops being navigable long before 20 tabs. */
+export const MAX_SECTIONS = 20;
+export const MAX_BLOCKS_PER_SECTION = 50;
+
 /** onlineCompetitions/{competitionId}
  *
  * `description`, `startAt`, `registrationDeadline`, and `participantLimit`
@@ -216,6 +284,12 @@ export interface OnlineCompetition {
   bannerUrl?: string | null;
   bannerPublicId?: string | null;
   createdAt?: Timestamp;
+  /** Admin-authored extra tabs. Absent or [] = none, which is what every
+   *  competition written before this field existed reads as. Nothing
+   *  renders these publicly yet — the detail page grows the tabs once the
+   *  field is populated; the shape is final and needs no migration for
+   *  that. */
+  sections?: OnlineCompetitionSection[];
   /** e.g. "2026-spring" — groups competitions into onlineSeasonPoints
    *  leaderboards. Optional for the same legacy-doc reason as the fields
    *  above; a competition without one simply doesn't contribute to any
@@ -554,6 +628,12 @@ export interface OnlineCompetitionAdminView {
    *  an open round; the list endpoint only computes it for live
    *  competitions, where it is the state the admin needs warning about. */
   eventsWithoutLiveRound: { eventId: string; label: string }[];
+  /** Always present, [] when the competition has none. Returned in FULL by
+   *  both the list and the single GET — unlike eventsWithoutLiveRound and
+   *  lockedEventIds below, this is stored content, not a derived hint, and
+   *  a mapper that returned [] for "not computed here" would hand the
+   *  editor an empty structure to save back over the real one. */
+  sections: OnlineCompetitionSection[];
   /** eventIds whose resultFormat is LOCKED because a judged (approved or
    *  rejected) submission already exists for them — changing the format
    *  now would silently re-derive existing results under a different rule.
@@ -593,6 +673,7 @@ export interface OnlineCompetitionWriteInput {
   posterPublicId: string | null;
   bannerUrl: string | null;
   bannerPublicId: string | null;
+  sections: OnlineCompetitionSection[];
 }
 
 // ── Season points / leaderboard ─────────────────────────────────────────

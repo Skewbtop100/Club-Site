@@ -5,6 +5,7 @@ import {
   CompetitionWriteError,
   lockedFormatEventIds,
   normalizeCompetitionStatus,
+  normalizeStoredSections,
   validateCompetitionInput,
   writeCompetitionDoc,
 } from '@/lib/online-competition/admin-competitions';
@@ -76,6 +77,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     posterPublicId: typeof data.posterPublicId === 'string' && data.posterPublicId ? data.posterPublicId : null,
     bannerUrl: typeof data.bannerUrl === 'string' && data.bannerUrl ? data.bannerUrl : null,
     bannerPublicId: typeof data.bannerPublicId === 'string' && data.bannerPublicId ? data.bannerPublicId : null,
+    sections: normalizeStoredSections(data.sections),
     createdAt: data.createdAt?.toMillis?.() ?? null,
     // Neither count is needed for the edit form (only the list view shows
     // them) — skip the extra queries here.

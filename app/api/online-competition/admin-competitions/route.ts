@@ -5,6 +5,7 @@ import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
 import {
   CompetitionWriteError,
   normalizeCompetitionStatus,
+  normalizeStoredSections,
   validateCompetitionInput,
   writeCompetitionDoc,
 } from '@/lib/online-competition/admin-competitions';
@@ -111,6 +112,11 @@ export async function GET() {
         posterPublicId: typeof data.posterPublicId === 'string' && data.posterPublicId ? data.posterPublicId : null,
         bannerUrl: typeof data.bannerUrl === 'string' && data.bannerUrl ? data.bannerUrl : null,
         bannerPublicId: typeof data.bannerPublicId === 'string' && data.bannerPublicId ? data.bannerPublicId : null,
+        // Returned in FULL here, unlike lockedEventIds below. This is
+        // stored content, not a derived hint: handing the list an empty
+        // array would be handing a future writer an empty structure to
+        // save back over a real one.
+        sections: normalizeStoredSections(data.sections),
         createdAt: data.createdAt?.toMillis?.() ?? null,
         participantCount: await countDistinctParticipants(db, d.id),
         registeredCount: registeredByCompetition.get(d.id) ?? 0,

@@ -59,7 +59,11 @@ function compile() {
 process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
 compile();
 
-const { validateCompetitionInput, writeCompetitionDoc } = require(path.join(OUT, 'admin-competitions.js'));
+const {
+  validateCompetitionInput,
+  writeCompetitionDoc,
+  normalizeStoredSections,
+} = require(path.join(OUT, 'admin-competitions.js'));
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
 
@@ -524,6 +528,243 @@ const read = async (id) => (await db.collection(COL).doc(id).get()).data();
     })());
 
   await pendingRef.delete();
+
+
+
+  // ── sections[] — admin-authored custom tabs ───────────────────────────
+  // The THIRD nested structure through validateCompetitionInput, and the
+  // first with two levels of nesting. The rebuild trap that ate
+  // `advancement` and nearly ate `resultFormat` applies at BOTH levels
+  // here, so these pin: every field survives at both levels, ids survive a
+  // reorder, array order is the stored order, and each malformed shape is
+  // refused rather than quietly dropped.
+  const SEC_IMG = 'https://res.cloudinary.com/x/image/upload/sec.jpg';
+  const SECTIONS = () => [
+    {
+      id: 'sec-a',
+      title: 'Шагнал',
+      blocks: [
+        { id: 'blk-1', type: 'text', text: '  1-р байр: 500,000₮  ' },
+        { id: 'blk-2', type: 'image', imageUrl: SEC_IMG, imagePublicId: 'comp/sec_abc' },
+        { id: 'blk-3', type: 'video', videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42' },
+      ],
+    },
+    { id: 'sec-b', title: 'Дүрэм', blocks: [{ id: 'blk-4', type: 'text', text: 'WCA дүрэм үйлчилнэ.' }] },
+  ];
+  const secBody = (sections) => body({ sections });
+  const vSec = validateCompetitionInput(secBody(SECTIONS()));
+  ok('sections survive validation', vSec.ok, vSec.ok ? '' : vSec.error);
+  ok('  ...both sections, in order', vSec.ok && vSec.data.sections.map((s) => s.title).join(',') === 'Шагнал,Дүрэм',
+    vSec.ok ? JSON.stringify(vSec.data.sections.map((s) => s.title)) : '');
+  ok('  ...section ids are preserved verbatim',
+    vSec.ok && vSec.data.sections.map((s) => s.id).join(',') === 'sec-a,sec-b');
+  ok('  ...block order within a section is preserved',
+    vSec.ok && vSec.data.sections[0].blocks.map((b) => b.id).join(',') === 'blk-1,blk-2,blk-3',
+    vSec.ok ? JSON.stringify(vSec.data.sections[0].blocks.map((b) => b.id)) : '');
+  ok('  ...block types are preserved',
+    vSec.ok && vSec.data.sections[0].blocks.map((b) => b.type).join(',') === 'text,image,video');
+
+  // The per-type payload fields: the exact thing the rebuild trap eats.
+  const blk = (i) => (vSec.ok ? vSec.data.sections[0].blocks[i] : {});
+  ok('a text block keeps `text` VERBATIM (not trimmed)', blk(0).text === '  1-р байр: 500,000₮  ',
+    JSON.stringify(blk(0).text));
+  ok('an image block keeps imageUrl', blk(1).imageUrl === SEC_IMG, String(blk(1).imageUrl));
+  ok('an image block keeps imagePublicId', blk(1).imagePublicId === 'comp/sec_abc', String(blk(1).imagePublicId));
+  ok('a video block keeps videoUrl (query string and all)',
+    blk(2).videoUrl === 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42', String(blk(2).videoUrl));
+  // No block carries a key belonging to another type, and no undefined
+  // sneaks in — Firestore refuses undefined values outright.
+  ok('a text block carries ONLY id/type/text', Object.keys(blk(0)).sort().join(',') === 'id,text,type',
+    Object.keys(blk(0)).join(','));
+  ok('a video block carries ONLY id/type/videoUrl', Object.keys(blk(2)).sort().join(',') === 'id,type,videoUrl',
+    Object.keys(blk(2)).join(','));
+
+  // ── the Firestore round trip ──────────────────────────────────────────
+  const secId = await writeCompetitionDoc(db, null, vSec.data);
+  const dSec = await read(secId);
+  ok('sections round-trip through Firestore byte-identical',
+    JSON.stringify(dSec.sections) === JSON.stringify(vSec.data.sections),
+    JSON.stringify(dSec.sections));
+  ok('  ...with block order intact after the round trip',
+    dSec.sections?.[0]?.blocks?.map((b) => b.id).join(',') === 'blk-1,blk-2,blk-3');
+  ok('  ...and the read normaliser returns the same thing',
+    JSON.stringify(normalizeStoredSections(dSec.sections)) === JSON.stringify(vSec.data.sections),
+    JSON.stringify(normalizeStoredSections(dSec.sections)));
+
+  // ── ids survive a reorder ─────────────────────────────────────────────
+  // What the ids exist for. The editor's moveItem moves the ELEMENT, so a
+  // reordered save carries the same ids in a new order — never the same
+  // order with swapped contents, which is what index-keying would produce.
+  const reordered = SECTIONS();
+  reordered[0].blocks = [reordered[0].blocks[2], reordered[0].blocks[0], reordered[0].blocks[1]];
+  reordered.reverse();
+  const vMove = validateCompetitionInput(secBody(reordered));
+  ok('a reorder validates', vMove.ok, vMove.ok ? '' : vMove.error);
+  ok('reordering SECTIONS keeps their ids, in the new order',
+    vMove.ok && vMove.data.sections.map((s) => s.id).join(',') === 'sec-b,sec-a',
+    vMove.ok ? JSON.stringify(vMove.data.sections.map((s) => s.id)) : '');
+  ok('reordering BLOCKS keeps their ids, in the new order',
+    vMove.ok && vMove.data.sections[1].blocks.map((b) => b.id).join(',') === 'blk-3,blk-1,blk-2',
+    vMove.ok ? JSON.stringify(vMove.data.sections[1].blocks.map((b) => b.id)) : '');
+  ok('  ...and each id still carries its OWN content (not the one that was in its slot)',
+    vMove.ok &&
+      vMove.data.sections[1].blocks[0].videoUrl === 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42' &&
+      vMove.data.sections[1].blocks[1].text === '  1-р байр: 500,000₮  ' &&
+      vMove.data.sections[1].blocks[2].imageUrl === SEC_IMG);
+  await writeCompetitionDoc(db, secId, vMove.data);
+  const dMove = await read(secId);
+  ok('the reorder PERSISTS (merge:true replaces the array, not element-wise)',
+    dMove.sections?.map((s) => s.id).join(',') === 'sec-b,sec-a',
+    JSON.stringify(dMove.sections?.map((s) => s.id)));
+
+  // Deleting a section must shorten the stored array, not leave a tail.
+  await writeCompetitionDoc(db, secId, validateCompetitionInput(secBody([SECTIONS()[1]])).data);
+  const dDel = await read(secId);
+  ok('deleting a section shortens the stored array', dDel.sections?.length === 1, JSON.stringify(dDel.sections));
+  ok('  ...leaving the right one', dDel.sections?.[0]?.id === 'sec-b');
+
+  // ── absent / empty defaults cleanly ───────────────────────────────────
+  for (const [label, raw] of [['omitted', undefined], ['null', null], ['empty array', []]]) {
+    const r = validateCompetitionInput(secBody(raw));
+    ok(`${label} sections defaults to []`, r.ok && Array.isArray(r.data.sections) && r.data.sections.length === 0,
+      r.ok ? JSON.stringify(r.data.sections) : r.error);
+  }
+  const vLegacy = validateCompetitionInput({ name: 'legacy', status: 'draft', events: [] });
+  ok('a payload with no sections key at all validates', vLegacy.ok && vLegacy.data.sections.length === 0);
+  ok('normalizeStoredSections([]) is []', normalizeStoredSections([]).length === 0);
+  ok('normalizeStoredSections(undefined) is [] (a legacy doc)', normalizeStoredSections(undefined).length === 0);
+  ok('normalizeStoredSections of junk is []', normalizeStoredSections('nope').length === 0);
+
+  // ── a competition with no sections is BYTE-IDENTICAL to before ────────
+  // The whole point of "absent/empty = no custom sections": adding this
+  // field must not change a single existing document beyond an empty
+  // array, and must not perturb any other field.
+  const beforeKeys = [
+    'name', 'description', 'startAt', 'registrationDeadline', 'participantLimit', 'events', 'status',
+    'season', 'registrationOpensAt', 'endAt', 'format', 'featured', 'featuredHeading', 'featuredCtaLabel',
+    'featuredUntil', 'instructions', 'paid', 'posterUrl', 'posterPublicId', 'bannerUrl', 'bannerPublicId',
+  ];
+  const plainId = await writeCompetitionDoc(db, null, validateCompetitionInput(body()).data);
+  const dPlain = await read(plainId);
+  ok('a competition with no sections stores sections: []',
+    Array.isArray(dPlain.sections) && dPlain.sections.length === 0, JSON.stringify(dPlain.sections));
+  ok('  ...and every pre-existing field is untouched',
+    beforeKeys.every((k) => JSON.stringify(dPlain[k]) === JSON.stringify(dSec[k]) || k === 'sections'),
+    beforeKeys.filter((k) => JSON.stringify(dPlain[k]) !== JSON.stringify(dSec[k])).join(','));
+  ok('  ...and the document gains EXACTLY one key over the old shape',
+    Object.keys(dPlain).filter((k) => k !== 'createdAt' && !beforeKeys.includes(k)).join(',') === 'sections',
+    Object.keys(dPlain).filter((k) => k !== 'createdAt' && !beforeKeys.includes(k)).join(','));
+
+  // ── malformed sections are REFUSED, never dropped ─────────────────────
+  const rejectSec = (name, sections) => {
+    const r = validateCompetitionInput(secBody(sections));
+    ok(name, !r.ok, r.ok ? `accepted! -> ${JSON.stringify(r.data.sections)}` : r.error);
+  };
+  const oneSec = (over = {}) => [{ id: 'sec-a', title: 'Шагнал', blocks: [], ...over }];
+  const oneBlk = (block) => [{ id: 'sec-a', title: 'Шагнал', blocks: [block] }];
+
+  rejectSec('rejects a non-array sections', 'nope');
+  rejectSec('rejects a non-object section', [42]);
+  rejectSec('rejects a section with NO title', oneSec({ title: '' }));
+  rejectSec('rejects a whitespace-only title', oneSec({ title: '   ' }));
+  rejectSec('rejects a missing title', [{ id: 'sec-a', blocks: [] }]);
+  rejectSec('rejects a non-string title', oneSec({ title: 7 }));
+  rejectSec('rejects a section with no id', [{ title: 'Шагнал', blocks: [] }]);
+  rejectSec('rejects duplicate section ids', [
+    { id: 'same', title: 'A', blocks: [] },
+    { id: 'same', title: 'B', blocks: [] },
+  ]);
+  rejectSec('rejects an unknown section field', oneSec({ colour: 'red' }));
+  rejectSec('rejects non-array blocks', oneSec({ blocks: 'nope' }));
+
+  rejectSec('rejects an unknown block type', oneBlk({ id: 'b', type: 'audio', text: 'x' }));
+  rejectSec('rejects a block with no type', oneBlk({ id: 'b', text: 'x' }));
+  rejectSec('rejects a block with no id', oneBlk({ type: 'text', text: 'x' }));
+  rejectSec('rejects duplicate block ids', [
+    { id: 'sec-a', title: 'A', blocks: [{ id: 'b', type: 'text', text: '1' }, { id: 'b', type: 'text', text: '2' }] },
+  ]);
+  rejectSec('rejects an unknown block field', oneBlk({ id: 'b', type: 'text', text: 'x', align: 'left' }));
+
+  // Type/payload mismatch — the case the manifest exists to catch.
+  rejectSec('rejects a text block carrying imageUrl', oneBlk({ id: 'b', type: 'text', text: 'x', imageUrl: SEC_IMG }));
+  rejectSec('rejects a text block carrying videoUrl',
+    oneBlk({ id: 'b', type: 'text', text: 'x', videoUrl: 'https://youtu.be/dQw4w9WgXcQ' }));
+  rejectSec('rejects an image block carrying text', oneBlk({ id: 'b', type: 'image', imageUrl: SEC_IMG, text: 'x' }));
+  rejectSec('rejects a video block carrying imagePublicId',
+    oneBlk({ id: 'b', type: 'video', videoUrl: 'https://youtu.be/dQw4w9WgXcQ', imagePublicId: 'x' }));
+  rejectSec('rejects a text block with a videoUrl payload and no text',
+    oneBlk({ id: 'b', type: 'text', videoUrl: 'https://youtu.be/dQw4w9WgXcQ' }));
+
+  // Required payloads.
+  rejectSec('rejects an image block with NO imageUrl', oneBlk({ id: 'b', type: 'image' }));
+  rejectSec('rejects an image block with an empty imageUrl', oneBlk({ id: 'b', type: 'image', imageUrl: '   ' }));
+  rejectSec('rejects a video block with NO videoUrl', oneBlk({ id: 'b', type: 'video' }));
+  rejectSec('rejects a text block with a non-string text', oneBlk({ id: 'b', type: 'text', text: 42 }));
+
+  // Video urls: the same parser the editor reads back with.
+  rejectSec('rejects a non-video url', oneBlk({ id: 'b', type: 'video', videoUrl: 'https://example.com/v.mp4' }));
+  rejectSec('rejects a YouTube CHANNEL url',
+    oneBlk({ id: 'b', type: 'video', videoUrl: 'https://youtube.com/@somechannel' }));
+  rejectSec('rejects a YouTube PLAYLIST url (a real link that is not a video)',
+    oneBlk({ id: 'b', type: 'video', videoUrl: 'https://youtube.com/playlist?list=PL123456' }));
+  rejectSec('rejects a truncated YouTube id',
+    oneBlk({ id: 'b', type: 'video', videoUrl: 'https://youtu.be/short' }));
+
+  // Ceilings.
+  const many = (n) => Array.from({ length: n }, (_, i) => ({ id: `s${i}`, title: `T${i}`, blocks: [] }));
+  ok('exactly 20 sections is accepted', validateCompetitionInput(secBody(many(20))).ok);
+  rejectSec('rejects 21 sections', many(21));
+  const manyBlocks = (n) => [
+    { id: 'sec-a', title: 'A', blocks: Array.from({ length: n }, (_, i) => ({ id: `b${i}`, type: 'text', text: '' })) },
+  ];
+  ok('exactly 50 blocks is accepted', validateCompetitionInput(secBody(manyBlocks(50))).ok);
+  rejectSec('rejects 51 blocks in one section', manyBlocks(51));
+
+  // ── accepted video urls ───────────────────────────────────────────────
+  const acceptVideo = (url) => {
+    const r = validateCompetitionInput(secBody(oneBlk({ id: 'b', type: 'video', videoUrl: url })));
+    ok(`accepts ${url}`, r.ok, r.ok ? '' : r.error);
+  };
+  acceptVideo('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+  acceptVideo('https://youtu.be/dQw4w9WgXcQ');
+  acceptVideo('https://www.youtube.com/embed/dQw4w9WgXcQ');
+  acceptVideo('https://www.youtube.com/shorts/dQw4w9WgXcQ');
+  acceptVideo('youtube.com/watch?v=dQw4w9WgXcQ');
+  acceptVideo('https://vimeo.com/123456789');
+  acceptVideo('https://player.vimeo.com/video/123456789');
+  acceptVideo('https://vimeo.com/groups/cubing/videos/123456789');
+
+  // An empty section — a title and no blocks — is ACCEPTED, deliberately.
+  // The editor warns about it in place; dropping it on save would delete
+  // the title the admin just typed on their way to filling it in.
+  const vEmptySec = validateCompetitionInput(secBody([{ id: 'e', title: 'Хоосон', blocks: [] }]));
+  ok('an EMPTY section is accepted (warned in the editor, never dropped)',
+    vEmptySec.ok && vEmptySec.data.sections.length === 1 && vEmptySec.data.sections[0].blocks.length === 0,
+    vEmptySec.ok ? JSON.stringify(vEmptySec.data.sections) : vEmptySec.error);
+  const vNoBlocks = validateCompetitionInput(secBody([{ id: 'e', title: 'Хоосон' }]));
+  ok('  ...and an omitted blocks key becomes []',
+    vNoBlocks.ok && Array.isArray(vNoBlocks.data.sections[0].blocks) && vNoBlocks.data.sections[0].blocks.length === 0);
+
+  // ── the read normaliser is FORGIVING where the writer is strict ───────
+  // A write is refused when malformed; a READ must still open, or the
+  // admin cannot get in to fix the document.
+  const messy = normalizeStoredSections([
+    { title: 'Гарчиггүй ID', blocks: [{ type: 'text', text: 'x' }] },
+    { id: 'ok', title: 'Зөв', blocks: [{ id: 'b1', type: 'nope' }, { id: 'b2', type: 'image' }, { id: 'b3', type: 'text' }] },
+    { id: 'no-title', title: '  ', blocks: [] },
+    'junk',
+  ]);
+  ok('read: a section with no id gets a positional fallback', messy[0]?.id === 's1', JSON.stringify(messy[0]));
+  ok('read: a block with no id gets a positional fallback', messy[0]?.blocks?.[0]?.id === 's1-b1',
+    JSON.stringify(messy[0]?.blocks));
+  ok('read: an unknown block type is dropped, not thrown on',
+    messy[1]?.blocks?.every((b) => b.id !== 'b1'), JSON.stringify(messy[1]?.blocks));
+  ok('read: an image block with no image is dropped', messy[1]?.blocks?.every((b) => b.id !== 'b2'));
+  ok('read: a text block with no text becomes text: ""',
+    messy[1]?.blocks?.find((b) => b.id === 'b3')?.text === '');
+  ok('read: a section with no title is dropped (it could not be saved back)',
+    messy.every((s) => s.id !== 'no-title'), JSON.stringify(messy.map((s) => s.id)));
+  ok('read: junk entries are dropped', messy.length === 2, String(messy.length));
 
 
   // ── scramble route: the attempt bound ─────────────────────────────────
