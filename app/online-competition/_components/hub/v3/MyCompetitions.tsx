@@ -20,9 +20,11 @@ export interface RegisteredView {
 }
 
 // Status treatment keyed off the competition's real status. There is no
-// second axis to show — OnlineRegistration.status only has the single
-// value 'registered' today (see types.ts), so a row's presence here IS
-// the registration.
+// second axis to show YET: OnlineRegistration.status now has review values
+// (pending / waitlisted / approved / ...), but nothing writes them until
+// registration review lands, and every stored registration reads as
+// 'approved'. So for now a row's presence here IS the registration. When
+// review ships, this card must show the registration's own status too.
 const STATUS: Record<OnlineCompetitionStatus, { dot: string; text: string; label: string }> = {
   // Unreachable in practice: you cannot register for a draft, and a
   // competition moved back to draft drops out of the join in

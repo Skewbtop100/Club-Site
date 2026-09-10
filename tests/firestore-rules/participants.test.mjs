@@ -4,7 +4,40 @@ import {
   assertSucceeds,
   assertFails,
 } from '@firebase/rules-unit-testing';
-import { doc, setDoc, updateDoc, deleteField, serverTimestamp } from 'firebase/firestore';
+import {
+  doc,
+  setDoc,
+  updateDoc,
+  deleteField,
+  serverTimestamp,
+  getDoc,
+  getDocs,
+  collection,
+  runTransaction,
+} from 'firebase/firestore';
+import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+
+// registration-shape.ts decides which fields a registration save writes.
+// It is compiled here and run against the REAL rules, inside a real
+// transaction, so "registration still works" is tested on the actual
+// write path rather than asserted. It imports no Firestore SDK, so the
+// CommonJS build shares nothing with this ESM file's SDK instance.
+const require = createRequire(import.meta.url);
+const SHAPE_OUT = path.resolve('.tmp-regshape-rules');
+execFileSync(
+  process.execPath,
+  [
+    require.resolve('typescript/bin/tsc'),
+    'lib/online-competition/registration-shape.ts',
+    '--outDir', SHAPE_OUT,
+    '--module', 'commonjs', '--target', 'es2022', '--moduleResolution', 'node',
+    '--strict', '--skipLibCheck', '--esModuleInterop',
+  ],
+  { stdio: 'inherit' },
+);
+const { buildRegistrationWrite, normalizeStoredRegistration } = require(path.join(SHAPE_OUT, 'registration-shape.js'));
 
 // Defaults to the repo's real rules file, so `npm run test:rules` from the
 // project root needs no arguments. RULES_PATH overrides it if you want to
@@ -297,6 +330,147 @@ await check('GAP-3. event ids are not checked against the competition', 'ALLOW',
 // The deadline, status and participant limit are not checked either — the
 // rule never reads the competition document at all, so GAP-2 covers them.
 
+// ── Registration READS: owner only ──────────────────────────────────
+// The rule was `isSignedIn()`: any account could read any athlete's
+// registration, including the note whose placeholder asks for a contact
+// phone number. Uids are public (leaderboard docs are keyed by them), so
+// "you would need to know the uid" was never a protection.
+async function scenario(name, fn) {
+  let ok = true;
+  let detail;
+  try {
+    await testEnv.clearFirestore();
+    await fn();
+  } catch (e) {
+    ok = false;
+    detail = String(e?.message ?? e).split('\n')[0];
+  }
+  if (ok) pass++;
+  else fail++;
+  console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}`);
+  if (!ok) console.log(`          -> ${detail}`);
+}
+const expect = (cond, msg) => { if (!cond) throw new Error(msg); };
+const seedReg = (uid, competitionId, data) =>
+  testEnv.withSecurityRulesDisabled((ctx) =>
+    setDoc(doc(ctx.firestore(), 'onlineParticipants', uid, 'registrations', competitionId), data));
+const readRaw = async (uid, competitionId) => {
+  let out;
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    out = (await getDoc(doc(ctx.firestore(), 'onlineParticipants', uid, 'registrations', competitionId))).data();
+  });
+  return out;
+};
+const athlete = (uid) => testEnv.authenticatedContext(uid, { email: `${uid}@example.com`, email_verified: true }).firestore();
+const PRIVATE = { competitionId: 'comp1', events: ['333'], status: 'registered', note: 'Утас 9911 2233' };
+
+await scenario('RR1. an athlete CAN read their own registration', async () => {
+  await seedReg(UID, 'comp1', PRIVATE);
+  await assertSucceeds(getDoc(doc(athlete(UID), 'onlineParticipants', UID, 'registrations', 'comp1')));
+});
+await scenario('RR2. an athlete CANNOT read another athlete’s registration (the phone-number leak)', async () => {
+  await seedReg(UID, 'comp1', PRIVATE);
+  await assertFails(getDoc(doc(athlete('someoneElse'), 'onlineParticipants', UID, 'registrations', 'comp1')));
+});
+await scenario('RR3. a signed-out visitor cannot read a registration', async () => {
+  await seedReg(UID, 'comp1', PRIVATE);
+  await assertFails(getDoc(doc(testEnv.unauthenticatedContext().firestore(), 'onlineParticipants', UID, 'registrations', 'comp1')));
+});
+await scenario('RR4. an athlete CAN list their own registrations (fetchMyRegistrations)', async () => {
+  await seedReg(UID, 'comp1', PRIVATE);
+  await assertSucceeds(getDocs(collection(athlete(UID), 'onlineParticipants', UID, 'registrations')));
+});
+await scenario('RR5. an athlete CANNOT list another athlete’s registrations', async () => {
+  await seedReg(UID, 'comp1', PRIVATE);
+  await assertFails(getDocs(collection(athlete('someoneElse'), 'onlineParticipants', UID, 'registrations')));
+});
+
+// ── The WRITE path, end to end ──────────────────────────────────────
+// Mirrors registerForCompetition in data.ts exactly — the same builder,
+// the same transaction shape (registration-shape.test.cjs checks that
+// data.ts still has this shape). Runs under the real rules as the athlete.
+async function saveRegistration(db, uid, competitionId, events, note) {
+  const ref = doc(db, 'onlineParticipants', uid, 'registrations', competitionId);
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    const write = buildRegistrationWrite(
+      snap.exists(),
+      { competitionId, events, note },
+      { now: serverTimestamp(), remove: deleteField() },
+    );
+    if (write.kind === 'create') tx.set(ref, write.data);
+    else tx.update(ref, write.data);
+  });
+}
+
+await scenario('RW1. a FIRST registration creates the document with both timestamps', async () => {
+  await saveRegistration(athlete(UID), UID, 'comp1', ['333', '222'], 'хамт ирнэ');
+  const d = await readRaw(UID, 'comp1');
+  expect(d, 'no document');
+  expect(Object.keys(d).sort().join(',') === 'competitionId,events,note,registeredAt,status,updatedAt',
+    `fields: ${Object.keys(d).sort().join(',')}`);
+  expect(d.status === 'registered', `status ${d.status}`);
+  expect(d.registeredAt && d.updatedAt, 'timestamps missing');
+});
+
+await scenario('RW2. an EDIT keeps registeredAt, status and results — and replaces events', async () => {
+  // As it will look after an admin review and a solve: an admin-written
+  // status, recordAo5Result's results map, and a first-registration time.
+  const { Timestamp } = await import('firebase/firestore');
+  const FIRST = Timestamp.fromMillis(Date.UTC(2026, 0, 5, 9, 0));
+  await seedReg(UID, 'comp1', {
+    competitionId: 'comp1', events: ['333'], status: 'approved', registeredAt: FIRST,
+    results: { '333': { ao5: 1234, attempts: [1200, 1234, 1300, 1250, 1180] } },
+  });
+  await saveRegistration(athlete(UID), UID, 'comp1', ['333', '444'], '');
+  const d = await readRaw(UID, 'comp1');
+  expect(d.status === 'approved', `the admin status was overwritten: ${d.status}`);
+  expect(d.registeredAt.toMillis() === FIRST.toMillis(), 'registeredAt was rewritten');
+  expect(d.results?.['333']?.ao5 === 1234, `results were erased: ${JSON.stringify(d.results)}`);
+  expect(d.events.join(',') === '333,444', `events: ${d.events}`);
+  expect(d.updatedAt && d.updatedAt.toMillis() > FIRST.toMillis(), 'updatedAt not stamped');
+  expect(d.competitionId === 'comp1', 'competitionId lost');
+});
+
+await scenario('RW3. an edit that CLEARS the note deletes it', async () => {
+  await saveRegistration(athlete(UID), UID, 'comp1', ['333'], 'Утас 9911');
+  await saveRegistration(athlete(UID), UID, 'comp1', ['333'], '   ');
+  const d = await readRaw(UID, 'comp1');
+  expect(!('note' in d), `note still there: ${JSON.stringify(d.note)}`);
+});
+
+await scenario('RW4. an edit that ADDS a note sets it', async () => {
+  await saveRegistration(athlete(UID), UID, 'comp1', ['333'], '');
+  await saveRegistration(athlete(UID), UID, 'comp1', ['333'], 'тусгай шаардлага');
+  expect((await readRaw(UID, 'comp1')).note === 'тусгай шаардлага', 'note not set');
+});
+
+await scenario('RW5. the one EXISTING registration (only an overwritten registeredAt) edits cleanly', async () => {
+  // Exactly the live document's shape: status 'registered', no updatedAt.
+  const { Timestamp } = await import('firebase/firestore');
+  const LAST_SAVE = Timestamp.fromMillis(Date.UTC(2026, 8, 1, 12, 0));
+  await seedReg(UID, 'jbb6', { competitionId: 'jbb6', events: ['333', '222'], registeredAt: LAST_SAVE, status: 'registered' });
+  await saveRegistration(athlete(UID), UID, 'jbb6', ['333'], '');
+  const d = await readRaw(UID, 'jbb6');
+  expect(d.registeredAt.toMillis() === LAST_SAVE.toMillis(), 'its registeredAt was rewritten');
+  expect(d.status === 'registered', 'its stored status was changed');
+  expect(d.updatedAt, 'updatedAt not added');
+});
+
+await scenario('RW6. what the athlete READS back: the legacy status converts to approved', async () => {
+  await saveRegistration(athlete(UID), UID, 'comp1', ['333'], 'x');
+  const snap = await getDoc(doc(athlete(UID), 'onlineParticipants', UID, 'registrations', 'comp1'));
+  const r = normalizeStoredRegistration(snap.data(), 'comp1');
+  expect(r.status === 'approved', `read as ${r.status}`);
+  expect(r.events.join(',') === '333' && r.note === 'x', 'shape wrong');
+});
+
+await scenario('RW7. another athlete CANNOT save into my registration via the write path', async () => {
+  await assertFails(saveRegistration(athlete('someoneElse'), UID, 'comp1', ['333'], ''));
+});
+
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 await testEnv.cleanup();
+const { rmSync } = await import('node:fs');
+rmSync(SHAPE_OUT, { recursive: true, force: true });
 process.exit(fail === 0 ? 0 : 1);

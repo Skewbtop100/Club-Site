@@ -199,9 +199,9 @@ export default function CompetitionsList() {
                     ШҮҮЛТ
                   </Link>
                   {/* The registrations view IS the detail page's Тамирчид
-                      tab. No badge: registrations have a single status
-                      ('registered') — there is no pending-request state in
-                      the schema for a count to come from. */}
+                      tab. No badge yet: the review statuses exist in the
+                      type, but nothing writes 'pending' until registration
+                      review lands, so there is no pending count to show. */}
                   <Link className="oc-adm-comp-btn" href={detail}>
                     БҮРТГЭЛ
                   </Link>

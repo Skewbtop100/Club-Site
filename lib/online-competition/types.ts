@@ -539,20 +539,49 @@ export interface OnlineParticipantAdminView {
   rejectionReason: string | null;
 }
 
-export type OnlineRegistrationStatus = 'registered';
+/** Where a registration stands in the (upcoming) admin review.
+ *
+ *  GROUNDWORK: nothing writes these values yet and nothing reads the
+ *  status yet. Every stored registration today holds the legacy value
+ *  'registered', written before review existed; normalizeRegistrationStatus
+ *  (registration-shape.ts) reads it as 'approved'. 'registered' is
+ *  deliberately NOT a member of this union — it is a stored spelling only,
+ *  never a state the code reasons about. */
+export type OnlineRegistrationStatus = 'pending' | 'waitlisted' | 'approved' | 'cancelled' | 'rejected';
 
 /** onlineParticipants/{uid}/registrations/{competitionId} — one doc per
- *  competition a participant has registered for. `status` is a single
- *  value for now ("registered"); more (e.g. "withdrawn") may come later
- *  once there's a reason to track it. */
+ *  competition a participant has registered for.
+ *
+ *  READABLE BY ITS OWNER ONLY (firestore.rules). The admin panel reads
+ *  registrations through API routes with the Admin SDK, which bypasses
+ *  the rules. It used to be readable by any signed-in user — which, once
+ *  the note field asked for a contact phone number, exposed that number to
+ *  anyone who knew an athlete's uid (and uids are public: the leaderboard
+ *  documents are keyed by them).
+ *
+ *  The document holds more than this type: recordAo5Result writes a
+ *  `results` map onto it, and admin review fields will follow. The athlete's
+ *  own saves touch only their own fields (buildRegistrationWrite), so those
+ *  survive an edit. */
 export interface OnlineRegistration {
   competitionId: string;
   /** eventIds the athlete selected, e.g. ["333", "222"]. */
   events: string[];
-  /** Server time of the LAST write — registerForCompetition overwrites
-   *  the whole document on every save, including an edit, so this is when
-   *  the current selection was made, not when the athlete first joined. */
+  /** When the athlete FIRST registered. Set once, by the create, and never
+   *  rewritten — a waitlist needs a fair order, and this is it.
+   *
+   *  CAVEAT FOR DOCUMENTS WRITTEN BEFORE THIS FIELD WAS FIXED: the old
+   *  writer replaced the whole document on every save, so on those this
+   *  holds the time of their LAST save before the fix, not their first.
+   *  The original is unrecoverable. It is still the best value there is,
+   *  and it can only be LATER than the truth — so in any order built on it,
+   *  such an athlete can be placed behind where they belong, never ahead. */
   registeredAt?: Timestamp;
+  /** Server time of the most recent save — the create, then every edit.
+   *  Absent on documents written before this field existed. */
+  updatedAt?: Timestamp;
+  /** Always a current value — the reader converts the legacy stored
+   *  'registered' (see OnlineRegistrationStatus). */
   status: OnlineRegistrationStatus;
   /** The athlete's optional note to the organiser — someone coming with
    *  them, a special requirement, a phone number. Shown to the admin on

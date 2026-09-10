@@ -4,6 +4,7 @@ import {
   waitForPendingWrites,
   deleteField,
   getDocs,
+  runTransaction,
   limit,
   orderBy,
   query,
@@ -20,7 +21,7 @@ import {
   normalizeStoredSchedule,
   normalizeStoredSections,
 } from './competition-shape';
-import { REGISTRATION_NOTE_MAX } from './types';
+import { buildRegistrationWrite, normalizeStoredRegistration } from './registration-shape';
 import type {
   OnlineCompetition,
   OnlineCompetitionStatus,
@@ -304,42 +305,46 @@ function registrationRef(uid: string, competitionId: string) {
   return doc(onlineCompDb, 'onlineParticipants', uid, 'registrations', competitionId);
 }
 
-// Plain setDoc (no merge) — the doc ID is the competitionId, so
-// re-registering for the same competition overwrites the previous
-// selection wholesale rather than merging stale array entries into it.
-// That wholesale overwrite is also what makes CLEARING the note work: a
-// save with no note writes a document with no `note` key, and the old one
-// is gone.
+// First registration CREATES the document; every later save UPDATES only
+// the athlete's own fields. Which fields each writes is decided by
+// buildRegistrationWrite (registration-shape.ts), the one place it is
+// spelled out and tested.
+//
+// This used to be a plain setDoc with no merge, replacing the whole
+// document on every edit. That silently erased the `results` map
+// recordAo5Result writes onto the same document, rewrote registeredAt so
+// it recorded the last save instead of the first registration, and —
+// once an admin writes a review status — would have erased that too.
+//
+// A TRANSACTION, because create-or-update is decided by reading the
+// document first: two tabs registering at the same moment must not both
+// take the create path and both stamp registeredAt. The read is of the
+// athlete's own document, which the owner-only read rule allows.
 export async function registerForCompetition(
   uid: string,
   competitionId: string,
   eventIds: string[],
   note = '',
 ): Promise<void> {
-  // Trimmed, capped, and OMITTED when blank — absent is the one spelling
-  // of "no note" (see the field comment in types.ts). The cap is also
-  // enforced by firestore.rules; slicing here means a paste one character
-  // over never reaches the rules as a refused write.
-  const trimmed = note.trim().slice(0, REGISTRATION_NOTE_MAX);
-  await setDoc(registrationRef(uid, competitionId), {
-    competitionId,
-    events: eventIds,
-    registeredAt: serverTimestamp(),
-    status: 'registered',
-    ...(trimmed ? { note: trimmed } : {}),
+  const ref = registrationRef(uid, competitionId);
+  await runTransaction(onlineCompDb, async (tx) => {
+    const snap = await tx.get(ref);
+    const write = buildRegistrationWrite(
+      snap.exists(),
+      { competitionId, events: eventIds, note },
+      { now: serverTimestamp(), remove: deleteField() },
+    );
+    if (write.kind === 'create') tx.set(ref, write.data);
+    else tx.update(ref, write.data);
   });
 }
 
 export async function fetchRegistration(uid: string, competitionId: string): Promise<OnlineRegistration | null> {
   const snap = await getDoc(registrationRef(uid, competitionId));
   if (!snap.exists()) return null;
-  const data = snap.data() as OnlineRegistration;
-  // The note is typed by the athlete and pre-fills a form, so it is read
-  // defensively: a non-string (a hand edit) reads as no note rather than
-  // reaching a textarea as "[object Object]".
-  const note = typeof data.note === 'string' && data.note.trim() ? data.note : undefined;
-  const { note: _raw, ...rest } = data;
-  return note === undefined ? rest : { ...rest, note };
+  // Converts the legacy status, and reads the note defensively — see
+  // normalizeStoredRegistration.
+  return normalizeStoredRegistration(snap.data(), competitionId);
 }
 
 // For the "Миний тэмцээнүүд" dashboard — every competition this user has
@@ -347,7 +352,9 @@ export async function fetchRegistration(uid: string, competitionId: string): Pro
 // (the dashboard splits live/upcoming/finished itself).
 export async function fetchMyRegistrations(uid: string): Promise<OnlineRegistration[]> {
   const snap = await getDocs(collection(onlineCompDb, 'onlineParticipants', uid, 'registrations'));
-  return snap.docs.map((d) => d.data() as OnlineRegistration);
+  // The document id IS the competition id, so it is the fallback for a
+  // document missing the mirrored field.
+  return snap.docs.map((d) => normalizeStoredRegistration(d.data(), d.id));
 }
 
 // The signed-in athlete's own submissions, for the dashboard's

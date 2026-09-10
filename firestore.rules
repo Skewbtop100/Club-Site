@@ -323,7 +323,18 @@ service cloud.firestore {
                                 judgeFieldsUntouched();
 
       match /registrations/{competitionId} {
-        allow read: if isSignedIn();
+        // OWNER ONLY. This was `isSignedIn()` — any signed-in account could
+        // read any athlete's registration, including the free-text note
+        // whose placeholder asks for a contact phone number, and athlete
+        // uids are public (the leaderboard documents are keyed by them).
+        //
+        // Nothing legitimate needs more: every client-side reader
+        // (fetchRegistration, fetchMyRegistrations, and the transaction in
+        // registerForCompetition) reads the signed-in athlete's own
+        // documents, and the admin panel reads through API routes with the
+        // Admin SDK, which bypasses these rules. isAdmin() is deliberately
+        // NOT added — no client-side admin read exists to need it.
+        allow read: if isSignedIn() && request.auth.uid == uid;
         // `note` — optional, a string of at most 300 characters. 300 is
         // REGISTRATION_NOTE_MAX in lib/online-competition/types.ts; rules
         // cannot import it, so change both together. This is the only

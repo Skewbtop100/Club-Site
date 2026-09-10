@@ -14,13 +14,13 @@ import { WcaEventIcon, hasWcaEventIcon } from '@/lib/wca-event-icon';
 // A REDESIGN, not a new flow. The states and their order are exactly what
 // they were:
 //
-//   idle ──(sign in if needed)──(profile check)──> picking ──(save)──> registered
+//   idle ──(sign in if needed)──(profile check)──> picking ──(save)──> summary
 //                                     │                                   │
 //                                     └──> gated (not approved)           └── edit ──> picking
 //
 // persisted to onlineParticipants/{uid}/registrations/{competitionId}. On
 // mount an existing registration is loaded and the panel opens straight on
-// `registered`, as before.
+// `summary`, as before.
 //
 // What is new: the mockup's markup; the note; the fee for the current
 // selection; distinct copy for the three not-approved profile states; and
@@ -29,7 +29,12 @@ import { WcaEventIcon, hasWcaEventIcon } from '@/lib/wca-event-icon';
 // promise about the deadline, and it cannot be true if the deadline does
 // nothing. ALL gates are client-side; see registration-view.ts.
 
-type RegState = 'idle' | 'gated' | 'picking' | 'registered';
+/** The PANEL's state — which screen is showing. Unrelated to the stored
+ *  registration's review status (OnlineRegistrationStatus). The last state
+ *  was called 'registered' until the review statuses arrived; it was
+ *  renamed so a UI screen and a document status can never be confused
+ *  for one another in the same file. */
+type RegState = 'idle' | 'gated' | 'picking' | 'summary';
 
 interface Saved {
   events: Set<string>;
@@ -83,7 +88,7 @@ export default function RegistrationPanel({ competition }: { competition: Online
         setSaved(snapshot);
         setSelected(new Set(snapshot.events));
         setNote(snapshot.note);
-        setState('registered');
+        setState('summary');
       })
       .catch((err) => {
         // Best-effort, as before: on failure the athlete sees the idle
@@ -159,7 +164,7 @@ export default function RegistrationPanel({ competition }: { competition: Online
     if (saved) {
       setSelected(new Set(saved.events));
       setNote(saved.note);
-      setState('registered');
+      setState('summary');
     } else {
       setState('idle');
     }
@@ -202,7 +207,7 @@ export default function RegistrationPanel({ competition }: { competition: Online
       setSaved({ events: new Set(chosen), note: trimmed });
       setSelected(new Set(chosen));
       setNote(trimmed);
-      setState('registered');
+      setState('summary');
     } catch (err) {
       console.error('RegistrationPanel: saving the registration failed:', err);
       setSaveError('Бүртгэл хадгалахад алдаа гарлаа. Дахин оролдоно уу.');
@@ -369,7 +374,7 @@ export default function RegistrationPanel({ competition }: { competition: Online
     );
   }
 
-  // ── registered, and still open ───────────────────────────────────────
+  // ── summary: registered, and still open ──────────────────────────────
   if (!saved) return null;
   return (
     <RegisteredSummary
