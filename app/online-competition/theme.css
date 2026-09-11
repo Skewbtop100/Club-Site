@@ -1595,34 +1595,6 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  /* Slow enough that the marker reads as a drift rather than a flash —
-     the athlete is solving, and a snap would pull the eye. */
-  transition: border-color 800ms ease;
-}
-/* WCA inspection markers at 8s, 12s and 15s: the preview's one-pixel
-   frame and nothing else. No text, no number, no movement, no layout
-   change — the athlete should notice it peripherally and never read it.
-   Each step is a small lift in warmth from the neutral #2A2721, staying
-   far below the contrast of anything else on the screen.
-   
-   THE SEQUENCE MUST NOT DE-ESCALATE. The 15s step is the last one and has
-   to read at least as strongly as the 12s amber, or the marker that means
-   "inspection is over" lands softer than the one before it. Red is
-   intrinsically darker than amber at the same nominal brightness (the eye
-   weights green ~3x red), so an obvious red-brown measured 34% DIMMER
-   than the amber it followed. Relative luminance, measured:
-     neutral 0.0205 · 8s 0.0512 · 12s 0.0957 · 15s 0.1102
-   The 15s is 1.15x the amber — a step up, not a jump — and LESS saturated
-   than it (0.47 vs 0.54), so the hue carries the "this one is different"
-   rather than the intensity. */
-.oc-solve-rec-box.oc-solve-mark-1 {
-  border-color: #4A3F20;
-}
-.oc-solve-rec-box.oc-solve-mark-2 {
-  border-color: #6B5420;
-}
-.oc-solve-rec-box.oc-solve-mark-3 {
-  border-color: #8E4B33;
 }
 .oc-solve-rec-box .oc-solve-camera-video {
   position: absolute;
@@ -2238,8 +2210,79 @@
   background: #E9FF7A;
 }
 .oc-solve-btn-submit:disabled {
-  opacity: 0.5;
+  background: transparent;
+  border-color: #2A2A31;
+  color: #4A4740;
   cursor: not-allowed;
+}
+
+
+/* ── THE ATTESTATION ─────────────────────────────────────────────────────
+   The mockup's checkbox, with the mockup's geometry and something
+   checkable in it. Its own words are "Миний эвлүүлэлт үнэн зөв байна" —
+   my solve is correct — which names nothing an athlete could be wrong
+   about on purpose. The three lines above the box do.
+
+   IT GATES A BUTTON IN ONE TAB AND NOTHING ELSE. Nothing about it is
+   stored, so it is a prompt to think before signing, not a record that
+   they did. Making it evidence means a field on the registration and a
+   rule to protect it. */
+.oc-solve-attest-head {
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.2em;
+  color: #6E6A62;
+}
+.oc-solve-attest-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.oc-solve-attest-item {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  font: 400 12px/1.55 var(--oc-font-heading), sans-serif;
+  color: #9A958A;
+}
+.oc-solve-attest-dot {
+  width: 5px;
+  height: 5px;
+  margin-top: 6px;
+  background: #DFFF4F;
+  flex: none;
+}
+.oc-solve-attest {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  border: 1px solid #2A2A31;
+  background: transparent;
+  padding: 15px 16px;
+  cursor: pointer;
+  text-align: left;
+}
+.oc-solve-attest:hover {
+  border-color: #DFFF4F;
+}
+.oc-solve-attest-box {
+  width: 20px;
+  height: 20px;
+  border: 1px solid #3A3A42;
+  flex: none;
+}
+.oc-solve-attest-box-on {
+  background: #DFFF4F;
+  border-color: #DFFF4F;
+  color: #08080A;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 700 11px/1 var(--oc-font-mono), monospace;
+}
+.oc-solve-attest-text {
+  font: 500 13px/1.5 var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
 }
 
 /* State 7 — sent */

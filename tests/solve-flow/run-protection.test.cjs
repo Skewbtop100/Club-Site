@@ -326,39 +326,26 @@ console.log('\n  -- 7. durations and markers --');
     page.includes("{stage === 'zeroDisplay' && (") && (page.match(/setStage\([^)]*zeroDisplay/g) ?? []).length === 4);
   ok('  ...showing the athlete their own timer at 0.00', /0\.00 дээр байхад нь камерт/.test(page));
 
-  // THE MARKERS: colour, never sound, never anything readable.
-  ok('three markers, at 8s, 12s and 15s',
-    rec.includes('const MARKER_TIMES_MS = [8000, 12000, 15000];'));
-  ok('  ...and the beeps are gone',
+  // THE MARKERS ARE GONE. They walked the preview's border at 8, 12 and
+  // 15 seconds, as an aid to an athlete counting WCA inspection by feel.
+  // Inspection is its own stage with its own countdown now, BEFORE this
+  // screen exists — so those three timers were counting from the start of
+  // the SOLVE, which was never inspection, and the only thing they could
+  // still suggest mid-solve was a rule that is not running.
+  ok('no marker timers survive in rec',
+    !rec.includes('MARKER_TIMES_MS') && !rec.includes('setMarker') && !rec.includes('oc-solve-mark-'));
+  ok('  ...nor the four rules that painted them',
+    [1, 2, 3].every((n) => !theme.includes(`.oc-solve-mark-${n}`)) &&
+      !theme.includes('transition: border-color 800ms ease;'));
+  ok('  ...and nothing else referenced them',
+    !fs.readFileSync(path.join(ROOT, SOLVE, '_lib/useSolveRecorder.ts'), 'utf8').includes('marker') &&
+      !page.includes('marker') && !theme.includes('oc-solve-mark'));
+  ok('  ...leaving rec with no state at all',
+    !rec.includes('useState') && !rec.includes('useEffect'));
+  // The beeps they replaced are still gone, and nothing audio-shaped came
+  // back with the removal.
+  ok('  ...and the beeps are still gone',
     !rec.includes('BEEP') && !rec.includes('onBeep') && !page.includes('playBeep'));
-  ok('  ...expressed as the preview frame’s border colour',
-    rec.includes('oc-solve-mark-${marker}') && theme.includes('.oc-solve-rec-box.oc-solve-mark-1'));
-  ok('  ...three steps of it', [1, 2, 3].every((n) => theme.includes(`.oc-solve-rec-box.oc-solve-mark-${n}`)));
-  // THE SEQUENCE ESCALATES. Red is intrinsically darker than amber, so
-  // "make the last one red" silently made it the weakest of the three.
-  // Measured in relative luminance, not eyeballed.
-  {
-    const colourOf = (n) => {
-      const at = theme.indexOf(`.oc-solve-rec-box.oc-solve-mark-${n} {`);
-      const m = /border-color: (#[0-9A-Fa-f]{6})/.exec(theme.slice(at, at + 120));
-      return m ? m[1] : null;
-    };
-    const lum = (hex) => {
-      const ch = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
-        .map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
-      return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
-    };
-    const l = [1, 2, 3].map((n) => lum(colourOf(n)));
-    ok('  ...each marker at least as strong as the one before',
-      l[0] < l[1] && l[1] <= l[2], l.map((x) => x.toFixed(4)).join(' < '));
-    ok('  ...and the last one not a jump (within 1.5x of the previous)', l[2] / l[1] < 1.5,
-      (l[2] / l[1]).toFixed(2));
-  }
-  ok('  ...faded, not snapped', theme.includes('transition: border-color 800ms ease;'));
-  // Nothing the athlete could read, and nothing that moves: the marker
-  // state drives a class name and nothing else.
-  ok('the marker renders no text and no number',
-    !/marker[^;]{0,80}(БАЙНА|секунд|\{marker\}<)/.test(rec) && (rec.match(/marker/g) ?? []).length <= 6);
   const recCode = rec.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
   ok('nothing audio-shaped was added near the recorder',
     !/audio/i.test(recCode) && !/oscillator/i.test(recCode) && !recCode.includes('playBeep'));
@@ -484,8 +471,7 @@ console.log('\n  -- 8. the competition environment --');
   ok('the holds are untouched: 8 seconds, three of them',
     page.includes('const HOLD_SECONDS = 8;') &&
       (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3);
-  ok('the markers are untouched: 8s, 12s, 15s',
-    rec.includes('const MARKER_TIMES_MS = [8000, 12000, 15000];'));
+  ok('the markers are gone and stayed gone', !rec.includes('MARKER_TIMES_MS'));
   ok('resume is untouched: a complete run still lands on the summary',
     /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page));
 }
@@ -605,7 +591,7 @@ console.log('\n  -- 9. the lobby and the between screen --');
     page.includes('const HOLD_SECONDS = 8;') && (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3);
   ok('  ...and one of them is now the cover, at the same length',
     page.includes('<CoverStage seconds={HOLD_SECONDS}'));
-  ok('the markers did not move', rec.includes('const MARKER_TIMES_MS = [8000, 12000, 15000];'));
+  ok('the markers are gone and stayed gone', !rec.includes('MARKER_TIMES_MS'));
 }
 
 console.log('\n  -- 10. the mockup restyle --');
@@ -677,11 +663,12 @@ console.log('\n  -- 10. the mockup restyle --');
 
   // ── REC, minus the inspection panel ──
   ok('rec is the mockup’s 4/3 frame',
-    rec.includes('className={`oc-solve-rec-box') &&
+    rec.includes('className="oc-solve-rec-box"') &&
       /\.oc-solve-rec-box \{[\s\S]{0,260}?aspect-ratio: 4 \/ 3;/.test(theme));
   ok('  ...with the mockup’s finish button', rec.includes('>\n        Эвлүүлэлт дууссан\n      </button>'));
   // The inspection strip under the preview belongs with `count`.
-  ok('  ...and NO inspection panel', !rec.includes('АЖИГЛАХ ХУГАЦАА') && !theme.includes('oc-solve-insp'));
+  ok('  ...and NO inspection panel',
+    !stripComments(rec).includes('АЖИГЛАХ ХУГАЦАА') && !theme.includes('oc-solve-insp'));
   ok('the scrolling tick strip is gone', !theme.includes('.oc-solve-tick-strip') && !rec.includes('tick-strip'));
 
   // ── ENTRY: the mockup's `entry` block, NOT verify's ──
@@ -700,10 +687,11 @@ console.log('\n  -- 10. the mockup restyle --');
       /\.oc-solve-ao5-value \{[\s\S]{0,120}?font: 700 44px\/0\.9/.test(theme));
   // Changeset 5, both of them: the checkbox and the label whose colours
   // the mockup binds to it.
-  ok('  ...with NO attestation checkbox yet',
-    !summary.includes('Миний эвлүүлэлт үнэн зөв') && !summary.includes('confirmed'));
-  ok('  ...and the submit label unchanged',
-    summaryCode.includes("'Илгээх'") && !summaryCode.includes('Бүгдийг илгээх'));
+  // The checkbox and the label it gates arrived in changeset 5; what this
+  // section still owns is that the box sits ABOVE the button, which is
+  // the mockup's order and the only order in which it is a gate.
+  ok('  ...with the attestation above the submit button',
+    summaryCode.indexOf('oc-solve-attest') < summaryCode.indexOf('oc-solve-btn-submit'));
 
   // ── SENT ──
   ok('the sent grid is 18px cells at gap 4',
@@ -717,7 +705,7 @@ console.log('\n  -- 10. the mockup restyle --');
       page.includes('async function finishRecording'));
   ok('the hold durations did not move',
     page.includes('const HOLD_SECONDS = 8;') && (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3);
-  ok('the markers did not move', rec.includes('const MARKER_TIMES_MS = [8000, 12000, 15000];'));
+  ok('the markers are gone and stayed gone', !rec.includes('MARKER_TIMES_MS'));
   ok('resume did not move',
     /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page) &&
       page.includes('setResumeMessage(resumeNotice(plan))'));
@@ -848,11 +836,78 @@ console.log('\n  -- 11. the inspection --');
     ['.oc-solve-lobby', '620px'], ['.oc-solve-between', '520px'], ['.oc-solve-entry', '380px'],
     ['.oc-solve-summary', '560px'], ['.oc-solve-sent', '460px'],
   ].every(([sel, w]) => new RegExp(`\\${sel} \\{[\\s\\S]{0,220}?max-width: ${w};`).test(theme)));
-  ok('the markers did not move', rec.includes('const MARKER_TIMES_MS = [8000, 12000, 15000];'));
+  ok('the markers are gone and stayed gone', !rec.includes('MARKER_TIMES_MS'));
 
   // 375px: the two numbers that do not fit as specified.
   ok('the 210px count shrinks at 375', /\.oc-solve-count-n \{\s*\n\s*font-size: 130px;/.test(theme));
   ok('  ...and the 46px flash title with it', /\.oc-solve-goflash-title \{\s*\n\s*font-size: 32px;/.test(theme));
+}
+
+console.log('\n  -- 12. the attestation --');
+{
+  const summaryCode2 = stripComments(summary);
+
+  // THE MOCKUP'S OWN WORDING is «Миний эвлүүлэлт үнэн зөв байна» — my
+  // solve is correct. It names no act, so ticking it costs a cheat
+  // nothing. These name acts the athlete alone knows and the video can be
+  // checked against.
+  ok('the attestation is not the mockup’s unfalsifiable line',
+    !summaryCode2.includes('Миний эвлүүлэлт үнэн зөв байна'));
+  ok('  ...it attests to the times matching the athlete’s own timer',
+    summary.includes('өөрийн таймерын заасантай тохирч байна'));
+  ok('  ...to nobody having helped', summary.includes('тусламж, зөвлөгөөгүйгээр'));
+  ok('  ...and to the recording being unedited', summary.includes('засвар, хасалт, тасалдал ороогүй'));
+  ok('  ...three of them, in one list', /const ATTESTATIONS = \[[\s\S]{0,400}?\];/.test(summary) &&
+    (summary.match(/^  '[^']+',$/gm) ?? []).length === 3);
+
+  // The mockup's geometry, and its two box states.
+  ok('the checkbox is the mockup’s 20px box in a bordered row',
+    /\.oc-solve-attest \{[\s\S]{0,260}?border: 1px solid #2A2A31;[\s\S]{0,120}?padding: 15px 16px;/.test(theme) &&
+      /\.oc-solve-attest-box \{[\s\S]{0,140}?width: 20px;[\s\S]{0,40}?height: 20px;/.test(theme));
+  ok('  ...volt when ticked', /\.oc-solve-attest-box-on \{[\s\S]{0,120}?background: #DFFF4F;/.test(theme));
+  ok('  ...and it is a real toggle', summary.includes('setAttested((v) => !v)') &&
+    summary.includes('aria-pressed={attested}'));
+
+  // THE BUTTON'S COLOURS FOLLOW IT, as the mockup binds them — an outline
+  // that says "not yet", not a greyed one that says broken.
+  ok('the submit button is gated on the checkbox',
+    summary.includes('disabled={submitting || !attested}'));
+  ok('  ...and looks ungated rather than broken',
+    /\.oc-solve-btn-submit:disabled \{[\s\S]{0,200}?background: transparent;[\s\S]{0,120}?color: #4A4740;/.test(theme));
+
+  // NOT STORED, and the code says so rather than implying otherwise: it
+  // gates a button in one tab. Making it evidence needs a field.
+  ok('the attestation is local to the screen and not persisted',
+    summary.includes('const [attested, setAttested] = useState(false);') &&
+      !page.includes('attested') &&
+      !fs.readFileSync(path.join(ROOT, 'lib/online-competition/data.ts'), 'utf8').includes('attested'));
+
+  // THE LABEL is neither the mockup's nor the old one. Every attempt is
+  // already on the server; the only thing this sends is the result line.
+  ok('the submit label does not promise to send what is already sent',
+    !summaryCode2.includes('Бүгдийг илгээх'));
+  ok('  ...it names the one thing it does send', summary.includes("'Дүнгээ илгээх'"));
+  // ...and the run's result really is all that is left to write.
+  ok('  ...which is all handleFinish writes',
+    /async function handleFinish\(\)[\s\S]{0,2600}?await recordAo5Result\(/.test(page) &&
+      !/async function handleFinish\(\)[\s\S]{0,2600}?uploadVideoToCloudinary/.test(page));
+
+  // ── WHAT MUST NOT MOVE ──
+  ok('the recording boundary did not move',
+    page.includes("if (stage === 'zeroDisplay') {") &&
+      page.includes("onFinish={() => setStage('finishHold')}") &&
+      /async function finishRecording[\s\S]{0,200}?await recorder\.stopRecording\(\)/.test(page));
+  ok('the hold durations did not move',
+    page.includes('const HOLD_SECONDS = 8;') && (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3);
+  ok('the inspection countdown did not move',
+    page.includes('const INSPECTION_SECONDS = 15;') &&
+      page.includes('seconds={INSPECTION_SECONDS}') && page.includes('const GO_FLASH_MS = 1000;'));
+  ok('  ...and still owns the inspection alone',
+    !stripComments(rec).includes('АЖИГЛАХ') && !theme.includes('oc-solve-insp'));
+  ok('resume did not move',
+    /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page) &&
+      page.includes('setResumeMessage(resumeNotice(plan))'));
+  ok('the stage list did not move', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 15);
 }
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);

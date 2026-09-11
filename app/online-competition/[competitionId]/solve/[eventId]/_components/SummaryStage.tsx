@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { fmtCentiseconds, fmtTimeLimit } from '@/lib/online-competition/time-utils';
 import type { AttemptTime } from '@/lib/online-competition/ao5';
 import { computeResult, formatLabel, type ResultFormat } from '@/lib/online-competition/ao5';
@@ -9,6 +10,20 @@ export interface AttemptResult {
   timeCs: number | null;
   isDnf: boolean;
 }
+
+/** What the athlete is actually signing.
+ *
+ *  The mockup's checkbox reads «Миний эвлүүлэлт үнэн зөв байна» — my solve
+ *  is correct. That is not something anyone can be wrong about on
+ *  purpose: it names no act, so ticking it costs a cheat nothing and
+ *  tells an honest athlete nothing either. These three name acts, and
+ *  each is something the athlete alone knows and the video can be checked
+ *  against. */
+const ATTESTATIONS = [
+  'Бичиж оруулсан цаг маань өөрийн таймерын заасантай тохирч байна.',
+  'Эвлүүлэлтээ би өөрөө, хэний ч тусламж, зөвлөгөөгүйгээр хийсэн.',
+  'Бичлэгт засвар, хасалт, тасалдал ороогүй.',
+];
 
 /** Provisional PR marker. Reads the athlete's stored bests (fetched once
  *  by the page); never writes them — stats.{eventId} is only ever
@@ -78,6 +93,12 @@ export default function SummaryStage({
   // A first-ever Ao5 for this event counts, same rule as a first single.
   const ao5IsPr = beatsAverage(ao5, resultFormat, bests);
 
+  // LOCAL, AND DELIBERATELY NOT PERSISTED. It gates this button in this
+  // tab and nothing else — it is a prompt to read three sentences before
+  // signing them, not a record that anyone did. It resets on reload,
+  // which is right: a run you come back to is a run you sign again.
+  const [attested, setAttested] = useState(false);
+
   return (
     <div className="oc-solve-summary">
       <p style={{ font: '500 9px var(--oc-font-mono), monospace', letterSpacing: '.2em', color: '#6E6A62' }}>
@@ -143,17 +164,48 @@ export default function SummaryStage({
         <p style={{ font: '400 12px var(--oc-font-heading), sans-serif', color: '#D8402C' }}>{submitError}</p>
       )}
 
+      <p className="oc-solve-attest-head">БАТАЛГААЖУУЛАЛТ</p>
+      <div className="oc-solve-attest-list">
+        {ATTESTATIONS.map((line) => (
+          <div key={line} className="oc-solve-attest-item">
+            <span className="oc-solve-attest-dot" aria-hidden />
+            <span>{line}</span>
+          </div>
+        ))}
+      </div>
+
+      <button
+        type="button"
+        className="oc-solve-attest"
+        aria-pressed={attested}
+        onClick={() => setAttested((v) => !v)}
+      >
+        <span className={`oc-solve-attest-box${attested ? ' oc-solve-attest-box-on' : ''}`} aria-hidden>
+          {attested ? '✓' : ''}
+        </span>
+        <span className="oc-solve-attest-text">Дээрх бүгдийг баталж байна</span>
+      </button>
+
       {/* One action. The old "Дахин үзэх" beside it deleted every
           recording and restarted the round — offered right under the
           athlete's own Ao5, which made it a way to discard a result you
           did not like. Attempts are filed as they happen now, and a filed
           attempt cannot be deleted by the person who filed it.
 
-          The label stays «Илгээх». The mockup's «Бүгдийг илгээх» comes
-          with the attestation checkbox above it, and its colours are
-          bound to that checkbox's state — both are changeset 5. */}
-      <button type="button" className="oc-solve-btn-submit" disabled={submitting} onClick={onSubmit}>
-        {submitting ? 'Илгээж байна...' : 'Илгээх'}
+          THE LABEL IS NEITHER THE MOCKUP'S NOR THE OLD ONE. «Бүгдийг
+          илгээх» — send everything — is true in the mockup's model, where
+          nothing leaves the device until this button. Here every attempt
+          was filed as it was recorded and the only thing this sends is
+          the run's own result line, so "send everything" would promise
+          work that already happened and imply that leaving now would lose
+          it. «Дүнгээ илгээх» is what actually happens. */}
+      <button
+        type="button"
+        className="oc-solve-btn-submit"
+        disabled={submitting || !attested}
+        onClick={onSubmit}
+      >
+        {submitting ? 'Илгээж байна...' : 'Дүнгээ илгээх'}
       </button>
     </div>
   );
