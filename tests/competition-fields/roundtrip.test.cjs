@@ -1288,10 +1288,13 @@ const read = async (id) => (await db.collection(COL).doc(id).get()).data();
   }
   ok('a uid registered for a different competition is refused', wrongComp instanceof RegistrationPatchError);
 
-  // PR-4 is not here: approving past the participant limit is possible.
-  // (There is no limit read in this path at all — asserted by construction:
-  // the bulk above approved without the competition document existing.)
-  ok('the limit is NOT enforced yet (PR-4): approvals succeed with no competition document at all',
+  // The limit IS enforced now (see the participant-limit block above), and
+  // this case still passes for a different reason than it used to: a
+  // competition document that does not exist has no participantLimit, so
+  // there is nothing to exceed. Worth keeping — every approval above ran
+  // against a missing competition, which is the path a limit read could
+  // most easily have thrown on.
+  ok('approvals still work when the competition document does not exist',
     !(await db.collection('onlineCompetitions').doc(RC).get()).exists);
 
   const relisted = await listCompetitionRegistrations(db, RC);
@@ -1362,6 +1365,137 @@ const read = async (id) => (await db.collection(COL).doc(id).get()).data();
   // admin has to see every status to act on it.
   const allForD7 = await listCompetitionRegistrations(db, D7);
   ok('the admin review listing still shows every status', allForD7.length === 7, String(allForD7.length));
+
+  // ── the participant limit, enforced at approval ───────────────────────
+  // participantLimit was displayed and enforced by nothing. The check now
+  // happens INSIDE the approval transaction, which is the only way two
+  // admins approving at once cannot both pass a check that was true for
+  // each of them separately.
+  const LIM = 'comp-limit';
+  const limitRef = db.collection('onlineCompetitions').doc(LIM);
+  const regFor = (uid, comp = LIM) =>
+    db.collection('onlineParticipants').doc(uid).collection('registrations').doc(comp);
+  const seedAthlete = async (uid, status, comp = LIM) => {
+    await db.collection('onlineParticipants').doc(uid).set({ uid, displayName: uid });
+    await regFor(uid, comp).set({ competitionId: comp, events: ['333'], status, registeredAt: RTS.now() });
+  };
+  const statusOfReg = async (uid, comp = LIM) => (await regFor(uid, comp).get()).get('status');
+  const approvedCount = async (comp = LIM) => {
+    const all = await db.collectionGroup('registrations').get();
+    return all.docs.filter(
+      (d) =>
+        d.ref.parent.parent?.parent.id === 'onlineParticipants' &&
+        d.data().competitionId === comp &&
+        (d.data().status === 'approved' || d.data().status === 'registered'),
+    ).length;
+  };
+
+  await limitRef.set({ name: 'limit', status: 'upcoming', events: [], participantLimit: 3 });
+  for (const uid of ['lim-a', 'lim-b', 'lim-c', 'lim-d', 'lim-e']) await seedAthlete(uid, 'pending');
+
+  await applyRegistrationPatch(db, LIM, ['lim-a', 'lim-b'], { status: 'approved' });
+  ok('approving within the limit works', (await approvedCount()) === 2, String(await approvedCount()));
+
+  {
+    // The third place exists; the fourth does not.
+    await applyRegistrationPatch(db, LIM, ['lim-c'], { status: 'approved' });
+    ok('the last place is takeable', (await approvedCount()) === 3);
+    let err = null;
+    try {
+      await applyRegistrationPatch(db, LIM, ['lim-d'], { status: 'approved' });
+    } catch (e) {
+      err = e;
+    }
+    ok('one past the limit is REFUSED', err instanceof RegistrationPatchError, String(err));
+    ok('  ...as a 409', err?.status === 409, String(err?.status));
+    ok('  ...naming the waitlist as the next step', /ХҮЛЭЭЛГЭНД/.test(String(err?.message)), String(err?.message));
+    ok('  ...and nothing was written', (await statusOfReg('lim-d')) === 'pending');
+    ok('  ...the count is unchanged', (await approvedCount()) === 3);
+  }
+  {
+    // ALL OR NOTHING: a bulk that does not fit is refused whole, not
+    // approved as far as it goes.
+    await applyRegistrationPatch(db, LIM, ['lim-c'], { status: 'waitlisted' });
+    ok('a place freed by the waitlist is usable again', (await approvedCount()) === 2);
+    let err = null;
+    try {
+      await applyRegistrationPatch(db, LIM, ['lim-c', 'lim-d', 'lim-e'], { status: 'approved' });
+    } catch (e) {
+      err = e;
+    }
+    ok('a bulk needing 3 places with 1 left is refused', err instanceof RegistrationPatchError);
+    ok('  ...reporting the places remaining', /1 орон зай/.test(String(err?.message)), String(err?.message));
+    ok('  ...and NOT approving the one that would have fitted',
+      (await statusOfReg('lim-c')) === 'waitlisted' && (await statusOfReg('lim-d')) === 'pending');
+  }
+  {
+    // Moving athletes out must keep working when the competition is full —
+    // it is how an admin makes room.
+    await applyRegistrationPatch(db, LIM, ['lim-c'], { status: 'approved' });
+    ok('full again', (await approvedCount()) === 3);
+    await applyRegistrationPatch(db, LIM, ['lim-a'], { status: 'cancelled' });
+    ok('cancelling works at the limit', (await statusOfReg('lim-a')) === 'cancelled');
+    await applyRegistrationPatch(db, LIM, ['lim-d'], { status: 'waitlisted' });
+    ok('waitlisting works at the limit', (await statusOfReg('lim-d')) === 'waitlisted');
+    // A note-only patch on an approved athlete approves nobody new.
+    await applyRegistrationPatch(db, LIM, ['lim-b'], { statusNote: 'Төлбөр хүлээгдэж буй' });
+    ok('a note-only patch is never refused by the limit',
+      (await regFor('lim-b').get()).get('statusNote') === 'Төлбөр хүлээгдэж буй');
+    // Re-approving someone already approved takes no place.
+    await applyRegistrationPatch(db, LIM, ['lim-b'], { status: 'approved' });
+    ok('re-approving an existing member is allowed when full', (await statusOfReg('lim-b')) === 'approved');
+  }
+  {
+    // UNLIMITED never refuses.
+    const UNL = 'comp-unlimited';
+    await db.collection('onlineCompetitions').doc(UNL).set({ name: 'u', status: 'upcoming', events: [] });
+    for (const uid of ['unl-a', 'unl-b', 'unl-c']) await seedAthlete(uid, 'pending', UNL);
+    await applyRegistrationPatch(db, UNL, ['unl-a', 'unl-b', 'unl-c'], { status: 'approved' });
+    ok('no participantLimit means no refusal', (await approvedCount(UNL)) === 3);
+  }
+  {
+    // ALREADY OVER: seeded past the limit, as data from before this
+    // existed would be. Existing approvals stand; new ones refuse.
+    const OVER = 'comp-over';
+    await db.collection('onlineCompetitions').doc(OVER).set({ name: 'o', status: 'upcoming', events: [], participantLimit: 2 });
+    for (const uid of ['ov-a', 'ov-b', 'ov-c', 'ov-d']) await seedAthlete(uid, 'approved', OVER);
+    await seedAthlete('ov-e', 'pending', OVER);
+    ok('a competition can be over its limit already', (await approvedCount(OVER)) === 4);
+    let err = null;
+    try {
+      await applyRegistrationPatch(db, OVER, ['ov-e'], { status: 'approved' });
+    } catch (e) {
+      err = e;
+    }
+    ok('further approvals refuse', err instanceof RegistrationPatchError);
+    ok('  ...reporting the real count, not a clamped one', /4\/2/.test(String(err?.message)), String(err?.message));
+    ok('  ...and the four already approved are untouched', (await approvedCount(OVER)) === 4);
+    ok('  ...every one of them still approved',
+      (await statusOfReg('ov-a', OVER)) === 'approved' && (await statusOfReg('ov-d', OVER)) === 'approved');
+  }
+  {
+    // THE CONCURRENT CASE. Two admins approve different athletes into the
+    // ONE remaining place at the same time. A check-then-write would let
+    // both through — each read 2 of 3 before either wrote.
+    const RACE = 'comp-race';
+    await db.collection('onlineCompetitions').doc(RACE).set({ name: 'r', status: 'upcoming', events: [], participantLimit: 3 });
+    for (const uid of ['race-a', 'race-b']) await seedAthlete(uid, 'approved', RACE);
+    for (const uid of ['race-x', 'race-y']) await seedAthlete(uid, 'pending', RACE);
+
+    const results = await Promise.allSettled([
+      applyRegistrationPatch(db, RACE, ['race-x'], { status: 'approved' }),
+      applyRegistrationPatch(db, RACE, ['race-y'], { status: 'approved' }),
+    ]);
+    const fulfilled = results.filter((r) => r.status === 'fulfilled').length;
+    const rejected = results.filter((r) => r.status === 'rejected');
+    ok('exactly ONE of two simultaneous approvals succeeds', fulfilled === 1,
+      JSON.stringify(results.map((r) => r.status)));
+    ok('  ...the other is refused by the limit',
+      rejected.length === 1 && rejected[0].reason instanceof RegistrationPatchError,
+      String(rejected[0]?.reason));
+    ok('  ...and the competition ends at exactly its limit, not one over',
+      (await approvedCount(RACE)) === 3, String(await approvedCount(RACE)));
+  }
 
   // ── opening a round announces the competition ─────────────────────────
   // There were two independent notions of "live": roundState said a round

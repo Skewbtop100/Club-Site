@@ -1,5 +1,6 @@
 import { FieldValue, type Firestore } from 'firebase-admin/firestore';
-import { normalizeRegistrationStatus } from './registration-shape';
+import { isCompetingRegistration, normalizeRegistrationStatus } from './registration-shape';
+import { checkApprovalLimit, limitRefusalMessage } from './participant-limit';
 import type { StatusPatch } from './registration-review';
 import type { OnlineRegistrationStatus } from './types';
 
@@ -131,9 +132,17 @@ export class RegistrationPatchError extends Error {
  *  Every document is read first; if any uid has no registration for this
  *  competition, nothing is written and the error names the missing uids.
  *
- *  THE PARTICIPANT LIMIT IS NOT ENFORCED HERE (PR-4). Approving past it is
- *  currently possible; the review table's summary shows "70/64" when it
- *  happens.
+ *  ── THE PARTICIPANT LIMIT ──
+ *  An approval also counts. Inside the SAME transaction: two admins
+ *  approving at once must not both pass a check that was true for each of
+ *  them separately, which is exactly what a read-then-write would allow.
+ *  The count is a transactional read of the registrations, so a concurrent
+ *  approval invalidates it and Firestore retries this transaction against
+ *  the new state rather than committing against a stale one.
+ *
+ *  Only an approval is checked. Moving athletes to the waitlist, cancelling
+ *  or rejecting them can never take a place, and must keep working when a
+ *  competition is already full — that is how an admin makes room.
  *
  *  Returns how many registrations were written. */
 export async function applyRegistrationPatch(
@@ -150,7 +159,37 @@ export async function applyRegistrationPatch(
   if (patch.statusNote !== undefined) update.statusNote = patch.statusNote === null ? FieldValue.delete() : patch.statusNote;
 
   await db.runTransaction(async (tx) => {
+    // ── every read first ──
     const snaps = await tx.getAll(...refs);
+
+    // Only when this patch approves someone. The reads below are part of
+    // the transaction's conflict set, so they are not paid for — or
+    // contended on — by a cancel or a waitlist move.
+    let limitCheck: ReturnType<typeof checkApprovalLimit> = { ok: true };
+    if (patch.status === 'approved') {
+      const compSnap = await tx.get(db.collection('onlineCompetitions').doc(competitionId));
+      const rawLimit = compSnap.get('participantLimit');
+      const limit = typeof rawLimit === 'number' ? rawLimit : null;
+
+      // The same unfiltered collection-group read every other caller uses
+      // — a filtered one needs a COLLECTION_GROUP index this project does
+      // not have (see countRegistrationsFor in admin-competitions.ts). In
+      // a transaction it is also the conflict set: another admin approving
+      // anyone, anywhere, makes this transaction retry, which is the
+      // price of counting without a denormalised counter that could drift.
+      const all = await tx.get(db.collectionGroup('registrations'));
+      const approvedUids = all.docs
+        .filter(
+          (d) =>
+            d.ref.parent.parent?.parent.id === 'onlineParticipants' &&
+            d.data().competitionId === competitionId &&
+            isCompetingRegistration(d.data().status),
+        )
+        .map((d) => d.ref.parent.parent!.id);
+
+      limitCheck = checkApprovalLimit({ approvedUids, patchUids: uids, limit });
+    }
+
     const missing = snaps.filter((s) => !s.exists).map((s) => s.ref.parent.parent!.id);
     if (missing.length > 0) {
       throw new RegistrationPatchError(
@@ -159,6 +198,14 @@ export async function applyRegistrationPatch(
         missing,
       );
     }
+    // ALL OR NOTHING applies here too: a bulk that does not fit is refused
+    // whole, rather than approving as many as fit and leaving the admin to
+    // work out which.
+    if (!limitCheck.ok) {
+      throw new RegistrationPatchError(limitRefusalMessage(limitCheck), 409);
+    }
+
+    // ── writes ──
     for (const ref of refs) tx.update(ref, update);
   });
   return refs.length;

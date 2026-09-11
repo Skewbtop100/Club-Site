@@ -134,10 +134,23 @@ console.log('\n  -- D7 call sites: every reader asks one of the two questions --
   const live = src('app/online-competition/dashboard/_components/LiveCard.tsx');
   ok('LiveCard returns the locked chip BEFORE it can reach the Эхлүүлэх link',
     live.indexOf('if (gate) {') < live.indexOf('oc-v3-start-btn"'));
-  // The admin review listing must NOT be filtered — the review table is
-  // the one place that has to see every status.
-  ok('the admin registrations listing stays unfiltered',
-    !src('lib/online-competition/admin-registrations.ts').includes('isCompetingRegistration'));
+  // The admin review LISTING must not be filtered — the review table is
+  // the one place that has to see every status. Scoped to that function:
+  // the same file's applyRegistrationPatch counts approved registrations
+  // for the participant limit, which is a different question.
+  {
+    const adminRegs = src('lib/online-competition/admin-registrations.ts');
+    const listing = adminRegs.slice(
+      adminRegs.indexOf('export async function listCompetitionRegistrations'),
+      adminRegs.indexOf('export class RegistrationPatchError'),
+    );
+    ok('the admin registrations listing stays unfiltered',
+      !listing.includes('isCompetingRegistration') && !listing.includes("status ==="));
+    // ...and the limit count, which is not the listing, uses the shared
+    // predicate rather than a second spelling of "approved".
+    ok('the participant-limit count asks the same D7 question',
+      adminRegs.includes('isCompetingRegistration(d.data().status)'));
+  }
 }
 
 console.log('\n  -- read shape --');

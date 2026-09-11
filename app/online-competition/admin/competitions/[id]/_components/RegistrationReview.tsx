@@ -149,6 +149,15 @@ export default function RegistrationReview({ competition }: { competition: Onlin
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
+        // 409 is a DECISION, not a breakage: the participant limit refused
+        // this approval. It arrives already written for the admin — it
+        // says how many places are left and offers ХҮЛЭЭЛГЭНД — so it is
+        // shown as-is rather than wrapped in "could not save", which would
+        // read as a bug in the table.
+        if (res.status === 409 && data.error) {
+          setActionError(data.error);
+          return false;
+        }
         throw new Error(data.error ?? `HTTP ${res.status}`);
       }
       await load();
@@ -174,6 +183,11 @@ export default function RegistrationReview({ competition }: { competition: Onlin
       setSelected(new Set());
       setBulkNote('');
     }
+    // On a refusal the SELECTION IS KEPT on purpose: the limit message
+    // says to move these athletes to the waitlist, and ХҮЛЭЭЛГЭНД is the
+    // button next to the one they just pressed. Clearing it would make
+    // them tick every row again to follow the advice they were just
+    // given.
   }
 
   async function saveNote(uid: string, text: string) {

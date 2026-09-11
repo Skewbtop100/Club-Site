@@ -595,6 +595,32 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
     };
   }, [savedId, loadedFees, registeredCount, baseFee, events]);
 
+  /** Lowering the participant limit below the athletes already approved.
+   *
+   *  NOBODY IS UN-APPROVED by it — an athlete who has been told they are
+   *  in stays in, and taking that back is a decision for a person, not a
+   *  consequence of editing a number. What the lower limit does do is stop
+   *  FURTHER approvals (applyRegistrationPatch refuses them) and make the
+   *  review table read "70/64", which is the honest thing for it to say.
+   *
+   *  So this is a warning rather than a refusal: it says out loud what the
+   *  admin has just done, because the alternative is finding out later
+   *  from a number that looks like a bug.
+   *
+   *  registeredCount is the APPROVED count (D7), which is exactly the
+   *  number the limit is measured against. */
+  const limitLoweredWarning = useCallback((): SaveWarning | null => {
+    if (savedId === null || unlimited || registeredCount === 0) return null;
+    const next = Math.max(1, parseInt(participantLimit, 10) || 0);
+    if (next >= registeredCount) return null;
+    return {
+      headline: 'Хязгаар одоогийн баталгаажсан тоогоос бага байна.',
+      detail:
+        `${registeredCount} тамирчин баталгаажсан, шинэ хязгаар ${next}. Хэний ч бүртгэл цуцлагдахгүй — ` +
+        'гэхдээ шинээр баталгаажуулах боломжгүй болно.',
+    };
+  }, [savedId, unlimited, participantLimit, registeredCount]);
+
   // url and publicId always move together — a stale publicId beside a new
   // url would point cleanup at the wrong asset.
   const setPoster = useCallback((url: string | null, publicId: string | null) => {
@@ -707,6 +733,9 @@ export default function CompetitionEditor({ competitionId }: { competitionId: st
     // the more consequential of the two.
     const fee = feeChangeWarning();
     if (fee) warnings.push(fee);
+
+    const lowered = limitLoweredWarning();
+    if (lowered) warnings.push(lowered);
 
     if (nextStatus === 'live' && loadedStatus !== 'live') {
       setSaving(true);
