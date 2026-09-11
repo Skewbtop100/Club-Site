@@ -8,10 +8,11 @@ import { competeGateCopy } from '@/lib/online-competition/registration-view';
 import type { RoundAccess } from '@/lib/online-competition/round-access';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import { fmtDateTime } from '../../_components/hub/format';
-import { deriveEventState } from './eventState';
+import { deriveEventState } from '@/lib/online-competition/event-state';
 
 /** The four event states from the solve-flow phase, repainted in v3. The
- *  state machine itself (eventState.ts) is untouched. */
+ *  state machine itself (lib/online-competition/event-state.ts) is
+ *  untouched. */
 function EventStatus({
   competitionId,
   eventId,
@@ -113,7 +114,7 @@ export default function LiveCard({
   // Approved only (D7). Hiding the button is all this can do — the solve
   // page itself is not gated until PR-3.
   const gate = competeGateCopy(registration.status);
-  const state = deriveEventState(competition);
+  const state = deriveEventState(competition, undefined, Date.now());
   const completed = state === 'done' ? myEvents.length : 0;
   const total = myEvents.length;
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
@@ -173,7 +174,7 @@ export default function LiveCard({
           <EventStatus
             competitionId={competition.id}
             eventId={e.eventId}
-            state={deriveEventState(competition, access?.[e.eventId])}
+            state={deriveEventState(competition, access?.[e.eventId], Date.now())}
             gate={gate}
           />
         </div>

@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
-import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import { FieldValue } from 'firebase-admin/firestore';
 import { isOnlineCompAdmin } from '@/lib/online-competition/admin-auth';
 import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
 import { roundKey } from '@/lib/online-competition/scrambles';
 import { fetchRoundStates } from '@/lib/online-competition/round-results';
 import { resolveEventLiveRounds } from '@/lib/online-competition/round-access';
 import { notifyRoundFinalised } from '@/lib/online-competition/notifications-server';
+import { RoundOpenError, openRound } from '@/lib/online-competition/round-open';
 import type { QualifierMethod, RoundStatus } from '@/lib/online-competition/rounds';
 
 // ── Round management (Раунд удирдах) ────────────────────────────────────
@@ -144,28 +145,19 @@ export async function POST(req: Request) {
   const key = roundKey(eventId, round);
 
   if (action === 'open') {
-    if (round > 1) {
-      const prev = await compRef.collection('qualifiers').doc(roundKey(eventId, round - 1)).get();
-      if (!prev.exists) {
-        return NextResponse.json(
-          {
-            error: `${round - 1}-р раунд шалгаруулаагүй байна. Эхлээд өмнөх раундаа шалгаруулна уу.`,
-          },
-          { status: 400 },
-        );
+    // The qualifier check, the roundState write and the competition's
+    // status all move together — see openRound. Opening a round is what
+    // announces a competition as live; keeping that in one transaction is
+    // what stops the two notions of "live" from disagreeing again.
+    try {
+      const result = await openRound(db, competitionId, eventId, round);
+      return NextResponse.json(result);
+    } catch (e) {
+      if (e instanceof RoundOpenError) {
+        return NextResponse.json({ error: e.message }, { status: e.status });
       }
+      throw e;
     }
-    await compRef.collection('roundState').doc(key).set(
-      {
-        eventId,
-        round,
-        status: 'live' satisfies RoundStatus,
-        openedAt: Timestamp.now(),
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
-    return NextResponse.json({ status: 'live' });
   }
 
   await compRef.collection('roundState').doc(key).set(

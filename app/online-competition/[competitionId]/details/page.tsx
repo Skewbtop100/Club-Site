@@ -14,6 +14,9 @@ import { EventsTab, ScheduleTab, SectionTab } from './_components/DetailTabs';
 import RegistrationPanel from './_components/RegistrationPanel';
 import { useMyRegistration } from './_components/useMyRegistration';
 import RegistrationStatusBadge from '../../_components/RegistrationStatusBadge';
+import StartRoundPanel from './_components/StartRoundPanel';
+import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
+import type { RoundAccess } from '@/lib/online-competition/round-access';
 
 const COMPETITIONS = '/online-competition/competitions';
 
@@ -75,6 +78,44 @@ export default function CompetitionDetailPage() {
   // The athlete's own registration — read here rather than inside the
   // panel so the sidebar can show its status before the panel is opened.
   const myRegistration = useMyRegistration(competitionId);
+
+  // ── Which round is open, for this athlete ─────────────────────────────
+  // roundState is denied to every client by firestore.rules, so "is a
+  // round open" can only be answered by the server. This is the SAME
+  // resolver the scramble route enforces with, so the start button below
+  // cannot offer something the solve flow would then refuse.
+  const { user } = useOnlineAuth();
+  const solverUid = user && !user.isAnonymous ? user.uid : null;
+  const [access, setAccess] = useState<Record<string, RoundAccess> | null>(null);
+  const [accessLoading, setAccessLoading] = useState(false);
+
+  useEffect(() => {
+    if (!solverUid) {
+      setAccess(null);
+      return;
+    }
+    let cancelled = false;
+    setAccessLoading(true);
+    fetch(
+      `/api/online-competition/round-access?competitionId=${encodeURIComponent(competitionId)}&uid=${encodeURIComponent(solverUid)}`,
+    )
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('failed'))))
+      .then((d: { events: Record<string, RoundAccess> }) => {
+        if (!cancelled) setAccess(d.events ?? {});
+      })
+      .catch(() => {
+        // A failed lookup leaves `access` null: the panel then says no
+        // round is open rather than offering a button it cannot stand
+        // behind.
+        if (!cancelled) setAccess(null);
+      })
+      .finally(() => {
+        if (!cancelled) setAccessLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [solverUid, competitionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -241,6 +282,18 @@ export default function CompetitionDetailPage() {
             </div>
           </div>
         </header>
+
+        {/* Directly under the hero, above the sidebar layout, so it is
+            visible whichever section is selected. An athlete who has
+            registered should not have to know that solving lives on
+            another page. */}
+        <StartRoundPanel
+          competitionId={competitionId}
+          events={competition.events}
+          registration={myRegistration.registration}
+          access={access}
+          loading={accessLoading || myRegistration.loading}
+        />
 
         <div className="oc-cd-layout">
           <nav className="oc-cd-side" aria-label="Хэсэг">

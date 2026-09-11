@@ -531,11 +531,11 @@ function RegisteredSummary({
           gate.message
         ) : (
           <>
-            Раунд эхлэхэд{' '}
+            Раунд нээгдэхэд «Эхлүүлэх» товч энэ хуудасны дээд талд болон{' '}
             <Link href="/online-competition/dashboard" className="oc-rp-link">
               «Миний тэмцээнүүд»
             </Link>{' '}
-            дээр «Эхлүүлэх» товч нээгдэнэ.
+            дээр гарна.
           </>
         )}
       </p>

@@ -45,6 +45,9 @@ export default function RoundsManager() {
   // `rounds` here, which would be a second copy of that rule.
   const [gaps, setGaps] = useState<RoundGapEvent[]>([]);
   const [loadError, setLoadError] = useState('');
+  /** Set when opening a round also announced the competition — the side
+   *  effect said out loud, rather than discovered on the public site. */
+  const [announced, setAnnounced] = useState('');
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [rowError, setRowError] = useState<{ key: string; message: string } | null>(null);
   const [qualifyKey, setQualifyKey] = useState<string | null>(null);
@@ -106,18 +109,38 @@ export default function RoundsManager() {
 
   async function toggle(row: RoundAdminView, action: 'open' | 'close') {
     const key = roundKey(row.eventId, row.round);
+    // OPENING A ROUND ANNOUNCES THE COMPETITION. An upcoming competition
+    // becomes live in the same transaction (round-open.ts), because every
+    // athlete-facing surface reads competition.status and an open round in
+    // an "upcoming" competition is reachable only by typing the solve URL.
+    // Asked first: it is a public change, and an admin opening a round to
+    // test something should not publish the competition by accident.
+    if (action === 'open' && competition && competition.status === 'upcoming') {
+      const ok = window.confirm(
+        `«${competition.name}» тэмцээн ЯВАГДАЖ БУЙ болж, нийтэд харагдана. ` +
+          `${row.label} · ${row.round}-р раундыг нээх үү?`,
+      );
+      if (!ok) return;
+    }
     setBusyKey(key);
     setRowError(null);
+    setAnnounced('');
     try {
       const res = await fetch('/api/online-competition/admin-rounds', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ competitionId, eventId: row.eventId, round: row.round, action }),
       });
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        announcedLive?: boolean;
+      };
       if (!res.ok) {
         setRowError({ key, message: data.error ?? 'Үйлдэл амжилтгүй боллоо.' });
         return;
+      }
+      if (data.announcedLive) {
+        setAnnounced('Тэмцээн ЯВАГДАЖ БУЙ болж, нийтэд харагдаж эхэллээ.');
       }
       await load();
     } catch (err) {
@@ -173,6 +196,22 @@ export default function RoundsManager() {
       </div>
 
       {loadError && <p className="oc-v3-status-error">{loadError}</p>}
+      {announced && (
+        <p
+          role="status"
+          style={{
+            marginBottom: 12,
+            border: '1px solid #2A2A31',
+            borderLeft: '2px solid #DFFF4F',
+            background: '#0F0F13',
+            padding: '10px 12px',
+            font: '500 11px var(--oc-font-heading), sans-serif',
+            color: '#F4F1EA',
+          }}
+        >
+          {announced}
+        </p>
+      )}
 
       {/* One line per event with no round open, at the top of the panel —
           the ОНГОЙЛОХ button that fixes each one is in the rows

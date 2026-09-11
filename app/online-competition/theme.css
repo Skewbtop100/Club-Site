@@ -1761,6 +1761,52 @@
 }
 
 /* ── sidebar + content ───────────────────────────────────────────────── */
+/* The athlete's way into their own live round, directly under the hero
+   on the competition detail page. Sits above .oc-cd-layout so it is
+   visible whichever section of the page is selected. */
+.oc-cd-start {
+  margin-top: 20px;
+  border: 1px solid #2A2A31;
+  border-left: 2px solid #DFFF4F;
+  background: #0F0F13;
+  padding: 14px 16px;
+}
+.oc-cd-start-label {
+  font: 500 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.2em;
+  color: #6E6A62;
+}
+.oc-cd-start-note {
+  margin-top: 8px;
+  font: 400 12px var(--oc-font-heading), sans-serif;
+  color: #9A958A;
+  line-height: 1.6;
+}
+.oc-cd-start-rows {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.oc-cd-start-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.oc-cd-start-name {
+  flex: 1;
+  min-width: 0;
+  font: 600 13px var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+}
+.oc-cd-start-round,
+.oc-cd-start-state {
+  font: 500 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.12em;
+  color: #6E6A62;
+  white-space: nowrap;
+}
+
 .oc-cd-layout {
   display: grid;
   grid-template-columns: 210px minmax(0, 1fr);

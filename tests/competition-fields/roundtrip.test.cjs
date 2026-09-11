@@ -67,6 +67,7 @@ function compile() {
       'lib/online-competition/admin-competitions.ts',
       'lib/online-competition/admin-registrations.ts',
       'lib/online-competition/scramble-roster.ts',
+      'lib/online-competition/round-open.ts',
       '--outDir', path.basename(OUT),
       '--module', 'commonjs',
       '--target', 'es2022',
@@ -105,6 +106,7 @@ const {
   RegistrationPatchError,
 } = require(path.join(OUT, 'admin-registrations.js'));
 const { fetchScrambleRoster } = require(path.join(OUT, 'scramble-roster.js'));
+const { openRound, RoundOpenError } = require(path.join(OUT, 'round-open.js'));
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
 
@@ -1360,6 +1362,102 @@ const read = async (id) => (await db.collection(COL).doc(id).get()).data();
   // admin has to see every status to act on it.
   const allForD7 = await listCompetitionRegistrations(db, D7);
   ok('the admin review listing still shows every status', allForD7.length === 7, String(allForD7.length));
+
+  // ── opening a round announces the competition ─────────────────────────
+  // There were two independent notions of "live": roundState said a round
+  // was open, competition.status said whether the competition was
+  // happening — and every athlete-facing surface reads the second. A
+  // competition with an open round still read as "удахгүй", so an approved
+  // athlete could not reach their own live round at all without typing the
+  // solve URL. Opening a round is now the act that announces it, in the
+  // same transaction.
+  const roundComp = async (id, status) => {
+    await db.collection('onlineCompetitions').doc(id).set({ name: id, status, events: [], season: '' });
+    return db.collection('onlineCompetitions').doc(id);
+  };
+  const statusOf = async (id) => (await db.collection('onlineCompetitions').doc(id).get()).get('status');
+  const roundStatusOf = async (id, key) =>
+    (await db.collection('onlineCompetitions').doc(id).collection('roundState').doc(key).get()).get('status');
+
+  {
+    const id = 'ro-upcoming';
+    await roundComp(id, 'upcoming');
+    const res = await openRound(db, id, '333', 1);
+    ok('opening a round on an UPCOMING competition announces it', await statusOf(id) === 'live', await statusOf(id));
+    ok('  ...and the round itself is live', await roundStatusOf(id, '333_1') === 'live');
+    ok('  ...and the caller is told, so the admin UI can say so',
+      res.announcedLive === true && res.competitionStatusBefore === 'upcoming' && res.competitionStatusAfter === 'live',
+      JSON.stringify(res));
+  }
+  {
+    const id = 'ro-live';
+    await roundComp(id, 'live');
+    const res = await openRound(db, id, '222', 1);
+    ok('a competition already live is left alone', await statusOf(id) === 'live');
+    ok('  ...and nothing is announced', res.announcedLive === false);
+  }
+  {
+    // A draft is unannounced: absent from the public site entirely.
+    // Publishing is a deliberate act with its own readiness checks, and it
+    // must not happen as a side effect of opening a round.
+    const id = 'ro-draft';
+    await roundComp(id, 'draft');
+    let err = null;
+    try {
+      await openRound(db, id, '333', 1);
+    } catch (e) {
+      err = e;
+    }
+    ok('a DRAFT competition refuses to open a round', err instanceof RoundOpenError, String(err));
+    ok('  ...staying a draft', await statusOf(id) === 'draft');
+    ok('  ...and writing no round state', (await roundStatusOf(id, '333_1')) === undefined);
+  }
+  {
+    // Reopening a round on a finished competition is either a correction
+    // or a mistake, and they look identical from here. Refusing names the
+    // choice instead of guessing.
+    const id = 'ro-finished';
+    await roundComp(id, 'finished');
+    let err = null;
+    try {
+      await openRound(db, id, '333', 1);
+    } catch (e) {
+      err = e;
+    }
+    ok('a FINISHED competition refuses too', err instanceof RoundOpenError);
+    ok('  ...staying finished', await statusOf(id) === 'finished');
+    ok('  ...and writing no round state', (await roundStatusOf(id, '333_1')) === undefined);
+  }
+  {
+    const id = 'ro-missing-quals';
+    await roundComp(id, 'upcoming');
+    let err = null;
+    try {
+      await openRound(db, id, '333', 2);
+    } catch (e) {
+      err = e;
+    }
+    ok('round 2 without qualifiers is still refused', err instanceof RoundOpenError);
+    // THE POINT OF THE TRANSACTION: a refusal cannot leave the competition
+    // announced with no round open.
+    ok('  ...and the competition was NOT announced by the attempt',
+      await statusOf(id) === 'upcoming', await statusOf(id));
+
+    await db.collection('onlineCompetitions').doc(id).collection('qualifiers').doc('333_1').set({ uids: ['a'] });
+    const res = await openRound(db, id, '333', 2);
+    ok('with qualifiers, round 2 opens and announces', res.announcedLive === true);
+    ok('  ...leaving the competition live', await statusOf(id) === 'live');
+  }
+  {
+    const id = 'ro-missing-comp';
+    let err = null;
+    try {
+      await openRound(db, id, '333', 1);
+    } catch (e) {
+      err = e;
+    }
+    ok('a competition that does not exist is a 404', err instanceof RoundOpenError && err.status === 404);
+  }
 
   // ── scramble route: the attempt bound ─────────────────────────────────
   // The route's official-scramble lookup used to return null for an

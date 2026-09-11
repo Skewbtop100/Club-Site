@@ -48,11 +48,13 @@ export default function UpcomingCard({
       <div style={{ marginTop: 10 }}>
         <RegistrationStatusBadge status={registration.status} withDetail />
       </div>
-      {/* "эхлэхэд сануулга ирнэ" is a promise about a competition this
-          athlete is in. Not approved: the events they asked for, and then
-          why nothing will open. */}
+      {/* NO NOTIFICATION EXISTS. This said "эхлэхэд сануулга ирнэ" — a
+          reminder will come when it starts — and nothing sends one. Worse,
+          it was shown while the athlete's round was already open, because
+          this card is chosen by competition.status. It now says where the
+          round will appear, which is a thing that actually happens. */}
       <p style={{ marginTop: 8, font: '400 11px var(--oc-font-mono), monospace', color: '#9A958A' }}>
-        {gate ? codes : `${codes} · эхлэхэд сануулга ирнэ`}
+        {gate ? codes : `${codes} · раунд нээгдэхэд энд гарна`}
       </p>
       {gate && (
         <p className="oc-v3-gate-line" style={{ marginTop: 6 }}>
