@@ -28,10 +28,8 @@ export default function SummaryStage({
   cutOff,
   cutoffCs,
   bests,
-  onRedo,
   onSubmit,
   submitting,
-  submitProgress,
   submitError,
 }: {
   attempts: AttemptResult[];
@@ -48,13 +46,12 @@ export default function SummaryStage({
   /** The athlete's stored bests for this event, or null while still
    *  loading / unavailable — in which case no marker is shown. */
   bests: StoredBests | null;
-  onRedo: () => void;
+  /** Finishes the run. It uploads NOTHING — every attempt was filed as it
+   *  was recorded, and this screen is only reachable once they all
+   *  landed. It writes the run's own result and moves to the sent
+   *  screen. */
   onSubmit: () => void;
   submitting: boolean;
-  /** Aggregate 0-100 across all 5 video uploads — no specific mockup
-   *  state was given for this, so it's folded into the submit button's
-   *  own label rather than a separate progress bar. */
-  submitProgress: number;
   submitError: string;
 }) {
   // An over-limit attempt shows as DNF here, exactly as it will score.
@@ -80,12 +77,6 @@ export default function SummaryStage({
   const anyPr = prRows.some(Boolean);
   // A first-ever Ao5 for this event counts, same rule as a first single.
   const ao5IsPr = beatsAverage(ao5, resultFormat, bests);
-
-  function handleRedo() {
-    if (window.confirm('Бүх бичлэгийг устгаад дахин эхлэх үү?')) {
-      onRedo();
-    }
-  }
 
   return (
     <div className="oc-solve-summary">
@@ -154,14 +145,20 @@ export default function SummaryStage({
           <p style={{ font: '400 12px var(--oc-font-heading), sans-serif', color: '#D8402C' }}>{submitError}</p>
         )}
 
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button type="button" className="oc-solve-btn-redo" disabled={submitting} onClick={handleRedo}>
-            Дахин үзэх
-          </button>
-          <button type="button" className="oc-solve-btn-submit" disabled={submitting} onClick={onSubmit}>
-            {submitting ? `Илгээж байна... ${submitProgress}%` : 'Илгээх'}
-          </button>
-        </div>
+        {/* One action. The old "Дахин үзэх" beside it deleted every
+            recording and restarted the round — offered right under the
+            athlete's own Ao5, which made it a way to discard a result you
+            did not like. Attempts are filed as they happen now, and a
+            filed attempt cannot be deleted by the person who filed it. */}
+        <button
+          type="button"
+          className="oc-solve-btn-submit"
+          style={{ width: '100%' }}
+          disabled={submitting}
+          onClick={onSubmit}
+        >
+          {submitting ? 'Илгээж байна...' : 'Илгээх'}
+        </button>
       </div>
     </div>
   );

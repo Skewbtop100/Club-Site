@@ -59,13 +59,12 @@ console.log('\n  -- a stale scramble can never be displayed --');
 
 console.log('\n  -- the run cannot start recording without a scramble --');
 {
-  // zeroDisplay is what starts the MediaRecorder. Exactly two places may
-  // enter it, and both require a scramble in hand.
-  // Three, and only three, and each one already holds a scramble.
+  // zeroDisplay is what starts the MediaRecorder. Three, and only three,
+  // places may enter it, and each one already holds a scramble.
   const intoZero = page.match(/setStage\([^)]*zeroDisplay/g) ?? [];
   ok('exactly three transitions into zeroDisplay', intoZero.length === 3, intoZero.join(' | '));
   ok('  ...the promotion effect, which requires a scramble',
-    page.includes("if (stage === 'scrambleWait' && scramble) setStage('zeroDisplay');"));
+    /if \(stage !== 'scrambleWait'\) return;[\s\S]{0,600}?if \(scramble\) setStage\('zeroDisplay'\);/.test(page));
   ok('  ...cameraSetup, which falls back to the wait when there is none',
     page.includes("onDone={() => setStage(scramble ? 'zeroDisplay' : 'scrambleWait')}"));
   // Restarting an attempt whose recording failed. It re-enters the attempt
@@ -74,11 +73,13 @@ console.log('\n  -- the run cannot start recording without a scramble --');
   ok('  ...and the recording-failure restart, which replays the same attempt',
     /setRecordingFailure\(null\);\s*\n\s*setStage\('zeroDisplay'\);/.test(page));
   // The two places an attempt begins mid-run.
-  const confirm = page.slice(page.indexOf('function handleEntryConfirm'), page.indexOf('function handleRedo'));
-  const redo = page.slice(page.indexOf('function handleRedo'), page.indexOf('async function handleSubmit'));
+  const confirm = page.slice(page.indexOf('function handleEntryConfirm'), page.indexOf('// NO REDO.'));
   ok('handleEntryConfirm starts the next attempt on the WAIT stage',
     confirm.includes("setStage('scrambleWait')") && !confirm.includes("setStage('zeroDisplay')"));
-  ok('handleRedo does the same', redo.includes("setStage('scrambleWait')") && !redo.includes("setStage('zeroDisplay')"));
+  // The third route in is the recording-failure restart; the run has no
+  // other way to re-enter an attempt now that redo is gone.
+  ok('there is no redo to re-enter the run through',
+    !page.includes('handleRedo') && !page.includes('onRedo'));
   ok('the wait stage is rendered', page.includes("{stage === 'scrambleWait' && ("));
   // An empty scramble is the whole of every wait stage; blanking the page
   // on it would hide the failure and the retry both.
@@ -88,10 +89,10 @@ console.log('\n  -- the run cannot start recording without a scramble --');
 
 console.log('\n  -- a mid-run failure must not unmount the run --');
 {
-  // Everything solved so far is a video blob in memory, uploaded only at
-  // the end of the run. The blocked screen REPLACES the run and offers
-  // only a link away, so it is for attempt 1 — which has nothing to lose
-  // — and nothing else.
+  // The blocked screen REPLACES the run and offers only a link away. Even
+  // with attempts filed as they are recorded, the run in progress is not
+  // resumable after leaving — so it is for attempt 1, which has nothing to
+  // lose, and nothing else.
   const fn = page.slice(page.indexOf('const fetchScramble'), page.indexOf('// THE WAIT'));
   ok('the blocked screen is gated on attempt 1',
     fn.indexOf('if (attemptNumber > 1) {') < fn.indexOf('setBlockedMessage(body.message)'));

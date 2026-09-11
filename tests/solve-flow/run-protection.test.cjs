@@ -10,10 +10,11 @@
 // deterministic submission id — is a pure function and IS really tested,
 // in tests/competition-fields/submission-id.test.cjs.
 //
-// What a run holds: every solved attempt is a video blob in memory,
-// uploaded only when the whole run is submitted. Leaving the page throws
-// them away, and an attempt that records nothing wastes the athlete's
-// solve. These pin the guards that now stand in front of both.
+// What a run holds: each attempt is uploaded and filed the moment it is
+// recorded, so at most ONE video is in memory at a time — but that one
+// exists nowhere else, an attempt that records nothing wastes the
+// athlete's solve, and a run cannot yet be resumed after leaving. These
+// pin the guards that stand in front of all three.
 //
 // Run: npm run test:solve
 
@@ -24,6 +25,8 @@ const ROOT = path.join(__dirname, '..', '..');
 const SOLVE = 'app/online-competition/[competitionId]/solve/[eventId]';
 const page = fs.readFileSync(path.join(ROOT, SOLVE, 'page.tsx'), 'utf8');
 const failed = fs.readFileSync(path.join(ROOT, SOLVE, '_components/RecordingFailedStage.tsx'), 'utf8');
+const filing = fs.readFileSync(path.join(ROOT, SOLVE, '_components/FilingStage.tsx'), 'utf8');
+const summary = fs.readFileSync(path.join(ROOT, SOLVE, '_components/SummaryStage.tsx'), 'utf8');
 const components = fs
   .readdirSync(path.join(ROOT, SOLVE, '_components'))
   .filter((f) => f.endsWith('.tsx'));
@@ -66,13 +69,17 @@ console.log('\n  -- 1. leaving a run in progress --');
   ok('  ...and declining re-arms it', (page.match(/pushState\(window\.history\.state/g) ?? []).length === 2);
   ok('confirming leaves without asking twice',
     page.includes('leaving = true') && page.includes('window.history.back()'));
-  // Our own wording, in Mongolian, for the one dialog we control.
-  ok('the confirm names the number of attempts at stake',
-    /function leaveConfirmMessage\(recordedAttempts: number\)/.test(page) &&
-      page.includes('${recordedAttempts} оролдлого'));
-  ok('  ...and says they will have to be redone', page.includes('дахин хийх шаардлагатай болно'));
+  // Our own wording, in Mongolian, for the one dialog we control. It has
+  // two truths to tell apart now: the unfiled attempt is lost, and the
+  // round cannot be continued either way (resume is PR-3).
+  ok('the confirm counts the UNFILED attempts, not every attempt',
+    /function leaveConfirmMessage\(unfiledAttempts: number\)/.test(page) &&
+      page.includes('${unfiledAttempts} оролдлого'));
+  ok('  ...says the unfiled recording is lost', page.includes('тэр бичлэг устах'));
+  ok('  ...and that the round cannot be continued', page.includes('үргэлжлүүлэх боломжгүй'));
+  ok('  ...while saying the filed ones survive', page.includes('хэвээр үлдэнэ'));
   ok('the in-app link on this page is guarded by the same confirm',
-    /onClick=\{\(e\) => \{\s*\n\s*if \(runAtRisk && !window\.confirm\(leaveConfirmMessage\(attempts\.length\)\)\) e\.preventDefault\(\);/.test(page));
+    page.includes('if (runAtRisk && !window.confirm(leaveConfirmMessage(unfiledCount))) e.preventDefault();'));
   // beforeunload does not fire for a client-side <Link>, so a new one
   // anywhere in the flow would be an unguarded exit.
   {
@@ -108,20 +115,70 @@ console.log('\n  -- 2. an empty recording is not accepted --');
   ok('  ...and says the recorded attempts are still here', failed.includes('recordedAttempts > 0'));
 }
 
-console.log('\n  -- 3. a retry resumes instead of restarting --');
+console.log('\n  -- 3. each attempt is filed as it is recorded --');
 {
-  const submit = page.slice(page.indexOf('async function handleSubmit'), page.indexOf('// ── Gates: auth'));
-  ok('attempts already filed this session are skipped',
-    submit.includes('if (filedAttemptsRef.current.has(attemptNumber)) {'));
-  ok('  ...before the upload, not after it',
-    submit.indexOf('filedAttemptsRef.current.has') < submit.indexOf('uploadVideoToCloudinary'));
-  ok('  ...and their progress still reads as done',
-    /filedAttemptsRef\.current\.has\(attemptNumber\)\) \{\s*\n\s*perAttemptProgress\[i\] = 100;/.test(submit));
-  // An upload that succeeded and a file that did not must still retry.
-  ok('an attempt is marked filed only after the write lands',
-    submit.indexOf('await createSubmission(') < submit.indexOf('filedAttemptsRef.current.add(attemptNumber)'));
-  ok('a redo clears the set — a new run must upload its own videos',
-    page.includes('filedAttemptsRef.current = new Set();'));
+  const confirm = page.slice(page.indexOf('function handleEntryConfirm'), page.indexOf('// NO REDO.'));
+  const worker = page.slice(page.indexOf('const pumpFiling'), page.indexOf('const enqueueFiling'));
+  const finish = page.slice(page.indexOf('async function handleFinish'), page.indexOf('// ── Gates: auth'));
+
+  // The whole point: the recording goes as soon as it exists, and the run
+  // does not wait for it.
+  ok('a solved attempt goes straight into the filing queue', confirm.includes('enqueueFiling(index, {'));
+  ok('  ...unawaited — the athlete moves on to the next attempt',
+    !/await enqueueFiling|await pumpFiling/.test(page));
+  ok('  ...and the run ends at the filing stage, never straight at the summary',
+    confirm.includes("setStage('filing')") && !confirm.includes("setStage('summary')"));
+
+  // One connection, one attempt, in order.
+  ok('the queue is single-flight', worker.includes('if (filingBusyRef.current) return;'));
+  ok('  ...worked from the head', worker.includes('const index = filingQueueRef.current[0];'));
+  ok('  ...which only moves on once the write has landed',
+    worker.indexOf('await createSubmission(') < worker.lastIndexOf('filingQueueRef.current.shift();'));
+
+  // THE POINT OF THE CHANGESET: the video is dropped once the server has it.
+  ok('the blob is released the moment the attempt is filed',
+    worker.includes('pendingUploadsRef.current.delete(index);'));
+  ok('  ...only after the submission write resolved',
+    worker.indexOf('await createSubmission(') < worker.indexOf('pendingUploadsRef.current.delete(index);'));
+  ok('  ...and what is kept is the time, the DNF flag and the id',
+    /fileState: 'filed', uploadPercent: 100, submissionId, fileError: null/.test(worker));
+  ok('the recording is never held in React state', !/videoBlob/.test(page));
+
+  // Retry: once on its own, then it asks.
+  ok('one automatic retry, then the athlete decides', page.includes('const FILING_AUTO_RETRIES = 1;'));
+  ok('  ...scheduled on a timer that is cleared on unmount',
+    worker.includes('filingRetryTimerRef.current = setTimeout(') &&
+      page.includes('if (filingRetryTimerRef.current) clearTimeout(filingRetryTimerRef.current);'));
+  ok('  ...and a conflict never auto-retries (it can never come good)',
+    worker.includes('if (!conflict && spent < FILING_AUTO_RETRIES)'));
+  ok('the manual retry is the filing screen’s only action',
+    page.includes('void pumpFiling();') && filing.includes('onRetry'));
+  ok('  ...and that screen offers no way off the page', !/href|next[/]link/i.test(filing));
+
+  // The run stops before it can pile up unfiled recordings.
+  ok('a filing that gave up blocks the next attempt before it records',
+    /if \(filingFailed\) \{\s*\n\s*setStage\('filing'\);/.test(page));
+  ok('the summary is unreachable while anything is unfiled',
+    /if \(stage !== 'filing'\) return;\s*\n\s*if \(unfiledCount > 0\) return;/.test(page));
+
+  // Finish uploads nothing.
+  ok('handleFinish sends no video', !finish.includes('uploadVideoToCloudinary'));
+  ok('  ...and files no submission', !finish.includes('createSubmission'));
+  ok('  ...it writes the run result and moves to the sent screen',
+    finish.includes('await recordAo5Result(') && finish.includes("setStage('sent')"));
+  ok('  ...refusing to finish a run with an unfiled attempt',
+    finish.includes("attempts.some((a) => a.fileState !== 'filed')"));
+
+  // Redo is gone, everywhere.
+  ok('no redo in the page', !page.includes('handleRedo') && !page.includes('onRedo'));
+  // Code, not prose: the comment that replaced the button explains what
+  // it was, and would otherwise fail its own assertion.
+  ok('  ...none in the summary screen either',
+    !summary.includes('onRedo') && !summary.includes('oc-solve-btn-redo') && !/>\s*Дахин үзэх/.test(summary));
+  ok('  ...and the confirm that used to offer it is gone',
+    !summary.includes('Бүх бичлэгийг устгаад дахин эхлэх үү?'));
+  ok('the aggregate upload progress went with the end-of-run loop',
+    !page.includes('submitProgress') && !summary.includes('submitProgress'));
 }
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);

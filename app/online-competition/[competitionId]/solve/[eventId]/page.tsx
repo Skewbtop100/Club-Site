@@ -33,6 +33,7 @@ import ReadyPromptStage from './_components/ReadyPromptStage';
 import RecStage from './_components/RecStage';
 import EntryStage from './_components/EntryStage';
 import SummaryStage from './_components/SummaryStage';
+import FilingStage, { type FilingRow } from './_components/FilingStage';
 import RecordingFailedStage from './_components/RecordingFailedStage';
 import ScrambleWaitStage from './_components/ScrambleWaitStage';
 import SentStage from './_components/SentStage';
@@ -54,6 +55,10 @@ type Stage =
   | 'readyPrompt'
   | 'rec'
   | 'entry'
+  /** Waiting for recordings to reach the server. Normally seen once, after
+   *  the last attempt; also mid-run when a filing failed, because the next
+   *  attempt must not start on top of a hole in the attempt order. */
+  | 'filing'
   | 'summary'
   | 'sent';
 
@@ -77,14 +82,37 @@ function bestSingle(times: AttemptTime[]): number | null {
   return finished.length > 0 ? Math.min(...finished) : null;
 }
 
+/** One attempt of the run, as the page tracks it AFTER it has been solved.
+ *
+ *  The recording is NOT here. It lives in pendingUploadsRef until the
+ *  attempt is filed and is dropped the moment it is — holding five videos
+ *  in memory for the length of a run is what made a tab discard
+ *  catastrophic. What stays is what the summary and the result need: the
+ *  time, the DNF flag, and where the attempt got to. */
 interface Attempt {
   timeCs: number | null;
   isDnf: boolean;
-  videoBlob: Blob | null;
+  /** queued    — recorded, waiting its turn in the single-file queue
+   *  uploading — its video is going up now
+   *  retrying  — it failed once and is going again on its own
+   *  filed     — the submission landed; the blob has been released
+   *  failed    — it has given up asking; the athlete decides */
+  fileState: 'queued' | 'uploading' | 'retrying' | 'filed' | 'failed';
+  uploadPercent: number;
+  /** The onlineSubmissions document id, once filed. */
+  submissionId: string | null;
+  fileError: string | null;
 }
+
+/** One automatic retry before the run stops and asks. A dropped packet on
+ *  a phone is the common case and does not deserve a dialog; a second
+ *  failure is a real problem and does. */
+const FILING_AUTO_RETRIES = 1;
+const FILING_RETRY_DELAY_MS = 3000;
 
 const HEADER_STAGES: Stage[] = [
   'scrambleWait',
+  'filing',
   'zeroDisplay',
   'recordingFailed',
   'scrambleReveal',
@@ -106,12 +134,18 @@ const HEADER_STAGES: Stage[] = [
 const MIN_RECORDING_BYTES = 1024;
 
 /** The browser's own dialog wording is not ours to choose, so
- *  beforeunload gets no message. Ours is for in-app navigation. */
-function leaveConfirmMessage(recordedAttempts: number): string {
-  return (
-    `Та ${recordedAttempts} оролдлого бичсэн байна. Хуудаснаас гарвал бичлэгүүд устаж, ` +
-    'оролдлогуудаа эхнээс нь дахин хийх шаардлагатай болно. Гарах уу?'
-  );
+ *  beforeunload gets no message. Ours is for in-app navigation.
+ *
+ *  Two different losses now, and the athlete deserves to know which one
+ *  they are looking at. Attempts already filed are on the server and stay
+ *  there whatever happens to this tab — but the round still cannot be
+ *  continued after leaving, because resuming is PR-3. */
+function leaveConfirmMessage(unfiledAttempts: number): string {
+  return unfiledAttempts > 0
+    ? `Хадгалагдаагүй ${unfiledAttempts} оролдлого байна. Хуудаснаас гарвал тэр бичлэг устах бөгөөд ` +
+      'эхлүүлсэн раундаа үргэлжлүүлэх боломжгүй. Гарах уу?'
+    : 'Хуудаснаас гарвал эхлүүлсэн раундаа үргэлжлүүлэх боломжгүй. Хадгалагдсан оролдлогууд сервэрт ' +
+      'хэвээр үлдэнэ. Гарах уу?';
 }
 
 export default function SolvePage() {
@@ -130,15 +164,26 @@ export default function SolvePage() {
   /** Why the recording for the current attempt is unusable, or null.
    *  Drives the recordingFailed stage. */
   const [recordingFailure, setRecordingFailure] = useState<'start' | 'empty' | null>(null);
-  /** Attempt numbers already filed as submissions in THIS session, so a
-   *  retry after a partial submit re-uploads only what is missing. Purely
-   *  a bandwidth saver: correctness comes from submissionDocId, which
-   *  makes a re-file overwrite rather than duplicate even when this set
-   *  is gone (a reload) or wrong. */
-  const filedAttemptsRef = useRef<Set<number>>(new Set());
+  /** attempt index -> its recording and result, held ONLY until that
+   *  attempt is filed. Deleted the moment the submission lands: this map
+   *  is the run's memory footprint, and it is meant to hold at most one
+   *  video at a time.
+   *
+   *  A ref, not state: the filing worker below reads it across awaits, and
+   *  a state mirror would be one render behind. */
+  const pendingUploadsRef = useRef<Map<number, { blob: Blob; timeCs: number | null; isDnf: boolean }>>(new Map());
+  /** Attempt indices waiting to be filed, oldest first. The head stays put
+   *  until it succeeds, so attempts are always filed IN ORDER and a
+   *  failure cannot let the run run ahead of it. */
+  const filingQueueRef = useRef<number[]>([]);
+  /** True while the worker is awake — the single-file guarantee. Two
+   *  uploads never overlap: one connection, one attempt, in order. */
+  const filingBusyRef = useRef(false);
+  const filingRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** attempt index -> automatic retries already spent on it. */
+  const filingRetriesRef = useRef<Map<number, number>>(new Map());
 
   const [submitting, setSubmitting] = useState(false);
-  const [submitProgress, setSubmitProgress] = useState(0);
   const [submitError, setSubmitError] = useState('');
   const [finalAo5, setFinalAo5] = useState<number | null>(null);
 
@@ -334,9 +379,9 @@ export default function SolvePage() {
   );
 
   // Fetch the first attempt's scramble once the athlete is known. Later
-  // attempts fetch theirs explicitly (in handleEntryConfirm/handleRedo
-  // below) rather than via a reactive effect — attemptIndex going back to
-  // 0 on a redo wouldn't re-trigger an effect keyed on its value.
+  // attempts fetch theirs explicitly (in handleEntryConfirm below) rather
+  // than via a reactive effect keyed on the attempt number — the fetch is
+  // part of starting an attempt, not a consequence of a counter moving.
   //
   // Keyed on solverUid rather than running on mount: without a uid the
   // request can't resolve a group assignment, and an anonymous/loading
@@ -349,14 +394,39 @@ export default function SolvePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [solverUid]);
 
-  // THE WAIT. Every attempt now enters scrambleWait first and is promoted
-  // to zeroDisplay — which is what starts the recording — only once a
+  /** Attempts recorded but not yet on the server. At most one, if filing
+   *  is keeping up. */
+  const unfiledCount = attempts.filter((a) => a.fileState !== 'filed').length;
+  /** A filing that has stopped trying on its own and needs the athlete. */
+  const filingFailed = attempts.some((a) => a.fileState === 'failed');
+  /** Every attempt of the run has been solved. */
+  const runComplete = cutOff || (runShape !== null && attempts.length >= runShape.attempts);
+
+  // THE WAIT. Every attempt enters scrambleWait first and is promoted to
+  // zeroDisplay — which is what starts the recording — only once a
   // scramble has actually arrived. A fetch that fails simply never
   // promotes: the run sits on the wait stage with a retry button instead
   // of recording an attempt it has no scramble for.
   useEffect(() => {
-    if (stage === 'scrambleWait' && scramble) setStage('zeroDisplay');
-  }, [stage, scramble]);
+    if (stage !== 'scrambleWait') return;
+    // A filing that has given up stops the run here, before the next
+    // attempt starts recording. The queue already guarantees ORDER; this
+    // guarantees the athlete finds out, and that unfiled recordings cannot
+    // pile up in memory behind a broken connection.
+    if (filingFailed) {
+      setStage('filing');
+      return;
+    }
+    if (scramble) setStage('zeroDisplay');
+  }, [stage, scramble, filingFailed]);
+
+  // Leaving the filing screen: back into the run mid-round, on to the
+  // result at the end of it.
+  useEffect(() => {
+    if (stage !== 'filing') return;
+    if (unfiledCount > 0) return;
+    setStage(runComplete ? 'summary' : 'scrambleWait');
+  }, [stage, unfiledCount, runComplete]);
 
   useEffect(() => {
     return () => recorder.releaseCamera();
@@ -367,14 +437,20 @@ export default function SolvePage() {
   // Every solved attempt is a video blob in memory, uploaded only when the
   // whole run is submitted. Leaving throws all of them away, and until now
   // nothing said so.
+  //
+  // It protects much less than it did: at most one attempt is unfiled at
+  // any moment, and the rest are already on the server. It still blocks,
+  // for two reasons — that one attempt is real work with a video that
+  // exists nowhere else, and leaving still ends the round, because a
+  // returning athlete cannot yet resume (PR-3).
   const runAtRisk = attempts.length > 0 && stage !== 'sent';
   // Read inside the listeners below, which are installed once per
   // at-risk run and must not be re-installed on every attempt (each
   // install pushes a history entry).
   const attemptCountRef = useRef(0);
   useEffect(() => {
-    attemptCountRef.current = attempts.length;
-  }, [attempts.length]);
+    attemptCountRef.current = attempts.filter((a) => a.fileState !== 'filed').length;
+  }, [attempts]);
 
   useEffect(() => {
     if (!runAtRisk) return;
@@ -469,6 +545,115 @@ export default function SolvePage() {
     if (recordingFailure !== null) setStage('recordingFailed');
   }, [recordingFailure]);
 
+
+  // ── Filing: one attempt at a time, in the background ──────────────────
+  // Each attempt is uploaded and written the moment it is recorded, rather
+  // than all five at the end. Two things follow: the run holds at most one
+  // video in memory, and losing the page costs at most one attempt instead
+  // of the whole round.
+  //
+  // It runs BEHIND the athlete. The next attempt's ceremony — zeroDisplay,
+  // the reveal, the orientation hold, inspection — is around 45 seconds in
+  // which nothing needs the network, and a ~2MB clip normally lands well
+  // inside it. Nothing waits on it except the summary.
+  const patchAttempt = useCallback((index: number, patch: Partial<Attempt>) => {
+    setAttempts((prev) => prev.map((a, i) => (i === index ? { ...a, ...patch } : a)));
+  }, []);
+
+  const pumpFiling = useCallback(async () => {
+    // ONE AT A TIME. Two uploads never overlap: the queue is worked from
+    // the head and the head stays put until it lands, so attempts are also
+    // always filed in order and the server never sees a hole.
+    if (filingBusyRef.current) return;
+    filingBusyRef.current = true;
+    try {
+      while (filingQueueRef.current.length > 0) {
+        const index = filingQueueRef.current[0];
+        const held = pendingUploadsRef.current.get(index);
+        if (!held) {
+          // Already filed — nothing left to send.
+          filingQueueRef.current.shift();
+          continue;
+        }
+        if (!solverUid || competitionRound === null) {
+          patchAttempt(index, {
+            fileState: 'failed',
+            fileError: 'Нэвтрэлт эсвэл раундын мэдээлэл олдсонгүй. Хуудсаа сэргээлгүйгээр дахин оролдоно уу.',
+          });
+          return;
+        }
+        patchAttempt(index, { fileState: 'uploading', uploadPercent: 0, fileError: null });
+        try {
+          const { secureUrl, publicId } = await uploadVideoToCloudinary(held.blob, (pct) =>
+            patchAttempt(index, { uploadPercent: pct }),
+          );
+          const submissionId = await createSubmission({
+            competitionId,
+            uid: solverUid,
+            event: eventId,
+            round: index + 1,
+            competitionRound,
+            videoUrl: secureUrl,
+            cloudinaryPublicId: publicId,
+            reportedTime: held.isDnf ? 0 : (held.timeCs as number),
+            isDnf: held.isDnf,
+          });
+          // FILED — and this is the line the whole changeset is for: the
+          // recording is dropped the moment the server has it.
+          pendingUploadsRef.current.delete(index);
+          filingQueueRef.current.shift();
+          patchAttempt(index, { fileState: 'filed', uploadPercent: 100, submissionId, fileError: null });
+        } catch (e) {
+          console.error('Filing attempt failed:', e);
+          // A conflict is not a network problem and will never come good:
+          // this attempt is already filed with a different result, which
+          // only another session could have done.
+          const conflict = e instanceof SubmissionAlreadyFiledError;
+          const spent = filingRetriesRef.current.get(index) ?? 0;
+          if (!conflict && spent < FILING_AUTO_RETRIES) {
+            filingRetriesRef.current.set(index, spent + 1);
+            patchAttempt(index, {
+              fileState: 'retrying',
+              fileError: 'Холболт тасарлаа. Автоматаар дахин оролдож байна...',
+            });
+            if (filingRetryTimerRef.current) clearTimeout(filingRetryTimerRef.current);
+            filingRetryTimerRef.current = setTimeout(() => {
+              filingRetryTimerRef.current = null;
+              void pumpFiling();
+            }, FILING_RETRY_DELAY_MS);
+            return;
+          }
+          patchAttempt(index, {
+            fileState: 'failed',
+            fileError: conflict
+              ? 'Энэ оролдлого өмнө нь өөр цагтайгаар хадгалагдсан байна. Зохион байгуулагчид хандана уу.'
+              : 'Бичлэгийг хадгалж чадсангүй. Холболтоо шалгаад дахин илгээнэ үү.',
+          });
+          return;
+        }
+      }
+    } finally {
+      filingBusyRef.current = false;
+    }
+  }, [patchAttempt, solverUid, competitionRound, competitionId, eventId]);
+
+  /** Hands a just-recorded attempt to the queue. Never awaited — the run
+   *  moves on to the next attempt while this works. */
+  const enqueueFiling = useCallback(
+    (index: number, held: { blob: Blob; timeCs: number | null; isDnf: boolean }) => {
+      pendingUploadsRef.current.set(index, held);
+      filingQueueRef.current.push(index);
+      void pumpFiling();
+    },
+    [pumpFiling],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (filingRetryTimerRef.current) clearTimeout(filingRetryTimerRef.current);
+    };
+  }, []);
+
   function handleEntryConfirm(result: { timeCs: number | null; isDnf: boolean }) {
     // Over the event's per-attempt limit? The attempt still COUNTS as an
     // attempt and the run continues — ending it here would be cutoff
@@ -492,9 +677,24 @@ export default function SolvePage() {
     // and can never be one.
     if (!isOver && beatsPr(result.timeCs, result.isDnf, bests)) setPrToast(true);
 
-    const newAttempt: Attempt = { timeCs: result.timeCs, isDnf: result.isDnf, videoBlob: pendingBlobRef.current };
+    const index = attempts.length;
+    const newAttempt: Attempt = {
+      timeCs: result.timeCs,
+      isDnf: result.isDnf,
+      fileState: 'queued',
+      uploadPercent: 0,
+      submissionId: null,
+      fileError: null,
+    };
     const next = [...attempts, newAttempt];
     setAttempts(next);
+    // Straight into the queue, unawaited: the athlete goes on to the next
+    // attempt while this uploads behind them.
+    enqueueFiling(index, {
+      blob: pendingBlobRef.current ?? new Blob([], { type: 'video/webm' }),
+      timeCs: result.timeCs,
+      isDnf: result.isDnf,
+    });
     pendingBlobRef.current = null;
 
     // ── THE CUTOFF ──
@@ -512,11 +712,13 @@ export default function SolvePage() {
         .every((a) => attemptTime(a, runShape?.timeLimitCs ?? null) === 'DNF' ||
           (a.timeCs as number) >= cutoffCs);
 
+    // The run is over — but the summary is not reachable until every
+    // attempt is actually on the server.
     if (failedCutoff) {
       setCutOff(true);
-      setStage('summary');
+      setStage('filing');
     } else if (next.length >= (runShape?.attempts ?? 0)) {
-      setStage('summary');
+      setStage('filing');
     } else {
       setAttemptIndex((i) => i + 1);
       // next.length is the count of completed attempts, so the attempt now
@@ -531,25 +733,19 @@ export default function SolvePage() {
     }
   }
 
-  function handleRedo() {
-    setAttempts([]);
-    setAttemptIndex(0);
-    setOverLimit(false);
-    setCutOff(false);
-    setSubmitError('');
-    // Cleared so a failed re-fetch can't leave the previous run's round
-    // attached to the new one; fetchScramble(1) re-resolves it.
-    setCompetitionRound(null);
-    // A redo is a NEW run for the same round. Its attempts file to the
-    // same deterministic ids and overwrite the old ones, so the session
-    // set has to be cleared or the new videos would never be uploaded.
-    filedAttemptsRef.current = new Set();
-    setRecordingFailure(null);
-    setStage('scrambleWait');
-    fetchScramble(1);
-  }
+  // NO REDO. The summary used to offer "Дахин үзэх" — delete every
+  // recording and start the round again — next to the Ao5 it had just
+  // shown. That is the exploit in its most convenient form: see your
+  // result, dislike it, solve it again. It is also now impossible, because
+  // attempts are filed as they happen and athletes cannot delete a filed
+  // submission (firestore.rules). Everything it reset went with it; the
+  // run has one shape and one set of attempts from start to finish.
 
-  async function handleSubmit() {
+  /** "Илгээх" no longer sends anything — every attempt was filed as it
+   *  was recorded. What is left is the run's own result, which lives on
+   *  the athlete's registration document rather than on any submission,
+   *  and the move to the sent screen. */
+  async function handleFinish() {
     if (!user || user.isAnonymous) {
       setSubmitError('Та нэвтрээгүй байна. Дахин нэвтэрнэ үү.');
       return;
@@ -564,55 +760,21 @@ export default function SolvePage() {
       setSubmitError('Энэ төрлийн раунд одоогоор нээлттэй биш байна.');
       return;
     }
+    // Also unreachable: the summary is only reached through the filing
+    // stage, which does not let go until every attempt has landed. Left in
+    // because "the result is computed from attempts that exist on the
+    // server" is the property that matters here.
+    if (attempts.some((a) => a.fileState !== 'filed')) {
+      setSubmitError('Бүх оролдлого хадгалагдаагүй байна.');
+      return;
+    }
     setSubmitError('');
     setSubmitting(true);
-    setSubmitProgress(0);
-
-    // Uploaded one at a time (not in parallel) — simpler aggregate
-    // progress and easier on a mobile connection during a live
-    // competition than 5 concurrent uploads.
-    const perAttemptProgress = new Array(attempts.length).fill(0);
-    const reportAggregate = () => {
-      const avg = perAttemptProgress.reduce((a, b) => a + b, 0) / attempts.length;
-      setSubmitProgress(Math.round(avg));
-    };
 
     try {
-      for (let i = 0; i < attempts.length; i++) {
-        const attemptNumber = i + 1;
-        // Already filed earlier in this session (a submit that failed
-        // part-way through). Re-uploading it would cost the athlete the
-        // bandwidth again and orphan the video already in Cloudinary;
-        // re-filing it would land on the same document id anyway.
-        if (filedAttemptsRef.current.has(attemptNumber)) {
-          perAttemptProgress[i] = 100;
-          reportAggregate();
-          continue;
-        }
-        const attempt = attempts[i];
-        const blob = attempt.videoBlob ?? new Blob([], { type: 'video/webm' });
-        const { secureUrl, publicId } = await uploadVideoToCloudinary(blob, (pct) => {
-          perAttemptProgress[i] = pct;
-          reportAggregate();
-        });
-        await createSubmission({
-          competitionId,
-          uid: user.uid,
-          event: eventId,
-          round: attemptNumber,
-          competitionRound,
-          videoUrl: secureUrl,
-          cloudinaryPublicId: publicId,
-          reportedTime: attempt.isDnf ? 0 : (attempt.timeCs as number),
-          isDnf: attempt.isDnf,
-        });
-        // Only after the write lands — an upload that succeeded and a
-        // file that did not must still be retried.
-        filedAttemptsRef.current.add(attemptNumber);
-        perAttemptProgress[i] = 100;
-        reportAggregate();
-      }
-
+      // Computed from the SAME in-memory times the athlete was shown on
+      // the summary — filing them one at a time changed when each video
+      // was sent, not what any attempt scored.
       const times: AttemptTime[] = attempts.map((a) => attemptTime(a, runShape?.timeLimitCs ?? null));
       // A cut-off run has no average — its result is the best single, and
       // the partial set never touches computeResult (whose ao5 branch
@@ -630,17 +792,10 @@ export default function SolvePage() {
       recorder.releaseCamera();
       setStage('sent');
     } catch (err) {
-      console.error('Submit failed:', err);
-      // A filed attempt is immutable (firestore.rules). Reached today only
-      // after a submit that failed part-way through and was then REDONE:
-      // the redone attempts carry new times and cannot replace the ones
-      // already filed. Retrying will not help, so the message says so
-      // rather than inviting it. The redo button itself goes in PR-2.
-      setSubmitError(
-        err instanceof SubmissionAlreadyFiledError
-          ? 'Энэ оролдлого өмнө нь өөр цагтайгаар илгээгдсэн байна. Зохион байгуулагчид хандана уу.'
-          : 'Илгээхэд алдаа гарлаа. Дахин оролдоно уу.',
-      );
+      console.error('Finish failed:', err);
+      // The attempts are safe on the server either way — only the run's
+      // own result line failed to write, and retrying is harmless.
+      setSubmitError('Дүнг хадгалахад алдаа гарлаа. Дахин оролдоно уу.');
     } finally {
       setSubmitting(false);
     }
@@ -712,7 +867,7 @@ export default function SolvePage() {
                is normally nothing to lose — but a link is a link, and
                beforeunload does not fire for a client-side one. */
             onClick={(e) => {
-              if (runAtRisk && !window.confirm(leaveConfirmMessage(attempts.length))) e.preventDefault();
+              if (runAtRisk && !window.confirm(leaveConfirmMessage(unfiledCount))) e.preventDefault();
             }}
             style={{
               border: '1px solid #2A2A31',
@@ -737,6 +892,28 @@ export default function SolvePage() {
   if (!competition || !runShape) {
     return <div className="oc-solve-page" />;
   }
+
+  const filingRows: FilingRow[] = attempts.map((a, i) => ({
+    attempt: i + 1,
+    timeCs: a.timeCs,
+    isDnf: a.isDnf,
+    state: a.fileState,
+    uploadPercent: a.uploadPercent,
+    error: a.fileError,
+  }));
+  // One line for the header, in priority order: a problem, then work in
+  // progress, then how much is safely stored.
+  const uploading = attempts.find((a) => a.fileState === 'uploading' || a.fileState === 'retrying');
+  const filedCount = attempts.length - unfiledCount;
+  const savingLabel = filingFailed
+    ? 'ХАДГАЛАГДСАНГҮЙ'
+    : uploading?.fileState === 'retrying'
+      ? 'ДАХИН ОРОЛДОЖ БАЙНА'
+      : uploading
+        ? `ХАДГАЛЖ БАЙНА ${uploading.uploadPercent}%`
+        : filedCount > 0
+          ? `${filedCount} ОРОЛДЛОГО ХАДГАЛАГДСАН`
+          : null;
 
   const eventConfig = competition.events.find((e) => e.eventId === eventId);
   const eventLabel = eventConfig?.label ?? eventId.toUpperCase();
@@ -767,6 +944,10 @@ export default function SolvePage() {
             eventLabel={eventLabel}
             attemptIndex={attemptIndex}
             totalAttempts={cutOff ? (runShape.cutoffPhase ?? runShape.attempts) : runShape.attempts}
+            /* What the background filing is doing, in one line. The
+               athlete is mid-attempt: it says enough to notice, and not
+               enough to distract. */
+            savingLabel={savingLabel}
           />
         )}
 
@@ -852,6 +1033,23 @@ export default function SolvePage() {
 
         {stage === 'entry' && <EntryStage onConfirm={handleEntryConfirm} />}
 
+        {stage === 'filing' && (
+          <FilingStage
+            rows={filingRows}
+            failed={filingFailed}
+            runComplete={runComplete}
+            /* Manual retry. The worker has already tried once on its own
+               (FILING_AUTO_RETRIES) — this is the athlete taking over. */
+            onRetry={() => {
+              if (filingRetryTimerRef.current) {
+                clearTimeout(filingRetryTimerRef.current);
+                filingRetryTimerRef.current = null;
+              }
+              void pumpFiling();
+            }}
+          />
+        )}
+
         {stage === 'summary' && (
           <SummaryStage
             bests={bests}
@@ -860,10 +1058,8 @@ export default function SolvePage() {
             timeLimitCs={runShape.timeLimitCs}
             cutOff={cutOff}
             cutoffCs={runShape.cutoffCs}
-            onRedo={handleRedo}
-            onSubmit={handleSubmit}
+            onSubmit={handleFinish}
             submitting={submitting}
-            submitProgress={submitProgress}
             submitError={submitError}
           />
         )}
