@@ -27,6 +27,9 @@ const SOLVE = 'app/online-competition/[competitionId]/solve/[eventId]';
 const page = fs.readFileSync(path.join(ROOT, SOLVE, 'page.tsx'), 'utf8');
 const failed = fs.readFileSync(path.join(ROOT, SOLVE, '_components/RecordingFailedStage.tsx'), 'utf8');
 const filing = fs.readFileSync(path.join(ROOT, SOLVE, '_components/FilingStage.tsx'), 'utf8');
+const hold = fs.readFileSync(path.join(ROOT, SOLVE, '_components/CameraHoldStage.tsx'), 'utf8');
+const zero = fs.readFileSync(path.join(ROOT, SOLVE, '_components/ZeroDisplayStage.tsx'), 'utf8');
+const rec = fs.readFileSync(path.join(ROOT, SOLVE, '_components/RecStage.tsx'), 'utf8');
 const summary = fs.readFileSync(path.join(ROOT, SOLVE, '_components/SummaryStage.tsx'), 'utf8');
 const data = fs.readFileSync(path.join(ROOT, 'lib/online-competition/data.ts'), 'utf8');
 const components = fs
@@ -231,6 +234,45 @@ console.log('\n  -- 4. resuming a run --');
   ok('the athlete is told they are continuing', page.includes('{resumeMessage}'));
   ok('  ...and the notice clears once they solve something',
     page.includes('setResumeMessage(null);'));
+}
+
+console.log('\n  -- 5. the camera hold is ONE component --');
+{
+  // Steps 2, 5 and 9 of the new flow are all "preview, an instruction, a
+  // tick bar, N seconds". Three copies of that timer would drift, and the
+  // timer is what a judge measures the hold against.
+  ok('CameraHoldStage is parameterised by seconds, label and instruction',
+    /seconds: number;/.test(hold) && /label: string;/.test(hold) && /instruction: string;/.test(hold));
+  ok('  ...and OrientationHoldStage is gone',
+    !fs.existsSync(path.join(ROOT, SOLVE, '_components/OrientationHoldStage.tsx')));
+  // THE BAR IS THE CLOCK: one segment per second, from the same number
+  // that sets the timeout. A duration cannot be changed without the bar
+  // following it.
+  ok('the tick bar is derived from `seconds`, not a second constant',
+    hold.includes('Array.from({ length: seconds })') && hold.includes('setTimeout(onDone, seconds * 1000)'));
+  ok('  ...filling one segment a second', hold.includes('Math.min(t + 1, seconds)'));
+  // It is a clock and a preview. Nothing else.
+  ok('it starts and stops no recording',
+    !hold.includes('startRecording') && !hold.includes('stopRecording') && !hold.includes('recorder'));
+
+  // THIS CHANGESET CHANGES NO BEHAVIOUR: the one call site passes exactly
+  // what the component used to hard-code.
+  ok('the call site still holds for 5 seconds', page.includes('seconds={5}'));
+  ok('  ...with the same label', page.includes('label="ШООГОО БАЙРШУУЛ"'));
+  ok('  ...and the same instruction, word for word',
+    page.includes('instruction="Шоогоо цагаан тал дээшээ, ногоон тал дэлгэц рүү харагдахаар байрлуулаад 5 секунд хөдөлгөөнгүй барина уу."'));
+  ok('  ...under the same stage name', page.includes("{stage === 'orientationHold' && ("));
+  ok('  ...used exactly once, for now', (page.match(/<CameraHoldStage/g) ?? []).length === 1);
+
+  // Explicitly NOT touched here — each is its own later changeset, and a
+  // short video afterwards must have exactly one suspect.
+  ok('ZeroDisplayStage is untouched: still 5s', zero.includes('const ZERO_DISPLAY_MS = 5000;'));
+  ok('the beep cues are untouched: still 8s and 12s',
+    rec.includes('const BEEP_CUE_TIMES_MS = [8000, 12000];'));
+  ok('the recording boundary is untouched: starts at zeroDisplay',
+    page.includes("if (stage === 'zeroDisplay') {"));
+  ok('  ...and stops when the solve is finished, in RecStage',
+    page.includes('const blob = await recorder.stopRecording();'));
 }
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);

@@ -37,7 +37,7 @@ import Header from './_components/Header';
 import CameraSetupStage from './_components/CameraSetupStage';
 import ZeroDisplayStage from './_components/ZeroDisplayStage';
 import RevealStage from './_components/RevealStage';
-import OrientationHoldStage from './_components/OrientationHoldStage';
+import CameraHoldStage from './_components/CameraHoldStage';
 import ReadyPromptStage from './_components/ReadyPromptStage';
 import RecStage from './_components/RecStage';
 import EntryStage from './_components/EntryStage';
@@ -1176,8 +1176,19 @@ export default function SolvePage() {
           <RevealStage scramble={scramble} videoRef={recorder.videoRef} onDone={() => setStage('orientationHold')} />
         )}
 
+        {/* The cube in a known orientation before the solve, so a judge
+            can verify the scramble was applied to a cube whose
+            orientation is provably known. The SAME five seconds and the
+            same words as before — CameraHoldStage is OrientationHoldStage
+            with its three hard-coded values handed in. */}
         {stage === 'orientationHold' && (
-          <OrientationHoldStage videoRef={recorder.videoRef} onDone={() => setStage('readyPrompt')} />
+          <CameraHoldStage
+            seconds={5}
+            label="ШООГОО БАЙРШУУЛ"
+            instruction="Шоогоо цагаан тал дээшээ, ногоон тал дэлгэц рүү харагдахаар байрлуулаад 5 секунд хөдөлгөөнгүй барина уу."
+            videoRef={recorder.videoRef}
+            onDone={() => setStage('readyPrompt')}
+          />
         )}
 
         {stage === 'readyPrompt' && (
