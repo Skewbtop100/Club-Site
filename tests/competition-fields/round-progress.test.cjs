@@ -164,24 +164,41 @@ console.log('\n  -- the call sites that were reading the wrong field --');
   // The server change that made all of this expressible.
   ok('the admin view carries competitionRound',
     /competitionRound: number;/.test(src('lib/online-competition/types.ts')));
+  const route = src('app/api/online-competition/submissions/route.ts');
   ok('  ...and the GET mapper fills it, defaulting a legacy document to round 1',
-    src('app/api/online-competition/submissions/route.ts')
-      .includes("competitionRound: typeof data.competitionRound === 'number' ? data.competitionRound : 1,"));
+    route.includes("competitionRound: typeof data.competitionRound === 'number' ? data.competitionRound : 1,"));
+  // THE BOUNDARY RENAME: stored `round` (the attempt index) is served as
+  // `attempt`, so no admin component can read a number called "round" and
+  // take it for a competition round.
+  ok('the mapper renames the stored attempt index on the way out',
+    route.includes('attempt: data.round,'));
+  const types = src('lib/online-competition/types.ts');
+  const between = (from, to) => types.slice(types.indexOf(from), types.indexOf(to));
+  const adminView = between('export interface OnlineSubmissionAdminView', '// ── Competition management');
+  ok('  ...and the admin view has no `round` field at all — reading one is a compile error',
+    adminView.includes('attempt: number;') && !/^ {2}round: number;$/m.test(adminView));
+  // The STORED field keeps its name — renaming it would be a data
+  // migration, and every server-side scorer reads it.
+  const storedDoc = between('/** onlineSubmissions/{submissionId} */', 'export interface OnlineSubmissionAdminView');
+  ok('the stored document still calls it `round`',
+    /^ {2}round: number;$/m.test(storedDoc) && !storedDoc.includes('attempt: number;'));
+  ok('  ...and the solve flow still writes that name',
+    src('lib/online-competition/data.ts').includes('round: input.round,'));
 
   const overview = src(`${ADMIN}/AdminOverview.tsx`);
   ok('the overview computes progress through this module', overview.includes('roundProgressRows('));
   ok('  ...and no longer counts attempts as rounds itself',
     !/s\.round === round/.test(overview));
   ok('the recent-submissions line shows the round AND the attempt',
-    overview.includes('РАУНД {s.competitionRound} · ОРОЛДЛОГО {s.round}'));
+    overview.includes('РАУНД {s.competitionRound} · ОРОЛДЛОГО {s.attempt}'));
 
   const panel = src(`${ADMIN}/SubmissionDetailPanel.tsx`);
   ok('the detail panel headlines the COMPETITION round',
     panel.includes('РАУНД {submission.competitionRound}'));
   ok('  ...and keeps the attempt index as the attempt',
-    panel.includes('Оролдлого {submission.round}'));
+    panel.includes('Оролдлого {submission.attempt}'));
   ok('  ...never printing the same number under both names',
-    !panel.includes('РАУНД {submission.round}'));
+    !panel.includes('РАУНД {submission.attempt}'));
 
   const grid = src(`${ADMIN}/ReviewGrid.tsx`);
   ok('the grid derives its round tabs from the event’s configuration',
@@ -195,10 +212,10 @@ console.log('\n  -- the call sites that were reading the wrong field --');
   ok('  ...re-running the rows when the round changes',
     grid.includes('}, [registrations, submissions, eventId, round]);'));
   ok('the attempt columns still key off the attempt index',
-    grid.includes('const key = `${s.uid}#${s.round}`;'));
+    grid.includes('const key = `${s.uid}#${s.attempt}`;'));
   // Duplicates within one round are still possible in historical data, so
   // the indicator stays.
-  ok('the duplicate-slot indicator is kept', grid.includes('row.slotCounts.set(roundNum, list.length);'));
+  ok('the duplicate-slot indicator is kept', grid.includes('row.slotCounts.set(attemptNum, list.length);'));
 }
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);

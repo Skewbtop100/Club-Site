@@ -41,9 +41,16 @@ export async function GET(req: Request) {
       competitionId: data.competitionId,
       uid: data.uid,
       event: data.event,
-      round: data.round,
-      // Legacy documents predate the field; round 1 was the only round
-      // that existed when they were written.
+      // THE RENAME HAPPENS HERE, and only here. The document stores the
+      // attempt index under `round` (OnlineSubmission.round — renaming it
+      // would be a data migration); the admin view calls it `attempt`, so
+      // no admin component can read a number called "round" and take it
+      // for a competition round. See OnlineSubmissionAdminView.
+      attempt: data.round,
+      // Not renamed: competitionRound means the same thing on both sides
+      // and was never the confusing one. Legacy documents predate the
+      // field; round 1 was the only round that existed when they were
+      // written.
       competitionRound: typeof data.competitionRound === 'number' ? data.competitionRound : 1,
       videoUrl: data.videoUrl,
       cloudinaryPublicId: data.cloudinaryPublicId,

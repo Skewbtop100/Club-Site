@@ -174,7 +174,7 @@ export default function AdminOverview() {
                         submissions carry no attempt number, which was the
                         truth exactly backwards. */}
                     <p style={{ marginTop: 3, font: '400 10px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
-                      РАУНД {s.competitionRound} · ОРОЛДЛОГО {s.round}
+                      РАУНД {s.competitionRound} · ОРОЛДЛОГО {s.attempt}
                     </p>
                   </div>
                   <span

@@ -70,15 +70,17 @@ export default function SubmissionDetailPanel({
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
           <div style={{ minWidth: 0 }}>
             {/* THE ROUND, and then the attempt — two different numbers.
-                This line used to print `submission.round` after "РАУНД",
-                and `submission.round` is the ATTEMPT INDEX: the header
-                showed the same number twice under two names, so attempt 2
-                of a single-round competition read "РАУНД 2". */}
+                This line used to print the field the admin view now calls
+                `attempt`, which is the ATTEMPT INDEX, under the label
+                РАУНД: the header showed the same number twice under two
+                names, so attempt 2 of a single-round competition read
+                "РАУНД 2". The field was renamed at the boundary so that
+                mistake no longer compiles. */}
             <p style={{ font: '500 10px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
               {submission.event.toUpperCase()} · РАУНД {submission.competitionRound}
             </p>
             <h2 style={{ marginTop: 6, font: '600 18px var(--oc-font-heading), sans-serif', color: '#F4F1EA' }}>
-              {athleteName} · Оролдлого {submission.round}
+              {athleteName} · Оролдлого {submission.attempt}
             </h2>
           </div>
           <button

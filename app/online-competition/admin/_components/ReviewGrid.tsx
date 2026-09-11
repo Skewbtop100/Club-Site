@@ -34,9 +34,13 @@ function attemptColumns(count: number): number[] {
 
 // ── How attempts map to storage ──────────────────────────────────────────
 // A submission carries TWO numbers and they are not the same thing:
-//   `round`            — the ATTEMPT INDEX 1-5 within one run
+//   `attempt`          — the ATTEMPT INDEX 1-5 within one run (stored on
+//                        the document as `round`; the admin GET mapper
+//                        renames it, precisely so nothing in here can read
+//                        a number called "round" and take it for a
+//                        competition round)
 //   `competitionRound` — the competition round that run belongs to
-// The attempt columns below key off `round`, which is what makes the Ao5
+// The attempt columns below key off `attempt`, which is what makes the Ao5
 // columns computable. The round TABS key off `competitionRound`, and rows
 // are filtered to the selected round.
 //
@@ -220,18 +224,18 @@ export default function ReviewGrid() {
       if (!byUid.has(s.uid)) {
         byUid.set(s.uid, { uid: s.uid, name: s.uid.slice(0, 10), attempts: new Map(), slotCounts: new Map() });
       }
-      const key = `${s.uid}#${s.round}`;
+      const key = `${s.uid}#${s.attempt}`;
       if (!bySlot.has(key)) bySlot.set(key, []);
       bySlot.get(key)!.push(s);
     }
     for (const [key, list] of bySlot) {
-      const [uid, roundStr] = key.split('#');
-      const roundNum = Number(roundStr);
+      const [uid, attemptStr] = key.split('#');
+      const attemptNum = Number(attemptStr);
       const sorted = [...list].sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
       const shown = sorted.find((x) => x.status === 'pending') ?? sorted[sorted.length - 1];
       const row = byUid.get(uid)!;
-      row.attempts.set(roundNum, shown);
-      row.slotCounts.set(roundNum, list.length);
+      row.attempts.set(attemptNum, shown);
+      row.slotCounts.set(attemptNum, list.length);
     }
     return [...byUid.values()];
   }, [registrations, submissions, eventId, round]);
@@ -246,9 +250,9 @@ export default function ReviewGrid() {
   );
 
   // The selected athlete's real group for the event+round currently in
-  // view. `round` here is the competition round the toolbar selects, NOT
-  // the submission's `round` field (which is its attempt index) — see the
-  // storage note at the top of this file.
+  // view. `round` here is the competition round the toolbar selects; the
+  // attempt index is `attempt` on the submission — see the storage note at
+  // the top of this file.
   const selectedGroupLabel = useMemo(() => {
     if (!selectedSubmission || !eventId || !scrambles) return null;
     const key = roundKey(eventId, round);

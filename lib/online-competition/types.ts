@@ -730,10 +730,20 @@ export interface OnlineSubmissionAdminView {
   competitionId: string;
   uid: string;
   event: string;
-  /** ATTEMPT INDEX 1-5 within one run — the same field as
-   *  OnlineSubmission.round above, and NOT a competition round. Render it
-   *  as "Оролдлого N". */
-  round: number;
+  /** ATTEMPT INDEX 1-5 within one run. Stored as `round` on the document
+   *  (OnlineSubmission.round, which cannot be renamed without a data
+   *  migration); the GET mapper renames it on the way out.
+   *
+   *  THE RENAME IS THE POINT. Four admin call sites at once read the
+   *  stored name as a competition round — the detail panel's header, the
+   *  review grid's round tabs and slot grouping, and the overview's round
+   *  progress, which counted attempt-1 submissions against a per-round
+   *  denominator and read 10/10 with a fifth of the solves filed. A
+   *  capitals comment on the stored type did not prevent it, because the
+   *  mistake happens at call sites reading THIS type. `s.round` in an
+   *  admin component is now a compile error rather than a plausible
+   *  number. */
+  attempt: number;
   /** The COMPETITION round (1..N). Absent from this view until the admin
    *  UI was found to be misreading `round` as a round number in four
    *  places at once: the detail panel's header, the review grid's round
