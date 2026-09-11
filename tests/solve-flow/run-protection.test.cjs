@@ -28,8 +28,8 @@ const page = fs.readFileSync(path.join(ROOT, SOLVE, 'page.tsx'), 'utf8');
 const failed = fs.readFileSync(path.join(ROOT, SOLVE, '_components/RecordingFailedStage.tsx'), 'utf8');
 const filing = fs.readFileSync(path.join(ROOT, SOLVE, '_components/FilingStage.tsx'), 'utf8');
 const hold = fs.readFileSync(path.join(ROOT, SOLVE, '_components/CameraHoldStage.tsx'), 'utf8');
-const zero = fs.readFileSync(path.join(ROOT, SOLVE, '_components/ZeroDisplayStage.tsx'), 'utf8');
 const rec = fs.readFileSync(path.join(ROOT, SOLVE, '_components/RecStage.tsx'), 'utf8');
+const theme = fs.readFileSync(path.join(ROOT, 'app/online-competition/theme.css'), 'utf8');
 const summary = fs.readFileSync(path.join(ROOT, SOLVE, '_components/SummaryStage.tsx'), 'utf8');
 const data = fs.readFileSync(path.join(ROOT, 'lib/online-competition/data.ts'), 'utf8');
 const components = fs
@@ -243,7 +243,8 @@ console.log('\n  -- 5. the camera hold is ONE component --');
   // tick bar, N seconds". Three copies of that timer would drift, and the
   // timer is what a judge measures the hold against.
   ok('CameraHoldStage is parameterised by seconds, label and instruction',
-    /seconds: number;/.test(hold) && /label: string;/.test(hold) && /instruction: string;/.test(hold));
+    /seconds: number;/.test(hold) && /label: string;/.test(hold) &&
+      /instruction: \(seconds: number\) => string;/.test(hold));
   ok('  ...and OrientationHoldStage is gone',
     !fs.existsSync(path.join(ROOT, SOLVE, '_components/OrientationHoldStage.tsx')));
   // THE BAR IS THE CLOCK: one segment per second, from the same number
@@ -256,27 +257,93 @@ console.log('\n  -- 5. the camera hold is ONE component --');
   ok('it starts and stops no recording',
     !hold.includes('startRecording') && !hold.includes('stopRecording') && !hold.includes('recorder'));
 
-  // THIS CHANGESET CHANGES NO BEHAVIOUR: the one call site passes exactly
-  // what the component used to hard-code.
-  ok('the call site still holds for 5 seconds', page.includes('seconds={5}'));
-  ok('  ...with the same label', page.includes('label="ШООГОО БАЙРШУУЛ"'));
-  ok('  ...and the same instruction, word for word',
-    page.includes('instruction="Шоогоо цагаан тал дээшээ, ногоон тал дэлгэц рүү харагдахаар байрлуулаад 5 секунд хөдөлгөөнгүй барина уу."'));
-  ok('  ...under the same stage name', page.includes("{stage === 'orientationHold' && ("));
-  // Two uses now (changeset 2 added the closing hold); steps 2 and 5 of
-  // the new flow will make it three. One component, one timer.
-  ok('  ...used for both holds, from one component',
-    (page.match(/<CameraHoldStage/g) ?? []).length === 2);
+  ok('the orientation hold keeps its stage name', page.includes("{stage === 'orientationHold' && ("));
+  // All three holds — the timer at zero, the cube's orientation, the timer
+  // at the finish — are the same component with the same clock.
+  ok('all three holds come from the one component',
+    (page.match(/<CameraHoldStage/g) ?? []).length === 3);
+  // THREE DISTINCT LABELS. The two timer holds are the same component at
+  // the same duration with nearly the same sentence; sharing a label too
+  // left an athlete glancing at the screen unable to tell whether they
+  // were before or after the solve.
+  {
+    const labels = (page.match(/label="([^"]+)"/g) ?? []).map((m) => m.slice(7, -1));
+    ok('  ...each labelled for what it asks for', labels.length === 3 && new Set(labels).size === 3,
+      labels.join(' | '));
+    ok('  ...the timer holds say which side of the solve they are on',
+      labels.includes('ЦАГАА ХАРУУЛ · ЭХЛЭХИЙН ӨМНӨ') && labels.includes('ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА'));
+    ok('  ...and the cube hold keeps its own', labels.includes('ШООГОО БАЙРШУУЛ'));
+  }
+}
 
-  // Explicitly NOT touched here — each is its own later changeset, and a
-  // short video afterwards must have exactly one suspect.
-  ok('ZeroDisplayStage is untouched: still 5s', zero.includes('const ZERO_DISPLAY_MS = 5000;'));
-  ok('the beep cues are untouched: still 8s and 12s',
-    rec.includes('const BEEP_CUE_TIMES_MS = [8000, 12000];'));
+console.log('\n  -- 7. durations and markers --');
+{
+  // ONE NUMBER for every hold: the timer, the tick bar and the sentence
+  // all read it.
+  ok('the holds share a single duration constant', page.includes('const HOLD_SECONDS = 8;'));
+  ok('  ...and every hold uses it',
+    (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3 && !/seconds=\{\d/.test(page));
+  // THE DRIFT THE REFACTOR DID NOT FIX: the sentence names the duration,
+  // so it is built from the same number rather than written beside it.
+  ok('the instruction is a function of seconds, not a literal',
+    hold.includes('instruction: (seconds: number) => string;') && hold.includes('{instruction(seconds)}'));
+  ok('  ...and no call site writes the number into the sentence itself',
+    (page.match(/instruction=\{\(sec\) =>/g) ?? []).length === 3 && !/\d+ секунд/.test(page));
+
+  // THE OPENING HOLD is now the athlete's own timer, held to the camera —
+  // with a preview to aim at, which the on-screen "0.00" never gave them.
+  ok('the opening hold is a camera hold', !fs.existsSync(path.join(ROOT, SOLVE, '_components/ZeroDisplayStage.tsx')));
+  ok('  ...under the SAME stage name, so the three transitions still land',
+    page.includes("{stage === 'zeroDisplay' && (") && (page.match(/setStage\([^)]*zeroDisplay/g) ?? []).length === 3);
+  ok('  ...showing the athlete their own timer at 0.00', /0\.00 дээр байхад нь камерт/.test(page));
+
+  // THE MARKERS: colour, never sound, never anything readable.
+  ok('three markers, at 8s, 12s and 15s',
+    rec.includes('const MARKER_TIMES_MS = [8000, 12000, 15000];'));
+  ok('  ...and the beeps are gone',
+    !rec.includes('BEEP') && !rec.includes('onBeep') && !page.includes('playBeep'));
+  ok('  ...expressed as the preview frame’s border colour',
+    rec.includes('oc-solve-mark-${marker}') &&
+      theme.includes('.oc-solve-camera-box-portrait.oc-solve-mark-1'));
+  ok('  ...three steps of it', [1, 2, 3].every((n) => theme.includes(`.oc-solve-camera-box-portrait.oc-solve-mark-${n}`)));
+  // THE SEQUENCE ESCALATES. Red is intrinsically darker than amber, so
+  // "make the last one red" silently made it the weakest of the three.
+  // Measured in relative luminance, not eyeballed.
+  {
+    const colourOf = (n) => {
+      const at = theme.indexOf(`.oc-solve-camera-box-portrait.oc-solve-mark-${n} {`);
+      const m = /border-color: (#[0-9A-Fa-f]{6})/.exec(theme.slice(at, at + 120));
+      return m ? m[1] : null;
+    };
+    const lum = (hex) => {
+      const ch = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+        .map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+      return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+    };
+    const l = [1, 2, 3].map((n) => lum(colourOf(n)));
+    ok('  ...each marker at least as strong as the one before',
+      l[0] < l[1] && l[1] <= l[2], l.map((x) => x.toFixed(4)).join(' < '));
+    ok('  ...and the last one not a jump (within 1.5x of the previous)', l[2] / l[1] < 1.5,
+      (l[2] / l[1]).toFixed(2));
+  }
+  ok('  ...faded, not snapped', theme.includes('transition: border-color 800ms ease;'));
+  // Nothing the athlete could read, and nothing that moves: the marker
+  // state drives a class name and nothing else.
+  ok('the marker renders no text and no number',
+    !/marker[^;]{0,80}(БАЙНА|секунд|\{marker\}<)/.test(rec) && (rec.match(/marker/g) ?? []).length <= 6);
+  const recCode = rec.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  ok('nothing audio-shaped was added near the recorder',
+    !/audio/i.test(recCode) && !/oscillator/i.test(recCode) && !recCode.includes('playBeep'));
+
+  // NOT IN THIS DIFF.
   ok('the recording boundary is untouched: starts at zeroDisplay',
     page.includes("if (stage === 'zeroDisplay') {"));
-  ok('  ...and stops when the solve is finished, in RecStage',
-    page.includes('const blob = await recorder.stopRecording();'));
+  ok('  ...and still stops after the closing hold, not at the solve',
+    page.includes("onFinish={() => setStage('finishHold')}") &&
+      page.includes('async function finishRecording'));
+  ok('no instructions stage was added', !page.includes("'instructions'"));
+  ok('resume is untouched: a complete run still lands on the summary',
+    /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page));
 }
 
 console.log('\n  -- 6. the recording stops AFTER the closing hold --');
@@ -286,8 +353,10 @@ console.log('\n  -- 6. the recording stops AFTER the closing hold --');
   // it has to be on the same continuous video as the solve.
   ok('the solve’s end button only changes stage — it stops nothing',
     page.includes("onFinish={() => setStage('finishHold')}"));
+  // (Changeset 3 folded FINISH_HOLD_SECONDS into the one HOLD_SECONDS
+  // every hold shares.)
   ok('the closing hold is 8 seconds of CameraHoldStage',
-    page.includes('const FINISH_HOLD_SECONDS = 8;') && page.includes('seconds={FINISH_HOLD_SECONDS}'));
+    page.includes('const HOLD_SECONDS = 8;') && page.includes('seconds={HOLD_SECONDS}'));
   // A stage missing from HEADER_STAGES loses the header and the attempt
   // pips silently, mid-attempt.
   ok('  ...and it is in HEADER_STAGES', /'rec',\s*\n\s*'finishHold',/.test(page));
@@ -322,11 +391,7 @@ console.log('\n  -- 6. the recording stops AFTER the closing hold --');
 
   // NOT IN THIS DIFF. Each is its own changeset; a short video afterwards
   // must have exactly one suspect.
-  ok('the opening hold is untouched: zeroDisplay, 5 seconds',
-    zero.includes('const ZERO_DISPLAY_MS = 5000;') && page.includes("if (stage === 'zeroDisplay') {"));
-  ok('the beep cues are untouched: 8s and 12s',
-    rec.includes('const BEEP_CUE_TIMES_MS = [8000, 12000];'));
-  ok('the orientation hold is untouched: 5 seconds', page.includes('seconds={5}'));
+  ok('the recording still starts at the opening hold', page.includes("if (stage === 'zeroDisplay') {"));
   ok('no instructions stage was added', !page.includes("'instructions'"));
   ok('resume is untouched: a complete run still lands on the summary',
     /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page) && !/plan[\s\S]{0,400}finishHold/.test(page));

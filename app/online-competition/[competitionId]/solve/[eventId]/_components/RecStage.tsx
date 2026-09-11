@@ -1,25 +1,29 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
-// Standard WCA-style inspection warning cues, elapsed since this stage
-// (not the whole attempt) began. After 12s no further cues are given —
-// the athlete solves at their own pace with no time limit enforced.
-const BEEP_CUE_TIMES_MS = [8000, 12000];
+/** WCA inspection markers, elapsed since this stage began.
+ *
+ *  INFORMATIONAL ONLY. Nothing is enforced at 8, 12 or 15 seconds — the
+ *  athlete solves at their own pace, and the event's own time limit is
+ *  applied later, at the keypad and again at scoring. These exist so an
+ *  athlete who counts inspection by feel has something to check against. */
+const MARKER_TIMES_MS = [8000, 12000, 15000];
 
 export default function RecStage({
   videoRef,
   onFinish,
-  onBeep,
 }: {
   videoRef: (el: HTMLVideoElement | null) => void;
   onFinish: () => void;
-  onBeep: () => void;
 }) {
+  /** 0 before the first marker, then 1, 2, 3. Drives nothing but a border
+   *  colour. */
+  const [marker, setMarker] = useState(0);
+
   useEffect(() => {
-    const timers = BEEP_CUE_TIMES_MS.map((ms) => setTimeout(onBeep, ms));
+    const timers = MARKER_TIMES_MS.map((ms, i) => setTimeout(() => setMarker(i + 1), ms));
     return () => timers.forEach(clearTimeout);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -31,7 +35,23 @@ export default function RecStage({
             БИЧИЖ БАЙНА
           </span>
         </div>
-        <div className="oc-solve-camera-box-portrait" style={{ marginTop: 10 }}>
+        {/* THE MARKER IS THE FRAME, and nothing else.
+            The athlete is mid-solve: anything they could read is worse
+            than nothing, because reading it costs them the solve they are
+            reading it during. So it is the one-pixel border of the
+            preview they are already looking past — no text, no number, no
+            movement, and no layout change at any step. The colour walks
+            from the neutral frame through two dim ambers to a dim red over
+            an 800ms fade, so it registers as the frame having drifted
+            rather than as an event that happened.
+
+            It is deliberately NOT a sound. The cues were beeps until now;
+            useSolveRecorder carries the reason nothing audio-shaped goes
+            anywhere near this flow again. */}
+        <div
+          className={`oc-solve-camera-box-portrait${marker > 0 ? ` oc-solve-mark-${marker}` : ''}`}
+          style={{ marginTop: 10 }}
+        >
           <video ref={videoRef} autoPlay playsInline muted className="oc-solve-camera-video" />
           <div className="oc-solve-tick-strip" aria-hidden />
         </div>

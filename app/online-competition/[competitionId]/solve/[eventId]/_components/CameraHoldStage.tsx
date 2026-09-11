@@ -18,7 +18,9 @@ import { useEffect, useState } from 'react';
  *
  *  The tick bar is the progress indicator rather than a countdown number,
  *  deliberately: the instruction is what the athlete has to read, and a
- *  large number beside it competes for the same attention. */
+ *  large number beside it competes for the same attention. It is also the
+ *  clock — one segment per second, from the same `seconds` that sets the
+ *  timeout and the sentence. */
 export default function CameraHoldStage({
   seconds,
   label,
@@ -32,8 +34,15 @@ export default function CameraHoldStage({
   seconds: number;
   /** The small mono eyebrow above the preview. */
   label: string;
-  /** The dominant line: what to hold, how, and for how long. */
-  instruction: string;
+  /** The dominant line: what to hold, how, and for how long — BUILT FROM
+   *  `seconds`, not written beside it.
+   *
+   *  Every instruction here names the duration ("...8 секунд барина уу"),
+   *  which made the number two facts in two places: a hold whose timer
+   *  said 8 and whose sentence said 5 would be wrong in the way nobody
+   *  checks. Taking the number as an argument means the sentence can only
+   *  say what the timer does. */
+  instruction: (seconds: number) => string;
   videoRef: (el: HTMLVideoElement | null) => void;
   onDone: () => void;
 }) {
@@ -73,7 +82,7 @@ export default function CameraHoldStage({
             lineHeight: 1.45,
           }}
         >
-          {instruction}
+          {instruction(seconds)}
         </p>
         <div className="oc-solve-chunk-bar-track" style={{ marginTop: 14, justifyContent: 'center' }}>
           {Array.from({ length: seconds }).map((_, i) => (

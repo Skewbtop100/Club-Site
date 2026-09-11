@@ -35,7 +35,6 @@ import { beatsPr } from './_lib/prCheck';
 import { fmtTimeLimit } from '@/lib/online-competition/time-utils';
 import Header from './_components/Header';
 import CameraSetupStage from './_components/CameraSetupStage';
-import ZeroDisplayStage from './_components/ZeroDisplayStage';
 import RevealStage from './_components/RevealStage';
 import CameraHoldStage from './_components/CameraHoldStage';
 import ReadyPromptStage from './_components/ReadyPromptStage';
@@ -139,9 +138,11 @@ const HEADER_STAGES: Stage[] = [
  *  order above an empty one, so it cannot reject a genuine recording. */
 const MIN_RECORDING_BYTES = 1024;
 
-/** The closing hold: long enough for a judge to read a timer off the
- *  video, and the same length the mockup gives every other hold. */
-const FINISH_HOLD_SECONDS = 8;
+/** Every hold in the flow runs the same length: long enough for a judge
+ *  to read a timer or an orientation off the video, short enough not to
+ *  pad five attempts. Each stage passes this to CameraHoldStage, which
+ *  builds its sentence and its tick bar from the same number. */
+const HOLD_SECONDS = 8;
 
 /** The browser's own dialog wording is not ours to choose, so
  *  beforeunload gets no message. Ours is for in-app navigation.
@@ -1223,7 +1224,21 @@ export default function SolvePage() {
           />
         )}
 
-        {stage === 'zeroDisplay' && <ZeroDisplayStage onDone={() => setStage('scrambleReveal')} />}
+        {/* THE ATHLETE'S OWN TIMER, at 0.00, held to the camera — the
+            proof that the clock they are about to solve against started
+            from zero. This used to be a large on-screen "0.00" with no
+            camera preview at all, which proved something about this page
+            rather than about the athlete's timer. Recording starts here,
+            unchanged: the effect is still keyed on this stage name. */}
+        {stage === 'zeroDisplay' && (
+          <CameraHoldStage
+            seconds={HOLD_SECONDS}
+            label="ЦАГАА ХАРУУЛ · ЭХЛЭХИЙН ӨМНӨ"
+            instruction={(sec) => `Өөрийн цагаа 0.00 дээр байхад нь камерт ${sec} секунд харуулна уу.`}
+            videoRef={recorder.videoRef}
+            onDone={() => setStage('scrambleReveal')}
+          />
+        )}
 
         {stage === 'scrambleReveal' && (
           <RevealStage scramble={scramble} videoRef={recorder.videoRef} onDone={() => setStage('orientationHold')} />
@@ -1236,9 +1251,11 @@ export default function SolvePage() {
             with its three hard-coded values handed in. */}
         {stage === 'orientationHold' && (
           <CameraHoldStage
-            seconds={5}
+            seconds={HOLD_SECONDS}
             label="ШООГОО БАЙРШУУЛ"
-            instruction="Шоогоо цагаан тал дээшээ, ногоон тал дэлгэц рүү харагдахаар байрлуулаад 5 секунд хөдөлгөөнгүй барина уу."
+            instruction={(sec) =>
+              `Шоогоо цагаан тал дээшээ, ногоон тал дэлгэц рүү харагдахаар байрлуулаад ${sec} секунд хөдөлгөөнгүй барина уу.`
+            }
             videoRef={recorder.videoRef}
             onDone={() => setStage('readyPrompt')}
           />
@@ -1251,7 +1268,6 @@ export default function SolvePage() {
         {stage === 'rec' && (
           <RecStage
             videoRef={recorder.videoRef}
-            onBeep={recorder.playBeep}
             /* The solve is over; the RECORDING IS NOT. It runs through
                the closing hold, where the athlete shows the timer that
                produced the number they are about to type. */
@@ -1261,9 +1277,9 @@ export default function SolvePage() {
 
         {stage === 'finishHold' && (
           <CameraHoldStage
-            seconds={FINISH_HOLD_SECONDS}
-            label="ЦАГАА ХАРУУЛ"
-            instruction="Хэмжсэн цагаа камерт тод харагдахаар 8 секунд барина уу."
+            seconds={HOLD_SECONDS}
+            label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"
+            instruction={(sec) => `Хэмжсэн цагаа камерт тод харагдахаар ${sec} секунд барина уу.`}
             videoRef={recorder.videoRef}
             onDone={finishRecording}
           />

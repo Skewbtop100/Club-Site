@@ -957,16 +957,6 @@
   flex: none;
 }
 
-/* State 0 — zeroDisplay (frozen "0.00", proves the timer read zero
-   before the scramble was applied) */
-.oc-solve-zero {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  flex: 1;
-}
-
 /* State 1 — reveal */
 .oc-solve-reveal {
   padding-top: 22px;
@@ -1030,6 +1020,34 @@
   border: 1px solid #2A2721;
   background: #141210;
   overflow: hidden;
+  /* Slow enough that the marker reads as a drift rather than a flash —
+     the athlete is solving, and a snap would pull the eye. */
+  transition: border-color 800ms ease;
+}
+/* WCA inspection markers at 8s, 12s and 15s: the preview's one-pixel
+   frame and nothing else. No text, no number, no movement, no layout
+   change — the athlete should notice it peripherally and never read it.
+   Each step is a small lift in warmth from the neutral #2A2721, staying
+   far below the contrast of anything else on the screen.
+   
+   THE SEQUENCE MUST NOT DE-ESCALATE. The 15s step is the last one and has
+   to read at least as strongly as the 12s amber, or the marker that means
+   "inspection is over" lands softer than the one before it. Red is
+   intrinsically darker than amber at the same nominal brightness (the eye
+   weights green ~3x red), so an obvious red-brown measured 34% DIMMER
+   than the amber it followed. Relative luminance, measured:
+     neutral 0.0205 · 8s 0.0512 · 12s 0.0957 · 15s 0.1102
+   The 15s is 1.15x the amber — a step up, not a jump — and LESS saturated
+   than it (0.47 vs 0.54), so the hue carries the "this one is different"
+   rather than the intensity. */
+.oc-solve-camera-box-portrait.oc-solve-mark-1 {
+  border-color: #4A3F20;
+}
+.oc-solve-camera-box-portrait.oc-solve-mark-2 {
+  border-color: #6B5420;
+}
+.oc-solve-camera-box-portrait.oc-solve-mark-3 {
+  border-color: #8E4B33;
 }
 /* State 1 — reveal's small side preview (recording is already live by
    then; this is just visual confirmation, not the main camera-box). */
@@ -1074,27 +1092,7 @@
   padding-top: 20px;
   flex: 1;
 }
-/* Now used by zeroDisplay's frozen "0.00" — the old live countdown number
-   this treatment was originally built for (the "go" stage) is gone;
-   orientationHold shows instruction text instead, with progress marked by
-   the same tick pattern the reveal stage's progress bar uses. */
-.oc-solve-countdown-number {
-  font: 700 148px/0.85 var(--oc-font-mono), monospace;
-  color: #DFFF4F;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-  animation: oc-solve-pop 0.3s ease-out;
-}
-@keyframes oc-solve-pop {
-  from {
-    transform: scale(0.85);
-    opacity: 0.4;
-  }
-  to {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
+
 
 /* State 4 — rec (recording, no timer) */
 .oc-solve-rec {
