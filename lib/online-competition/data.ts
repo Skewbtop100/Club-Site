@@ -22,6 +22,7 @@ import {
 } from './competition-shape';
 import { buildRegistrationWrite, normalizeStoredRegistration } from './registration-shape';
 import { submissionDocId } from './submission-id';
+import type { FiledAttempt } from './run-resume';
 import type {
   OnlineCompetition,
   OnlineCompetitionStatus,
@@ -389,6 +390,47 @@ export async function fetchMySubmissions(uid: string, count = 5): Promise<Online
     .map((d) => ({ id: d.id, ...(d.data() as Omit<OnlineSubmission, 'id'>) }))
     .sort((a, b) => (b.createdAt?.toMillis() ?? 0) - (a.createdAt?.toMillis() ?? 0))
     .slice(0, count);
+}
+
+/** Every attempt this athlete has already filed for one competition and
+ *  event, across all rounds — what the solve page resumes from.
+ *
+ *  THE SAME UNFILTERED-BY-EVERYTHING-ELSE SHAPE as fetchMySubmissions
+ *  above, and for the same reason. A query with four equality filters
+ *  (uid + competitionId + event + competitionRound) is the obvious form
+ *  and is NOT used: this project has already taken a production outage
+ *  from assuming a query shape the emulator serves happily and production
+ *  refuses for want of an index (see countRegistrationsFor in
+ *  admin-competitions.ts). `where('uid','==',uid)` is the one shape
+ *  already proven against production here; the rest is an in-memory
+ *  filter over one athlete's own submissions, which is a small, bounded
+ *  set.
+ *
+ *  The uid equality filter is also what makes the read provably safe
+ *  under the onlineSubmissions read rule, which only admits documents the
+ *  caller owns. */
+export async function fetchMyFiledAttempts(
+  uid: string,
+  competitionId: string,
+  event: string,
+): Promise<FiledAttempt[]> {
+  const snap = await getDocs(query(collection(onlineCompDb, 'onlineSubmissions'), where('uid', '==', uid)));
+  const mine: FiledAttempt[] = [];
+  for (const d of snap.docs) {
+    const data = d.data();
+    if (data.competitionId !== competitionId || data.event !== event) continue;
+    // A document written before competitionRound existed cannot be placed
+    // in a round, so it cannot be resumed into one either.
+    if (typeof data.round !== 'number' || typeof data.competitionRound !== 'number') continue;
+    mine.push({
+      submissionId: d.id,
+      attempt: data.round,
+      competitionRound: data.competitionRound,
+      reportedTime: typeof data.reportedTime === 'number' ? data.reportedTime : 0,
+      isDnf: data.isDnf === true,
+    });
+  }
+  return mine;
 }
 
 /** Thrown when this attempt is ALREADY FILED with different contents —

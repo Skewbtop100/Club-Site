@@ -7,10 +7,18 @@ import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import {
   fetchCompetition,
   createSubmission,
+  fetchMyFiledAttempts,
   fetchParticipant,
   recordAo5Result,
   SubmissionAlreadyFiledError,
 } from '@/lib/online-competition/data';
+import {
+  cutoffFailed,
+  planResume,
+  resolveAttemptTime,
+  resumeNotice,
+  type FiledAttempt,
+} from '@/lib/online-competition/run-resume';
 import { uploadVideoToCloudinary } from '@/lib/online-competition/cloudinary';
 import type { OnlineCompetition } from '@/lib/online-competition/types';
 import { useSolveRecorder } from './_lib/useSolveRecorder';
@@ -65,16 +73,6 @@ type Stage =
 /** Attempts in a run come from the event's resultFormat via
  *  attemptsForFormat — there is no constant here any more. See `runShape`
  *  below for why it is captured once rather than read per render. */
-
-/** One attempt's value for LOCAL display and the provisional result the
- *  athlete is shown. Mirrors effectiveAttemptTime's limit rule for a time
- *  that has not been judged yet — no status, no penalty, just the
- *  athlete's own number against the limit. */
-function attemptTime(a: { timeCs: number | null; isDnf: boolean }, timeLimitCs: number | null): AttemptTime {
-  if (a.isDnf || a.timeCs === null) return 'DNF';
-  if (timeLimitCs !== null && a.timeCs > timeLimitCs) return 'DNF';
-  return a.timeCs;
-}
 
 /** Fastest non-DNF attempt, or null if there was none. */
 function bestSingle(times: AttemptTime[]): number | null {
@@ -136,16 +134,15 @@ const MIN_RECORDING_BYTES = 1024;
 /** The browser's own dialog wording is not ours to choose, so
  *  beforeunload gets no message. Ours is for in-app navigation.
  *
- *  Two different losses now, and the athlete deserves to know which one
- *  they are looking at. Attempts already filed are on the server and stay
- *  there whatever happens to this tab — but the round still cannot be
- *  continued after leaving, because resuming is PR-3. */
+ *  One loss to describe now: the attempt that has not been filed yet. The
+ *  ones before it are on the server, and returning to this page picks the
+ *  run up at the next attempt — so the dialog says what actually happens,
+ *  which is that this one solve has to be done again. */
 function leaveConfirmMessage(unfiledAttempts: number): string {
-  return unfiledAttempts > 0
-    ? `Хадгалагдаагүй ${unfiledAttempts} оролдлого байна. Хуудаснаас гарвал тэр бичлэг устах бөгөөд ` +
-      'эхлүүлсэн раундаа үргэлжлүүлэх боломжгүй. Гарах уу?'
-    : 'Хуудаснаас гарвал эхлүүлсэн раундаа үргэлжлүүлэх боломжгүй. Хадгалагдсан оролдлогууд сервэрт ' +
-      'хэвээр үлдэнэ. Гарах уу?';
+  return (
+    `Хадгалагдаагүй ${unfiledAttempts} оролдлого байна. Хуудаснаас гарвал тэр бичлэг устаж, ` +
+    'уг оролдлогыг дахин хийх шаардлагатай болно. Өмнөх оролдлогууд сервэрт хэвээр үлдэнэ. Гарах уу?'
+  );
 }
 
 export default function SolvePage() {
@@ -182,6 +179,11 @@ export default function SolvePage() {
   const filingRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** attempt index -> automatic retries already spent on it. */
   const filingRetriesRef = useRef<Map<number, number>>(new Map());
+
+  /** What to tell an athlete who is continuing rather than starting — see
+   *  resumeNotice in run-resume.ts. Cleared the moment they solve
+   *  something, because from then on they can see it for themselves. */
+  const [resumeMessage, setResumeMessage] = useState<string | null>(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
@@ -302,6 +304,25 @@ export default function SolvePage() {
   // waits for it too — see the effect below.
   const solverUid = user && !user.isAnonymous ? user.uid : null;
 
+  /** This ROUND's cutoff onto the captured run shape. A cutoff is per
+   *  round, so it can only be resolved once the round is known — which is
+   *  either when the resume plan lands or when the gate answers. */
+  const applyRoundCutoff = useCallback(
+    (round: number) => {
+      const forRound = eventCutoffs.find((c) => c.round === round);
+      setRunShape((prev) =>
+        prev === null
+          ? prev
+          : {
+              ...prev,
+              cutoffCs: forRound?.cutoffCs ?? null,
+              cutoffPhase: forRound ? cutoffPhaseFor(prev.format) : null,
+            },
+      );
+    },
+    [eventCutoffs],
+  );
+
   const fetchScramble = useCallback(
     async (attemptNumber: number) => {
       // Cleared BEFORE the request, every time. The old code only ever
@@ -348,25 +369,24 @@ export default function SolvePage() {
           throw new Error('failed');
         }
         const data = (await res.json()) as { scramble: string; round?: number };
+        if (typeof data.round === 'number') {
+          if (competitionRound === null) {
+            // No resume plan reached here first — the gate is then the
+            // authority on which round this run belongs to.
+            setCompetitionRound(data.round);
+            applyRoundCutoff(data.round);
+          } else if (data.round !== competitionRound) {
+            // The round moved between planning this run and asking for
+            // its scramble. Solving on the new round's scramble and
+            // filing it into the old round would be worse than stopping.
+            setScrambleError(
+              'Раунд өөрчлөгдсөн байна. Хуудсаа сэргээгээд дахин оролдоно уу — асуудал давтагдвал зохион байгуулагчид хандана уу.',
+            );
+            return;
+          }
+        }
         setBlockedMessage('');
         setScramble(data.scramble);
-        // Attempt 1 only — later attempts re-hit the gate but must not
-        // move a run that has already started.
-        if (attemptNumber === 1 && typeof data.round === 'number') {
-          setCompetitionRound(data.round);
-          // Captured with the round, and never re-read for the rest of the
-          // run — the same rule competitionRound itself follows.
-          const forRound = eventCutoffs.find((c) => c.round === data.round);
-          setRunShape((prev) =>
-            prev === null
-              ? prev
-              : {
-                  ...prev,
-                  cutoffCs: forRound?.cutoffCs ?? null,
-                  cutoffPhase: forRound ? cutoffPhaseFor(prev.format) : null,
-                },
-          );
-        }
       } catch {
         if (superseded()) return;
         // Never loadError: its screen is guarded by `!competition`, so
@@ -375,24 +395,128 @@ export default function SolvePage() {
         setScrambleError('Скрамбл авахад алдаа гарлаа. Холболтоо шалгаад дахин оролдоно уу.');
       }
     },
-    [eventId, competitionId, solverUid, eventCutoffs],
+    [eventId, competitionId, solverUid, competitionRound, applyRoundCutoff],
   );
 
-  // Fetch the first attempt's scramble once the athlete is known. Later
-  // attempts fetch theirs explicitly (in handleEntryConfirm below) rather
-  // than via a reactive effect keyed on the attempt number — the fetch is
-  // part of starting an attempt, not a consequence of a counter moving.
+  // ── RESUME ────────────────────────────────────────────────────────────
+  // Before anything is solved, find out what this athlete has already
+  // FILED for this competition and event. Attempts are written one at a
+  // time as they are recorded, so the server — not this tab — is the
+  // authority on how far the run got. Leaving therefore stops being a way
+  // to discard a solve: come back and you come back to the attempt AFTER
+  // the last one you filed.
   //
-  // Keyed on solverUid rather than running on mount: without a uid the
-  // request can't resolve a group assignment, and an anonymous/loading
-  // visitor is sitting on the sign-in gate anyway, so there is nothing to
-  // scramble for yet. solverUid only ever transitions null -> uid, so this
-  // still fires exactly once per session.
+  // This read has to happen BEFORE the scramble is fetched. The attempt
+  // number is a query parameter of that request, and asking for attempt 1
+  // when two are already filed would hand the athlete a scramble they
+  // have used and then refuse the filing at the end of it.
+  //
+  // Later attempts fetch their scramble explicitly (in handleEntryConfirm)
+  // rather than through a reactive effect — the fetch is part of starting
+  // an attempt, not a consequence of a counter moving.
+  //
+  // Keyed on solverUid: an anonymous or still-loading visitor is sitting
+  // on the sign-in gate anyway, and solverUid only ever goes null -> uid,
+  // so this runs once per session.
   useEffect(() => {
-    if (!solverUid) return;
-    fetchScramble(1);
+    if (!solverUid || runShape === null) return;
+    let cancelled = false;
+
+    (async () => {
+      // Which round is open for this event, from the SAME resolver the
+      // scramble route enforces with — so the round this run is planned
+      // for is the round it would be admitted to.
+      let liveRound: number | null = null;
+      let filed: FiledAttempt[] = [];
+      try {
+        const [accessRes, mine] = await Promise.all([
+          fetch(
+            `/api/online-competition/round-access?competitionId=${encodeURIComponent(competitionId)}&uid=${encodeURIComponent(solverUid)}`,
+          ),
+          fetchMyFiledAttempts(solverUid, competitionId, eventId),
+        ]);
+        const accessBody = accessRes.ok
+          ? ((await accessRes.json()) as { events?: Record<string, { liveRound: number | null }> })
+          : { events: {} };
+        liveRound = accessBody.events?.[eventId]?.liveRound ?? null;
+        filed = mine;
+      } catch (e) {
+        // FAIL CLOSED, and visibly. Starting a run that cannot be planned
+        // would either re-solve a filed attempt or file into the wrong
+        // round. blockedMessage, not loadError: loadError's screen is
+        // guarded by `!competition`, which is false by now, so it would
+        // have shown the athlete nothing at all. Nothing is at risk yet —
+        // no attempt has been recorded — so replacing the page is safe
+        // here in a way it is not mid-run.
+        console.error('Resume lookup failed:', e);
+        if (!cancelled) {
+          setBlockedMessage(
+            'Өмнөх оролдлогуудыг уншиж чадсангүй. Холболтоо шалгаад хуудсаа сэргээнэ үү.',
+          );
+        }
+        return;
+      }
+      if (cancelled) return;
+
+      // The cutoff belongs to the round, so it is resolved for the live
+      // round before the plan is made — the plan uses it to decide whether
+      // a resumed run is already over.
+      const forRound = eventCutoffs.find((c) => c.round === liveRound);
+      const plan = planResume(filed, liveRound, {
+        format: runShape.format,
+        attempts: runShape.attempts,
+        timeLimitCs: runShape.timeLimitCs,
+        cutoffCs: forRound?.cutoffCs ?? null,
+        cutoffPhase: forRound ? cutoffPhaseFor(runShape.format) : null,
+      });
+
+      if (plan.competitionRound !== null) {
+        setCompetitionRound(plan.competitionRound);
+        applyRoundCutoff(plan.competitionRound);
+      }
+      // Rebuilt from the server's own record of them. They are already
+      // filed, so they carry no blob and nothing will try to upload them.
+      setAttempts(
+        plan.priorAttempts.map((a, i) => ({
+          timeCs: a.timeCs,
+          isDnf: a.isDnf,
+          fileState: 'filed' as const,
+          uploadPercent: 100,
+          submissionId: filed.find((f) => f.competitionRound === plan.competitionRound && f.attempt === i + 1)?.submissionId ?? null,
+          fileError: null,
+        })),
+      );
+      setAttemptIndex(plan.nextAttempt - 1);
+      setCutOff(plan.cutOff);
+      setResumeMessage(resumeNotice(plan));
+
+      if (plan.kind === 'no-live-round') {
+        // Nothing can be solved and nothing can be finished. An athlete
+        // with a run left part-finished needs more than the stock line:
+        // their attempts are safe, and only the organiser can decide what
+        // happens to the round.
+        setBlockedMessage(
+          plan.unfinishedRound !== null
+            ? 'Энэ төрлийн раунд хаагдсан байна. Таны хадгалсан оролдлогууд сервэрт хэвээр байгаа боловч ' +
+              'үлдсэн оролдлогыг хийх боломжгүй. Зохион байгуулагчтай холбогдоно уу.'
+            : 'Энэ төрлийн раунд одоогоор нээлттэй биш байна.',
+        );
+        return;
+      }
+      if (plan.kind === 'complete') {
+        // They solved the whole round and left before sending the result.
+        // Nothing to scramble for; the summary is what they owe.
+        setStage('summary');
+        return;
+      }
+      fetchScramble(plan.nextAttempt);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [solverUid]);
+  }, [solverUid, runShape !== null]);
 
   /** Attempts recorded but not yet on the server. At most one, if filing
    *  is keeping up. */
@@ -438,12 +562,11 @@ export default function SolvePage() {
   // whole run is submitted. Leaving throws all of them away, and until now
   // nothing said so.
   //
-  // It protects much less than it did: at most one attempt is unfiled at
-  // any moment, and the rest are already on the server. It still blocks,
-  // for two reasons — that one attempt is real work with a video that
-  // exists nowhere else, and leaving still ends the round, because a
-  // returning athlete cannot yet resume (PR-3).
-  const runAtRisk = attempts.length > 0 && stage !== 'sent';
+  // It now protects exactly one thing: the attempt that has been recorded
+  // but not yet filed. Everything before it is on the server, and coming
+  // back resumes at the next attempt — so leaving with nothing in flight
+  // costs nothing and is not worth a dialog.
+  const runAtRisk = unfiledCount > 0 && stage !== 'sent';
   // Read inside the listeners below, which are installed once per
   // at-risk run and must not be re-installed on every attempt (each
   // install pushes a history entry).
@@ -677,6 +800,9 @@ export default function SolvePage() {
     // and can never be one.
     if (!isOver && beatsPr(result.timeCs, result.isDnf, bests)) setPrToast(true);
 
+    // From here they can see for themselves that the run is under way.
+    setResumeMessage(null);
+
     const index = attempts.length;
     const newAttempt: Attempt = {
       timeCs: result.timeCs,
@@ -698,19 +824,15 @@ export default function SolvePage() {
     pendingBlobRef.current = null;
 
     // ── THE CUTOFF ──
-    // At the end of the cutoff phase, if nothing beat the cutoff the run
-    // ends here. STRICTLY better is required, and an over-limit attempt
-    // (already a DNF above) can never beat it.
-    const phase = runShape?.cutoffPhase ?? null;
-    const cutoffCs = runShape?.cutoffCs ?? null;
-    const failedCutoff =
-      phase !== null &&
-      cutoffCs !== null &&
-      next.length >= phase &&
-      next
-        .slice(0, phase)
-        .every((a) => attemptTime(a, runShape?.timeLimitCs ?? null) === 'DNF' ||
-          (a.timeCs as number) >= cutoffCs);
+    // The SAME evaluation a resumed run gets (run-resume.ts), over the
+    // same attempt list — an athlete must not be able to reload their way
+    // past a cutoff they already missed, and two copies of this rule is
+    // how that would happen.
+    const failedCutoff = cutoffFailed(
+      next.map((a) => resolveAttemptTime(a, runShape?.timeLimitCs ?? null)),
+      runShape?.cutoffPhase ?? null,
+      runShape?.cutoffCs ?? null,
+    );
 
     // The run is over — but the summary is not reachable until every
     // attempt is actually on the server.
@@ -775,7 +897,7 @@ export default function SolvePage() {
       // Computed from the SAME in-memory times the athlete was shown on
       // the summary — filing them one at a time changed when each video
       // was sent, not what any attempt scored.
-      const times: AttemptTime[] = attempts.map((a) => attemptTime(a, runShape?.timeLimitCs ?? null));
+      const times: AttemptTime[] = attempts.map((a) => resolveAttemptTime(a, runShape?.timeLimitCs ?? null));
       // A cut-off run has no average — its result is the best single, and
       // the partial set never touches computeResult (whose ao5 branch
       // would return a fabricated average from a two-attempt slice).
@@ -949,6 +1071,28 @@ export default function SolvePage() {
                enough to distract. */
             savingLabel={savingLabel}
           />
+        )}
+
+        {/* Continuing, not starting. Without this the flow looks
+            identical to a fresh run — same camera prompt, same countdown —
+            and an athlete who thinks they are on attempt 1 would solve it
+            again and have the filing refused. Cleared as soon as they
+            record something, because from then on the pips say it. */}
+        {resumeMessage && (
+          <p
+            style={{
+              marginTop: 14,
+              padding: '11px 13px',
+              background: '#141210',
+              borderLeft: '2px solid #DFFF4F',
+              font: '400 12px var(--oc-font-heading), sans-serif',
+              color: '#F4F1EA',
+              lineHeight: 1.6,
+            }}
+            role="status"
+          >
+            {resumeMessage}
+          </p>
         )}
 
         {stage === 'cameraSetup' && (

@@ -11,10 +11,11 @@
 // in tests/competition-fields/submission-id.test.cjs.
 //
 // What a run holds: each attempt is uploaded and filed the moment it is
-// recorded, so at most ONE video is in memory at a time — but that one
-// exists nowhere else, an attempt that records nothing wastes the
-// athlete's solve, and a run cannot yet be resumed after leaving. These
-// pin the guards that stand in front of all three.
+// recorded, so at most ONE video is in memory at a time — and that one
+// exists nowhere else. Everything before it is on the server and the run
+// picks up from there on the next visit. These pin the guards in front of
+// that one unfiled attempt, and in front of an attempt that records
+// nothing.
 //
 // Run: npm run test:solve
 
@@ -27,6 +28,7 @@ const page = fs.readFileSync(path.join(ROOT, SOLVE, 'page.tsx'), 'utf8');
 const failed = fs.readFileSync(path.join(ROOT, SOLVE, '_components/RecordingFailedStage.tsx'), 'utf8');
 const filing = fs.readFileSync(path.join(ROOT, SOLVE, '_components/FilingStage.tsx'), 'utf8');
 const summary = fs.readFileSync(path.join(ROOT, SOLVE, '_components/SummaryStage.tsx'), 'utf8');
+const data = fs.readFileSync(path.join(ROOT, 'lib/online-competition/data.ts'), 'utf8');
 const components = fs
   .readdirSync(path.join(ROOT, SOLVE, '_components'))
   .filter((f) => f.endsWith('.tsx'));
@@ -46,8 +48,11 @@ function ok(name, cond, detail) {
 
 console.log('\n  -- 1. leaving a run in progress --');
 {
-  ok('a run is "at risk" from the first solved attempt until it is sent',
-    page.includes("const runAtRisk = attempts.length > 0 && stage !== 'sent';"));
+  // Resume changed what is at stake: only the attempt that has not
+  // reached the server yet. Leaving with nothing in flight costs nothing,
+  // so it no longer asks.
+  ok('a run is "at risk" only while an attempt is unfiled',
+    page.includes("const runAtRisk = unfiledCount > 0 && stage !== 'sent';"));
   ok('the guard is installed only while it is at risk',
     /if \(!runAtRisk\) return;/.test(page) && /\}, \[runAtRisk\]\);/.test(page));
   // Reload, tab close, hard navigation.
@@ -75,9 +80,11 @@ console.log('\n  -- 1. leaving a run in progress --');
   ok('the confirm counts the UNFILED attempts, not every attempt',
     /function leaveConfirmMessage\(unfiledAttempts: number\)/.test(page) &&
       page.includes('${unfiledAttempts} оролдлого'));
-  ok('  ...says the unfiled recording is lost', page.includes('тэр бичлэг устах'));
-  ok('  ...and that the round cannot be continued', page.includes('үргэлжлүүлэх боломжгүй'));
+  ok('  ...says the unfiled recording is lost and must be redone',
+    page.includes('тэр бичлэг устаж') && page.includes('дахин хийх шаардлагатай болно'));
   ok('  ...while saying the filed ones survive', page.includes('хэвээр үлдэнэ'));
+  // The round CAN be continued now — the old copy said it could not.
+  ok('  ...and no longer claims the round is over', !page.includes('үргэлжлүүлэх боломжгүй. Гарах уу?'));
   ok('the in-app link on this page is guarded by the same confirm',
     page.includes('if (runAtRisk && !window.confirm(leaveConfirmMessage(unfiledCount))) e.preventDefault();'));
   // beforeunload does not fire for a client-side <Link>, so a new one
@@ -179,6 +186,51 @@ console.log('\n  -- 3. each attempt is filed as it is recorded --');
     !summary.includes('Бүх бичлэгийг устгаад дахин эхлэх үү?'));
   ok('the aggregate upload progress went with the end-of-run loop',
     !page.includes('submitProgress') && !summary.includes('submitProgress'));
+}
+
+console.log('\n  -- 4. resuming a run --');
+{
+  const resume = page.slice(page.indexOf('// ── RESUME ─'), page.indexOf('}, [solverUid, runShape !== null]);'));
+
+  // The read has to come first: the attempt number is a parameter of the
+  // scramble request, so asking before planning would serve the wrong one.
+  ok('the filed attempts are read before any scramble is fetched',
+    resume.indexOf('fetchMyFiledAttempts(') < resume.indexOf('fetchScramble(plan.nextAttempt)'));
+  ok('  ...with the proven single-filter query shape, filtered in memory',
+    /where\('uid', '==', uid\)/.test(data) && data.includes('data.competitionId !== competitionId || data.event !== event'));
+  ok('  ...alongside the live round from the same resolver the gate uses',
+    resume.includes('/api/online-competition/round-access?competitionId='));
+  ok('  ...and a lookup failure stops the run rather than starting it fresh',
+    resume.includes('setBlockedMessage(') && resume.includes('Өмнөх оролдлогуудыг уншиж чадсангүй'));
+
+  // The plan decides everything the run starts from.
+  ok('the next attempt comes from the plan', resume.includes('setAttemptIndex(plan.nextAttempt - 1)'));
+  ok('the round comes from the plan, not from a fresh gate call',
+    resume.includes('setCompetitionRound(plan.competitionRound)'));
+  ok('the prior attempts are rebuilt as already filed',
+    resume.includes("fileState: 'filed' as const"));
+  ok('a cut-off run comes back cut off', resume.includes('setCutOff(plan.cutOff)'));
+  ok('a completed run goes straight to the summary',
+    /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(resume));
+  ok('a closed round explains itself instead of scrambling',
+    /plan\.kind === 'no-live-round'[\s\S]{0,600}setBlockedMessage\(/.test(resume));
+  ok('  ...and points at the organiser when a run was left part-finished',
+    resume.includes('Зохион байгуулагчтай холбогдоно уу'));
+
+  // The scramble the athlete solves must belong to the round being filed.
+  ok('a round that moved under the run refuses the scramble',
+    page.includes("data.round !== competitionRound") && page.includes('Раунд өөрчлөгдсөн байна'));
+
+  // One cutoff rule, used by the live run and the resumed one.
+  ok('the live run evaluates the cutoff with the same shared function',
+    page.includes('const failedCutoff = cutoffFailed('));
+  ok('  ...and the page keeps no second copy of the attempt-time rule',
+    !page.includes('function attemptTime(') && page.includes('resolveAttemptTime('));
+
+  // Resuming looks identical to starting without this.
+  ok('the athlete is told they are continuing', page.includes('{resumeMessage}'));
+  ok('  ...and the notice clears once they solve something',
+    page.includes('setResumeMessage(null);'));
 }
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
