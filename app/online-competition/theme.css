@@ -1403,6 +1403,23 @@
   .oc-solve-btn-finish {
     font-size: 16px;
   }
+  /* 210px of digit is 2.4 screens wide at 375. The number stays the
+     largest thing on the screen by a distance; it just fits on it. */
+  .oc-solve-count-n {
+    font-size: 130px;
+  }
+  .oc-solve-goflash-title {
+    font-size: 32px;
+  }
+  .oc-solve-cover-say {
+    font-size: 20px;
+  }
+  .oc-solve-cover-n {
+    font-size: 40px;
+  }
+  .oc-solve-cover-faces {
+    gap: 18px;
+  }
 }
 
 .oc-solve-page {
@@ -1748,6 +1765,184 @@
   color: #DFFF4F;
   text-align: center;
   max-width: 460px;
+}
+
+/* ── COVER: the cube goes under its cover, in a known orientation ────────
+   Takes over orientationHold's eight seconds and its job — the cube held
+   still, white up and green to camera, long enough for a judge to read it
+   off the video — and adds the thing that makes the inspection auditable:
+   the cube ends up HIDDEN. The moment the cover comes off is a visible
+   mark on the recording, which is what an inspection window needs in
+   order to be measured at all.
+
+   SINGLE PHASE. The mockup's cover is two: a countdown, then a БЭЛЭН
+   button that goes live when it ends. That second phase IS `ready`, which
+   follows it — same badge shape, same one volt button — so building both
+   would put two go-aheads on two consecutive screens. The button stays on
+   ready, which is the one that must not be pressable early. */
+.oc-solve-cover {
+  width: 100%;
+  max-width: 620px;
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+}
+.oc-solve-cover-count {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.oc-solve-cover-n {
+  font: 700 50px/1 var(--oc-font-mono), monospace;
+  color: #DFFF4F;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.04em;
+}
+.oc-solve-cover-unit {
+  font: 500 16px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.14em;
+  color: #6E6A62;
+}
+.oc-solve-cover-say {
+  font: 600 24px/1.4 var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+  text-align: center;
+  letter-spacing: -0.01em;
+  max-width: 520px;
+}
+.oc-solve-cover-faces {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+}
+.oc-solve-cover-face {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+}
+.oc-solve-cover-grid {
+  width: 78px;
+  height: 78px;
+  background: #0D0D10;
+  border: 1px solid #2A2A31;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 3px;
+  padding: 7px;
+}
+.oc-solve-cover-face-label {
+  font: 500 8px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.16em;
+  color: #6E6A62;
+}
+.oc-solve-cover-note {
+  font: 400 12px/1.7 var(--oc-font-heading), sans-serif;
+  color: #6E6A62;
+  text-align: center;
+  max-width: 460px;
+}
+
+/* ── COUNT: WCA's fifteen seconds, counted for real ──────────────────────
+   The one clock that owns the inspection. rec deliberately has no
+   inspection panel: the mockup shows one there, but a second readout of
+   the same fifteen seconds is a second clock, and two clocks for one rule
+   is how they come to disagree. */
+.oc-solve-count {
+  width: 100%;
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+}
+.oc-solve-count-label {
+  font: 500 10px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.24em;
+  color: #6E6A62;
+}
+.oc-solve-count-n {
+  font: 700 210px/0.85 var(--oc-font-mono), monospace;
+  color: #DFFF4F;
+  letter-spacing: -0.06em;
+  font-variant-numeric: tabular-nums;
+}
+.oc-solve-count-cam {
+  width: 180px;
+  max-width: 100%;
+  position: relative;
+  aspect-ratio: 4 / 3;
+  border: 1px solid #1C1C21;
+  overflow: hidden;
+  background: #0A0A0C;
+}
+/* NOT IN THE MOCKUP, and there on purpose: WCA inspection is UP TO
+   fifteen seconds, not exactly fifteen. Without this the platform would
+   force every athlete to hold a planned solve for the full count, which
+   costs them the plan. */
+.oc-solve-count-go {
+  border: 1px solid #F4F1EA;
+  background: transparent;
+  color: #F4F1EA;
+  padding: 15px 28px;
+  font: 700 14px/1 var(--oc-font-heading), sans-serif;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.oc-solve-count-go:hover {
+  background: #F4F1EA;
+  color: #08080A;
+}
+
+/* ── GO: the flash ───────────────────────────────────────────────────────
+   Full-bleed over the scrolling column, exactly like `ready`. The bar
+   stays: it is the frame, and ГАРАХ is the only way out of a run. */
+.oc-solve-goflash {
+  position: absolute;
+  inset: 0;
+  background: #DFFF4F;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 26px;
+  padding: 24px;
+  animation: oc-solve-go-pop 0.35s ease-out;
+}
+@keyframes oc-solve-go-pop {
+  0% {
+    transform: scale(0.95);
+  }
+  60% {
+    transform: scale(1.015);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.oc-solve-goflash-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 26px);
+  grid-template-rows: repeat(3, 26px);
+  gap: 5px;
+}
+.oc-solve-goflash-cell {
+  background: #08080A;
+}
+.oc-solve-goflash-title {
+  font: 700 46px/1.1 var(--oc-font-heading), sans-serif;
+  color: #08080A;
+  letter-spacing: -0.015em;
+  text-align: center;
+}
+.oc-solve-goflash-sub {
+  font: 500 11px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.24em;
+  color: rgba(8, 8, 10, 0.55);
 }
 
 /* ── READY: the full-bleed go-ahead ──────────────────────────────────────

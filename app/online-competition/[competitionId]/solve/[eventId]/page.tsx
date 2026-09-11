@@ -39,6 +39,9 @@ import BetweenStage, { type SlotRow } from './_components/BetweenStage';
 import RevealStage from './_components/RevealStage';
 import CameraHoldStage from './_components/CameraHoldStage';
 import ReadyPromptStage from './_components/ReadyPromptStage';
+import CoverStage from './_components/CoverStage';
+import CountStage from './_components/CountStage';
+import GoStage from './_components/GoStage';
 import RecStage from './_components/RecStage';
 import EntryStage from './_components/EntryStage';
 import SummaryStage from './_components/SummaryStage';
@@ -61,8 +64,18 @@ type Stage =
    *  continue without a recording — see RecordingFailedStage. */
   | 'recordingFailed'
   | 'scrambleReveal'
-  | 'orientationHold'
+  /** The cube goes under its cover, white up and green to camera. Took
+   *  over orientationHold's eight seconds AND its job; what it adds is
+   *  that the cube ends up hidden, so the moment the cover comes off is a
+   *  visible mark on the video and the inspection can be measured. */
+  | 'cover'
   | 'readyPrompt'
+  /** WCA's fifteen seconds. The ONE clock that owns the inspection —
+   *  nothing after it counts inspection, which is why rec has no
+   *  inspection panel. */
+  | 'count'
+  /** The flash that ends the inspection window. */
+  | 'go'
   | 'rec'
   /** The hold AFTER the solve: the athlete shows their timer to the
    *  camera, and the recording runs through it. THE CLIP STOPS HERE, not
@@ -125,8 +138,10 @@ const ATTEMPT_STAGES: Stage[] = [
   'zeroDisplay',
   'recordingFailed',
   'scrambleReveal',
-  'orientationHold',
+  'cover',
   'readyPrompt',
+  'count',
+  'go',
   'rec',
   'finishHold',
   'entry',
@@ -148,6 +163,25 @@ const MIN_RECORDING_BYTES = 1024;
  *  pad five attempts. Each stage passes this to CameraHoldStage, which
  *  builds its sentence and its tick bar from the same number. */
 const HOLD_SECONDS = 8;
+
+/** WCA inspection. The number is the rule's, and this is the only place
+ *  the flow states it.
+ *
+ *  WHAT IT DOES NOT DO is penalise. WCA adds +2 past fifteen seconds and
+ *  a DNF past seventeen; this platform can carry both — `penalty` is a
+ *  stored field, the review route sets it, and effectiveAttemptTime
+ *  applies it for every scorer — but firestore.rules pins `penalty` to
+ *  null on create and gives athletes no update, so a penalty is a judge's
+ *  to assign and never a client clock's. The count therefore ENDS the
+ *  window instead of scoring an overrun: at zero the run moves on, so
+ *  there is no fifteen-to-seventeen band for this page to have an opinion
+ *  about. An athlete who keeps inspecting past the flash does it on
+ *  camera, and the judge's existing +2 is what answers that. */
+const INSPECTION_SECONDS = 15;
+
+/** How long the volt flash holds before the solve. Long enough to read
+ *  two words, short enough not to be a stage. */
+const GO_FLASH_MS = 1000;
 
 /** The browser's own dialog wording is not ours to choose, so
  *  beforeunload gets no message. Ours is for in-app navigation.
@@ -693,7 +727,7 @@ export default function SolvePage() {
   // Recording starts the moment each attempt's zeroDisplay begins (the
   // frozen "0.00" itself must be on video, proving the timer read zero
   // before the scramble was applied) and runs uninterrupted through
-  // scrambleReveal -> orientationHold -> readyPrompt -> rec, stopping
+  // scrambleReveal -> cover -> readyPrompt -> count -> go -> rec, stopping
   // only when the athlete clicks "Дуусгах" in rec. `stage` only takes the
   // value 'zeroDisplay' at the start of a fresh attempt — never as an
   // intermediate value while already sitting in zeroDisplay — so this
@@ -1277,30 +1311,37 @@ export default function SolvePage() {
         )}
 
         {stage === 'scrambleReveal' && (
-          <RevealStage scramble={scramble} onDone={() => setStage('orientationHold')} />
+          <RevealStage scramble={scramble} onDone={() => setStage('cover')} />
         )}
 
         {/* The cube in a known orientation before the solve, so a judge
             can verify the scramble was applied to a cube whose
-            orientation is provably known. The SAME five seconds and the
-            same words as before — CameraHoldStage is OrientationHoldStage
-            with its three hard-coded values handed in. */}
-        {stage === 'orientationHold' && (
-          <CameraHoldStage
-            seconds={HOLD_SECONDS}
-            label="ШООГОО БАЙРШУУЛ"
-            instruction={(sec) =>
-              `Шоогоо цагаан тал дээшээ, ногоон тал дэлгэц рүү харагдахаар байрлуулаад ${sec} секунд хөдөлгөөнгүй барина уу.`
-            }
-            footnote="Хугацаа дуусаад эвлүүлэлт эхэлнэ."
+            orientation is provably known — and then HIDDEN, so that the
+            moment it is uncovered is a mark on the video the inspection
+            can be measured from. The same eight seconds as the two timer
+            holds: this stage took over orientationHold's duration along
+            with its job. */}
+        {stage === 'cover' && (
+          <CoverStage seconds={HOLD_SECONDS} onDone={() => setStage('readyPrompt')} />
+        )}
+
+        {/* The single go-ahead. It starts the INSPECTION now, not the
+            solve — the mockup's cover carries a second БЭЛЭН button of
+            its own, and two go-aheads on two consecutive screens is one
+            too many. This is the one that must not be pressable early,
+            so it is the one that stayed. */}
+        {stage === 'readyPrompt' && <ReadyPromptStage onDone={() => setStage('count')} />}
+
+        {/* THE INSPECTION. One clock, and it is this one. */}
+        {stage === 'count' && (
+          <CountStage
+            seconds={INSPECTION_SECONDS}
             videoRef={recorder.videoRef}
-            onDone={() => setStage('readyPrompt')}
+            onDone={() => setStage('go')}
           />
         )}
 
-        {stage === 'readyPrompt' && (
-          <ReadyPromptStage onDone={() => setStage('rec')} />
-        )}
+        {stage === 'go' && <GoStage ms={GO_FLASH_MS} onDone={() => setStage('rec')} />}
 
         {stage === 'rec' && (
           <RecStage

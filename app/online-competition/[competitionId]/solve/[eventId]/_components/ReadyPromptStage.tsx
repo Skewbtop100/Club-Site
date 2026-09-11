@@ -34,13 +34,17 @@ export default function ReadyPromptStage({ onDone }: { onDone: () => void }) {
           after the orientation hold, with the scramble already applied —
           the layout is the mockup's, the sentence is about where it
           actually is. */}
-      <p className="oc-solve-ready-title">Бэлэн болмогц эвлүүлж эхлээрэй</p>
+      <p className="oc-solve-ready-title">Бэлэн болмогц ажиглалтаа эхлүүлээрэй</p>
+      {/* Re-pointed, not restyled: the button used to start the solve and
+          now starts the fifteen seconds before it. The layout is
+          untouched. */}
       <p className="oc-solve-ready-lead">
-        Товч дарсны дараа дэлгэц дээр цаг харагдахгүй. Цагаа өөрөө хэмжиж, эвлүүлж дуусаад бичнэ.
+        Товч дарсны дараа ковероо авч, 15 секунд шоогоо ажиглана. Хугацаа дуусмагц эвлүүлж
+        эхэлнэ — дэлгэц дээр цаг харагдахгүй тул цагаа өөрөө хэмжинэ.
       </p>
 
       <button type="button" className="oc-solve-ready-go" onClick={onDone}>
-        Эвлүүлж эхлүүлэх
+        Ажиглалтаа эхлүүлэх
       </button>
     </div>
   );
