@@ -910,6 +910,189 @@
    is the one screen meant to be used one-handed, camera up, in a dim
    room. Same exact-literal-port approach as every prior phase. */
 
+/* ── The competition environment ──────────────────────────────────────
+   A fixed, full-screen takeover: the run is not a page in the site, it is
+   a room the athlete is inside. Values are the approved mockup's, literal.
+
+   .oc-solve-page and .oc-solve-shell below are what this replaces; they
+   are kept until the stages themselves are restyled, because every stage
+   component still lays itself out inside a 480px column. */
+.oc-solve-takeover {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: #08080A;
+  color: #F4F1EA;
+  display: flex;
+  flex-direction: column;
+}
+.oc-solve-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  justify-content: center;
+  padding: 26px;
+  position: relative;
+}
+/* The column every stage renders into. Keeps the old shell's width and
+   column layout so the stages themselves are untouched by this
+   changeset — they still stretch with flex:1 the way they always have. */
+.oc-solve-stage {
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The bar: 56px, on every screen of the run. */
+.oc-solve-bar {
+  flex: none;
+  height: 56px;
+  border-bottom: 1px solid #1C1C21;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 20px;
+}
+.oc-solve-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.oc-solve-bar-badge {
+  font: 700 10px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.24em;
+  color: #DFFF4F;
+  white-space: nowrap;
+}
+.oc-solve-bar-rule {
+  width: 1px;
+  height: 18px;
+  background: #1C1C21;
+  flex: none;
+}
+.oc-solve-bar-where {
+  font: 500 12px/1 var(--oc-font-heading), sans-serif;
+  color: #9A958A;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.oc-solve-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: none;
+}
+.oc-solve-bar-attempt {
+  font: 500 10px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.14em;
+  color: #6E6A62;
+  white-space: nowrap;
+}
+.oc-solve-bar-pips {
+  display: flex;
+  gap: 4px;
+}
+.oc-solve-bar-pip {
+  width: 22px;
+  height: 5px;
+  background: #1C1C21;
+}
+.oc-solve-bar-pip-done {
+  background: #3A4614;
+}
+.oc-solve-bar-pip-now {
+  background: #DFFF4F;
+}
+.oc-solve-bar-btn {
+  border: 1px solid #2A2A31;
+  background: transparent;
+  color: #9A958A;
+  padding: 9px 12px;
+  cursor: pointer;
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+}
+.oc-solve-bar-btn:hover:not(:disabled) {
+  border-color: #DFFF4F;
+  color: #DFFF4F;
+}
+/* ЗОГСООХ, until pausing exists. Dimmed and inert rather than absent, so
+   the bar is the shape it will keep. */
+.oc-solve-bar-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.oc-solve-bar-btn-exit:hover {
+  border-color: #E8543C;
+  color: #E8543C;
+}
+
+/* Banners above the stage: what the background filing is doing, and the
+   notice that a run is being resumed. Both used to sit in the header,
+   which is now a fixed single row with no space for them. */
+.oc-solve-banner {
+  margin-bottom: 14px;
+  padding: 11px 13px;
+  background: #141210;
+  border-left: 2px solid #DFFF4F;
+  font: 400 12px/1.6 var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+}
+.oc-solve-banner-quiet {
+  border-left-color: #3A4614;
+  font: 500 9px/1.6 var(--oc-font-mono), monospace;
+  letter-spacing: 0.14em;
+  color: #6E6A62;
+}
+.oc-solve-banner-bad {
+  border-left-color: #D8402C;
+  color: #D8402C;
+}
+
+/* ── The bar on a narrow screen ───────────────────────────────────────
+   Six elements do not fit 375px. They are dropped in order of how much
+   they carry, not right to left:
+     the badge  — decorative; the takeover itself says where you are
+     the label  — the pips say the same thing in 126px less
+   The competition line truncates rather than wraps (the bar is a fixed
+   56px), and the two buttons never move: one is the only way out. */
+@media (max-width: 620px) {
+  .oc-solve-bar {
+    padding: 0 14px;
+    gap: 12px;
+  }
+  .oc-solve-bar-badge,
+  .oc-solve-bar-rule {
+    display: none;
+  }
+  .oc-solve-bar-right {
+    gap: 12px;
+  }
+}
+@media (max-width: 460px) {
+  .oc-solve-bar-comp {
+    display: none;
+  }
+  .oc-solve-bar-attempt {
+    display: none;
+  }
+  .oc-solve-bar-pip {
+    width: 14px;
+  }
+  .oc-solve-bar-btn {
+    padding: 9px 9px;
+  }
+  .oc-solve-body {
+    padding: 16px;
+  }
+}
+
 .oc-solve-page {
   min-height: 100vh;
   background: #0D0C0A;

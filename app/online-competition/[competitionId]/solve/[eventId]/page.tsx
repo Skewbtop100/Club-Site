@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import {
   fetchCompetition,
@@ -33,7 +33,7 @@ import {
 } from '@/lib/online-competition/ao5';
 import { beatsPr } from './_lib/prCheck';
 import { fmtTimeLimit } from '@/lib/online-competition/time-utils';
-import Header from './_components/Header';
+import SolveHeader from './_components/SolveHeader';
 import CameraSetupStage from './_components/CameraSetupStage';
 import RevealStage from './_components/RevealStage';
 import CameraHoldStage from './_components/CameraHoldStage';
@@ -114,7 +114,10 @@ interface Attempt {
 const FILING_AUTO_RETRIES = 1;
 const FILING_RETRY_DELAY_MS = 3000;
 
-const HEADER_STAGES: Stage[] = [
+/** Stages that are INSIDE AN ATTEMPT. The bar is on every stage; only the
+ *  attempt label and the pips are conditional, because "3-р оролдлого"
+ *  is a claim that is false on the summary and the sent screen. */
+const ATTEMPT_STAGES: Stage[] = [
   'scrambleWait',
   'filing',
   'zeroDisplay',
@@ -159,6 +162,7 @@ function leaveConfirmMessage(unfiledAttempts: number): string {
 }
 
 export default function SolvePage() {
+  const router = useRouter();
   const params = useParams<{ competitionId: string; eventId: string }>();
   const { competitionId, eventId } = params;
   const { user, loading: authLoading } = useOnlineAuth();
@@ -1006,13 +1010,13 @@ export default function SolvePage() {
 
   // ── Gates: auth, then data load ─────────────────────────────────────────
   if (authLoading) {
-    return <div className="oc-solve-page" />;
+    return <div className="oc-solve-takeover" />;
   }
 
   if (!user || user.isAnonymous) {
     return (
-      <div className="oc-solve-page">
-        <div className="oc-solve-shell" style={{ justifyContent: 'center', alignItems: 'center', gap: 16 }}>
+      <div className="oc-solve-takeover">
+        <div className="oc-solve-body" style={{ flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: 16 }}>
           <p style={{ font: '400 13px var(--oc-font-heading), sans-serif', color: '#F4F1EA', textAlign: 'center' }}>
             Тэмцээнд орохын тулд нэвтэрнэ үү.
           </p>
@@ -1036,8 +1040,8 @@ export default function SolvePage() {
 
   if (loadError && !competition) {
     return (
-      <div className="oc-solve-page">
-        <div className="oc-solve-shell" style={{ justifyContent: 'center' }}>
+      <div className="oc-solve-takeover">
+        <div className="oc-solve-body" style={{ flexDirection: 'column', justifyContent: 'center' }}>
           <p style={{ font: '400 13px var(--oc-font-heading), sans-serif', color: '#D8402C' }}>{loadError}</p>
         </div>
       </div>
@@ -1048,8 +1052,8 @@ export default function SolvePage() {
   // with a way back rather than the blank loading state below.
   if (blockedMessage) {
     return (
-      <div className="oc-solve-page">
-        <div className="oc-solve-shell" style={{ justifyContent: 'center', alignItems: 'center', gap: 14 }}>
+      <div className="oc-solve-takeover">
+        <div className="oc-solve-body" style={{ flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: 14 }}>
           <p style={{ font: '500 10px var(--oc-font-mono), monospace', letterSpacing: '.14em', color: '#6E6A62' }}>
             {eventId.toUpperCase()}
           </p>
@@ -1093,7 +1097,7 @@ export default function SolvePage() {
   // there would hide the one screen that explains a failure — and the
   // retry that recovers from it.
   if (!competition || !runShape) {
-    return <div className="oc-solve-page" />;
+    return <div className="oc-solve-takeover" />;
   }
 
   const filingRows: FilingRow[] = attempts.map((a, i) => ({
@@ -1121,8 +1125,19 @@ export default function SolvePage() {
   const eventConfig = competition.events.find((e) => e.eventId === eventId);
   const eventLabel = eventConfig?.label ?? eventId.toUpperCase();
 
+  /** ГАРАХ. The same guard a browser Back gets — the run holds an attempt
+   *  that exists nowhere else until it is filed, and this is the one exit
+   *  the athlete is offered on purpose. */
+  function exitRun() {
+    if (runAtRisk && !window.confirm(leaveConfirmMessage(unfiledCount))) return;
+    router.push('/online-competition/dashboard');
+  }
+
   return (
-    <div className="oc-solve-page">
+    /* THE COMPETITION ENVIRONMENT: a fixed, full-screen takeover rather
+       than a page in the site. Nothing of the site shows around it, and
+       the only way out is the bar's own ГАРАХ. */
+    <div className="oc-solve-takeover">
       {prToast && (
         <div className="oc-solve-pr-toast" role="status">
           <span className="oc-solve-pr-toast-title">ШИНЭ PR!</span>
@@ -1140,41 +1155,46 @@ export default function SolvePage() {
           </span>
         </div>
       )}
-      <div className="oc-solve-shell">
-        {HEADER_STAGES.includes(stage) && (
-          <Header
-            competitionName={competition.name}
-            eventLabel={eventLabel}
-            attemptIndex={attemptIndex}
-            totalAttempts={cutOff ? (runShape.cutoffPhase ?? runShape.attempts) : runShape.attempts}
-            /* What the background filing is doing, in one line. The
-               athlete is mid-attempt: it says enough to notice, and not
-               enough to distract. */
-            savingLabel={savingLabel}
-          />
-        )}
+      <SolveHeader
+        competitionName={competition.name}
+        eventLabel={eventLabel}
+        roundLabel={competitionRound === null ? null : `Раунд ${competitionRound}`}
+        /* The attempt label and the pips, only where an attempt is
+           actually under way. "3-р оролдлого" over the summary would be
+           describing an attempt that is over. */
+        attempt={
+          ATTEMPT_STAGES.includes(stage)
+            ? {
+                index: attemptIndex,
+                total: cutOff ? (runShape.cutoffPhase ?? runShape.attempts) : runShape.attempts,
+              }
+            : null
+        }
+        onExit={exitRun}
+      />
 
-        {/* Continuing, not starting. Without this the flow looks
-            identical to a fresh run — same camera prompt, same countdown —
-            and an athlete who thinks they are on attempt 1 would solve it
-            again and have the filing refused. Cleared as soon as they
-            record something, because from then on the pips say it. */}
-        {resumeMessage && (
-          <p
-            style={{
-              marginTop: 14,
-              padding: '11px 13px',
-              background: '#141210',
-              borderLeft: '2px solid #DFFF4F',
-              font: '400 12px var(--oc-font-heading), sans-serif',
-              color: '#F4F1EA',
-              lineHeight: 1.6,
-            }}
-            role="status"
-          >
-            {resumeMessage}
-          </p>
-        )}
+      <div className="oc-solve-body">
+        <div className="oc-solve-stage">
+          {/* BANNERS, above the stage and inside the scrolling body. Both
+              used to live in the header; the bar is now a fixed 56px with
+              no room for a second line, and neither of these is worth
+              shrinking the competition's own name for. */}
+          {savingLabel && (
+            <p className={`oc-solve-banner oc-solve-banner-quiet${filingFailed ? ' oc-solve-banner-bad' : ''}`}>
+              {savingLabel}
+            </p>
+          )}
+
+          {/* Continuing, not starting. Without this the flow looks
+              identical to a fresh run — same camera prompt, same countdown
+              — and an athlete who thinks they are on attempt 1 would solve
+              it again and have the filing refused. Cleared as soon as they
+              record something, because from then on the pips say it. */}
+          {resumeMessage && (
+            <p className="oc-solve-banner" role="status">
+              {resumeMessage}
+            </p>
+          )}
 
         {stage === 'cameraSetup' && (
           <CameraSetupStage
@@ -1324,7 +1344,8 @@ export default function SolvePage() {
           />
         )}
 
-        {stage === 'sent' && <SentStage ao5={finalAo5} />}
+          {stage === 'sent' && <SentStage ao5={finalAo5} />}
+        </div>
       </div>
     </div>
   );

@@ -1,0 +1,372 @@
+<!-- ХОРОМ — solve flow, extracted verbatim from the approved mockup.
+     13 stages: lobby, zero, ready, reveal, cover, count, go, rec, verify, entry, between, summary, sent.
+     sc-if / sc-for are the mockup's own template tags; {{ x }} are its bindings.
+     Every colour, font, size, gap and padding here is the spec. -->
+
+<style>
+@keyframes khPulse{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes khFadeUp{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+@keyframes khCount{from{opacity:.15;transform:scale(1.28)}to{opacity:1;transform:scale(1)}}
+@keyframes khGoPop{0%{transform:scale(.95)}60%{transform:scale(1.015)}100%{transform:scale(1)}}
+</style>
+
+<sc-if value="{{ runOpen }}" hint-placeholder-val="{{ false }}">
+  <div style="position:fixed;inset:0;z-index:200;background:#08080A;display:flex;flex-direction:column">
+
+    <div style="flex:none;height:56px;border-bottom:1px solid #1C1C21;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 20px">
+      <div style="display:flex;align-items:center;gap:14px;min-width:0">
+        <span style="font:700 10px/1 'JetBrains Mono',monospace;letter-spacing:.24em;color:#DFFF4F">ТЭМЦЭЭНИЙ ОРЧИН</span>
+        <span style="width:1px;height:18px;background:#1C1C21"></span>
+        <span style="font:500 12px/1 Geologica,sans-serif;color:#9A958A;white-space:nowrap">Тест тэмцээн · 3x3x3 · Раунд 1</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:16px;flex:none">
+        <span style="font:500 10px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#6E6A62;white-space:nowrap">{{ runAttemptLabel }}</span>
+        <div style="display:flex;gap:4px">
+          <sc-for list="{{ runPips }}" as="p" hint-placeholder-count="5">
+            <span style="width:22px;height:5px;background:{{ p.bg }}"></span>
+          </sc-for>
+        </div>
+        <button type="button" onClick="{{ togglePause }}" style="border:1px solid {{ pauseLine }};background:transparent;color:{{ pauseFg }};padding:9px 12px;cursor:pointer;font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.12em;white-space:nowrap" style-hover="border-color:#DFFF4F;color:#DFFF4F">{{ pauseLabel }}</button>
+        <button type="button" onClick="{{ closeRun }}" style="border:1px solid #2A2A31;background:transparent;color:#9A958A;padding:9px 12px;cursor:pointer;font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.12em" style-hover="border-color:#E8543C;color:#E8543C">ГАРАХ</button>
+      </div>
+    </div>
+
+    <sc-if value="{{ paused }}" hint-placeholder-val="{{ false }}">
+      <div style="flex:none;background:#16180F;border-bottom:1px solid #3A4614;padding:10px 20px;display:flex;align-items:center;gap:10px">
+        <span style="width:6px;height:6px;background:#DFFF4F"></span>
+        <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.16em;color:#DFFF4F">ЗОГССОН · ЗАСВАРЫН ТӨЛӨВ · ТООЛОЛ ЯВАХГҮЙ</span>
+      </div>
+    </sc-if>
+
+    <div style="flex:1;min-height:0;overflow-y:auto;display:flex;justify-content:center;padding:26px;position:relative">
+
+      <sc-if value="{{ runIsLobby }}" hint-placeholder-val="{{ true }}">
+        <div style="width:100%;max-width:620px;margin:auto 0;display:flex;flex-direction:column;gap:24px">
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <span style="font:600 30px/1.15 Geologica,sans-serif;letter-spacing:-.015em">Таван оролдлогыг нэг суулт дотор</span>
+            <span style="font:400 13px/1.7 Geologica,sans-serif;color:#9A958A">Эхэлсний дараа таван оролдлогоо дараалан дуусгана. Хооронд гарвал үлдсэн оролдлого хүчингүй болно. Камер бүх хугацаанд бичиж байх ёстой.</span>
+          </div>
+          <div style="border:1px solid #1C1C21;background:#0D0D10;display:grid;grid-template-columns:200px 1fr;gap:1px">
+            <div style="background:#0A0A0C;position:relative;aspect-ratio:3/4;overflow:hidden;display:flex;align-items:center;justify-content:center">
+              <video ref="{{ camRef }}" autoPlay="{{ true }}" muted="{{ true }}" playsInline="{{ true }}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover"></video>
+              <span style="position:relative;font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.18em;color:#3A3A42">КАМЕР</span>
+            </div>
+            <div style="background:#0D0D10;padding:18px;display:flex;flex-direction:column;gap:14px;justify-content:center">
+              <sc-for list="{{ runRules }}" as="r" hint-placeholder-count="4">
+                <div style="display:flex;gap:11px;align-items:flex-start">
+                  <span style="width:5px;height:5px;margin-top:6px;background:#DFFF4F;flex:none"></span>
+                  <span style="font:400 12px/1.55 Geologica,sans-serif;color:#9A958A">{{ r.text }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          <button type="button" onClick="{{ startAttempt }}" style="border:none;background:#DFFF4F;color:#08080A;padding:20px;cursor:pointer;font:700 16px/1 Geologica,sans-serif;letter-spacing:.06em;text-transform:uppercase" style-hover="background:#E9FF7A">Эвлүүлэлтээ эхлэх</button>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ runIsZero }}" hint-placeholder-val="{{ false }}">
+        <div style="width:100%;max-width:680px;margin:auto 0;display:flex;flex-direction:column;align-items:center;gap:24px">
+          <div style="display: flex; align-items: center; gap: 12px; width: 93px; height: 40px; justify-content: center">
+            
+            <span style="width:1px;height:16px;background:#1C1C21"></span>
+            <span key="{{ zeroCount }}" style="font: 700 22px/1 'JetBrains Mono',monospace; color: #DFFF4F; font-variant-numeric: tabular-nums; animation: khCount .4s ease-out; font-size: 50px">{{ zeroCount }}</span>
+            <span style="font: 500 10px/1 'JetBrains Mono',monospace; letter-spacing: .14em; color: #6E6A62; font-size: 18px">СЕКУНД</span>
+          </div>
+
+          <span style="font:600 26px/1.35 Geologica,sans-serif;text-align:center;letter-spacing:-.01em;max-width:520px;text-wrap:pretty">Хугацаа дуустал Timer-аа&nbsp;<span style="font-family: &quot;JetBrains Mono&quot;, monospace; color: rgb(223, 255, 79);">0.00</span> болгосон байдалтай камерт харуулаад эвлүүлэлтээ эхлүүлээрэй</span>
+
+          <div style="width:100%;max-width:420px;position:relative;aspect-ratio:4/3;max-height:36vh;border:1px solid #2A2A31;overflow:hidden;background:#0A0A0C;display:flex;align-items:center;justify-content:center">
+            <video ref="{{ camRef }}" autoPlay="{{ true }}" muted="{{ true }}" playsInline="{{ true }}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover"></video>
+            <span style="position:relative;font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.2em;color:#6E6A62">КАМЕРЛУУ ЦАГАА ХАРУУЛААРАЙ</span>
+            <div style="position:absolute;top:12px;left:12px;width:22px;height:22px;border-top:1px solid #DFFF4F;border-left:1px solid #DFFF4F"></div>
+            <div style="position:absolute;top:12px;right:12px;width:22px;height:22px;border-top:1px solid #DFFF4F;border-right:1px solid #DFFF4F"></div>
+            <div style="position:absolute;bottom:12px;left:12px;width:22px;height:22px;border-bottom:1px solid #DFFF4F;border-left:1px solid #DFFF4F"></div>
+            <div style="position:absolute;bottom:12px;right:12px;width:22px;height:22px;border-bottom:1px solid #DFFF4F;border-right:1px solid #DFFF4F"></div>
+          </div>
+
+          <span style="font: 400 12px/1.7 Geologica,sans-serif; color: #DFFF4F; text-align: center; max-width: 460px; font-size: 15px">Хугацаа дуусаад холилт гарч эхэлнэ.</span>
+
+          
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ runIsReady }}" hint-placeholder-val="{{ false }}">
+        <div style="position:absolute;inset:0;background:#16180F;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;padding:26px;animation:khFadeUp .35s ease-out">
+          <div style="display:flex;align-items:center;gap:11px;border:1px solid #3A4614;background:#0D0D10;padding:10px 16px">
+            <span style="width:20px;height:20px;border-radius:50%;border:1.5px solid #4FD07A;display:flex;align-items:center;justify-content:center;font:700 11px/1 'JetBrains Mono',monospace;color:#4FD07A;flex:none">✓</span>
+            <span style="font:600 11px/1 'JetBrains Mono',monospace;letter-spacing:.16em;color:#4FD07A">ЦАГ ШАЛГАГДЛАА</span>
+          </div>
+          <span style="font:600 32px/1.3 Geologica,sans-serif;text-align:center;letter-spacing:-.015em;max-width:560px;text-wrap:pretty">Бэлэн болмогц холилтоо гаргаарай</span>
+          <span style="font:400 13px/1.7 Geologica,sans-serif;color:#9A958A;text-align:center;max-width:440px">Товч дарсны дараа холилтууд 5 секунд тутам дараалан гарч эхэлнэ.</span>
+          <button type="button" onClick="{{ skipZero }}" style="min-width:300px;border:none;background:#DFFF4F;color:#08080A;padding:22px 32px;cursor:pointer;font:700 17px/1 Geologica,sans-serif;letter-spacing:.12em;text-transform:uppercase" style-hover="background:#E9FF7A">Холилт гаргах</button>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ runIsReveal }}" hint-placeholder-val="{{ false }}">
+        <div style="width:100%;max-width:760px;margin:auto;display:flex;flex-direction:column;align-items:center;gap:22px">
+          <div style="width:100%;display:flex;align-items:center;justify-content:center;gap:16px">
+            <span style="font: 500 9px/1 'JetBrains Mono',monospace; letter-spacing: .2em; color: #6E6A62; font-size: 13px">ХОЛИЛТ</span>
+            <div style="display:flex;align-items:center;gap:16px">
+              <div style="display:flex;gap:6px">
+                <sc-for list="{{ runChunkTicks }}" as="c" hint-placeholder-count="4">
+                  <span style="width:9px;height:9px;background:{{ c.line }}"></span>
+                </sc-for>
+              </div>
+              <span style="width:1px;height:44px;background:#1C1C21"></span>
+              <div style="display:flex;align-items:baseline;gap:8px">
+                <span key="{{ chunkLeft }}" style="font:700 64px/.85 'JetBrains Mono',monospace;color:#DFFF4F;font-variant-numeric:tabular-nums;letter-spacing:-.05em;animation:khCount .35s ease-out">{{ chunkLeft }}</span>
+                <span style="font:500 10px/1 'JetBrains Mono',monospace;letter-spacing:.2em;color:#6E6A62">СЕК</span>
+              </div>
+            </div>
+          </div>
+          <div key="{{ runChunkLabel }}" style="animation:khFadeUp .4s ease-out;display:flex;flex-direction:column;align-items:center;gap:12px">
+            <span style="font: 500 8px/1 'JetBrains Mono',monospace; letter-spacing: .2em; color: #6E6A62; font-size: 9px">{{ runChunkLabel }}</span>
+            <div style="display:flex;flex-wrap:wrap;justify-content:center;gap:9px">
+              <sc-for list="{{ runChunkMoves }}" as="m" hint-placeholder-count="5">
+                <span style="width:68px;height:68px;flex:none;display:flex;align-items:center;justify-content:center;font:700 30px/1 'JetBrains Mono',monospace;color:#F4F1EA;background:#0D0D10;border:1px solid #1C1C21">{{ m }}</span>
+              </sc-for>
+            </div>
+          </div>
+          <span style="font: 400 12px/1.6 Geologica,sans-serif; color: #6E6A62; font-size: 14px">Хэсэг тус бүр 5 секунд харагдана.</span>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ runIsCover }}" hint-placeholder-val="{{ false }}">
+        <div style="width:100%;max-width:620px;margin:auto 0;display:flex;flex-direction:column;align-items:center;gap:24px">
+          <sc-if value="{{ coverCounting }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;align-items:baseline;gap:12px">
+              <span key="{{ coverCount }}" style="font:700 50px/1 'JetBrains Mono',monospace;color:#DFFF4F;font-variant-numeric:tabular-nums;letter-spacing:-.04em;animation:khCount .4s ease-out">{{ coverCount }}</span>
+              <span style="font:500 16px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#6E6A62">СЕКУНД</span>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ coverReady }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;align-items:center;gap:11px;border:1px solid #3A4614;background:#16180F;padding:11px 18px;animation:khFadeUp .35s ease-out">
+              <span style="width:20px;height:20px;border-radius:50%;border:1.5px solid #4FD07A;display:flex;align-items:center;justify-content:center;font:700 11px/1 'JetBrains Mono',monospace;color:#4FD07A;flex:none">✓</span>
+              <span style="font:600 11px/1 'JetBrains Mono',monospace;letter-spacing:.16em;color:#4FD07A">ХОЛИЛТ ХИЙЖ ДУУСЛАА</span>
+            </div>
+          </sc-if>
+
+          <span style="font:600 24px/1.4 Geologica,sans-serif;text-align:center;letter-spacing:-.01em;max-width:520px;text-wrap:pretty">Шоогоо ковертоо нуугаад <span style="color: rgb(0, 245, 82);">ногоон</span> төвийг камер тал руу, <span style="color: rgb(244, 241, 234);">цагаан</span> төвийг дээш харуулж тавиарай.</span>
+
+          <div style="display:flex;align-items:center;gap:26px">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:9px">
+              <div style="width:78px;height:78px;background:#0D0D10;border:1px solid #2A2A31;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);gap:3px;padding:7px">
+                <div style="background:#F4F1EA"></div><div style="background:#F4F1EA"></div><div style="background:#F4F1EA"></div>
+                <div style="background:#F4F1EA"></div><div style="background:#F4F1EA"></div><div style="background:#F4F1EA"></div>
+                <div style="background:#F4F1EA"></div><div style="background:#F4F1EA"></div><div style="background:#F4F1EA"></div>
+              </div>
+              <span style="font:500 8px/1 'JetBrains Mono',monospace;letter-spacing:.16em;color:#6E6A62">ДЭЭД ТАЛД</span>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:9px">
+              <div style="width:78px;height:78px;background:#0D0D10;border:1px solid #2A2A31;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);gap:3px;padding:7px">
+                <div style="background-color: #00FF55"></div><div style="background-color: #00FF55"></div><div style="background-color: #00FF55"></div>
+                <div style="background-color: #00FF55"></div><div style="background-color: #00FF55"></div><div style="background-color: #00FF55"></div>
+                <div style="background-color: #00FF55"></div><div style="background-color: #00FF55"></div><div style="background-color: #00FF55"></div>
+              </div>
+              <span style="font:500 8px/1 'JetBrains Mono',monospace;letter-spacing:.16em;color:#6E6A62">КАМЕР РУУ</span>
+            </div>
+          </div>
+
+          <span style="font:400 12px/1.7 Geologica,sans-serif;color:#6E6A62;text-align:center;max-width:460px">Хугацаа дуусмагц БЭЛЭН товч дээр дарж эвлүүлэлтээ эхлээрэй.</span>
+
+          <button type="button" onClick="{{ skipCover }}" style="position:relative;display:flex;align-items:center;justify-content:center;gap:14px;min-width:280px;border:1px solid {{ coverBtnLine }};background:{{ coverBtnBg }};color:{{ coverBtnFg }};padding:20px 30px;cursor:pointer;font:700 17px/1 Geologica,sans-serif;letter-spacing:.14em;text-transform:uppercase;transition:background .2s,border-color .2s,color .2s" style-hover="background:#E9FF7A;border-color:#E9FF7A;color:#08080A">
+            <span>Бэлэн</span>
+            <sc-if value="{{ coverReady }}" hint-placeholder-val="{{ false }}">
+              <span style="position:absolute;top:-1px;right:-1px;bottom:-1px;left:-1px;border:1px solid #DFFF4F;animation:khPulse 1.8s ease-in-out infinite"></span>
+            </sc-if>
+          </button>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ runIsCount }}" hint-placeholder-val="{{ false }}">
+        <div style="margin:auto 0;display:flex;flex-direction:column;align-items:center;gap:22px">
+          <span style="font:500 10px/1 'JetBrains Mono',monospace;letter-spacing:.24em;color:#6E6A62">АЖИГЛАХ ХУГАЦАА</span>
+          <span key="{{ runCount }}" style="font:700 210px/.85 'JetBrains Mono',monospace;color:#DFFF4F;letter-spacing:-.06em;font-variant-numeric:tabular-nums;animation:khCount .5s ease-out">{{ runCount }}</span>
+          <div style="width:180px;position:relative;aspect-ratio:4/3;border:1px solid #1C1C21;overflow:hidden;background:#0A0A0C">
+            <video ref="{{ camRef }}" autoPlay="{{ true }}" muted="{{ true }}" playsInline="{{ true }}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover"></video>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ runIsGo }}" hint-placeholder-val="{{ false }}">
+        <div style="position:absolute;inset:0;background:#DFFF4F;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px;animation:khGoPop .35s ease-out">
+          <div style="display:grid;grid-template-columns:repeat(3,26px);grid-template-rows:repeat(3,26px);gap:5px">
+            <div style="background:#08080A"></div><div style="background:#08080A"></div><div style="background:#08080A"></div>
+            <div style="background:#08080A"></div><div style="background:#08080A"></div><div style="background:#08080A"></div>
+            <div style="background:#08080A"></div><div style="background:#08080A"></div><div style="background:#08080A"></div>
+          </div>
+          <span style="font:700 46px/1.1 Geologica,sans-serif;color:#08080A;letter-spacing:-.015em;text-align:center;padding:0 24px">ЭВЛҮҮЛЖ ЭХЛЭЭРЭЙ</span>
+          <span style="font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.24em;color:rgba(8,8,10,.55)">БИЧЛЭГ ЯВЖ БАЙНА</span>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ runIsRec }}" hint-placeholder-val="{{ false }}">
+        <div style="width:100%;max-width:720px;margin:auto;display:flex;flex-direction:column;gap:16px;align-items:center">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="width:8px;height:8px;border-radius:50%;background:#E8543C;animation:khPulse 1.1s ease-in-out infinite"></span>
+            <span style="font:500 10px/1 'JetBrains Mono',monospace;letter-spacing:.2em;color:#E8543C">БИЧИЖ БАЙНА</span>
+          </div>
+
+          <div style="width:100%;position:relative;aspect-ratio:4/3;max-height:46vh;border:1px solid #1C1C21;overflow:hidden;background:#0A0A0C;display:flex;align-items:center;justify-content:center">
+            <video ref="{{ camRef }}" autoPlay="{{ true }}" muted="{{ true }}" playsInline="{{ true }}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover"></video>
+            <span style="position:relative;font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.2em;color:#6E6A62">КАМЕР</span>
+
+          </div>
+
+          <sc-if value="{{ inspShow }}" hint-placeholder-val="{{ true }}">
+            <div style="width:100%;border:1px solid #2A2A31;background:#0D0D10;display:flex;flex-direction:column">
+              <div style="display:flex;align-items:center;gap:16px;padding:14px 18px">
+                <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.22em;color:#6E6A62;white-space:nowrap">АЖИГЛАХ ХУГАЦАА</span>
+                <div style="flex:1;display:flex;gap:3px">
+                  <sc-for list="{{ inspTicks }}" as="t" hint-placeholder-count="15">
+                    <span style="flex:1;height:14px;background:{{ t.bg }}"></span>
+                  </sc-for>
+                </div>
+                <div style="display:flex;align-items:baseline;gap:6px;flex:none">
+                  <span key="{{ inspCount }}" style="font:700 32px/1 'JetBrains Mono',monospace;color:{{ inspFg }};font-variant-numeric:tabular-nums;letter-spacing:-.03em">{{ inspCount }}</span>
+                  <span style="font:500 10px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:#6E6A62">/ 15</span>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+
+          <button type="button" onClick="{{ goEntry }}" style="width:100%;border:1px solid #F4F1EA;background:transparent;color:#F4F1EA;padding:20px;cursor:pointer;font:700 18px/1 Geologica,sans-serif;letter-spacing:.04em" style-hover="background:#F4F1EA;color:#08080A">Эвлүүлэлт дууссан</button>
+          <span style="font:400 12px/1.6 Geologica,sans-serif;color:#6E6A62;text-align:center">Эвлүүлэлт дууссан товч дээр дарж цагаа бичиж оруулах хэсэгрүү ороорой.</span>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ runIsVerify }}" hint-placeholder-val="{{ false }}">
+        <div style="width:100%;max-width:760px;margin:auto;display:flex;flex-direction:column;align-items:center;gap:16px">
+          <div style="display:flex;align-items:center;gap:12px">
+            
+            <sc-if value="{{ vCounting }}" hint-placeholder-val="{{ true }}">
+              <span style="width:1px;height:16px;background:#1C1C21"></span>
+              <span key="{{ vCount }}" style="font: 700 22px/1 'JetBrains Mono',monospace; color: #DFFF4F; font-variant-numeric: tabular-nums; animation: khCount .4s ease-out; font-size: 50px">{{ vCount }}</span>
+              <span style="font: 500 10px/1 'JetBrains Mono',monospace; letter-spacing: .14em; color: #6E6A62; font-size: 18px">СЕКУНД</span>
+            </sc-if>
+          </div>
+
+          <sc-if value="{{ vCounting }}" hint-placeholder-val="{{ true }}">
+            <span style="font:600 17px/1.5 Geologica,sans-serif;color:#F4F1EA;text-align:center;max-width:520px;text-wrap:pretty">Хугацаа дуустал цагаа камерлуу харуулаарай.</span>
+          </sc-if>
+
+          <div style="width:100%;display:grid;grid-template-columns:minmax(240px,1fr) minmax(280px,340px);gap:16px;align-items:start">
+            <div style="width:100%;position:relative;aspect-ratio:4/3;max-height:40vh;border:1px solid #2A2A31;overflow:hidden;background:#0A0A0C;display:flex;align-items:center;justify-content:center">
+              <video ref="{{ camRef }}" autoPlay="{{ true }}" muted="{{ true }}" playsInline="{{ true }}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover"></video>
+              <span style="position:relative;font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.2em;color:#6E6A62">КАМЕРЛУУ ЦАГАА ХАРУУЛААРАЙ</span>
+              <div style="position:absolute;top:10px;left:10px;width:20px;height:20px;border-top:1px solid #DFFF4F;border-left:1px solid #DFFF4F"></div>
+              <div style="position:absolute;bottom:10px;right:10px;width:20px;height:20px;border-bottom:1px solid #DFFF4F;border-right:1px solid #DFFF4F"></div>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:12px">
+              <sc-if value="{{ vCounting }}" hint-placeholder-val="{{ true }}">
+                <div style="border:1px dashed #2A2A31;padding:22px 18px;display:flex;flex-direction:column;gap:9px">
+                  <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.18em;color:#6E6A62">ҮЗҮҮЛЭЛТ БИЧИХ</span>
+                  <span style="font:400 12px/1.7 Geologica,sans-serif;color:#6E6A62">Хугацаа дуусмагц цагаа бичих хэсэг нээгдэнэ.</span>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ vDone }}" hint-placeholder-val="{{ false }}">
+                <div style="animation:khFadeUp .4s ease-out;display:flex;flex-direction:column;gap:12px">
+                  <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.2em;color:#6E6A62">ЦАГАА БИЧИХ ХЭСЭГ</span>
+                  <div style="border:1px solid #1C1C21;background:#0D0D10;padding:14px 16px;display:flex;justify-content:flex-end">
+                    <span style="font:700 40px/.9 'JetBrains Mono',monospace;color:#DFFF4F;letter-spacing:-.04em;font-variant-numeric:tabular-nums">{{ entryDisplay }}</span>
+                  </div>
+                  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px">
+                    <sc-for list="{{ keypad }}" as="k" hint-placeholder-count="12">
+                      <button type="button" onClick="{{ k.press }}" style="border:1px solid {{ k.line }};background:transparent;color:{{ k.fg }};padding:14px 0;cursor:pointer;font:600 18px/1 'JetBrains Mono',monospace" style-hover="background:#131318">{{ k.label }}</button>
+                    </sc-for>
+                  </div>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
+                    <button type="button" onClick="{{ plus2 }}" style="border:1px solid #E0A020;background:#1A1408;color:#E0A020;padding:15px 0;cursor:pointer;font:700 15px/1 'JetBrains Mono',monospace;letter-spacing:.1em" style-hover="background:#E0A020;color:#08080A">+2</button>
+                    <button type="button" onClick="{{ markDnf }}" style="border:1px solid #D8402C;background:#1A0D0A;color:#FF9C8C;padding:15px 0;cursor:pointer;font:700 15px/1 'JetBrains Mono',monospace;letter-spacing:.1em" style-hover="background:#D8402C;color:#08080A">DNF</button>
+                  </div>
+                  <button type="button" onClick="{{ confirmEntry }}" style="border:none;background:#DFFF4F;color:#08080A;padding:17px;cursor:pointer;font:700 16px/1 Geologica,sans-serif" style-hover="background:#E9FF7A">Баталгаажуулах</button>
+                </div>
+              </sc-if>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ runIsEntry }}" hint-placeholder-val="{{ false }}">
+        <div style="width:100%;max-width:380px;margin:auto 0;display:flex;flex-direction:column;gap:16px">
+          <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.2em;color:#6E6A62">ЦАГАА БИЧ · ММ:СС.ХХ</span>
+          <div style="border:1px solid #1C1C21;background:#0D0D10;padding:20px;display:flex;justify-content:flex-end">
+            <span style="font:700 56px/.9 'JetBrains Mono',monospace;color:#DFFF4F;letter-spacing:-.04em;font-variant-numeric:tabular-nums">{{ entryDisplay }}</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+            <sc-for list="{{ keypad }}" as="k" hint-placeholder-count="12">
+              <button type="button" onClick="{{ k.press }}" style="border:1px solid {{ k.line }};background:transparent;color:{{ k.fg }};padding:17px 0;cursor:pointer;font:600 21px/1 'JetBrains Mono',monospace" style-hover="background:#131318">{{ k.label }}</button>
+            </sc-for>
+          </div>
+          <button type="button" onClick="{{ confirmEntry }}" style="border:none;background:#DFFF4F;color:#08080A;padding:20px;cursor:pointer;font:700 17px/1 Geologica,sans-serif" style-hover="background:#E9FF7A">Бататгах</button>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ runIsBetween }}" hint-placeholder-val="{{ false }}">
+        <div style="width:100%;max-width:520px;margin:auto 0;display:flex;flex-direction:column;gap:22px">
+          <span style="font:600 26px/1.15 Geologica,sans-serif;letter-spacing:-.015em">{{ runAttemptLabel }}</span>
+          <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px">
+            <sc-for list="{{ runSlots }}" as="s" hint-placeholder-count="5">
+              <div style="background:{{ s.bg }};border:1px solid {{ s.line }};padding:16px 8px;display:flex;flex-direction:column;align-items:center;gap:11px;min-height:104px;justify-content:center">
+                <span style="font:500 8px/1 'JetBrains Mono',monospace;letter-spacing:.16em;color:{{ s.nFg }}">{{ s.n }}</span>
+                <span style="font-family:'JetBrains Mono',monospace;font-weight:700;font-size:{{ s.size }};line-height:1;letter-spacing:-.02em;color:{{ s.fg }};font-variant-numeric:tabular-nums;text-align:center">{{ s.time }}</span>
+                <sc-if value="{{ s.done }}" hint-placeholder-val="{{ true }}">
+                  <span style="width:16px;height:2px;background:#3A4614"></span>
+                </sc-if>
+                <sc-if value="{{ s.waiting }}" hint-placeholder-val="{{ false }}">
+                  <span style="width:16px;height:2px;background:#1C1C21"></span>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="width:6px;height:6px;background:#DFFF4F"></span>
+            <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#6E6A62">{{ runAttemptLabel }} · ИЛГЭЭГДЭЭГҮЙ</span>
+          </div>
+          <span style="font: 400 12px/1.7 Geologica,sans-serif; color: #6E6A62; text-align: center">5 эвлүүлэлт дуусмагц бүрэн бүртгэгдэнэ. Одоо гарвал үлдсэн оролдлого хүчингүй.</span>
+          <button type="button" onClick="{{ startAttempt }}" style="border:none;background:#DFFF4F;color:#08080A;padding:20px;cursor:pointer;font:700 16px/1 Geologica,sans-serif;letter-spacing:.06em;text-transform:uppercase" style-hover="background:#E9FF7A">{{ runNextLabel }}</button>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ runIsSummary }}" hint-placeholder-val="{{ false }}">
+        <div style="width:100%;max-width:560px;margin:auto 0;display:flex;flex-direction:column;gap:20px">
+          <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.2em;color:#6E6A62">5 ОРОЛДЛОГО</span>
+          <div style="display:flex;flex-direction:column;gap:1px;background:#1C1C21;border:1px solid #1C1C21">
+            <sc-for list="{{ runSummary }}" as="r" hint-placeholder-count="5">
+              <div style="background:#0D0D10;display:flex;align-items:center;gap:14px;padding:13px 16px;opacity:{{ r.op }}">
+                <span style="font:500 10px/1 'JetBrains Mono',monospace;color:#6E6A62">{{ r.n }}</span>
+                <span style="flex:1;font:700 24px/1 'JetBrains Mono',monospace;color:{{ r.fg }};font-variant-numeric:tabular-nums">{{ r.time }}</span>
+
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:14px;border:1px solid #DFFF4F;padding:16px 18px">
+            <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.2em;color:#6E6A62;padding-bottom:6px">ДУНДАЖ</span>
+            <span style="font:700 44px/.9 'JetBrains Mono',monospace;color:#DFFF4F;letter-spacing:-.04em;font-variant-numeric:tabular-nums">{{ runAo5 }}</span>
+          </div>
+          <button type="button" onClick="{{ toggleConfirm }}" style="display:flex;align-items:center;gap:13px;border:1px solid #2A2A31;background:transparent;padding:15px 16px;cursor:pointer;text-align:left" style-hover="border-color:#DFFF4F">
+            <sc-if value="{{ confirmed }}" hint-placeholder-val="{{ false }}">
+              <span style="width:20px;height:20px;background:#DFFF4F;color:#08080A;display:flex;align-items:center;justify-content:center;font:700 11px/1 'JetBrains Mono',monospace;flex:none">✓</span>
+            </sc-if>
+            <sc-if value="{{ notConfirmed }}" hint-placeholder-val="{{ true }}">
+              <span style="width:20px;height:20px;border:1px solid #3A3A42;flex:none"></span>
+            </sc-if>
+            <span style="font:500 13px/1.5 Geologica,sans-serif;color:#F4F1EA">Миний эвлүүлэлт үнэн зөв байна</span>
+          </button>
+          <button type="button" onClick="{{ submitRun }}" style="border:1px solid {{ submitLine }};background:{{ submitBg }};color:{{ submitFg }};padding:20px;cursor:pointer;font:700 16px/1 Geologica,sans-serif;letter-spacing:.06em;text-transform:uppercase;transition:background .2s,color .2s,border-color .2s">Бүгдийг илгээх</button>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ runIsSent }}" hint-placeholder-val="{{ false }}">
+        <div style="margin:auto 0;display:flex;flex-direction:column;align-items:flex-start;gap:22px;max-width:460px">
+          <div style="display:grid;grid-template-columns:repeat(3,18px);grid-template-rows:repeat(3,18px);gap:4px">
+            <div style="background:#DFFF4F"></div><div style="background:#DFFF4F"></div><div style="background:#DFFF4F"></div>
+            <div style="background:#1C1C21"></div><div style="background:#DFFF4F"></div><div style="background:#1C1C21"></div>
+            <div style="background:#1C1C21"></div><div style="background:#DFFF4F"></div><div style="background:#1C1C21"></div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <span style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.2em;color:#6E6A62">AO5 - ДУНДАЖ</span>
+            <span style="font:700 58px/.9 'JetBrains Mono',monospace;letter-spacing:-.04em;font-variant-numeric:tabular-nums">{{ runAo5 }}</span>

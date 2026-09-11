@@ -30,6 +30,7 @@ const filing = fs.readFileSync(path.join(ROOT, SOLVE, '_components/FilingStage.t
 const hold = fs.readFileSync(path.join(ROOT, SOLVE, '_components/CameraHoldStage.tsx'), 'utf8');
 const rec = fs.readFileSync(path.join(ROOT, SOLVE, '_components/RecStage.tsx'), 'utf8');
 const theme = fs.readFileSync(path.join(ROOT, 'app/online-competition/theme.css'), 'utf8');
+const bar = fs.readFileSync(path.join(ROOT, SOLVE, '_components/SolveHeader.tsx'), 'utf8');
 const summary = fs.readFileSync(path.join(ROOT, SOLVE, '_components/SummaryStage.tsx'), 'utf8');
 const data = fs.readFileSync(path.join(ROOT, 'lib/online-competition/data.ts'), 'utf8');
 const components = fs
@@ -359,7 +360,7 @@ console.log('\n  -- 6. the recording stops AFTER the closing hold --');
     page.includes('const HOLD_SECONDS = 8;') && page.includes('seconds={HOLD_SECONDS}'));
   // A stage missing from HEADER_STAGES loses the header and the attempt
   // pips silently, mid-attempt.
-  ok('  ...and it is in HEADER_STAGES', /'rec',\s*\n\s*'finishHold',/.test(page));
+  ok('  ...and it is in ATTEMPT_STAGES', /'rec',\s*\n\s*'finishHold',/.test(page));
 
   // THE INVARIANT THAT MATTERS MOST: the stop, the size check and the
   // handoff are one function, in one order. Splitting them is how an
@@ -395,6 +396,70 @@ console.log('\n  -- 6. the recording stops AFTER the closing hold --');
   ok('no instructions stage was added', !page.includes("'instructions'"));
   ok('resume is untouched: a complete run still lands on the summary',
     /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page) && !/plan[\s\S]{0,400}finishHold/.test(page));
+}
+
+console.log('\n  -- 8. the competition environment --');
+{
+  // A fixed takeover, not a page in the site: the run is a room the
+  // athlete is inside, and the only way out is the bar's own ГАРАХ.
+  ok('the run is a full-screen takeover',
+    /\.oc-solve-takeover \{[\s\S]{0,200}?position: fixed;[\s\S]{0,200}?z-index: 200;/.test(theme));
+  ok('  ...over the mockup’s ground', /\.oc-solve-takeover \{[\s\S]{0,200}?background: #08080A;/.test(theme));
+  ok('  ...and every screen of the run wears it',
+    !page.includes('className="oc-solve-page"') &&
+      (page.match(/className="oc-solve-takeover"/g) ?? []).length === 6);
+  ok('the body scrolls, the bar does not',
+    /\.oc-solve-body \{[\s\S]{0,220}?overflow-y: auto;/.test(theme) &&
+      /\.oc-solve-bar \{[\s\S]{0,120}?flex: none;[\s\S]{0,120}?height: 56px;/.test(theme));
+
+  // THE BAR IS UNCONDITIONAL. It used to appear on ten stages of thirteen.
+  ok('the bar renders once, outside every stage condition',
+    (page.match(/<SolveHeader/g) ?? []).length === 1 && !page.includes('ATTEMPT_STAGES.includes(stage) && (\n        <SolveHeader'.replace('\n', String.fromCharCode(10))));
+  // ...but the claim about an attempt is not.
+  ok('the attempt label and pips only appear inside an attempt',
+    page.includes('ATTEMPT_STAGES.includes(stage)') && bar.includes('{attempt && ('));
+  ok('  ...so the summary and the sent screen make no claim about one',
+    !page.includes("'summary',") && !page.includes("'sent',"));
+
+  // ГАРАХ is the leave guard with a button on it.
+  ok('ГАРАХ asks the same question a browser Back does',
+    /function exitRun\(\) \{[\s\S]{0,200}?runAtRisk && !window\.confirm\(leaveConfirmMessage\(unfiledCount\)\)/.test(page));
+  ok('  ...and only then leaves', /exitRun[\s\S]{0,260}?router\.push\(/.test(page));
+  // ЗОГСООХ: rendered, inert, and honest about it. Pausing is only ever
+  // safe on a stage with no recording running.
+  ok('ЗОГСООХ is disabled, not implemented', /ЗОГСООХ/.test(bar) && /disabled\s*\n\s*title=/.test(bar));
+  ok('  ...and says so on hover', bar.includes('удахгүй нэмэгдэнэ'));
+  ok('  ...and looks inert', theme.includes('.oc-solve-bar-btn:disabled'));
+
+  // The two banners that used to live in the header. A fixed 56px row has
+  // no second line to give them.
+  ok('the filing indicator and the resume notice moved into the body',
+    page.includes('oc-solve-banner-quiet') && page.includes('className="oc-solve-banner"'));
+  ok('  ...above the stage, inside the scrolling column',
+    page.indexOf('oc-solve-banner') < page.indexOf("{stage === 'cameraSetup'"));
+
+  // 375px: six elements do not fit one row. What goes, goes in order of
+  // what it carries — and never the way out.
+  ok('the narrow bar drops the badge and the attempt label',
+    /@media \(max-width: 620px\)[\s\S]{0,400}?\.oc-solve-bar-badge,[\s\S]{0,80}?display: none;/.test(theme) &&
+      /@media \(max-width: 460px\)[\s\S]{0,400}?\.oc-solve-bar-attempt \{[\s\S]{0,40}?display: none;/.test(theme));
+  ok('  ...and the competition name, keeping the event and the round',
+    bar.includes('oc-solve-bar-comp') &&
+      /@media \(max-width: 460px\)[\s\S]{0,200}?\.oc-solve-bar-comp \{[\s\S]{0,40}?display: none;/.test(theme));
+  ok('  ...but never the two buttons', !/@media[\s\S]*?\.oc-solve-bar-btn \{[\s\S]{0,60}?display: none/.test(theme));
+
+  // NOT IN THIS DIFF: layout only.
+  ok('no stage was added or removed', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 13);
+  ok('the recording boundary is untouched',
+    page.includes("if (stage === 'zeroDisplay') {") &&
+      page.includes("onFinish={() => setStage('finishHold')}") &&
+      page.includes('async function finishRecording'));
+  ok('the holds are untouched: three of them, 8 seconds',
+    page.includes('const HOLD_SECONDS = 8;') && (page.match(/<CameraHoldStage/g) ?? []).length === 3);
+  ok('the markers are untouched: 8s, 12s, 15s',
+    rec.includes('const MARKER_TIMES_MS = [8000, 12000, 15000];'));
+  ok('resume is untouched: a complete run still lands on the summary',
+    /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page));
 }
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
