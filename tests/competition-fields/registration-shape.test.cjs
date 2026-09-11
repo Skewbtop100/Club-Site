@@ -114,7 +114,10 @@ console.log('\n  -- D7 call sites: every reader asks one of the two questions --
   // Approved only.
   uses('lib/online-competition/scramble-roster.ts', 'isCompetingRegistration(d.data().status)');
   uses('app/api/online-competition/admin-competitions/route.ts', "isCompetingRegistration(d.get('status'))");
-  uses('app/online-competition/admin/_components/AdminOverview.tsx', "r.status === 'approved'");
+  // The overview's round-progress arithmetic moved into its own pure
+  // module when it was found to be counting attempt indices as rounds;
+  // the D7 filter moved with it and is tested there directly.
+  uses('lib/online-competition/round-progress.ts', "r.status === 'approved'");
   // Everyone who was quoted a price — the ONE site that is deliberately wider.
   uses('lib/online-competition/admin-competitions.ts', 'isFeeQuotedRegistration(d.data().status)');
 

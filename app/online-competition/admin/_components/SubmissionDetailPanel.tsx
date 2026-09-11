@@ -69,8 +69,13 @@ export default function SubmissionDetailPanel({
       <div className="oc-rv-panel-info">
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
           <div style={{ minWidth: 0 }}>
+            {/* THE ROUND, and then the attempt — two different numbers.
+                This line used to print `submission.round` after "РАУНД",
+                and `submission.round` is the ATTEMPT INDEX: the header
+                showed the same number twice under two names, so attempt 2
+                of a single-round competition read "РАУНД 2". */}
             <p style={{ font: '500 10px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
-              {submission.event.toUpperCase()} · РАУНД {submission.round}
+              {submission.event.toUpperCase()} · РАУНД {submission.competitionRound}
             </p>
             <h2 style={{ marginTop: 6, font: '600 18px var(--oc-font-heading), sans-serif', color: '#F4F1EA' }}>
               {athleteName} · Оролдлого {submission.round}

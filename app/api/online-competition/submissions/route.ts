@@ -42,6 +42,9 @@ export async function GET(req: Request) {
       uid: data.uid,
       event: data.event,
       round: data.round,
+      // Legacy documents predate the field; round 1 was the only round
+      // that existed when they were written.
+      competitionRound: typeof data.competitionRound === 'number' ? data.competitionRound : 1,
       videoUrl: data.videoUrl,
       cloudinaryPublicId: data.cloudinaryPublicId,
       reportedTime: data.reportedTime,

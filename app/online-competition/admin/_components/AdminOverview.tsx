@@ -8,6 +8,7 @@ import type {
   OnlineSubmissionAdminView,
 } from '@/lib/online-competition/types';
 import type { RegistrationAdminView } from '@/lib/online-competition/admin-registrations';
+import { roundProgressRows } from '@/lib/online-competition/round-progress';
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
 import RoundGapWarning from './RoundGapWarning';
 import { WcaEventIcon, hasWcaEventIcon } from '@/lib/wca-event-icon';
@@ -166,10 +167,14 @@ export default function AdminOverview() {
                     >
                       {names[s.uid] ?? s.uid.slice(0, 10)}
                     </p>
-                    {/* Submissions carry a round but no attempt number, so
-                        the mockup's "{round} · {attempt}" is round only. */}
+                    {/* The mockup's "{round} · {attempt}", which this could
+                        not show while the admin payload carried only one of
+                        the two numbers. It printed `round` — the ATTEMPT
+                        INDEX — labelled as РАУНД, and the comment here said
+                        submissions carry no attempt number, which was the
+                        truth exactly backwards. */}
                     <p style={{ marginTop: 3, font: '400 10px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
-                      РАУНД {s.round} · {s.competitionId}
+                      РАУНД {s.competitionRound} · ОРОЛДЛОГО {s.round}
                     </p>
                   </div>
                   <span
@@ -243,18 +248,15 @@ function EmptyRow({ text }: { text: string }) {
 /** One row per event+round that has at least one submission in the live
  *  competition.
  *
- *  Denominator approximation: there is no "expected submissions for this
- *  round" anywhere in the schema, so it uses the number of APPROVED
- *  athletes registered for that EVENT (D7 — a pending athlete is not
- *  expected to solve, and counting them made every round look permanently
- *  behind). That is per-event, not per-round — for a multi-round event
- *  every round shows the same denominator, which over-counts if athletes
- *  are cut between rounds. There is no cut/advance model to derive a
- *  truer number from.
+ *  The arithmetic lives in round-progress.ts, where it is tested. It used
+ *  to be inline here and was counting the wrong field: `round` on a
+ *  submission is its ATTEMPT INDEX, not a competition round, so "Раунд 1"
+ *  counted every athlete's first attempt and a ten-athlete Ao5 round read
+ *  10/10 with four fifths of the solves missing.
  *
  *  `registrations` arrives unfiltered, because the review table on the
- *  same page needs every status; the filter belongs here, at the one place
- *  that means "expected to compete". */
+ *  same page needs every status; only approved athletes are expected to
+ *  solve (D7), and that filter happens inside roundProgressRows. */
 function RoundProgress({
   competition,
   submissions,
@@ -264,22 +266,13 @@ function RoundProgress({
   submissions: OnlineSubmissionAdminView[];
   registrations: RegistrationAdminView[];
 }) {
-  const rows: { key: string; label: string; done: number; expected: number }[] = [];
-  for (const ev of competition.events) {
-    const expected = registrations.filter((r) => r.status === 'approved' && r.events.includes(ev.eventId)).length;
-    for (let round = 1; round <= ev.rounds; round += 1) {
-      const done = submissions.filter((s) => s.event === ev.eventId && s.round === round).length;
-      if (done === 0) continue;
-      rows.push({ key: `${ev.eventId}-${round}`, label: `${ev.label} · Раунд ${round}`, done, expected });
-    }
-  }
+  const rows = roundProgressRows(competition.events, submissions, registrations);
 
   if (rows.length === 0) return <EmptyRow text="Илгээмж бүхий раунд алга." />;
 
   return (
     <>
       {rows.map((r) => {
-        const pct = r.expected > 0 ? Math.min(100, Math.round((r.done / r.expected) * 100)) : 0;
         return (
           <div key={r.key} className="oc-adm-progress-row">
             <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
@@ -298,7 +291,7 @@ function RoundProgress({
               </span>
             </div>
             <div className="oc-v3-bar" style={{ marginTop: 8, height: 4 }}>
-              <div className="oc-v3-bar-fill" style={{ width: `${pct}%` }} />
+              <div className="oc-v3-bar-fill" style={{ width: `${r.pct}%` }} />
             </div>
           </div>
         );

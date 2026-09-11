@@ -730,7 +730,20 @@ export interface OnlineSubmissionAdminView {
   competitionId: string;
   uid: string;
   event: string;
+  /** ATTEMPT INDEX 1-5 within one run — the same field as
+   *  OnlineSubmission.round above, and NOT a competition round. Render it
+   *  as "Оролдлого N". */
   round: number;
+  /** The COMPETITION round (1..N). Absent from this view until the admin
+   *  UI was found to be misreading `round` as a round number in four
+   *  places at once: the detail panel's header, the review grid's round
+   *  tabs, its duplicate-slot grouping, and — worst — the overview's round
+   *  progress, which counted attempt-1 submissions against a per-round
+   *  denominator and so read 10/10 when a fifth of the solves existed.
+   *
+   *  Defaulted to 1 for any document written before the field existed:
+   *  there was only one round then. */
+  competitionRound: number;
   videoUrl: string;
   cloudinaryPublicId: string;
   reportedTime: number;

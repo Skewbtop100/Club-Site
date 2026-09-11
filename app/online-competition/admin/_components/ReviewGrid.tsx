@@ -33,16 +33,21 @@ function attemptColumns(count: number): number[] {
 }
 
 // ── How attempts map to storage ──────────────────────────────────────────
-// The solve flow writes one onlineSubmissions doc per attempt with
-// `round: i + 1` (see the createSubmission call in
-// app/online-competition/[competitionId]/solve/[eventId]/page.tsx), so a
-// submission's `round` IS its attempt index 1-5 — not a competition round.
-// The five attempt columns below therefore key off `round`, which is also
-// what makes the Ao5 columns computable at all. There is currently no
-// field anywhere that distinguishes one competition round from another,
-// which is why the round tab strip has exactly one entry; see the comment
-// on ROUNDS below.
-const ROUNDS = [1];
+// A submission carries TWO numbers and they are not the same thing:
+//   `round`            — the ATTEMPT INDEX 1-5 within one run
+//   `competitionRound` — the competition round that run belongs to
+// The attempt columns below key off `round`, which is what makes the Ao5
+// columns computable. The round TABS key off `competitionRound`, and rows
+// are filtered to the selected round.
+//
+// The tabs used to be a hardcoded `const ROUNDS = [1]`, on the stated
+// grounds that no field distinguished one competition round from another.
+// One did — `competitionRound`, resolved once per run from the round-access
+// gate — it simply never reached the client: the admin GET mapper dropped
+// it. It is in OnlineSubmissionAdminView now.
+function roundsForEvent(count: number): number[] {
+  return Array.from({ length: Math.max(1, count) }, (_, i) => i + 1);
+}
 
 export interface AthleteRow {
   uid: string;
@@ -125,12 +130,25 @@ export default function ReviewGrid() {
   }, [preselect]);
 
   const competition = competitions?.find((c) => c.id === competitionId) ?? null;
+  const eventConfig = competition?.events.find((e) => e.eventId === eventId) ?? null;
+  // What the competition CONFIGURES, not what has been solved: a round
+  // with no submissions yet still deserves a tab to watch fill up.
+  const rounds = roundsForEvent(eventConfig?.rounds ?? 1);
 
   // Default the event to the competition's first configured one.
   useEffect(() => {
     setEventId(competition?.events[0]?.eventId ?? null);
+    setRound(1);
     setSelected(null);
   }, [competition]);
+
+  // A round's tab can disappear when the event changes (a 1-round event
+  // after a 3-round one), and a selection from the round being left would
+  // otherwise keep a panel open over a grid that no longer contains it.
+  useEffect(() => {
+    setRound(1);
+    setSelected(null);
+  }, [eventId]);
 
   const load = useCallback(async () => {
     if (!competitionId) return;
@@ -159,7 +177,10 @@ export default function ReviewGrid() {
 
   const rows: AthleteRow[] = useMemo(() => {
     if (!eventId || submissions === null) return [];
-    const forEvent = submissions.filter((s) => s.event === eventId);
+    // This event AND this round. Before competitionRound reached the
+    // client, two rounds of the same event landed in the same five cells
+    // and showed up as duplicate slots.
+    const forEvent = submissions.filter((s) => s.event === eventId && s.competitionRound === round);
     const byUid = new Map<string, AthleteRow>();
 
     // Registered athletes first, in registration order.
@@ -176,11 +197,19 @@ export default function ReviewGrid() {
     // anonymous solve-page sessions predate the registration flow, and
     // hiding their attempts would hide real work from the judge.
     //
-    // DUPLICATE SLOTS: nothing stops an athlete re-running the solve flow,
-    // and each run writes a fresh doc for rounds 1-5 with no field marking
-    // which run it belongs to. Real data has up to 10 submissions sharing
-    // one (uid, event, round) slot. A five-column grid can only show one
-    // per slot, so the cell shows the OLDEST still-pending submission
+    // DUPLICATE SLOTS: still possible, and still meaningful. Filtering by
+    // competitionRound removes the commonest cause — two ROUNDS of the
+    // same event colliding in one set of five cells — but not duplicates
+    // WITHIN a round. Historical runs made before the solve flow filed to
+    // a deterministic id (submission-id.ts) wrote a fresh document per
+    // attempt on every re-run, and the redo button that produced them was
+    // only removed later; real data has up to 10 submissions in one
+    // (uid, event, round, attempt) slot. Nothing new can create one — a
+    // re-file now lands on the same document — so this is a view of
+    // history, not of something the flow still does.
+    //
+    // A five-column grid can only show one per slot, so the cell shows the
+    // OLDEST still-pending submission
     // (falling back to the newest decided one when the slot is fully
     // judged): deciding a cell surfaces the next undecided submission in
     // the same slot, so the judge can still work the whole backlog to
@@ -205,7 +234,7 @@ export default function ReviewGrid() {
       row.slotCounts.set(roundNum, list.length);
     }
     return [...byUid.values()];
-  }, [registrations, submissions, eventId]);
+  }, [registrations, submissions, eventId, round]);
 
   const selectedSubmission = useMemo(
     () => (selected ? (submissions ?? []).find((s) => s.id === selected) ?? null : null),
@@ -376,12 +405,16 @@ export default function ReviewGrid() {
 
         <span style={{ width: 1, height: 22, background: '#2A2A31' }} aria-hidden />
 
-        {ROUNDS.map((r) => (
+        {rounds.map((r) => (
           <button
             key={r}
             type="button"
             className={`oc-rv-tab${r === round ? ' oc-rv-tab-active' : ''}`}
-            onClick={() => setRound(r)}
+            onClick={() => {
+              setRound(r);
+              // The open panel belongs to the round being left.
+              setSelected(null);
+            }}
           >
             РАУНД {r}
           </button>
