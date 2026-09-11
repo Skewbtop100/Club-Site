@@ -5,6 +5,7 @@ import Link from 'next/link';
 import type { OnlineCompetition, OnlineRegistration } from '@/lib/online-competition/types';
 import RegistrationStatusBadge from '../../_components/RegistrationStatusBadge';
 import { competeGateCopy } from '@/lib/online-competition/registration-view';
+import { authedFetchWithRetry } from '@/lib/online-competition/authed-fetch';
 import type { RoundAccess } from '@/lib/online-competition/round-access';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import { fmtDateTime } from '../../_components/hub/format';
@@ -95,8 +96,9 @@ export default function LiveCard({
   useEffect(() => {
     if (!uid) return;
     let cancelled = false;
-    fetch(
-      `/api/online-competition/round-access?competitionId=${encodeURIComponent(competition.id)}&uid=${encodeURIComponent(uid)}`,
+    // The uid comes from the verified token now, not from the URL.
+    authedFetchWithRetry(
+      `/api/online-competition/round-access?competitionId=${encodeURIComponent(competition.id)}`,
     )
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error('failed'))))
       .then((d: { events: Record<string, RoundAccess> }) => {

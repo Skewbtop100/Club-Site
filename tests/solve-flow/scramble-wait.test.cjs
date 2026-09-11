@@ -45,8 +45,11 @@ const count = (s, needle) => s.split(needle).length - 1;
 console.log('\n  -- a stale scramble can never be displayed --');
 {
   const fn = page.slice(page.indexOf('const fetchScramble'), page.indexOf('// THE WAIT'));
+  // The request goes through authedFetch now (it carries the athlete's
+  // verified token), so this looks for that call rather than a bare fetch.
   ok('fetchScramble clears the scramble BEFORE requesting the next one',
-    fn.indexOf("setScramble('')") !== -1 && fn.indexOf("setScramble('')") < fn.indexOf('await fetch('));
+    fn.indexOf("setScramble('')") !== -1 &&
+      fn.indexOf("setScramble('')") < fn.indexOf('await authedFetchWithRetry('));
   ok('  ...and sets it only from the response', count(fn, 'setScramble(') === 2);
   // The old failure path. Its screen is guarded by `!competition`, so
   // mid-run it rendered nothing at all while the run marched on.

@@ -19,6 +19,7 @@ import AthletesTab from './_components/AthletesTab';
 import type { CompetitionRoster } from '@/app/api/online-competition/competitions/[id]/roster/route';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import type { RoundAccess } from '@/lib/online-competition/round-access';
+import { authedFetchWithRetry } from '@/lib/online-competition/authed-fetch';
 
 const COMPETITIONS = '/online-competition/competitions';
 
@@ -121,9 +122,8 @@ export default function CompetitionDetailPage() {
     }
     let cancelled = false;
     setAccessLoading(true);
-    fetch(
-      `/api/online-competition/round-access?competitionId=${encodeURIComponent(competitionId)}&uid=${encodeURIComponent(solverUid)}`,
-    )
+    // The uid comes from the verified token now, not from the URL.
+    authedFetchWithRetry(`/api/online-competition/round-access?competitionId=${encodeURIComponent(competitionId)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error('failed'))))
       .then((d: { events: Record<string, RoundAccess> }) => {
         if (!cancelled) setAccess(d.events ?? {});

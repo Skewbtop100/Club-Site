@@ -1,4 +1,5 @@
 import { cert, getApps, initializeApp, type App } from 'firebase-admin/app';
+import { getAuth, type Auth } from 'firebase-admin/auth';
 import { getFirestore, type Firestore } from 'firebase-admin/firestore';
 
 // Server-only Firebase Admin SDK client for the online-competition review
@@ -45,4 +46,22 @@ function getAdminApp(): App {
 
 export function getOnlineCompAdminDb(): Firestore {
   return getFirestore(getAdminApp());
+}
+
+/** Firebase Auth, for verifying an ATHLETE's ID token in a public route.
+ *
+ *  Nothing else in this codebase verifies a token: the admin dashboard is
+ *  gated by the shared password cookie above, and athletes are otherwise
+ *  authenticated only by firestore.rules evaluating request.auth on direct
+ *  client SDK calls. The public routes have no rules to lean on, so they
+ *  verify the token themselves — see lib/online-competition/athlete-auth.ts.
+ *
+ *  No new env vars: this is the same service-account credential the
+ *  Firestore client above uses, for the same project, so verifyIdToken can
+ *  check a token minted by the client app in lib/online-competition/
+ *  firebase.ts. Verification is a local signature check against Google's
+ *  public keys, cached in-process — one extra HTTPS round trip on a cold
+ *  start, nothing per request after that. */
+export function getOnlineCompAdminAuth(): Auth {
+  return getAuth(getAdminApp());
 }

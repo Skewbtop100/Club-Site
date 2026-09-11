@@ -26,6 +26,7 @@
     "test:progress": "node tests/competition-fields/round-progress.test.cjs",
     "test:eventstate": "node tests/competition-fields/event-state.test.cjs",
     "test:roster": "node tests/competition-fields/roster-view.test.cjs",
+    "test:athleteauth": "node tests/competition-fields/athlete-auth.test.cjs",
     "test:scrambles": "node tests/competition-fields/scrambles.test.cjs",
     "test:ranking": "firebase emulators:exec --only firestore \"node tests/competition-fields/ranking.test.cjs\"",
     "test:merge": "firebase emulators:exec --only firestore \"node tests/merge-athlete-uid/merge.test.mjs\""

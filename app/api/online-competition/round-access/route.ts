@@ -4,6 +4,11 @@ import {
   resolveRoundAccessForCompetition,
   type RoundAccess,
 } from '@/lib/online-competition/round-access';
+import { AthleteAuthError, requireAthlete } from '@/lib/online-competition/athlete-auth';
+
+// firebase-admin (token verification and the Firestore reads) does not run
+// on edge.
+export const runtime = 'nodejs';
 
 // Read-only companion to the solve flow's gating: tells the athlete's
 // dashboard, per event, which round is live and whether they may attempt
@@ -11,15 +16,30 @@ import {
 // the dashboard can never offer "Эхлүүлэх" for something that would then
 // be refused.
 //
-// Public (no admin cookie): it exposes only round status and whether one
-// uid is on a qualifiers list — the same facts that athlete is about to
-// be shown anyway. It never returns the qualifier list itself.
+// No admin cookie — this answers a question about the ATHLETE ASKING, and
+// it now proves who that is. It used to take `?uid=` unverified, which
+// made it a free probe: anyone could ask whether a given uid had qualified
+// for a round. Lower stakes than handing out someone else's scramble, but
+// it shares the resolver with that route and there is no reason to leave
+// half of a pair unverified.
+//
+// The uid parameter is GONE, not cross-checked — same reasoning as the
+// scramble route.
 export async function GET(req: Request) {
+  let uid: string;
+  try {
+    uid = await requireAthlete(req);
+  } catch (e) {
+    if (e instanceof AthleteAuthError) {
+      return NextResponse.json({ error: e.reason }, { status: e.status });
+    }
+    throw e;
+  }
+
   const url = new URL(req.url);
   const competitionId = url.searchParams.get('competitionId') ?? '';
-  const uid = url.searchParams.get('uid') ?? '';
-  if (!competitionId || !uid) {
-    return NextResponse.json({ error: 'Missing competitionId or uid' }, { status: 400 });
+  if (!competitionId) {
+    return NextResponse.json({ error: 'Missing competitionId' }, { status: 400 });
   }
 
   try {

@@ -12,6 +12,7 @@ import {
   recordAo5Result,
   SubmissionAlreadyFiledError,
 } from '@/lib/online-competition/data';
+import { NotSignedInError, authedFetchWithRetry } from '@/lib/online-competition/authed-fetch';
 import {
   cutoffFailed,
   planResume,
@@ -342,20 +343,37 @@ export default function SolvePage() {
         // No `round` param: which round is live is the server's call now
         // (see the round-gating block in the scramble route), so the client
         // can't ask for one it hasn't qualified into.
+        // NO uid PARAMETER. The route reads the athlete from a verified
+        // Authorization header; sending a uid as well would be a second,
+        // unverified source of identity for someone to trust later.
         const qs = new URLSearchParams({
           event: eventId,
           competitionId,
           attempt: String(attemptNumber),
         });
-        if (solverUid) qs.set('uid', solverUid);
-        const res = await fetch(`/api/online-competition/scramble?${qs.toString()}`);
+        const res = await authedFetchWithRetry(`/api/online-competition/scramble?${qs.toString()}`);
         if (superseded()) return;
         if (!res.ok) {
           const body = (await res.json().catch(() => ({}))) as { message?: string };
+          // ── AN AUTH FAILURE IS NOT A ROUND REFUSAL ──
+          // 401 means the token was rejected — expired mid-run, a device
+          // clock behind the server, a refresh that failed offline. It is
+          // transient and retryable, and it must NEVER reach the blocked
+          // screen: that screen replaces the run, and a run holds an
+          // attempt that exists nowhere else.
+          //
+          // authedFetchWithRetry has ALREADY re-minted the token and tried
+          // again by the time we get here, so this is a token that could
+          // not be fixed by refreshing it.
+          if (res.status === 401) {
+            setScrambleError(
+              'Нэвтрэлт хүчингүй болсон байна. «Дахин оролдох» дарна уу — эсвэл өөр цонхонд дахин нэвтэрч орно уу.',
+            );
+            return;
+          }
           // A round-gating refusal carries a Mongolian `message`; anything
           // else is a genuine failure. Either way, from attempt 2 on it
-          // must NOT reach the blocked screen: that screen replaces the
-          // run, and the run is holding every video recorded so far.
+          // must NOT reach the blocked screen, for the same reason.
           if (attemptNumber > 1) {
             setScrambleError(
               body.message || 'Скрамбл авахад алдаа гарлаа. Холболтоо шалгаад дахин оролдоно уу.',
@@ -387,12 +405,21 @@ export default function SolvePage() {
         }
         setBlockedMessage('');
         setScramble(data.scramble);
-      } catch {
+      } catch (e) {
         if (superseded()) return;
         // Never loadError: its screen is guarded by `!competition`, so
         // mid-run it rendered NOTHING while the run marched on. The wait
         // stage shows this and offers a retry.
-        setScrambleError('Скрамбл авахад алдаа гарлаа. Холболтоо шалгаад дахин оролдоно уу.');
+        //
+        // NotSignedInError is thrown before the request leaves the
+        // browser — the session went away mid-run. Same soft landing: the
+        // athlete signs in again and presses retry, and the run is still
+        // here when they do.
+        setScrambleError(
+          e instanceof NotSignedInError
+            ? 'Та нэвтэрсэн эрхээсээ гарсан байна. Дахин нэвтэрч ороод «Дахин оролдох» дарна уу.'
+            : 'Скрамбл авахад алдаа гарлаа. Холболтоо шалгаад дахин оролдоно уу.',
+        );
       }
     },
     [eventId, competitionId, solverUid, competitionRound, applyRoundCutoff],
@@ -430,8 +457,9 @@ export default function SolvePage() {
       let filed: FiledAttempt[] = [];
       try {
         const [accessRes, mine] = await Promise.all([
-          fetch(
-            `/api/online-competition/round-access?competitionId=${encodeURIComponent(competitionId)}&uid=${encodeURIComponent(solverUid)}`,
+          // The uid comes from the verified token now, not from the URL.
+          authedFetchWithRetry(
+            `/api/online-competition/round-access?competitionId=${encodeURIComponent(competitionId)}`,
           ),
           fetchMyFiledAttempts(solverUid, competitionId, eventId),
         ]);

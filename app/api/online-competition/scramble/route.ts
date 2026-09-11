@@ -4,6 +4,12 @@ import { scrambleConfigFor } from '@/lib/online-competition/scramble-types';
 import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
 import { roundKey, type ScrambleGroup } from '@/lib/online-competition/scrambles';
 import { ROUND_ACCESS_MESSAGE, resolveRoundAccess } from '@/lib/online-competition/round-access';
+import { AthleteAuthError, requireAthlete } from '@/lib/online-competition/athlete-auth';
+
+// firebase-admin does not run on edge, and both the token verification and
+// the Firestore reads below need it. Stated rather than inherited from the
+// default.
+export const runtime = 'nodejs';
 
 // Server-side scramble source for the public online-competition feature.
 // Separate route from app/api/scramble/route.ts (the club's internal one) —
@@ -82,6 +88,31 @@ async function lookupGroupScramble(params: {
 }
 
 export async function GET(req: Request) {
+  // ── WHO IS ASKING ──────────────────────────────────────────────────
+  // From the Authorization header, verified, and from nowhere else. This
+  // used to be `?uid=`, unchecked: anyone could ask for anyone's official
+  // scramble — before that athlete had solved it — by editing a URL.
+  //
+  // The parameter is GONE rather than cross-checked against the token: a
+  // parameter that must equal the token is a parameter someone will
+  // eventually trust on its own.
+  //
+  // A 401 from here carries `error` and NO `message`. That distinction is
+  // load-bearing for the client: `message` is the round gate's own
+  // Mongolian explanation ("this round is not open", "you did not
+  // qualify"), which is a final answer worth replacing the screen with. An
+  // auth failure is a transient thing to retry with a fresh token, and the
+  // solve flow must not tear a run down over it.
+  let uid: string;
+  try {
+    uid = await requireAthlete(req);
+  } catch (e) {
+    if (e instanceof AthleteAuthError) {
+      return NextResponse.json({ error: e.reason }, { status: e.status });
+    }
+    throw e;
+  }
+
   const url = new URL(req.url);
   const eventId = url.searchParams.get('event');
   if (!eventId) {
@@ -92,8 +123,17 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: `Unsupported event: ${eventId}` }, { status: 400 });
   }
 
+  // REQUIRED NOW. There used to be a "generator only" mode — no
+  // competitionId, no uid — that skipped the round gate entirely and
+  // handed out a scramble to anyone. Nothing called it: the solve page is
+  // the only caller and always sends a competition, and the club site's
+  // own practice scrambles come from a different route (app/api/scramble).
+  // It is removed rather than left as an unauthenticated path around the
+  // gate.
   const competitionId = url.searchParams.get('competitionId') ?? '';
-  const uid = url.searchParams.get('uid') ?? '';
+  if (!competitionId) {
+    return NextResponse.json({ error: 'Missing competitionId param' }, { status: 400 });
+  }
   const attempt = Number(url.searchParams.get('attempt') ?? '1');
 
   // ── Round gating ───────────────────────────────────────────────────
@@ -106,27 +146,20 @@ export async function GET(req: Request) {
   // Unlike the group lookup below, a failure here is NOT swallowed: if the
   // gate can't be evaluated we must not hand out a scramble, because
   // failing open would let a non-qualified athlete solve.
-  let round: number;
-  if (competitionId && uid) {
-    const access = await resolveRoundAccess(getOnlineCompAdminDb(), competitionId, eventId, uid);
-    if (!access.allowed) {
-      return NextResponse.json(
-        {
-          error: access.reason,
-          message: ROUND_ACCESS_MESSAGE[access.reason as keyof typeof ROUND_ACCESS_MESSAGE],
-          liveRound: access.liveRound,
-        },
-        { status: access.reason === 'not-qualified' ? 403 : 409 },
-      );
-    }
-    round = access.liveRound ?? 1;
-  } else {
-    // No competition/athlete context — the generator-only use of this
-    // route, which has no round to gate on.
-    round = 1;
+  const access = await resolveRoundAccess(getOnlineCompAdminDb(), competitionId, eventId, uid);
+  if (!access.allowed) {
+    return NextResponse.json(
+      {
+        error: access.reason,
+        message: ROUND_ACCESS_MESSAGE[access.reason as keyof typeof ROUND_ACCESS_MESSAGE],
+        liveRound: access.liveRound,
+      },
+      { status: access.reason === 'not-qualified' ? 403 : 409 },
+    );
   }
+  const round = access.liveRound ?? 1;
 
-  if (competitionId && uid && Number.isInteger(attempt) && attempt >= 1) {
+  if (Number.isInteger(attempt) && attempt >= 1) {
     try {
       const official = await lookupGroupScramble({ competitionId, eventId, round, uid, attempt });
       if (official && 'outOfRange' in official) {
