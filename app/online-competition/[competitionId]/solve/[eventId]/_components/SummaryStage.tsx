@@ -80,86 +80,81 @@ export default function SummaryStage({
 
   return (
     <div className="oc-solve-summary">
-      <div>
-        <p style={{ font: '500 9px var(--oc-font-mono), monospace', letterSpacing: '.2em', color: '#8A8474' }}>
-          {attempts.length} ОРОЛДЛОГО
-        </p>
+      <p style={{ font: '500 9px var(--oc-font-mono), monospace', letterSpacing: '.2em', color: '#6E6A62' }}>
+        {attempts.length} ОРОЛДЛОГО
+      </p>
 
-        <div className="oc-solve-attempt-list" style={{ marginTop: 10 }}>
-          {attempts.map((a, i) => {
-            // Ao5 drops its best and worst; Mo3 counts all three and a
-            // best-of excludes nothing, so for those excludedIndices is
-            // empty and no row is greyed or tagged.
-            const isExcluded = excludedIndices.includes(i);
-            const tag = excludedIndices[0] === i ? 'ХАМГИЙН БАГА' : excludedIndices[1] === i ? 'ХАМГИЙН ИХ' : '';
-            return (
-              <div key={i} className="oc-solve-attempt-row" style={isExcluded ? { opacity: 0.55 } : undefined}>
-                <span style={{ font: '500 10px var(--oc-font-mono), monospace', color: '#5B564B' }}>#{i + 1}</span>
-                <span className={`oc-solve-attempt-time${a.isDnf ? ' oc-solve-attempt-time-dnf' : ''}`}>
-                  {a.isDnf ? 'DNF' : fmtCentiseconds(a.timeCs as number)}
+      <div className="oc-solve-attempt-list">
+        {attempts.map((a, i) => {
+          // Ao5 drops its best and worst; Mo3 counts all three and a
+          // best-of excludes nothing, so for those excludedIndices is
+          // empty and no row is greyed or tagged.
+          const isExcluded = excludedIndices.includes(i);
+          const tag = excludedIndices[0] === i ? 'ХАМГИЙН БАГА' : excludedIndices[1] === i ? 'ХАМГИЙН ИХ' : '';
+          return (
+            <div key={i} className="oc-solve-attempt-row" style={isExcluded ? { opacity: 0.55 } : undefined}>
+              <span style={{ font: '500 10px var(--oc-font-mono), monospace', color: '#6E6A62' }}>{i + 1}</span>
+              <span className={`oc-solve-attempt-time${a.isDnf ? ' oc-solve-attempt-time-dnf' : ''}`}>
+                {a.isDnf ? 'DNF' : fmtCentiseconds(a.timeCs as number)}
+              </span>
+              {tag && (
+                <span style={{ font: '500 8px var(--oc-font-mono), monospace', letterSpacing: '.12em', color: '#6E6A62' }}>
+                  {tag}
                 </span>
-                {tag && (
-                  <span style={{ font: '500 8px var(--oc-font-mono), monospace', letterSpacing: '.12em', color: '#5B564B' }}>
-                    {tag}
-                  </span>
-                )}
-                {prRows[i] && <PrTag />}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {cutOff && cutoffCs !== null && (
-          <div className="oc-solve-cutoff-note" role="status">
-            <span className="oc-solve-cutoff-title">ШҮҮЛТҮҮР ДАВААГҮЙ</span>
-            <span>
-              Эхний {attempts.length} оролдлогод {fmtTimeLimit(cutoffCs)}-аас хурдан үр дүн
-              гараагүй тул раунд эндээ дуусч, зөвхөн ганц үзүүлэлт бүртгэгдэнэ.
-            </span>
-            <span className="oc-solve-pr-note">шүүгч баталгаажуулснаар эцэслэнэ</span>
-          </div>
-        )}
-        <div className="oc-solve-ao5-box">
-          {/* A cut-off round produces a single, so labelling it AO5 would
-              be a lie about what the number is. */}
-          <span style={{ font: '500 9px var(--oc-font-mono), monospace', letterSpacing: '.2em', color: '#8A8474' }}>
-            {cutOff ? 'ГАНЦ ҮЗҮҮЛЭЛТ' : formatLabel(resultFormat).toUpperCase()}
-          </span>
-          <span className="oc-solve-ao5-value">{ao5 === null ? 'DNF' : fmtCentiseconds(ao5)}</span>
-          {ao5IsPr && (
-            <div style={{ marginTop: 8 }}>
-              <PrTag />
+              )}
+              {prRows[i] && <PrTag />}
             </div>
-          )}
-        </div>
-
-        {(anyPr || ao5IsPr) && (
-          <span className="oc-solve-pr-note" style={{ marginTop: 0 }}>
-            шүүгч баталгаажуулснаар эцэслэнэ
-          </span>
-        )}
-
-        {submitError && (
-          <p style={{ font: '400 12px var(--oc-font-heading), sans-serif', color: '#D8402C' }}>{submitError}</p>
-        )}
-
-        {/* One action. The old "Дахин үзэх" beside it deleted every
-            recording and restarted the round — offered right under the
-            athlete's own Ao5, which made it a way to discard a result you
-            did not like. Attempts are filed as they happen now, and a
-            filed attempt cannot be deleted by the person who filed it. */}
-        <button
-          type="button"
-          className="oc-solve-btn-submit"
-          style={{ width: '100%' }}
-          disabled={submitting}
-          onClick={onSubmit}
-        >
-          {submitting ? 'Илгээж байна...' : 'Илгээх'}
-        </button>
+          );
+        })}
       </div>
+
+      {cutOff && cutoffCs !== null && (
+        <div className="oc-solve-cutoff-note" role="status">
+          <span className="oc-solve-cutoff-title">ШҮҮЛТҮҮР ДАВААГҮЙ</span>
+          <span>
+            Эхний {attempts.length} оролдлогод {fmtTimeLimit(cutoffCs)}-аас хурдан үр дүн
+            гараагүй тул раунд эндээ дуусч, зөвхөн ганц үзүүлэлт бүртгэгдэнэ.
+          </span>
+          <span className="oc-solve-pr-note">шүүгч баталгаажуулснаар эцэслэнэ</span>
+        </div>
+      )}
+
+      <div className="oc-solve-ao5-box">
+        {/* A cut-off round produces a single, so labelling it AO5 would
+            be a lie about what the number is. */}
+        <span className="oc-solve-ao5-label">
+          {cutOff ? 'ГАНЦ ҮЗҮҮЛЭЛТ' : formatLabel(resultFormat).toUpperCase()}
+        </span>
+        <span className="oc-solve-ao5-value">{ao5 === null ? 'DNF' : fmtCentiseconds(ao5)}</span>
+      </div>
+
+      {/* Out of the average box: the mockup's box is a two-item row with
+          the number hard against its right edge, and a badge inside it
+          pushed the number off that edge. */}
+      {ao5IsPr && <PrTag />}
+
+      {(anyPr || ao5IsPr) && (
+        <span className="oc-solve-pr-note" style={{ marginTop: 0 }}>
+          шүүгч баталгаажуулснаар эцэслэнэ
+        </span>
+      )}
+
+      {submitError && (
+        <p style={{ font: '400 12px var(--oc-font-heading), sans-serif', color: '#D8402C' }}>{submitError}</p>
+      )}
+
+      {/* One action. The old "Дахин үзэх" beside it deleted every
+          recording and restarted the round — offered right under the
+          athlete's own Ao5, which made it a way to discard a result you
+          did not like. Attempts are filed as they happen now, and a filed
+          attempt cannot be deleted by the person who filed it.
+
+          The label stays «Илгээх». The mockup's «Бүгдийг илгээх» comes
+          with the attestation checkbox above it, and its colours are
+          bound to that checkbox's state — both are changeset 5. */}
+      <button type="button" className="oc-solve-btn-submit" disabled={submitting} onClick={onSubmit}>
+        {submitting ? 'Илгээж байна...' : 'Илгээх'}
+      </button>
     </div>
   );
 }

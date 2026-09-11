@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
 
 const GRID_PATTERN = ['volt', 'volt', 'volt', 'ink', 'volt', 'ink', 'ink', 'volt', 'ink'] as const;
-const COLOR = { ink: '#0D0C0A', volt: '#DFFF4F' } as const;
+const COLOR = { ink: '#1C1C21', volt: '#DFFF4F' } as const;
 
 export default function SentStage({ ao5 }: { ao5: number | null }) {
   return (
@@ -13,8 +13,11 @@ export default function SentStage({ ao5 }: { ao5: number | null }) {
         ))}
       </div>
 
-      <div>
-        <p style={{ font: '500 9px var(--oc-font-mono), monospace', letterSpacing: '.2em', color: '#8A8474' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {/* Deliberately not the mockup's "AO5 - ДУНДАЖ": this screen is
+            reached by Mo3 and best-of rounds too, and naming the average
+            there would be wrong for them. */}
+        <p style={{ font: '500 9px var(--oc-font-mono), monospace', letterSpacing: '.2em', color: '#6E6A62' }}>
           AO5
         </p>
         <p className="oc-solve-ao5-value-lg">{ao5 === null ? 'DNF' : fmtCentiseconds(ao5)}</p>

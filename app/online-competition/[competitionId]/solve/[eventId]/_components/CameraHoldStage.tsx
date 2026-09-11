@@ -6,33 +6,38 @@ import { useEffect, useState } from 'react';
  *
  *  Parameterised from OrientationHoldStage, which was one hard-coded
  *  instance of it: the same preview, the same instruction slot, the same
- *  one-segment-per-second tick bar. The solve flow has more than one such
- *  hold — the cube in a known orientation before the solve, the athlete's
- *  own timer before and after it — and three copies of this timer would
- *  drift apart. The timer is the thing a judge measures the hold against,
- *  so there is exactly one of it.
+ *  clock. The solve flow has more than one such hold — the cube in a
+ *  known orientation before the solve, the athlete's own timer before and
+ *  after it — and three copies of this timer would drift apart. The timer
+ *  is the thing a judge measures the hold against, so there is exactly
+ *  one of it.
  *
  *  IT DOES NOT TOUCH THE RECORDING. Recording runs continuously across
  *  these stages; this component starts and stops nothing. Its only effect
  *  is the clock that calls onDone.
  *
- *  The tick bar is the progress indicator rather than a countdown number,
- *  deliberately: the instruction is what the athlete has to read, and a
- *  large number beside it competes for the same attention. It is also the
- *  clock — one segment per second, from the same `seconds` that sets the
- *  timeout and the sentence. */
+ *  ONE PRESENTATION, NOT TWO. The tick bar is gone and the mockup's
+ *  countdown number has taken its place on all three holds. The mockup
+ *  uses that number wherever it holds an athlete in front of the camera —
+ *  zero, cover and verify all show the same 50px volt count and the same
+ *  СЕКУНД — and a second presentation for the other two holds would make
+ *  them read as different kinds of thing, which is exactly what they are
+ *  not. `seconds` still drives the timeout, the number and the sentence,
+ *  so none of the three can disagree with the other two. */
 export default function CameraHoldStage({
   seconds,
   label,
   instruction,
+  footnote,
   videoRef,
   onDone,
 }: {
-  /** How long to hold, in whole seconds. Also the number of segments in
-   *  the tick bar — one per second, so the bar IS the clock rather than a
-   *  separate animation of it. */
+  /** How long to hold, in whole seconds. Also what the countdown starts
+   *  from, so the number IS the clock rather than a separate animation
+   *  of it. */
   seconds: number;
-  /** The small mono eyebrow above the preview. */
+  /** WHICH hold this is, in the mockup's in-frame caption slot. The three
+   *  holds are distinguished by nothing else. */
   label: string;
   /** The dominant line: what to hold, how, and for how long — BUILT FROM
    *  `seconds`, not written beside it.
@@ -43,14 +48,16 @@ export default function CameraHoldStage({
    *  checks. Taking the number as an argument means the sentence can only
    *  say what the timer does. */
   instruction: (seconds: number) => string;
+  /** What happens when the count reaches zero. The mockup's volt line. */
+  footnote: string;
   videoRef: (el: HTMLVideoElement | null) => void;
   onDone: () => void;
 }) {
-  const [ticksFilled, setTicksFilled] = useState(0);
+  const [remaining, setRemaining] = useState(seconds);
 
   useEffect(() => {
     const interval = setInterval(() => {
-      setTicksFilled((t) => Math.min(t + 1, seconds));
+      setRemaining((r) => Math.max(r - 1, 0));
     }, 1000);
     const t = setTimeout(onDone, seconds * 1000);
     return () => {
@@ -61,35 +68,25 @@ export default function CameraHoldStage({
   }, []);
 
   return (
-    <div className="oc-solve-go">
-      <div>
-        <p style={{ font: '500 9px var(--oc-font-mono), monospace', letterSpacing: '.2em', color: '#8A8474' }}>
-          {label}
-        </p>
-        <div className="oc-solve-camera-box" style={{ marginTop: 10 }}>
-          <video ref={videoRef} autoPlay playsInline muted className="oc-solve-camera-video" />
-          <span className="oc-solve-corner oc-solve-corner-tl" aria-hidden />
-          <span className="oc-solve-corner oc-solve-corner-br" aria-hidden />
-        </div>
+    <div className="oc-solve-hold">
+      <div className="oc-solve-hold-count">
+        <span className="oc-solve-hold-rule" aria-hidden />
+        <span className="oc-solve-hold-n">{remaining}</span>
+        <span className="oc-solve-hold-unit">СЕКУНД</span>
       </div>
 
-      <div>
-        <p
-          style={{
-            font: '600 17px var(--oc-font-heading), sans-serif',
-            color: '#F4F1EA',
-            textAlign: 'center',
-            lineHeight: 1.45,
-          }}
-        >
-          {instruction(seconds)}
-        </p>
-        <div className="oc-solve-chunk-bar-track" style={{ marginTop: 14, justifyContent: 'center' }}>
-          {Array.from({ length: seconds }).map((_, i) => (
-            <span key={i} className={`oc-solve-chunk-bar${i < ticksFilled ? ' oc-solve-chunk-bar-filled' : ''}`} />
-          ))}
-        </div>
+      <p className="oc-solve-hold-say">{instruction(seconds)}</p>
+
+      <div className="oc-solve-hold-cam">
+        <video ref={videoRef} autoPlay playsInline muted className="oc-solve-camera-video" />
+        <span className="oc-solve-hold-caption">{label}</span>
+        <span className="oc-solve-hold-corner oc-solve-hold-corner-tl" aria-hidden />
+        <span className="oc-solve-hold-corner oc-solve-hold-corner-tr" aria-hidden />
+        <span className="oc-solve-hold-corner oc-solve-hold-corner-bl" aria-hidden />
+        <span className="oc-solve-hold-corner oc-solve-hold-corner-br" aria-hidden />
       </div>
+
+      <p className="oc-solve-hold-next">{footnote}</p>
     </div>
   );
 }

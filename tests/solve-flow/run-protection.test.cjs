@@ -260,12 +260,14 @@ console.log('\n  -- 5. the camera hold is ONE component --');
       /instruction: \(seconds: number\) => string;/.test(hold));
   ok('  ...and OrientationHoldStage is gone',
     !fs.existsSync(path.join(ROOT, SOLVE, '_components/OrientationHoldStage.tsx')));
-  // THE BAR IS THE CLOCK: one segment per second, from the same number
-  // that sets the timeout. A duration cannot be changed without the bar
-  // following it.
-  ok('the tick bar is derived from `seconds`, not a second constant',
-    hold.includes('Array.from({ length: seconds })') && hold.includes('setTimeout(onDone, seconds * 1000)'));
-  ok('  ...filling one segment a second', hold.includes('Math.min(t + 1, seconds)'));
+  // THE NUMBER IS THE CLOCK: it starts at the same value that sets the
+  // timeout. A duration cannot be changed without the display following
+  // it. (It was an 8-segment tick bar until the mockup restyle; the
+  // guarantee is the same one, on the mockup's countdown.)
+  ok('the countdown starts from `seconds`, not a second constant',
+    hold.includes('useState(seconds)') && hold.includes('setTimeout(onDone, seconds * 1000)'));
+  ok('  ...counting down one a second', hold.includes('Math.max(r - 1, 0)'));
+  ok('  ...and no tick bar survives beside it', !hold.includes('oc-solve-chunk-bar'));
   // It is a clock and a preview. Nothing else.
   ok('it starts and stops no recording',
     !hold.includes('startRecording') && !hold.includes('stopRecording') && !hold.includes('recorder'));
@@ -318,15 +320,14 @@ console.log('\n  -- 7. durations and markers --');
   ok('  ...and the beeps are gone',
     !rec.includes('BEEP') && !rec.includes('onBeep') && !page.includes('playBeep'));
   ok('  ...expressed as the preview frame’s border colour',
-    rec.includes('oc-solve-mark-${marker}') &&
-      theme.includes('.oc-solve-camera-box-portrait.oc-solve-mark-1'));
-  ok('  ...three steps of it', [1, 2, 3].every((n) => theme.includes(`.oc-solve-camera-box-portrait.oc-solve-mark-${n}`)));
+    rec.includes('oc-solve-mark-${marker}') && theme.includes('.oc-solve-rec-box.oc-solve-mark-1'));
+  ok('  ...three steps of it', [1, 2, 3].every((n) => theme.includes(`.oc-solve-rec-box.oc-solve-mark-${n}`)));
   // THE SEQUENCE ESCALATES. Red is intrinsically darker than amber, so
   // "make the last one red" silently made it the weakest of the three.
   // Measured in relative luminance, not eyeballed.
   {
     const colourOf = (n) => {
-      const at = theme.indexOf(`.oc-solve-camera-box-portrait.oc-solve-mark-${n} {`);
+      const at = theme.indexOf(`.oc-solve-rec-box.oc-solve-mark-${n} {`);
       const m = /border-color: (#[0-9A-Fa-f]{6})/.exec(theme.slice(at, at + 120));
       return m ? m[1] : null;
     };
@@ -590,6 +591,137 @@ console.log('\n  -- 9. the lobby and the between screen --');
   ok('the three holds did not move',
     page.includes('const HOLD_SECONDS = 8;') && (page.match(/<CameraHoldStage/g) ?? []).length === 3);
   ok('the markers did not move', rec.includes('const MARKER_TIMES_MS = [8000, 12000, 15000];'));
+}
+
+console.log('\n  -- 10. the mockup restyle --');
+{
+  const entry = fs.readFileSync(path.join(ROOT, SOLVE, '_components/EntryStage.tsx'), 'utf8');
+  const reveal = fs.readFileSync(path.join(ROOT, SOLVE, '_components/RevealStage.tsx'), 'utf8');
+  const ready = fs.readFileSync(path.join(ROOT, SOLVE, '_components/ReadyPromptStage.tsx'), 'utf8');
+  const sent = fs.readFileSync(path.join(ROOT, SOLVE, '_components/SentStage.tsx'), 'utf8');
+  // Comment-stripped, for the assertions that something is ABSENT: each
+  // of these files explains in a comment what it dropped and why, and the
+  // explanation contains the thing.
+  const readyCode = stripComments(ready);
+  const revealCode = stripComments(reveal);
+  const summaryCode = stripComments(summary);
+
+  // THE CAP THAT MADE EVERY MAX-WIDTH A LIE. The shell kept the old
+  // shell's 480px on the stage column, so lobby's declared 620 (and every
+  // other stage's) was clamped to 480 and nothing said so.
+  ok('the stage column no longer caps every screen at 480px',
+    /\.oc-solve-stage \{[\s\S]{0,160}?\}/.test(theme) &&
+      !/\.oc-solve-stage \{[\s\S]{0,160}?max-width/.test(theme));
+  ok('  ...so each screen carries the mockup’s own width', [
+    ['.oc-solve-entry', '380px'], ['.oc-solve-sent', '460px'], ['.oc-solve-between', '520px'],
+    ['.oc-solve-summary', '560px'], ['.oc-solve-lobby', '620px'], ['.oc-solve-hold', '680px'],
+    ['.oc-solve-rec', '720px'], ['.oc-solve-reveal', '760px'],
+  ].every(([sel, w]) => new RegExp(`\\${sel} \\{[\\s\\S]{0,220}?max-width: ${w};`).test(theme)));
+  ok('  ...and centres itself, since the column no longer does',
+    (theme.match(/\n  margin: auto;/g) ?? []).length >= 8);
+
+  // ── THE HOLD: one component, ONE presentation ──
+  ok('the three holds are still one component', (page.match(/<CameraHoldStage/g) ?? []).length === 3);
+  ok('  ...showing the mockup’s countdown, not a tick bar',
+    hold.includes('oc-solve-hold-n') && !hold.includes('oc-solve-chunk-bar'));
+  ok('  ...at the mockup’s 50px volt over a 4/3 frame',
+    /\.oc-solve-hold-n \{[\s\S]{0,140}?font: 700 50px\/1 var\(--oc-font-mono\)/.test(theme) &&
+      /\.oc-solve-hold-cam \{[\s\S]{0,260}?aspect-ratio: 4 \/ 3;/.test(theme));
+  ok('  ...with four corner brackets at 22px', ['tl', 'tr', 'bl', 'br']
+    .every((c) => theme.includes(`.oc-solve-hold-corner-${c} {`)) &&
+    /\.oc-solve-hold-corner \{[\s\S]{0,90}?width: 22px;/.test(theme));
+  // The label is what tells the three holds apart, so it survives the
+  // restyle -- in the mockup's in-frame caption slot.
+  ok('  ...and each hold still names itself inside the frame',
+    hold.includes('className="oc-solve-hold-caption">{label}'));
+  // NEW SLOT, one per hold: what happens when the count reaches zero.
+  ok('every hold says what the count leads to',
+    (page.match(/footnote="/g) ?? []).length === 3 &&
+      new Set(page.match(/footnote="([^"]+)"/g) ?? []).size === 3);
+
+  // ── READY: a stage after the hold, never a way to cut it short ──
+  ok('ready is reached only when the hold has run out',
+    page.includes("onDone={() => setStage('readyPrompt')}") && !page.includes('skipZero'));
+  ok('  ...and cannot end a hold itself', !readyCode.includes('seconds') && !readyCode.includes('setTimeout'));
+  ok('  ...it is the mockup’s full-bleed confirmation',
+    ready.includes('className="oc-solve-ready"') && ready.includes('ЦАГ ШАЛГАГДЛАА') &&
+      /\.oc-solve-ready \{[\s\S]{0,200}?position: absolute;[\s\S]{0,120}?background: #16180F;/.test(theme));
+  ok('  ...over a body that can host it', /\.oc-solve-body \{[\s\S]{0,220}?position: relative;/.test(theme));
+  ok('  ...and shows no preview of its own', !ready.includes('videoRef') && !ready.includes('<video'));
+
+  // ── REVEAL ──
+  ok('the reveal wears the mockup’s header',
+    reveal.includes('oc-solve-reveal-eyebrow') && reveal.includes('oc-solve-reveal-n'));
+  ok('  ...whose countdown is a readout of the chunk clock, not a second one',
+    reveal.includes('setSecondsLeft(GROUP_DISPLAY_MS / 1000)') &&
+      (reveal.match(/GROUP_DISPLAY_MS/g) ?? []).length === 6);
+  ok('  ...the chunk ticks are 9px squares', /\.oc-solve-chunk-bar \{[\s\S]{0,90}?width: 9px;[\s\S]{0,40}?height: 9px;/.test(theme));
+  ok('  ...and the moves are 68px tiles',
+    /\.oc-solve-move-tile \{[\s\S]{0,120}?width: 68px;[\s\S]{0,40}?height: 68px;/.test(theme));
+  ok('  ...with no side preview left', !revealCode.includes('videoRef') && !revealCode.includes('<video'));
+
+  // ── REC, minus the inspection panel ──
+  ok('rec is the mockup’s 4/3 frame',
+    rec.includes('className={`oc-solve-rec-box') &&
+      /\.oc-solve-rec-box \{[\s\S]{0,260}?aspect-ratio: 4 \/ 3;/.test(theme));
+  ok('  ...with the mockup’s finish button', rec.includes('>\n        Эвлүүлэлт дууссан\n      </button>'));
+  // The inspection strip under the preview belongs with `count`.
+  ok('  ...and NO inspection panel', !rec.includes('АЖИГЛАХ ХУГАЦАА') && !theme.includes('oc-solve-insp'));
+  ok('the scrolling tick strip is gone', !theme.includes('.oc-solve-tick-strip') && !rec.includes('tick-strip'));
+
+  // ── ENTRY: the mockup's `entry` block, NOT verify's ──
+  ok('entry is one 380px column', /\.oc-solve-entry \{[\s\S]{0,200}?max-width: 380px;/.test(theme));
+  ok('  ...with no camera beside the keypad', !entry.includes('videoRef') && !entry.includes('<video'));
+  ok('  ...the mockup’s 56px well', /\.oc-solve-entry-digits \{[\s\S]{0,120}?font: 700 56px\/0\.9/.test(theme));
+  ok('  ...and its 3-column keypad at gap 8',
+    /\.oc-solve-keypad \{[\s\S]{0,140}?grid-template-columns: repeat\(3, 1fr\);[\s\S]{0,40}?gap: 8px;/.test(theme));
+
+  // ── SUMMARY, minus the attestation ──
+  ok('the summary list is the mockup’s hairline stack',
+    /\.oc-solve-attempt-row \{[\s\S]{0,200}?padding: 13px 16px;/.test(theme) &&
+      /\.oc-solve-attempt-time \{[\s\S]{0,140}?font: 700 24px\/1/.test(theme));
+  ok('  ...and the average box its volt frame',
+    /\.oc-solve-ao5-box \{[\s\S]{0,200}?border: 1px solid #DFFF4F;[\s\S]{0,120}?padding: 16px 18px;/.test(theme) &&
+      /\.oc-solve-ao5-value \{[\s\S]{0,120}?font: 700 44px\/0\.9/.test(theme));
+  // Changeset 5, both of them: the checkbox and the label whose colours
+  // the mockup binds to it.
+  ok('  ...with NO attestation checkbox yet',
+    !summary.includes('Миний эвлүүлэлт үнэн зөв') && !summary.includes('confirmed'));
+  ok('  ...and the submit label unchanged',
+    summaryCode.includes("'Илгээх'") && !summaryCode.includes('Бүгдийг илгээх'));
+
+  // ── SENT ──
+  ok('the sent grid is 18px cells at gap 4',
+    /\.oc-solve-sent-grid \{[\s\S]{0,200}?repeat\(3, 18px\);[\s\S]{0,120}?gap: 4px;/.test(theme));
+  ok('  ...on the mockup’s ink', sent.includes("ink: '#1C1C21'"));
+
+  // ── WHAT MUST NOT MOVE ──
+  ok('the recording boundary did not move',
+    page.includes("if (stage === 'zeroDisplay') {") &&
+      page.includes("onFinish={() => setStage('finishHold')}") &&
+      page.includes('async function finishRecording'));
+  ok('the hold durations did not move',
+    page.includes('const HOLD_SECONDS = 8;') && (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3);
+  ok('the markers did not move', rec.includes('const MARKER_TIMES_MS = [8000, 12000, 15000];'));
+  ok('resume did not move',
+    /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page) &&
+      page.includes('setResumeMessage(resumeNotice(plan))'));
+  ok('lobby and between were not restyled',
+    lobby.includes('className="oc-solve-lobby"') && between.includes('className="oc-solve-between"') &&
+      /\.oc-solve-lobby \{[\s\S]{0,200}?max-width: 620px;[\s\S]{0,120}?gap: 24px;/.test(theme) &&
+      /\.oc-solve-between \{[\s\S]{0,200}?max-width: 520px;[\s\S]{0,120}?gap: 22px;/.test(theme));
+  ok('no stage was added or removed', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 13);
+  // cover, count and go would each be a new stage; verify would merge the
+  // closing hold with the keypad, which moves the recording boundary.
+  ok('  ...so cover, count, go and verify are absent',
+    !page.includes("'cover'") && !page.includes("'count'") && !page.includes("| 'go'") &&
+      !page.includes("'verify'"));
+
+  // 375px: the two that do not fit as specified.
+  ok('five 68px tiles shrink rather than wrapping at 375',
+    /\.oc-solve-move-tile \{\s*\n\s*width: 56px;/.test(theme));
+  ok('  ...and the 56px keypad well shrinks with them',
+    /\.oc-solve-entry-digits \{\s*\n\s*font-size: 44px;/.test(theme));
 }
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);

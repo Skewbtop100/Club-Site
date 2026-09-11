@@ -35,6 +35,15 @@ function digitsToCentiseconds(digits: string): number {
   return mm * 6000 + ss * 100 + cc;
 }
 
+/** The mockup's `entry`: ONE 380px column — label, well, keypad, confirm.
+ *
+ *  NOT the camera-left/keypad-right layout. That is the mockup's
+ *  `verify`, which folds this keypad into the closing camera hold so the
+ *  athlete types while still being recorded. Building it would move the
+ *  recording boundary, which this changeset may not do — and it is also
+ *  why there is no preview here: by the time this screen renders,
+ *  finishRecording has already stopped the recorder, and a live preview
+ *  beside the keypad would say the attempt was still being filmed. */
 export default function EntryStage({
   onConfirm,
 }: {
@@ -64,28 +73,24 @@ export default function EntryStage({
 
   return (
     <div className="oc-solve-entry">
-      <div>
-        <p style={{ font: '500 9px var(--oc-font-mono), monospace', letterSpacing: '.2em', color: '#8A8474' }}>
-          ЦАГАА БИЧ · ММ:СС.ХХ
-        </p>
-        <div className="oc-solve-entry-well" style={{ marginTop: 10 }}>
-          <span className="oc-solve-entry-digits" style={isDnf ? { color: '#D8402C' } : undefined}>
-            {isDnf ? 'DNF' : formatDigits(digits)}
-          </span>
-        </div>
+      <p className="oc-solve-entry-label">ЦАГАА БИЧ · ММ:СС.ХХ</p>
+      <div className="oc-solve-entry-well">
+        <span className="oc-solve-entry-digits" style={isDnf ? { color: '#D8402C' } : undefined}>
+          {isDnf ? 'DNF' : formatDigits(digits)}
+        </span>
+      </div>
 
-        <div className="oc-solve-keypad">
-          {KEYS.map((key) => (
-            <button
-              key={key.label}
-              type="button"
-              onClick={() => press(key)}
-              className={`oc-solve-key${key.type === 'dnf' ? ' oc-solve-key-dnf' : ''}`}
-            >
-              {key.label}
-            </button>
-          ))}
-        </div>
+      <div className="oc-solve-keypad">
+        {KEYS.map((key) => (
+          <button
+            key={key.label}
+            type="button"
+            onClick={() => press(key)}
+            className={`oc-solve-key${key.type === 'dnf' ? ' oc-solve-key-dnf' : ''}`}
+          >
+            {key.label}
+          </button>
+        ))}
       </div>
 
       <button type="button" className="oc-solve-btn-confirm" disabled={!canConfirm} onClick={handleConfirm}>

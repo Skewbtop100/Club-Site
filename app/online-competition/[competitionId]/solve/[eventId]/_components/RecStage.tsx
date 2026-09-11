@@ -10,6 +10,9 @@ import { useEffect, useState } from 'react';
  *  athlete who counts inspection by feel has something to check against. */
 const MARKER_TIMES_MS = [8000, 12000, 15000];
 
+/** The mockup's `rec`, MINUS its inspection panel — the ticks-and-count
+ *  strip under the preview belongs with the dedicated `count` stage and
+ *  arrives with it. The markers below stay exactly as they were. */
 export default function RecStage({
   videoRef,
   onFinish,
@@ -28,41 +31,38 @@ export default function RecStage({
 
   return (
     <div className="oc-solve-rec">
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span className="oc-solve-rec-dot" aria-hidden />
-          <span style={{ font: '500 10px var(--oc-font-mono), monospace', letterSpacing: '.2em', color: '#D8402C' }}>
-            БИЧИЖ БАЙНА
-          </span>
-        </div>
-        {/* THE MARKER IS THE FRAME, and nothing else.
-            The athlete is mid-solve: anything they could read is worse
-            than nothing, because reading it costs them the solve they are
-            reading it during. So it is the one-pixel border of the
-            preview they are already looking past — no text, no number, no
-            movement, and no layout change at any step. The colour walks
-            from the neutral frame through two dim ambers to a dim red over
-            an 800ms fade, so it registers as the frame having drifted
-            rather than as an event that happened.
+      <div className="oc-solve-rec-flag">
+        <span className="oc-solve-rec-dot" aria-hidden />
+        <span className="oc-solve-rec-flag-text">БИЧИЖ БАЙНА</span>
+      </div>
 
-            It is deliberately NOT a sound. The cues were beeps until now;
-            useSolveRecorder carries the reason nothing audio-shaped goes
-            anywhere near this flow again. */}
-        <div
-          className={`oc-solve-camera-box-portrait${marker > 0 ? ` oc-solve-mark-${marker}` : ''}`}
-          style={{ marginTop: 10 }}
-        >
-          <video ref={videoRef} autoPlay playsInline muted className="oc-solve-camera-video" />
-          <div className="oc-solve-tick-strip" aria-hidden />
-        </div>
-        <p style={{ marginTop: 10, font: '400 12px var(--oc-font-heading), sans-serif', color: '#8A8474' }}>
-          Дэлгэц дээр цаг харагдахгүй. Цагаа өөрөө хэмжиж, дараа нь бичнэ.
-        </p>
+      {/* THE MARKER IS THE FRAME, and nothing else.
+          The athlete is mid-solve: anything they could read is worse
+          than nothing, because reading it costs them the solve they are
+          reading it during. So it is the one-pixel border of the
+          preview they are already looking past — no text, no number, no
+          movement, and no layout change at any step. The colour walks
+          from the neutral frame through two dim ambers to a dim red over
+          an 800ms fade, so it registers as the frame having drifted
+          rather than as an event that happened. Same three colours and
+          the same fade as before; only the frame they sit on is the
+          mockup's 4/3 rather than the old portrait box.
+
+          It is deliberately NOT a sound. The cues were beeps until now;
+          useSolveRecorder carries the reason nothing audio-shaped goes
+          anywhere near this flow again. */}
+      <div className={`oc-solve-rec-box${marker > 0 ? ` oc-solve-mark-${marker}` : ''}`}>
+        <video ref={videoRef} autoPlay playsInline muted className="oc-solve-camera-video" />
+        <span className="oc-solve-rec-caption">КАМЕР</span>
       </div>
 
       <button type="button" className="oc-solve-btn-finish" onClick={onFinish}>
-        Дуусгах
+        Эвлүүлэлт дууссан
       </button>
+
+      <p className="oc-solve-rec-note">
+        Дэлгэц дээр цаг харагдахгүй. Эвлүүлж дуусаад товч дээр дарж цагаа бичиж оруулна.
+      </p>
     </div>
   );
 }

@@ -1270,13 +1270,14 @@ export default function SolvePage() {
             seconds={HOLD_SECONDS}
             label="ЦАГАА ХАРУУЛ · ЭХЛЭХИЙН ӨМНӨ"
             instruction={(sec) => `Өөрийн цагаа 0.00 дээр байхад нь камерт ${sec} секунд харуулна уу.`}
+            footnote="Хугацаа дуусаад холилт гарч эхэлнэ."
             videoRef={recorder.videoRef}
             onDone={() => setStage('scrambleReveal')}
           />
         )}
 
         {stage === 'scrambleReveal' && (
-          <RevealStage scramble={scramble} videoRef={recorder.videoRef} onDone={() => setStage('orientationHold')} />
+          <RevealStage scramble={scramble} onDone={() => setStage('orientationHold')} />
         )}
 
         {/* The cube in a known orientation before the solve, so a judge
@@ -1291,13 +1292,14 @@ export default function SolvePage() {
             instruction={(sec) =>
               `Шоогоо цагаан тал дээшээ, ногоон тал дэлгэц рүү харагдахаар байрлуулаад ${sec} секунд хөдөлгөөнгүй барина уу.`
             }
+            footnote="Хугацаа дуусаад эвлүүлэлт эхэлнэ."
             videoRef={recorder.videoRef}
             onDone={() => setStage('readyPrompt')}
           />
         )}
 
         {stage === 'readyPrompt' && (
-          <ReadyPromptStage videoRef={recorder.videoRef} onDone={() => setStage('rec')} />
+          <ReadyPromptStage onDone={() => setStage('rec')} />
         )}
 
         {stage === 'rec' && (
@@ -1315,6 +1317,7 @@ export default function SolvePage() {
             seconds={HOLD_SECONDS}
             label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"
             instruction={(sec) => `Хэмжсэн цагаа камерт тод харагдахаар ${sec} секунд барина уу.`}
+            footnote="Хугацаа дуусаад цагаа бичих хэсэг нээгдэнэ."
             videoRef={recorder.videoRef}
             onDone={finishRecording}
           />
