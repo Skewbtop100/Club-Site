@@ -15,6 +15,8 @@ import RegistrationPanel from './_components/RegistrationPanel';
 import { useMyRegistration } from './_components/useMyRegistration';
 import RegistrationStatusBadge from '../../_components/RegistrationStatusBadge';
 import StartRoundPanel from './_components/StartRoundPanel';
+import AthletesTab from './_components/AthletesTab';
+import type { CompetitionRoster } from '@/app/api/online-competition/competitions/[id]/roster/route';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import type { RoundAccess } from '@/lib/online-competition/round-access';
 
@@ -78,6 +80,29 @@ export default function CompetitionDetailPage() {
   // The athlete's own registration — read here rather than inside the
   // panel so the sidebar can show its status before the panel is opened.
   const myRegistration = useMyRegistration(competitionId);
+
+  // ── Who is competing ──────────────────────────────────────────────────
+  // Public, and it has to come from a route: neither registrations
+  // (owner-only) nor onlineParticipants (signed-in) is publicly readable,
+  // and rules cannot project fields. The route publishes a whitelist.
+  const [roster, setRoster] = useState<CompetitionRoster | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/online-competition/competitions/${encodeURIComponent(competitionId)}/roster`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('failed'))))
+      .then((d: CompetitionRoster) => {
+        if (!cancelled) setRoster(d);
+      })
+      .catch(() => {
+        // The tab shows its own loading state; a failed roster must not
+        // take the page down with it.
+        if (!cancelled) setRoster(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [competitionId]);
 
   // ── Which round is open, for this athlete ─────────────────────────────
   // roundState is denied to every client by firestore.rules, so "is a
@@ -260,18 +285,16 @@ export default function CompetitionDetailPage() {
             <div className="oc-cd-cells">
               <div className="oc-cd-cell">
                 <span className="oc-cd-cell-label">ТАМИРЧИН</span>
-                {/* Registered counts have NO public read path:
-                    registrations live at onlineParticipants/{uid}/
-                    registrations, whose rule is `allow read: if
-                    isSignedIn()` on the individual document with no
-                    collection-group rule — so neither an anonymous nor a
-                    signed-in visitor can count across athletes. The
-                    denominator is the real declared capacity; the
-                    numerator is an em dash rather than an invented
-                    number. "— / 64" is deliberately kept over a bare
-                    "64", which under a ТАМИРЧИН label would read as
-                    "64 registered". */}
-                <span className="oc-cd-cell-value">— / {limit === null ? '∞' : limit}</span>
+                {/* This read "— / 64" for as long as the page has
+                    existed: registrations are owner-only, so no client
+                    could count across athletes. The roster route does it
+                    server-side with the Admin SDK and publishes the
+                    APPROVED count — which is what a ТАМИРЧИН label always
+                    meant. Still an em dash until it arrives, rather than a
+                    0 that would read as "nobody has entered". */}
+                <span className="oc-cd-cell-value">
+                  {roster ? roster.approvedCount : '—'} / {limit === null ? '∞' : limit}
+                </span>
               </div>
               <div className="oc-cd-cell">
                 <span className="oc-cd-cell-label">БҮРТГЭЛ ХААГДАХАД</span>
@@ -313,10 +336,15 @@ export default function CompetitionDetailPage() {
                 )
               }
             />
-            {/* No count: see the ТАМИРЧИН cell above — the number does not
-                exist publicly, and a 0 here would be a lie rather than a
-                gap. */}
-            <SideItem active={side === 'athletes'} onClick={() => setSide('athletes')} label="Тамирчид" count="—" />
+            {/* The approved count, from the same roster route as the
+                ТАМИРЧИН cell above — it was an em dash here for the same
+                reason, and it is a real number for the same reason. */}
+            <SideItem
+              active={side === 'athletes'}
+              onClick={() => setSide('athletes')}
+              label="Тамирчид"
+              count={roster ? String(roster.approvedCount) : '—'}
+            />
           </nav>
 
           <div className="oc-cd-content">
@@ -406,7 +434,7 @@ export default function CompetitionDetailPage() {
             ) : (
               <>
                 <h2 className="oc-cd-section-label">Тамирчид</h2>
-                <p className="oc-cd-soon">Энэ хэсэг удахгүй нэмэгдэнэ.</p>
+                <AthletesTab roster={roster} />
               </>
             )}
           </div>

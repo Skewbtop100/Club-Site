@@ -1807,6 +1807,91 @@
   white-space: nowrap;
 }
 
+/* ── The public athlete roster (Тамирчид) ──────────────────────────────
+   Prefixed .oc-ro-, NOT .oc-rs-, which the registration status badge
+   already owns (.oc-rs, .oc-rs-dot, .oc-rs-amber ...). */
+.oc-ro-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 16px;
+}
+.oc-ro-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #1C1C21;
+  background: transparent;
+  color: #9A958A;
+  padding: 7px 11px 7px 7px;
+  font: 600 11px var(--oc-font-heading), sans-serif;
+  cursor: pointer;
+}
+.oc-ro-filter:hover {
+  border-color: #2A2A31;
+  color: #F4F1EA;
+}
+.oc-ro-filter-on {
+  border-color: #DFFF4F;
+  color: #DFFF4F;
+}
+.oc-ro-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 380px;
+}
+.oc-ro-table th {
+  text-align: left;
+  padding: 0 10px 8px;
+  border-bottom: 1px solid #1C1C21;
+  font: 500 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.14em;
+  color: #6E6A62;
+  white-space: nowrap;
+}
+.oc-ro-table td {
+  padding: 10px;
+  border-bottom: 1px solid #131318;
+  font: 500 13px var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+  vertical-align: middle;
+}
+.oc-ro-col-rank {
+  width: 34px;
+  font-variant-numeric: tabular-nums;
+  color: #6E6A62 !important;
+  font-family: var(--oc-font-mono), monospace;
+}
+.oc-ro-col-avatar {
+  width: 34px;
+  padding-right: 0 !important;
+}
+.oc-ro-col-name {
+  width: 100%;
+}
+.oc-ro-col-num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.oc-ro-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid #2A2A31;
+  background: #131318;
+  color: #9A958A;
+  font: 600 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.04em;
+}
+.oc-ro-note {
+  margin-top: 12px;
+  font: 400 11px var(--oc-font-heading), sans-serif;
+  color: #6E6A62;
+}
+
 .oc-cd-layout {
   display: grid;
   grid-template-columns: 210px minmax(0, 1fr);
