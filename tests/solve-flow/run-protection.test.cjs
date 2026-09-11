@@ -106,11 +106,12 @@ console.log('\n  -- 2. an empty recording is not accepted --');
     page.includes("if (!recorder.startRecording()) setRecordingFailure('start');"));
   ok('a failure moves the run to its own stage, not onward',
     page.includes("if (recordingFailure !== null) setStage('recordingFailed');"));
-  // Started, ran, and produced an empty container anyway.
+  // Started, ran, and produced an empty container anyway. The check moved
+  // with the stop (changeset 2) and lives in finishRecording now.
   ok('the finished blob is checked before the attempt is accepted',
     /if \(blob\.size < MIN_RECORDING_BYTES\) \{\s*\n\s*setRecordingFailure\('empty'\);\s*\n\s*return;/.test(page));
   ok('  ...and the blob is only kept when it passes',
-    page.indexOf('setRecordingFailure(\'empty\')') < page.indexOf('pendingBlobRef.current = blob;'));
+    page.indexOf("setRecordingFailure('empty')") < page.indexOf('setPendingBlob(blob);'));
   ok('the threshold is 1KB', /const MIN_RECORDING_BYTES = 1024;/.test(page));
   ok('the stage is rendered', page.includes("{stage === 'recordingFailed' && recordingFailure !== null && ("));
   // The stream that just failed is still an object, so requestCamera
@@ -118,7 +119,7 @@ console.log('\n  -- 2. an empty recording is not accepted --');
   ok('reconnecting releases the dead stream first',
     /recorder\.releaseCamera\(\);\s*\n\s*void recorder\.requestCamera\(\);/.test(page));
   ok('restarting replays the SAME attempt from the top',
-    /setRecordingFailure\(null\);\s*\n\s*setStage\('zeroDisplay'\);/.test(page));
+    /setRecordingFailure\(null\);\s*\n\s*setPendingBlob\(null\);\s*\n\s*setStage\('zeroDisplay'\);/.test(page));
   ok('the athlete can see the camera before restarting', failed.includes('<video ref={videoRef}'));
   ok('  ...and cannot restart until there is one', failed.includes('disabled={!hasCamera}'));
   ok('the screen offers no way off the page', !/href|next\/link/i.test(failed));
@@ -262,7 +263,10 @@ console.log('\n  -- 5. the camera hold is ONE component --');
   ok('  ...and the same instruction, word for word',
     page.includes('instruction="Шоогоо цагаан тал дээшээ, ногоон тал дэлгэц рүү харагдахаар байрлуулаад 5 секунд хөдөлгөөнгүй барина уу."'));
   ok('  ...under the same stage name', page.includes("{stage === 'orientationHold' && ("));
-  ok('  ...used exactly once, for now', (page.match(/<CameraHoldStage/g) ?? []).length === 1);
+  // Two uses now (changeset 2 added the closing hold); steps 2 and 5 of
+  // the new flow will make it three. One component, one timer.
+  ok('  ...used for both holds, from one component',
+    (page.match(/<CameraHoldStage/g) ?? []).length === 2);
 
   // Explicitly NOT touched here — each is its own later changeset, and a
   // short video afterwards must have exactly one suspect.
@@ -273,6 +277,59 @@ console.log('\n  -- 5. the camera hold is ONE component --');
     page.includes("if (stage === 'zeroDisplay') {"));
   ok('  ...and stops when the solve is finished, in RecStage',
     page.includes('const blob = await recorder.stopRecording();'));
+}
+
+console.log('\n  -- 6. the recording stops AFTER the closing hold --');
+{
+  // The clip used to end the instant the solve did. The reading on the
+  // athlete's own timer is the evidence for the number they type next, so
+  // it has to be on the same continuous video as the solve.
+  ok('the solve’s end button only changes stage — it stops nothing',
+    page.includes("onFinish={() => setStage('finishHold')}"));
+  ok('the closing hold is 8 seconds of CameraHoldStage',
+    page.includes('const FINISH_HOLD_SECONDS = 8;') && page.includes('seconds={FINISH_HOLD_SECONDS}'));
+  // A stage missing from HEADER_STAGES loses the header and the attempt
+  // pips silently, mid-attempt.
+  ok('  ...and it is in HEADER_STAGES', /'rec',\s*\n\s*'finishHold',/.test(page));
+
+  // THE INVARIANT THAT MATTERS MOST: the stop, the size check and the
+  // handoff are one function, in one order. Splitting them is how an
+  // attempt gets filed with no video.
+  const finish = page.slice(page.indexOf('async function finishRecording'), page.indexOf('function handleEntryConfirm'));
+  ok('stopRecording, the size check and the handoff are ONE function',
+    finish.includes('await recorder.stopRecording()') &&
+      finish.includes('blob.size < MIN_RECORDING_BYTES') &&
+      finish.includes('setPendingBlob(blob)'));
+  ok('  ...in that order', finish.indexOf('stopRecording') < finish.indexOf('MIN_RECORDING_BYTES') &&
+    finish.indexOf('MIN_RECORDING_BYTES') < finish.indexOf('setPendingBlob(blob)'));
+  ok('  ...and the keypad is entered from the same place, after the blob',
+    finish.indexOf('setPendingBlob(blob)') < finish.indexOf("setStage('entry')"));
+  ok('  ...with an empty recording never reaching it',
+    finish.indexOf("setRecordingFailure('empty')") < finish.indexOf('setPendingBlob(blob)'));
+
+  // STRUCTURAL, not sequential: the keypad cannot render without a
+  // recording, and confirming takes one as a required argument.
+  ok('the keypad cannot render without a recording',
+    page.includes("{stage === 'entry' && pendingBlob && ("));
+  ok('  ...and hands it to the confirm', page.includes('handleEntryConfirm(result, pendingBlob)'));
+  ok('  ...which requires it as an argument', /function handleEntryConfirm\([\s\S]{0,600}?blob: Blob,\s*\n\s*\) \{/.test(page));
+  // The fallback that would have filed a 0-byte video is gone, along with
+  // the ref that could be read as null.
+  const code = page.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  ok('the `?? new Blob` fallback is gone', !code.includes('new Blob('));
+  ok('  ...and so is the ref it guarded', !page.includes('pendingBlobRef'));
+  ok('the blob is cleared with the attempt it belonged to', page.includes('setPendingBlob(null);'));
+
+  // NOT IN THIS DIFF. Each is its own changeset; a short video afterwards
+  // must have exactly one suspect.
+  ok('the opening hold is untouched: zeroDisplay, 5 seconds',
+    zero.includes('const ZERO_DISPLAY_MS = 5000;') && page.includes("if (stage === 'zeroDisplay') {"));
+  ok('the beep cues are untouched: 8s and 12s',
+    rec.includes('const BEEP_CUE_TIMES_MS = [8000, 12000];'));
+  ok('the orientation hold is untouched: 5 seconds', page.includes('seconds={5}'));
+  ok('no instructions stage was added', !page.includes("'instructions'"));
+  ok('resume is untouched: a complete run still lands on the summary',
+    /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page) && !/plan[\s\S]{0,400}finishHold/.test(page));
 }
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);

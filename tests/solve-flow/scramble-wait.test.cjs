@@ -73,8 +73,11 @@ console.log('\n  -- the run cannot start recording without a scramble --');
   // Restarting an attempt whose recording failed. It re-enters the attempt
   // it was already in, on the scramble that attempt was given — no fetch,
   // so nothing can have cleared it.
+  // (It also clears the recording of the attempt being restarted —
+  // changeset 2 put the blob in state, and a restarted attempt starts with
+  // none in hand.)
   ok('  ...and the recording-failure restart, which replays the same attempt',
-    /setRecordingFailure\(null\);\s*\n\s*setStage\('zeroDisplay'\);/.test(page));
+    /setRecordingFailure\(null\);\s*\n\s*setPendingBlob\(null\);\s*\n\s*setStage\('zeroDisplay'\);/.test(page));
   // The two places an attempt begins mid-run.
   const confirm = page.slice(page.indexOf('function handleEntryConfirm'), page.indexOf('// NO REDO.'));
   ok('handleEntryConfirm starts the next attempt on the WAIT stage',

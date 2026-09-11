@@ -63,6 +63,12 @@ type Stage =
   | 'orientationHold'
   | 'readyPrompt'
   | 'rec'
+  /** The hold AFTER the solve: the athlete shows their timer to the
+   *  camera, and the recording runs through it. THE CLIP STOPS HERE, not
+   *  at the button that ends the solve — the reading on that timer is the
+   *  evidence for the time typed on the next screen, so it has to be on
+   *  the same continuous video as the solve it belongs to. */
+  | 'finishHold'
   | 'entry'
   /** Waiting for recordings to reach the server. Normally seen once, after
    *  the last attempt; also mid-run when a filing failed, because the next
@@ -118,6 +124,7 @@ const HEADER_STAGES: Stage[] = [
   'orientationHold',
   'readyPrompt',
   'rec',
+  'finishHold',
   'entry',
 ];
 
@@ -131,6 +138,10 @@ const HEADER_STAGES: Stage[] = [
  *  1 KB sits two orders of magnitude below the smallest real clip and an
  *  order above an empty one, so it cannot reject a genuine recording. */
 const MIN_RECORDING_BYTES = 1024;
+
+/** The closing hold: long enough for a judge to read a timer off the
+ *  video, and the same length the mockup gives every other hold. */
+const FINISH_HOLD_SECONDS = 8;
 
 /** The browser's own dialog wording is not ours to choose, so
  *  beforeunload gets no message. Ours is for in-app navigation.
@@ -158,7 +169,18 @@ export default function SolvePage() {
   const [attemptIndex, setAttemptIndex] = useState(0);
   const [scramble, setScramble] = useState('');
   const [attempts, setAttempts] = useState<Attempt[]>([]);
-  const pendingBlobRef = useRef<Blob | null>(null);
+  /** The recording of the attempt being entered, between the moment it is
+   *  accepted and the moment the athlete confirms their time.
+   *
+   *  STATE, NOT A REF, and that is the whole safety argument of this
+   *  changeset. The keypad cannot render without it (see the render gate),
+   *  and handleEntryConfirm takes it as a REQUIRED PARAMETER rather than
+   *  reading it — so "confirm a time with no video" is not an ordering
+   *  mistake waiting to happen, it is a thing that does not typecheck and
+   *  does not render. A ref could be read as null by a keypad that mounted
+   *  first, and the old `?? new Blob([])` fallback would then have filed a
+   *  0-byte video with a time attached to it. */
+  const [pendingBlob, setPendingBlob] = useState<Blob | null>(null);
   /** Why the recording for the current attempt is unusable, or null.
    *  Drives the recordingFailed stage. */
   const [recordingFailure, setRecordingFailure] = useState<'start' | 'empty' | null>(null);
@@ -805,7 +827,35 @@ export default function SolvePage() {
     };
   }, []);
 
-  function handleEntryConfirm(result: { timeCs: number | null; isDnf: boolean }) {
+  /** Ends the recording and hands it to the keypad. The ONLY route from
+   *  the closing hold to the time entry.
+   *
+   *  The blob and the stage are set together, so React commits them in one
+   *  render: the keypad never exists in a frame where the recording does
+   *  not. A recording that came back empty goes to the failure stage
+   *  instead — the athlete re-solves the attempt rather than filing a time
+   *  with no evidence. */
+  async function finishRecording() {
+    const blob = await recorder.stopRecording();
+    // A recorder that started and still produced nothing — the stream died
+    // mid-attempt. Accepting this hands the judge an empty file with a
+    // time attached to it.
+    if (blob.size < MIN_RECORDING_BYTES) {
+      setRecordingFailure('empty');
+      return;
+    }
+    setPendingBlob(blob);
+    setStage('entry');
+  }
+
+  function handleEntryConfirm(
+    result: { timeCs: number | null; isDnf: boolean },
+    /** REQUIRED. The attempt's recording, handed in by the keypad's render
+     *  gate. Not read from a ref: an attempt cannot be filed without the
+     *  video it is evidence for, and that is now a type error rather than
+     *  a runtime `?? new Blob([])`. */
+    blob: Blob,
+  ) {
     // Over the event's per-attempt limit? The attempt still COUNTS as an
     // attempt and the run continues — ending it here would be cutoff
     // behaviour, which this is not.
@@ -845,11 +895,13 @@ export default function SolvePage() {
     // Straight into the queue, unawaited: the athlete goes on to the next
     // attempt while this uploads behind them.
     enqueueFiling(index, {
-      blob: pendingBlobRef.current ?? new Blob([], { type: 'video/webm' }),
+      blob,
       timeCs: result.timeCs,
       isDnf: result.isDnf,
     });
-    pendingBlobRef.current = null;
+    // Cleared with the attempt it belonged to: the next keypad cannot
+    // reach a stale recording, because there is none to reach.
+    setPendingBlob(null);
 
     // ── THE CUTOFF ──
     // The SAME evaluation a resumed run gets (run-resume.ts), over the
@@ -1165,6 +1217,7 @@ export default function SolvePage() {
                nothing about it has been kept. */
             onRestartAttempt={() => {
               setRecordingFailure(null);
+              setPendingBlob(null);
               setStage('zeroDisplay');
             }}
           />
@@ -1199,22 +1252,30 @@ export default function SolvePage() {
           <RecStage
             videoRef={recorder.videoRef}
             onBeep={recorder.playBeep}
-            onFinish={async () => {
-              const blob = await recorder.stopRecording();
-              // A recorder that started and still produced nothing —
-              // the stream died mid-attempt. Accepting this hands the
-              // judge an empty file with a time attached to it.
-              if (blob.size < MIN_RECORDING_BYTES) {
-                setRecordingFailure('empty');
-                return;
-              }
-              pendingBlobRef.current = blob;
-              setStage('entry');
-            }}
+            /* The solve is over; the RECORDING IS NOT. It runs through
+               the closing hold, where the athlete shows the timer that
+               produced the number they are about to type. */
+            onFinish={() => setStage('finishHold')}
           />
         )}
 
-        {stage === 'entry' && <EntryStage onConfirm={handleEntryConfirm} />}
+        {stage === 'finishHold' && (
+          <CameraHoldStage
+            seconds={FINISH_HOLD_SECONDS}
+            label="ЦАГАА ХАРУУЛ"
+            instruction="Хэмжсэн цагаа камерт тод харагдахаар 8 секунд барина уу."
+            videoRef={recorder.videoRef}
+            onDone={finishRecording}
+          />
+        )}
+
+        {/* THE GATE: no blob, no keypad. The only way to reach this
+            screen is through finishRecording, which sets the blob and the
+            stage together — but this says so structurally rather than
+            relying on that ordering holding forever. */}
+        {stage === 'entry' && pendingBlob && (
+          <EntryStage onConfirm={(result) => handleEntryConfirm(result, pendingBlob)} />
+        )}
 
         {stage === 'filing' && (
           <FilingStage
