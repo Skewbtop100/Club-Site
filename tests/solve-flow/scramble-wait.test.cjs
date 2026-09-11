@@ -62,14 +62,26 @@ console.log('\n  -- a stale scramble can never be displayed --');
 
 console.log('\n  -- the run cannot start recording without a scramble --');
 {
-  // zeroDisplay is what starts the MediaRecorder. Three, and only three,
-  // places may enter it, and each one already holds a scramble.
+  // zeroDisplay is what starts the MediaRecorder. Four, and only four,
+  // places may enter it, and each one already holds a scramble. (Four
+  // since the between screen: the athlete now presses to begin each
+  // attempt, and lobby and between press the same way.)
   const intoZero = page.match(/setStage\([^)]*zeroDisplay/g) ?? [];
-  ok('exactly three transitions into zeroDisplay', intoZero.length === 3, intoZero.join(' | '));
+  ok('exactly four transitions into zeroDisplay', intoZero.length === 4, intoZero.join(' | '));
   ok('  ...the promotion effect, which requires a scramble',
     /if \(stage !== 'scrambleWait'\) return;[\s\S]{0,600}?if \(scramble\) setStage\('zeroDisplay'\);/.test(page));
-  ok('  ...cameraSetup, which falls back to the wait when there is none',
-    page.includes("onDone={() => setStage(scramble ? 'zeroDisplay' : 'scrambleWait')}"));
+  ok('  ...the lobby, which falls back to the wait when there is none',
+    page.includes("onStart={() => setStage(scramble ? 'zeroDisplay' : 'scrambleWait')}"));
+  // The between screen's button, which starts every attempt after the
+  // first. Same fallback, same reason: handleEntryConfirm fetched this
+  // attempt's scramble when the previous one ended, so it is normally
+  // already in hand -- but if it is not, the run waits rather than
+  // recording without one.
+  ok('  ...the between screen, which falls back the same way', (() => {
+    const next = page.slice(page.indexOf('onNext={() => {'), page.indexOf('/* Manual retry.'));
+    return next.includes("setStage(scramble ? 'zeroDisplay' : 'scrambleWait');") &&
+      next.includes("setStage('summary');");
+  })());
   // Restarting an attempt whose recording failed. It re-enters the attempt
   // it was already in, on the scramble that attempt was given — no fetch,
   // so nothing can have cleared it.
@@ -80,8 +92,12 @@ console.log('\n  -- the run cannot start recording without a scramble --');
     /setRecordingFailure\(null\);\s*\n\s*setPendingBlob\(null\);\s*\n\s*setStage\('zeroDisplay'\);/.test(page));
   // The two places an attempt begins mid-run.
   const confirm = page.slice(page.indexOf('function handleEntryConfirm'), page.indexOf('// NO REDO.'));
-  ok('handleEntryConfirm starts the next attempt on the WAIT stage',
-    confirm.includes("setStage('scrambleWait')") && !confirm.includes("setStage('zeroDisplay')"));
+  // It no longer starts the next attempt at all: it ends on the between
+  // screen, which is where the athlete chooses to go again. What has not
+  // changed is the thing this was guarding -- handleEntryConfirm never
+  // enters the recording stage directly.
+  ok('handleEntryConfirm ends the attempt on the BETWEEN stage',
+    confirm.includes("setStage('between')") && !confirm.includes("setStage('zeroDisplay')"));
   // The third route in is the recording-failure restart; the run has no
   // other way to re-enter an attempt now that redo is gone.
   ok('there is no redo to re-enter the run through',

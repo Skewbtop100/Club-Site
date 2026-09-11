@@ -22,11 +22,19 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+/** Source with its comments removed. A comment explaining a removed
+ *  string contains that string, and would fail the assertion that it is
+ *  gone. */
+function stripComments(src) {
+  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+}
+
 const ROOT = path.join(__dirname, '..', '..');
 const SOLVE = 'app/online-competition/[competitionId]/solve/[eventId]';
 const page = fs.readFileSync(path.join(ROOT, SOLVE, 'page.tsx'), 'utf8');
 const failed = fs.readFileSync(path.join(ROOT, SOLVE, '_components/RecordingFailedStage.tsx'), 'utf8');
-const filing = fs.readFileSync(path.join(ROOT, SOLVE, '_components/FilingStage.tsx'), 'utf8');
+const between = fs.readFileSync(path.join(ROOT, SOLVE, '_components/BetweenStage.tsx'), 'utf8');
+const lobby = fs.readFileSync(path.join(ROOT, SOLVE, '_components/LobbyStage.tsx'), 'utf8');
 const hold = fs.readFileSync(path.join(ROOT, SOLVE, '_components/CameraHoldStage.tsx'), 'utf8');
 const rec = fs.readFileSync(path.join(ROOT, SOLVE, '_components/RecStage.tsx'), 'utf8');
 const theme = fs.readFileSync(path.join(ROOT, 'app/online-competition/theme.css'), 'utf8');
@@ -138,8 +146,8 @@ console.log('\n  -- 3. each attempt is filed as it is recorded --');
   ok('a solved attempt goes straight into the filing queue', confirm.includes('enqueueFiling(index, {'));
   ok('  ...unawaited — the athlete moves on to the next attempt',
     !/await enqueueFiling|await pumpFiling/.test(page));
-  ok('  ...and the run ends at the filing stage, never straight at the summary',
-    confirm.includes("setStage('filing')") && !confirm.includes("setStage('summary')"));
+  ok('  ...and the run ends at the between stage, never straight at the summary',
+    confirm.includes("setStage('between')") && !confirm.includes("setStage('summary')"));
 
   // One connection, one attempt, in order.
   ok('the queue is single-flight', worker.includes('if (filingBusyRef.current) return;'));
@@ -163,15 +171,19 @@ console.log('\n  -- 3. each attempt is filed as it is recorded --');
       page.includes('if (filingRetryTimerRef.current) clearTimeout(filingRetryTimerRef.current);'));
   ok('  ...and a conflict never auto-retries (it can never come good)',
     worker.includes('if (!conflict && spent < FILING_AUTO_RETRIES)'));
-  ok('the manual retry is the filing screen’s only action',
-    page.includes('void pumpFiling();') && filing.includes('onRetry'));
-  ok('  ...and that screen offers no way off the page', !/href|next[/]link/i.test(filing));
+  ok('the manual retry lives on the between screen',
+    page.includes('void pumpFiling();') && between.includes('onRetry'));
+  ok('  ...and that screen offers no way off the page', !/href|next[/]link/i.test(between));
 
   // The run stops before it can pile up unfiled recordings.
   ok('a filing that gave up blocks the next attempt before it records',
-    /if \(filingFailed\) \{\s*\n\s*setStage\('filing'\);/.test(page));
+    /if \(filingFailed\) \{\s*\n\s*setStage\('between'\);/.test(page));
+  // The effect that used to hold the run on the filing screen is gone --
+  // between is left by pressing a button, not by a counter reaching zero.
+  // The same guarantee is now that button's own disabled state.
   ok('the summary is unreachable while anything is unfiled',
-    /if \(stage !== 'filing'\) return;\s*\n\s*if \(unfiledCount > 0\) return;/.test(page));
+    between.includes('const waitingToFinish = runComplete && unfiledCount > 0 && !filingFailed;') &&
+      between.includes('disabled={waitingToFinish}'));
 
   // Finish uploads nothing.
   ok('handleFinish sends no video', !finish.includes('uploadVideoToCloudinary'));
@@ -294,8 +306,10 @@ console.log('\n  -- 7. durations and markers --');
   // THE OPENING HOLD is now the athlete's own timer, held to the camera —
   // with a preview to aim at, which the on-screen "0.00" never gave them.
   ok('the opening hold is a camera hold', !fs.existsSync(path.join(ROOT, SOLVE, '_components/ZeroDisplayStage.tsx')));
-  ok('  ...under the SAME stage name, so the three transitions still land',
-    page.includes("{stage === 'zeroDisplay' && (") && (page.match(/setStage\([^)]*zeroDisplay/g) ?? []).length === 3);
+  // Four transitions since the between screen: the athlete presses to
+  // begin each attempt now, so lobby and between both enter it.
+  ok('  ...under the SAME stage name, so every transition still lands',
+    page.includes("{stage === 'zeroDisplay' && (") && (page.match(/setStage\([^)]*zeroDisplay/g) ?? []).length === 4);
   ok('  ...showing the athlete their own timer at 0.00', /0\.00 дээр байхад нь камерт/.test(page));
 
   // THE MARKERS: colour, never sound, never anything readable.
@@ -436,7 +450,7 @@ console.log('\n  -- 8. the competition environment --');
   ok('the filing indicator and the resume notice moved into the body',
     page.includes('oc-solve-banner-quiet') && page.includes('className="oc-solve-banner"'));
   ok('  ...above the stage, inside the scrolling column',
-    page.indexOf('oc-solve-banner') < page.indexOf("{stage === 'cameraSetup'"));
+    page.indexOf('oc-solve-banner') < page.indexOf("{stage === 'lobby'"));
 
   // 375px: six elements do not fit one row. What goes, goes in order of
   // what it carries — and never the way out.
@@ -460,6 +474,122 @@ console.log('\n  -- 8. the competition environment --');
     rec.includes('const MARKER_TIMES_MS = [8000, 12000, 15000];'));
   ok('resume is untouched: a complete run still lands on the summary',
     /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page));
+}
+
+console.log('\n  -- 9. the lobby and the between screen --');
+{
+  // TWO STAGES ABSORBED, not hidden. cameraSetup existed only to ask for
+  // the camera; filing existed only to say "wait". Both jobs belong to a
+  // screen the athlete was going to be standing on anyway.
+  ok('cameraSetup is gone, file and all',
+    !fs.existsSync(path.join(ROOT, SOLVE, '_components/CameraSetupStage.tsx')));
+  ok('filing is gone, file and all',
+    !fs.existsSync(path.join(ROOT, SOLVE, '_components/FilingStage.tsx')));
+  ok('  ...and neither stage name survives anywhere in the page',
+    !page.includes("'cameraSetup'") && !page.includes("'filing'"));
+  ok('  ...nor as a render branch',
+    !page.includes("stage === 'cameraSetup'") && !page.includes("stage === 'filing'"));
+  ok('the run still has thirteen stages', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 13);
+  ok('  ...two of them new', page.includes("| 'lobby'") && page.includes("| 'between'"));
+
+  // ── LOBBY ──
+  ok('the run opens on the lobby', page.includes("useState<Stage>('lobby')"));
+  ok('  ...which asks for the camera itself', lobby.includes('void onRequestCamera();'));
+  ok("  ...keeps cameraSetup's gate: no stream, no start",
+    lobby.includes('className="oc-solve-lobby-go" disabled={!hasCamera}'));
+  ok('  ...and keeps its reconnect path',
+    lobby.includes('onRequestCamera()') && lobby.includes('Камерыг дахин холбох'));
+  // Neither lobby nor between is inside an attempt, so the bar makes no
+  // claim about one on either.
+  ok('  ...and the bar claims no attempt on it', (() => {
+    const list = page.slice(page.indexOf('const ATTEMPT_STAGES'), page.indexOf('/** Below this, the file is not'));
+    return !list.includes("'lobby'") && !list.includes("'between'");
+  })());
+
+  // THE COPY. The mockup promises the remaining attempts are void if you
+  // leave; this platform files each attempt as it is recorded and resumes
+  // at the next. Keeping the mockup's line would keep an athlete solving
+  // on a dying battery rather than stopping.
+  // Comment-stripped: both files explain in a comment what the mockup's
+  // wording was and why it went, which would otherwise fail its own
+  // assertion. What must not survive is the CLAIM, not the note about it.
+  const lobbyCode = stripComments(lobby);
+  const betweenCode = stripComments(between);
+  ok('the lobby never claims the remaining attempts are void', !lobbyCode.includes('хүчингүй'));
+  ok('  ...it says attempts are saved as they are recorded',
+    lobby.includes('бичигдмэгцээ шууд хадгалагдана'));
+  ok('  ...and that leaving and returning continues the run',
+    lobby.includes('Завсарлах шаардлага гарвал') && lobby.includes('үргэлжлүүлнэ'));
+
+  // RESUME LANDS HERE. Attempt 3 of 5 must not read like attempt 1.
+  ok('the lobby knows it is a resume', lobby.includes('const resuming = filedAttempts > 0;'));
+  ok('  ...so the heading is not "five in one sitting"',
+    lobby.includes("resuming ? 'Үлдсэн оролдлогоо үргэлжлүүл'"));
+  ok('  ...and the button names the attempt it starts',
+    lobby.includes('`${nextAttempt}-р оролдлогоо эхлэх`'));
+  ok('  ...fed from what the server said is already filed',
+    page.includes('filedAttempts={attempts.length}') && page.includes('nextAttempt={attempts.length + 1}'));
+  // The specifics stay in ONE sentence — the resume banner, rendered above
+  // every stage, which is the only place that counts attempts in prose.
+  ok('  ...while the numbers stay in the resume banner',
+    !lobby.includes('resumeMessage') && page.includes('{resumeMessage && ('));
+
+  // ── BETWEEN ──
+  ok('the between screen shows the whole run, not just what was solved',
+    page.includes('const slotRows: SlotRow[] = Array.from({ length: slotCount }') &&
+      between.includes("state: 'pending' | 'queued' | 'uploading' | 'retrying' | 'filed' | 'failed';"));
+  ok('  ...and a cut-off run is as long as it got',
+    page.includes('const slotCount = cutOff ? attempts.length : runShape.attempts;'));
+  ok('  ...every state has a word',
+    ['ХАДГАЛСАН', 'ДАХИН', 'ЭЭЛЖИНД', 'АЛДАА', 'ОДОО', 'ХҮЛЭЭГДЭЖ'].every((w) => between.includes(w)));
+  ok('  ...and an uploading slot shows its percentage', between.includes('`${s.uploadPercent}%`'));
+  // The mockup's slots read ИЛГЭЭГДЭЭГҮЙ because in its model nothing was
+  // filed until the end. Here a recorded attempt IS submitted.
+  ok('  ...but no slot says "not submitted"', !betweenCode.includes('ИЛГЭЭГДЭЭГҮЙ'));
+  ok('  ...and none of its copy claims the rest are void', !betweenCode.includes('хүчингүй'));
+
+  // MID-RUN THE UPLOAD RUNS BEHIND THE ATHLETE. That is the whole point of
+  // filing per attempt, and blocking here would hand it back.
+  ok('an in-flight upload does not block the next attempt',
+    between.includes('const waitingToFinish = runComplete && unfiledCount > 0 && !filingFailed;'));
+  // ...with two exceptions, both of which predate this changeset.
+  ok('  ...but a FAILED filing does, before the next attempt records',
+    between.includes('onClick={filingFailed ? onRetry : onNext}'));
+  ok('  ...and so does the end of the run', between.includes('disabled={waitingToFinish}'));
+  ok('  ...so the summary is only reached with everything filed',
+    /onNext=\{\(\) => \{\s*\n\s*if \(runComplete\) \{\s*\n\s*setStage\('summary'\);/.test(page));
+
+  // ── the mockup's literal values ──
+  ok("the lobby is the mockup's 620px column",
+    /\.oc-solve-lobby \{[\s\S]{0,200}?max-width: 620px;[\s\S]{0,120}?gap: 24px;/.test(theme));
+  ok('  ...with its 200px camera beside the rules',
+    /\.oc-solve-lobby-panel \{[\s\S]{0,200}?grid-template-columns: 200px 1fr;/.test(theme));
+  ok("the between screen is the mockup's 520px column",
+    /\.oc-solve-between \{[\s\S]{0,200}?max-width: 520px;[\s\S]{0,120}?gap: 22px;/.test(theme));
+  ok('  ...five slots across, always',
+    /\.oc-solve-slots \{[\s\S]{0,120}?grid-template-columns: repeat\(5, 1fr\);/.test(theme));
+  ok("  ...the mockup's card",
+    /\.oc-solve-slot \{[\s\S]{0,300}?padding: 16px 8px;[\s\S]{0,200}?min-height: 104px;/.test(theme));
+  ok('  ...and its 16x2 marker, olive when done',
+    /\.oc-solve-slot-mark \{[\s\S]{0,120}?width: 16px;[\s\S]{0,60}?height: 2px;/.test(theme) &&
+      /\.oc-solve-slot-mark-done \{[\s\S]{0,60}?background: #3A4614;/.test(theme));
+  ok('both screens end on the same volt button',
+    /\.oc-solve-lobby-go,\s*\n\.oc-solve-between-go \{[\s\S]{0,300}?background: #DFFF4F;/.test(theme));
+
+  // 375px: 200px of camera leaves 142px for four rules, and five 17px
+  // times do not fit 62px cards.
+  ok('the lobby panel stacks on a narrow screen',
+    /\.oc-solve-lobby-panel \{\s*\n\s*grid-template-columns: 1fr;/.test(theme));
+  ok('  ...and the slot row tightens rather than wrapping',
+    /\.oc-solve-slot-time \{\s*\n\s*font-size: 13px;/.test(theme) &&
+      !/\.oc-solve-slots \{[\s\S]{0,120}?repeat\(3/.test(theme));
+
+  // NOT IN THIS DIFF.
+  ok('the recording boundary did not move',
+    page.includes("onFinish={() => setStage('finishHold')}") && page.includes('async function finishRecording'));
+  ok('the three holds did not move',
+    page.includes('const HOLD_SECONDS = 8;') && (page.match(/<CameraHoldStage/g) ?? []).length === 3);
+  ok('the markers did not move', rec.includes('const MARKER_TIMES_MS = [8000, 12000, 15000];'));
 }
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);

@@ -34,21 +34,23 @@ import {
 import { beatsPr } from './_lib/prCheck';
 import { fmtTimeLimit } from '@/lib/online-competition/time-utils';
 import SolveHeader from './_components/SolveHeader';
-import CameraSetupStage from './_components/CameraSetupStage';
+import LobbyStage from './_components/LobbyStage';
+import BetweenStage, { type SlotRow } from './_components/BetweenStage';
 import RevealStage from './_components/RevealStage';
 import CameraHoldStage from './_components/CameraHoldStage';
 import ReadyPromptStage from './_components/ReadyPromptStage';
 import RecStage from './_components/RecStage';
 import EntryStage from './_components/EntryStage';
 import SummaryStage from './_components/SummaryStage';
-import FilingStage, { type FilingRow } from './_components/FilingStage';
 import RecordingFailedStage from './_components/RecordingFailedStage';
 import ScrambleWaitStage from './_components/ScrambleWaitStage';
 import SentStage from './_components/SentStage';
 import AuthModal from '@/app/online-competition/_components/hub/v3/AuthModal';
 
 type Stage =
-  | 'cameraSetup'
+  /** The first screen of a round, and the only one that asks for the
+   *  camera. Absorbed cameraSetup, which existed to do nothing else. */
+  | 'lobby'
   /** Waiting for THIS attempt's scramble — and where the run parks if
    *  that fetch fails. Nothing may enter zeroDisplay (which starts the
    *  recording) without a scramble in hand. */
@@ -69,10 +71,11 @@ type Stage =
    *  the same continuous video as the solve it belongs to. */
   | 'finishHold'
   | 'entry'
-  /** Waiting for recordings to reach the server. Normally seen once, after
-   *  the last attempt; also mid-run when a filing failed, because the next
-   *  attempt must not start on top of a hole in the attempt order. */
-  | 'filing'
+  /** The pause between attempts, and the run's only waiting screen: it
+   *  absorbed `filing`. The athlete reads their times, watches the last
+   *  one land, and starts the next one when they choose to — the old
+   *  filing stage moved on by itself, which took that choice away. */
+  | 'between'
   | 'summary'
   | 'sent';
 
@@ -119,7 +122,6 @@ const FILING_RETRY_DELAY_MS = 3000;
  *  is a claim that is false on the summary and the sent screen. */
 const ATTEMPT_STAGES: Stage[] = [
   'scrambleWait',
-  'filing',
   'zeroDisplay',
   'recordingFailed',
   'scrambleReveal',
@@ -170,7 +172,7 @@ export default function SolvePage() {
   const [competition, setCompetition] = useState<OnlineCompetition | null>(null);
   const [loadError, setLoadError] = useState('');
 
-  const [stage, setStage] = useState<Stage>('cameraSetup');
+  const [stage, setStage] = useState<Stage>('lobby');
   const [attemptIndex, setAttemptIndex] = useState(0);
   const [scramble, setScramble] = useState('');
   const [attempts, setAttempts] = useState<Attempt[]>([]);
@@ -593,19 +595,11 @@ export default function SolvePage() {
     // guarantees the athlete finds out, and that unfiled recordings cannot
     // pile up in memory behind a broken connection.
     if (filingFailed) {
-      setStage('filing');
+      setStage('between');
       return;
     }
     if (scramble) setStage('zeroDisplay');
   }, [stage, scramble, filingFailed]);
-
-  // Leaving the filing screen: back into the run mid-round, on to the
-  // result at the end of it.
-  useEffect(() => {
-    if (stage !== 'filing') return;
-    if (unfiledCount > 0) return;
-    setStage(runComplete ? 'summary' : 'scrambleWait');
-  }, [stage, unfiledCount, runComplete]);
 
   useEffect(() => {
     return () => recorder.releaseCamera();
@@ -923,19 +917,21 @@ export default function SolvePage() {
     // attempt is actually on the server.
     if (failedCutoff) {
       setCutOff(true);
-      setStage('filing');
+      setStage('between');
     } else if (next.length >= (runShape?.attempts ?? 0)) {
-      setStage('filing');
+      setStage('between');
     } else {
       setAttemptIndex((i) => i + 1);
       // next.length is the count of completed attempts, so the attempt now
       // starting is next.length + 1 (1-based, matching the group scramble
       // array index the API reads).
       //
-      // scrambleWait, NOT zeroDisplay: this fetch is still in flight, and
-      // zeroDisplay would start recording an attempt whose scramble may
-      // never arrive. The effect above promotes the run when it does.
-      setStage('scrambleWait');
+      // BETWEEN, not scrambleWait: the next attempt does not begin until
+      // the athlete says so. The scramble is fetched now anyway, so it is
+      // normally already in hand by the time they press the button and
+      // the wait screen is never seen; if it has not arrived, pressing
+      // the button lands on scrambleWait exactly as before.
+      setStage('between');
       fetchScramble(next.length + 1);
     }
   }
@@ -1100,14 +1096,27 @@ export default function SolvePage() {
     return <div className="oc-solve-takeover" />;
   }
 
-  const filingRows: FilingRow[] = attempts.map((a, i) => ({
-    attempt: i + 1,
-    timeCs: a.timeCs,
-    isDnf: a.isDnf,
-    state: a.fileState,
-    uploadPercent: a.uploadPercent,
-    error: a.fileError,
-  }));
+  /** The run's shape as a row of slots — the ones not solved yet
+   *  included, because "2 of 5" is the thing the between screen exists to
+   *  say. A cut-off run is as long as it got: there is no sixth slot to
+   *  promise when the round is already over. */
+  const slotCount = cutOff ? attempts.length : runShape.attempts;
+  const slotRows: SlotRow[] = Array.from({ length: slotCount }, (_, i) => {
+    const a = attempts[i];
+    return a
+      ? {
+          attempt: i + 1,
+          timeCs: a.timeCs,
+          isDnf: a.isDnf,
+          state: a.fileState,
+          uploadPercent: a.uploadPercent,
+        }
+      : { attempt: i + 1, timeCs: null, isDnf: false, state: 'pending' as const, uploadPercent: 0 };
+  });
+  /** The one error worth putting in front of the athlete: whatever the
+   *  stuck or retrying attempt last said. */
+  const filingError =
+    attempts.find((a) => a.fileState === 'failed' || a.fileState === 'retrying')?.fileError ?? null;
   // One line for the header, in priority order: a problem, then work in
   // progress, then how much is safely stored.
   const uploading = attempts.find((a) => a.fileState === 'uploading' || a.fileState === 'retrying');
@@ -1179,7 +1188,7 @@ export default function SolvePage() {
               used to live in the header; the bar is now a fixed 56px with
               no room for a second line, and neither of these is worth
               shrinking the competition's own name for. */}
-          {savingLabel && (
+          {savingLabel && stage !== 'between' && (
             <p className={`oc-solve-banner oc-solve-banner-quiet${filingFailed ? ' oc-solve-banner-bad' : ''}`}>
               {savingLabel}
             </p>
@@ -1196,17 +1205,23 @@ export default function SolvePage() {
             </p>
           )}
 
-        {stage === 'cameraSetup' && (
-          <CameraSetupStage
-            videoRef={recorder.videoRef}
+        {stage === 'lobby' && (
+          <LobbyStage
+            totalAttempts={runShape.attempts}
+            /* A returning athlete gets a different heading, a different
+               lead and a different button. The numbers stay in the resume
+               banner above — one place, one sentence. */
+            filedAttempts={attempts.length}
+            nextAttempt={attempts.length + 1}
             hasCamera={recorder.hasCamera}
-            error={recorder.error}
+            cameraError={recorder.error}
+            videoRef={recorder.videoRef}
             onRequestCamera={recorder.requestCamera}
-            /* Attempt 1's fetch runs alongside the camera prompt. If it
+            /* The attempt's fetch runs alongside the camera prompt. If it
                has not landed by the time the athlete is ready, the run
                waits on scrambleWait rather than recording without a
                scramble. */
-            onDone={() => setStage(scramble ? 'zeroDisplay' : 'scrambleWait')}
+            onStart={() => setStage(scramble ? 'zeroDisplay' : 'scrambleWait')}
           />
         )}
 
@@ -1313,11 +1328,28 @@ export default function SolvePage() {
           <EntryStage onConfirm={(result) => handleEntryConfirm(result, pendingBlob)} />
         )}
 
-        {stage === 'filing' && (
-          <FilingStage
-            rows={filingRows}
-            failed={filingFailed}
+        {stage === 'between' && (
+          <BetweenStage
+            slots={slotRows}
+            nextAttempt={attempts.length + 1}
             runComplete={runComplete}
+            filingFailed={filingFailed}
+            unfiledCount={unfiledCount}
+            errorMessage={filingError}
+            /* MID-RUN THE UPLOAD IS NOT WAITED FOR. Filing each attempt
+               as it is recorded exists precisely so the athlete does not
+               have to sit through it: the next attempt's ceremony is ~45
+               seconds in which nothing needs the network. The end of the
+               run is the exception — BetweenStage disables this button
+               while anything is unfiled, because the result is computed
+               from attempts the server actually has. */
+            onNext={() => {
+              if (runComplete) {
+                setStage('summary');
+                return;
+              }
+              setStage(scramble ? 'zeroDisplay' : 'scrambleWait');
+            }}
             /* Manual retry. The worker has already tried once on its own
                (FILING_AUTO_RETRIES) — this is the athlete taking over. */
             onRetry={() => {

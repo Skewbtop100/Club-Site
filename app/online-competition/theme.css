@@ -1055,6 +1055,234 @@
   color: #D8402C;
 }
 
+/* ── LOBBY: the first screen of a round ───────────────────────────────
+   Absorbs the old cameraSetup — there is no reason to spend a screen
+   asking for the camera when the screen that explains the run can hold
+   the preview. The rules list is the mockup's; its wording is not (see
+   LobbyStage: attempts are filed as they are recorded, so "leave and the
+   rest are void" describes a platform this one stopped being). */
+.oc-solve-lobby {
+  width: 100%;
+  max-width: 620px;
+  margin: auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.oc-solve-lobby-head {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.oc-solve-lobby-title {
+  font: 600 30px/1.15 var(--oc-font-heading), sans-serif;
+  letter-spacing: -0.015em;
+  color: #F4F1EA;
+}
+.oc-solve-lobby-lead {
+  font: 400 13px/1.7 var(--oc-font-heading), sans-serif;
+  color: #9A958A;
+}
+.oc-solve-lobby-panel {
+  border: 1px solid #1C1C21;
+  background: #1C1C21;
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 1px;
+}
+.oc-solve-lobby-cam {
+  background: #0A0A0C;
+  position: relative;
+  aspect-ratio: 3 / 4;
+  max-width: 100%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* Behind the КАМЕР placeholder, not above it: the label is what the box
+   says while the stream is still being granted. */
+.oc-solve-lobby-cam .oc-solve-camera-video {
+  position: absolute;
+  inset: 0;
+}
+.oc-solve-lobby-camlabel {
+  position: relative;
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.18em;
+  color: #3A3A42;
+}
+.oc-solve-lobby-rules {
+  background: #0D0D10;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  justify-content: center;
+}
+.oc-solve-lobby-rule {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  font: 400 12px/1.55 var(--oc-font-heading), sans-serif;
+  color: #9A958A;
+}
+.oc-solve-lobby-dot {
+  width: 5px;
+  height: 5px;
+  margin-top: 6px;
+  background: #DFFF4F;
+  flex: none;
+}
+.oc-solve-lobby-error {
+  font: 400 12px/1.6 var(--oc-font-heading), sans-serif;
+  color: #D8402C;
+}
+.oc-solve-lobby-wait {
+  font: 400 12px/1.6 var(--oc-font-heading), sans-serif;
+  color: #8A8474;
+}
+
+/* ── BETWEEN: the pause between attempts, and where filing waits ──────
+   One volt button, five slot cards, and a status line. The old filing
+   stage was a second waiting screen with the same job; the athlete now
+   waits once. */
+.oc-solve-between {
+  width: 100%;
+  max-width: 520px;
+  margin: auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.oc-solve-between-title {
+  font: 600 26px/1.15 var(--oc-font-heading), sans-serif;
+  letter-spacing: -0.015em;
+  color: #F4F1EA;
+}
+.oc-solve-slots {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+.oc-solve-slot {
+  background: #0A0A0C;
+  border: 1px solid #1C1C21;
+  padding: 16px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 11px;
+  min-height: 104px;
+  justify-content: center;
+}
+.oc-solve-slot-now {
+  background: #0D0D10;
+  border-color: #DFFF4F;
+}
+.oc-solve-slot-bad {
+  border-color: #D8402C;
+}
+.oc-solve-slot-n {
+  font: 500 8px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.16em;
+  color: #3A3A42;
+}
+.oc-solve-slot-now .oc-solve-slot-n {
+  color: #DFFF4F;
+}
+.oc-solve-slot-time {
+  font-family: var(--oc-font-mono), monospace;
+  font-weight: 700;
+  font-size: 17px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: #F4F1EA;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+/* The word states — ХҮЛЭЭГДЭЖ, ХАДГАЛЖ, АЛДАА — are not times and must
+   not be set like one; at 17px they overflow a 62px card at 375px. */
+.oc-solve-slot-word {
+  font: 500 8px/1.3 var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+  color: #6E6A62;
+  text-align: center;
+}
+.oc-solve-slot-word-bad {
+  color: #D8402C;
+}
+.oc-solve-slot-mark {
+  width: 16px;
+  height: 2px;
+  background: #1C1C21;
+  flex: none;
+}
+.oc-solve-slot-mark-done {
+  background: #3A4614;
+}
+.oc-solve-slot-mark-live {
+  background: #DFFF4F;
+}
+.oc-solve-slot-mark-bad {
+  background: #D8402C;
+}
+.oc-solve-between-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.oc-solve-between-square {
+  width: 6px;
+  height: 6px;
+  background: #DFFF4F;
+  flex: none;
+}
+.oc-solve-between-square-done {
+  background: #3A4614;
+}
+.oc-solve-between-square-bad {
+  background: #D8402C;
+}
+.oc-solve-between-statustext {
+  font: 500 9px/1.5 var(--oc-font-mono), monospace;
+  letter-spacing: 0.14em;
+  color: #6E6A62;
+}
+.oc-solve-between-note {
+  font: 400 12px/1.7 var(--oc-font-heading), sans-serif;
+  color: #6E6A62;
+  text-align: center;
+}
+.oc-solve-between-error {
+  font: 400 12px/1.6 var(--oc-font-heading), sans-serif;
+  color: #D8402C;
+  text-align: center;
+}
+
+/* The one volt button both screens end on. */
+.oc-solve-lobby-go,
+.oc-solve-between-go {
+  border: none;
+  background: #DFFF4F;
+  color: #08080A;
+  padding: 20px;
+  cursor: pointer;
+  font: 700 16px/1 var(--oc-font-heading), sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.oc-solve-lobby-go:hover:not(:disabled),
+.oc-solve-between-go:hover:not(:disabled) {
+  background: #E9FF7A;
+}
+.oc-solve-lobby-go:disabled,
+.oc-solve-between-go:disabled {
+  background: #1C1C21;
+  color: #4A4740;
+  cursor: not-allowed;
+}
+
 /* ── The bar on a narrow screen ───────────────────────────────────────
    Six elements do not fit 375px. They are dropped in order of how much
    they carry, not right to left:
@@ -1074,6 +1302,21 @@
   .oc-solve-bar-right {
     gap: 12px;
   }
+  /* 200px of camera leaves 142px for four rules at 375px. The panel
+     stacks instead, and the portrait crop goes landscape so a preview
+     does not push the button off the screen. */
+  .oc-solve-lobby-panel {
+    grid-template-columns: 1fr;
+  }
+  .oc-solve-lobby-cam {
+    aspect-ratio: 16 / 10;
+  }
+  .oc-solve-lobby-title {
+    font-size: 24px;
+  }
+  .oc-solve-between-title {
+    font-size: 21px;
+  }
 }
 @media (max-width: 460px) {
   .oc-solve-bar-comp {
@@ -1090,6 +1333,27 @@
   }
   .oc-solve-body {
     padding: 16px;
+  }
+  /* Five cards across 343px: 64px each. The grid never becomes two rows
+     — the point of the row is that five attempts are one run. */
+  .oc-solve-slots {
+    gap: 6px;
+  }
+  .oc-solve-slot {
+    padding: 12px 4px;
+    gap: 8px;
+    min-height: 88px;
+  }
+  .oc-solve-slot-time {
+    font-size: 13px;
+  }
+  .oc-solve-slot-mark {
+    width: 12px;
+  }
+  .oc-solve-lobby-go,
+  .oc-solve-between-go {
+    padding: 17px;
+    font-size: 14px;
   }
 }
 
