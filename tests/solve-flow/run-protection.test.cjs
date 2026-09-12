@@ -526,30 +526,52 @@ console.log('\n  -- 9. the lobby and the between screen --');
     !lobby.includes('oc-solve-lobby-rule') && !lobby.includes('oc-solve-lobby-panel'));
   ok('  ...as are the heading and the lead',
     !lobby.includes('oc-solve-lobby-title') && !lobby.includes('oc-solve-lobby-lead'));
-  ok('  ...leaving one line, over the preview',
-    lobby.includes('Камерт шоо болон таймер хоёул бүтэн харагдахаар байрлуулна уу.') &&
-      lobby.includes('oc-solve-lobby-hint'));
-  // Fades, but is never REMOVED: opacity only, so the instruction is
-  // still in the accessibility tree after the timer has hidden it.
-  ok('  ...which fades on a timer rather than unmounting',
-    lobby.includes('const OVERLAY_VISIBLE_MS = 5000;') &&
-      /oc-solve-lobby-notes-out/.test(lobby) &&
-      /\.oc-solve-lobby-notes-out \{\s*\n\s*opacity: 0;/.test(theme));
+  ok('  ...leaving one line, BELOW the preview',
+    lobby.includes('Камерт шоо болон хугацаа хэмжигч хоёрыг бүтэн харагдахаар 50см орчим зайтай байрлуулна уу.') &&
+      lobby.includes('oc-solve-lobby-aim'));
+
+  // ── A STANDING INSTRUCTION IS NOT A PASSING NOTICE ──
+  // These two were briefly one fading stack inside the frame. Wrong:
+  // "put the cube and the timer in frame, ~50cm away" is needed for as
+  // long as the athlete is aiming, which is the whole time they are on
+  // this screen, while "2 saved, you resume at 3" is true once and read
+  // once. Fading them together timed out the one line the screen exists
+  // to deliver, while they were still doing the thing it describes.
+  ok('  ...which NEVER fades — no timer, no conditional class',
+    lobby.includes('<p className="oc-solve-lobby-aim">') &&
+      !/oc-solve-lobby-aim[^"]*\$\{/.test(lobby));
+  ok('  ...and never covers the video it is telling them to check',
+    !/\.oc-solve-lobby-aim \{[^}]*position:/.test(theme) &&
+      // Out of the preview area entirely: after the area closes, before
+      // the button. That is the dead space the column already had.
+      lobby.indexOf('oc-solve-lobby-aim') > lobby.indexOf('oc-solve-lobby-band') &&
+      lobby.indexOf('oc-solve-lobby-aim') < lobby.indexOf('oc-solve-lobby-go'));
+  ok('  ...and nothing but the video is left inside the frame',
+    !/oc-solve-lobby-frame[\s\S]{0,900}?oc-solve-lobby-aim/.test(lobby) &&
+      !/oc-solve-lobby-frame[\s\S]{0,900}?oc-solve-lobby-band/.test(lobby));
+
+  // THE BAND: the passing notice, on its OWN timer, and the only thing
+  // left that covers any video. Fades but is never REMOVED — opacity
+  // only, so a screen reader keeps the sentence either way.
+  ok('the status band fades on a timer of its own',
+    lobby.includes('const NOTE_VISIBLE_MS = 5000;') &&
+      /oc-solve-lobby-band-out/.test(lobby) &&
+      /\.oc-solve-lobby-band-out \{\s*\n\s*opacity: 0;/.test(theme));
+  ok('  ...which is the ONLY timer on the screen',
+    (lobbyCode.match(/NOTE_VISIBLE_MS/g) ?? []).length === 2 &&
+      !lobbyCode.includes('OVERLAY_VISIBLE_MS') && !lobbyCode.includes('HINT_VISIBLE_MS'));
   ok('  ...and comes back when the athlete taps the preview',
-    lobby.includes('onClick={showOverlay}') && lobby.includes('setOverlayOn(true);'));
-  // ONE timer for the whole overlay. Two lines fading independently over
-  // live video is two distractions, the second arriving after the athlete
-  // has already gone back to aiming.
-  ok('  ...as ONE block on ONE timer, not a line at a time',
-    (lobbyCode.match(/OVERLAY_VISIBLE_MS/g) ?? []).length === 2 &&
-      /oc-solve-lobby-notes\$\{overlayOn[\s\S]{0,600}?oc-solve-lobby-hint[\s\S]{0,600}?oc-solve-lobby-note\b/.test(lobby));
+    lobby.includes('onClick={showNote}') && lobby.includes('setNoteOn(true);'));
+  // A BAND, not a card. The card was pinned inside the frame and floated
+  // over whatever the camera was pointing at — usually the athlete's own
+  // face. Full-bleed across the area reads as the system talking.
+  ok('  ...spanning the whole stage rather than floating as a card',
+    /\.oc-solve-lobby-band \{[\s\S]{0,400}?left: 0;[\s\S]{0,60}?right: 0;[\s\S]{0,60}?top: 0;/.test(theme));
   // THE TOP EDGE. The cube and the timer sit low in a solve's frame, so
   // the bottom is the edge that clips what a judge must see — and the one
   // the athlete is checking when they aim. The top is usually wall.
-  ok('  ...anchored to the top of the frame, not the bottom',
-    /\.oc-solve-lobby-notes \{[\s\S]{0,400}?top: 16px;/.test(theme) &&
-      !/\.oc-solve-lobby-notes \{[^}]*bottom:/.test(theme) &&
-      !/\.oc-solve-lobby-hint \{[^}]*bottom:/.test(theme));
+  ok('  ...at the top, where a solve has least worth covering',
+    !/\.oc-solve-lobby-band \{[^}]*bottom: 0;/.test(theme));
 
   // RESUME LANDS HERE. Attempt 3 of 5 must not read like attempt 1 — but
   // with the prose gone, the button is the only place left that can say
@@ -596,7 +618,7 @@ console.log('\n  -- 9. the lobby and the between screen --');
   // would be the same fact twice, over the video, in two type sizes.
   ok('  ...as ONE note, since the resume notice already carries the count',
     /note: string \| null;/.test(lobby) &&
-      (lobbyCode.match(/oc-solve-lobby-note"/g) ?? []).length === 1);
+      (lobbyCode.match(/oc-solve-lobby-band/g) ?? []).length === 2);
 
   // ── BETWEEN ──
   ok('the between screen shows the whole run, not just what was solved',
@@ -696,8 +718,9 @@ console.log('\n  -- 9. the lobby and the between screen --');
   // The one line is a child of the FRAME, not the area: positioned
   // against the area it drifted onto the black beside a portrait frame
   // on a desktop, and below a landscape frame on a phone.
-  ok('  ...and the overlay sits over the preview, not beside it',
-    /<div className=\{`oc-solve-lobby-frame[\s\S]{0,2400}?oc-solve-lobby-notes/.test(lobby));
+  ok('  ...and the status band spans the area, not the frame',
+    /oc-solve-lobby-view[\s\S]{0,3000}?oc-solve-lobby-band/.test(lobby) &&
+      /\.oc-solve-lobby-band \{[\s\S]{0,200}?position: absolute;/.test(theme));
 
   // 375px: five 17px times do not fit 62px cards.
   ok('the slot row tightens rather than wrapping',

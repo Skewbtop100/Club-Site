@@ -31,21 +31,21 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  *  above the button for what carries the rest.
  */
 
-/** How long the overlay stays up before fading.
+/** How long the run's status band stays up before fading.
  *
- *  The framing line is ~60 characters of Mongolian: reading it takes
- *  about three and a half seconds, and the athlete is looking at the
- *  video, not at the text, when it appears. Five seconds is long enough
- *  to read it after noticing it and short enough that it is gone before
- *  they have finished aiming — which is the moment the frame edges matter
- *  most and anything covering them is in the way. Tapping brings it back.
+ *  It applies to the BAND ONLY. The framing instruction below the preview
+ *  has no timer at all, and the two must not share one: they are
+ *  different kinds of thing. "You have 2 attempts saved, you resume at 3"
+ *  is a passing notice — true once, read once, irrelevant thereafter.
+ *  "Put the cube and the timer in frame, about 50cm away" is a standing
+ *  instruction the athlete needs for as long as they are aiming, which is
+ *  the entire time they are on this screen.
  *
- *  ONE timer for the whole overlay, not one per line. The framing line
- *  and the run's status note appear together, are read together, and
- *  fade together as a single block — two independently-timed fades over
- *  live video would be two separate distractions, and the second one
- *  would arrive after the athlete had already gone back to aiming. */
-const OVERLAY_VISIBLE_MS = 5000;
+ *  An earlier version faded both together as one block. That was wrong in
+ *  the way that matters: it timed out the one line the screen exists to
+ *  deliver, while the athlete was still doing the thing it tells them how
+ *  to do. */
+const NOTE_VISIBLE_MS = 5000;
 
 export default function LobbyStage({
   note,
@@ -82,10 +82,10 @@ export default function LobbyStage({
   /** The stream's REAL frame size, straight off the element. Null until
    *  metadata lands — see the placeholder note below. */
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
-  const [overlayOn, setOverlayOn] = useState(true);
-  /** Bumped on every tap so re-showing the overlay re-arms its timer even
+  const [noteOn, setNoteOn] = useState(true);
+  /** Bumped on every tap so re-showing the band re-arms its timer even
    *  when it was already up. */
-  const [overlayNonce, setOverlayNonce] = useState(0);
+  const [noteNonce, setNoteNonce] = useState(0);
 
   useEffect(() => {
     void onRequestCamera();
@@ -137,14 +137,14 @@ export default function LobbyStage({
   }, [hasCamera]);
 
   useEffect(() => {
-    if (!overlayOn) return;
-    const t = setTimeout(() => setOverlayOn(false), OVERLAY_VISIBLE_MS);
+    if (!noteOn) return;
+    const t = setTimeout(() => setNoteOn(false), NOTE_VISIBLE_MS);
     return () => clearTimeout(t);
-  }, [overlayOn, overlayNonce]);
+  }, [noteOn, noteNonce]);
 
-  const showOverlay = useCallback(() => {
-    setOverlayOn(true);
-    setOverlayNonce((n) => n + 1);
+  const showNote = useCallback(() => {
+    setNoteOn(true);
+    setNoteNonce((n) => n + 1);
   }, []);
 
   // Live means a stream AND a frame size read back from it. Both, because
@@ -166,7 +166,7 @@ export default function LobbyStage({
           reports what the camera said, and CSS does the fitting. */}
       <div
         className="oc-solve-lobby-view"
-        onClick={showOverlay}
+        onClick={showNote}
         style={
           dims
             ? ({ '--oc-cam-w': dims.w, '--oc-cam-h': dims.h } as React.CSSProperties)
@@ -203,35 +203,49 @@ export default function LobbyStage({
             </div>
           )}
 
-          {/* ALL the screen's text, in one block, at the TOP of the
-              frame, on one timer.
-
-              THE TOP, not the bottom, and this is the load-bearing part:
-              a solve is framed with the cube and the timer LOW — they sit
-              on the mat, the hands come in from below, and the camera
-              looks slightly down at them. The bottom edge is therefore
-              the one that clips something a judge needs to see, and it is
-              the edge the athlete is checking when they aim. The top of
-              the frame is usually wall. Covering the bottom hid exactly
-              the edge this screen exists to let them check.
-
-              A child of the FRAME, so it is always over the preview
-              rather than over the dead space beside it. Always in the
-              DOM, never removed — the fade is opacity alone, so a screen
-              reader keeps both lines whatever the timer has done to them
-              visually. */}
-          <div className={`oc-solve-lobby-notes${overlayOn ? '' : ' oc-solve-lobby-notes-out'}`}>
-            <p className="oc-solve-lobby-hint">
-              Камерт шоо болон таймер хоёул бүтэн харагдахаар байрлуулна уу.
-            </p>
-            {note && (
-              <p className="oc-solve-lobby-note" role="status">
-                {note}
-              </p>
-            )}
-          </div>
         </div>
+
+        {/* THE RUN'S STATUS, as a band across the whole area rather than a
+            card floating over the athlete's face. A card reads as
+            something attached to a point in the picture; a full-width
+            band reads as the system talking, which is what it is. It
+            spans the stage because it is a child of the AREA, not of the
+            frame — so its width is the screen's, whatever shape the
+            camera turned out to be.
+
+            At the TOP, because the cube and the timer sit low in a solve
+            and the bottom edge is the one that clips what a judge must
+            see. It is the only thing left that covers any video, and it
+            is gone in five seconds.
+
+            Never unmounted — the fade is opacity alone, so a screen
+            reader keeps the sentence whatever the timer has done to it. */}
+        {note && (
+          <p
+            className={`oc-solve-lobby-band${noteOn ? '' : ' oc-solve-lobby-band-out'}`}
+            role="status"
+          >
+            {note}
+          </p>
+        )}
       </div>
+
+      {/* THE STANDING INSTRUCTION. Below the preview, above the button,
+          permanent, and OUT of the frame entirely.
+
+          It is the one thing the athlete needs for the whole time they
+          are on this screen — they are aiming a camera, and this says
+          what "aimed" means. So it cannot fade, and it cannot sit on the
+          video: whatever it covered would be part of the shot it is
+          telling them to check. The column has room above and below the
+          frame that is showing nothing; this is what that room is for.
+
+          Quiet — muted, unruled, no scrim. A standing instruction that
+          is always on screen must not read as an alert, or it becomes
+          noise the athlete stops seeing. */}
+      <p className="oc-solve-lobby-aim">
+        Камерт шоо болон хугацаа хэмжигч хоёрыг бүтэн харагдахаар 50см орчим зайтай байрлуулна уу.
+      </p>
 
       {/* The gate cameraSetup used to hold: no stream, no start. The very
           next screen begins recording, so there is nowhere later to put
