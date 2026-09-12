@@ -920,6 +920,14 @@
 .oc-solve-takeover {
   position: fixed;
   inset: 0;
+  /* THE VISIBLE VIEWPORT, not the layout one. `inset: 0` on a fixed box
+     resolves against the LARGE viewport — the height the page would have
+     with the browser chrome retracted — so with a URL bar showing, the
+     bottom of this box sits below what the phone displays. Anything
+     anchored to that bottom edge is then off-screen. 100dvh tracks the
+     chrome as it comes and goes. It is over-constrained with top and
+     bottom both 0, and height wins, which is the intent. */
+  height: 100dvh;
   z-index: 200;
   background: #08080A;
   color: #F4F1EA;
@@ -2272,19 +2280,32 @@
    stays above it, because it is the frame of the run and ГАРАХ is the
    only way out of one. The camera IS the screen: everything else on it
    is a small thing laid over a corner. */
+/* TWO ROWS: the camera, and a band under it that the camera cannot
+   reach. The finish button used to be a static flex child alongside the
+   absolutely-positioned video, and a positioned element paints above
+   static in-flow content — so the opaque video covered the only way out
+   of an attempt. Splitting them is the structural fix: nothing in the
+   band is a sibling of the video any more, so no z-index has to be right
+   for the button to be visible. */
 .oc-solve-rec {
   position: absolute;
   inset: 0;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 14px;
-  padding: 20px;
   background: #08080A;
 }
-/* Fills the screen behind everything else. `cover` rather than `contain`:
-   the athlete framed this shot on the lobby and has held it through four
+/* The camera's layer, and the only one anything overlays. */
+.oc-solve-rec-view {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  /* So the two overlays' z-index is scoped to this box and cannot
+     interact with anything outside it. */
+  isolation: isolate;
+}
+/* Fills the view behind the overlays. `cover` rather than `contain`: the
+   athlete framed this shot on the lobby and has held it through four
    screens since, so what matters here is a large, clear view of the cube
    rather than a letterboxed view of the whole frame. It is display only —
    MediaRecorder reads the camera track and never a stylesheet, so the
@@ -2292,13 +2313,31 @@
 .oc-solve-rec-feed {
   position: absolute;
   inset: 0;
+  z-index: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
   object-position: center center;
 }
+/* THE WAY OUT, for the whole solve. Its own band at the bottom: the cube
+   and the hands sit low in a solve's frame, so a button floating over the
+   bottom of the video would cover exactly the strip the athlete is
+   watching. This costs a little of the view and covers none of it.
+   The bottom padding clears the home indicator on phones that have one,
+   and never goes below 14px on those that do not. */
+.oc-solve-rec-actions {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 20px;
+  padding-bottom: max(14px, env(safe-area-inset-bottom));
+  background: #08080A;
+}
 .oc-solve-rec-flag {
   position: absolute;
+  z-index: 1;
   top: 16px;
   left: 16px;
   display: flex;
@@ -2328,6 +2367,7 @@
    value, so it belongs on this number. */
 .oc-solve-insp {
   position: absolute;
+  z-index: 1;
   top: 16px;
   right: 16px;
   min-width: 42px;

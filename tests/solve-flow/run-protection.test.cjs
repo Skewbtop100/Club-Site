@@ -483,8 +483,15 @@ console.log('\n  -- 8. the competition environment --');
   // A fixed takeover, not a page in the site: the run is a room the
   // athlete is inside, and the only way out is the bar's own ГАРАХ.
   ok('the run is a full-screen takeover',
-    /\.oc-solve-takeover \{[\s\S]{0,200}?position: fixed;[\s\S]{0,200}?z-index: 200;/.test(theme));
-  ok('  ...over the mockup’s ground', /\.oc-solve-takeover \{[\s\S]{0,200}?background: #08080A;/.test(theme));
+    /\.oc-solve-takeover \{[^}]*position: fixed;[^}]*z-index: 200;/.test(theme));
+  ok('  ...over the mockup’s ground', /\.oc-solve-takeover \{[^}]*background: #08080A;/.test(theme));
+  // THE VISIBLE VIEWPORT, not the layout one. `inset: 0` on a fixed box
+  // resolves against the LARGE viewport — the height the page would have
+  // with the browser chrome retracted — so with a URL bar showing, its
+  // bottom edge sits below what the phone displays, and anything
+  // anchored there goes with it. 100dvh tracks the chrome.
+  ok('  ...sized to what the phone actually shows',
+    /\.oc-solve-takeover \{[^}]*height: 100dvh;/.test(theme));
   ok('  ...and every screen of the run wears it',
     !page.includes('className="oc-solve-page"') &&
       (page.match(/className="oc-solve-takeover"/g) ?? []).length === 6);
@@ -1048,7 +1055,34 @@ console.log('\n  -- 10. the mockup restyle --');
     rec.includes('className="oc-solve-rec-feed"') &&
       /\.oc-solve-rec \{[\s\S]{0,500}?position: absolute;[\s\S]{0,60}?inset: 0;/.test(theme) &&
       /\.oc-solve-rec-feed \{[\s\S]{0,300}?object-fit: cover;/.test(theme));
-  ok('  ...with the mockup’s finish button', rec.includes('>\n        Эвлүүлэлт дууссан\n      </button>'));
+  ok('  ...with the mockup’s finish button', rec.includes('Эвлүүлэлт дууссан'));
+
+  // ── THE ONLY WAY OUT OF AN ATTEMPT ──
+  // IT WAS INVISIBLE ON A PHONE, and geometry said it was fine: the
+  // button had a box in the right place, but .oc-solve-rec-feed is
+  // absolutely positioned and the button was a STATIC sibling of it, so
+  // the opaque video painted over it. A positioned element paints above
+  // static in-flow content whatever the DOM order.
+  //
+  // The fix is structural, not a z-index: the button is not a sibling of
+  // the video any more. The camera and its overlays live in one row, and
+  // everything that must not be covered lives in another.
+  ok('the finish button is not a sibling of the video',
+    /oc-solve-rec-view[\s\S]*?oc-solve-rec-feed[\s\S]*?<\/div>[\s\S]*?oc-solve-rec-actions[\s\S]*?oc-solve-btn-finish/.test(rec));
+  ok('  ...so nothing positioned can paint over it',
+    /\.oc-solve-rec-view \{[^}]*position: relative;/.test(theme) &&
+      /\.oc-solve-rec-actions \{[^}]*flex: none;/.test(theme) &&
+      !/\.oc-solve-rec-actions \{[^}]*position: absolute;/.test(theme));
+  // BELOW THE VIDEO, NOT OVER IT. The cube and the hands sit low in a
+  // solve's frame, so a button floating over the bottom of the picture
+  // would cover exactly the strip the athlete is watching.
+  ok('  ...and covers none of the frame',
+    /\.oc-solve-rec-view \{[^}]*flex: 1;/.test(theme) &&
+      /\.oc-solve-rec-feed \{[^}]*inset: 0;/.test(theme));
+  // The home indicator overlays the bottom of the screen on phones that
+  // have one; the band clears it.
+  ok('  ...clear of the home indicator',
+    /\.oc-solve-rec-actions \{[^}]*padding-bottom: max\(14px, env\(safe-area-inset-bottom\)\);/.test(theme));
   ok('  ...and the old boxed preview gone with the column',
     !theme.includes('oc-solve-rec-box') && !rec.includes('oc-solve-rec-box'));
   ok('the scrolling tick strip is gone', !theme.includes('.oc-solve-tick-strip') && !rec.includes('tick-strip'));

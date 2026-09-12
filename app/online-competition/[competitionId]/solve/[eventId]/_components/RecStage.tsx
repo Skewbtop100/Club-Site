@@ -98,36 +98,49 @@ export default function RecStage({
 
   return (
     <div className="oc-solve-rec">
-      {/* FULL-BLEED. The camera is the screen — there is nothing else on
-          it worth the space, and the athlete is checking their own framing
-          against it while they inspect. */}
-      <video ref={videoRef} autoPlay playsInline muted className="oc-solve-rec-feed" />
+      {/* THE CAMERA AND ITS OVERLAYS, in their own layer. The video is
+          absolutely positioned, so it paints ABOVE any static sibling —
+          which is what hid the finish button: the button was a static
+          flex child of the same box and the opaque video simply covered
+          it. Everything that belongs over the video lives in here and is
+          positioned; everything that must not be covered lives outside
+          it, in the row below. */}
+      <div className="oc-solve-rec-view">
+        <video ref={videoRef} autoPlay playsInline muted className="oc-solve-rec-feed" />
 
-      <div className="oc-solve-rec-flag">
-        <span className="oc-solve-rec-dot" aria-hidden />
-        <span className="oc-solve-rec-flag-text">БИЧИЖ БАЙНА</span>
+        <div className="oc-solve-rec-flag">
+          <span className="oc-solve-rec-dot" aria-hidden />
+          <span className="oc-solve-rec-flag-text">БИЧИЖ БАЙНА</span>
+        </div>
+
+        {/* SMALL AND PERIPHERAL, opposite the recording flag. It is a
+            thing to glance at, not to watch: an athlete inspecting a cube
+            should be looking at the cube. */}
+        <span
+          className={`oc-solve-insp${cueClass(elapsed)}${windowClosed ? ' oc-solve-insp-done' : ''}`}
+          aria-hidden
+        >
+          {elapsed}
+        </span>
       </div>
 
-      {/* SMALL AND PERIPHERAL, opposite the recording flag. It is a thing
-          to glance at, not to watch: an athlete inspecting a cube should
-          be looking at the cube. */}
-      <span
-        className={`oc-solve-insp${cueClass(elapsed)}${windowClosed ? ' oc-solve-insp-done' : ''}`}
-        aria-hidden
-      >
-        {elapsed}
-      </span>
+      {/* BELOW THE VIDEO, NOT OVER IT. The only way out of an attempt has
+          to be reachable for the whole solve, and it cannot buy that by
+          sitting on the picture: the cube and the hands are low in the
+          frame, so the bottom of the video is the worst strip to cover.
+          Its own band costs a little of the view and covers none of it. */}
+      <div className="oc-solve-rec-actions">
+        <button type="button" className="oc-solve-btn-finish" onClick={onFinish}>
+          Эвлүүлэлт дууссан
+        </button>
 
-      <button type="button" className="oc-solve-btn-finish" onClick={onFinish}>
-        Эвлүүлэлт дууссан
-      </button>
-
-      {/* The run's only statement that it does not time the solve. Kept
-          here, quiet, because this is where it has always been said and
-          nowhere else says it. */}
-      <p className="oc-solve-rec-note">
-        Дэлгэц дээр цаг харагдахгүй. Эвлүүлж дуусаад товч дээр дарж цагаа бичиж оруулна.
-      </p>
+        {/* The run's only statement that it does not time the solve. Kept
+            here, quiet, because this is where it has always been said and
+            nowhere else says it. */}
+        <p className="oc-solve-rec-note">
+          Дэлгэц дээр цаг харагдахгүй. Эвлүүлж дуусаад товч дээр дарж цагаа бичиж оруулна.
+        </p>
+      </div>
     </div>
   );
 }
