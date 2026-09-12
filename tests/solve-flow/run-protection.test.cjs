@@ -319,18 +319,22 @@ console.log('\n  -- 5. the camera hold is ONE component --');
   // Two, not three, since cover: the two TIMER holds share the component;
   // cover holds a cube, not a timer, and shows two colour diagrams
   // instead of a preview.
-  ok('both timer holds come from the one component',
-    (page.match(/<CameraHoldStage/g) ?? []).length === 2);
+  ok('all three camera holds come from the one component',
+    (page.match(/<CameraHoldStage/g) ?? []).length === 3);
   // THREE DISTINCT LABELS. The two timer holds are the same component at
   // the same duration with nearly the same sentence; sharing a label too
   // left an athlete glancing at the screen unable to tell whether they
   // were before or after the solve.
   {
     const labels = (page.match(/label="([^"]+)"/g) ?? []).map((m) => m.slice(7, -1));
-    ok('  ...each labelled for what it asks for', labels.length === 2 && new Set(labels).size === 2,
+    ok('  ...each labelled for what it asks for', labels.length === 3 && new Set(labels).size === 3,
       labels.join(' | '));
     ok('  ...the timer holds say which side of the solve they are on',
       labels.includes('ЦАГАА ХАРУУЛ · ЭХЛЭХИЙН ӨМНӨ') && labels.includes('ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА'));
+    // The third is the only hold whose subject is the cube rather than
+    // a clock, and says so.
+    ok('  ...and the cube check names the cube, not a timer',
+      labels.includes('ШООГОО ХАРУУЛ · ЭЦСИЙН БАЙДАЛ'));
     }
   // The cube hold's own words moved into CoverStage with the rest of it.
   {
@@ -349,9 +353,9 @@ console.log('\n  -- 7. durations and markers --');
   // must see something for, COVER_SECONDS is how long the athlete needs
   // to read an instruction and act on it — so a change to either must
   // not silently move the other.
-  ok('the two timer holds share a single duration constant',
+  ok('the three 8-second holds share a single duration constant',
     page.includes('const HOLD_SECONDS = 8;') &&
-      (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 2);
+      (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3);
   ok('  ...and the cover has a longer one of its own',
     page.includes('const COVER_SECONDS = 20;') &&
       page.includes('<CoverStage seconds={COVER_SECONDS}'));
@@ -367,7 +371,7 @@ console.log('\n  -- 7. durations and markers --');
   // is unchanged and still absolute: NO call site may write a literal
   // number of seconds into its sentence.
   ok('  ...and no call site writes the number into the sentence itself',
-    (page.match(/instruction=\{\(sec\) =>/g) ?? []).length === 1 && !/\d+ секунд/.test(page));
+    (page.match(/instruction=\{\(sec\) =>/g) ?? []).length === 2 && !/\d+ секунд/.test(page));
 
   // THE OPENING HOLD is now the athlete's own timer, held to the camera —
   // with a preview to aim at, which the on-screen "0.00" never gave them.
@@ -427,11 +431,17 @@ console.log('\n  -- 7. durations and markers --');
     /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page));
 }
 
-console.log('\n  -- 6. the recording stops AFTER the closing hold --');
+console.log('\n  -- 6. the recording stops AFTER the cube check --');
 {
-  // The clip used to end the instant the solve did. The reading on the
-  // athlete's own timer is the evidence for the number they type next, so
-  // it has to be on the same continuous video as the solve.
+  // The clip used to end the instant the solve did, then after the
+  // closing hold. It ends after the CUBE CHECK now — one stage later
+  // again — because the cube's final state is what a judge reads to
+  // decide +2 or DNF, and evidence that arrives after the recording has
+  // stopped is not evidence.
+  //
+  // THE BOUNDARY MOVED BY ONE CALL SITE AND NOTHING ELSE: finishRecording
+  // is unchanged, and the assertions below on its contents are the same
+  // ones that guarded the previous boundary.
   ok('the solve’s end button only changes stage — it stops nothing',
     page.includes("onFinish={() => setStage('finishHold')}"));
   // (Changeset 3 folded FINISH_HOLD_SECONDS into the one HOLD_SECONDS
@@ -441,6 +451,33 @@ console.log('\n  -- 6. the recording stops AFTER the closing hold --');
   // A stage missing from HEADER_STAGES loses the header and the attempt
   // pips silently, mid-attempt.
   ok('  ...and it is in ATTEMPT_STAGES', /'rec',\s*\n\s*'finishHold',/.test(page));
+
+  // ── THE CUBE CHECK, AND WHY THE CLIP NOW REACHES IT ──
+  // A judge reads the cube's final state for +2 (one face off by a turn)
+  // or DNF (more than that). Until now nothing on the video showed it:
+  // the time was evidenced and the solve was not.
+  ok('a cube check follows the closing hold',
+    page.includes("| 'cubeCheck'") &&
+      /label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"[\s\S]{0,500}?onDone=\{\(\) => setStage\('cubeCheck'\)\}/.test(page));
+  ok('  ...in ATTEMPT_STAGES, between the closing hold and the keypad',
+    /'finishHold',\s*\n\s*'cubeCheck',\s*\n\s*'entry',/.test(page));
+  ok('  ...at the same 8 seconds, from the same constant',
+    /label="ШООГОО ХАРУУЛ · ЭЦСИЙН БАЙДАЛ"/.test(page) &&
+      /<CameraHoldStage\s*\n\s*seconds=\{HOLD_SECONDS\}\s*\n\s*label="ШООГОО ХАРУУЛ · ЭЦСИЙН БАЙДАЛ"/.test(page));
+  // THE TWO THINGS THE INSTRUCTION MUST SAY. Turning a single layer
+  // here would erase the difference between a finished solve, a +2 and a
+  // DNF — the athlete destroying the evidence they are providing.
+  ok('  ...telling the athlete to turn the cube so every face is seen',
+    page.includes('Шоогоо аажмаар эргүүлж бүх талыг нь'));
+  ok('  ...and NOT to turn a layer, with the reason',
+    page.includes('Аль ч давхаргыг эргүүлж болохгүй') &&
+      page.includes('эвлүүлэлтийн эцсийн байдлыг шүүгч шалгана'));
+  // THE CLIP NOW STOPS HERE, and in exactly one place.
+  ok('  ...and it is the one stage that ends the recording',
+    (page.match(/onDone=\{finishRecording\}/g) ?? []).length === 1 &&
+      /label="ШООГОО ХАРУУЛ · ЭЦСИЙН БАЙДАЛ"[\s\S]{0,1200}?onDone=\{finishRecording\}/.test(page));
+  ok('  ...so the closing hold no longer ends it',
+    !/label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"[\s\S]{0,500}?onDone=\{finishRecording\}/.test(page));
 
   // THE INVARIANT THAT MATTERS MOST: the stop, the size check and the
   // handoff are one function, in one order. Splitting them is how an
@@ -539,14 +576,14 @@ console.log('\n  -- 8. the competition environment --');
   ok('  ...but never the two buttons', !/@media[\s\S]*?\.oc-solve-bar-btn \{[\s\S]{0,60}?display: none/.test(theme));
 
   // NOT IN THIS DIFF: layout only.
-  ok('the run has fourteen stages', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 14);
+  ok('the run has fifteen stages', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 15);
   ok('the recording boundary is untouched',
     page.includes("if (stage === 'zeroDisplay') {") &&
       page.includes("onFinish={() => setStage('finishHold')}") &&
       page.includes('async function finishRecording'));
-  ok('the two timer holds are untouched: 8 seconds, both of them',
+  ok('the 8-second holds are untouched: three of them, all 8',
     page.includes('const HOLD_SECONDS = 8;') &&
-      (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 2);
+      (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3);
   ok('the markers are gone and stayed gone', !rec.includes('MARKER_TIMES_MS'));
   ok('resume is untouched: a complete run still lands on the summary',
     /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page));
@@ -565,7 +602,7 @@ console.log('\n  -- 9. the lobby and the between screen --');
     !page.includes("'cameraSetup'") && !page.includes("'filing'"));
   ok('  ...nor as a render branch',
     !page.includes("stage === 'cameraSetup'") && !page.includes("stage === 'filing'"));
-  ok('the run still has every stage it had, minus count and go', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 14);
+  ok('the run still has every stage it had, plus the cube check', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 15);
   ok('  ...two of them new', page.includes("| 'lobby'") && page.includes("| 'between'"));
 
   // ── LOBBY ──
@@ -814,8 +851,8 @@ console.log('\n  -- 9. the lobby and the between screen --');
   // NOT IN THIS DIFF.
   ok('the recording boundary did not move',
     page.includes("onFinish={() => setStage('finishHold')}") && page.includes('async function finishRecording'));
-  ok('the two timer holds did not move',
-    page.includes('const HOLD_SECONDS = 8;') && (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 2);
+  ok('the 8-second holds did not move',
+    page.includes('const HOLD_SECONDS = 8;') && (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3);
   ok('  ...and the cover now runs longer, on its own constant',
     page.includes('<CoverStage seconds={COVER_SECONDS}'));
   ok('the markers are gone and stayed gone', !rec.includes('MARKER_TIMES_MS'));
@@ -849,7 +886,7 @@ console.log('\n  -- 10. the mockup restyle --');
     (theme.match(/\n  margin: auto;/g) ?? []).length >= 8);
 
   // ── THE HOLD: one component, ONE presentation ──
-  ok('both timer holds are still one component', (page.match(/<CameraHoldStage/g) ?? []).length === 2);
+  ok('all three camera holds are still one component', (page.match(/<CameraHoldStage/g) ?? []).length === 3);
   // ── THE NUMBER, ON ALL THREE CAMERA HOLDS ──
   // A colour fill briefly replaced it on all three. It is back: these
   // screens carry a live preview, and colour moving behind the picture
@@ -885,9 +922,11 @@ console.log('\n  -- 10. the mockup restyle --');
     const footnotes = page.match(/footnote="([^"]+)"/g) ?? [];
     const silenced = page.match(/footnote=\{null\}/g) ?? [];
     const buttons = page.match(/end=\{\{ label: '[^']+' \}\}/g) ?? [];
-    // Two CameraHoldStage call sites: one footnote, one button.
-    return footnotes.length === 1 && silenced.length === 1 && buttons.length === 1 &&
-      new Set(footnotes).size === 1;
+    // Three CameraHoldStage call sites: two footnotes (the closing hold
+    // and the cube check), one button (the timer check), and all of them
+    // saying something different.
+    return footnotes.length === 2 && silenced.length === 1 && buttons.length === 1 &&
+      new Set(footnotes).size === 2;
   })());
 
   // ── THE BEAT BEFORE THE TIMER CHECK ──
@@ -971,8 +1010,11 @@ console.log('\n  -- 10. the mockup restyle --');
   // is the only reason this one needed a button.
   ok('  ...while the closing hold still advances on its own',
     (page.match(/end=\{\{ label:/g) ?? []).length === 1 &&
-      /label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"[\s\S]{0,400}?onDone=\{finishRecording\}/.test(page) &&
-      !/label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"[\s\S]{0,400}?end=/.test(page));
+      /label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"[\s\S]{0,500}?onDone=\{\(\) => setStage\('cubeCheck'\)\}/.test(page) &&
+      !/label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"[\s\S]{0,500}?end=/.test(page));
+  ok('  ...and the cube check too, which is what ends the clip',
+    /label="ШООГОО ХАРУУЛ · ЭЦСИЙН БАЙДАЛ"[\s\S]{0,1200}?onDone=\{finishRecording\}/.test(page) &&
+      !/label="ШООГОО ХАРУУЛ · ЭЦСИЙН БАЙДАЛ"[\s\S]{0,1200}?end=/.test(page));
   ok('  ...and the cover hold too, still auto-advancing',
     page.includes("<CoverStage seconds={COVER_SECONDS} onDone={() => setStage('readyPrompt')} />"));
   ok('  ...so "auto" is still what a hold does unless told otherwise',
@@ -1120,7 +1162,7 @@ console.log('\n  -- 10. the mockup restyle --');
       page.includes("onFinish={() => setStage('finishHold')}") &&
       page.includes('async function finishRecording'));
   ok('the hold durations did not move',
-    page.includes('const HOLD_SECONDS = 8;') && (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 2);
+    page.includes('const HOLD_SECONDS = 8;') && (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3);
   ok('the markers are gone and stayed gone', !rec.includes('MARKER_TIMES_MS'));
   ok('resume did not move',
     /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page) &&
@@ -1133,7 +1175,7 @@ console.log('\n  -- 10. the mockup restyle --');
     between.includes('className="oc-solve-between"') &&
       /\.oc-solve-between \{[\s\S]{0,200}?max-width: 520px;[\s\S]{0,120}?gap: 22px;/.test(theme));
   ok('  ...and the lobby is still the lobby', lobby.includes('className="oc-solve-lobby"'));
-  ok('the stage list is fourteen long', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 14);
+  ok('the stage list is fifteen long', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 15);
   // count and go were merged into rec; verify was never built, because
   // it merges the closing hold with the keypad and that moves the
   // recording boundary.
@@ -1216,7 +1258,7 @@ console.log('\n  -- 11. the inspection --');
       union.filter((u) => !notAnAttempt.includes(u)).every((u) => inList.includes(u)),
       union.filter((u) => !notAnAttempt.includes(u) && !inList.includes(u)).join(',') || 'all present');
     // TWO FEWER: count and go merged into rec.
-    ok('  ...ten of them', inList.length === 10, String(inList.length));
+    ok('  ...eleven of them', inList.length === 11, String(inList.length));
     // attemptIntro names the attempt it introduces ("3-р эвлүүлэлт эхлэх
     // гэж байна"), so the bar must claim that attempt too — the two
     // would otherwise disagree on the same screen.
@@ -1388,7 +1430,7 @@ console.log('\n  -- 12. the attestation --');
       page.includes("onFinish={() => setStage('finishHold')}") &&
       /async function finishRecording[\s\S]{0,200}?await recorder\.stopRecording\(\)/.test(page));
   ok('the hold durations did not move',
-    page.includes('const HOLD_SECONDS = 8;') && (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 2);
+    page.includes('const HOLD_SECONDS = 8;') && (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3);
   // THE INSPECTION IS STILL FIFTEEN SECONDS, but it is no longer a stage
   // duration: `count` and `go` merged into the solve screen, so nothing
   // advances when the window is reached and the page holds no constant
@@ -1402,7 +1444,7 @@ console.log('\n  -- 12. the attestation --');
   ok('resume did not move',
     /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page) &&
       page.includes('setResumeMessage(resumeNotice(plan))'));
-  ok('the stage list did not move', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 14);
+  ok('the stage list did not move', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 15);
 }
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);

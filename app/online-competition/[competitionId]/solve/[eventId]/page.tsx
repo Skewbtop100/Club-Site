@@ -84,11 +84,19 @@ type Stage =
    *  this screen now, and nothing advances when it is reached. */
   | 'rec'
   /** The hold AFTER the solve: the athlete shows their timer to the
-   *  camera, and the recording runs through it. THE CLIP STOPS HERE, not
-   *  at the button that ends the solve — the reading on that timer is the
-   *  evidence for the time typed on the next screen, so it has to be on
-   *  the same continuous video as the solve it belongs to. */
+   *  camera. The reading on that timer is the evidence for the time typed
+   *  two screens later, so it has to be on the same continuous video as
+   *  the solve it belongs to. */
   | 'finishHold'
+  /** And then the CUBE, turned slowly so every face is seen. THE CLIP
+   *  STOPS HERE now — one stage later than it used to.
+   *
+   *  Why it moved: the cube's final state is what a judge reads to decide
+   *  +2 (one face off by a turn) or DNF (more than that), and until now
+   *  nothing on the video showed it. The time was evidenced and the solve
+   *  was not. Evidence that arrives after the recording has stopped is not
+   *  evidence, so the boundary had to follow it. */
+  | 'cubeCheck'
   | 'entry'
   /** The pause between attempts, and the run's only waiting screen: it
    *  absorbed `filing`. The athlete reads their times, watches the last
@@ -152,6 +160,7 @@ const ATTEMPT_STAGES: Stage[] = [
   'readyPrompt',
   'rec',
   'finishHold',
+  'cubeCheck',
   'entry',
 ];
 
@@ -895,7 +904,15 @@ export default function SolvePage() {
   }, []);
 
   /** Ends the recording and hands it to the keypad. The ONLY route from
-   *  the closing hold to the time entry.
+   *  the last hold to the time entry.
+   *
+   *  WHERE THE CLIP STOPS. This function is the boundary, and it did not
+   *  change when the boundary moved: stopRecording, the size check and the
+   *  blob handoff are all still here, in this order, in one place. What
+   *  moved is WHO CALLS IT — cubeCheck's onDone rather than finishHold's —
+   *  so the clip now runs eight seconds longer and covers the cube as well
+   *  as the timer. Moving a call site is the whole change; nothing about
+   *  how the recording is ended, checked or handed on is different.
    *
    *  The blob and the stage are set together, so React commits them in one
    *  render: the keypad never exists in a frame where the recording does
@@ -1495,6 +1512,32 @@ export default function SolvePage() {
             seconds={HOLD_SECONDS}
             label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"
             instruction={(sec) => `Хэмжсэн цагаа камерт тод харагдахаар ${sec} секунд барина уу.`}
+            /* It hands to the cube check now, not to the keypad. */
+            footnote="Хугацаа дуусаад шоогоо харуулна."
+            videoRef={recorder.videoRef}
+            onDone={() => setStage('cubeCheck')}
+          />
+        )}
+
+        {/* THE CUBE, and the last thing on the clip. A judge reads its
+            final state to decide +2 or DNF, so it has to be ON the video —
+            which is why the recording now stops after this stage instead
+            of before it. Same component, same constant, same auto-advance
+            as the other two timer holds: it is the same kind of thing, and
+            the only hold whose subject is the cube rather than a clock. */}
+        {stage === 'cubeCheck' && (
+          <CameraHoldStage
+            seconds={HOLD_SECONDS}
+            label="ШООГОО ХАРУУЛ · ЭЦСИЙН БАЙДАЛ"
+            /* Says the two things a judge needs it to say: turn it so
+               every face is seen, and do not turn a layer. A single
+               quarter-turn here would erase the difference between a
+               finished solve, a +2 and a DNF — the athlete would be
+               destroying the evidence they are being asked to provide. */
+            instruction={(sec) =>
+              `Шоогоо аажмаар эргүүлж бүх талыг нь ${sec} секунд камерт харуулна уу. ` +
+              'Аль ч давхаргыг эргүүлж болохгүй — эвлүүлэлтийн эцсийн байдлыг шүүгч шалгана.'
+            }
             footnote="Хугацаа дуусаад цагаа бичих хэсэг нээгдэнэ."
             videoRef={recorder.videoRef}
             onDone={finishRecording}
