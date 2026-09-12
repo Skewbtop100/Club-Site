@@ -41,8 +41,6 @@ import AttemptIntroStage from './_components/AttemptIntroStage';
 import CameraHoldStage from './_components/CameraHoldStage';
 import ReadyPromptStage from './_components/ReadyPromptStage';
 import CoverStage from './_components/CoverStage';
-import CountStage from './_components/CountStage';
-import GoStage from './_components/GoStage';
 import RecStage from './_components/RecStage';
 import EntryStage from './_components/EntryStage';
 import SummaryStage from './_components/SummaryStage';
@@ -78,12 +76,12 @@ type Stage =
    *  visible mark on the video and the inspection can be measured. */
   | 'cover'
   | 'readyPrompt'
-  /** WCA's fifteen seconds. The ONE clock that owns the inspection —
-   *  nothing after it counts inspection, which is why rec has no
-   *  inspection panel. */
-  | 'count'
-  /** The flash that ends the inspection window. */
-  | 'go'
+  /** THE INSPECTION AND THE SOLVE, on one screen. It absorbed `count`
+   *  (a 130px countdown) and `go` (a full-bleed flash): three screens for
+   *  one continuous moment, the middle of which told the athlete when to
+   *  begin — which WCA does not. Inspection is up to fifteen seconds and
+   *  going at six is a legitimate solve. The window is a quiet counter on
+   *  this screen now, and nothing advances when it is reached. */
   | 'rec'
   /** The hold AFTER the solve: the athlete shows their timer to the
    *  camera, and the recording runs through it. THE CLIP STOPS HERE, not
@@ -152,8 +150,6 @@ const ATTEMPT_STAGES: Stage[] = [
   'scrambleReveal',
   'cover',
   'readyPrompt',
-  'count',
-  'go',
   'rec',
   'finishHold',
   'entry',
@@ -192,24 +188,11 @@ const HOLD_SECONDS = 8;
  *  change to either must not silently move the other. */
 const COVER_SECONDS = 20;
 
-/** WCA inspection. The number is the rule's, and this is the only place
- *  the flow states it.
- *
- *  WHAT IT DOES NOT DO is penalise. WCA adds +2 past fifteen seconds and
- *  a DNF past seventeen; this platform can carry both — `penalty` is a
- *  stored field, the review route sets it, and effectiveAttemptTime
- *  applies it for every scorer — but firestore.rules pins `penalty` to
- *  null on create and gives athletes no update, so a penalty is a judge's
- *  to assign and never a client clock's. The count therefore ENDS the
- *  window instead of scoring an overrun: at zero the run moves on, so
- *  there is no fifteen-to-seventeen band for this page to have an opinion
- *  about. An athlete who keeps inspecting past the flash does it on
- *  camera, and the judge's existing +2 is what answers that. */
-const INSPECTION_SECONDS = 15;
-
-/** How long the volt flash holds before the solve. Long enough to read
- *  two words, short enough not to be a stage. */
-const GO_FLASH_MS = 1000;
+/* WCA's fifteen seconds are no longer a stage duration and have no
+   constant here. Nothing advances when they are reached — the window is
+   a counter on the solve screen and is that screen's own business. See
+   INSPECTION_WINDOW_SECONDS in RecStage, and the note there on why a
+   client clock names no penalty. */
 
 /** The browser's own dialog wording is not ours to choose, so
  *  beforeunload gets no message. Ours is for in-app navigation.
@@ -1495,18 +1478,7 @@ export default function SolvePage() {
             its own, and two go-aheads on two consecutive screens is one
             too many. This is the one that must not be pressable early,
             so it is the one that stayed. */}
-        {stage === 'readyPrompt' && <ReadyPromptStage onDone={() => setStage('count')} />}
-
-        {/* THE INSPECTION. One clock, and it is this one. */}
-        {stage === 'count' && (
-          <CountStage
-            seconds={INSPECTION_SECONDS}
-            videoRef={recorder.videoRef}
-            onDone={() => setStage('go')}
-          />
-        )}
-
-        {stage === 'go' && <GoStage ms={GO_FLASH_MS} onDone={() => setStage('rec')} />}
+        {stage === 'readyPrompt' && <ReadyPromptStage onDone={() => setStage('rec')} />}
 
         {stage === 'rec' && (
           <RecStage

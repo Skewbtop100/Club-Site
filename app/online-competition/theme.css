@@ -1547,12 +1547,6 @@
   }
   /* 210px of digit is 2.4 screens wide at 375. The number stays the
      largest thing on the screen by a distance; it just fits on it. */
-  .oc-solve-count-n {
-    font-size: 130px;
-  }
-  .oc-solve-goflash-title {
-    font-size: 32px;
-  }
   .oc-solve-cover-count {
   display: flex;
   align-items: baseline;
@@ -1767,28 +1761,6 @@
   border: 1px solid #2A2721;
   background: repeating-linear-gradient(135deg, #141210 0 8px, #191713 8px 16px);
   overflow: hidden;
-}
-.oc-solve-rec-box {
-  width: 100%;
-  position: relative;
-  aspect-ratio: 4 / 3;
-  max-height: 46vh;
-  border: 1px solid #1C1C21;
-  background: #0A0A0C;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.oc-solve-rec-box .oc-solve-camera-video {
-  position: absolute;
-  inset: 0;
-}
-.oc-solve-rec-caption {
-  position: relative;
-  font: 500 9px/1 var(--oc-font-mono), monospace;
-  letter-spacing: 0.2em;
-  color: #6E6A62;
 }
 .oc-solve-camera-video {
   width: 100%;
@@ -2182,68 +2154,14 @@
    inspection panel: the mockup shows one there, but a second readout of
    the same fifteen seconds is a second clock, and two clocks for one rule
    is how they come to disagree. */
-.oc-solve-count {
-  width: 100%;
-  margin: auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 22px;
-}
-.oc-solve-count-label {
-  font: 500 10px/1 var(--oc-font-mono), monospace;
-  letter-spacing: 0.24em;
-  color: #6E6A62;
-}
-.oc-solve-count-n {
-  font: 700 210px/0.85 var(--oc-font-mono), monospace;
-  color: #DFFF4F;
-  letter-spacing: -0.06em;
-  font-variant-numeric: tabular-nums;
-}
-.oc-solve-count-cam {
-  width: 180px;
-  max-width: 100%;
-  position: relative;
-  aspect-ratio: 4 / 3;
-  border: 1px solid #1C1C21;
-  overflow: hidden;
-  background: #0A0A0C;
-}
 /* NOT IN THE MOCKUP, and there on purpose: WCA inspection is UP TO
    fifteen seconds, not exactly fifteen. Without this the platform would
    force every athlete to hold a planned solve for the full count, which
    costs them the plan. */
-.oc-solve-count-go {
-  border: 1px solid #F4F1EA;
-  background: transparent;
-  color: #F4F1EA;
-  padding: 15px 28px;
-  font: 700 14px/1 var(--oc-font-heading), sans-serif;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-.oc-solve-count-go:hover {
-  background: #F4F1EA;
-  color: #08080A;
-}
 
 /* ── GO: the flash ───────────────────────────────────────────────────────
    Full-bleed over the scrolling column, exactly like `ready`. The bar
    stays: it is the frame, and ГАРАХ is the only way out of a run. */
-.oc-solve-goflash {
-  position: absolute;
-  inset: 0;
-  background: #DFFF4F;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 26px;
-  padding: 24px;
-  animation: oc-solve-go-pop 0.35s ease-out;
-}
 @keyframes oc-solve-go-pop {
   0% {
     transform: scale(0.95);
@@ -2254,26 +2172,6 @@
   100% {
     transform: scale(1);
   }
-}
-.oc-solve-goflash-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 26px);
-  grid-template-rows: repeat(3, 26px);
-  gap: 5px;
-}
-.oc-solve-goflash-cell {
-  background: #08080A;
-}
-.oc-solve-goflash-title {
-  font: 700 46px/1.1 var(--oc-font-heading), sans-serif;
-  color: #08080A;
-  letter-spacing: -0.015em;
-  text-align: center;
-}
-.oc-solve-goflash-sub {
-  font: 500 11px/1 var(--oc-font-mono), monospace;
-  letter-spacing: 0.24em;
-  color: rgba(8, 8, 10, 0.55);
 }
 
 /* ── READY: the full-bleed go-ahead ──────────────────────────────────────
@@ -2364,19 +2262,105 @@
 
 
 /* State 4 — rec (recording, no timer) */
+/* ── THE INSPECTION AND THE SOLVE, ON ONE FULL-BLEED SCREEN ───────────
+   It was a 720px column with a 4/3 preview in it, reached after a 130px
+   countdown screen and a full-bleed flash. Those two are gone: three
+   screens for one continuous moment, the middle of which told the athlete
+   when to begin, which WCA does not.
+
+   Full-bleed over the scrolling column, the way `ready` is — the bar
+   stays above it, because it is the frame of the run and ГАРАХ is the
+   only way out of one. The camera IS the screen: everything else on it
+   is a small thing laid over a corner. */
 .oc-solve-rec {
-  width: 100%;
-  max-width: 720px;
-  margin: auto;
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
+  padding: 20px;
+  background: #08080A;
+}
+/* Fills the screen behind everything else. `cover` rather than `contain`:
+   the athlete framed this shot on the lobby and has held it through four
+   screens since, so what matters here is a large, clear view of the cube
+   rather than a letterboxed view of the whole frame. It is display only —
+   MediaRecorder reads the camera track and never a stylesheet, so the
+   recording is the full frame either way. */
+.oc-solve-rec-feed {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center center;
 }
 .oc-solve-rec-flag {
+  position: absolute;
+  top: 16px;
+  left: 16px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  padding: 7px 10px;
+  background: rgba(8, 8, 10, 0.72);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+/* ── THE INSPECTION COUNTER ───────────────────────────────────────────
+   Counts UP, 1 to 15. Up, not down, because a countdown is a deadline —
+   it says something happens at zero, and here nothing does.
+
+   SMALL AND PERIPHERAL, in the corner opposite the recording flag. An
+   athlete inspecting a cube should be looking at the cube; this is a
+   thing to glance at, and it is sized and placed so that glancing is all
+   it invites. Tabular figures so it does not jitter as it counts.
+
+   THE CUE COLOUR LIVES HERE, on the digits — not on the camera frame's
+   border, where it used to. The border is the edge of what is being
+   recorded, which is the one thing on this screen that already means
+   something specific; and a border is a large peripheral change that
+   pulls the eye across the whole frame at the exact moment the athlete
+   should be looking at a cube. The cue is a fact about this number's
+   value, so it belongs on this number. */
+.oc-solve-insp {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  min-width: 42px;
+  padding: 7px 10px;
+  background: rgba(8, 8, 10, 0.72);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  font: 600 15px/1 var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: #9A958A;
+  transition: color 300ms ease, opacity 900ms ease;
+}
+/* The two moments a judge calls aloud during inspection, as colour and
+   nothing else — no words, no sound, no border. */
+.oc-solve-insp-amber {
+  color: #E0A020;
+}
+.oc-solve-insp-red {
+  color: #D8402C;
+}
+/* AT FIFTEEN IT GOES. A number parked at the end of a closed window still
+   looks like it means something, and the only thing it could be taken to
+   mean is the penalty this platform does not apply. Faded rather than
+   removed, and slowly: the athlete may be mid-solve at fifteen seconds,
+   and something vanishing in the corner of the eye is an interruption. */
+.oc-solve-insp-done {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .oc-solve-insp {
+    transition: none;
+  }
 }
 .oc-solve-rec-flag-text {
   font: 500 10px/1 var(--oc-font-mono), monospace;
@@ -2384,9 +2368,11 @@
   color: #E8543C;
 }
 .oc-solve-rec-note {
-  font: 400 12px/1.6 var(--oc-font-heading), sans-serif;
-  color: #6E6A62;
+  max-width: 460px;
+  font: 400 11px/1.5 var(--oc-font-heading), sans-serif;
+  color: #9A958A;
   text-align: center;
+  text-shadow: 0 1px 6px rgba(8, 8, 10, 0.9);
 }
 .oc-solve-rec-dot {
   width: 8px;
@@ -2405,6 +2391,7 @@
 }
 .oc-solve-btn-finish {
   width: 100%;
+  max-width: 460px;
   border: 1px solid #F4F1EA;
   background: transparent;
   color: #F4F1EA;

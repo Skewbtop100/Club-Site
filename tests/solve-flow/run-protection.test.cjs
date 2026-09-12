@@ -385,22 +385,29 @@ console.log('\n  -- 7. durations and markers --');
   ok('  ...showing the athlete their own timer at 0.00',
     /Хугацаа хэмжигчийг 0\.00 болгосон байдалтай цаг дуустал камерлуу харуулна уу\./.test(page));
 
-  // THE MARKERS ARE GONE. They walked the preview's border at 8, 12 and
-  // 15 seconds, as an aid to an athlete counting WCA inspection by feel.
-  // Inspection is its own stage with its own countdown now, BEFORE this
-  // screen exists — so those three timers were counting from the start of
-  // the SOLVE, which was never inspection, and the only thing they could
-  // still suggest mid-solve was a rule that is not running.
-  ok('no marker timers survive in rec',
-    !rec.includes('MARKER_TIMES_MS') && !rec.includes('setMarker') && !rec.includes('oc-solve-mark-'));
-  ok('  ...nor the four rules that painted them',
-    [1, 2, 3].every((n) => !theme.includes(`.oc-solve-mark-${n}`)) &&
+  // THE 8/12/15 CUES ARE BACK, AND SOMEWHERE ELSE. They were removed
+  // when a dedicated inspection countdown made them misleading — they
+  // walked the PREVIEW'S BORDER from the start of the solve, which was
+  // never inspection. That countdown is gone now (its stage merged into
+  // this screen), so the cues are meaningful again and have come back as
+  // the counter's own colour.
+  ok('the old border markers stay gone, timers and rules alike',
+    !rec.includes('MARKER_TIMES_MS') && !rec.includes('setMarker') && !rec.includes('oc-solve-mark-') &&
+      [1, 2, 3].every((n) => !theme.includes(`.oc-solve-mark-${n}`)) &&
       !theme.includes('transition: border-color 800ms ease;'));
   ok('  ...and nothing else referenced them',
     !fs.readFileSync(path.join(ROOT, SOLVE, '_lib/useSolveRecorder.ts'), 'utf8').includes('marker') &&
       !page.includes('marker') && !theme.includes('oc-solve-mark'));
-  ok('  ...leaving rec with no state at all',
-    !rec.includes('useState') && !rec.includes('useEffect'));
+  // ON THE DIGITS, not the frame. The border is the edge of what is
+  // being recorded — the one thing on this screen that already means
+  // something specific — and a border is a large peripheral change that
+  // pulls the eye across the whole frame while the athlete should be
+  // looking at a cube.
+  ok('  ...the cue colour living on the counter, not the camera frame',
+    rec.includes('const CUE_AMBER_AT = 8;') && rec.includes('const CUE_RED_AT = 12;') &&
+      /\.oc-solve-insp-amber \{\s*\n\s*color: #E0A020;/.test(theme) &&
+      /\.oc-solve-insp-red \{\s*\n\s*color: #D8402C;/.test(theme) &&
+      !/\.oc-solve-rec-feed \{[^}]*border/.test(theme));
   // The beeps they replaced are still gone, and nothing audio-shaped came
   // back with the removal.
   ok('  ...and the beeps are still gone',
@@ -525,7 +532,7 @@ console.log('\n  -- 8. the competition environment --');
   ok('  ...but never the two buttons', !/@media[\s\S]*?\.oc-solve-bar-btn \{[\s\S]{0,60}?display: none/.test(theme));
 
   // NOT IN THIS DIFF: layout only.
-  ok('the run has sixteen stages', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 16);
+  ok('the run has fourteen stages', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 14);
   ok('the recording boundary is untouched',
     page.includes("if (stage === 'zeroDisplay') {") &&
       page.includes("onFinish={() => setStage('finishHold')}") &&
@@ -551,7 +558,7 @@ console.log('\n  -- 9. the lobby and the between screen --');
     !page.includes("'cameraSetup'") && !page.includes("'filing'"));
   ok('  ...nor as a render branch',
     !page.includes("stage === 'cameraSetup'") && !page.includes("stage === 'filing'"));
-  ok('the run still has every stage it had, plus the intro', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 16);
+  ok('the run still has every stage it had, minus count and go', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 14);
   ok('  ...two of them new', page.includes("| 'lobby'") && page.includes("| 'between'"));
 
   // ── LOBBY ──
@@ -829,7 +836,7 @@ console.log('\n  -- 10. the mockup restyle --');
   ok('  ...so each screen carries the mockup’s own width', [
     ['.oc-solve-entry', '380px'], ['.oc-solve-sent', '460px'], ['.oc-solve-between', '520px'],
     ['.oc-solve-summary', '560px'], ['.oc-solve-lobby', '1080px'], ['.oc-solve-hold', '680px'],
-    ['.oc-solve-rec', '720px'], ['.oc-solve-reveal', '760px'],
+    ['.oc-solve-reveal', '760px'],
   ].every(([sel, w]) => new RegExp(`\\${sel} \\{[\\s\\S]{0,220}?max-width: ${w};`).test(theme)));
   ok('  ...and centres itself, since the column no longer does',
     (theme.match(/\n  margin: auto;/g) ?? []).length >= 8);
@@ -1034,14 +1041,16 @@ console.log('\n  -- 10. the mockup restyle --');
       /\.oc-solve-move-tile \{[\s\S]{0,200}?aspect-ratio: 1;/.test(theme));
   ok('  ...with no side preview left', !revealCode.includes('videoRef') && !revealCode.includes('<video'));
 
-  // ── REC, minus the inspection panel ──
-  ok('rec is the mockup’s 4/3 frame',
-    rec.includes('className="oc-solve-rec-box"') &&
-      /\.oc-solve-rec-box \{[\s\S]{0,260}?aspect-ratio: 4 \/ 3;/.test(theme));
+  // ── REC: THE CAMERA IS THE SCREEN ──
+  // It was a 4/3 box in a 720px column, reached after a countdown screen
+  // and a flash. Those two are gone; this one is full-bleed.
+  ok('rec is full-bleed, the camera filling the screen',
+    rec.includes('className="oc-solve-rec-feed"') &&
+      /\.oc-solve-rec \{[\s\S]{0,500}?position: absolute;[\s\S]{0,60}?inset: 0;/.test(theme) &&
+      /\.oc-solve-rec-feed \{[\s\S]{0,300}?object-fit: cover;/.test(theme));
   ok('  ...with the mockup’s finish button', rec.includes('>\n        Эвлүүлэлт дууссан\n      </button>'));
-  // The inspection strip under the preview belongs with `count`.
-  ok('  ...and NO inspection panel',
-    !stripComments(rec).includes('АЖИГЛАХ ХУГАЦАА') && !theme.includes('oc-solve-insp'));
+  ok('  ...and the old boxed preview gone with the column',
+    !theme.includes('oc-solve-rec-box') && !rec.includes('oc-solve-rec-box'));
   ok('the scrolling tick strip is gone', !theme.includes('.oc-solve-tick-strip') && !rec.includes('tick-strip'));
 
   // ── ENTRY: the mockup's `entry` block, NOT verify's ──
@@ -1090,12 +1099,13 @@ console.log('\n  -- 10. the mockup restyle --');
     between.includes('className="oc-solve-between"') &&
       /\.oc-solve-between \{[\s\S]{0,200}?max-width: 520px;[\s\S]{0,120}?gap: 22px;/.test(theme));
   ok('  ...and the lobby is still the lobby', lobby.includes('className="oc-solve-lobby"'));
-  ok('three stages were added', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 16);
-  // verify is still out: it merges the closing hold with the keypad,
-  // which moves the recording boundary.
-  ok('  ...cover, count and go — and verify still absent',
-    page.includes("| 'cover'") && page.includes("| 'count'") && page.includes("| 'go'") &&
-      !page.includes("'verify'"));
+  ok('the stage list is fourteen long', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 14);
+  // count and go were merged into rec; verify was never built, because
+  // it merges the closing hold with the keypad and that moves the
+  // recording boundary.
+  ok('  ...cover stayed, count and go merged away, verify never arrived',
+    page.includes("| 'cover'") && !page.includes("| 'count'") &&
+      !page.includes("| 'go'") && !page.includes("'verify'"));
 
   // ── ONE ROW PER CHUNK, AT EVERY WIDTH ──
   // A grid with one column per move cannot wrap: there is no second row
@@ -1119,10 +1129,7 @@ console.log('\n  -- 10. the mockup restyle --');
 console.log('\n  -- 11. the inspection --');
 {
   const cover = fs.readFileSync(path.join(ROOT, SOLVE, '_components/CoverStage.tsx'), 'utf8');
-  const count = fs.readFileSync(path.join(ROOT, SOLVE, '_components/CountStage.tsx'), 'utf8');
-  const go = fs.readFileSync(path.join(ROOT, SOLVE, '_components/GoStage.tsx'), 'utf8');
   const ready = fs.readFileSync(path.join(ROOT, SOLVE, '_components/ReadyPromptStage.tsx'), 'utf8');
-  const countCode = stripComments(count);
   const recCode2 = stripComments(rec);
   const pageCode = stripComments(page);
 
@@ -1138,17 +1145,32 @@ console.log('\n  -- 11. the inspection --');
       !page.includes('coverPrep') && !page.includes('CoverPrepStage') &&
       !theme.includes('oc-solve-prep'));
   ok('  ...cover to ready', page.includes("<CoverStage seconds={COVER_SECONDS} onDone={() => setStage('readyPrompt')} />"));
-  ok('  ...ready to count', page.includes("<ReadyPromptStage onDone={() => setStage('count')} />"));
-  ok('  ...count to go', /<CountStage[\s\S]{0,200}?onDone=\{\(\) => setStage\('go'\)\}/.test(page));
-  ok('  ...and go to rec', page.includes("<GoStage ms={GO_FLASH_MS} onDone={() => setStage('rec')} />"));
+  // STRAIGHT TO THE SOLVE SCREEN. `count` and `go` sat between these
+  // two — three screens for one continuous moment, and the middle one
+  // told the athlete when to begin, which WCA does not.
+  ok('  ...and ready straight to rec', page.includes("<ReadyPromptStage onDone={() => setStage('rec')} />"));
+  ok('  ...with both merged stages gone, files and all',
+    !fs.existsSync(path.join(ROOT, SOLVE, '_components/CountStage.tsx')) &&
+      !fs.existsSync(path.join(ROOT, SOLVE, '_components/GoStage.tsx')) &&
+      !page.includes('CountStage') && !page.includes('GoStage') &&
+      !page.includes("'count'") && !page.includes("'go'"));
+  ok('  ...and their constants with them',
+    !page.includes('const INSPECTION_SECONDS') && !page.includes('GO_FLASH_MS'));
+  ok('  ...and their CSS',
+    !theme.includes('oc-solve-count') && !theme.includes('oc-solve-goflash'));
 
   // ── ALL THREE ARE INSIDE THE RECORDING ──
   ok('the recording still starts at the opening hold', page.includes("if (stage === 'zeroDisplay') {"));
   ok('  ...and still stops after the closing hold, nowhere else',
     page.includes("onFinish={() => setStage('finishHold')}") &&
       /async function finishRecording[\s\S]{0,200}?await recorder\.stopRecording\(\)/.test(page));
-  ok('  ...so none of the three new stages touches it', [cover, count, go]
-    .every((f) => !f.includes('startRecording') && !f.includes('stopRecording') && !f.includes('recorder')));
+  // THE MERGE MOVED NEITHER END OF THE CLIP. It already ran across all
+  // three of the screens folded together here, so folding them changes
+  // nothing about where it starts or stops — and the merged screen
+  // touches the recorder no more than its parts did.
+  ok('  ...so neither the cover nor the merged solve screen touches it',
+    [cover, stripComments(rec)]
+      .every((f) => !f.includes('startRecording') && !f.includes('stopRecording')));
   // EVERY stage of an attempt must be in ATTEMPT_STAGES, or the bar drops
   // its attempt label part-way through one.
   {
@@ -1159,13 +1181,14 @@ console.log('\n  -- 11. the inspection --');
     ok('every stage of an attempt is in ATTEMPT_STAGES',
       union.filter((u) => !notAnAttempt.includes(u)).every((u) => inList.includes(u)),
       union.filter((u) => !notAnAttempt.includes(u) && !inList.includes(u)).join(',') || 'all present');
-    ok('  ...twelve of them', inList.length === 12, String(inList.length));
+    // TWO FEWER: count and go merged into rec.
+    ok('  ...ten of them', inList.length === 10, String(inList.length));
     // attemptIntro names the attempt it introduces ("3-р эвлүүлэлт эхлэх
     // гэж байна"), so the bar must claim that attempt too — the two
     // would otherwise disagree on the same screen.
     ok('  ...including the intro, which names its attempt', inList.includes('attemptIntro'));
-    ok('  ...including the three new ones',
-      ['cover', 'count', 'go'].every((x) => inList.includes(x)));
+    ok('  ...including the cover, and no longer count or go',
+      inList.includes('cover') && !inList.includes('count') && !inList.includes('go'));
     ok('  ...and the four that are not an attempt stay out',
       notAnAttempt.every((x) => !inList.includes(x)));
   }
@@ -1186,20 +1209,47 @@ console.log('\n  -- 11. the inspection --');
   // ...and it now starts the inspection rather than the solve, so it says so.
   ok('  ...and says what it now starts', ready.includes('ажиглалтаа эхлүүлээрэй') || ready.includes('Ажиглалтаа эхлүүлэх'));
 
-  // ── COUNT: fifteen seconds, one clock, no penalty ──
-  ok('the inspection is fifteen seconds', page.includes('const INSPECTION_SECONDS = 15;'));
-  ok('  ...stated once and passed in', (page.match(/INSPECTION_SECONDS/g) ?? []).length === 2);
-  ok('  ...driving the timeout and the number from the same value',
-    count.includes('useState(seconds)') && count.includes('setTimeout(onDone, seconds * 1000)'));
-  ok('  ...at the mockup’s 210px', /\.oc-solve-count-n \{[\s\S]{0,140}?font: 700 210px\/0\.85/.test(theme));
+  // ── THE INSPECTION, ON THE SOLVE SCREEN ──
+  // Fifteen seconds, counted UP. Up, not down, because a countdown is a
+  // deadline — it says something happens at zero, and here nothing does.
+  ok('the inspection window is fifteen seconds',
+    rec.includes('const INSPECTION_WINDOW_SECONDS = 15;'));
+  ok('  ...counted up, 1 to 15, from one value',
+    rec.includes('useState(1)') &&
+      rec.includes('Math.min(e + 1, INSPECTION_WINDOW_SECONDS)'));
+  ok('  ...and NOT a stage duration: nothing advances when it is reached',
+    !rec.includes('setTimeout') && !stripComments(rec).includes('onDone'));
+  // SMALL AND PERIPHERAL. An athlete inspecting a cube should be looking
+  // at the cube, so the counter is sized and placed to be glanced at.
+  ok('  ...shown small, in the corner, not as a 210px number',
+    /\.oc-solve-insp \{[\s\S]{0,400}?position: absolute;[\s\S]{0,400}?font: 600 15px\/1/.test(theme) &&
+      !theme.includes('.oc-solve-count-n'));
+  // AT FIFTEEN IT GOES. A number parked at the end of a closed window
+  // still looks like it means something, and the only thing it could be
+  // taken to mean is the penalty this platform does not apply. Faded,
+  // not removed, because the athlete may be mid-solve.
+  ok('  ...then fading out rather than sitting on 15',
+    rec.includes('oc-solve-insp-done') &&
+      /\.oc-solve-insp-done \{\s*\n\s*opacity: 0;/.test(theme) &&
+      /\.oc-solve-insp \{[^}]*transition:[^;]*opacity/.test(theme));
+  // NOTHING TELLS THE ATHLETE TO BEGIN. That was `go`'s whole job and
+  // it is the part of it that had to not come back: WCA inspection is UP
+  // TO fifteen seconds, and going at six is a legitimate solve.
+  ok('  ...and nothing on it says when to start',
+    !recCode2.includes('ЭВЛҮҮЛЖ ЭХЛЭЭРЭЙ') && !recCode2.includes('эхлээрэй') &&
+      !theme.includes('oc-solve-goflash'));
+  // THE BUTTON IS THERE THROUGHOUT, at nine seconds or ninety.
+  ok('  ...while the finish button is present from the first frame',
+    /<button type="button" className="oc-solve-btn-finish"/.test(rec) &&
+      !/disabled/.test(rec));
 
-  // THE PART THAT MATTERS: no client-side penalty, anywhere.
-  ok('the count writes no penalty', !countCode.includes('penalty') && !countCode.includes('+2'));
+  // THE PART THAT MATTERS: no client-side penalty, anywhere. Fifteen
+  // seconds passing does nothing at all.
+  ok('the solve screen writes no penalty',
+    !recCode2.includes('penalty') && !recCode2.includes('+2'));
   ok('  ...and neither does the page', !pageCode.includes('penalty'));
-  // It ends the window instead. There is no 15-to-17 band to have an
-  // opinion about, because at zero the run has already moved on.
-  ok('  ...it ENDS the window rather than scoring an overrun',
-    count.includes("onDone") && !countCode.includes('17') && !countCode.includes('DNF'));
+  ok('  ...and it names no rule it cannot apply',
+    !recCode2.includes('17') && !recCode2.includes('DNF'));
   // The judge's +2 is real and reaches scoring — that is what answers an
   // overrun, and it is a field athletes cannot write.
   ok('the judge’s +2 still reaches every scorer',
@@ -1209,25 +1259,27 @@ console.log('\n  -- 11. the inspection --');
     fs.readFileSync(path.join(ROOT, 'firestore.rules'), 'utf8')
       .includes('request.resource.data.penalty == null'));
 
-  // EXACTLY ONE THING OWNS THE INSPECTION.
-  ok('rec has no inspection panel', !recCode2.includes('АЖИГЛАХ') && !theme.includes('oc-solve-insp'));
-  ok('  ...so АЖИГЛАХ ХУГАЦАА appears on exactly one stage',
-    countCode.includes('АЖИГЛАХ ХУГАЦАА') && !recCode2.includes('АЖИГЛАХ ХУГАЦАА'));
-  // The early exit can only ever SHORTEN the window.
-  ok('the athlete may start before the count runs out',
-    /className="oc-solve-count-go" onClick=\{onDone\}/.test(count));
+  // EXACTLY ONE THING OWNS THE INSPECTION, and now it is the solve
+  // screen's counter. The old panel's label is gone with its stage: a
+  // bare number needs no heading, and a heading would make it something
+  // to read rather than glance at.
+  ok('the inspection is a bare counter, with no panel or label',
+    !recCode2.includes('АЖИГЛАХ') && !theme.includes('oc-solve-count-label'));
+  // THE EARLY EXIT IS GONE WITH THE STAGE, and nothing replaced it,
+  // because there is nothing left to exit. `count` needed a "done"
+  // button so an athlete who had planned their solve at six was not held
+  // for the remaining nine seconds; here the window does not hold them
+  // at all — they simply start turning, and the counter goes on counting
+  // beside them without meaning anything.
+  ok('nothing on the screen ends the inspection early, or at all',
+    !rec.includes('oc-solve-count-go') && !theme.includes('oc-solve-count-go'));
 
-  // ── GO ──
-  ok('go is the mockup’s full-bleed volt flash',
-    /\.oc-solve-goflash \{[\s\S]{0,200}?position: absolute;[\s\S]{0,120}?background: #DFFF4F;/.test(theme) &&
-      go.includes('ЭВЛҮҮЛЖ ЭХЛЭЭРЭЙ') && go.includes('БИЧЛЭГ ЯВЖ БАЙНА'));
-  ok('  ...over a 3x3 of 26px cells',
-    /\.oc-solve-goflash-grid \{[\s\S]{0,160}?repeat\(3, 26px\);/.test(theme));
-  ok('  ...and it is a flash, not a stage', page.includes('const GO_FLASH_MS = 1000;'));
-  // Neither full-bleed screen may cover the bar: ГАРАХ is the only way out.
+  // Neither full-bleed screen may cover the bar: ГАРАХ is the only way
+  // out. The flash is gone; the solve screen took its place as the
+  // second full-bleed one.
   ok('neither full-bleed screen covers the bar',
     /\.oc-solve-ready \{[\s\S]{0,200}?position: absolute;/.test(theme) &&
-      /\.oc-solve-goflash \{[\s\S]{0,200}?position: absolute;/.test(theme) &&
+      /\.oc-solve-rec \{[\s\S]{0,500}?position: absolute;/.test(theme) &&
       /\.oc-solve-body \{[\s\S]{0,220}?position: relative;/.test(theme));
 
   // ── WHAT MUST NOT MOVE ──
@@ -1240,9 +1292,11 @@ console.log('\n  -- 11. the inspection --');
   ].every(([sel, w]) => new RegExp(`\\${sel} \\{[\\s\\S]{0,220}?max-width: ${w};`).test(theme)));
   ok('the markers are gone and stayed gone', !rec.includes('MARKER_TIMES_MS'));
 
-  // 375px: the two numbers that do not fit as specified.
-  ok('the 210px count shrinks at 375', /\.oc-solve-count-n \{\s*\n\s*font-size: 130px;/.test(theme));
-  ok('  ...and the 46px flash title with it', /\.oc-solve-goflash-title \{\s*\n\s*font-size: 32px;/.test(theme));
+  // 375px: the two numbers that did not fit as specified are gone with
+  // their stages — a 210px countdown and a 46px flash title. What is
+  // left on the solve screen is a 15px counter, which fits anywhere.
+  ok('the two oversized numbers went with their stages',
+    !theme.includes('.oc-solve-count-n') && !theme.includes('.oc-solve-goflash-title'));
 }
 
 console.log('\n  -- 12. the attestation --');
@@ -1301,15 +1355,20 @@ console.log('\n  -- 12. the attestation --');
       /async function finishRecording[\s\S]{0,200}?await recorder\.stopRecording\(\)/.test(page));
   ok('the hold durations did not move',
     page.includes('const HOLD_SECONDS = 8;') && (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 2);
-  ok('the inspection countdown did not move',
-    page.includes('const INSPECTION_SECONDS = 15;') &&
-      page.includes('seconds={INSPECTION_SECONDS}') && page.includes('const GO_FLASH_MS = 1000;'));
-  ok('  ...and still owns the inspection alone',
-    !stripComments(rec).includes('АЖИГЛАХ') && !theme.includes('oc-solve-insp'));
+  // THE INSPECTION IS STILL FIFTEEN SECONDS, but it is no longer a stage
+  // duration: `count` and `go` merged into the solve screen, so nothing
+  // advances when the window is reached and the page holds no constant
+  // for it. The number lives with the counter that shows it.
+  ok('the inspection window is still fifteen seconds',
+    rec.includes('const INSPECTION_WINDOW_SECONDS = 15;') &&
+      !page.includes('INSPECTION_SECONDS') && !page.includes('GO_FLASH_MS'));
+  ok('  ...and one thing still owns it — the solve screen’s counter',
+    !stripComments(rec).includes('АЖИГЛАХ') &&
+      theme.includes('.oc-solve-insp {') && !theme.includes('.oc-solve-count-label'));
   ok('resume did not move',
     /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page) &&
       page.includes('setResumeMessage(resumeNotice(plan))'));
-  ok('the stage list did not move', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 16);
+  ok('the stage list did not move', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 14);
 }
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
