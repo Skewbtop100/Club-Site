@@ -1063,82 +1063,166 @@
 
 /* ── LOBBY: the first screen of a round ───────────────────────────────
    Absorbs the old cameraSetup — there is no reason to spend a screen
-   asking for the camera when the screen that explains the run can hold
-   the preview. The rules list is the mockup's; its wording is not (see
-   LobbyStage: attempts are filed as they are recorded, so "leave and the
-   rest are void" describes a platform this one stopped being). */
+   asking for the camera when the screen the athlete is standing on
+   anyway can hold the preview.
+
+   THE CAMERA IS THE SCREEN. The mockup's 620px column — a 200px 3/4
+   thumbnail beside a heading, a lead and four rules — is gone. It could
+   not do the one job the screen has: a `cover` thumbnail in a fixed
+   portrait box cropped the preview and lied about the shape of the
+   frame, so an athlete framed the cube and the timer against edges that
+   were not the recording's. The text is one line, over the video. */
 .oc-solve-lobby {
   width: 100%;
-  max-width: 620px;
+  max-width: 1080px;
   margin: auto;
+  /* Fills the stage column rather than sitting in the middle of it: the
+     preview can only be "as large as the viewport allows" if the column
+     hands it every pixel the bar, the banners and the button leave. */
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
 }
-.oc-solve-lobby-head {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.oc-solve-lobby-title {
-  font: 600 30px/1.15 var(--oc-font-heading), sans-serif;
-  letter-spacing: -0.015em;
-  color: #F4F1EA;
-}
-.oc-solve-lobby-lead {
-  font: 400 13px/1.7 var(--oc-font-heading), sans-serif;
-  color: #9A958A;
-}
-.oc-solve-lobby-panel {
-  border: 1px solid #1C1C21;
-  background: #1C1C21;
-  display: grid;
-  grid-template-columns: 200px 1fr;
-  gap: 1px;
-}
-.oc-solve-lobby-cam {
-  background: #0A0A0C;
+/* The available area, and the positioning context for the overlay.
+
+   container-type: size does two jobs. It exposes the area's width and
+   height to the sizing rule below as cqw/cqh, and — because size
+   containment means the contents cannot size the container — it stops the
+   video's intrinsic width from inflating this box. Without it a 1280-wide
+   stream made this element 1280 wide inside a 343px phone screen, because
+   a flex item's automatic minimum size is its content's, and the page
+   scrolled sideways. min-width: 0 says the same thing a second way. */
+.oc-solve-lobby-view {
+  flex: 1;
+  /* Not min-height: 0 — below this the preview stops being usable and
+     the body should scroll instead (a phone in landscape with the
+     browser chrome up). */
+  min-height: 180px;
+  min-width: 0;
+  container-type: size;
   position: relative;
-  aspect-ratio: 3 / 4;
-  max-width: 100%;
-  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
+  background: #0A0A0C;
+  cursor: pointer;
+  /* Fallback ratio for the moment before the stream reports its own. The
+     feed is hidden behind the placeholder until then; these only keep the
+     sizing rule below well-formed. */
+  --oc-cam-w: 4;
+  --oc-cam-h: 3;
 }
-/* Behind the КАМЕР placeholder, not above it: the label is what the box
-   says while the stream is still being granted. */
-.oc-solve-lobby-cam .oc-solve-camera-video {
+/* THE SIZING RULE, and the whole point of the screen.
+
+   The largest box of the STREAM'S OWN ratio that fits the area:
+     width = min(the area's width, the area's height x the ratio)
+   which is the width if the area is the narrower shape, and the
+   height-derived width if it is the taller one. Whichever axis runs out
+   first decides, in one expression, with no branch and no JavaScript
+   doing layout — cqw/cqh are the container's real dimensions.
+
+   The ratio is --oc-cam-w / --oc-cam-h, set from the stream's actual
+   frame size (LobbyStage reads videoWidth/videoHeight). It is measured,
+   never assumed: a portrait phone draws a portrait frame and a laptop
+   webcam a landscape one because the camera said so.
+
+   It scales UP as well as down — a 640x480 webcam filled a 640x480 patch
+   of a 1440px screen when this was intrinsic sizing with max-* caps, and
+   the preview is the content of this screen, not an illustration of it.
+
+   IT IS AN ELEMENT, not a rule on the video, so that the overlay can be
+   its child. Positioned against the AREA, the one line drifted off the
+   video whenever the frame was the narrower shape — a portrait phone
+   stream on a desktop put a "centre the cube in frame" caption on the
+   black beside the frame, and a landscape stream on a phone put it well
+   below the frame's bottom edge. Over the preview means over the
+   preview. */
+.oc-solve-lobby-frame {
+  position: relative;
+  width: min(100cqw, 100cqh * (var(--oc-cam-w) / var(--oc-cam-h)));
+  aspect-ratio: var(--oc-cam-w) / var(--oc-cam-h);
+  background: #08080A;
+  /* A shadow, not a border: it traces the frame's edge exactly instead of
+     eating a pixel of it, whatever box-sizing is in force. */
+  box-shadow: 0 0 0 1px #1C1C21;
+}
+/* Waiting. No true ratio is known yet, so none is claimed: the frame is
+   simply the whole area, unmarked, and the placeholder fills it. */
+.oc-solve-lobby-frame-idle {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  box-shadow: none;
+  background: none;
+}
+/* contain, never cover: nothing that will be recorded may be cropped out
+   of the preview. The frame above is already the stream's shape, so
+   contain has nothing to letterboard in the ordinary case — it is the
+   belt to that rule's braces, and what keeps a stream that has just
+   changed shape from being cropped for the frame or two before the new
+   ratio lands. */
+.oc-solve-lobby-feed {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+/* DASHED, where the live frame is solid. Before metadata there is no
+   real frame to draw, and drawing a plausible one is the exact mistake
+   this screen was rebuilt to stop making — an edge the athlete could aim
+   at that is not where the recording ends. */
+.oc-solve-lobby-placeholder {
   position: absolute;
   inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 20px;
+  text-align: center;
+  border: 1px dashed #1C1C21;
 }
 .oc-solve-lobby-camlabel {
-  position: relative;
   font: 500 9px/1 var(--oc-font-mono), monospace;
   letter-spacing: 0.18em;
   color: #3A3A42;
 }
-.oc-solve-lobby-rules {
-  background: #0D0D10;
-  padding: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  justify-content: center;
+/* The one line of copy, over live video. A scrim, not a text-shadow:
+   the background is an arbitrary camera frame, and a white cube under
+   room lighting defeats a shadow. Volt rule on the left ties it to the
+   rest of the run; pointer-events: none so it never eats the tap that
+   brings it back. */
+.oc-solve-lobby-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  /* Of the FRAME, which is this element's positioning context — so the
+     line can never be wider than the preview it annotates. */
+  max-width: min(520px, calc(100% - 32px));
+  margin: 0;
+  padding: 11px 15px;
+  border-left: 2px solid #DFFF4F;
+  background: rgba(8, 8, 10, 0.82);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  font: 500 13px/1.5 var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 600ms ease;
 }
-.oc-solve-lobby-rule {
-  display: flex;
-  gap: 11px;
-  align-items: flex-start;
-  font: 400 12px/1.55 var(--oc-font-heading), sans-serif;
-  color: #9A958A;
+.oc-solve-lobby-hint-out {
+  opacity: 0;
 }
-.oc-solve-lobby-dot {
-  width: 5px;
-  height: 5px;
-  margin-top: 6px;
-  background: #DFFF4F;
-  flex: none;
+@media (prefers-reduced-motion: reduce) {
+  .oc-solve-lobby-hint {
+    transition: none;
+  }
 }
 .oc-solve-lobby-error {
   font: 400 12px/1.6 var(--oc-font-heading), sans-serif;
@@ -1308,17 +1392,16 @@
   .oc-solve-bar-right {
     gap: 12px;
   }
-  /* 200px of camera leaves 142px for four rules at 375px. The panel
-     stacks instead, and the portrait crop goes landscape so a preview
-     does not push the button off the screen. */
-  .oc-solve-lobby-panel {
-    grid-template-columns: 1fr;
-  }
-  .oc-solve-lobby-cam {
-    aspect-ratio: 16 / 10;
-  }
-  .oc-solve-lobby-title {
-    font-size: 24px;
+  /* NOTHING TO STACK AND NO RATIO TO OVERRIDE. The panel that had to
+     stack at 375px is gone, and so is the 16/10 override that forced a
+     landscape preview on a narrow screen — which was the crop bug in its
+     most damaging form, since a phone is the device that records
+     portrait. The preview takes the shape of the stream at every width
+     now; the only narrow-screen concession is the hint's type. */
+  .oc-solve-lobby-hint {
+    bottom: 12px;
+    padding: 10px 13px;
+    font-size: 12px;
   }
   .oc-solve-between-title {
     font-size: 21px;

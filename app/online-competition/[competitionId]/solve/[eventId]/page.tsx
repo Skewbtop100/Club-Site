@@ -1241,10 +1241,13 @@ export default function SolvePage() {
 
         {stage === 'lobby' && (
           <LobbyStage
-            totalAttempts={runShape.attempts}
-            /* A returning athlete gets a different heading, a different
-               lead and a different button. The numbers stay in the resume
-               banner above — one place, one sentence. */
+            /* A returning athlete gets a different BUTTON, and nothing
+               else — the heading and lead that used to differ are gone
+               with the rest of the lobby's prose. The numbers were always
+               in the resume banner above: one place, one sentence.
+               runShape.attempts used to feed a "5 оролдлогыг нэг суулт
+               дотор" heading here; the run's length is on the bar's pips
+               and in that banner, so the lobby no longer needs it. */
             filedAttempts={attempts.length}
             nextAttempt={attempts.length + 1}
             hasCamera={recorder.hasCamera}

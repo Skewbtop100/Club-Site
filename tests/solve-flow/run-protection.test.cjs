@@ -516,17 +516,36 @@ console.log('\n  -- 9. the lobby and the between screen --');
   const lobbyCode = stripComments(lobby);
   const betweenCode = stripComments(between);
   ok('the lobby never claims the remaining attempts are void', !lobbyCode.includes('хүчингүй'));
-  ok('  ...it says attempts are saved as they are recorded',
-    lobby.includes('бичигдмэгцээ шууд хадгалагдана'));
-  ok('  ...and that leaving and returning continues the run',
-    lobby.includes('Завсарлах шаардлага гарвал') && lobby.includes('үргэлжлүүлнэ'));
 
-  // RESUME LANDS HERE. Attempt 3 of 5 must not read like attempt 1.
+  // THE PROSE IS GONE — heading, lead and all four rules. They were not
+  // reworded, they were removed: the screen's job is aiming a camera, and
+  // four paragraphs beside a 200px thumbnail is not how that is done. The
+  // 'хүчингүй' guard above still stands, because the claim that leaving
+  // voids the round must never come back whatever the copy becomes.
+  ok('  ...and the rules list is gone entirely',
+    !lobby.includes('oc-solve-lobby-rule') && !lobby.includes('oc-solve-lobby-panel'));
+  ok('  ...as are the heading and the lead',
+    !lobby.includes('oc-solve-lobby-title') && !lobby.includes('oc-solve-lobby-lead'));
+  ok('  ...leaving one line, over the preview',
+    lobby.includes('Камерт шоо болон таймер хоёул бүтэн харагдахаар байрлуулна уу.') &&
+      lobby.includes('oc-solve-lobby-hint'));
+  // Fades, but is never REMOVED: opacity only, so the instruction is
+  // still in the accessibility tree after the timer has hidden it.
+  ok('  ...which fades on a timer rather than unmounting',
+    lobby.includes('const HINT_VISIBLE_MS = 5000;') &&
+      /oc-solve-lobby-hint-out/.test(lobby) &&
+      /\.oc-solve-lobby-hint-out \{\s*\n\s*opacity: 0;/.test(theme));
+  ok('  ...and comes back when the athlete taps the preview',
+    lobby.includes('onClick={showHint}') && lobby.includes('setHintOn(true);'));
+
+  // RESUME LANDS HERE. Attempt 3 of 5 must not read like attempt 1 — but
+  // with the prose gone, the button is the only place left that can say
+  // so, and the resume banner above the stage carries the arithmetic.
   ok('the lobby knows it is a resume', lobby.includes('const resuming = filedAttempts > 0;'));
-  ok('  ...so the heading is not "five in one sitting"',
-    lobby.includes("resuming ? 'Үлдсэн оролдлогоо үргэлжлүүл'"));
   ok('  ...and the button names the attempt it starts',
     lobby.includes('`${nextAttempt}-р оролдлогоо эхлэх`'));
+  ok('  ...which is the ONLY thing resuming now changes',
+    (lobbyCode.match(/resuming/g) ?? []).length === 2);
   ok('  ...fed from what the server said is already filed',
     page.includes('filedAttempts={attempts.length}') && page.includes('nextAttempt={attempts.length + 1}'));
   // The specifics stay in ONE sentence — the resume banner, rendered above
@@ -560,10 +579,14 @@ console.log('\n  -- 9. the lobby and the between screen --');
     /onNext=\{\(\) => \{\s*\n\s*if \(runComplete\) \{\s*\n\s*setStage\('summary'\);/.test(page));
 
   // ── the mockup's literal values ──
-  ok("the lobby is the mockup's 620px column",
-    /\.oc-solve-lobby \{[\s\S]{0,200}?max-width: 620px;[\s\S]{0,120}?gap: 24px;/.test(theme));
-  ok('  ...with its 200px camera beside the rules',
-    /\.oc-solve-lobby-panel \{[\s\S]{0,200}?grid-template-columns: 200px 1fr;/.test(theme));
+  // THE LOBBY IS NO LONGER THE MOCKUP'S COLUMN. Its 620px/200px-thumbnail
+  // panel could not do the screen's one job — see "the preview is the
+  // recording" below — so the column now fills the stage and the camera
+  // fills the column.
+  ok('the lobby fills the stage rather than sitting in a 620px column',
+    /\.oc-solve-lobby \{[\s\S]{0,600}?max-width: 1080px;[\s\S]{0,400}?flex: 1;[\s\S]{0,120}?min-height: 0;/.test(theme));
+  ok('  ...and the panel that held the thumbnail is gone',
+    !theme.includes('.oc-solve-lobby-panel') && !theme.includes('.oc-solve-lobby-rules'));
   ok("the between screen is the mockup's 520px column",
     /\.oc-solve-between \{[\s\S]{0,200}?max-width: 520px;[\s\S]{0,120}?gap: 22px;/.test(theme));
   ok('  ...five slots across, always',
@@ -576,11 +599,63 @@ console.log('\n  -- 9. the lobby and the between screen --');
   ok('both screens end on the same volt button',
     /\.oc-solve-lobby-go,\s*\n\.oc-solve-between-go \{[\s\S]{0,300}?background: #DFFF4F;/.test(theme));
 
-  // 375px: 200px of camera leaves 142px for four rules, and five 17px
-  // times do not fit 62px cards.
-  ok('the lobby panel stacks on a narrow screen',
-    /\.oc-solve-lobby-panel \{\s*\n\s*grid-template-columns: 1fr;/.test(theme));
-  ok('  ...and the slot row tightens rather than wrapping',
+  // ── THE PREVIEW IS THE RECORDING ──
+  // MediaRecorder reads the raw camera track (useSolveRecorder's comment
+  // is emphatic about it), so the recording is the full frame at the
+  // stream's own ratio. A preview that crops, or that fixes a ratio the
+  // camera does not produce, has the athlete framing the cube and the
+  // timer against edges the recording does not have — and they find out
+  // when a judge rejects the clip. This is not hypothetical: the same
+  // mistake downstream, a portrait clip in a landscape box on the review
+  // dashboard, is what got the recordings blamed.
+  const feedRule = theme.slice(theme.indexOf('.oc-solve-lobby-feed {'));
+  const frameRule = theme.slice(theme.indexOf('.oc-solve-lobby-frame {'));
+  ok('the preview contains the frame, never crops it',
+    /^\.oc-solve-lobby-feed \{[\s\S]{0,300}?object-fit: contain;/.test(feedRule));
+  ok('  ...and never cover, which is what cropped it',
+    !/^\.oc-solve-lobby-feed \{[\s\S]{0,300}?object-fit: cover;/.test(feedRule));
+  // THE SIZING RULE: the largest box of the STREAM'S ratio that fits the
+  // area — min(the area's width, the area's height x the ratio) — so
+  // whichever axis runs out first decides and the preview is as large as
+  // the viewport allows. It scales up as well as down; intrinsic sizing
+  // with max-* caps left a 640x480 webcam at 640x480 on a 1440px screen.
+  ok('  ...and is sized to the largest box of the stream’s ratio that fits',
+    /^\.oc-solve-lobby-frame \{[\s\S]{0,400}?width: min\(100cqw, 100cqh \* \(var\(--oc-cam-w\) \/ var\(--oc-cam-h\)\)\);/.test(frameRule) &&
+      /\.oc-solve-lobby-view \{[\s\S]{0,400}?container-type: size;/.test(theme));
+  // EVERY ratio in the lobby is built from the measured stream size (or
+  // explicitly `auto` while it is unknown). A literal like `3 / 4` or
+  // `16 / 10` here is the bug this screen was rebuilt to remove.
+  ok('  ...from the stream’s own numbers, never a hardcoded ratio', (() => {
+    const ratios = theme.match(/\.oc-solve-lobby[a-z-]* \{[^}]*\}/g) ?? [];
+    const declared = ratios.flatMap((r) => r.match(/aspect-ratio: [^;]+;/g) ?? []);
+    return declared.length > 0 &&
+      declared.every((d) => d.includes('var(--oc-cam-w)') || d === 'aspect-ratio: auto;');
+  })());
+  // Read off the ELEMENT, which is what a <video> lays out from — and a
+  // <video> is also what replays the recording in review.
+  ok('the real frame size comes from the element, on metadata AND resize',
+    lobby.includes('el.videoWidth') && lobby.includes('el.videoHeight') &&
+      lobby.includes("el.addEventListener('loadedmetadata', read)") &&
+      lobby.includes("el.addEventListener('resize', read)"));
+  // Rotation is exactly the `resize` case, and the phone is the device
+  // that records portrait — so the 16/10 landscape override the old
+  // narrow-screen rule forced was the crop bug at its worst.
+  ok('  ...and 375px no longer forces a landscape preview',
+    !/@media[^{]*\{[\s\S]*?\.oc-solve-lobby-cam \{[\s\S]{0,80}?aspect-ratio: 16 \/ 10;/.test(theme));
+  // Before metadata there is no true frame to draw, so none is drawn:
+  // the frame claims no ratio and no edge until the stream reports one.
+  ok('  ...and nothing draws a frame before the size is known',
+    lobby.includes('const live = hasCamera && dims !== null;') &&
+      /\.oc-solve-lobby-frame-idle \{[\s\S]{0,200}?aspect-ratio: auto;[\s\S]{0,120}?box-shadow: none;/.test(theme) &&
+      /\.oc-solve-lobby-placeholder \{[\s\S]{0,300}?border: 1px dashed/.test(theme));
+  // The one line is a child of the FRAME, not the area: positioned
+  // against the area it drifted onto the black beside a portrait frame
+  // on a desktop, and below a landscape frame on a phone.
+  ok('  ...and the one line sits over the preview, not beside it',
+    /<div className=\{`oc-solve-lobby-frame[\s\S]{0,1600}?oc-solve-lobby-hint[\s\S]{0,200}?<\/div>/.test(lobby));
+
+  // 375px: five 17px times do not fit 62px cards.
+  ok('the slot row tightens rather than wrapping',
     /\.oc-solve-slot-time \{\s*\n\s*font-size: 13px;/.test(theme) &&
       !/\.oc-solve-slots \{[\s\S]{0,120}?repeat\(3/.test(theme));
 
@@ -615,7 +690,7 @@ console.log('\n  -- 10. the mockup restyle --');
       !/\.oc-solve-stage \{[\s\S]{0,160}?max-width/.test(theme));
   ok('  ...so each screen carries the mockup’s own width', [
     ['.oc-solve-entry', '380px'], ['.oc-solve-sent', '460px'], ['.oc-solve-between', '520px'],
-    ['.oc-solve-summary', '560px'], ['.oc-solve-lobby', '620px'], ['.oc-solve-hold', '680px'],
+    ['.oc-solve-summary', '560px'], ['.oc-solve-lobby', '1080px'], ['.oc-solve-hold', '680px'],
     ['.oc-solve-rec', '720px'], ['.oc-solve-reveal', '760px'],
   ].every(([sel, w]) => new RegExp(`\\${sel} \\{[\\s\\S]{0,220}?max-width: ${w};`).test(theme)));
   ok('  ...and centres itself, since the column no longer does',
@@ -709,10 +784,14 @@ console.log('\n  -- 10. the mockup restyle --');
   ok('resume did not move',
     /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page) &&
       page.includes('setResumeMessage(resumeNotice(plan))'));
-  ok('lobby and between were not restyled',
-    lobby.includes('className="oc-solve-lobby"') && between.includes('className="oc-solve-between"') &&
-      /\.oc-solve-lobby \{[\s\S]{0,200}?max-width: 620px;[\s\S]{0,120}?gap: 24px;/.test(theme) &&
+  // The lobby WAS restyled, deliberately and later than this changeset —
+  // the camera became the screen (see "the preview is the recording").
+  // What that rework had to leave alone is asserted where it was made;
+  // here, only that it did not drag the between screen along with it.
+  ok('between was not restyled',
+    between.includes('className="oc-solve-between"') &&
       /\.oc-solve-between \{[\s\S]{0,200}?max-width: 520px;[\s\S]{0,120}?gap: 22px;/.test(theme));
+  ok('  ...and the lobby is still the lobby', lobby.includes('className="oc-solve-lobby"'));
   ok('three stages were added', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 15);
   // verify is still out: it merges the closing hold with the keypad,
   // which moves the recording boundary.
@@ -833,7 +912,7 @@ console.log('\n  -- 11. the inspection --');
     /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page) &&
       page.includes('setResumeMessage(resumeNotice(plan))'));
   ok('lobby, between, entry, summary and sent were not touched', [
-    ['.oc-solve-lobby', '620px'], ['.oc-solve-between', '520px'], ['.oc-solve-entry', '380px'],
+    ['.oc-solve-lobby', '1080px'], ['.oc-solve-between', '520px'], ['.oc-solve-entry', '380px'],
     ['.oc-solve-summary', '560px'], ['.oc-solve-sent', '460px'],
   ].every(([sel, w]) => new RegExp(`\\${sel} \\{[\\s\\S]{0,220}?max-width: ${w};`).test(theme)));
   ok('the markers are gone and stayed gone', !rec.includes('MARKER_TIMES_MS'));
