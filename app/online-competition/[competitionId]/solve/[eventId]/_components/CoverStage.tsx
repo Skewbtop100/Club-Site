@@ -1,6 +1,6 @@
 'use client';
 
-import { useHoldFill } from './HoldFill';
+import { useHoldClock } from '../_lib/useHoldClock';
 
 /** The face colours the mockup names. Not the site palette — these are a
  *  cube's stickers, and a judge reads the video against them. */
@@ -47,22 +47,25 @@ export default function CoverStage({
   onDone,
 }: {
   /** The SAME hold duration as the two timer holds — this stage replaced
-   *  one of the three and did not shorten it. Through useHoldFill it sets
-   *  the timeout and the fill together, so the picture of the clock and
-   *  the clock itself cannot disagree. */
+   *  one of the three and did not shorten it. It goes to useHoldClock,
+   *  the run's one clock, so this stage cannot drift from the two timer
+   *  holds about how long a hold is. */
   seconds: number;
   onDone: () => void;
 }) {
-  // The same clock every other hold uses. This stage kept its own copy of
-  // the countdown, which is exactly how two holds come to disagree about
-  // how long a hold is. It still advances itself: nothing in the
-  // athlete's hands has to change here, and the note below already says
-  // what the end leads to.
-  const { fill } = useHoldFill(seconds, onDone);
+  // The same clock every other hold uses. This stage used to keep its own
+  // private copy of the countdown, which is exactly how two holds come to
+  // disagree about how long a hold is; that copy is not coming back. It
+  // still advances itself: nothing in the athlete's hands has to change
+  // here, and the note below already says what the end leads to.
+  const { remaining } = useHoldClock(seconds, onDone);
 
   return (
     <div className="oc-solve-cover">
-      {fill}
+      <div className="oc-solve-cover-count">
+        <span className="oc-solve-cover-n">{remaining}</span>
+        <span className="oc-solve-cover-unit">СЕКУНД</span>
+      </div>
 
       <p className="oc-solve-cover-say">
         Шоогоо ковертоо нуугаад <span style={{ color: GREEN }}>ногоон</span> төвийг камер тал руу,{' '}

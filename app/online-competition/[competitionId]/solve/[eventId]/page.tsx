@@ -629,15 +629,18 @@ export default function SolvePage() {
   /** Every attempt of the run has been solved. */
   const runComplete = cutOff || (runShape !== null && attempts.length >= runShape.attempts);
 
-  // THE WAIT. Every attempt enters scrambleWait first and is promoted
-  // only once a scramble has actually arrived. A fetch that fails simply
-  // never promotes: the run sits on the wait stage with a retry button
-  // instead of recording an attempt it has no scramble for.
+  // THE WAIT, and it is now only ever reached from the END of the intro.
+  // An attempt is promoted off it only once a scramble has actually
+  // arrived. A fetch that fails simply never promotes: the run sits on
+  // the wait stage with a retry button instead of recording an attempt it
+  // has no scramble for.
   //
-  // It promotes to attemptIntro now, not to zeroDisplay. The gate is
-  // unchanged in substance — attemptIntro's only exit is zeroDisplay, so
-  // "nothing reaches the recording without a scramble in hand" still
-  // holds, one screen earlier.
+  // It promotes straight to zeroDisplay. The athlete has already had
+  // their five seconds of intro before landing here — that is what this
+  // screen means now, "the scramble did not arrive during the intro" —
+  // and making them sit through a second one would be a beat they have
+  // already had. The gate is unchanged: this is still the only promotion
+  // and it is still conditional on `scramble`.
   useEffect(() => {
     if (stage !== 'scrambleWait') return;
     // A filing that has given up stops the run here, before the next
@@ -648,7 +651,7 @@ export default function SolvePage() {
       setStage('between');
       return;
     }
-    if (scramble) setStage('attemptIntro');
+    if (scramble) setStage('zeroDisplay');
   }, [stage, scramble, filingFailed]);
 
   useEffect(() => {
@@ -759,12 +762,15 @@ export default function SolvePage() {
   // every clip of every attempt of every athlete, for upload, storage and
   // review, and prove nothing that zeroDisplay does not already prove.
   // The boundary is therefore exactly where it was: this effect is still
-  // keyed on 'zeroDisplay' alone, and attemptIntro's only exit is into
-  // it.
+  // keyed on 'zeroDisplay' alone.
   //
-  // Every route into an attempt runs through scrambleWait and its
-  // promotion effect above, so the recording can no longer start for an
-  // attempt whose scramble never arrived.
+  // TWO transitions reach it, and both hold a scramble. The intro's exit
+  // takes it when the fetch has landed; when it has not, the intro sends
+  // the run to scrambleWait, whose promotion effect above is the other —
+  // and that one is conditional on `scramble` too. So the recording still
+  // cannot start for an attempt whose scramble never arrived, and the
+  // press that begins an attempt no longer has to know anything about
+  // it.
   useEffect(() => {
     if (stage === 'zeroDisplay') {
       // The return value used to be discarded. It is false when the
@@ -1353,7 +1359,10 @@ export default function SolvePage() {
                has not landed by the time the athlete is ready, the run
                waits on scrambleWait rather than recording without a
                scramble. */
-            onStart={() => setStage(scramble ? 'attemptIntro' : 'scrambleWait')}
+            /* Straight to the intro, with no scramble check. See the
+               note on attemptIntro's own transition for why that is safe
+               — and why it is what stops the wait screen flashing. */
+            onStart={() => setStage(scrambleError ? 'scrambleWait' : 'attemptIntro')}
           />
         )}
 
@@ -1395,12 +1404,33 @@ export default function SolvePage() {
           />
         )}
 
-        {/* The beat before the hold. Its ONLY exit is zeroDisplay, which
-            is what keeps "nothing records without a scramble in hand"
-            true: every route into an attempt now lands here, and this
-            lands on the recording. */}
+        {/* THE BEAT BEFORE THE HOLD, AND THE BUFFER IN FRONT OF THE WAIT.
+            Pressing "begin" used to ask whether the scramble was in hand
+            and drop onto scrambleWait if it was not — which it often was
+            not, because handleEntryConfirm fires the fetch for the next
+            attempt immediately AFTER handing that attempt's video to the
+            upload queue, so the request goes out behind a multi-megabyte
+            POST on the same connection. The fetch was honest and usually
+            quick; the wait screen it painted was a single frame of "3-р
+            холилтыг татаж байна" that the athlete read as a glitch.
+
+            This screen is the fix, and it needed no timer of its own to
+            be one: it requires no scramble (no camera, no recording, a
+            static sentence) and it lasts five seconds. So the press comes
+            here unconditionally, and the scramble is required where it is
+            actually needed — at the exit, one step before the recording
+            starts. A fetch that lands within those five seconds is never
+            seen at all; one that does not has had five full seconds to
+            try, so the wait screen now only ever appears when the wait is
+            real.
+
+            THE GATE IS UNCHANGED. zeroDisplay still cannot be entered
+            without a scramble; the check simply moved from the press to
+            here. */}
         {stage === 'attemptIntro' && (
-          <AttemptIntroStage onDone={() => setStage('zeroDisplay')} />
+          <AttemptIntroStage
+            onDone={() => setStage(scramble ? 'zeroDisplay' : 'scrambleWait')}
+          />
         )}
 
         {/* THE ATHLETE'S OWN TIMER, at 0.00, held to the camera — the
@@ -1427,6 +1457,7 @@ export default function SolvePage() {
             /* The button names where it goes, so the footnote that said
                the same thing is gone. */
             footnote={null}
+            layout="instruction-first"
             end={{ label: 'ХОЛИЛТ ХАРАХ' }}
             videoRef={recorder.videoRef}
             onDone={() => setStage('scrambleReveal')}
@@ -1515,7 +1546,7 @@ export default function SolvePage() {
                 setStage('summary');
                 return;
               }
-              setStage(scramble ? 'attemptIntro' : 'scrambleWait');
+              setStage(scrambleError ? 'scrambleWait' : 'attemptIntro');
             }}
             /* Manual retry. The worker has already tried once on its own
                (FILING_AUTO_RETRIES) — this is the athlete taking over. */

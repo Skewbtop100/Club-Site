@@ -37,7 +37,7 @@ const between = fs.readFileSync(path.join(ROOT, SOLVE, '_components/BetweenStage
 const lobby = fs.readFileSync(path.join(ROOT, SOLVE, '_components/LobbyStage.tsx'), 'utf8');
 const hold = fs.readFileSync(path.join(ROOT, SOLVE, '_components/CameraHoldStage.tsx'), 'utf8');
 const intro = fs.readFileSync(path.join(ROOT, SOLVE, '_components/AttemptIntroStage.tsx'), 'utf8');
-const holdFill = fs.readFileSync(path.join(ROOT, SOLVE, '_components/HoldFill.tsx'), 'utf8');
+const holdClock = fs.readFileSync(path.join(ROOT, SOLVE, '_lib/useHoldClock.ts'), 'utf8');
 const cover = fs.readFileSync(path.join(ROOT, SOLVE, '_components/CoverStage.tsx'), 'utf8');
 const rec = fs.readFileSync(path.join(ROOT, SOLVE, '_components/RecStage.tsx'), 'utf8');
 const theme = fs.readFileSync(path.join(ROOT, 'app/online-competition/theme.css'), 'utf8');
@@ -267,24 +267,28 @@ console.log('\n  -- 5. the camera hold is ONE component --');
   // timeout. A duration cannot be changed without the display following
   // it. (It was an 8-segment tick bar until the mockup restyle; the
   // guarantee is the same one, on the mockup's countdown.)
-  // THE SAME GUARANTEE, now carried by useHoldFill: a duration cannot
-  // be changed without the display of it following. The number is gone —
-  // the time shows as the screen filling — so what must not drift is the
-  // FILL's length against the timeout's, and the only way to be sure is
-  // that there is no second place to pass a duration to. One argument
-  // arms the timeout and sets the animation-duration.
-  ok('the clock and its picture come from one argument',
-    holdFill.includes('setTimeout(() => {') &&
-      holdFill.includes('}, seconds * 1000);') &&
-      holdFill.includes("'--oc-fill-duration': `${seconds}s`"));
-  ok('  ...and the hold owns no clock of its own any more',
-    hold.includes('useHoldFill(seconds,') &&
-      !hold.includes('setInterval') && !hold.includes('setTimeout'));
-  // THE TIMEOUT IS THE CLOCK; THE FILL IS A PICTURE OF IT. `done` flips
-  // on real time, never on an animation event, so a throttled tab makes
-  // the hold end late rather than early.
-  ok('  ...with the real-time timeout, not the animation, deciding `done`',
-    !holdFill.includes('animationend') && !holdFill.includes('onAnimationEnd'));
+  // THE SAME GUARANTEE, carried by useHoldClock: a duration cannot be
+  // changed without the display of it following, because one argument
+  // drives the tick, the timeout and the sentence.
+  ok('the countdown starts from `seconds`, not a second constant',
+    holdClock.includes('useState(seconds)') &&
+      holdClock.includes('}, seconds * 1000);'));
+  ok('  ...counting down one a second', holdClock.includes('Math.max(r - 1, 0)'));
+  // ONE CLOCK FOR THE WHOLE RUN. The cover used to keep a private copy
+  // of this, which is how two holds come to disagree about how long a
+  // hold is — and it must not come back.
+  ok('  ...and every timed screen reads it from the one place',
+    hold.includes("from '../_lib/useHoldClock'") &&
+      cover.includes("from '../_lib/useHoldClock'") &&
+      intro.includes("from '../_lib/useHoldClock'"));
+  ok('  ...with no screen keeping a timer of its own',
+    [hold, cover, intro].every((f) => !f.includes('setInterval') && !f.includes('setTimeout')));
+  // DISPLAY vs DECISION. The number is what an athlete reads; `done` is
+  // what opens the gate, and it flips on a real-time timeout rather than
+  // on the tick count, so a drifting or throttled interval can never
+  // open it early.
+  ok('  ...and the gate reads the timeout, not the ticking number',
+    /const t = setTimeout\(\(\) => \{\s*\n\s*setDone\(true\);/.test(holdClock));
   ok('  ...and no tick bar survives beside it', !hold.includes('oc-solve-chunk-bar'));
   // It is a clock and a preview. Nothing else.
   ok('it starts and stops no recording',
@@ -347,8 +351,12 @@ console.log('\n  -- 7. durations and markers --');
   // attempt enters attemptIntro, whose only exit is here — so the
   // recording still starts in exactly one place, one screen later than
   // the athlete presses to begin.
+  // TWO transitions in now, and both hold a scramble: the intro's exit
+  // when the fetch has landed, and the wait's promotion when it had not.
+  // Beginning an attempt no longer consults the scramble at all — see
+  // scramble-wait.test.cjs, which owns that invariant.
   ok('  ...under the SAME stage name, so every transition still lands',
-    page.includes("{stage === 'zeroDisplay' && (") && (page.match(/setStage\([^)]*zeroDisplay/g) ?? []).length === 1);
+    page.includes("{stage === 'zeroDisplay' && (") && (page.match(/setStage\([^)]*zeroDisplay/g) ?? []).length === 2);
   ok('  ...showing the athlete their own timer at 0.00',
     /Хугацаа хэмжигчийг 0\.00 болгосон байдалтай цаг дуустал камерлуу харуулна уу\./.test(page));
 
@@ -798,36 +806,26 @@ console.log('\n  -- 10. the mockup restyle --');
 
   // ── THE HOLD: one component, ONE presentation ──
   ok('both timer holds are still one component', (page.match(/<CameraHoldStage/g) ?? []).length === 2);
-  // ── THE FILL REPLACES THE NUMBER, ON ALL THREE HOLDS ──
-  // A hold is one kind of thing, so it is shown one way. The counting
-  // number is gone from the timer check, the cover AND the closing hold,
-  // and all three now take their clock from the same useHoldFill.
-  ok('  ...showing a fill, not a counting number',
-    hold.includes('{fill}') && !hold.includes('className="oc-solve-hold-n"') &&
-      !hold.includes('oc-solve-hold-count') && !hold.includes('oc-solve-chunk-bar'));
-  ok('  ...as does the cover, from the same clock',
-    cover.includes('useHoldFill(seconds, onDone)') && cover.includes('{fill}') &&
-      !cover.includes('className="oc-solve-cover-n"') &&
-      !cover.includes('oc-solve-cover-count') && !cover.includes('setInterval'));
-  ok('  ...so no countdown number survives anywhere in the run',
-    !/\.oc-solve-(hold|cover|intro)-(n|count|unit) \{/.test(theme));
-  ok('  ...over the same 4/3 frame as before',
-    /\.oc-solve-hold-cam \{[\s\S]{0,400}?aspect-ratio: 4 \/ 3;/.test(theme));
-  // BEHIND EVERYTHING. On the two holds that show a camera the fill must
-  // never wash over the preview — that is the picture being judged.
-  ok('  ...painted behind the screen, never over the video',
-    /\.oc-solve-fill \{[\s\S]{0,400}?z-index: -1;/.test(theme) &&
-      /\.oc-solve-body \{[^}]*isolation: isolate;/.test(theme));
-  // REDUCED MOTION: stepped, not deleted. The fill is the only thing
-  // left saying how long the hold is, so removing it would take the
-  // information rather than the motion.
-  ok('  ...stepping instead of sweeping under reduced motion',
-    /@media \(prefers-reduced-motion: reduce\) \{\s*\n\s*\.oc-solve-fill \{\s*\n\s*animation-timing-function: steps\(var\(--oc-fill-steps\), end\);/.test(theme) &&
-      holdFill.includes("'--oc-fill-steps': seconds"));
-  // The number was also the only text stating the duration.
-  ok('  ...and still saying the duration to a screen reader',
-    holdFill.includes('oc-sr-only') && /\{seconds\} секунд хүлээнэ үү\./.test(holdFill) &&
-      /\.oc-sr-only \{/.test(theme));
+  // ── THE NUMBER, ON ALL THREE CAMERA HOLDS ──
+  // A colour fill briefly replaced it on all three. It is back: these
+  // screens carry a live preview, and colour moving behind the picture
+  // an athlete is trying to frame competes with the one thing they are
+  // meant to be looking at. The fill belongs to the intro, which has no
+  // preview — see below.
+  ok('  ...showing the mockup’s countdown, not a tick bar',
+    hold.includes('className="oc-solve-hold-n"') && !hold.includes('oc-solve-chunk-bar'));
+  ok('  ...at the mockup’s 50px volt over a 4/3 frame',
+    /\.oc-solve-hold-n \{[\s\S]{0,140}?font: 700 50px\/1 var\(--oc-font-mono\)/.test(theme) &&
+      /\.oc-solve-hold-cam \{[\s\S]{0,400}?aspect-ratio: 4 \/ 3;/.test(theme));
+  ok('  ...and the cover counting the same way, off the shared clock',
+    cover.includes('useHoldClock(seconds, onDone)') &&
+      cover.includes('className="oc-solve-cover-n"') &&
+      /\.oc-solve-cover-n \{[\s\S]{0,140}?font: 700 50px\/1 var\(--oc-font-mono\)/.test(theme));
+  // NO FILL ON A SCREEN WITH A PREVIEW. The number and the fill must not
+  // both live in the shared hold component when only one screen fills.
+  ok('  ...with no colour fill left on any hold',
+    !hold.includes('fill') && !cover.includes('fill') &&
+      !/\.oc-solve-hold[a-z-]* \{[^}]*animation: oc-solve-fill-rise/.test(theme));
   ok('  ...with four corner brackets at 22px', ['tl', 'tr', 'bl', 'br']
     .every((c) => theme.includes(`.oc-solve-hold-corner-${c} {`)) &&
     /\.oc-solve-hold-corner \{[\s\S]{0,90}?width: 22px;/.test(theme));
@@ -857,7 +855,7 @@ console.log('\n  -- 10. the mockup restyle --');
       page.includes("{stage === 'attemptIntro' && ("));
   ok('  ...for five seconds, then on by itself',
     intro.includes('const INTRO_SECONDS = 5;') &&
-      intro.includes('useHoldFill(INTRO_SECONDS, onDone)'));
+      intro.includes('useHoldClock(INTRO_SECONDS, onDone)'));
   // ONE LINE. It also carried "{N}-р эвлүүлэлт эхлэх гэж байна"; the bar
   // above already names the attempt, and a screen with one instruction
   // on it should have one sentence on it.
@@ -865,12 +863,38 @@ console.log('\n  -- 10. the mockup restyle --');
     intro.includes('<p className="oc-solve-intro-say">Цагаа 0.00 болгож шалгуулахдаа бэлдээрэй.</p>') &&
       !stripComments(intro).includes('эвлүүлэлт эхлэх гэж байна') &&
       !intro.includes('attemptNumber') &&
-      page.includes('<AttemptIntroStage onDone={() => setStage(\'zeroDisplay\')} />'));
+      page.includes('<AttemptIntroStage'));
   // Its five seconds are the same fill the holds use, from the same
   // clock — a screen that fills is a screen that is waiting, wherever
   // the athlete meets one.
+  // THE FILL IS THE INTRO'S AND NOWHERE ELSE'S. This is the only waiting
+  // screen with nothing on it but a sentence, so it is the only one where
+  // the screen itself is free to become the clock.
   ok('  ...shown as the screen filling, not as a number',
-    intro.includes('{fill}') && !intro.includes('oc-solve-intro-count'));
+    intro.includes('className="oc-solve-intro-fill"') &&
+      !intro.includes('oc-solve-intro-count'));
+  ok('  ...from the same INTRO_SECONDS that ends the screen',
+    intro.includes("'--oc-fill-duration': `${INTRO_SECONDS}s`") &&
+      intro.includes("'--oc-fill-steps': INTRO_SECONDS"));
+  // BEHIND THE SENTENCE, which stays the brightest thing on the screen.
+  ok('  ...behind the sentence, never over it',
+    /\.oc-solve-intro-fill \{[\s\S]{0,400}?z-index: -1;/.test(theme) &&
+      /\.oc-solve-body \{[^}]*isolation: isolate;/.test(theme));
+  // THE ACCENT, not a tint of it. At 4-16% it read as a grey-green
+  // smudge; the volt is unmistakable at 10-38%.
+  ok('  ...in the volt accent at a strength that reads as a colour',
+    /\.oc-solve-intro-fill \{[\s\S]{0,500}?linear-gradient\(to top, rgba\(223, 255, 79, 0\.1\), rgba\(223, 255, 79, 0\.38\)\)/.test(theme));
+  // THE SENTENCE IS THE SCREEN'S CONTENT, not a caption. At 18px it read
+  // as a footnote to an empty page.
+  ok('  ...under a sentence sized as the screen’s content',
+    /\.oc-solve-intro-say \{[\s\S]{0,200}?font: 600 clamp\(26px, 6\.4vw, 42px\)/.test(theme));
+  // REDUCED MOTION: stepped, not deleted. The fill is the only thing on
+  // this screen saying how long it lasts.
+  ok('  ...stepping instead of sweeping under reduced motion',
+    /@media \(prefers-reduced-motion: reduce\) \{\s*\n\s*\.oc-solve-intro-fill \{\s*\n\s*animation-timing-function: steps\(var\(--oc-fill-steps\), end\);/.test(theme));
+  ok('  ...and saying its duration to a screen reader',
+    intro.includes('oc-sr-only') && /\{INTRO_SECONDS\} секунд хүлээнэ үү\./.test(intro) &&
+      /\.oc-sr-only \{/.test(theme));
   // NOT ON THE RECORDING, and no preview on it either: five seconds of
   // an athlete reaching for a timer is not evidence of anything, and
   // would otherwise be added to every clip of every attempt.
@@ -888,15 +912,11 @@ console.log('\n  -- 10. the mockup restyle --');
   // own — a throttled background tab then enables it late, never early.
   ok('  ...and cannot be pressed before the time runs out',
     hold.includes('disabled={!done}'));
-  // A hold that waits for a press hands useHoldFill no onElapsed at all,
-  // so there is no second timer able to advance it behind the button.
+  // A hold that waits for a press hands useHoldClock no onElapsed at
+  // all, so there is no second timer able to advance it behind the
+  // button.
   ok('  ...with nothing left able to advance it but the press',
-    hold.includes('useHoldFill(seconds, waitsForPress ? undefined : onDone)'));
-  // WAITING -> READY IS ONE CHANGE: the fill vanishes and the button
-  // lights at the same instant, both off the same `done`. A hold that
-  // ends leaves no clock parked at zero.
-  ok('  ...and the fill disappears at zero rather than sitting full',
-    holdFill.includes('fill: done ? null : ('));
+    hold.includes('useHoldClock(seconds, waitsForPress ? undefined : onDone)'));
   ok('  ...as the button arrives lit, not merely enabled',
     /\.oc-solve-hold-go:not\(:disabled\) \{\s*\n\s*box-shadow: 0 0 26px 0 rgba\(223, 255, 79, 0\.34\);/.test(theme));
   // THE OTHER TWO HOLDS DID NOT CHANGE. finishHold and cover are both
@@ -913,14 +933,15 @@ console.log('\n  -- 10. the mockup restyle --');
     hold.includes("end = 'auto',") && hold.includes("end?: 'auto' | { label: string };"));
 
   // ── THE TIMER CHECK'S LAYOUT ──
-  // The instruction leads because there is nothing else in the column to
-  // lead: losing the number removed the only thing `layout` ordered, so
-  // the prop went with it and both holds read the same way.
-  ok('the hold leads with its instruction, with no count block left',
-    hold.includes('<p className="oc-solve-hold-say">{instruction(seconds)}</p>') &&
-      // Comment-stripped: the component explains in a comment what
-      // `layout` used to order and why it went, which contains the name.
-      !stripComments(hold).includes('layout') && !page.includes('layout="'));
+  // The sentence is the task and the count is how long it lasts; leading
+  // with the number asked the athlete to read a clock before they knew
+  // what it was for.
+  ok('the timer check leads with its instruction, not its count',
+    page.includes('layout="instruction-first"') &&
+      hold.includes("{layout === 'instruction-first' ? say : count}"));
+  ok('  ...and the closing hold still leads with the count',
+    (page.match(/layout="instruction-first"/g) ?? []).length === 1 &&
+      hold.includes("layout = 'count-first',"));
   // THE PREVIEW MAY CROP HERE — different job from the lobby's. The
   // athlete is centring one object, so the centre of the frame is the
   // whole question. Centred ON PURPOSE rather than by `cover`'s default,

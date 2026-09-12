@@ -62,36 +62,60 @@ console.log('\n  -- a stale scramble can never be displayed --');
 
 console.log('\n  -- the run cannot start recording without a scramble --');
 {
-  // zeroDisplay is what starts the MediaRecorder, and the gate now sits
-  // one screen earlier: every way into an attempt enters attemptIntro,
-  // and attemptIntro's ONLY exit is zeroDisplay. So the invariant is
-  // two halves, and both are checked — four guarded ways in, and one
-  // unguarded step from there onto the recording.
+  // zeroDisplay is what starts the MediaRecorder. The gate is no longer
+  // at the press that begins an attempt — that press cannot fail, and
+  // asking it about the scramble is what made the wait screen flash for
+  // a frame. It is at the intro's EXIT, one step before the recording.
+  //
+  // So the invariant is: four ways in, none of which consults the
+  // scramble; and every transition onto the recording guarded by it.
+  // THREE, not four: the wait's promotion used to route back through the
+  // intro and now lands on the recording directly, because reaching the
+  // wait at all means the intro has already been spent.
   const intoIntro = page.match(/setStage\([^)]*attemptIntro/g) ?? [];
-  ok('exactly four transitions into attemptIntro', intoIntro.length === 4, intoIntro.join(' | '));
-  // THE RECORDING BOUNDARY. Exactly one place moves the run onto the
-  // clip, it is the intro's own onDone, and the start effect is still
-  // keyed on that stage alone — the intro is NOT recorded.
+  ok('exactly three transitions into attemptIntro', intoIntro.length === 3, intoIntro.join(' | '));
+  ok('  ...none of which asks whether the scramble has arrived',
+    !/setStage\(scramble \? 'attemptIntro'/.test(page));
+  // THE RECORDING BOUNDARY. Two transitions reach it now — the intro's
+  // exit and the wait's promotion — and BOTH are conditional on the
+  // scramble. The start effect is still keyed on that stage alone, so
+  // the intro itself is not recorded.
   const intoZero = page.match(/setStage\([^)]*zeroDisplay/g) ?? [];
-  ok('  ...and exactly one transition from there into zeroDisplay',
-    intoZero.length === 1, intoZero.join(' | '));
-  ok('  ...which is the intro finishing, nothing else',
-    /<AttemptIntroStage[\s\S]{0,300}?onDone=\{\(\) => setStage\('zeroDisplay'\)\}/.test(page));
+  // Both of them, named exactly: the intro's guarded exit, and the wait's
+  // promotion — which is itself inside `if (scramble)`, checked below.
+  ok('  ...and exactly two transitions into zeroDisplay, both guarded',
+    intoZero.length === 2 &&
+      intoZero.includes("setStage(scramble ? 'zeroDisplay") &&
+      intoZero.includes("setStage('zeroDisplay") &&
+      /if \(scramble\) setStage\('zeroDisplay'\);/.test(page),
+    intoZero.join(' | '));
+  ok('  ...one being the intro finishing WITH a scramble in hand',
+    /<AttemptIntroStage[\s\S]{0,200}?onDone=\{\(\) => setStage\(scramble \? 'zeroDisplay' : 'scrambleWait'\)\}/.test(page));
   ok('  ...and the clip still begins on zeroDisplay, not on the intro',
     /useEffect\(\(\) => \{\s*\n\s*if \(stage === 'zeroDisplay'\) \{[\s\S]{0,400}?startRecording\(\)/.test(page) &&
       !/stage === 'attemptIntro'[\s\S]{0,200}?startRecording/.test(page));
+  // The other. It lands straight on the recording rather than replaying
+  // the intro: reaching this screen MEANS the intro's five seconds have
+  // already been spent, so a second beat would be one the athlete has
+  // had.
   ok('  ...the promotion effect, which requires a scramble',
-    /if \(stage !== 'scrambleWait'\) return;[\s\S]{0,700}?if \(scramble\) setStage\('attemptIntro'\);/.test(page));
-  ok('  ...the lobby, which falls back to the wait when there is none',
-    page.includes("onStart={() => setStage(scramble ? 'attemptIntro' : 'scrambleWait')}"));
+    /if \(stage !== 'scrambleWait'\) return;[\s\S]{0,800}?if \(scramble\) setStage\('zeroDisplay'\);/.test(page));
+  // A FETCH THAT RESOLVES QUICKLY NEVER PAINTS. The wait screen is only
+  // reachable from the end of the intro, so it cannot appear until the
+  // fetch has had the intro's full five seconds to land — except when
+  // it has ALREADY failed, which is not a wait and is shown at once.
+  ok('  ...so the press only reaches the wait on an error already in hand',
+    (page.match(/setStage\(scrambleError \? 'scrambleWait' : 'attemptIntro'\)/g) ?? []).length === 2);
+  ok('  ...the lobby, which goes to the intro regardless',
+    page.includes("onStart={() => setStage(scrambleError ? 'scrambleWait' : 'attemptIntro')}"));
   // The between screen's button, which starts every attempt after the
   // first. Same fallback, same reason: handleEntryConfirm fetched this
   // attempt's scramble when the previous one ended, so it is normally
   // already in hand -- but if it is not, the run waits rather than
   // recording without one.
-  ok('  ...the between screen, which falls back the same way', (() => {
+  ok('  ...and the between screen, which does the same', (() => {
     const next = page.slice(page.indexOf('onNext={() => {'), page.indexOf('/* Manual retry.'));
-    return next.includes("setStage(scramble ? 'attemptIntro' : 'scrambleWait');") &&
+    return next.includes("setStage(scrambleError ? 'scrambleWait' : 'attemptIntro');") &&
       next.includes("setStage('summary');");
   })());
   // Restarting an attempt whose recording failed. It re-enters the attempt

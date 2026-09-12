@@ -934,11 +934,12 @@
   justify-content: center;
   padding: 26px;
   position: relative;
-  /* So .oc-solve-fill's z-index: -1 lands BEHIND this screen's own
-     content and no further. Without a stacking context here a negative
-     z-index escapes to the takeover's background and the fill is simply
-     invisible. Stacking only — no layout changes, and the go flash
-     (positioned, auto z-index) still paints over everything as before. */
+  /* So the intro's .oc-solve-intro-fill (z-index: -1) lands BEHIND that
+     screen's own content and no further. Without a stacking context here
+     a negative z-index escapes to the takeover's background and the fill
+     is simply invisible. Stacking only — no layout changes, and the go
+     flash (positioned, auto z-index) still paints over everything as
+     before. */
   isolation: isolate;
 }
 /* The column every stage renders into.
@@ -1499,7 +1500,33 @@
   .oc-solve-reveal-eyebrow {
     font-size: 11px;
   }
-  .oc-solve-hold-say {
+  /* THE COUNTDOWN NUMBER, on all three camera holds.
+   The colour fill that briefly replaced it lives on the attempt intro
+   now, and only there: the intro is a bare sentence on an empty screen,
+   while these three carry a live preview, and colour moving behind the
+   picture an athlete is trying to frame competes with the one thing they
+   are meant to be looking at. */
+.oc-solve-hold-count {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.oc-solve-hold-rule {
+  width: 26px;
+  height: 1px;
+  background: #2A2A31;
+}
+.oc-solve-hold-n {
+  font: 700 50px/1 var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #DFFF4F;
+}
+.oc-solve-hold-unit {
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.2em;
+  color: #6E6A62;
+}
+.oc-solve-hold-say {
     font-size: 21px;
   }
   .oc-solve-ready-title {
@@ -1533,7 +1560,22 @@
   .oc-solve-goflash-title {
     font-size: 32px;
   }
-  .oc-solve-cover-say {
+  .oc-solve-cover-count {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.oc-solve-cover-n {
+  font: 700 50px/1 var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #DFFF4F;
+}
+.oc-solve-cover-unit {
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.2em;
+  color: #6E6A62;
+}
+.oc-solve-cover-say {
     font-size: 20px;
   }
   .oc-solve-cover-faces {
@@ -1766,6 +1808,32 @@
   align-items: center;
   gap: 24px;
 }
+/* THE COUNTDOWN NUMBER, on all three camera holds.
+   The colour fill that briefly replaced it lives on the attempt intro
+   now, and only there: the intro is a bare sentence on an empty screen,
+   while these three carry a live preview, and colour moving behind the
+   picture an athlete is trying to frame competes with the one thing they
+   are meant to be looking at. */
+.oc-solve-hold-count {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.oc-solve-hold-rule {
+  width: 26px;
+  height: 1px;
+  background: #2A2A31;
+}
+.oc-solve-hold-n {
+  font: 700 50px/1 var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #DFFF4F;
+}
+.oc-solve-hold-unit {
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.2em;
+  color: #6E6A62;
+}
 .oc-solve-hold-say {
   font: 600 26px/1.35 var(--oc-font-heading), sans-serif;
   color: #F4F1EA;
@@ -1844,33 +1912,36 @@
   border-bottom: 1px solid #DFFF4F;
   border-right: 1px solid #DFFF4F;
 }
-/* ── THE CLOCK, AS A FILL ─────────────────────────────────────────────
-   Every hold and the attempt intro show their remaining time as the
-   screen filling with colour from the bottom, instead of a number
-   counting down. Driven entirely by --oc-fill-duration, which useHoldFill
-   sets from the SAME `seconds` that arms its timeout — the picture of the
-   clock cannot be given a different length from the clock.
+/* ── THE INTRO'S CLOCK, AS A FILL ────────────────────────────────────
+   The attempt intro shows its five seconds as the screen filling with
+   colour from the bottom instead of as a number. It is the ONLY screen
+   that does: it has nothing on it but one sentence, so the screen itself
+   is free to become the clock. Every screen with a camera preview counts
+   with a number instead (.oc-solve-hold-n), because colour moving behind
+   a live picture competes with the picture.
 
-   BEHIND EVERYTHING (z-index: -1 inside .oc-solve-body's stacking
-   context), which is what makes it safe on the holds that show a camera.
-   The preview is an opaque box; the fill rises around it and never tints
-   the video the athlete is being asked to check. Washing a colour over
-   live footage would dim the one thing on screen that has to be judged.
+   Driven entirely by --oc-fill-duration, which AttemptIntroStage sets
+   from the SAME INTRO_SECONDS that arms useHoldClock's timeout — there is
+   no second place to put a duration, so the sweep cannot outlast the
+   screen or stop short of it.
 
-   SUBTLE ON PURPOSE: a volt wash at 4-16% over the near-black ground, so
-   it reads as the room changing rather than as a bar demanding to be
-   watched. The sentence stays the brightest thing on the screen.
-   scaleY from the bottom edge, and the gradient is brightest at its top,
-   so the leading edge is the part that reads — and scaling a gradient
-   distorts nothing, unlike scaling a border. */
-.oc-solve-fill {
+   THE COLOUR IS THE ACCENT, NOT A TINT OF IT. At 4-16% the volt was a
+   grey-green smudge that read as a rendering artefact; it runs 10% -> 38%
+   now, which over the near-black ground lands around rgb(90,102,36) at
+   the leading edge — an unmistakably olive-volt band. The sentence stays
+   the brightest thing on the screen by a wide margin: #F4F1EA on that
+   band is about 5.2:1, well past the 3:1 that large text needs, and the
+   fill is BEHIND the text (z-index: -1) rather than over it.
+   The gradient is brightest at its top so the leading edge is what reads,
+   and scaling a gradient distorts nothing, unlike scaling a border. */
+.oc-solve-intro-fill {
   position: absolute;
   inset: 0;
   z-index: -1;
   pointer-events: none;
   transform: scaleY(0);
   transform-origin: bottom;
-  background: linear-gradient(to top, rgba(223, 255, 79, 0.04), rgba(223, 255, 79, 0.16));
+  background: linear-gradient(to top, rgba(223, 255, 79, 0.1), rgba(223, 255, 79, 0.38));
   animation: oc-solve-fill-rise var(--oc-fill-duration) linear forwards;
 }
 @keyframes oc-solve-fill-rise {
@@ -1881,16 +1952,16 @@
     transform: scaleY(1);
   }
 }
-/* REDUCED MOTION: stepped, not removed. The fill is the only thing left
-   telling the athlete how long they have, so deleting it would take the
-   information away rather than the motion. One step per second turns a
-   continuous sweep into a discrete change the same way a digit ticking
-   over was — --oc-fill-steps is the same `seconds`, so the steps cannot
-   come out at a different count from the duration.
+/* REDUCED MOTION: stepped, not removed. The fill is the only thing on
+   this screen telling the athlete how long they have, so deleting it
+   would take the information away rather than the motion. One step per
+   second turns a continuous sweep into a discrete change the way a digit
+   ticking over was — --oc-fill-steps is the same INTRO_SECONDS, so the
+   steps cannot come out at a different count from the duration.
    `end` rather than `start`: it under-reports the time elapsed, so the
    fill is never fuller than the wait actually is. */
 @media (prefers-reduced-motion: reduce) {
-  .oc-solve-fill {
+  .oc-solve-intro-fill {
     animation-timing-function: steps(var(--oc-fill-steps), end);
   }
 }
@@ -1982,19 +2053,23 @@
   letter-spacing: 0.22em;
   color: #6E6A62;
 }
+/* THE SCREEN'S CONTENT, not a caption under an eyebrow. It is the only
+   sentence on the only screen that says what to get ready for, and at
+   18px it read as a footnote to an empty page. Fluid so it fills a phone
+   without overflowing it and still reads as a statement on a desktop;
+   600 weight and near-white keep it the brightest thing on screen as the
+   fill rises behind it. */
 .oc-solve-intro-say {
   margin: 0;
-  font: 400 18px/1.6 var(--oc-font-heading), sans-serif;
+  font: 600 clamp(26px, 6.4vw, 42px) / 1.3 var(--oc-font-heading), sans-serif;
+  letter-spacing: -0.015em;
   color: #F4F1EA;
-  text-wrap: pretty;
+  text-wrap: balance;
 }
 /* Quiet, and much smaller than a hold's 50px count: this is a hint about
    how long the athlete has, not a clock anyone is measured against. */
 
 @media (max-width: 620px) {
-  .oc-solve-intro-say {
-    font-size: 16px;
-  }
   .oc-solve-hold-go {
     padding: 16px;
     font-size: 14px;
@@ -2022,6 +2097,21 @@
   flex-direction: column;
   align-items: center;
   gap: 24px;
+}
+.oc-solve-cover-count {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.oc-solve-cover-n {
+  font: 700 50px/1 var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #DFFF4F;
+}
+.oc-solve-cover-unit {
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.2em;
+  color: #6E6A62;
 }
 .oc-solve-cover-say {
   font: 600 24px/1.4 var(--oc-font-heading), sans-serif;
