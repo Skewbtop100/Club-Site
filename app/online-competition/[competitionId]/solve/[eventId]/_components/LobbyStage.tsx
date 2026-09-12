@@ -31,17 +31,24 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  *  above the button for what carries the rest.
  */
 
-/** How long the framing line stays up before fading.
+/** How long the overlay stays up before fading.
  *
- *  The line is ~60 characters of Mongolian: reading it takes about three
- *  and a half seconds, and the athlete is looking at the video, not at
- *  the text, when it appears. Five seconds is long enough to read it
- *  after noticing it and short enough that it is gone before they have
- *  finished aiming — which is the moment the frame edges matter most and
- *  anything covering them is in the way. Tapping brings it back. */
-const HINT_VISIBLE_MS = 5000;
+ *  The framing line is ~60 characters of Mongolian: reading it takes
+ *  about three and a half seconds, and the athlete is looking at the
+ *  video, not at the text, when it appears. Five seconds is long enough
+ *  to read it after noticing it and short enough that it is gone before
+ *  they have finished aiming — which is the moment the frame edges matter
+ *  most and anything covering them is in the way. Tapping brings it back.
+ *
+ *  ONE timer for the whole overlay, not one per line. The framing line
+ *  and the run's status note appear together, are read together, and
+ *  fade together as a single block — two independently-timed fades over
+ *  live video would be two separate distractions, and the second one
+ *  would arrive after the athlete had already gone back to aiming. */
+const OVERLAY_VISIBLE_MS = 5000;
 
 export default function LobbyStage({
+  note,
   filedAttempts,
   nextAttempt,
   hasCamera,
@@ -50,6 +57,17 @@ export default function LobbyStage({
   onRequestCamera,
   onStart,
 }: {
+  /** The run's one status line — the resume notice, or the saving line's
+   *  reassurance when there is no resume notice. Null on a fresh run,
+   *  which has neither. It is ONE string by the time it arrives: the page
+   *  picks between them, because the resume notice already contains the
+   *  saving line's count (see lobbyNote in page.tsx).
+   *
+   *  A saving line that is NOT reassurance — a failure, or an upload in
+   *  progress — never reaches this prop. It stays a permanent row above
+   *  the preview, because a failure that fades out is a failure nobody
+   *  sees. */
+  note: string | null;
   /** Attempts already on the server for this run. 0 for a fresh start. */
   filedAttempts: number;
   /** 1-based attempt this run will begin at. */
@@ -64,10 +82,10 @@ export default function LobbyStage({
   /** The stream's REAL frame size, straight off the element. Null until
    *  metadata lands — see the placeholder note below. */
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
-  const [hintOn, setHintOn] = useState(true);
-  /** Bumped on every tap so re-showing the hint re-arms its timer even
+  const [overlayOn, setOverlayOn] = useState(true);
+  /** Bumped on every tap so re-showing the overlay re-arms its timer even
    *  when it was already up. */
-  const [hintNonce, setHintNonce] = useState(0);
+  const [overlayNonce, setOverlayNonce] = useState(0);
 
   useEffect(() => {
     void onRequestCamera();
@@ -119,14 +137,14 @@ export default function LobbyStage({
   }, [hasCamera]);
 
   useEffect(() => {
-    if (!hintOn) return;
-    const t = setTimeout(() => setHintOn(false), HINT_VISIBLE_MS);
+    if (!overlayOn) return;
+    const t = setTimeout(() => setOverlayOn(false), OVERLAY_VISIBLE_MS);
     return () => clearTimeout(t);
-  }, [hintOn, hintNonce]);
+  }, [overlayOn, overlayNonce]);
 
-  const showHint = useCallback(() => {
-    setHintOn(true);
-    setHintNonce((n) => n + 1);
+  const showOverlay = useCallback(() => {
+    setOverlayOn(true);
+    setOverlayNonce((n) => n + 1);
   }, []);
 
   // Live means a stream AND a frame size read back from it. Both, because
@@ -148,7 +166,7 @@ export default function LobbyStage({
           reports what the camera said, and CSS does the fitting. */}
       <div
         className="oc-solve-lobby-view"
-        onClick={showHint}
+        onClick={showOverlay}
         style={
           dims
             ? ({ '--oc-cam-w': dims.w, '--oc-cam-h': dims.h } as React.CSSProperties)
@@ -185,14 +203,33 @@ export default function LobbyStage({
             </div>
           )}
 
-          {/* The only text on the screen, and a child of the FRAME so it
-              is always over the preview rather than over the dead space
-              beside it. Always in the DOM, never removed — the fade is
-              opacity alone, so a screen reader keeps the instruction
-              whatever the timer has done to it visually. */}
-          <p className={`oc-solve-lobby-hint${hintOn ? '' : ' oc-solve-lobby-hint-out'}`}>
-            Камерт шоо болон таймер хоёул бүтэн харагдахаар байрлуулна уу.
-          </p>
+          {/* ALL the screen's text, in one block, at the TOP of the
+              frame, on one timer.
+
+              THE TOP, not the bottom, and this is the load-bearing part:
+              a solve is framed with the cube and the timer LOW — they sit
+              on the mat, the hands come in from below, and the camera
+              looks slightly down at them. The bottom edge is therefore
+              the one that clips something a judge needs to see, and it is
+              the edge the athlete is checking when they aim. The top of
+              the frame is usually wall. Covering the bottom hid exactly
+              the edge this screen exists to let them check.
+
+              A child of the FRAME, so it is always over the preview
+              rather than over the dead space beside it. Always in the
+              DOM, never removed — the fade is opacity alone, so a screen
+              reader keeps both lines whatever the timer has done to them
+              visually. */}
+          <div className={`oc-solve-lobby-notes${overlayOn ? '' : ' oc-solve-lobby-notes-out'}`}>
+            <p className="oc-solve-lobby-hint">
+              Камерт шоо болон таймер хоёул бүтэн харагдахаар байрлуулна уу.
+            </p>
+            {note && (
+              <p className="oc-solve-lobby-note" role="status">
+                {note}
+              </p>
+            )}
+          </div>
         </div>
       </div>
 

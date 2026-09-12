@@ -1164,6 +1164,31 @@ export default function SolvePage() {
         : filedCount > 0
           ? `${filedCount} ОРОЛДЛОГО ХАДГАЛАГДСАН`
           : null;
+  /** Is the saving line the REASSURING variant — "n are safely stored" —
+   *  rather than a problem or work in progress?
+   *
+   *  This is the only variant that may ever be allowed to fade. A failed
+   *  upload that fades out is a failure nobody sees, and "ХАДГАЛЖ БАЙНА
+   *  60%" that fades out is an athlete who thinks the upload finished.
+   *  Both of those must stay on the screen until they stop being true, on
+   *  every stage including the lobby. Derived from the same two values
+   *  the label's own priority order is built from, so it cannot disagree
+   *  with it. */
+  const savingIsReassurance = !filingFailed && !uploading;
+
+  /** The one status line the lobby shows INSIDE its preview overlay.
+   *
+   *  Deliberately one, not a stack of two. The resume notice already
+   *  contains the saving line's number — "2 ОРОЛДЛОГО ХАДГАЛАГДСАН" and
+   *  "Өмнө нь хадгалагдсан 2 оролдлого байна. Та 3-р оролдлогоос
+   *  үргэлжлүүлнэ." are the same count, and the notice also says which
+   *  attempt is next — so stacking them would be the same fact twice,
+   *  over the video, in two type sizes.
+   *  The fallback is not reachable today (on the lobby the two are
+   *  non-null together: a resumed run has filed attempts, a fresh one has
+   *  neither) but it is written as a choice rather than a coincidence, so
+   *  the count cannot be silently dropped if that ever changes. */
+  const lobbyNote = resumeMessage ?? (savingIsReassurance ? savingLabel : null);
 
   const eventConfig = competition.events.find((e) => e.eventId === eventId);
   const eventLabel = eventConfig?.label ?? eventId.toUpperCase();
@@ -1221,8 +1246,21 @@ export default function SolvePage() {
           {/* BANNERS, above the stage and inside the scrolling body. Both
               used to live in the header; the bar is now a fixed 56px with
               no room for a second line, and neither of these is worth
-              shrinking the competition's own name for. */}
-          {savingLabel && stage !== 'between' && (
+              shrinking the competition's own name for.
+
+              ON THE LOBBY THEY ARE NOT ROWS. That screen is a camera
+              preview the athlete aims, and two rows above it took height
+              away from the one thing on the page worth looking at, to say
+              two things they need once. Both move inside the preview as a
+              fading overlay there — see lobbyNote and LobbyStage.
+
+              WHAT DOES NOT FADE, anywhere: the saving line unless it is
+              pure reassurance. A failure and an upload in progress stay
+              as a permanent row on EVERY stage, the lobby included. That
+              is the whole reason this is gated on savingIsReassurance
+              rather than on the stage alone — the fade follows what the
+              line says, not where it is. */}
+          {savingLabel && stage !== 'between' && !(stage === 'lobby' && savingIsReassurance) && (
             <p className={`oc-solve-banner oc-solve-banner-quiet${filingFailed ? ' oc-solve-banner-bad' : ''}`}>
               {savingLabel}
             </p>
@@ -1232,8 +1270,11 @@ export default function SolvePage() {
               identical to a fresh run — same camera prompt, same countdown
               — and an athlete who thinks they are on attempt 1 would solve
               it again and have the filing refused. Cleared as soon as they
-              record something, because from then on the pips say it. */}
-          {resumeMessage && (
+              record something, because from then on the pips say it.
+              Not on the lobby: it is the lobby's overlay instead. It still
+              banners on the stages between the lobby and the first
+              recording, where there is no preview to overlay it onto. */}
+          {resumeMessage && stage !== 'lobby' && (
             <p className="oc-solve-banner" role="status">
               {resumeMessage}
             </p>
@@ -1248,6 +1289,10 @@ export default function SolvePage() {
                runShape.attempts used to feed a "5 оролдлогыг нэг суулт
                дотор" heading here; the run's length is on the bar's pips
                and in that banner, so the lobby no longer needs it. */
+            /* The resume notice (or, failing that, the saving line) as a
+               fading overlay on the preview rather than a row above it.
+               One string, never a stack — see lobbyNote. */
+            note={lobbyNote}
             filedAttempts={attempts.length}
             nextAttempt={attempts.length + 1}
             hasCamera={recorder.hasCamera}

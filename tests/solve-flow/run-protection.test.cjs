@@ -532,11 +532,24 @@ console.log('\n  -- 9. the lobby and the between screen --');
   // Fades, but is never REMOVED: opacity only, so the instruction is
   // still in the accessibility tree after the timer has hidden it.
   ok('  ...which fades on a timer rather than unmounting',
-    lobby.includes('const HINT_VISIBLE_MS = 5000;') &&
-      /oc-solve-lobby-hint-out/.test(lobby) &&
-      /\.oc-solve-lobby-hint-out \{\s*\n\s*opacity: 0;/.test(theme));
+    lobby.includes('const OVERLAY_VISIBLE_MS = 5000;') &&
+      /oc-solve-lobby-notes-out/.test(lobby) &&
+      /\.oc-solve-lobby-notes-out \{\s*\n\s*opacity: 0;/.test(theme));
   ok('  ...and comes back when the athlete taps the preview',
-    lobby.includes('onClick={showHint}') && lobby.includes('setHintOn(true);'));
+    lobby.includes('onClick={showOverlay}') && lobby.includes('setOverlayOn(true);'));
+  // ONE timer for the whole overlay. Two lines fading independently over
+  // live video is two distractions, the second arriving after the athlete
+  // has already gone back to aiming.
+  ok('  ...as ONE block on ONE timer, not a line at a time',
+    (lobbyCode.match(/OVERLAY_VISIBLE_MS/g) ?? []).length === 2 &&
+      /oc-solve-lobby-notes\$\{overlayOn[\s\S]{0,600}?oc-solve-lobby-hint[\s\S]{0,600}?oc-solve-lobby-note\b/.test(lobby));
+  // THE TOP EDGE. The cube and the timer sit low in a solve's frame, so
+  // the bottom is the edge that clips what a judge must see — and the one
+  // the athlete is checking when they aim. The top is usually wall.
+  ok('  ...anchored to the top of the frame, not the bottom',
+    /\.oc-solve-lobby-notes \{[\s\S]{0,400}?top: 16px;/.test(theme) &&
+      !/\.oc-solve-lobby-notes \{[^}]*bottom:/.test(theme) &&
+      !/\.oc-solve-lobby-hint \{[^}]*bottom:/.test(theme));
 
   // RESUME LANDS HERE. Attempt 3 of 5 must not read like attempt 1 — but
   // with the prose gone, the button is the only place left that can say
@@ -548,10 +561,42 @@ console.log('\n  -- 9. the lobby and the between screen --');
     (lobbyCode.match(/resuming/g) ?? []).length === 2);
   ok('  ...fed from what the server said is already filed',
     page.includes('filedAttempts={attempts.length}') && page.includes('nextAttempt={attempts.length + 1}'));
-  // The specifics stay in ONE sentence — the resume banner, rendered above
-  // every stage, which is the only place that counts attempts in prose.
-  ok('  ...while the numbers stay in the resume banner',
-    !lobby.includes('resumeMessage') && page.includes('{resumeMessage && ('));
+  // The specifics stay in ONE sentence, computed in ONE place. On the
+  // lobby that sentence is now an overlay on the preview rather than a
+  // row above it, but the lobby still only RENDERS it — it neither counts
+  // attempts nor words the sentence, so there is still exactly one place
+  // that does.
+  ok('  ...while the numbers stay in one sentence the lobby only renders',
+    !lobby.includes('resumeMessage') && !lobbyCode.includes('filedAttempts}') &&
+      page.includes('setResumeMessage(resumeNotice(plan))') &&
+      page.includes('note={lobbyNote}'));
+  ok('  ...and that sentence still banners on the stages with no preview',
+    page.includes("{resumeMessage && stage !== 'lobby' && ("));
+
+  // ── A FAILURE THAT FADES IS A FAILURE NOBODY SEES ──
+  // The saving line is not a lobby ornament: during the run it reports
+  // upload progress and upload failure. Only its REASSURING variant —
+  // "n are safely stored" — may ever be allowed to fade, and the gate is
+  // on what the line SAYS, not on which stage it is on. A stage-only
+  // gate would hide a failed upload the moment one could occur on the
+  // lobby, and hide "ХАДГАЛЖ БАЙНА 60%" from an athlete who would then
+  // believe the upload had finished.
+  ok('only the reassuring saving line may fade, and only on the lobby',
+    page.includes('const savingIsReassurance = !filingFailed && !uploading;') &&
+      page.includes("{savingLabel && stage !== 'between' && !(stage === 'lobby' && savingIsReassurance) && ("));
+  ok('  ...so a failure and an upload in progress stay a permanent row everywhere',
+    // The only stage-based suppression left is `between`, which predates
+    // this and has its own per-attempt slot cards instead.
+    (page.match(/stage !== 'between'/g) ?? []).length === 1 &&
+      !/savingLabel && stage === 'lobby'/.test(page));
+  ok('  ...and the lobby overlay is only ever fed the reassuring one',
+    page.includes('const lobbyNote = resumeMessage ?? (savingIsReassurance ? savingLabel : null);'));
+  // ONE note, not a stack of two: the resume notice already contains the
+  // saving line's count AND says which attempt is next, so showing both
+  // would be the same fact twice, over the video, in two type sizes.
+  ok('  ...as ONE note, since the resume notice already carries the count',
+    /note: string \| null;/.test(lobby) &&
+      (lobbyCode.match(/oc-solve-lobby-note"/g) ?? []).length === 1);
 
   // ── BETWEEN ──
   ok('the between screen shows the whole run, not just what was solved',
@@ -651,8 +696,8 @@ console.log('\n  -- 9. the lobby and the between screen --');
   // The one line is a child of the FRAME, not the area: positioned
   // against the area it drifted onto the black beside a portrait frame
   // on a desktop, and below a landscape frame on a phone.
-  ok('  ...and the one line sits over the preview, not beside it',
-    /<div className=\{`oc-solve-lobby-frame[\s\S]{0,1600}?oc-solve-lobby-hint[\s\S]{0,200}?<\/div>/.test(lobby));
+  ok('  ...and the overlay sits over the preview, not beside it',
+    /<div className=\{`oc-solve-lobby-frame[\s\S]{0,2400}?oc-solve-lobby-notes/.test(lobby));
 
   // 375px: five 17px times do not fit 62px cards.
   ok('the slot row tightens rather than wrapping',

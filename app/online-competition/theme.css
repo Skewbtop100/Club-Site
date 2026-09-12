@@ -1144,6 +1144,15 @@
   position: relative;
   width: min(100cqw, 100cqh * (var(--oc-cam-w) / var(--oc-cam-h)));
   aspect-ratio: var(--oc-cam-w) / var(--oc-cam-h);
+  /* A NAMED container, so the overlay inside can respond to how tall the
+     FRAME is rather than how tall the area is. A landscape stream on a
+     phone draws a frame ~190px tall, and a two-line overlay at full size
+     covered two thirds of it — burying the preview more thoroughly than
+     the banner rows this replaced ever did. Named because the area above
+     is an unnamed container; an unnamed query here would match it.
+     Size containment is safe: this box's size comes from the width rule
+     and the ratio, never from its contents. */
+  container: ocframe / size;
   background: #08080A;
   /* A shadow, not a border: it traces the frame's edge exactly instead of
      eating a pixel of it, whatever box-sizing is in force. */
@@ -1191,19 +1200,49 @@
   letter-spacing: 0.18em;
   color: #3A3A42;
 }
-/* The one line of copy, over live video. A scrim, not a text-shadow:
-   the background is an arbitrary camera frame, and a white cube under
-   room lighting defeats a shadow. Volt rule on the left ties it to the
-   rest of the run; pointer-events: none so it never eats the tap that
-   brings it back. */
-.oc-solve-lobby-hint {
+/* EVERY word on this screen, in one block over the video, on one timer.
+
+   AT THE TOP, and that is the considered edge rather than the free one.
+   A solve is framed with the cube and the timer LOW in the frame — they
+   sit on the mat, the hands come in from below, and the camera looks
+   slightly down at them. The bottom edge is the one that clips something
+   a judge needs to see, and it is the edge the athlete is checking when
+   they aim; the top is usually wall. This sat on the bottom and covered
+   exactly the edge the screen exists to let them check.
+
+   ONE stack, not two overlays: the framing line and the run's status
+   note appear together, are read together and fade together, so there is
+   one fade over the video rather than two arriving at different moments.
+   The stack is the positioned element and the fade lives on it; the
+   lines inside it are ordinary blocks.
+
+   pointer-events: none so it never eats the tap that brings it back. */
+.oc-solve-lobby-notes {
   position: absolute;
   left: 50%;
-  bottom: 16px;
+  top: 16px;
   transform: translateX(-50%);
-  /* Of the FRAME, which is this element's positioning context — so the
-     line can never be wider than the preview it annotates. */
+  /* Of the FRAME, which is this element's positioning context — so no
+     line can ever be wider than the preview it annotates. */
   max-width: min(520px, calc(100% - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 600ms ease;
+}
+.oc-solve-lobby-notes-out {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .oc-solve-lobby-notes {
+    transition: none;
+  }
+}
+/* A scrim, not a text-shadow: the background is an arbitrary camera
+   frame, and a white cube under room lighting defeats a shadow. */
+.oc-solve-lobby-hint {
   margin: 0;
   padding: 11px 15px;
   border-left: 2px solid #DFFF4F;
@@ -1212,16 +1251,77 @@
   backdrop-filter: blur(6px);
   font: 500 13px/1.5 var(--oc-font-heading), sans-serif;
   color: #F4F1EA;
-  pointer-events: none;
-  opacity: 1;
-  transition: opacity 600ms ease;
 }
-.oc-solve-lobby-hint-out {
-  opacity: 0;
+/* The run's status, under the instruction and quieter than it: what to
+   do now outranks where you are in the run. Grey rule rather than the
+   hint's volt one, matching how the banner it replaces was already the
+   quieter of the two rows. */
+.oc-solve-lobby-note {
+  margin: 0;
+  padding: 10px 15px;
+  border-left: 2px solid #3A4614;
+  background: rgba(8, 8, 10, 0.82);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  font: 400 12px/1.5 var(--oc-font-heading), sans-serif;
+  color: #9A958A;
 }
-@media (prefers-reduced-motion: reduce) {
+
+/* ── A SHORT FRAME ────────────────────────────────────────────────────
+   Keyed off the FRAME's height, not the viewport's: what matters is how
+   much video the overlay is standing on, and a landscape stream makes a
+   short frame at any screen size. Measured before this existed: a
+   343x193 frame on a 375px phone had the overlay covering 65% of the
+   preview, and a 341x192 one in a landscape viewport had it overhanging
+   the frame completely. */
+@container ocframe (max-height: 340px) {
+  .oc-solve-lobby-notes {
+    top: 8px;
+    gap: 4px;
+    max-width: calc(100% - 16px);
+  }
   .oc-solve-lobby-hint {
-    transition: none;
+    padding: 6px 10px;
+    font: 500 11px/1.35 var(--oc-font-heading), sans-serif;
+  }
+  .oc-solve-lobby-note {
+    padding: 5px 10px;
+    font: 400 10px/1.35 var(--oc-font-heading), sans-serif;
+  }
+}
+/* Shorter still, and there is no honest way to fit both lines: the
+   status note goes, and the framing instruction — the one that is
+   actionable right now — stays. Nothing is lost by it. The count it
+   carries is the resume count, and the button under the preview already
+   names the attempt the run will start at. */
+@container ocframe (max-height: 210px) {
+  .oc-solve-lobby-note {
+    display: none;
+  }
+}
+/* A NARROW frame is the other way to run out of room, and it is not the
+   same condition: a portrait stream in a landscape viewport draws a
+   frame about 108px wide, where the instruction wraps to six lines and
+   covered 91% of the preview even after the height rules above had
+   compacted it. Width is what decides how many lines the sentence takes,
+   so width is what this asks about. */
+@container ocframe (max-width: 240px) {
+  .oc-solve-lobby-notes {
+    top: 6px;
+    /* WIDER THAN THE FRAME, on purpose, and the only place that is true.
+       A frame this narrow is narrower than the sentence needs, so keeping
+       the line inside it just stacks the words vertically and buries the
+       video. It spills onto the black beside the frame instead — which
+       exists precisely because the frame is this narrow, and is showing
+       nothing. Covering dead space costs nothing; covering the preview is
+       the thing this screen must not do. */
+    min-width: 260px;
+    max-width: 260px;
+  }
+  .oc-solve-lobby-hint {
+    padding: 4px 6px;
+    font: 500 9px/1.3 var(--oc-font-heading), sans-serif;
+    border-left-width: 1px;
   }
 }
 .oc-solve-lobby-error {
@@ -1398,10 +1498,17 @@
      most damaging form, since a phone is the device that records
      portrait. The preview takes the shape of the stream at every width
      now; the only narrow-screen concession is the hint's type. */
+  .oc-solve-lobby-notes {
+    top: 12px;
+    gap: 6px;
+  }
   .oc-solve-lobby-hint {
-    bottom: 12px;
     padding: 10px 13px;
     font-size: 12px;
+  }
+  .oc-solve-lobby-note {
+    padding: 9px 13px;
+    font-size: 11px;
   }
   .oc-solve-between-title {
     font-size: 21px;
