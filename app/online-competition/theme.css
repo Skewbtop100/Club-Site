@@ -934,8 +934,8 @@
   justify-content: center;
   padding: 26px;
   position: relative;
-  /* So the intro's .oc-solve-intro-fill (z-index: -1) lands BEHIND that
-     screen's own content and no further. Without a stacking context here
+  /* So .oc-solve-fill (z-index: -1) lands BEHIND its screen's own
+     content and no further. Without a stacking context here
      a negative z-index escapes to the takeover's background and the fill
      is simply invisible. Stacking only — no layout changes, and the go
      flash (positioned, auto z-index) still paints over everything as
@@ -1487,13 +1487,6 @@
     padding: 17px;
     font-size: 14px;
   }
-  /* 5 x 68px tiles + 4 x 9px gaps = 376px, which wraps to two rows at
-     343px. 56px keeps a five-move chunk on one line. */
-  .oc-solve-move-tile {
-    width: 56px;
-    height: 56px;
-    font-size: 24px;
-  }
   .oc-solve-reveal-n {
     font-size: 44px;
   }
@@ -1702,6 +1695,12 @@
   background: #DFFF4F;
 }
 .oc-solve-chunk-group {
+  /* Full width, so the move row below it has a definite width to resolve
+     its own `width: 100%` against. Without this the row shrink-wrapped
+     inside a centred flex column — and because the row is an inline-size
+     CONTAINER, its contents are not allowed to give it width either, so
+     it collapsed to the gaps and the tiles came out 2px wide. */
+  width: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1718,20 +1717,44 @@
     transform: translateY(0);
   }
 }
+/* ── ONE ROW PER CHUNK, ALWAYS ────────────────────────────────────────
+   A grid of exactly as many equal columns as the chunk has moves. A chunk
+   CANNOT wrap because there is no second row for it to wrap onto — the
+   grid has one. It was a flex row of fixed 68px tiles with flex-wrap,
+   which dropped the last move onto a line of its own the moment a chunk
+   was one tile too wide for the screen; a chunk read in two goes is not a
+   chunk.
+
+   THE SIZING RULE: tiles are 68px where there is room and divide the
+   width where there is not. `max-width` is the 68px ideal, so a short
+   chunk on a wide screen looks exactly as it did; below that the 1fr
+   columns share out whatever is left. At 375px the row has 343px, so an
+   eight-move chunk — the longest the splitter will produce — gives 37px
+   tiles. --oc-chunk-n is set per render from the chunk on screen. */
 .oc-solve-move-row {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 9px;
+  display: grid;
+  grid-template-columns: repeat(var(--oc-chunk-n, 5), minmax(0, 1fr));
+  gap: 6px;
+  width: 100%;
+  max-width: calc(var(--oc-chunk-n, 5) * 68px + (var(--oc-chunk-n, 5) - 1) * 6px);
+  margin-inline: auto;
+  /* So the type below can follow the TILE rather than the viewport. */
+  container-type: inline-size;
 }
+/* Type scales with the tile it sits in, which is what keeps a
+   three-character move like "Rw'" inside an eight-move chunk at 375px —
+   a fixed 30px would have overflowed it. Clamped at both ends: never
+   smaller than legible, never larger than the mockup's 30px. */
 .oc-solve-move-tile {
-  width: 68px;
-  height: 68px;
-  flex: none;
+  aspect-ratio: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  font: 700 30px/1 var(--oc-font-mono), monospace;
+  font-family: var(--oc-font-mono), monospace;
+  font-weight: 700;
+  font-size: clamp(11px, calc(100cqw / var(--oc-chunk-n, 5) * 0.41), 30px);
+  line-height: 1;
   color: #F4F1EA;
   background: #0D0D10;
   border: 1px solid #1C1C21;
@@ -1912,18 +1935,19 @@
   border-bottom: 1px solid #DFFF4F;
   border-right: 1px solid #DFFF4F;
 }
-/* ── THE INTRO'S CLOCK, AS A FILL ────────────────────────────────────
-   The attempt intro shows its five seconds as the screen filling with
-   colour from the bottom instead of as a number. It is the ONLY screen
-   that does: it has nothing on it but one sentence, so the screen itself
-   is free to become the clock. Every screen with a camera preview counts
-   with a number instead (.oc-solve-hold-n), because colour moving behind
-   a live picture competes with the picture.
+/* ── A SCREEN THAT IS ITS OWN CLOCK ───────────────────────────────────
+   Two screens show their seconds as the screen filling with colour from
+   the bottom instead of as a number: the attempt intro, and the cover
+   prep between the last chunk and the cover hold. They are the run's two
+   preview-less screens — one sentence on an empty background — so the
+   screen itself is free to become the clock. Every screen with a camera
+   preview counts with a number instead (.oc-solve-hold-n), because colour
+   moving behind a live picture competes with the picture.
 
-   Driven entirely by --oc-fill-duration, which AttemptIntroStage sets
-   from the SAME INTRO_SECONDS that arms useHoldClock's timeout — there is
-   no second place to put a duration, so the sweep cannot outlast the
-   screen or stop short of it.
+   Driven entirely by --oc-fill-duration, which useScreenFill sets from
+   the SAME `seconds` that arms useHoldClock's timeout — there is no
+   second place to put a duration, so the sweep cannot outlast the screen
+   or stop short of it.
 
    THE COLOUR IS THE ACCENT, NOT A TINT OF IT. At 4-16% the volt was a
    grey-green smudge that read as a rendering artefact; it runs 10% -> 38%
@@ -1934,7 +1958,7 @@
    fill is BEHIND the text (z-index: -1) rather than over it.
    The gradient is brightest at its top so the leading edge is what reads,
    and scaling a gradient distorts nothing, unlike scaling a border. */
-.oc-solve-intro-fill {
+.oc-solve-fill {
   position: absolute;
   inset: 0;
   z-index: -1;
@@ -1961,7 +1985,7 @@
    `end` rather than `start`: it under-reports the time elapsed, so the
    fill is never fuller than the wait actually is. */
 @media (prefers-reduced-motion: reduce) {
-  .oc-solve-intro-fill {
+  .oc-solve-fill {
     animation-timing-function: steps(var(--oc-fill-steps), end);
   }
 }
@@ -2038,7 +2062,12 @@
    judge measures — are spent holding it rather than reaching for it.
    NO CAMERA on it, and nothing recorded: the clip begins at the hold,
    where the evidence begins. */
-.oc-solve-intro {
+/* The intro and the cover prep are the same kind of screen — one
+   instruction, nothing else, a colour rising behind it — so they are the
+   same rules under two names rather than one name used for a screen it
+   does not describe. */
+.oc-solve-intro,
+.oc-solve-prep {
   width: 100%;
   max-width: 520px;
   margin: auto;
@@ -2048,7 +2077,8 @@
   gap: 18px;
   text-align: center;
 }
-.oc-solve-intro-eyebrow {
+.oc-solve-intro-eyebrow,
+.oc-solve-prep-eyebrow {
   font: 500 9px/1 var(--oc-font-mono), monospace;
   letter-spacing: 0.22em;
   color: #6E6A62;
@@ -2059,7 +2089,8 @@
    without overflowing it and still reads as a statement on a desktop;
    600 weight and near-white keep it the brightest thing on screen as the
    fill rises behind it. */
-.oc-solve-intro-say {
+.oc-solve-intro-say,
+.oc-solve-prep-say {
   margin: 0;
   font: 600 clamp(26px, 6.4vw, 42px) / 1.3 var(--oc-font-heading), sans-serif;
   letter-spacing: -0.015em;

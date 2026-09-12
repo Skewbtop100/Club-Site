@@ -38,6 +38,9 @@ const lobby = fs.readFileSync(path.join(ROOT, SOLVE, '_components/LobbyStage.tsx
 const hold = fs.readFileSync(path.join(ROOT, SOLVE, '_components/CameraHoldStage.tsx'), 'utf8');
 const intro = fs.readFileSync(path.join(ROOT, SOLVE, '_components/AttemptIntroStage.tsx'), 'utf8');
 const holdClock = fs.readFileSync(path.join(ROOT, SOLVE, '_lib/useHoldClock.ts'), 'utf8');
+const screenFill = fs.readFileSync(path.join(ROOT, SOLVE, '_components/ScreenFill.tsx'), 'utf8');
+const coverPrep = fs.readFileSync(path.join(ROOT, SOLVE, '_components/CoverPrepStage.tsx'), 'utf8');
+const chunks = fs.readFileSync(path.join(ROOT, SOLVE, '_lib/scrambleChunks.ts'), 'utf8');
 const cover = fs.readFileSync(path.join(ROOT, SOLVE, '_components/CoverStage.tsx'), 'utf8');
 const rec = fs.readFileSync(path.join(ROOT, SOLVE, '_components/RecStage.tsx'), 'utf8');
 const theme = fs.readFileSync(path.join(ROOT, 'app/online-competition/theme.css'), 'utf8');
@@ -247,8 +250,15 @@ console.log('\n  -- 4. resuming a run --');
   ok('  ...and the page keeps no second copy of the attempt-time rule',
     !page.includes('function attemptTime(') && page.includes('resolveAttemptTime('));
 
-  // Resuming looks identical to starting without this.
-  ok('the athlete is told they are continuing', page.includes('{resumeMessage}'));
+  // Resuming looks identical to starting without this. It is still
+  // built and still said — but by the LOBBY, as its own overlay band,
+  // rather than by a page banner that followed the athlete onto every
+  // screen until they recorded something.
+  ok('the athlete is told they are continuing',
+    page.includes('setResumeMessage(resumeNotice(plan))') &&
+      page.includes('const lobbyNote = resumeMessage ??'));
+  ok('  ...once, by the lobby, and never repeated downstream',
+    page.includes('note={lobbyNote}') && !page.includes('{resumeMessage}'));
   ok('  ...and the notice clears once they solve something',
     page.includes('setResumeMessage(null);'));
 }
@@ -277,12 +287,18 @@ console.log('\n  -- 5. the camera hold is ONE component --');
   // ONE CLOCK FOR THE WHOLE RUN. The cover used to keep a private copy
   // of this, which is how two holds come to disagree about how long a
   // hold is — and it must not come back.
+  // The two preview-less screens reach it through useScreenFill, which
+  // is itself one line of useHoldClock — so there is still exactly one
+  // clock in the run, whatever each screen draws with it.
   ok('  ...and every timed screen reads it from the one place',
     hold.includes("from '../_lib/useHoldClock'") &&
       cover.includes("from '../_lib/useHoldClock'") &&
-      intro.includes("from '../_lib/useHoldClock'"));
+      screenFill.includes("from '../_lib/useHoldClock'") &&
+      intro.includes("from './ScreenFill'") &&
+      coverPrep.includes("from './ScreenFill'"));
   ok('  ...with no screen keeping a timer of its own',
-    [hold, cover, intro].every((f) => !f.includes('setInterval') && !f.includes('setTimeout')));
+    [hold, cover, intro, coverPrep, screenFill].every((f) =>
+      !f.includes('setInterval') && !f.includes('setTimeout')));
   // DISPLAY vs DECISION. The number is what an athlete reads; `done` is
   // what opens the gate, and it flips on a real-time timeout rather than
   // on the tick count, so a drifting or throttled interval can never
@@ -481,8 +497,11 @@ console.log('\n  -- 8. the competition environment --');
 
   // The two banners that used to live in the header. A fixed 56px row has
   // no second line to give them.
-  ok('the filing indicator and the resume notice moved into the body',
-    page.includes('oc-solve-banner-quiet') && page.includes('className="oc-solve-banner"'));
+  // Only the filing indicator is left here — the resume notice is the
+  // lobby's band now. What remains is above the stage, in the scrolling
+  // column, where the fixed 56px bar has no second line for it.
+  ok('the filing indicator moved into the body',
+    page.includes('oc-solve-banner-quiet'));
   ok('  ...above the stage, inside the scrolling column',
     page.indexOf('oc-solve-banner') < page.indexOf("{stage === 'lobby'"));
 
@@ -497,7 +516,7 @@ console.log('\n  -- 8. the competition environment --');
   ok('  ...but never the two buttons', !/@media[\s\S]*?\.oc-solve-bar-btn \{[\s\S]{0,60}?display: none/.test(theme));
 
   // NOT IN THIS DIFF: layout only.
-  ok('the run has sixteen stages', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 16);
+  ok('the run has seventeen stages', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 17);
   ok('the recording boundary is untouched',
     page.includes("if (stage === 'zeroDisplay') {") &&
       page.includes("onFinish={() => setStage('finishHold')}") &&
@@ -523,7 +542,7 @@ console.log('\n  -- 9. the lobby and the between screen --');
     !page.includes("'cameraSetup'") && !page.includes("'filing'"));
   ok('  ...nor as a render branch',
     !page.includes("stage === 'cameraSetup'") && !page.includes("stage === 'filing'"));
-  ok('the run still has every stage it had, plus the intro', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 16);
+  ok('the run still has every stage it had, plus the intro and the cover prep', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 17);
   ok('  ...two of them new', page.includes("| 'lobby'") && page.includes("| 'between'"));
 
   // ── LOBBY ──
@@ -626,8 +645,8 @@ console.log('\n  -- 9. the lobby and the between screen --');
     !lobby.includes('resumeMessage') && !lobbyCode.includes('filedAttempts}') &&
       page.includes('setResumeMessage(resumeNotice(plan))') &&
       page.includes('note={lobbyNote}'));
-  ok('  ...and that sentence still banners on the stages with no preview',
-    page.includes('{resumeMessage && !instructingStage && ('));
+  ok('  ...and has no page-level banner of its own left at all',
+    !page.includes('{resumeMessage &&'));
 
   // ── A FAILURE THAT FADES IS A FAILURE NOBODY SEES ──
   // The saving line is not a lobby ornament: during the run it reports
@@ -637,15 +656,17 @@ console.log('\n  -- 9. the lobby and the between screen --');
   // gate would hide a failed upload the moment one could occur on the
   // lobby, and hide "ХАДГАЛЖ БАЙНА 60%" from an athlete who would then
   // believe the upload had finished.
-  // THE GATE IS STILL ON WHAT THE LINE SAYS. The set of screens it can
-  // be hidden on grew (the lobby, the intro, the timer check — each is
-  // asking for one specific thing), but every one of them is ANDed with
-  // savingIsReassurance, so a failure or an upload in progress is still
-  // a permanent row on all three.
-  ok('only the reassuring saving line may fade, and only where it instructs',
+  // AN ALLOWLIST BY WHAT THE LINE SAYS, not a list of screens to
+  // suppress it on. That list was growing by one every time a screen was
+  // added — lobby, intro, timer check, reveal — and a rule that has to
+  // name each new screen is always one screen out of date. The quiet
+  // lines are the LOBBY's, delivered once through lobbyNote; the
+  // page-level banner carries the saving line only when it is not
+  // reassurance.
+  ok('only a saving line that is NOT reassurance reaches the page banner',
     page.includes('const savingIsReassurance = !filingFailed && !uploading;') &&
-      page.includes("const instructingStage = stage === 'lobby' || stage === 'attemptIntro' || stage === 'zeroDisplay';") &&
-      page.includes("{savingLabel && stage !== 'between' && !(instructingStage && savingIsReassurance) && ("));
+      page.includes("{savingLabel && !savingIsReassurance && stage !== 'between' && (") &&
+      !page.includes('instructingStage'));
   ok('  ...so a failure and an upload in progress stay a permanent row everywhere',
     // The only stage-based suppression left is `between`, which predates
     // this and has its own per-attempt slot cards instead.
@@ -855,7 +876,7 @@ console.log('\n  -- 10. the mockup restyle --');
       page.includes("{stage === 'attemptIntro' && ("));
   ok('  ...for five seconds, then on by itself',
     intro.includes('const INTRO_SECONDS = 5;') &&
-      intro.includes('useHoldClock(INTRO_SECONDS, onDone)'));
+      intro.includes('useScreenFill(INTRO_SECONDS, onDone)'));
   // ONE LINE. It also carried "{N}-р эвлүүлэлт эхлэх гэж байна"; the bar
   // above already names the attempt, and a screen with one instruction
   // on it should have one sentence on it.
@@ -871,29 +892,31 @@ console.log('\n  -- 10. the mockup restyle --');
   // screen with nothing on it but a sentence, so it is the only one where
   // the screen itself is free to become the clock.
   ok('  ...shown as the screen filling, not as a number',
-    intro.includes('className="oc-solve-intro-fill"') &&
-      !intro.includes('oc-solve-intro-count'));
-  ok('  ...from the same INTRO_SECONDS that ends the screen',
-    intro.includes("'--oc-fill-duration': `${INTRO_SECONDS}s`") &&
-      intro.includes("'--oc-fill-steps': INTRO_SECONDS"));
+    intro.includes('{fill}') && !intro.includes('oc-solve-intro-count'));
+  // ONE ARGUMENT arms the clock and sizes the sweep, so a screen cannot
+  // be given a fill longer than the wait it is a picture of.
+  ok('  ...from the same `seconds` that ends the screen',
+    screenFill.includes('useHoldClock(seconds, onElapsed)') &&
+      screenFill.includes("'--oc-fill-duration': `${seconds}s`") &&
+      screenFill.includes("'--oc-fill-steps': seconds"));
   // BEHIND THE SENTENCE, which stays the brightest thing on the screen.
   ok('  ...behind the sentence, never over it',
-    /\.oc-solve-intro-fill \{[\s\S]{0,400}?z-index: -1;/.test(theme) &&
+    /\.oc-solve-fill \{[\s\S]{0,400}?z-index: -1;/.test(theme) &&
       /\.oc-solve-body \{[^}]*isolation: isolate;/.test(theme));
   // THE ACCENT, not a tint of it. At 4-16% it read as a grey-green
   // smudge; the volt is unmistakable at 10-38%.
   ok('  ...in the volt accent at a strength that reads as a colour',
-    /\.oc-solve-intro-fill \{[\s\S]{0,500}?linear-gradient\(to top, rgba\(223, 255, 79, 0\.1\), rgba\(223, 255, 79, 0\.38\)\)/.test(theme));
+    /\.oc-solve-fill \{[\s\S]{0,500}?linear-gradient\(to top, rgba\(223, 255, 79, 0\.1\), rgba\(223, 255, 79, 0\.38\)\)/.test(theme));
   // THE SENTENCE IS THE SCREEN'S CONTENT, not a caption. At 18px it read
   // as a footnote to an empty page.
   ok('  ...under a sentence sized as the screen’s content',
-    /\.oc-solve-intro-say \{[\s\S]{0,200}?font: 600 clamp\(26px, 6\.4vw, 42px\)/.test(theme));
+    /\.oc-solve-intro-say,\s*\n\.oc-solve-prep-say \{[\s\S]{0,220}?font: 600 clamp\(26px, 6\.4vw, 42px\)/.test(theme));
   // REDUCED MOTION: stepped, not deleted. The fill is the only thing on
-  // this screen saying how long it lasts.
+  // these screens saying how long they last.
   ok('  ...stepping instead of sweeping under reduced motion',
-    /@media \(prefers-reduced-motion: reduce\) \{\s*\n\s*\.oc-solve-intro-fill \{\s*\n\s*animation-timing-function: steps\(var\(--oc-fill-steps\), end\);/.test(theme));
+    /@media \(prefers-reduced-motion: reduce\) \{\s*\n\s*\.oc-solve-fill \{\s*\n\s*animation-timing-function: steps\(var\(--oc-fill-steps\), end\);/.test(theme));
   ok('  ...and saying its duration to a screen reader',
-    intro.includes('oc-sr-only') && /\{INTRO_SECONDS\} секунд хүлээнэ үү\./.test(intro) &&
+    screenFill.includes('oc-sr-only') && /\{seconds\} секунд хүлээнэ үү\./.test(screenFill) &&
       /\.oc-sr-only \{/.test(theme));
   // NOT ON THE RECORDING, and no preview on it either: five seconds of
   // an athlete reaching for a timer is not evidence of anything, and
@@ -978,8 +1001,12 @@ console.log('\n  -- 10. the mockup restyle --');
     reveal.includes('setSecondsLeft(GROUP_DISPLAY_MS / 1000)') &&
       (reveal.match(/GROUP_DISPLAY_MS/g) ?? []).length === 6);
   ok('  ...the chunk ticks are 9px squares', /\.oc-solve-chunk-bar \{[\s\S]{0,90}?width: 9px;[\s\S]{0,40}?height: 9px;/.test(theme));
-  ok('  ...and the moves are 68px tiles',
-    /\.oc-solve-move-tile \{[\s\S]{0,120}?width: 68px;[\s\S]{0,40}?height: 68px;/.test(theme));
+  // 68px WHERE THERE IS ROOM. The row is a grid of one column per move
+  // capped at the 68px ideal, so a short chunk on a wide screen is
+  // exactly as it was and a long one divides the width instead.
+  ok('  ...and the moves are 68px tiles where there is room',
+    /\.oc-solve-move-row \{[\s\S]{0,500}?max-width: calc\(var\(--oc-chunk-n, 5\) \* 68px/.test(theme) &&
+      /\.oc-solve-move-tile \{[\s\S]{0,200}?aspect-ratio: 1;/.test(theme));
   ok('  ...with no side preview left', !revealCode.includes('videoRef') && !revealCode.includes('<video'));
 
   // ── REC, minus the inspection panel ──
@@ -1038,16 +1065,28 @@ console.log('\n  -- 10. the mockup restyle --');
     between.includes('className="oc-solve-between"') &&
       /\.oc-solve-between \{[\s\S]{0,200}?max-width: 520px;[\s\S]{0,120}?gap: 22px;/.test(theme));
   ok('  ...and the lobby is still the lobby', lobby.includes('className="oc-solve-lobby"'));
-  ok('three stages were added', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 16);
+  ok('three stages were added', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 17);
   // verify is still out: it merges the closing hold with the keypad,
   // which moves the recording boundary.
   ok('  ...cover, count and go — and verify still absent',
     page.includes("| 'cover'") && page.includes("| 'count'") && page.includes("| 'go'") &&
       !page.includes("'verify'"));
 
-  // 375px: the two that do not fit as specified.
-  ok('five 68px tiles shrink rather than wrapping at 375',
-    /\.oc-solve-move-tile \{\s*\n\s*width: 56px;/.test(theme));
+  // ── ONE ROW PER CHUNK, AT EVERY WIDTH ──
+  // A grid with one column per move cannot wrap: there is no second row
+  // to wrap onto. It was a flex row with flex-wrap and fixed tiles,
+  // which put a lone move on a line of its own the moment a chunk was
+  // one tile too wide.
+  ok('a chunk cannot wrap, because the row has one line',
+    /\.oc-solve-move-row \{[\s\S]{0,400}?grid-template-columns: repeat\(var\(--oc-chunk-n, 5\), minmax\(0, 1fr\)\);/.test(theme) &&
+      !/\.oc-solve-move-row \{[^}]*flex-wrap/.test(theme));
+  ok('  ...with the column count coming from the chunk on screen',
+    reveal.includes("'--oc-chunk-n': moves.length"));
+  // Type follows the tile, not the viewport — a fixed 30px overflowed a
+  // 37px tile, which is what an eight-move chunk gives at 375px.
+  ok('  ...and the type scaling with the tile it sits in',
+    /\.oc-solve-move-row \{[\s\S]{0,500}?container-type: inline-size;/.test(theme) &&
+      /font-size: clamp\(11px, calc\(100cqw \/ var\(--oc-chunk-n, 5\) \* 0\.41\), 30px\);/.test(theme));
   ok('  ...and the 56px keypad well shrinks with them',
     /\.oc-solve-entry-digits \{\s*\n\s*font-size: 44px;/.test(theme));
 }
@@ -1063,7 +1102,29 @@ console.log('\n  -- 11. the inspection --');
   const pageCode = stripComments(page);
 
   // ── THE SEQUENCE ──
-  ok('reveal hands to cover', page.includes("<RevealStage scramble={scramble} onDone={() => setStage('cover')} />"));
+  // A BEAT BETWEEN THEM NOW. The cover hold's eight seconds start the
+  // instant it renders, and the athlete was spending the first of them
+  // finding the cover with the cube still in hand.
+  ok('reveal hands to the cover prep',
+    page.includes("<RevealStage scramble={scramble} onDone={() => setStage('coverPrep')} />"));
+  ok('  ...and the prep to cover, after five seconds',
+    page.includes("<CoverPrepStage onDone={() => setStage('cover')} />") &&
+      coverPrep.includes('const PREP_SECONDS = 5;') &&
+      coverPrep.includes('useScreenFill(PREP_SECONDS, onDone)'));
+  // INSIDE THE CLIP. Recording started at zeroDisplay and stops after
+  // the solve; this screen is five more seconds of the same continuous
+  // video, not a gap in it. A gap between the scramble and the cover is
+  // exactly where an unverifiable cube could be swapped in.
+  ok('  ...with the recording running straight through it',
+    // Comment-stripped: the file explains at length that the recording
+    // runs THROUGH it and that no recorder call belongs here, which
+    // contains every word this is looking for.
+    !/startRecording|stopRecording|recorder|videoRef/.test(stripComments(coverPrep)) &&
+      page.includes("if (stage === 'zeroDisplay') {"));
+  // NO PREVIEW is what earns it the fill, which is the line the holds
+  // are on the other side of.
+  ok('  ...and no preview, which is why it fills rather than counts',
+    !coverPrep.includes('<video') && coverPrep.includes('{fill}'));
   ok('  ...cover to ready', page.includes("<CoverStage seconds={HOLD_SECONDS} onDone={() => setStage('readyPrompt')} />"));
   ok('  ...ready to count', page.includes("<ReadyPromptStage onDone={() => setStage('count')} />"));
   ok('  ...count to go', /<CountStage[\s\S]{0,200}?onDone=\{\(\) => setStage\('go'\)\}/.test(page));
@@ -1086,7 +1147,7 @@ console.log('\n  -- 11. the inspection --');
     ok('every stage of an attempt is in ATTEMPT_STAGES',
       union.filter((u) => !notAnAttempt.includes(u)).every((u) => inList.includes(u)),
       union.filter((u) => !notAnAttempt.includes(u) && !inList.includes(u)).join(',') || 'all present');
-    ok('  ...twelve of them', inList.length === 12, String(inList.length));
+    ok('  ...thirteen of them', inList.length === 13, String(inList.length));
     // attemptIntro names the attempt it introduces ("3-р эвлүүлэлт эхлэх
     // гэж байна"), so the bar must claim that attempt too — the two
     // would otherwise disagree on the same screen.
@@ -1236,7 +1297,7 @@ console.log('\n  -- 12. the attestation --');
   ok('resume did not move',
     /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page) &&
       page.includes('setResumeMessage(resumeNotice(plan))'));
-  ok('the stage list did not move', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 16);
+  ok('the stage list did not move', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 17);
 }
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);

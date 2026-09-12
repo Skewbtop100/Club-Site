@@ -39,6 +39,7 @@ import BetweenStage, { type SlotRow } from './_components/BetweenStage';
 import RevealStage from './_components/RevealStage';
 import AttemptIntroStage from './_components/AttemptIntroStage';
 import CameraHoldStage from './_components/CameraHoldStage';
+import CoverPrepStage from './_components/CoverPrepStage';
 import ReadyPromptStage from './_components/ReadyPromptStage';
 import CoverStage from './_components/CoverStage';
 import CountStage from './_components/CountStage';
@@ -72,6 +73,13 @@ type Stage =
    *  continue without a recording — see RecordingFailedStage. */
   | 'recordingFailed'
   | 'scrambleReveal'
+  /** The beat between the last chunk and the cover: "get your scrambled
+   *  cube ready with its cover". Five seconds, no camera, and INSIDE the
+   *  clip — the recording has been running since zeroDisplay and runs
+   *  straight through it. It exists because the cover hold's eight
+   *  seconds start the instant it renders, and the athlete was spending
+   *  the first of them finding the cover with the cube still in hand. */
+  | 'coverPrep'
   /** The cube goes under its cover, white up and green to camera. Took
    *  over orientationHold's eight seconds AND its job; what it adds is
    *  that the cube ends up hidden, so the moment the cover comes off is a
@@ -150,6 +158,10 @@ const ATTEMPT_STAGES: Stage[] = [
   'zeroDisplay',
   'recordingFailed',
   'scrambleReveal',
+  // Inside an attempt in every sense: on the clip, between the scramble
+  // and the cover, with the bar's pips claiming the attempt it belongs
+  // to.
+  'coverPrep',
   'cover',
   'readyPrompt',
   'count',
@@ -1225,24 +1237,21 @@ export default function SolvePage() {
    *  the count cannot be silently dropped if that ever changes. */
   const lobbyNote = resumeMessage ?? (savingIsReassurance ? savingLabel : null);
 
-  /** Screens where a banner would be talking over a specific instruction.
-   *
-   *  The lobby shows both facts itself — the notice as its band, the
-   *  count inside it — and the two screens after it are asking the
-   *  athlete to do one thing each: get their timer, then hold it at 0.00
-   *  for eight seconds a judge measures. Repeating "2 оролдлого
-   *  хадгалагдсан" over that is noise at the exact moment the screen is
-   *  trying to be read.
-   *
-   *  It is all three, not just the timer check: the notice is cleared
-   *  only once something is recorded, so quieting the hold alone would
-   *  have it vanish on the lobby, reappear for the intro's five seconds,
-   *  and vanish again. A banner that blinks is worse than either.
-   *
-   *  REASSURANCE ONLY. This never hides a failure or an upload in
-   *  progress — see the render below, where it is ANDed with
-   *  savingIsReassurance and nothing else. */
-  const instructingStage = stage === 'lobby' || stage === 'attemptIntro' || stage === 'zeroDisplay';
+  // WHERE THE QUIET STATUS LINES ARE SHOWN: the lobby, and nowhere else.
+  //
+  // Said as an allowlist rather than as a list of screens to suppress
+  // them on, because that list was growing by one every time a screen was
+  // added — lobby, then the intro, then the timer check, then the reveal
+  // — and a rule that has to name each new screen is a rule that is
+  // always one screen out of date.
+  //
+  // The lobby delivers both of them ITSELF, as its overlay band, through
+  // `lobbyNote` above. Downstream screens are each asking for one
+  // specific thing, and "2 оролдлого хадгалагдсан" over that is noise at
+  // the moment the screen is trying to be read. So nothing repeats them:
+  // the page-level banner below carries the saving line only when it is
+  // NOT reassurance, and the resume notice has no page-level banner at
+  // all any more.
 
   const eventConfig = competition.events.find((e) => e.eventId === eventId);
   const eventLabel = eventConfig?.label ?? eventId.toUpperCase();
@@ -1308,33 +1317,31 @@ export default function SolvePage() {
               two things they need once. Both move inside the preview as a
               fading overlay there — see lobbyNote and LobbyStage.
 
-              WHAT DOES NOT FADE OR HIDE, anywhere: the saving line unless
-              it is pure reassurance. A failure and an upload in progress
-              stay as a permanent row on EVERY stage — the lobby, the
-              intro and the timer check included. That is the whole reason
-              both conditions are ANDed with savingIsReassurance rather
-              than keyed on the stage alone: what the line SAYS decides
-              whether it may go, and where it is only decides where. */}
-          {savingLabel && stage !== 'between' && !(instructingStage && savingIsReassurance) && (
+              WHAT DOES NOT HIDE, anywhere: the saving line unless it is
+              pure reassurance. A failure and an upload in progress are a
+              permanent row on EVERY stage — the lobby, the intro, the
+              timer check and the reveal included. The condition is on
+              what the line SAYS, not on which screen it is on, which is
+              what keeps that true as screens are added.
+
+              `between` is the one stage-based exception and it predates
+              all of this: its per-attempt slot cards already show every
+              file state, failures included, with the retry button next to
+              the attempt that needs it. */}
+          {savingLabel && !savingIsReassurance && stage !== 'between' && (
             <p className={`oc-solve-banner oc-solve-banner-quiet${filingFailed ? ' oc-solve-banner-bad' : ''}`}>
               {savingLabel}
             </p>
           )}
 
-          {/* Continuing, not starting. Without this the flow looks
-              identical to a fresh run — same camera prompt, same countdown
-              — and an athlete who thinks they are on attempt 1 would solve
-              it again and have the filing refused. Cleared as soon as they
-              record something, because from then on the pips say it.
-              Not on the lobby (it is the lobby's own band instead), and
-              not on the two screens that follow it, which are each asking
-              for one specific thing. It still banners anywhere else it
-              survives to. */}
-          {resumeMessage && !instructingStage && (
-            <p className="oc-solve-banner" role="status">
-              {resumeMessage}
-            </p>
-          )}
+          {/* The resume notice has NO banner here at all any more. It is
+              still built (setResumeMessage / resumeNotice) and still
+              says the thing that has to be said — "you are continuing at
+              attempt 3, the earlier ones are safe" — but the lobby
+              delivers it, once, as its own band. It used to banner on
+              every screen the athlete passed until they recorded
+              something, which by the reveal is the fourth screen in a row
+              repeating a sentence they read before pressing start. */}
 
         {stage === 'lobby' && (
           <LobbyStage
@@ -1465,8 +1472,15 @@ export default function SolvePage() {
         )}
 
         {stage === 'scrambleReveal' && (
-          <RevealStage scramble={scramble} onDone={() => setStage('cover')} />
+          <RevealStage scramble={scramble} onDone={() => setStage('coverPrep')} />
         )}
+
+        {/* Five seconds to get the cube under its cover before the hold
+            that measures it begins. Recording is untouched here — it has
+            been running since zeroDisplay and stops only after the solve,
+            so this is five more seconds of the same continuous clip
+            rather than a gap in it. */}
+        {stage === 'coverPrep' && <CoverPrepStage onDone={() => setStage('cover')} />}
 
         {/* The cube in a known orientation before the solve, so a judge
             can verify the scramble was applied to a cube whose

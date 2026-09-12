@@ -1,9 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { splitScrambleIntoGroups } from '../_lib/scrambleChunks';
+import { useEffect, useState, type CSSProperties } from 'react';
+import { splitScrambleIntoChunks } from '../_lib/scrambleChunks';
 
-const GROUP_SIZE = 5;
 const GROUP_DISPLAY_MS = 5000;
 
 function groupLabel(groups: string[], index: number): string {
@@ -13,10 +12,16 @@ function groupLabel(groups: string[], index: number): string {
   return start === end ? `${start}` : `${start}-${end}`;
 }
 
-/** "scrambleReveal" — shows the scramble in fixed-size groups of 5 moves,
- *  ONE group at a time (each replaces the last, not stacking), 5 seconds
- *  per group. Group count is dynamic from the actual scramble length, not
- *  a fixed 4 — a longer scramble just runs through more groups.
+/** "scrambleReveal" — shows the scramble in chunks, ONE at a time (each
+ *  replaces the last, not stacking), 5 seconds per chunk.
+ *
+ *  THE CHUNKS ARE EVEN, and the count follows the scramble rather than
+ *  the size being fixed. A fixed size of five split an 11-move 2x2
+ *  scramble into 5/5/1 — a final chunk holding a single move, on screen
+ *  for the same five seconds as a full one. splitScrambleIntoChunks
+ *  chooses the count from the length and spreads the moves across it; see
+ *  scrambleChunks.ts for the rule and why a long scramble gets more than
+ *  four.
  *
  *  The mockup's own header: ХОЛИЛТ, one tick per chunk, and the seconds
  *  left on THIS chunk. The countdown is a READOUT of the 5-second clock
@@ -29,7 +34,7 @@ function groupLabel(groups: string[], index: number): string {
  *  environment. Recording is unaffected either way — MediaRecorder reads
  *  the camera track, not any <video> element. */
 export default function RevealStage({ scramble, onDone }: { scramble: string; onDone: () => void }) {
-  const groups = splitScrambleIntoGroups(scramble, GROUP_SIZE);
+  const groups = splitScrambleIntoChunks(scramble);
   const [currentGroup, setCurrentGroup] = useState(0);
   const [secondsLeft, setSecondsLeft] = useState(GROUP_DISPLAY_MS / 1000);
 
@@ -53,6 +58,8 @@ export default function RevealStage({ scramble, onDone }: { scramble: string; on
     const id = setInterval(() => setSecondsLeft((s) => Math.max(s - 1, 0)), 1000);
     return () => clearInterval(id);
   }, [currentGroup]);
+
+  const moves = groups[currentGroup].split(' ').filter(Boolean);
 
   return (
     <div className="oc-solve-reveal">
@@ -81,15 +88,21 @@ export default function RevealStage({ scramble, onDone }: { scramble: string; on
         <span style={{ font: '500 9px var(--oc-font-mono), monospace', letterSpacing: '.2em', color: '#6E6A62' }}>
           {groupLabel(groups, currentGroup)}
         </span>
-        <div className="oc-solve-move-row">
-          {groups[currentGroup]
-            .split(' ')
-            .filter(Boolean)
-            .map((move, j) => (
-              <span key={j} className="oc-solve-move-tile">
-                {move}
-              </span>
-            ))}
+        {/* ONE ROW, ALWAYS. --oc-chunk-n is how many moves this chunk
+            holds, and the row is a grid of exactly that many equal
+            columns — so there is no second row for a move to wrap onto,
+            whatever the chunk length or the screen width. The tiles take
+            68px where there is room and divide the width where there is
+            not. */}
+        <div
+          className="oc-solve-move-row"
+          style={{ '--oc-chunk-n': moves.length } as CSSProperties}
+        >
+          {moves.map((move, j) => (
+            <span key={j} className="oc-solve-move-tile">
+              {move}
+            </span>
+          ))}
         </div>
       </div>
 

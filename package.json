@@ -20,7 +20,7 @@
     "test:registration": "node tests/competition-fields/registration-view.test.cjs",
     "test:regshape": "node tests/competition-fields/registration-shape.test.cjs",
     "test:review": "node tests/competition-fields/registration-review.test.cjs",
-    "test:solve": "node tests/solve-flow/scramble-wait.test.cjs && node tests/solve-flow/run-protection.test.cjs",
+    "test:solve": "node tests/solve-flow/scramble-wait.test.cjs && node tests/solve-flow/scramble-chunks.test.cjs && node tests/solve-flow/run-protection.test.cjs",
     "test:subid": "node tests/competition-fields/submission-id.test.cjs",
     "test:resume": "node tests/competition-fields/run-resume.test.cjs",
     "test:progress": "node tests/competition-fields/round-progress.test.cjs",
