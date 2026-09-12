@@ -44,8 +44,8 @@ export default function ReadyPromptStage({ onDone }: { onDone: () => void }) {
           now starts the fifteen seconds before it. The layout is
           untouched. */}
       <p className="oc-solve-ready-lead">
-        Товч дарсны дараа ковероо авч, 15 секунд шоогоо ажиглана. Хугацаа дуусмагц эвлүүлж
-        эхэлнэ — дэлгэц дээр цаг харагдахгүй тул цагаа өөрөө хэмжинэ.
+        Товч дарсны дараа ковероо авч, 15 секунд шоогоо ажиглах хугацаа явж эхэлнэ. Хугацаа
+        дуусхаас өмнө эвлүүлэлтээ эхлээрэй.
       </p>
 
       <button type="button" className="oc-solve-ready-go" onClick={onDone}>

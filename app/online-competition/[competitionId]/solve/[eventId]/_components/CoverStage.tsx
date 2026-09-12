@@ -78,7 +78,7 @@ export default function CoverStage({
       </div>
 
       <p className="oc-solve-cover-note">
-        Хугацаа дуусаад ажиглах хугацаа эхэлнэ. Ковероо тэр үед нь авна.
+        Хугацаа дуусгаад коверт шоогоо нуугаарай.
       </p>
     </div>
   );
