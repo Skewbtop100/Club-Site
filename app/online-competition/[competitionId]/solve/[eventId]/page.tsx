@@ -39,7 +39,6 @@ import BetweenStage, { type SlotRow } from './_components/BetweenStage';
 import RevealStage from './_components/RevealStage';
 import AttemptIntroStage from './_components/AttemptIntroStage';
 import CameraHoldStage from './_components/CameraHoldStage';
-import CoverPrepStage from './_components/CoverPrepStage';
 import ReadyPromptStage from './_components/ReadyPromptStage';
 import CoverStage from './_components/CoverStage';
 import CountStage from './_components/CountStage';
@@ -73,13 +72,6 @@ type Stage =
    *  continue without a recording — see RecordingFailedStage. */
   | 'recordingFailed'
   | 'scrambleReveal'
-  /** The beat between the last chunk and the cover: "get your scrambled
-   *  cube ready with its cover". Five seconds, no camera, and INSIDE the
-   *  clip — the recording has been running since zeroDisplay and runs
-   *  straight through it. It exists because the cover hold's eight
-   *  seconds start the instant it renders, and the athlete was spending
-   *  the first of them finding the cover with the cube still in hand. */
-  | 'coverPrep'
   /** The cube goes under its cover, white up and green to camera. Took
    *  over orientationHold's eight seconds AND its job; what it adds is
    *  that the cube ends up hidden, so the moment the cover comes off is a
@@ -158,10 +150,6 @@ const ATTEMPT_STAGES: Stage[] = [
   'zeroDisplay',
   'recordingFailed',
   'scrambleReveal',
-  // Inside an attempt in every sense: on the clip, between the scramble
-  // and the cover, with the bar's pips claiming the attempt it belongs
-  // to.
-  'coverPrep',
   'cover',
   'readyPrompt',
   'count',
@@ -182,11 +170,27 @@ const ATTEMPT_STAGES: Stage[] = [
  *  order above an empty one, so it cannot reject a genuine recording. */
 const MIN_RECORDING_BYTES = 1024;
 
-/** Every hold in the flow runs the same length: long enough for a judge
- *  to read a timer or an orientation off the video, short enough not to
- *  pad five attempts. Each stage passes this to CameraHoldStage, which
- *  builds its sentence and its tick bar from the same number. */
+/** THE TWO TIMER HOLDS: the check before an attempt and the hold after
+ *  it. Long enough for a judge to read a timer off the video, short
+ *  enough not to pad five attempts. Each stage passes this to
+ *  CameraHoldStage, which builds its sentence from the same number. */
 const HOLD_SECONDS = 8;
+
+/** THE COVER, which is a different kind of hold and now says so.
+ *
+ *  It shared HOLD_SECONDS when all three were the same job — hold still
+ *  in front of the camera while a judge reads something off the video.
+ *  The cover is not that. It asks the athlete to READ an instruction and
+ *  then DO it: cube under the cover, green to the camera, white up. Eight
+ *  seconds was the reading time and the doing time together, so the doing
+ *  started late and the orientation a judge checks was being settled in
+ *  the last second or two of it.
+ *
+ *  Separate constants rather than one with an exception, because the two
+ *  numbers answer different questions: HOLD_SECONDS is "how long must a
+ *  judge see this for", and this is "how long does the athlete need". A
+ *  change to either must not silently move the other. */
+const COVER_SECONDS = 20;
 
 /** WCA inspection. The number is the rule's, and this is the only place
  *  the flow states it.
@@ -1472,15 +1476,8 @@ export default function SolvePage() {
         )}
 
         {stage === 'scrambleReveal' && (
-          <RevealStage scramble={scramble} onDone={() => setStage('coverPrep')} />
+          <RevealStage scramble={scramble} onDone={() => setStage('cover')} />
         )}
-
-        {/* Five seconds to get the cube under its cover before the hold
-            that measures it begins. Recording is untouched here — it has
-            been running since zeroDisplay and stops only after the solve,
-            so this is five more seconds of the same continuous clip
-            rather than a gap in it. */}
-        {stage === 'coverPrep' && <CoverPrepStage onDone={() => setStage('cover')} />}
 
         {/* The cube in a known orientation before the solve, so a judge
             can verify the scramble was applied to a cube whose
@@ -1490,7 +1487,7 @@ export default function SolvePage() {
             holds: this stage took over orientationHold's duration along
             with its job. */}
         {stage === 'cover' && (
-          <CoverStage seconds={HOLD_SECONDS} onDone={() => setStage('readyPrompt')} />
+          <CoverStage seconds={COVER_SECONDS} onDone={() => setStage('readyPrompt')} />
         )}
 
         {/* The single go-ahead. It starts the INSPECTION now, not the

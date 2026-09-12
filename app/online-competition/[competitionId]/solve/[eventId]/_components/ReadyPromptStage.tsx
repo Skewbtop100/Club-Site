@@ -24,9 +24,14 @@ export default function ReadyPromptStage({ onDone }: { onDone: () => void }) {
         <span className="oc-solve-ready-check" aria-hidden>
           ✓
         </span>
-        {/* True at this point and not before it: the opening hold showed
-            the athlete's own timer reading 0.00 to the camera. */}
-        <span className="oc-solve-ready-badge-text">ЦАГ ШАЛГАГДЛАА</span>
+        {/* WHAT THIS SCREEN CONFIRMS is the scramble, not the timer.
+            It said "ЦАГ ШАЛГАГДЛАА" — the timer has been checked — which
+            was true but long past: the timer check is four screens and
+            about a minute back, before the scramble was even fetched.
+            What has just finished, and what the athlete is being asked to
+            confirm before inspection starts, is the scramble: every chunk
+            shown and applied, the cube under its cover. */}
+        <span className="oc-solve-ready-badge-text">ХОЛИЛТ ХИЙГДЛЭЭ</span>
       </div>
 
       {/* The mockup's ready sits between the countdown and the scramble,

@@ -1936,13 +1936,12 @@
   border-right: 1px solid #DFFF4F;
 }
 /* ── A SCREEN THAT IS ITS OWN CLOCK ───────────────────────────────────
-   Two screens show their seconds as the screen filling with colour from
-   the bottom instead of as a number: the attempt intro, and the cover
-   prep between the last chunk and the cover hold. They are the run's two
-   preview-less screens — one sentence on an empty background — so the
-   screen itself is free to become the clock. Every screen with a camera
-   preview counts with a number instead (.oc-solve-hold-n), because colour
-   moving behind a live picture competes with the picture.
+   The attempt intro shows its seconds as the screen filling with colour
+   from the bottom instead of as a number. It is the run's one
+   preview-less waiting screen — a single sentence on an empty background
+   — so the screen itself is free to become the clock. Every screen with a
+   camera preview counts with a number instead (.oc-solve-hold-n),
+   because colour moving behind a live picture competes with the picture.
 
    Driven entirely by --oc-fill-duration, which useScreenFill sets from
    the SAME `seconds` that arms useHoldClock's timeout — there is no
@@ -2062,12 +2061,7 @@
    judge measures — are spent holding it rather than reaching for it.
    NO CAMERA on it, and nothing recorded: the clip begins at the hold,
    where the evidence begins. */
-/* The intro and the cover prep are the same kind of screen — one
-   instruction, nothing else, a colour rising behind it — so they are the
-   same rules under two names rather than one name used for a screen it
-   does not describe. */
-.oc-solve-intro,
-.oc-solve-prep {
+.oc-solve-intro {
   width: 100%;
   max-width: 520px;
   margin: auto;
@@ -2077,8 +2071,7 @@
   gap: 18px;
   text-align: center;
 }
-.oc-solve-intro-eyebrow,
-.oc-solve-prep-eyebrow {
+.oc-solve-intro-eyebrow {
   font: 500 9px/1 var(--oc-font-mono), monospace;
   letter-spacing: 0.22em;
   color: #6E6A62;
@@ -2089,8 +2082,7 @@
    without overflowing it and still reads as a statement on a desktop;
    600 weight and near-white keep it the brightest thing on screen as the
    fill rises behind it. */
-.oc-solve-intro-say,
-.oc-solve-prep-say {
+.oc-solve-intro-say {
   margin: 0;
   font: 600 clamp(26px, 6.4vw, 42px) / 1.3 var(--oc-font-heading), sans-serif;
   letter-spacing: -0.015em;
@@ -2289,10 +2281,15 @@
    body is position:relative for exactly this). No preview — the hold
    immediately before it is where framing is checked, and this one exists
    to be a single unmissable button. */
+/* THE SAME GROUND AS EVERY OTHER SCREEN. It was #16180F, a green-washed
+   near-black that made this one moment of the run look like a different
+   product — and the wash read as a tint over the page rather than as a
+   colour anything meant. The badge is where the green belongs: it is the
+   thing being confirmed. */
 .oc-solve-ready {
   position: absolute;
   inset: 0;
-  background: #16180F;
+  background: #08080A;
   display: flex;
   flex-direction: column;
   align-items: center;

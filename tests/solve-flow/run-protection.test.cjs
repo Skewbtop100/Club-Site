@@ -39,7 +39,7 @@ const hold = fs.readFileSync(path.join(ROOT, SOLVE, '_components/CameraHoldStage
 const intro = fs.readFileSync(path.join(ROOT, SOLVE, '_components/AttemptIntroStage.tsx'), 'utf8');
 const holdClock = fs.readFileSync(path.join(ROOT, SOLVE, '_lib/useHoldClock.ts'), 'utf8');
 const screenFill = fs.readFileSync(path.join(ROOT, SOLVE, '_components/ScreenFill.tsx'), 'utf8');
-const coverPrep = fs.readFileSync(path.join(ROOT, SOLVE, '_components/CoverPrepStage.tsx'), 'utf8');
+
 const chunks = fs.readFileSync(path.join(ROOT, SOLVE, '_lib/scrambleChunks.ts'), 'utf8');
 const cover = fs.readFileSync(path.join(ROOT, SOLVE, '_components/CoverStage.tsx'), 'utf8');
 const rec = fs.readFileSync(path.join(ROOT, SOLVE, '_components/RecStage.tsx'), 'utf8');
@@ -294,10 +294,9 @@ console.log('\n  -- 5. the camera hold is ONE component --');
     hold.includes("from '../_lib/useHoldClock'") &&
       cover.includes("from '../_lib/useHoldClock'") &&
       screenFill.includes("from '../_lib/useHoldClock'") &&
-      intro.includes("from './ScreenFill'") &&
-      coverPrep.includes("from './ScreenFill'"));
+      intro.includes("from './ScreenFill'"));
   ok('  ...with no screen keeping a timer of its own',
-    [hold, cover, intro, coverPrep, screenFill].every((f) =>
+    [hold, cover, intro, screenFill].every((f) =>
       !f.includes('setInterval') && !f.includes('setTimeout')));
   // DISPLAY vs DECISION. The number is what an athlete reads; `done` is
   // what opens the gate, and it flips on a real-time timeout rather than
@@ -314,7 +313,7 @@ console.log('\n  -- 5. the camera hold is ONE component --');
   // its job, and added the hiding that makes the inspection measurable.
   ok('the orientation hold became the cover stage',
     !page.includes("'orientationHold'") && page.includes("{stage === 'cover' && ("));
-  ok('  ...at the same duration', page.includes('<CoverStage seconds={HOLD_SECONDS}'));
+  ok('  ...at its own, longer duration', page.includes('<CoverStage seconds={COVER_SECONDS}'));
   // All three holds — the timer at zero, the cube's orientation, the timer
   // at the finish — are the same component with the same clock.
   // Two, not three, since cover: the two TIMER holds share the component;
@@ -345,9 +344,19 @@ console.log('\n  -- 7. durations and markers --');
 {
   // ONE NUMBER for every hold: the timer, the tick bar and the sentence
   // all read it.
-  ok('the holds share a single duration constant', page.includes('const HOLD_SECONDS = 8;'));
-  ok('  ...and every hold uses it',
-    (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3 && !/seconds=\{\d/.test(page));
+  // THE TWO TIMER HOLDS share one constant; the cover has its own.
+  // They answer different questions — HOLD_SECONDS is how long a judge
+  // must see something for, COVER_SECONDS is how long the athlete needs
+  // to read an instruction and act on it — so a change to either must
+  // not silently move the other.
+  ok('the two timer holds share a single duration constant',
+    page.includes('const HOLD_SECONDS = 8;') &&
+      (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 2);
+  ok('  ...and the cover has a longer one of its own',
+    page.includes('const COVER_SECONDS = 20;') &&
+      page.includes('<CoverStage seconds={COVER_SECONDS}'));
+  ok('  ...with no bare number at any call site',
+    !/seconds=\{\d/.test(page));
   // THE DRIFT THE REFACTOR DID NOT FIX: the sentence names the duration,
   // so it is built from the same number rather than written beside it.
   ok('the instruction is a function of seconds, not a literal',
@@ -516,14 +525,14 @@ console.log('\n  -- 8. the competition environment --');
   ok('  ...but never the two buttons', !/@media[\s\S]*?\.oc-solve-bar-btn \{[\s\S]{0,60}?display: none/.test(theme));
 
   // NOT IN THIS DIFF: layout only.
-  ok('the run has seventeen stages', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 17);
+  ok('the run has sixteen stages', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 16);
   ok('the recording boundary is untouched',
     page.includes("if (stage === 'zeroDisplay') {") &&
       page.includes("onFinish={() => setStage('finishHold')}") &&
       page.includes('async function finishRecording'));
-  ok('the holds are untouched: 8 seconds, three of them',
+  ok('the two timer holds are untouched: 8 seconds, both of them',
     page.includes('const HOLD_SECONDS = 8;') &&
-      (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3);
+      (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 2);
   ok('the markers are gone and stayed gone', !rec.includes('MARKER_TIMES_MS'));
   ok('resume is untouched: a complete run still lands on the summary',
     /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page));
@@ -542,7 +551,7 @@ console.log('\n  -- 9. the lobby and the between screen --');
     !page.includes("'cameraSetup'") && !page.includes("'filing'"));
   ok('  ...nor as a render branch',
     !page.includes("stage === 'cameraSetup'") && !page.includes("stage === 'filing'"));
-  ok('the run still has every stage it had, plus the intro and the cover prep', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 17);
+  ok('the run still has every stage it had, plus the intro', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 16);
   ok('  ...two of them new', page.includes("| 'lobby'") && page.includes("| 'between'"));
 
   // ── LOBBY ──
@@ -791,10 +800,10 @@ console.log('\n  -- 9. the lobby and the between screen --');
   // NOT IN THIS DIFF.
   ok('the recording boundary did not move',
     page.includes("onFinish={() => setStage('finishHold')}") && page.includes('async function finishRecording'));
-  ok('the three holds did not move',
-    page.includes('const HOLD_SECONDS = 8;') && (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3);
-  ok('  ...and one of them is now the cover, at the same length',
-    page.includes('<CoverStage seconds={HOLD_SECONDS}'));
+  ok('the two timer holds did not move',
+    page.includes('const HOLD_SECONDS = 8;') && (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 2);
+  ok('  ...and the cover now runs longer, on its own constant',
+    page.includes('<CoverStage seconds={COVER_SECONDS}'));
   ok('the markers are gone and stayed gone', !rec.includes('MARKER_TIMES_MS'));
 }
 
@@ -910,7 +919,7 @@ console.log('\n  -- 10. the mockup restyle --');
   // THE SENTENCE IS THE SCREEN'S CONTENT, not a caption. At 18px it read
   // as a footnote to an empty page.
   ok('  ...under a sentence sized as the screen’s content',
-    /\.oc-solve-intro-say,\s*\n\.oc-solve-prep-say \{[\s\S]{0,220}?font: 600 clamp\(26px, 6\.4vw, 42px\)/.test(theme));
+    /\.oc-solve-intro-say \{[\s\S]{0,220}?font: 600 clamp\(26px, 6\.4vw, 42px\)/.test(theme));
   // REDUCED MOTION: stepped, not deleted. The fill is the only thing on
   // these screens saying how long they last.
   ok('  ...stepping instead of sweeping under reduced motion',
@@ -950,8 +959,8 @@ console.log('\n  -- 10. the mockup restyle --');
     (page.match(/end=\{\{ label:/g) ?? []).length === 1 &&
       /label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"[\s\S]{0,400}?onDone=\{finishRecording\}/.test(page) &&
       !/label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"[\s\S]{0,400}?end=/.test(page));
-  ok('  ...and the cover hold too, untouched',
-    page.includes("<CoverStage seconds={HOLD_SECONDS} onDone={() => setStage('readyPrompt')} />"));
+  ok('  ...and the cover hold too, still auto-advancing',
+    page.includes("<CoverStage seconds={COVER_SECONDS} onDone={() => setStage('readyPrompt')} />"));
   ok('  ...so "auto" is still what a hold does unless told otherwise',
     hold.includes("end = 'auto',") && hold.includes("end?: 'auto' | { label: string };"));
 
@@ -989,8 +998,24 @@ console.log('\n  -- 10. the mockup restyle --');
     page.includes("onDone={() => setStage('readyPrompt')}") && !page.includes('skipZero'));
   ok('  ...and cannot end a hold itself', !readyCode.includes('seconds') && !readyCode.includes('setTimeout'));
   ok('  ...it is the mockup’s full-bleed confirmation',
-    ready.includes('className="oc-solve-ready"') && ready.includes('ЦАГ ШАЛГАГДЛАА') &&
-      /\.oc-solve-ready \{[\s\S]{0,200}?position: absolute;[\s\S]{0,120}?background: #16180F;/.test(theme));
+    ready.includes('className="oc-solve-ready"') &&
+      /\.oc-solve-ready \{[\s\S]{0,400}?position: absolute;[\s\S]{0,120}?background: #08080A;/.test(theme));
+  // THE SAME GROUND AS EVERY OTHER SCREEN. It was #16180F, a green-washed
+  // near-black that made one moment of the run look like a different
+  // product. The green stays on the badge, which is the thing being
+  // confirmed.
+  ok('  ...on the same black as the rest of the run',
+    // The DECLARATION, not the string: the rule above carries a comment
+    // naming the colour it stopped using, which is the point of it.
+    !theme.includes('background: #16180F') &&
+      /\.oc-solve-ready-badge-text \{[\s\S]{0,140}?color: #4FD07A;/.test(theme));
+  // WHAT IT CONFIRMS is the scramble, not the timer. The timer check is
+  // four screens and about a minute back; what has just finished is the
+  // scramble, every chunk shown and applied.
+  ok('  ...confirming the scramble, not the long-past timer check',
+    // Comment-stripped: the component explains what the badge used to
+    // say and why it was wrong, which contains the old wording.
+    ready.includes('ХОЛИЛТ ХИЙГДЛЭЭ') && !stripComments(ready).includes('ЦАГ ШАЛГАГДЛАА'));
   ok('  ...over a body that can host it', /\.oc-solve-body \{[\s\S]{0,220}?position: relative;/.test(theme));
   ok('  ...and shows no preview of its own', !ready.includes('videoRef') && !ready.includes('<video'));
 
@@ -1052,7 +1077,7 @@ console.log('\n  -- 10. the mockup restyle --');
       page.includes("onFinish={() => setStage('finishHold')}") &&
       page.includes('async function finishRecording'));
   ok('the hold durations did not move',
-    page.includes('const HOLD_SECONDS = 8;') && (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3);
+    page.includes('const HOLD_SECONDS = 8;') && (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 2);
   ok('the markers are gone and stayed gone', !rec.includes('MARKER_TIMES_MS'));
   ok('resume did not move',
     /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page) &&
@@ -1065,7 +1090,7 @@ console.log('\n  -- 10. the mockup restyle --');
     between.includes('className="oc-solve-between"') &&
       /\.oc-solve-between \{[\s\S]{0,200}?max-width: 520px;[\s\S]{0,120}?gap: 22px;/.test(theme));
   ok('  ...and the lobby is still the lobby', lobby.includes('className="oc-solve-lobby"'));
-  ok('three stages were added', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 17);
+  ok('three stages were added', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 16);
   // verify is still out: it merges the closing hold with the keypad,
   // which moves the recording boundary.
   ok('  ...cover, count and go — and verify still absent',
@@ -1102,30 +1127,17 @@ console.log('\n  -- 11. the inspection --');
   const pageCode = stripComments(page);
 
   // ── THE SEQUENCE ──
-  // A BEAT BETWEEN THEM NOW. The cover hold's eight seconds start the
-  // instant it renders, and the athlete was spending the first of them
-  // finding the cover with the cube still in hand.
-  ok('reveal hands to the cover prep',
-    page.includes("<RevealStage scramble={scramble} onDone={() => setStage('coverPrep')} />"));
-  ok('  ...and the prep to cover, after five seconds',
-    page.includes("<CoverPrepStage onDone={() => setStage('cover')} />") &&
-      coverPrep.includes('const PREP_SECONDS = 5;') &&
-      coverPrep.includes('useScreenFill(PREP_SECONDS, onDone)'));
-  // INSIDE THE CLIP. Recording started at zeroDisplay and stops after
-  // the solve; this screen is five more seconds of the same continuous
-  // video, not a gap in it. A gap between the scramble and the cover is
-  // exactly where an unverifiable cube could be swapped in.
-  ok('  ...with the recording running straight through it',
-    // Comment-stripped: the file explains at length that the recording
-    // runs THROUGH it and that no recorder call belongs here, which
-    // contains every word this is looking for.
-    !/startRecording|stopRecording|recorder|videoRef/.test(stripComments(coverPrep)) &&
-      page.includes("if (stage === 'zeroDisplay') {"));
-  // NO PREVIEW is what earns it the fill, which is the line the holds
-  // are on the other side of.
-  ok('  ...and no preview, which is why it fills rather than counts',
-    !coverPrep.includes('<video') && coverPrep.includes('{fill}'));
-  ok('  ...cover to ready', page.includes("<CoverStage seconds={HOLD_SECONDS} onDone={() => setStage('readyPrompt')} />"));
+  // STRAIGHT TO THE COVER. A five-second coverPrep screen sat here for
+  // one changeset and is gone, file and all — the cover's own twenty
+  // seconds are now long enough to read the instruction and act on it,
+  // which is what the extra screen was compensating for.
+  ok('reveal hands to cover',
+    page.includes("<RevealStage scramble={scramble} onDone={() => setStage('cover')} />"));
+  ok('  ...and the prep screen is gone, file and all',
+    !fs.existsSync(path.join(ROOT, SOLVE, '_components/CoverPrepStage.tsx')) &&
+      !page.includes('coverPrep') && !page.includes('CoverPrepStage') &&
+      !theme.includes('oc-solve-prep'));
+  ok('  ...cover to ready', page.includes("<CoverStage seconds={COVER_SECONDS} onDone={() => setStage('readyPrompt')} />"));
   ok('  ...ready to count', page.includes("<ReadyPromptStage onDone={() => setStage('count')} />"));
   ok('  ...count to go', /<CountStage[\s\S]{0,200}?onDone=\{\(\) => setStage\('go'\)\}/.test(page));
   ok('  ...and go to rec', page.includes("<GoStage ms={GO_FLASH_MS} onDone={() => setStage('rec')} />"));
@@ -1147,7 +1159,7 @@ console.log('\n  -- 11. the inspection --');
     ok('every stage of an attempt is in ATTEMPT_STAGES',
       union.filter((u) => !notAnAttempt.includes(u)).every((u) => inList.includes(u)),
       union.filter((u) => !notAnAttempt.includes(u) && !inList.includes(u)).join(',') || 'all present');
-    ok('  ...thirteen of them', inList.length === 13, String(inList.length));
+    ok('  ...twelve of them', inList.length === 12, String(inList.length));
     // attemptIntro names the attempt it introduces ("3-р эвлүүлэлт эхлэх
     // гэж байна"), so the bar must claim that attempt too — the two
     // would otherwise disagree on the same screen.
@@ -1288,7 +1300,7 @@ console.log('\n  -- 12. the attestation --');
       page.includes("onFinish={() => setStage('finishHold')}") &&
       /async function finishRecording[\s\S]{0,200}?await recorder\.stopRecording\(\)/.test(page));
   ok('the hold durations did not move',
-    page.includes('const HOLD_SECONDS = 8;') && (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3);
+    page.includes('const HOLD_SECONDS = 8;') && (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 2);
   ok('the inspection countdown did not move',
     page.includes('const INSPECTION_SECONDS = 15;') &&
       page.includes('seconds={INSPECTION_SECONDS}') && page.includes('const GO_FLASH_MS = 1000;'));
@@ -1297,7 +1309,7 @@ console.log('\n  -- 12. the attestation --');
   ok('resume did not move',
     /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page) &&
       page.includes('setResumeMessage(resumeNotice(plan))'));
-  ok('the stage list did not move', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 17);
+  ok('the stage list did not move', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 16);
 }
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
