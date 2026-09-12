@@ -108,6 +108,11 @@ export default function ReviewGrid() {
   const [scrambles, setScrambles] = useState<ScramblesOverview | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The uid whose reset confirm bar is open — at most one at a time. Keyed
+  // by uid rather than a boolean so switching rows can't leave a confirm
+  // armed against the athlete the admin just navigated away from.
+  const [resetting, setResetting] = useState<string | null>(null);
+  const [resetNote, setResetNote] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -153,6 +158,14 @@ export default function ReviewGrid() {
     setRound(1);
     setSelected(null);
   }, [eventId]);
+
+  // An armed reset names a specific event and round in its confirm text,
+  // so it must not survive either changing. Same for the note, which
+  // reports on a scope that is no longer on screen.
+  useEffect(() => {
+    setResetting(null);
+    setResetNote(null);
+  }, [competitionId, eventId, round]);
 
   const load = useCallback(async () => {
     if (!competitionId) return;
@@ -293,6 +306,73 @@ export default function ReviewGrid() {
       setSelected(null);
     },
     [],
+  );
+
+  /** Everything this athlete has filed for the event AND round currently
+   *  in view — the exact scope the reset endpoint deletes, including the
+   *  duplicates hidden behind a cell (row.attempts shows one per slot).
+   *  Used for the confirm's counts, so the number the admin agrees to is
+   *  the number that actually goes. */
+  const scopedFor = useCallback(
+    (uid: string) => {
+      const mine = (submissions ?? []).filter(
+        (s) => s.uid === uid && s.event === eventId && s.competitionRound === round,
+      );
+      return { total: mine.length, judged: mine.filter(isDecided).length };
+    },
+    [submissions, eventId, round],
+  );
+
+  /** Deletes one athlete's attempts for the selected event and round, so
+   *  the round can be solved again from attempt 1.
+   *
+   *  Scoped identically on both sides: the request carries the four
+   *  fields, and the optimistic local drop below filters on the same
+   *  three the grid itself filters on — nothing else in the loaded set
+   *  can be removed by a reset of this row. */
+  const resetAttempts = useCallback(
+    async (row: AthleteRow) => {
+      if (!competitionId || !eventId) return;
+      setBusy(true);
+      setResetNote(null);
+      try {
+        const res = await fetch('/api/online-competition/admin-reset-attempts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ competitionId, uid: row.uid, event: eventId, competitionRound: round }),
+        });
+        if (!res.ok) throw new Error('reset failed');
+        const data = (await res.json()) as {
+          deleted: number;
+          judged: number;
+          videosDeleted: number;
+          videosFailed: number;
+        };
+        setSubmissions((prev) =>
+          (prev ?? []).filter(
+            (s) => !(s.uid === row.uid && s.event === eventId && s.competitionRound === round),
+          ),
+        );
+        setSelected(null);
+        setResetting(null);
+        // Says what happened rather than just "done": how many went, how
+        // many of those a judge had ruled on, whether any video outlived
+        // its document, and that nothing downstream has recomputed.
+        setResetNote(
+          `${row.name}: ${data.deleted} оролдлого устгагдлаа` +
+            (data.judged > 0 ? ` (${data.judged} нь шүүгдсэн байсан)` : '') +
+            `. Бичлэг: ${data.videosDeleted} устсан` +
+            (data.videosFailed > 0 ? `, ${data.videosFailed} устгаж чадсангүй — гараар шалгана уу` : '') +
+            '. Оноо, статистик хуучирсан хэвээр — "Онооны тооцоо шинэчлэх" товчийг дарна уу.',
+        );
+      } catch (err) {
+        console.error('ReviewGrid: resetting the athlete’s attempts failed:', err);
+        setResetNote('Устгаж чадсангүй. Дахин оролдоно уу.');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [competitionId, eventId, round],
   );
 
   /** Bulk-approve every submitted attempt for one athlete. Deliberately
@@ -460,21 +540,70 @@ export default function ReviewGrid() {
         ) : rows.length === 0 ? (
           <p className="oc-v3-status">Энэ төрөлд тамирчин алга.</p>
         ) : (
-          rows.map((row) => (
-            <GridRow
-              key={row.uid}
-              row={row}
-              selected={selected}
-              busy={busy}
-              onOpen={setSelected}
-              onBulk={() => bulkApprove(row)}
-              attemptCount={attemptCount}
-              resultFormat={resultFormat}
-              timeLimitCs={timeLimitCs}
-            />
-          ))
+          rows.map((row) => {
+            const scope = scopedFor(row.uid);
+            return (
+              <div key={row.uid}>
+                <GridRow
+                  row={row}
+                  selected={selected}
+                  busy={busy}
+                  onOpen={setSelected}
+                  onBulk={() => bulkApprove(row)}
+                  onReset={() => {
+                    setResetNote(null);
+                    setResetting(row.uid);
+                  }}
+                  resetCount={scope.total}
+                  attemptCount={attemptCount}
+                  resultFormat={resultFormat}
+                  timeLimitCs={timeLimitCs}
+                />
+                {/* The confirm is a full-width bar UNDER the row, not
+                    inline in the 132px decision column: it has to name the
+                    athlete, the event, the round and the count, and that
+                    sentence is the whole safety mechanism — cramming it
+                    into a cell would truncate the part that says what is
+                    about to be destroyed. */}
+                {resetting === row.uid && (
+                  <div className="oc-rv-reset-confirm">
+                    <span className="oc-rv-reset-text">
+                      <strong style={{ color: '#F4F1EA' }}>{row.name}</strong> тамирчны{' '}
+                      <strong style={{ color: '#F4F1EA' }}>{eventConfig?.label ?? eventId}</strong> төрлийн{' '}
+                      <strong style={{ color: '#F4F1EA' }}>{round}-р раундын</strong>{' '}
+                      <strong style={{ color: '#F4F1EA' }}>{scope.total}</strong> оролдлого устана
+                      {scope.judged > 0 && ` (${scope.judged} нь шүүгдсэн — тэдгээр нь ч бас устана)`}. Бичлэг
+                      эргэж сэргэхгүй. Бүртгэл, зөвшөөрөл, бусад раунд хэвээр үлдэнэ.
+                    </span>
+                    <button
+                      type="button"
+                      className="oc-rv-reset-yes"
+                      disabled={busy}
+                      onClick={() => resetAttempts(row)}
+                    >
+                      ТИЙМ, УСТГА
+                    </button>
+                    <button
+                      type="button"
+                      className="oc-rv-reset-no"
+                      disabled={busy}
+                      onClick={() => setResetting(null)}
+                    >
+                      ҮГҮЙ
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
+
+      {resetNote && (
+        <p className="oc-rv-reset-note" role="status">
+          {resetNote}
+        </p>
+      )}
 
       {/* ── Inline detail panel ────────────────────────────────────── */}
       {selectedSubmission && (
@@ -497,6 +626,8 @@ function GridRow({
   busy,
   onOpen,
   onBulk,
+  onReset,
+  resetCount,
   attemptCount,
   resultFormat,
   timeLimitCs,
@@ -506,6 +637,10 @@ function GridRow({
   busy: boolean;
   onOpen: (id: string) => void;
   onBulk: () => void;
+  onReset: () => void;
+  /** Attempts this athlete has for the event+round in view, duplicates
+   *  included. Zero hides the reset control — there is nothing to reset. */
+  resetCount: number;
   /** From the selected event's resultFormat — see attemptColumns. */
   attemptCount: number;
   resultFormat: ResultFormat;
@@ -590,7 +725,7 @@ function GridRow({
       </span>
       <span className="oc-rv-avg">{single === null ? '—' : fmtCentiseconds(single)}</span>
 
-      <span>
+      <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
         {untouched && submitted.length > 0 ? (
           <button type="button" className="oc-rv-bulk" disabled={busy} onClick={onBulk}>
             БАТАЛГААЖУУЛАХ
@@ -599,6 +734,17 @@ function GridRow({
           <span className="oc-rv-await">ИЛГЭЭГЭЭГҮЙ</span>
         ) : (
           <span className="oc-rv-await">ХЯНАЛТ ХҮЛЭЭЖ</span>
+        )}
+        {/* Reset lives here, under the decision control, because this row
+            IS the scope: one athlete, the event tab above, the round tab
+            above. Quiet by default (a muted link, not a button competing
+            with БАТАЛГААЖУУЛАХ) — it destroys work, so it should be found
+            when looked for, not pressed on the way past. Hidden entirely
+            when the athlete has nothing filed for this round. */}
+        {resetCount > 0 && (
+          <button type="button" className="oc-rv-reset" disabled={busy} onClick={onReset}>
+            ОРОЛДЛОГО ДАХИН ЭХЛҮҮЛЭХ
+          </button>
         )}
       </span>
     </div>

@@ -6310,6 +6310,83 @@ button.oc-rv-cell:hover {
   white-space: nowrap;
 }
 
+/* ── Reset one athlete's attempts for the round in view ─────────────
+   Deliberately the quietest control in the row: it deletes solves a
+   competitor actually recorded, so it reads as a muted link until
+   hovered, and the destructive red only appears on the confirm bar. */
+.oc-rv-reset {
+  border: none;
+  background: transparent;
+  color: #6E6A62;
+  padding: 0;
+  font: 500 8px var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  white-space: nowrap;
+  text-align: left;
+}
+.oc-rv-reset:hover:not(:disabled) {
+  color: #E8543C;
+}
+.oc-rv-reset:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.oc-rv-reset-confirm {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid #16161B;
+  border-left: 2px solid #D8402C;
+  background: #140A08;
+  padding: 12px 14px;
+  min-width: 900px;
+}
+.oc-rv-reset-text {
+  flex: 1;
+  min-width: 240px;
+  font: 400 11px var(--oc-font-heading), sans-serif;
+  line-height: 1.5;
+  color: #9A958A;
+}
+.oc-rv-reset-yes,
+.oc-rv-reset-no {
+  padding: 7px 10px;
+  font: 600 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.oc-rv-reset-yes {
+  border: 1px solid #D8402C;
+  background: #1A0D0A;
+  color: #E8543C;
+}
+.oc-rv-reset-yes:hover:not(:disabled) {
+  background: #D8402C;
+  color: #08080A;
+}
+.oc-rv-reset-no {
+  border: 1px solid #2A2A31;
+  background: transparent;
+  color: #9A958A;
+}
+.oc-rv-reset-yes:disabled,
+.oc-rv-reset-no:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.oc-rv-reset-note {
+  border: 1px solid #2A2A31;
+  border-left: 2px solid #DFFF4F;
+  background: #0D0D10;
+  padding: 12px 14px;
+  font: 400 11px var(--oc-font-heading), sans-serif;
+  line-height: 1.5;
+  color: #9A958A;
+}
+
 /* ── Inline detail panel (pushes content down, not a modal) ────────── */
 .oc-rv-panel {
   display: grid;
@@ -6375,6 +6452,8 @@ button.oc-rv-cell:hover {
   .oc-rv-picker-btn,
   .oc-rv-tab,
   .oc-rv-bulk,
+  .oc-rv-reset-yes,
+  .oc-rv-reset-no,
   .oc-rv-decide,
   .oc-rv-iconbtn,
   .oc-rv-cell,

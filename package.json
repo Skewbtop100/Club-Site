@@ -30,6 +30,7 @@
     "test:limit": "node tests/competition-fields/participant-limit.test.cjs",
     "test:scrambles": "node tests/competition-fields/scrambles.test.cjs",
     "test:ranking": "firebase emulators:exec --only firestore \"node tests/competition-fields/ranking.test.cjs\"",
+    "test:reset": "firebase emulators:exec --only firestore \"node tests/competition-fields/reset-attempts.test.cjs\"",
     "test:merge": "firebase emulators:exec --only firestore \"node tests/merge-athlete-uid/merge.test.mjs\""
   },
   "dependencies": {
