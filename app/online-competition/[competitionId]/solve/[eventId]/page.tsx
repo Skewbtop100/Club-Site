@@ -37,6 +37,7 @@ import SolveHeader from './_components/SolveHeader';
 import LobbyStage from './_components/LobbyStage';
 import BetweenStage, { type SlotRow } from './_components/BetweenStage';
 import RevealStage from './_components/RevealStage';
+import AttemptIntroStage from './_components/AttemptIntroStage';
 import CameraHoldStage from './_components/CameraHoldStage';
 import ReadyPromptStage from './_components/ReadyPromptStage';
 import CoverStage from './_components/CoverStage';
@@ -58,6 +59,13 @@ type Stage =
    *  that fetch fails. Nothing may enter zeroDisplay (which starts the
    *  recording) without a scramble in hand. */
   | 'scrambleWait'
+  /** The beat before the timer check: "attempt N is about to start, get
+   *  your timer ready". Five seconds, no camera, NOT on the recording —
+   *  the clip still begins at zeroDisplay, where the evidence begins.
+   *  It exists because the hold's eight seconds start the instant it
+   *  renders, and an athlete still reaching for their timer spent the
+   *  first half of a measured hold doing it. */
+  | 'attemptIntro'
   | 'zeroDisplay'
   /** The camera stopped being a camera: MediaRecorder would not start, or
    *  it started and gave back an empty file. The attempt does not
@@ -135,6 +143,10 @@ const FILING_RETRY_DELAY_MS = 3000;
  *  is a claim that is false on the summary and the sent screen. */
 const ATTEMPT_STAGES: Stage[] = [
   'scrambleWait',
+  // It names the attempt it is introducing, so the bar must agree with
+  // it: "3-р эвлүүлэлт эхлэх гэж байна" under a bar claiming no attempt
+  // would be the two disagreeing on the same screen.
+  'attemptIntro',
   'zeroDisplay',
   'recordingFailed',
   'scrambleReveal',
@@ -617,11 +629,15 @@ export default function SolvePage() {
   /** Every attempt of the run has been solved. */
   const runComplete = cutOff || (runShape !== null && attempts.length >= runShape.attempts);
 
-  // THE WAIT. Every attempt enters scrambleWait first and is promoted to
-  // zeroDisplay — which is what starts the recording — only once a
-  // scramble has actually arrived. A fetch that fails simply never
-  // promotes: the run sits on the wait stage with a retry button instead
-  // of recording an attempt it has no scramble for.
+  // THE WAIT. Every attempt enters scrambleWait first and is promoted
+  // only once a scramble has actually arrived. A fetch that fails simply
+  // never promotes: the run sits on the wait stage with a retry button
+  // instead of recording an attempt it has no scramble for.
+  //
+  // It promotes to attemptIntro now, not to zeroDisplay. The gate is
+  // unchanged in substance — attemptIntro's only exit is zeroDisplay, so
+  // "nothing reaches the recording without a scramble in hand" still
+  // holds, one screen earlier.
   useEffect(() => {
     if (stage !== 'scrambleWait') return;
     // A filing that has given up stops the run here, before the next
@@ -632,7 +648,7 @@ export default function SolvePage() {
       setStage('between');
       return;
     }
-    if (scramble) setStage('zeroDisplay');
+    if (scramble) setStage('attemptIntro');
   }, [stage, scramble, filingFailed]);
 
   useEffect(() => {
@@ -724,6 +740,7 @@ export default function SolvePage() {
     return () => clearTimeout(id);
   }, [prToast]);
 
+  // ── WHERE THE CLIP BEGINS, and why it did not move ──────────────────
   // Recording starts the moment each attempt's zeroDisplay begins (the
   // frozen "0.00" itself must be on video, proving the timer read zero
   // before the scramble was applied) and runs uninterrupted through
@@ -733,9 +750,21 @@ export default function SolvePage() {
   // intermediate value while already sitting in zeroDisplay — so this
   // fires exactly once per attempt.
   //
-  // Every route into it now runs through scrambleWait and its promotion
-  // effect above, so the recording can no longer start for an attempt
-  // whose scramble never arrived.
+  // attemptIntro now runs BEFORE this, and the clip deliberately does NOT
+  // begin there. The recording exists to be evidence, and it should start
+  // where the evidence starts: the first thing a judge needs to see is a
+  // timer reading 0.00 before the scramble was applied. Nothing on the
+  // intro is evidence of anything — it is five seconds of an athlete
+  // reaching for a timer. Starting there would add those five seconds to
+  // every clip of every attempt of every athlete, for upload, storage and
+  // review, and prove nothing that zeroDisplay does not already prove.
+  // The boundary is therefore exactly where it was: this effect is still
+  // keyed on 'zeroDisplay' alone, and attemptIntro's only exit is into
+  // it.
+  //
+  // Every route into an attempt runs through scrambleWait and its
+  // promotion effect above, so the recording can no longer start for an
+  // attempt whose scramble never arrived.
   useEffect(() => {
     if (stage === 'zeroDisplay') {
       // The return value used to be discarded. It is false when the
@@ -1190,6 +1219,25 @@ export default function SolvePage() {
    *  the count cannot be silently dropped if that ever changes. */
   const lobbyNote = resumeMessage ?? (savingIsReassurance ? savingLabel : null);
 
+  /** Screens where a banner would be talking over a specific instruction.
+   *
+   *  The lobby shows both facts itself — the notice as its band, the
+   *  count inside it — and the two screens after it are asking the
+   *  athlete to do one thing each: get their timer, then hold it at 0.00
+   *  for eight seconds a judge measures. Repeating "2 оролдлого
+   *  хадгалагдсан" over that is noise at the exact moment the screen is
+   *  trying to be read.
+   *
+   *  It is all three, not just the timer check: the notice is cleared
+   *  only once something is recorded, so quieting the hold alone would
+   *  have it vanish on the lobby, reappear for the intro's five seconds,
+   *  and vanish again. A banner that blinks is worse than either.
+   *
+   *  REASSURANCE ONLY. This never hides a failure or an upload in
+   *  progress — see the render below, where it is ANDed with
+   *  savingIsReassurance and nothing else. */
+  const instructingStage = stage === 'lobby' || stage === 'attemptIntro' || stage === 'zeroDisplay';
+
   const eventConfig = competition.events.find((e) => e.eventId === eventId);
   const eventLabel = eventConfig?.label ?? eventId.toUpperCase();
 
@@ -1254,13 +1302,14 @@ export default function SolvePage() {
               two things they need once. Both move inside the preview as a
               fading overlay there — see lobbyNote and LobbyStage.
 
-              WHAT DOES NOT FADE, anywhere: the saving line unless it is
-              pure reassurance. A failure and an upload in progress stay
-              as a permanent row on EVERY stage, the lobby included. That
-              is the whole reason this is gated on savingIsReassurance
-              rather than on the stage alone — the fade follows what the
-              line says, not where it is. */}
-          {savingLabel && stage !== 'between' && !(stage === 'lobby' && savingIsReassurance) && (
+              WHAT DOES NOT FADE OR HIDE, anywhere: the saving line unless
+              it is pure reassurance. A failure and an upload in progress
+              stay as a permanent row on EVERY stage — the lobby, the
+              intro and the timer check included. That is the whole reason
+              both conditions are ANDed with savingIsReassurance rather
+              than keyed on the stage alone: what the line SAYS decides
+              whether it may go, and where it is only decides where. */}
+          {savingLabel && stage !== 'between' && !(instructingStage && savingIsReassurance) && (
             <p className={`oc-solve-banner oc-solve-banner-quiet${filingFailed ? ' oc-solve-banner-bad' : ''}`}>
               {savingLabel}
             </p>
@@ -1271,10 +1320,11 @@ export default function SolvePage() {
               — and an athlete who thinks they are on attempt 1 would solve
               it again and have the filing refused. Cleared as soon as they
               record something, because from then on the pips say it.
-              Not on the lobby: it is the lobby's overlay instead. It still
-              banners on the stages between the lobby and the first
-              recording, where there is no preview to overlay it onto. */}
-          {resumeMessage && stage !== 'lobby' && (
+              Not on the lobby (it is the lobby's own band instead), and
+              not on the two screens that follow it, which are each asking
+              for one specific thing. It still banners anywhere else it
+              survives to. */}
+          {resumeMessage && !instructingStage && (
             <p className="oc-solve-banner" role="status">
               {resumeMessage}
             </p>
@@ -1303,7 +1353,7 @@ export default function SolvePage() {
                has not landed by the time the athlete is ready, the run
                waits on scrambleWait rather than recording without a
                scramble. */
-            onStart={() => setStage(scramble ? 'zeroDisplay' : 'scrambleWait')}
+            onStart={() => setStage(scramble ? 'attemptIntro' : 'scrambleWait')}
           />
         )}
 
@@ -1336,8 +1386,23 @@ export default function SolvePage() {
             onRestartAttempt={() => {
               setRecordingFailure(null);
               setPendingBlob(null);
-              setStage('zeroDisplay');
+              // Through the intro, like every other way into an attempt.
+              // The athlete has just been told the recording failed and
+              // is starting over; they need the same beat to get set that
+              // a first try gets, not less of one.
+              setStage('attemptIntro');
             }}
+          />
+        )}
+
+        {/* The beat before the hold. Its ONLY exit is zeroDisplay, which
+            is what keeps "nothing records without a scramble in hand"
+            true: every route into an attempt now lands here, and this
+            lands on the recording. */}
+        {stage === 'attemptIntro' && (
+          <AttemptIntroStage
+            attemptNumber={attempts.length + 1}
+            onDone={() => setStage('zeroDisplay')}
           />
         )}
 
@@ -1345,14 +1410,28 @@ export default function SolvePage() {
             proof that the clock they are about to solve against started
             from zero. This used to be a large on-screen "0.00" with no
             camera preview at all, which proved something about this page
-            rather than about the athlete's timer. Recording starts here,
-            unchanged: the effect is still keyed on this stage name. */}
+            rather than about the athlete's timer.
+
+            THE RECORDING STILL STARTS HERE, and that is a decision, not
+            an oversight — see the recording-start effect above.
+
+            It ends on a button rather than by itself: at zero the athlete
+            has a timer in one hand and needs the cube in the other, and
+            advancing on its own started the scramble appearing while
+            their hands were still full. The button cannot be pressed
+            before zero, because the eight seconds are the evidence. */}
         {stage === 'zeroDisplay' && (
           <CameraHoldStage
             seconds={HOLD_SECONDS}
             label="ЦАГАА ХАРУУЛ · ЭХЛЭХИЙН ӨМНӨ"
-            instruction={(sec) => `Өөрийн цагаа 0.00 дээр байхад нь камерт ${sec} секунд харуулна уу.`}
-            footnote="Хугацаа дуусаад холилт гарч эхэлнэ."
+            instruction={() =>
+              'Хугацаа хэмжигчийг 0.00 болгосон байдалтай цаг дуустал камерлуу харуулна уу.'
+            }
+            /* The button names where it goes, so the footnote that said
+               the same thing is gone. */
+            footnote={null}
+            layout="instruction-first"
+            end={{ label: 'ХОЛИЛТ ХАРАХ' }}
             videoRef={recorder.videoRef}
             onDone={() => setStage('scrambleReveal')}
           />
@@ -1440,7 +1519,7 @@ export default function SolvePage() {
                 setStage('summary');
                 return;
               }
-              setStage(scramble ? 'zeroDisplay' : 'scrambleWait');
+              setStage(scramble ? 'attemptIntro' : 'scrambleWait');
             }}
             /* Manual retry. The worker has already tried once on its own
                (FILING_AUTO_RETRIES) — this is the athlete taking over. */

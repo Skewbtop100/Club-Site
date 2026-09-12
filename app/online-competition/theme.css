@@ -1795,6 +1795,18 @@
   letter-spacing: -0.01em;
   max-width: 520px;
 }
+/* THE HOLD'S PREVIEW MAY CROP, unlike the lobby's.
+   Different job, so a different rule. The lobby is where the athlete
+   frames the shot, so its preview must show every pixel that will be
+   recorded (see .oc-solve-lobby-frame). Here they are centring one object
+   — a timer, or a cube — and the centre of the frame is the whole
+   question, so a 4/3 window onto the middle of the stream is the more
+   useful view: it is bigger, and it is where the thing goes.
+   The crop is CENTRED on purpose, not by default — object-position is
+   stated so nobody has to know that 50% 50% is what `cover` would have
+   picked anyway. It is display only: MediaRecorder reads the raw camera
+   track and never sees a stylesheet, so the recording is the full frame
+   at its own ratio whatever this box does. */
 .oc-solve-hold-cam {
   width: 100%;
   max-width: 420px;
@@ -1807,6 +1819,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
+}
+.oc-solve-hold-cam .oc-solve-camera-video {
+  object-position: center center;
 }
 .oc-solve-hold-cam .oc-solve-camera-video {
   position: absolute;
@@ -1856,6 +1871,77 @@
   color: #DFFF4F;
   text-align: center;
   max-width: 460px;
+}
+
+/* THE HOLD'S OWN WAY OUT, where it has one.
+   Disabled until the count reaches zero, because the seconds in front of
+   the camera are what a judge measures the hold against — a hold the
+   athlete can cut short is not a hold. The disabled state is deliberately
+   legible rather than ghosted away: the athlete should see the button
+   they are waiting for, so the wait reads as "not yet" and not as
+   "nothing here". */
+.oc-solve-hold-go {
+  width: 100%;
+  max-width: 460px;
+  border: none;
+  background: #DFFF4F;
+  color: #08080A;
+  padding: 18px;
+  font: 700 15px/1 var(--oc-font-heading), sans-serif;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+.oc-solve-hold-go:hover:not(:disabled) {
+  background: #E9FF7A;
+}
+.oc-solve-hold-go:disabled {
+  background: #1C1C21;
+  color: #4A4740;
+  cursor: not-allowed;
+}
+
+/* ── INTRO: the beat before an attempt's timer check ──────────────────
+   Five seconds to pick up a timer, so that the hold's eight — which a
+   judge measures — are spent holding it rather than reaching for it.
+   NO CAMERA on it, and nothing recorded: the clip begins at the hold,
+   where the evidence begins. */
+.oc-solve-intro {
+  width: 100%;
+  max-width: 520px;
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  text-align: center;
+}
+.oc-solve-intro-eyebrow {
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.22em;
+  color: #6E6A62;
+}
+.oc-solve-intro-say {
+  margin: 0;
+  font: 400 18px/1.6 var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+  text-wrap: pretty;
+}
+/* Quiet, and much smaller than a hold's 50px count: this is a hint about
+   how long the athlete has, not a clock anyone is measured against. */
+.oc-solve-intro-count {
+  font: 600 22px/1 var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #3A4614;
+}
+
+@media (max-width: 620px) {
+  .oc-solve-intro-say {
+    font-size: 16px;
+  }
+  .oc-solve-hold-go {
+    padding: 16px;
+    font-size: 14px;
+  }
 }
 
 /* ── COVER: the cube goes under its cover, in a known orientation ────────

@@ -36,6 +36,7 @@ const failed = fs.readFileSync(path.join(ROOT, SOLVE, '_components/RecordingFail
 const between = fs.readFileSync(path.join(ROOT, SOLVE, '_components/BetweenStage.tsx'), 'utf8');
 const lobby = fs.readFileSync(path.join(ROOT, SOLVE, '_components/LobbyStage.tsx'), 'utf8');
 const hold = fs.readFileSync(path.join(ROOT, SOLVE, '_components/CameraHoldStage.tsx'), 'utf8');
+const intro = fs.readFileSync(path.join(ROOT, SOLVE, '_components/AttemptIntroStage.tsx'), 'utf8');
 const rec = fs.readFileSync(path.join(ROOT, SOLVE, '_components/RecStage.tsx'), 'utf8');
 const theme = fs.readFileSync(path.join(ROOT, 'app/online-competition/theme.css'), 'utf8');
 const bar = fs.readFileSync(path.join(ROOT, SOLVE, '_components/SolveHeader.tsx'), 'utf8');
@@ -128,7 +129,7 @@ console.log('\n  -- 2. an empty recording is not accepted --');
   ok('reconnecting releases the dead stream first',
     /recorder\.releaseCamera\(\);\s*\n\s*void recorder\.requestCamera\(\);/.test(page));
   ok('restarting replays the SAME attempt from the top',
-    /setRecordingFailure\(null\);\s*\n\s*setPendingBlob\(null\);\s*\n\s*setStage\('zeroDisplay'\);/.test(page));
+    /setRecordingFailure\(null\);\s*\n\s*setPendingBlob\(null\);[\s\S]{0,400}?setStage\('attemptIntro'\);/.test(page));
   ok('the athlete can see the camera before restarting', failed.includes('<video ref={videoRef}'));
   ok('  ...and cannot restart until there is one', failed.includes('disabled={!hasCamera}'));
   ok('the screen offers no way off the page', !/href|next\/link/i.test(failed));
@@ -314,17 +315,25 @@ console.log('\n  -- 7. durations and markers --');
   // so it is built from the same number rather than written beside it.
   ok('the instruction is a function of seconds, not a literal',
     hold.includes('instruction: (seconds: number) => string;') && hold.includes('{instruction(seconds)}'));
+  // One call site takes `sec` now, not two: the timer check's sentence
+  // stopped naming a duration at all ("цаг дуустал" — until the count
+  // runs out), so it has no number to get wrong. The guard that matters
+  // is unchanged and still absolute: NO call site may write a literal
+  // number of seconds into its sentence.
   ok('  ...and no call site writes the number into the sentence itself',
-    (page.match(/instruction=\{\(sec\) =>/g) ?? []).length === 2 && !/\d+ секунд/.test(page));
+    (page.match(/instruction=\{\(sec\) =>/g) ?? []).length === 1 && !/\d+ секунд/.test(page));
 
   // THE OPENING HOLD is now the athlete's own timer, held to the camera —
   // with a preview to aim at, which the on-screen "0.00" never gave them.
   ok('the opening hold is a camera hold', !fs.existsSync(path.join(ROOT, SOLVE, '_components/ZeroDisplayStage.tsx')));
-  // Four transitions since the between screen: the athlete presses to
-  // begin each attempt now, so lobby and between both enter it.
+  // ONE transition in now, from the intro. Every way of beginning an
+  // attempt enters attemptIntro, whose only exit is here — so the
+  // recording still starts in exactly one place, one screen later than
+  // the athlete presses to begin.
   ok('  ...under the SAME stage name, so every transition still lands',
-    page.includes("{stage === 'zeroDisplay' && (") && (page.match(/setStage\([^)]*zeroDisplay/g) ?? []).length === 4);
-  ok('  ...showing the athlete their own timer at 0.00', /0\.00 дээр байхад нь камерт/.test(page));
+    page.includes("{stage === 'zeroDisplay' && (") && (page.match(/setStage\([^)]*zeroDisplay/g) ?? []).length === 1);
+  ok('  ...showing the athlete their own timer at 0.00',
+    /Хугацаа хэмжигчийг 0\.00 болгосон байдалтай цаг дуустал камерлуу харуулна уу\./.test(page));
 
   // THE MARKERS ARE GONE. They walked the preview's border at 8, 12 and
   // 15 seconds, as an aid to an athlete counting WCA inspection by feel.
@@ -463,7 +472,7 @@ console.log('\n  -- 8. the competition environment --');
   ok('  ...but never the two buttons', !/@media[\s\S]*?\.oc-solve-bar-btn \{[\s\S]{0,60}?display: none/.test(theme));
 
   // NOT IN THIS DIFF: layout only.
-  ok('the run has fifteen stages', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 15);
+  ok('the run has sixteen stages', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 16);
   ok('the recording boundary is untouched',
     page.includes("if (stage === 'zeroDisplay') {") &&
       page.includes("onFinish={() => setStage('finishHold')}") &&
@@ -489,7 +498,7 @@ console.log('\n  -- 9. the lobby and the between screen --');
     !page.includes("'cameraSetup'") && !page.includes("'filing'"));
   ok('  ...nor as a render branch',
     !page.includes("stage === 'cameraSetup'") && !page.includes("stage === 'filing'"));
-  ok('the run still has every stage it had', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 15);
+  ok('the run still has every stage it had, plus the intro', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 16);
   ok('  ...two of them new', page.includes("| 'lobby'") && page.includes("| 'between'"));
 
   // ── LOBBY ──
@@ -593,7 +602,7 @@ console.log('\n  -- 9. the lobby and the between screen --');
       page.includes('setResumeMessage(resumeNotice(plan))') &&
       page.includes('note={lobbyNote}'));
   ok('  ...and that sentence still banners on the stages with no preview',
-    page.includes("{resumeMessage && stage !== 'lobby' && ("));
+    page.includes('{resumeMessage && !instructingStage && ('));
 
   // ── A FAILURE THAT FADES IS A FAILURE NOBODY SEES ──
   // The saving line is not a lobby ornament: during the run it reports
@@ -603,9 +612,15 @@ console.log('\n  -- 9. the lobby and the between screen --');
   // gate would hide a failed upload the moment one could occur on the
   // lobby, and hide "ХАДГАЛЖ БАЙНА 60%" from an athlete who would then
   // believe the upload had finished.
-  ok('only the reassuring saving line may fade, and only on the lobby',
+  // THE GATE IS STILL ON WHAT THE LINE SAYS. The set of screens it can
+  // be hidden on grew (the lobby, the intro, the timer check — each is
+  // asking for one specific thing), but every one of them is ANDed with
+  // savingIsReassurance, so a failure or an upload in progress is still
+  // a permanent row on all three.
+  ok('only the reassuring saving line may fade, and only where it instructs',
     page.includes('const savingIsReassurance = !filingFailed && !uploading;') &&
-      page.includes("{savingLabel && stage !== 'between' && !(stage === 'lobby' && savingIsReassurance) && ("));
+      page.includes("const instructingStage = stage === 'lobby' || stage === 'attemptIntro' || stage === 'zeroDisplay';") &&
+      page.includes("{savingLabel && stage !== 'between' && !(instructingStage && savingIsReassurance) && ("));
   ok('  ...so a failure and an upload in progress stay a permanent row everywhere',
     // The only stage-based suppression left is `between`, which predates
     // this and has its own per-attempt slot cards instead.
@@ -778,10 +793,92 @@ console.log('\n  -- 10. the mockup restyle --');
   // restyle -- in the mockup's in-frame caption slot.
   ok('  ...and each hold still names itself inside the frame',
     hold.includes('className="oc-solve-hold-caption">{label}'));
-  // NEW SLOT, one per hold: what happens when the count reaches zero.
-  ok('every timer hold says what the count leads to',
-    (page.match(/footnote="/g) ?? []).length === 2 &&
-      new Set(page.match(/footnote="([^"]+)"/g) ?? []).size === 2);
+  // WHAT HAPPENS AT ZERO, once per hold — but no longer always as a
+  // footnote. A hold that ends on a button has the button say it, and
+  // repeating it underneath was the same sentence twice. The rule is
+  // that a hold says it exactly once, either way, and never neither.
+  ok('every timer hold says what the count leads to', (() => {
+    const footnotes = page.match(/footnote="([^"]+)"/g) ?? [];
+    const silenced = page.match(/footnote=\{null\}/g) ?? [];
+    const buttons = page.match(/end=\{\{ label: '[^']+' \}\}/g) ?? [];
+    // Two CameraHoldStage call sites: one footnote, one button.
+    return footnotes.length === 1 && silenced.length === 1 && buttons.length === 1 &&
+      new Set(footnotes).size === 1;
+  })());
+
+  // ── THE BEAT BEFORE THE TIMER CHECK ──
+  // The hold's eight seconds start the instant it renders, so an athlete
+  // who had not already picked up their timer spent the first half of a
+  // measured hold reaching for it. This screen is where that happens now.
+  ok('an intro screen precedes the timer check',
+    fs.existsSync(path.join(ROOT, SOLVE, '_components/AttemptIntroStage.tsx')) &&
+      page.includes("{stage === 'attemptIntro' && ("));
+  ok('  ...for five seconds, then on by itself',
+    intro.includes('const INTRO_SECONDS = 5;') &&
+      /setTimeout\(onDone, INTRO_SECONDS \* 1000\)/.test(intro));
+  ok('  ...naming the attempt it introduces',
+    intro.includes('{attemptNumber}-р эвлүүлэлт эхлэх гэж байна. Цагаа 0.00 болгож шалгуулахдаа бэлдээрэй.') &&
+      page.includes('attemptNumber={attempts.length + 1}'));
+  // NOT ON THE RECORDING, and no preview on it either: five seconds of
+  // an athlete reaching for a timer is not evidence of anything, and
+  // would otherwise be added to every clip of every attempt.
+  ok('  ...with no camera on it, because none of it is evidence',
+    !intro.includes('videoRef') && !intro.includes('<video'));
+
+  // ── THE HOLD ENDS ON A BUTTON, AND ONLY THIS HOLD DOES ──
+  // At zero the athlete has a timer in one hand and needs the cube in
+  // the other. Advancing on its own started the scramble appearing while
+  // their hands were still full.
+  ok('the timer check waits for a press instead of advancing itself',
+    page.includes("end={{ label: 'ХОЛИЛТ ХАРАХ' }}"));
+  // THE SECONDS ARE EVIDENCE. The button cannot be pressed early, and it
+  // is gated on the DISPLAYED count rather than a second timer of its
+  // own — a throttled background tab then enables it late, never early.
+  ok('  ...and cannot be pressed before the count runs out',
+    hold.includes('disabled={remaining > 0}'));
+  ok('  ...with no timeout left racing the press',
+    /const t = waitsForPress \? null : setTimeout\(onDone, seconds \* 1000\);/.test(hold));
+  // THE OTHER TWO HOLDS DID NOT CHANGE. finishHold and cover are both
+  // after the scramble, where nothing may move; and neither asks the
+  // athlete to swap what is in their hands before the next screen, which
+  // is the only reason this one needed a button.
+  ok('  ...while the closing hold still advances on its own',
+    (page.match(/end=\{\{ label:/g) ?? []).length === 1 &&
+      /label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"[\s\S]{0,400}?onDone=\{finishRecording\}/.test(page) &&
+      !/label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"[\s\S]{0,400}?end=/.test(page));
+  ok('  ...and the cover hold too, untouched',
+    page.includes("<CoverStage seconds={HOLD_SECONDS} onDone={() => setStage('readyPrompt')} />"));
+  ok('  ...so "auto" is still what a hold does unless told otherwise',
+    hold.includes("end = 'auto',") && hold.includes("end?: 'auto' | { label: string };"));
+
+  // ── THE TIMER CHECK'S LAYOUT ──
+  // The sentence is the task and the count is how long it lasts; leading
+  // with the number asked the athlete to read a clock before they knew
+  // what it was for.
+  ok('the timer check leads with its instruction, not its count',
+    page.includes('layout="instruction-first"') &&
+      hold.includes("{layout === 'instruction-first' ? say : count}"));
+  ok('  ...and the closing hold still leads with the count',
+    (page.match(/layout="instruction-first"/g) ?? []).length === 1 &&
+      hold.includes("layout = 'count-first',"));
+  // THE PREVIEW MAY CROP HERE — different job from the lobby's. The
+  // athlete is centring one object, so the centre of the frame is the
+  // whole question. Centred ON PURPOSE rather than by `cover`'s default,
+  // and display-only: MediaRecorder reads the raw track, never a
+  // stylesheet, so what is recorded is the full frame either way.
+  ok('the hold preview crops from the centre, deliberately',
+    /\.oc-solve-hold-cam \.oc-solve-camera-video \{\s*\n\s*object-position: center center;/.test(theme) &&
+      /\.oc-solve-camera-video \{[\s\S]{0,160}?object-fit: cover;/.test(theme));
+  ok('  ...and the crop cannot reach the recording',
+    (() => {
+      // Comment-stripped: the hook's own comment explains at length the
+      // off-screen canvas it USED to redraw through and why that was
+      // removed, which would fail the assertion that it is gone.
+      const rec = stripComments(
+        fs.readFileSync(path.join(ROOT, SOLVE, '_lib/useSolveRecorder.ts'), 'utf8'),
+      );
+      return !rec.includes('canvas') && rec.includes('new MediaRecorder(stream');
+    })());
 
   // ── READY: a stage after the hold, never a way to cut it short ──
   ok('ready is reached only when the hold has run out',
@@ -860,7 +957,7 @@ console.log('\n  -- 10. the mockup restyle --');
     between.includes('className="oc-solve-between"') &&
       /\.oc-solve-between \{[\s\S]{0,200}?max-width: 520px;[\s\S]{0,120}?gap: 22px;/.test(theme));
   ok('  ...and the lobby is still the lobby', lobby.includes('className="oc-solve-lobby"'));
-  ok('three stages were added', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 15);
+  ok('three stages were added', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 16);
   // verify is still out: it merges the closing hold with the keypad,
   // which moves the recording boundary.
   ok('  ...cover, count and go — and verify still absent',
@@ -908,7 +1005,11 @@ console.log('\n  -- 11. the inspection --');
     ok('every stage of an attempt is in ATTEMPT_STAGES',
       union.filter((u) => !notAnAttempt.includes(u)).every((u) => inList.includes(u)),
       union.filter((u) => !notAnAttempt.includes(u) && !inList.includes(u)).join(',') || 'all present');
-    ok('  ...eleven of them', inList.length === 11, String(inList.length));
+    ok('  ...twelve of them', inList.length === 12, String(inList.length));
+    // attemptIntro names the attempt it introduces ("3-р эвлүүлэлт эхлэх
+    // гэж байна"), so the bar must claim that attempt too — the two
+    // would otherwise disagree on the same screen.
+    ok('  ...including the intro, which names its attempt', inList.includes('attemptIntro'));
     ok('  ...including the three new ones',
       ['cover', 'count', 'go'].every((x) => inList.includes(x)));
     ok('  ...and the four that are not an attempt stay out',
@@ -1054,7 +1155,7 @@ console.log('\n  -- 12. the attestation --');
   ok('resume did not move',
     /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page) &&
       page.includes('setResumeMessage(resumeNotice(plan))'));
-  ok('the stage list did not move', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 15);
+  ok('the stage list did not move', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 16);
 }
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);

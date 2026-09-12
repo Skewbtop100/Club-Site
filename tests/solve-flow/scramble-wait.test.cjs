@@ -62,16 +62,28 @@ console.log('\n  -- a stale scramble can never be displayed --');
 
 console.log('\n  -- the run cannot start recording without a scramble --');
 {
-  // zeroDisplay is what starts the MediaRecorder. Four, and only four,
-  // places may enter it, and each one already holds a scramble. (Four
-  // since the between screen: the athlete now presses to begin each
-  // attempt, and lobby and between press the same way.)
+  // zeroDisplay is what starts the MediaRecorder, and the gate now sits
+  // one screen earlier: every way into an attempt enters attemptIntro,
+  // and attemptIntro's ONLY exit is zeroDisplay. So the invariant is
+  // two halves, and both are checked — four guarded ways in, and one
+  // unguarded step from there onto the recording.
+  const intoIntro = page.match(/setStage\([^)]*attemptIntro/g) ?? [];
+  ok('exactly four transitions into attemptIntro', intoIntro.length === 4, intoIntro.join(' | '));
+  // THE RECORDING BOUNDARY. Exactly one place moves the run onto the
+  // clip, it is the intro's own onDone, and the start effect is still
+  // keyed on that stage alone — the intro is NOT recorded.
   const intoZero = page.match(/setStage\([^)]*zeroDisplay/g) ?? [];
-  ok('exactly four transitions into zeroDisplay', intoZero.length === 4, intoZero.join(' | '));
+  ok('  ...and exactly one transition from there into zeroDisplay',
+    intoZero.length === 1, intoZero.join(' | '));
+  ok('  ...which is the intro finishing, nothing else',
+    /<AttemptIntroStage[\s\S]{0,300}?onDone=\{\(\) => setStage\('zeroDisplay'\)\}/.test(page));
+  ok('  ...and the clip still begins on zeroDisplay, not on the intro',
+    /useEffect\(\(\) => \{\s*\n\s*if \(stage === 'zeroDisplay'\) \{[\s\S]{0,400}?startRecording\(\)/.test(page) &&
+      !/stage === 'attemptIntro'[\s\S]{0,200}?startRecording/.test(page));
   ok('  ...the promotion effect, which requires a scramble',
-    /if \(stage !== 'scrambleWait'\) return;[\s\S]{0,600}?if \(scramble\) setStage\('zeroDisplay'\);/.test(page));
+    /if \(stage !== 'scrambleWait'\) return;[\s\S]{0,700}?if \(scramble\) setStage\('attemptIntro'\);/.test(page));
   ok('  ...the lobby, which falls back to the wait when there is none',
-    page.includes("onStart={() => setStage(scramble ? 'zeroDisplay' : 'scrambleWait')}"));
+    page.includes("onStart={() => setStage(scramble ? 'attemptIntro' : 'scrambleWait')}"));
   // The between screen's button, which starts every attempt after the
   // first. Same fallback, same reason: handleEntryConfirm fetched this
   // attempt's scramble when the previous one ended, so it is normally
@@ -79,7 +91,7 @@ console.log('\n  -- the run cannot start recording without a scramble --');
   // recording without one.
   ok('  ...the between screen, which falls back the same way', (() => {
     const next = page.slice(page.indexOf('onNext={() => {'), page.indexOf('/* Manual retry.'));
-    return next.includes("setStage(scramble ? 'zeroDisplay' : 'scrambleWait');") &&
+    return next.includes("setStage(scramble ? 'attemptIntro' : 'scrambleWait');") &&
       next.includes("setStage('summary');");
   })());
   // Restarting an attempt whose recording failed. It re-enters the attempt
@@ -89,7 +101,7 @@ console.log('\n  -- the run cannot start recording without a scramble --');
   // changeset 2 put the blob in state, and a restarted attempt starts with
   // none in hand.)
   ok('  ...and the recording-failure restart, which replays the same attempt',
-    /setRecordingFailure\(null\);\s*\n\s*setPendingBlob\(null\);\s*\n\s*setStage\('zeroDisplay'\);/.test(page));
+    /setRecordingFailure\(null\);\s*\n\s*setPendingBlob\(null\);[\s\S]{0,400}?setStage\('attemptIntro'\);/.test(page));
   // The two places an attempt begins mid-run.
   const confirm = page.slice(page.indexOf('function handleEntryConfirm'), page.indexOf('// NO REDO.'));
   // It no longer starts the next attempt at all: it ends on the between
