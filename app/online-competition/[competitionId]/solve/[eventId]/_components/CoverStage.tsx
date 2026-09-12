@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useHoldFill } from './HoldFill';
 
 /** The face colours the mockup names. Not the site palette — these are a
  *  cube's stickers, and a judge reads the video against them. */
@@ -47,29 +47,22 @@ export default function CoverStage({
   onDone,
 }: {
   /** The SAME hold duration as the two timer holds — this stage replaced
-   *  one of the three and did not shorten it. It sets the timeout and the
-   *  number, so neither can disagree with the other. */
+   *  one of the three and did not shorten it. Through useHoldFill it sets
+   *  the timeout and the fill together, so the picture of the clock and
+   *  the clock itself cannot disagree. */
   seconds: number;
   onDone: () => void;
 }) {
-  const [remaining, setRemaining] = useState(seconds);
-
-  useEffect(() => {
-    const interval = setInterval(() => setRemaining((r) => Math.max(r - 1, 0)), 1000);
-    const t = setTimeout(onDone, seconds * 1000);
-    return () => {
-      clearInterval(interval);
-      clearTimeout(t);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // The same clock every other hold uses. This stage kept its own copy of
+  // the countdown, which is exactly how two holds come to disagree about
+  // how long a hold is. It still advances itself: nothing in the
+  // athlete's hands has to change here, and the note below already says
+  // what the end leads to.
+  const { fill } = useHoldFill(seconds, onDone);
 
   return (
     <div className="oc-solve-cover">
-      <div className="oc-solve-cover-count">
-        <span className="oc-solve-cover-n">{remaining}</span>
-        <span className="oc-solve-cover-unit">СЕКУНД</span>
-      </div>
+      {fill}
 
       <p className="oc-solve-cover-say">
         Шоогоо ковертоо нуугаад <span style={{ color: GREEN }}>ногоон</span> төвийг камер тал руу,{' '}

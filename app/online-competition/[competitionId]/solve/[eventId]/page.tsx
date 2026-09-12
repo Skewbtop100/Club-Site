@@ -1400,10 +1400,7 @@ export default function SolvePage() {
             true: every route into an attempt now lands here, and this
             lands on the recording. */}
         {stage === 'attemptIntro' && (
-          <AttemptIntroStage
-            attemptNumber={attempts.length + 1}
-            onDone={() => setStage('zeroDisplay')}
-          />
+          <AttemptIntroStage onDone={() => setStage('zeroDisplay')} />
         )}
 
         {/* THE ATHLETE'S OWN TIMER, at 0.00, held to the camera — the
@@ -1430,7 +1427,6 @@ export default function SolvePage() {
             /* The button names where it goes, so the footnote that said
                the same thing is gone. */
             footnote={null}
-            layout="instruction-first"
             end={{ label: 'ХОЛИЛТ ХАРАХ' }}
             videoRef={recorder.videoRef}
             onDone={() => setStage('scrambleReveal')}

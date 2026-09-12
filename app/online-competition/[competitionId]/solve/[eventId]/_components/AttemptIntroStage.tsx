@@ -1,9 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useHoldFill } from './HoldFill';
 
-/** The beat before an attempt starts — "you are about to solve attempt N,
- *  get your timer ready".
+/** The beat before an attempt starts: get your timer ready.
  *
  *  WHY IT EXISTS: pressing ОРОЛДЛОГОО ЭХЛЭХ used to land straight on the
  *  timer check, whose eight seconds start counting the moment it renders.
@@ -20,42 +19,24 @@ import { useEffect, useState } from 'react';
  *  attempt, on every clip.
  *
  *  It advances on its own. There is no decision to make here, so a button
- *  would only be a second press between the athlete and the same place. */
+ *  would only be a second press between the athlete and the same place.
+ *
+ *  ONE LINE, and the five seconds are the screen filling behind it rather
+ *  than a number beside it. It also carried "{N}-р эвлүүлэлт эхлэх гэж
+ *  байна"; the bar above already names the attempt, and a screen with one
+ *  instruction on it should have one sentence on it. */
 const INTRO_SECONDS = 5;
 
-export default function AttemptIntroStage({
-  attemptNumber,
-  onDone,
-}: {
-  /** 1-based, the attempt that is about to start. */
-  attemptNumber: number;
-  onDone: () => void;
-}) {
-  const [remaining, setRemaining] = useState(INTRO_SECONDS);
-
-  useEffect(() => {
-    const interval = setInterval(() => setRemaining((r) => Math.max(r - 1, 0)), 1000);
-    const t = setTimeout(onDone, INTRO_SECONDS * 1000);
-    return () => {
-      clearInterval(interval);
-      clearTimeout(t);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+export default function AttemptIntroStage({ onDone }: { onDone: () => void }) {
+  // The same clock the three holds use, for the same reason: the duration
+  // that ends this screen is the duration that fills it.
+  const { fill } = useHoldFill(INTRO_SECONDS, onDone);
 
   return (
     <div className="oc-solve-intro">
+      {fill}
       <span className="oc-solve-intro-eyebrow">БЭЛТГЭЛ</span>
-      <p className="oc-solve-intro-say">
-        {attemptNumber}-р эвлүүлэлт эхлэх гэж байна. Цагаа 0.00 болгож шалгуулахдаа бэлдээрэй.
-      </p>
-      {/* The count is here so the athlete can pace the one physical thing
-          this screen asks of them — reaching for a timer — rather than
-          being surprised by the hold starting. Quiet: it is a hint, not a
-          clock anyone is measured against. The hold's count is that. */}
-      <span className="oc-solve-intro-count" aria-hidden>
-        {remaining}
-      </span>
+      <p className="oc-solve-intro-say">Цагаа 0.00 болгож шалгуулахдаа бэлдээрэй.</p>
     </div>
   );
 }

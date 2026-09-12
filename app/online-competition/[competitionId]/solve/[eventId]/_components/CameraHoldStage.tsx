@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useHoldFill } from './HoldFill';
 
 /** "Hold something still in front of the camera for N seconds."
  *
@@ -16,26 +16,26 @@ import { useEffect, useState } from 'react';
  *  these stages; this component starts and stops nothing. Its only effect
  *  is the clock that calls onDone.
  *
- *  ONE COUNTDOWN, NOT TWO. The tick bar is gone and the mockup's
- *  countdown number has taken its place on all three holds — the same
- *  50px volt count and the same СЕКУНД wherever an athlete is held in
- *  front of the camera. `seconds` drives the timeout, the number and the
- *  sentence, so none of the holds can disagree with the others about how
+ *  ONE COUNTDOWN, NOT TWO — now useHoldFill, shared with the cover. The
+ *  counting number is gone from all three holds and the time shows as the
+ *  screen filling with colour instead; `seconds` drives the timeout, the
+ *  fill and the sentence, so no hold can disagree with another about how
  *  long it lasted. That is the part that must stay singular, because the
- *  count is what a judge measures the hold against.
+ *  hold is what a judge measures.
  *
- *  `layout` and `end` vary AROUND that count, and only they do. The timer
- *  check before an attempt leads with its instruction and ends on a
- *  button; the closing hold leads with the count and advances itself.
- *  They are passed explicitly rather than inferred from `label`, so a
- *  call site says which it is instead of a reader having to work it
- *  out. */
+ *  Losing the number also removed the only thing `layout` ordered. There
+ *  is no count block in the column any more, so there is nothing to put
+ *  before or after the instruction, and the prop went with it.
+ *
+ *  `end` still varies: the timer check before an attempt waits for a
+ *  press, the closing hold advances itself. It is passed explicitly
+ *  rather than inferred from `label`, so a call site says which it is
+ *  instead of a reader having to work it out. */
 export default function CameraHoldStage({
   seconds,
   label,
   instruction,
   footnote,
-  layout = 'count-first',
   end = 'auto',
   videoRef,
   onDone,
@@ -61,14 +61,6 @@ export default function CameraHoldStage({
    *  on a button that names where it goes, which said the same thing
    *  twice. */
   footnote: string | null;
-  /** Which block leads.
-   *  'count-first'       — the count, then the instruction (the closing hold).
-   *  'instruction-first' — the instruction, then the count. For the timer
-   *                        check, where the sentence is the task and the
-   *                        count is how long it lasts; leading with the
-   *                        number asked the athlete to read the clock
-   *                        before they knew what it was for. */
-  layout?: 'count-first' | 'instruction-first';
   /** How the hold ends.
    *  'auto'    — advances itself the instant the count reaches zero.
    *  { label } — shows that button and WAITS. Used where the athlete has
@@ -80,36 +72,15 @@ export default function CameraHoldStage({
   videoRef: (el: HTMLVideoElement | null) => void;
   onDone: () => void;
 }) {
-  const [remaining, setRemaining] = useState(seconds);
   const waitsForPress = end !== 'auto';
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setRemaining((r) => Math.max(r - 1, 0));
-    }, 1000);
-    // Only an auto hold advances itself. A hold that ends on a button
-    // must not also have a timeout racing the press.
-    const t = waitsForPress ? null : setTimeout(onDone, seconds * 1000);
-    return () => {
-      clearInterval(interval);
-      if (t !== null) clearTimeout(t);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const count = (
-    <div className="oc-solve-hold-count">
-      <span className="oc-solve-hold-rule" aria-hidden />
-      <span className="oc-solve-hold-n">{remaining}</span>
-      <span className="oc-solve-hold-unit">СЕКУНД</span>
-    </div>
-  );
-  const say = <p className="oc-solve-hold-say">{instruction(seconds)}</p>;
+  // Only an auto hold advances itself. A hold that ends on a button gets
+  // no onElapsed at all, so nothing races the press.
+  const { done, fill } = useHoldFill(seconds, waitsForPress ? undefined : onDone);
 
   return (
     <div className="oc-solve-hold">
-      {layout === 'instruction-first' ? say : count}
-      {layout === 'instruction-first' ? count : say}
+      {fill}
+      <p className="oc-solve-hold-say">{instruction(seconds)}</p>
 
       <div className="oc-solve-hold-cam">
         <video ref={videoRef} autoPlay playsInline muted className="oc-solve-camera-video" />
@@ -123,19 +94,20 @@ export default function CameraHoldStage({
       {footnote !== null && <p className="oc-solve-hold-next">{footnote}</p>}
 
       {/* THE HOLD IS EVIDENCE. The button cannot be pressed before the
-          count reaches zero, because the seconds in front of the camera
-          are the thing a judge measures — a hold the athlete could cut
-          short is not a hold.
-          Gated on the DISPLAYED number rather than on a second timer of
-          its own, so the athlete is never told to wait by a clock they
-          cannot see. A backgrounded tab throttles the interval, which
-          makes the button enable LATE rather than early: the safe
-          direction, and the only one worth failing in. */}
+          time runs out, because the seconds in front of the camera are
+          the thing a judge measures — a hold the athlete could cut short
+          is not a hold.
+          Gated on useHoldFill's `done`, the same real-time timeout that
+          drives the fill, so the button and the picture of the clock
+          cannot disagree about when the hold ended. A backgrounded tab
+          throttles that timeout, which makes the button arrive LATE
+          rather than early: the safe direction, and the only one worth
+          failing in. */}
       {end !== 'auto' && (
         <button
           type="button"
           className="oc-solve-hold-go"
-          disabled={remaining > 0}
+          disabled={!done}
           onClick={onDone}
         >
           {end.label}
