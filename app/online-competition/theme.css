@@ -1573,9 +1573,6 @@
 .oc-solve-cover-say {
     font-size: 20px;
   }
-  .oc-solve-cover-faces {
-    gap: 18px;
-  }
 }
 
 .oc-solve-page {
@@ -2001,6 +1998,40 @@
   border-bottom: 1px solid #DFFF4F;
   border-right: 1px solid #DFFF4F;
 }
+/* THE COVER'S INSTRUCTION VIDEO. 720x720 square, 6.6s, silent, ~65KB.
+   Sized against what is already on this screen rather than against the
+   file: the cover carries a 50px count, a 26px instruction, two 78px
+   diagrams and a footnote, and it has to fit a 610px body on the
+   shortest phone this run supports without scrolling.
+
+   IT GREW WHEN THE DIAGRAMS WENT. With the two 78px sticker grids on the
+   screen the budget allowed 112px, and even that scrolled a 360x640
+   phone; their 134px is now the video's.
+
+   152px, AND THE SIZE HAS COME DOWN TWICE FOR THE SAME REASON. 196px
+   cleared the smallest phone by six pixels and 172px by ten, and both
+   are less than one line of this screen's own instruction (20px/1.4 =
+   28px at that width). The second trim was the footnote's doing: it was
+   reworded to carry the deadline rather than repeat the order, which
+   made it wrap to two lines and took twenty pixels with it.
+
+   A margin thinner than one wrapped line is not a margin. It matters
+   here more than the arithmetic suggests, because the measurements are
+   taken with Segoe UI standing in for Geologica — the real face can wrap
+   a line further than the harness sees, and ten pixels does not survive
+   that.
+   Capped in vw as well so it shrinks with the column rather than forcing
+   a scroll on a narrow one.
+   No border and no chrome: it is a demonstration, not a frame anything is
+   aimed at. */
+.oc-solve-cover-demo {
+  width: min(152px, 44vw);
+  aspect-ratio: 1;
+  display: block;
+  object-fit: contain;
+  background: #0A0A0C;
+}
+
 /* ── A SCREEN THAT IS ITS OWN CLOCK ───────────────────────────────────
    The attempt intro shows its seconds as the screen filling with colour
    from the bottom instead of as a number. It is the run's one
@@ -2208,33 +2239,6 @@
   text-align: center;
   letter-spacing: -0.01em;
   max-width: 520px;
-}
-.oc-solve-cover-faces {
-  display: flex;
-  align-items: center;
-  gap: 26px;
-}
-.oc-solve-cover-face {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 9px;
-}
-.oc-solve-cover-grid {
-  width: 78px;
-  height: 78px;
-  background: #0D0D10;
-  border: 1px solid #2A2A31;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: repeat(3, 1fr);
-  gap: 3px;
-  padding: 7px;
-}
-.oc-solve-cover-face-label {
-  font: 500 8px/1 var(--oc-font-mono), monospace;
-  letter-spacing: 0.16em;
-  color: #6E6A62;
 }
 .oc-solve-cover-note {
   font: 400 12px/1.7 var(--oc-font-heading), sans-serif;

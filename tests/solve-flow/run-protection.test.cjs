@@ -339,8 +339,70 @@ console.log('\n  -- 5. the camera hold is ONE component --');
   // The cube hold's own words moved into CoverStage with the rest of it.
   {
     const cover = fs.readFileSync(path.join(ROOT, SOLVE, '_components/CoverStage.tsx'), 'utf8');
+    // Case-insensitive: the sentence leads with the green centre now, so
+    // that word is capitalised. What must hold is that both centres are
+    // still named and the camera-facing one is still labelled.
+    // The two 78px sticker diagrams are gone, and КАМЕР РУУ was their
+    // label. What must survive is that the SENTENCE still names both
+    // centres — it is the only place the face positions are stated now,
+    // beyond the video that demonstrates them.
     ok('the cube hold still says what orientation it wants',
-      cover.includes('цагаан') && cover.includes('ногоон') && cover.includes('КАМЕР РУУ'));
+      /ногоон/i.test(cover) && /цагаан/i.test(cover));
+    // Whitespace-normalised: the sentence wraps across source lines.
+    ok('  ...in the wording that asks for the cover too', (() => {
+      const flat = cover.replace(/\s+/g, ' ');
+      return flat.includes('төвийг камер руу') && flat.includes('төвийг дээш харуулж') &&
+        flat.includes('коверт халхлан байрлуулна уу');
+    })());
+    // THE TWO COLOUR WORDS STAY TINTED. They are the only thing on the
+    // line a judge later reads the recording against, and the tint is
+    // what ties them to the diagrams below.
+    ok('  ...with both colour words still tinted to match the diagrams',
+      /color: GREEN \}\}>Ногоон</.test(cover) && /color: WHITE \}\}>цагаан</.test(cover));
+
+    // ── THE FOOTNOTE CARRIES THE DEADLINE, NOT THE ORDER ──
+    // It read "Хугацаа дуусгаад коверт шоогоо нуугаарай" — hide your cube
+    // in the cover — a third imperative on a screen whose instruction
+    // already gives that order and whose video already performs it. What
+    // it says now is the one fact nothing else on the screen states: the
+    // cube must ALREADY be covered when the count reaches zero, because a
+    // cube still on its way in leaves the clip with no visible mark for
+    // the inspection to be measured from.
+    ok('the footnote states the deadline and what follows it',
+      cover.replace(/\s+/g, ' ').includes(
+        'Хугацаа дуусахад шоо аль хэдийн халхлагдсан байх ёстой — дараа нь ажиглалтаа эхлүүлнэ.'));
+    // Comment-stripped: the component quotes the wording it replaced and
+    // explains why, and that explanation contains the old imperative.
+    ok('  ...and is no longer a third imperative',
+      !stripComments(cover).includes('нуугаарай'));
+
+    // ── THE INSTRUCTION VIDEO ──
+    // A still diagram says which face goes where; the video says what the
+    // hand does, which is the part a first-time athlete gets wrong.
+    ok('the cover shows the instruction video',
+      cover.includes('src="/cube-cover.mp4"') &&
+        fs.existsSync(path.join(ROOT, 'public/cube-cover.mp4')));
+    // BOTH ARE REQUIRED, for different reasons. Without playsInline iOS
+    // Safari takes a playing <video> fullscreen, which would cover the run
+    // mid-attempt; without muted the browser blocks autoplay outright and
+    // the athlete gets a still frame.
+    ok('  ...muted and playsInline, both of which it needs',
+      /<video[\s\S]{0,400}?cube-cover\.mp4[\s\S]{0,300}?muted/.test(cover) &&
+        /<video[\s\S]{0,400}?cube-cover\.mp4[\s\S]{0,300}?playsInline/.test(cover));
+    ok('  ...looping silently at the bottom of the screen', (() => {
+      const code = stripComments(cover);
+      return /<video[\s\S]{0,400}?cube-cover\.mp4[\s\S]{0,300}?loop/.test(cover) &&
+        code.indexOf('cube-cover.mp4') > code.indexOf('oc-solve-cover-note');
+    })());
+    // IT IS A FILE, NOT A CAMERA, and that is the whole of its safety.
+    // It never receives srcObject, never touches the recorder's videoRef,
+    // and calls no getUserMedia — so it opens no capture device and cannot
+    // compete for the camera the run is recording from. MediaRecorder
+    // reads the camera TRACK, never a <video> element, so nothing here can
+    // reach the clip either.
+    ok('  ...and cannot touch the recording or the camera',
+      !/srcObject|videoRef|getUserMedia|startRecording|stopRecording|recorder/
+        .test(stripComments(cover)));
   }
 }
 
@@ -1354,10 +1416,22 @@ console.log('\n  -- 11. the inspection --');
   }
 
   // ── COVER ──
-  ok('cover is the mockup’s 620px column with two 78px faces',
-    /\.oc-solve-cover \{[\s\S]{0,200}?max-width: 620px;[\s\S]{0,120}?gap: 24px;/.test(theme) &&
-      /\.oc-solve-cover-grid \{[\s\S]{0,140}?width: 78px;[\s\S]{0,40}?height: 78px;/.test(theme));
-  ok('  ...in the mockup’s own cube colours', cover.includes("'#00FF55'") && cover.includes("'#F4F1EA'"));
+  ok('cover is still the mockup’s 620px column',
+    /\.oc-solve-cover \{[\s\S]{0,200}?max-width: 620px;[\s\S]{0,120}?gap: 24px;/.test(theme));
+  // THE TWO 78px STICKER DIAGRAMS ARE GONE, markup and CSS. They said
+  // which face goes where; the video below says that AND what the hand
+  // does, and the instruction's two tinted colour words carry the colour
+  // precision the grids added. Their 134px is what let the video grow to
+  // a size that fits every phone measured.
+  ok('  ...with the two sticker diagrams gone, markup and CSS',
+    !cover.includes('oc-solve-cover-face') && !cover.includes('oc-solve-cover-grid') &&
+      !cover.includes('function Face') &&
+      !theme.includes('.oc-solve-cover-grid') && !theme.includes('.oc-solve-cover-face'));
+  // The cube colours survive as the tint on those two words, which is the
+  // only thing the diagrams were still adding.
+  ok('  ...but the mockup’s cube colours still tint the two words',
+    cover.includes("'#00FF55'") && cover.includes("'#F4F1EA'") &&
+      /color: GREEN \}\}>Ногоон</.test(cover) && /color: WHITE \}\}>цагаан</.test(cover));
   // ONE go-ahead, and it is ready's. The mockup gives cover a БЭЛЭН of its
   // own; two on two consecutive screens is one too many, and the one that
   // must not be pressable early is the one that stayed.
