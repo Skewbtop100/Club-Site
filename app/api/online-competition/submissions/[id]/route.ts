@@ -24,13 +24,17 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   if (!snap.exists) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
-  const cloudinaryPublicId = snap.data()?.cloudinaryPublicId as string | undefined;
+  // The whole document, not one field: deleteSubmissionAndVideo decides
+  // which assets a submission owns (video AND stills), so this route
+  // cannot fall behind when that answer changes.
+  const { cloudinaryDeleted, cloudinaryDetail, stillsDeleted, stillsFailed } =
+    await deleteSubmissionAndVideo(ref, snap.data(), 'admin delete');
 
-  const { cloudinaryDeleted, cloudinaryDetail } = await deleteSubmissionAndVideo(
-    ref,
-    cloudinaryPublicId,
-    'admin delete',
-  );
-
-  return NextResponse.json({ ok: true, cloudinaryDeleted, cloudinaryDetail });
+  return NextResponse.json({
+    ok: true,
+    cloudinaryDeleted,
+    cloudinaryDetail,
+    stillsDeleted,
+    stillsFailed,
+  });
 }

@@ -86,9 +86,18 @@ export async function GET(request: Request) {
   // Sequential, not Promise.all: Cloudinary's Admin API is rate limited
   // (and this is a nightly background job with no latency budget), so
   // there's nothing to gain from firing 200 deletes at once.
+  let stillsDeleted = 0;
+  let stillsFailed = 0;
+
   for (const doc of sweepable) {
-    const publicId = doc.data()?.cloudinaryPublicId as string | undefined;
-    const result = await deleteSubmissionAndVideo(doc.ref, publicId, 'retention sweep');
+    const data = doc.data();
+    const publicId = data?.cloudinaryPublicId as string | undefined;
+    // The document itself — see deleteSubmissionAndVideo: the stills go
+    // with the video, and which fields those are is its decision, not
+    // this route's.
+    const result = await deleteSubmissionAndVideo(doc.ref, data, 'retention sweep');
+    stillsDeleted += result.stillsDeleted;
+    stillsFailed += result.stillsFailed;
     if (result.cloudinaryDeleted || !publicId) {
       succeeded += 1;
     } else {
@@ -106,6 +115,12 @@ export async function GET(request: Request) {
     matched: sweepable.length,
     succeeded,
     failed,
+    // Counted separately from `succeeded`/`failed`, which are about the
+    // VIDEO. A run that leaves stillsFailed above zero has images still
+    // sitting in Cloudinary with the document that named them gone — the
+    // per-item log lines carry the public ids for manual removal.
+    stillsDeleted,
+    stillsFailed,
     skippedNotSweepable: expired.length - sweepable.length,
     hitBatchCap: expired.length === MAX_PER_RUN,
   };

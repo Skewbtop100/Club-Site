@@ -366,9 +366,10 @@ export interface OnlineCompetition {
    *
    *  null = no image. The publicId is kept alongside the url so a future
    *  cleanup can find the asset — see the orphaning note on
-   *  destroyCloudinaryVideo in submission-cleanup.ts; there is no image
-   *  equivalent yet, so removing an image here nulls both fields and
-   *  leaves the Cloudinary asset in place. */
+   *  destroyCloudinaryVideo in submission-cleanup.ts. An image destroy
+   *  now exists there (destroyCloudinaryImages, used for solve stills),
+   *  but nothing calls it for THESE fields: removing a poster or banner
+   *  here still nulls both and leaves the Cloudinary asset in place. */
   posterUrl?: string | null;
   posterPublicId?: string | null;
   bannerUrl?: string | null;

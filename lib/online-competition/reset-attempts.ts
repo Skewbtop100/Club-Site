@@ -109,9 +109,11 @@ export async function resetAthleteRoundAttempts(scope: ResetScope): Promise<Rese
     const data = doc.data();
     if (data.status === 'approved' || data.status === 'rejected') result.judged += 1;
 
+    // The document, not just its video id: the stills belong to the
+    // submission too, and deleteSubmissionAndVideo owns that decision.
     const { cloudinaryDeleted } = await deleteSubmissionAndVideo(
       doc.ref,
-      data.cloudinaryPublicId as string | undefined,
+      data,
       `attempt reset (${scope.uid} / ${scope.event} / round ${scope.competitionRound})`,
     );
 
