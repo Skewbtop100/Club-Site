@@ -1124,7 +1124,45 @@ console.log('\n  -- 10. the mockup restyle --');
   ok('  ...and the moves are 68px tiles where there is room',
     /\.oc-solve-move-row \{[\s\S]{0,500}?max-width: calc\(var\(--oc-chunk-n, 5\) \* 68px/.test(theme) &&
       /\.oc-solve-move-tile \{[\s\S]{0,200}?aspect-ratio: 1;/.test(theme));
-  ok('  ...with no side preview left', !revealCode.includes('videoRef') && !revealCode.includes('<video'));
+  // A PREVIEW IS BACK, AND IT IS NOT THE ONE THAT WAS REMOVED. The old
+  // one was a 74px box in a column BESIDE the scramble, in the same
+  // horizontal sweep as the tiles. This one is above the header,
+  // centred, smaller, and dimmed — see .oc-solve-reveal-rec.
+  //
+  // It exists because the reveal and the cover after it are forty
+  // seconds — the longest stretch of the clip — during which the athlete
+  // is looking at moves and has no way to tell the camera is alive.
+  ok('the reveal shows a small preview again',
+    revealCode.includes('oc-solve-reveal-cam') && revealCode.includes('<video ref={videoRef}') &&
+      page.includes('videoRef={recorder.videoRef}'));
+  ok('  ...above the scramble, not beside it',
+    revealCode.indexOf('oc-solve-reveal-rec') < revealCode.indexOf('oc-solve-reveal-head') &&
+      !theme.includes('oc-solve-camera-box-mini'));
+  // SMALLER THAN A MOVE TILE AT EVERY WIDTH. Tiles shrink on a narrow
+  // screen and a fixed box does not: at 64px this was 1.27x a tile in a
+  // six-move chunk at 375px — wider than the thing it must not compete
+  // with.
+  ok('  ...smaller than a move tile, and dimmed',
+    /\.oc-solve-reveal-cam \{[\s\S]{0,300}?width: 48px;/.test(theme) &&
+      /\.oc-solve-reveal-cam \{[\s\S]{0,400}?opacity: 0\.72;/.test(theme));
+  // THE SAME SIGNAL AS THE SOLVE SCREEN'S, from the same two classes: a
+  // reassurance only reassures if it is recognised, and a bare dot
+  // elsewhere would be a second thing to learn for one fact.
+  ok('  ...under the same recording flag the solve screen uses',
+    revealCode.includes('oc-solve-rec-dot') && revealCode.includes('oc-solve-rec-flag-text') &&
+      revealCode.includes('БИЧИЖ БАЙНА'));
+  // WHAT IT DOES NOT REUSE is the positioning: .oc-solve-rec-flag pins
+  // itself to the corner of a full-bleed video, which is the solve
+  // screen's job and would cover a 48px box.
+  ok('  ...without borrowing that screen\u2019s positioning',
+    !revealCode.includes('oc-solve-rec-flag"') &&
+      /\.oc-solve-rec-flag \{[\s\S]{0,200}?position: absolute;/.test(theme));
+  // IT TOUCHES NO RECORDING. MediaRecorder reads the camera track and
+  // has never read a <video> element, so adding one here neither starts,
+  // stops nor alters the clip.
+  ok('  ...and starts or stops nothing',
+    !revealCode.includes('startRecording') && !revealCode.includes('stopRecording') &&
+      !revealCode.includes('recorder.'));
 
   // ── REC: THE CAMERA IS THE SCREEN ──
   // It was a 4/3 box in a 720px column, reached after a countdown screen
@@ -1251,7 +1289,7 @@ console.log('\n  -- 11. the inspection --');
   // seconds are now long enough to read the instruction and act on it,
   // which is what the extra screen was compensating for.
   ok('reveal hands to cover',
-    page.includes("<RevealStage scramble={scramble} onDone={() => setStage('cover')} />"));
+    /<RevealStage[\s\S]{0,400}?onDone=\{\(\) => setStage\('cover'\)\}/.test(page));
   ok('  ...and the prep screen is gone, file and all',
     !fs.existsSync(path.join(ROOT, SOLVE, '_components/CoverPrepStage.tsx')) &&
       !page.includes('coverPrep') && !page.includes('CoverPrepStage') &&

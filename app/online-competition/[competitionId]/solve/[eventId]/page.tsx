@@ -1473,7 +1473,14 @@ export default function SolvePage() {
         )}
 
         {stage === 'scrambleReveal' && (
-          <RevealStage scramble={scramble} onDone={() => setStage('cover')} />
+          <RevealStage
+            scramble={scramble}
+            /* A preview only. The clip has been running since the opening
+               hold and this neither starts nor stops it — the recorder
+               reads the camera track, never a <video> element. */
+            videoRef={recorder.videoRef}
+            onDone={() => setStage('cover')}
+          />
         )}
 
         {/* The cube in a known orientation before the solve, so a judge

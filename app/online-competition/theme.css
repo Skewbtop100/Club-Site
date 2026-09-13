@@ -1719,6 +1719,49 @@
     transform: translateY(0);
   }
 }
+/* ── THE REVEAL'S "STILL RECORDING" ───────────────────────────────────
+   The reveal and the cover after it are forty seconds of looking at
+   moves, not at a camera — the longest stretch of the clip, and until now
+   the only one with nothing on screen to say the recording was alive.
+
+   HOW IT STAYS OUT OF THE WAY. Four things, none of them just "make it
+   smaller":
+     - 48px wide, against move tiles that are 52-68px. It has to be
+       smaller than a tile at EVERY width, and tiles shrink on a narrow
+       screen while a fixed box does not: at 64px this was 1.27x a tile
+       in a six-move chunk at 375px — wider than the thing it must not
+       compete with. 48px is smaller in width, height and area (about
+       two thirds of a tile) in every case measured.
+     - DIMMED to 0.72, so it sits back from tiles that are near-white on
+       near-black at full strength.
+     - NO BORDER BRACKETS. The hold previews wear four volt corners
+       because aiming is their job; this one is a flat box, and the volt
+       on this screen belongs to the chunk ticks.
+     - ABOVE THE HEADER, not beside the scramble. The old version was a
+       column to the side, which put it in the same horizontal sweep as
+       the tiles. Here the eye passes it once on the way in and then has
+       the whole width below for the thing that matters. */
+.oc-solve-reveal-rec {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+}
+.oc-solve-reveal-cam {
+  width: 48px;
+  aspect-ratio: 4 / 3;
+  flex: none;
+  position: relative;
+  overflow: hidden;
+  background: #0A0A0C;
+  border: 1px solid #1C1C21;
+  opacity: 0.72;
+}
+.oc-solve-reveal-cam .oc-solve-camera-video {
+  position: absolute;
+  inset: 0;
+}
+
 /* ── ONE ROW PER CHUNK, ALWAYS ────────────────────────────────────────
    A grid of exactly as many equal columns as the chunk has moves. A chunk
    CANNOT wrap because there is no second row for it to wrap onto — the

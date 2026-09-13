@@ -28,12 +28,32 @@ function groupLabel(groups: string[], index: number): string {
  *  that was already running — the timers that advance the groups are
  *  untouched, and both it and they come from GROUP_DISPLAY_MS.
  *
- *  NO PREVIEW. There used to be a 74px camera and a "БИЧИЖ БАЙНА" dot off
- *  to the side; the mockup's reveal is the scramble and nothing else, and
- *  the bar above already says the athlete is in a competition
- *  environment. Recording is unaffected either way — MediaRecorder reads
- *  the camera track, not any <video> element. */
-export default function RevealStage({ scramble, onDone }: { scramble: string; onDone: () => void }) {
+ *  A PREVIEW, SMALL, AT THE TOP. This screen carried a 74px camera off to
+ *  the side once and it was removed on the grounds that the mockup's
+ *  reveal is the scramble alone. That was wrong for a reason the mockup
+ *  could not show: the reveal and the cover after it are forty seconds —
+ *  the longest stretch of the clip — during which the athlete is looking
+ *  at moves, not at a camera, and has no way to tell the recording is
+ *  still running. A camera that died here costs them the whole attempt and
+ *  they find out at the keypad.
+ *
+ *  It is a REASSURANCE, not a framing tool: the athlete aimed this shot on
+ *  the lobby and checks it again on the timer check. So it is small,
+ *  dimmed, and above the header rather than beside the scramble — see
+ *  .oc-solve-reveal-rec for how it is kept from competing with the tiles.
+ *
+ *  Recording is unaffected either way, in both directions: MediaRecorder
+ *  reads the camera track and has never read a <video> element, so adding
+ *  one here neither starts, stops nor alters the clip. */
+export default function RevealStage({
+  scramble,
+  videoRef,
+  onDone,
+}: {
+  scramble: string;
+  videoRef: (el: HTMLVideoElement | null) => void;
+  onDone: () => void;
+}) {
   const groups = splitScrambleIntoChunks(scramble);
   const [currentGroup, setCurrentGroup] = useState(0);
   const [secondsLeft, setSecondsLeft] = useState(GROUP_DISPLAY_MS / 1000);
@@ -63,6 +83,21 @@ export default function RevealStage({ scramble, onDone }: { scramble: string; on
 
   return (
     <div className="oc-solve-reveal">
+      {/* THE SAME SIGNAL AS THE SOLVE SCREEN'S, deliberately: the pulsing
+          dot and the same two words, from the same two classes. A
+          reassurance only reassures if it is recognised, and a bare dot
+          somewhere else on the screen would be a second thing to learn
+          for one fact. What is NOT reused is the solve screen's
+          positioning — .oc-solve-rec-flag pins itself to the corner of a
+          full-bleed video, which is that screen's job, not this one's. */}
+      <div className="oc-solve-reveal-rec">
+        <div className="oc-solve-reveal-cam">
+          <video ref={videoRef} autoPlay playsInline muted className="oc-solve-camera-video" />
+        </div>
+        <span className="oc-solve-rec-dot" aria-hidden />
+        <span className="oc-solve-rec-flag-text">БИЧИЖ БАЙНА</span>
+      </div>
+
       <div className="oc-solve-reveal-head">
         <span className="oc-solve-reveal-eyebrow">ХОЛИЛТ</span>
         <div className="oc-solve-reveal-clock">
