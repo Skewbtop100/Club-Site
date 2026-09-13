@@ -133,13 +133,6 @@ export default function RecStage({
         <button type="button" className="oc-solve-btn-finish" onClick={onFinish}>
           Эвлүүлэлт дууссан
         </button>
-
-        {/* The run's only statement that it does not time the solve. Kept
-            here, quiet, because this is where it has always been said and
-            nowhere else says it. */}
-        <p className="oc-solve-rec-note">
-          Дэлгэц дээр цаг харагдахгүй. Эвлүүлж дуусаад товч дээр дарж цагаа бичиж оруулна.
-        </p>
       </div>
     </div>
   );

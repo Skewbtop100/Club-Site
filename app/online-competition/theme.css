@@ -2462,13 +2462,6 @@
   letter-spacing: 0.2em;
   color: #E8543C;
 }
-.oc-solve-rec-note {
-  max-width: 460px;
-  font: 400 11px/1.5 var(--oc-font-heading), sans-serif;
-  color: #9A958A;
-  text-align: center;
-  text-shadow: 0 1px 6px rgba(8, 8, 10, 0.9);
-}
 .oc-solve-rec-dot {
   width: 8px;
   height: 8px;
