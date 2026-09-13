@@ -680,6 +680,23 @@ export interface OnlineSubmission {
    *  for review, never evidence in their own right, and an attempt that
    *  cannot be filed is a solve thrown away. */
   marks?: Partial<SolveMarks>;
+  /** Cloudinary public ids for the full-resolution stills taken during
+   *  the closing timer hold and the cube check — at most three each, and
+   *  IMAGE resources, not video ones.
+   *
+   *  WHY THEY EXIST: the clip is 250kbps to fit Cloudinary's free tier,
+   *  which is enough to watch a solve and not enough to read the four
+   *  digits on an athlete's timer. These are frames of that same moment
+   *  at the camera's native size, so the number can actually be read.
+   *
+   *  OPTIONAL, AND SHORT OR EMPTY IS LEGAL, for the same reason as
+   *  `marks`: every submission from before they existed has none, a
+   *  camera that would not yield a frame produces none, and an upload
+   *  that fails is dropped rather than retried. A submission with no
+   *  stills at all is a normal submission and must review normally — the
+   *  video remains the evidence. */
+  timerShotIds?: string[];
+  cubeShotIds?: string[];
   createdAt?: Timestamp;
   /** 14 days from submission — drives scheduled deletion of the raw video. */
   retentionExpiresAt?: Timestamp;

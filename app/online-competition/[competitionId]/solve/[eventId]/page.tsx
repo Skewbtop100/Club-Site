@@ -20,7 +20,7 @@ import {
   resumeNotice,
   type FiledAttempt,
 } from '@/lib/online-competition/run-resume';
-import { uploadVideoToCloudinary } from '@/lib/online-competition/cloudinary';
+import { uploadImageToCloudinary, uploadVideoToCloudinary } from '@/lib/online-competition/cloudinary';
 import type { OnlineCompetition, SolveMarks } from '@/lib/online-competition/types';
 import { useSolveRecorder } from './_lib/useSolveRecorder';
 import type { AttemptTime } from '@/lib/online-competition/ao5';
@@ -217,6 +217,32 @@ function leaveConfirmMessage(unfiledAttempts: number): string {
   );
 }
 
+/** Uploads one stage's stills and returns the Cloudinary public ids that
+ *  landed — SUCCESSES ONLY, in no guaranteed relation to the input.
+ *
+ *  NOTHING HERE CAN FAIL THE ATTEMPT. Every rejection is logged and
+ *  dropped, and the worst outcome is an empty array, which is a shape the
+ *  stored document, firestore.rules and the review flow all already
+ *  accept. An attempt filed with no stills is a normal attempt; an
+ *  attempt lost because a JPEG would not upload is a solve thrown away.
+ *
+ *  In parallel, deliberately: these run after the video is already safely
+ *  on the server, but the filing queue is single-file, so six serial
+ *  uploads would hold the NEXT attempt's video behind them. No progress
+ *  callback — the athlete is shown the video's progress and nothing about
+ *  these. */
+async function uploadStills(blobs: Blob[]): Promise<string[]> {
+  const settled = await Promise.allSettled(
+    blobs.map((b) => uploadImageToCloudinary(b, () => {})),
+  );
+  const ids: string[] = [];
+  for (const r of settled) {
+    if (r.status === 'fulfilled') ids.push(r.value.publicId);
+    else console.error('Still upload failed (attempt still files):', r.reason);
+  }
+  return ids;
+}
+
 export default function SolvePage() {
   const router = useRouter();
   const params = useParams<{ competitionId: string; eventId: string }>();
@@ -253,7 +279,21 @@ export default function SolvePage() {
    *  A ref, not state: the filing worker below reads it across awaits, and
    *  a state mirror would be one render behind. */
   const pendingUploadsRef = useRef<
-    Map<number, { blob: Blob; timeCs: number | null; isDnf: boolean; marks: Partial<SolveMarks> }>
+    Map<
+      number,
+      {
+        blob: Blob;
+        timeCs: number | null;
+        isDnf: boolean;
+        marks: Partial<SolveMarks>;
+        /** Up to three stills each, held alongside the video and freed
+         *  with it. They add a few hundred KB per attempt to the run's
+         *  memory footprint — the note above still holds, it is just a
+         *  slightly larger "at most one attempt in memory". */
+        timerShots: Blob[];
+        cubeShots: Blob[];
+      }
+    >
   >(new Map());
   /** Attempt indices waiting to be filed, oldest first. The head stays put
    *  until it succeeds, so attempts are always filed IN ORDER and a
@@ -838,6 +878,16 @@ export default function SolvePage() {
           const { secureUrl, publicId } = await uploadVideoToCloudinary(held.blob, (pct) =>
             patchAttempt(index, { uploadPercent: pct }),
           );
+          // THE VIDEO IS ON THE SERVER BEFORE ANY STILL IS SENT. The
+          // recording is the evidence and the stills are a convenience
+          // for reading it, so nothing about them is allowed to stand
+          // between a finished solve and its clip landing. They do sit
+          // before createSubmission, because their ids are part of the
+          // document — but by then the thing worth protecting is safe.
+          const [timerShotIds, cubeShotIds] = await Promise.all([
+            uploadStills(held.timerShots),
+            uploadStills(held.cubeShots),
+          ]);
           const submissionId = await createSubmission({
             competitionId,
             uid: solverUid,
@@ -852,6 +902,8 @@ export default function SolvePage() {
             // the time this upload lands the athlete may already be
             // recording the next attempt, which has emptied the live set.
             marks: held.marks,
+            timerShotIds,
+            cubeShotIds,
           });
           // FILED — and this is the line the whole changeset is for: the
           // recording is dropped the moment the server has it.
@@ -897,7 +949,14 @@ export default function SolvePage() {
   const enqueueFiling = useCallback(
     (
       index: number,
-      held: { blob: Blob; timeCs: number | null; isDnf: boolean; marks: Partial<SolveMarks> },
+      held: {
+        blob: Blob;
+        timeCs: number | null;
+        isDnf: boolean;
+        marks: Partial<SolveMarks>;
+        timerShots: Blob[];
+        cubeShots: Blob[];
+      },
     ) => {
       pendingUploadsRef.current.set(index, held);
       filingQueueRef.current.push(index);
@@ -996,6 +1055,10 @@ export default function SolvePage() {
       // set the last mark), and the next startRecording is two screens
       // away. Taken as a value, so the queue owns it across its awaits.
       marks: recorder.readMarks(),
+      // Read at the same moment and for the same reason as the marks:
+      // this attempt is closed, the next has not started, and the queue
+      // must own values rather than arrays the next attempt will empty.
+      ...recorder.readShots(),
     });
     // Cleared with the attempt it belonged to: the next keypad cannot
     // reach a stale recording, because there is none to reach.
@@ -1539,8 +1602,14 @@ export default function SolvePage() {
             /* The solve is over; the RECORDING IS NOT. It runs through
                the closing hold, where the athlete shows the timer that
                produced the number they are about to type. */
+            /* The press opens the closing timer hold, so the stills of
+               that hold are scheduled from here — the burst is relative
+               to the stage starting, and this is the stage starting.
+               mark() still leads: it names this instant, and scheduling
+               three timeouts is cheap but not free. */
             onFinish={() => {
               recorder.mark('solveEnd');
+              recorder.captureBurst('timer');
               setStage('finishHold');
             }}
           />
@@ -1557,8 +1626,11 @@ export default function SolvePage() {
             footnote={null}
             endLabel="ШООГОО ХАРУУЛАХ"
             videoRef={recorder.videoRef}
+            /* Same again for the cube check, the other 8-second hold —
+               and the one whose stills a judge reads for +2 or DNF. */
             onDone={() => {
               recorder.mark('cubeShown');
+              recorder.captureBurst('cube');
               setStage('cubeCheck');
             }}
           />

@@ -66,14 +66,19 @@ const components = fs
 // were written for. The mark leading is pinned deliberately too — a mark
 // is meant to name the press, and anything run ahead of it puts its own
 // duration into the number.
+// Each now also schedules that stage's stills (captureBurst) — a
+// fire-and-forget setTimeout trio, nothing the run waits on. The handler
+// is still pinned whole, and stopRecording/finishRecording still cannot
+// appear in it, which is the property being guarded.
 const ENDS_SOLVE_AT_FINISH_HOLD =
-  /onFinish=\{\(\) => \{\s*recorder\.mark\('solveEnd'\);\s*setStage\('finishHold'\);\s*\}\}/;
+  /onFinish=\{\(\) => \{\s*recorder\.mark\('solveEnd'\);\s*recorder\.captureBurst\('timer'\);\s*setStage\('finishHold'\);\s*\}\}/;
 const READY_STRAIGHT_TO_REC =
   /<ReadyPromptStage\s*\n\s*onDone=\{\(\) => \{\s*recorder\.mark\('solveStart'\);\s*setStage\('rec'\);\s*\}\}\s*\n\s*\/>/;
 /** Source of the closing hold's onDone, for embedding in the larger
  *  label-to-handler regexes below. */
 const TO_CUBE_CHECK_SRC =
-  "onDone=\\{\\(\\) => \\{\\s*recorder\\.mark\\('cubeShown'\\);\\s*setStage\\('cubeCheck'\\);\\s*\\}\\}";
+  "onDone=\\{\\(\\) => \\{\\s*recorder\\.mark\\('cubeShown'\\);\\s*" +
+  "recorder\\.captureBurst\\('cube'\\);\\s*setStage\\('cubeCheck'\\);\\s*\\}\\}";
 
 let pass = 0;
 let fail = 0;
@@ -628,7 +633,9 @@ console.log('\n  -- 6. the recording stops AFTER the cube check --');
   ok('a cube check follows the closing hold',
     page.includes("| 'cubeCheck'") &&
       new RegExp(
-        'label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"[\\s\\S]{0,500}?' + TO_CUBE_CHECK_SRC,
+        // 900, matching its sibling below: the span from the label to the
+        // handler grew when the handler picked up its capture burst.
+        'label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"[\\s\\S]{0,900}?' + TO_CUBE_CHECK_SRC,
       ).test(page));
   ok('  ...in ATTEMPT_STAGES, between the closing hold and the keypad',
     /'finishHold',\s*\n\s*'cubeCheck',\s*\n\s*'entry',/.test(page));
@@ -1056,15 +1063,43 @@ console.log('\n  -- 9. the lobby and the between screen --');
   // passes this even after the constraint is flipped to true. Verified by
   // mutation — the unstripped form did exactly that.
   const recorderCode = stripComments(recorder);
+  // A MediaStream IS assembled here now — one, wrapping one downscaled
+  // clone of the camera's video track, so the clip keeps its old frame
+  // size while the stills read the full-size original (see
+  // RECORDING_MAX_WIDTH in the hook). The blanket "no new MediaStream"
+  // that used to stand in for "no second track" is therefore pinned to
+  // that exact shape instead: one construction, from one named video
+  // track, with addTrack and createMediaStreamDestination still nowhere —
+  // which is what actually kept the ~110-byte-recording bug out.
   ok('  ...through the speaker, never into the recorded stream',
     /audio: false,/.test(recorderCode) && !/audio: true/.test(recorderCode) &&
       recorderCode.includes('gain.connect(ctx.destination)') &&
       !recorderCode.includes('createMediaStreamDestination') &&
-      !/\.addTrack\(/.test(recorderCode) && !/new MediaStream\(/.test(recorderCode));
-  // MediaRecorder still reads the getUserMedia stream itself, unwrapped.
+      !/\.addTrack\(/.test(recorderCode) &&
+      (recorderCode.match(/new MediaStream\(/g) ?? []).length === 1 &&
+      /new MediaStream\(\[recordingTrack\]\)/.test(recorderCode));
+  // MediaRecorder still reads a camera track — cloned and shrunk, never
+  // re-encoded through anything. `recordingStreamRef` holds the clone and
+  // falls back to the camera stream itself if the clone could not be made.
   ok('  ...and MediaRecorder still reads the camera stream untouched',
     /new MediaRecorder\(stream, \{/.test(recorderCode) &&
-      /const stream = streamRef\.current;/.test(recorderCode));
+      /const stream = recordingStreamRef\.current \?\? streamRef\.current;/.test(recorderCode) &&
+      /const recordingTrack = source\.clone\(\);/.test(recorderCode) &&
+      /const source = stream\.getVideoTracks\(\)\[0\];/.test(recorderCode));
+  // THE CLIP'S FRAME SIZE IS PINNED, and that is the whole reason the
+  // clone exists: the source was raised to 1080p for the stills, and
+  // MediaRecorder encodes whatever the track hands it at a bitrate that
+  // is capped — so without this the file would stay the same SIZE and get
+  // materially worse to watch, which no size check can catch.
+  ok('  ...at the frame size it has always recorded at',
+    /const RECORDING_MAX_WIDTH = 640;/.test(recorderCode) &&
+      /const RECORDING_MAX_HEIGHT = 480;/.test(recorderCode) &&
+      /width: \{ max: RECORDING_MAX_WIDTH, ideal: RECORDING_MAX_WIDTH \}/.test(recorderCode) &&
+      /const VIDEO_BITS_PER_SECOND = 250_000;/.test(recorderCode));
+  // `ideal`/`max`, never `exact`: a camera that cannot manage these must
+  // hand back what it has, not fail and end the run before it starts.
+  ok('  ...and nothing about the camera is demanded exactly',
+    !/exact:/.test(recorderCode));
   // onElapsed marks ZERO; onDone marks the PRESS. The tone must not wait
   // for the athlete, and the clip must not stop without them.
   ok('  ...at the count’s end, not when the athlete presses',
@@ -1330,7 +1365,18 @@ console.log('\n  -- 10. the mockup restyle --');
       const rec = stripComments(
         fs.readFileSync(path.join(ROOT, SOLVE, '_lib/useSolveRecorder.ts'), 'utf8'),
       );
-      return !rec.includes('canvas') && rec.includes('new MediaRecorder(stream');
+      // A canvas IS in this file now — grabStill draws one frame of the
+      // preview into it to make a JPEG. It is NOT in the recording path
+      // and must never get there, so the assertion moved from "no canvas
+      // at all" to the thing that was actually being forbidden: no canvas
+      // can become a stream, and the recorder reads a camera track.
+      // captureStream() is the only way the former could happen.
+      const grab = rec.slice(rec.indexOf('const grabStill'), rec.indexOf('const clearStillTimers'));
+      const canvasesOutsideGrab =
+        (rec.match(/canvas/g) ?? []).length - (grab.match(/canvas/g) ?? []).length;
+      return !rec.includes('captureStream') &&
+        canvasesOutsideGrab === 0 &&
+        rec.includes('new MediaRecorder(stream');
     })());
 
   // ── READY: a stage after the hold, never a way to cut it short ──

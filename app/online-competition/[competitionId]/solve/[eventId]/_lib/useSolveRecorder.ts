@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SolveMarks } from '@/lib/online-competition/types';
 
 // Ideal hint only, deliberately in the sensor's native landscape shape
@@ -25,15 +25,56 @@ import type { SolveMarks } from '@/lib/online-competition/types';
 //
 // audio: false here on purpose — no microphone/ambient audio is ever
 // captured, for the athlete's privacy and to save bandwidth.
+// THE SOURCE IS NOW AS LARGE AS THE DEVICE WILL GIVE, and the RECORDING
+// IS NOT — the two used to be the same number and are now deliberately
+// different. The stills (grabStill below) are read off this stream at its
+// native size, because a judge has to read four digits off an athlete's
+// timer and 640x480 does not carry them. The clip the stills come from is
+// pinned back down to RECORDING_MAX_* before MediaRecorder ever sees it.
+//
+// `ideal`, never `exact`: a device that cannot do 1080p must hand back
+// whatever it has rather than failing getUserMedia and ending the run
+// before it starts. Everything downstream reads the track's ACTUAL
+// settings (grabStill takes its canvas size from getSettings()), so a
+// phone that answers with 1280x720 — or 640x480 — simply gets smaller
+// stills, not broken ones.
 const VIDEO_CONSTRAINTS: MediaStreamConstraints = {
   video: {
-    width: { ideal: 640 },
-    height: { ideal: 480 },
+    width: { ideal: 1920 },
+    height: { ideal: 1080 },
     facingMode: 'user',
   },
   audio: false,
 };
+
+// WHAT THE CLIP STAYS AT, and why this constant had to be invented. The
+// recorded video is 250kbps on purpose — it has to fit Cloudinary's free
+// tier — and MediaRecorder has no size setting of its own: it encodes
+// whatever the track hands it. So raising the source above would have
+// silently re-aimed that same 250kbps at four times the pixels, which
+// does NOT make the file bigger (the bitrate is capped) but makes it
+// markedly worse to watch. The file-size check that would normally catch
+// a recorder change cannot see this one.
+//
+// Hence a downscaled CLONE of the camera track for the recorder, made
+// once per run in requestCamera: the athlete's preview and the stills
+// keep the full-size track, the clip keeps exactly the frame size it has
+// always had. `max` rather than `exact` for the same graceful-degradation
+// reason as above — a weaker camera handing back something smaller than
+// this already satisfies it.
+const RECORDING_MAX_WIDTH = 640;
+const RECORDING_MAX_HEIGHT = 480;
 const VIDEO_BITS_PER_SECOND = 250_000;
+
+/** JPEG quality for the stills. High on purpose: the entire point of
+ *  these frames is legible digits, and a still is a few hundred KB
+ *  against the video's megabytes. */
+const STILL_JPEG_QUALITY = 0.9;
+/** When each still is taken, measured from the moment its stage opens.
+ *  Three shots inside an 8-second hold, none of them near either edge —
+ *  the athlete is still settling at 0s and may already be reaching for
+ *  the button by 8s. */
+const STILL_OFFSETS_MS = [2000, 4000, 6000];
 const BEEP_FREQUENCY_HZ = 880;
 const BEEP_DURATION_S = 0.25;
 const BEEP_GAIN = 0.2;
@@ -76,6 +117,11 @@ function pickMimeType(): string {
  *  the athlete still hears the beep live either way. */
 export function useSolveRecorder() {
   const streamRef = useRef<MediaStream | null>(null);
+  /** The downscaled clone the recorder reads, built once per run beside
+   *  streamRef — see RECORDING_MAX_WIDTH. Same camera, same single
+   *  getUserMedia, one video track, no audio and no canvas: the only
+   *  difference between it and streamRef is frame size. */
+  const recordingStreamRef = useRef<MediaStream | null>(null);
   const videoElRef = useRef<HTMLVideoElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -120,6 +166,89 @@ export function useSolveRecorder() {
     marksRef.current[key] = Math.round(performance.now() - recordingT0.current);
   }, []);
 
+  // ── Stills: the frames the video is too coarse to carry ─────────────
+  // The clip is 250kbps by necessity, which is enough to watch a solve
+  // and nowhere near enough to READ a timer — the digits are the first
+  // thing that compression spends. So the two stages whose whole job is
+  // showing something to the camera also hand back a few full-size JPEGs
+  // of that same moment, off the same stream, while the recording runs
+  // on untouched.
+  //
+  // THE ATHLETE IS TOLD NOTHING NEW BY THIS, and nothing new is
+  // collected: these are frames of the video they are already recording
+  // and already submitting, at the moments already on it, read by the
+  // same judge for the same purpose. What changes is legibility, not what
+  // is captured — which is why there is no UI for it.
+  const timerShotsRef = useRef<Blob[]>([]);
+  const cubeShotsRef = useRef<Blob[]>([]);
+  const stillTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  /** One frame from the LIVE stream at the camera's native size — NOT
+   *  from the recorder's downscaled clone, and not from the recorded
+   *  file. Returns null rather than throwing on every failure there is:
+   *  no track, no preview element mounted, a preview that has not
+   *  received a frame yet, a canvas the browser will not give us. A still
+   *  is a convenience for review and must never be able to interrupt a
+   *  solve. */
+  const grabStill = useCallback(async (): Promise<Blob | null> => {
+    try {
+      const track = streamRef.current?.getVideoTracks()[0];
+      const el = videoElRef.current;
+      // HAVE_CURRENT_DATA. Drawing a video that has not decoded a frame
+      // yet paints nothing (or throws, depending on the browser).
+      if (!track || !el || el.readyState < 2) return null;
+      const s = track.getSettings();
+      const canvas = document.createElement('canvas');
+      canvas.width = s.width ?? RECORDING_MAX_WIDTH;
+      canvas.height = s.height ?? RECORDING_MAX_HEIGHT;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+      ctx.drawImage(el, 0, 0, canvas.width, canvas.height);
+      return await new Promise((res) =>
+        canvas.toBlob((b) => res(b), 'image/jpeg', STILL_JPEG_QUALITY),
+      );
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const clearStillTimers = useCallback(() => {
+    stillTimersRef.current.forEach(clearTimeout);
+    stillTimersRef.current = [];
+  }, []);
+
+  /** Schedules this stage's three stills. Fire-and-forget by design: it
+   *  returns immediately, the stage advances on its own clock, and a grab
+   *  that comes back null is dropped without a word. Nothing about the
+   *  run waits on any of this. */
+  const captureBurst = useCallback(
+    (bucket: 'timer' | 'cube') => {
+      for (const offset of STILL_OFFSETS_MS) {
+        const id = setTimeout(() => {
+          void (async () => {
+            const blob = await grabStill();
+            if (!blob) return;
+            const target = bucket === 'timer' ? timerShotsRef : cubeShotsRef;
+            // Capped at the number of offsets, so a bucket cannot grow
+            // past what firestore.rules will accept however this is
+            // called.
+            if (target.current.length < STILL_OFFSETS_MS.length) target.current.push(blob);
+          })();
+        }, offset);
+        stillTimersRef.current.push(id);
+      }
+    },
+    [grabStill],
+  );
+
+  // A CANCELLED ATTEMPT MUST NOT FIRE INTO THE NEXT ONE. A pending
+  // timeout outlives the stage that scheduled it — the recording-failure
+  // restart and the leave-the-run paths both abandon a stage mid-hold —
+  // and a still landing after that would be filed against whatever
+  // attempt happened to be in the bucket next. Cleared on unmount here,
+  // and at the top of every startRecording below.
+  useEffect(() => clearStillTimers, [clearStillTimers]);
+
   const [hasCamera, setHasCamera] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -147,6 +276,34 @@ export function useSolveRecorder() {
         const stream = await navigator.mediaDevices.getUserMedia(VIDEO_CONSTRAINTS);
         streamRef.current = stream;
         if (videoElRef.current) videoElRef.current.srcObject = stream;
+
+        // ── The recorder's own, smaller view of the same camera ──
+        // Cloned and constrained HERE, once, rather than per attempt:
+        // applyConstraints is async, and doing it inside startRecording
+        // would either make that function async (its caller checks a
+        // synchronous boolean) or let the first frames of every clip
+        // encode at full size before shrinking mid-stream. Once per run,
+        // awaited, means every attempt records at a settled frame size.
+        //
+        // A REJECTION IS NOT FATAL. Some browsers apply track constraints
+        // by reconfiguring the shared source instead of downscaling the
+        // clone; the worst case is that the stills come back no larger
+        // than they used to be, which is exactly where this feature
+        // started. Recording must not be the thing that fails.
+        const source = stream.getVideoTracks()[0];
+        if (source) {
+          const recordingTrack = source.clone();
+          try {
+            await recordingTrack.applyConstraints({
+              width: { max: RECORDING_MAX_WIDTH, ideal: RECORDING_MAX_WIDTH },
+              height: { max: RECORDING_MAX_HEIGHT, ideal: RECORDING_MAX_HEIGHT },
+            });
+          } catch (e) {
+            console.warn('Could not pin the recording track size:', e);
+          }
+          recordingStreamRef.current = new MediaStream([recordingTrack]);
+        }
+
         setHasCamera(true);
         return true;
       } catch (e) {
@@ -193,13 +350,23 @@ export function useSolveRecorder() {
    *  Assumes requestCamera() already succeeded; returns false (and does
    *  nothing) if there's no stream to record from. */
   const startRecording = useCallback((): boolean => {
-    const stream = streamRef.current;
+    // The DOWNSCALED clone, not streamRef — see RECORDING_MAX_WIDTH for
+    // why the recorder gets its own view of the camera. Falls back to the
+    // full-size stream if the clone could not be made, because a clip at
+    // the wrong size is worth having and no clip is not.
+    const stream = recordingStreamRef.current ?? streamRef.current;
     if (!stream) {
       setError('Камерын урсгал олдсонгүй');
       return false;
     }
 
     chunksRef.current = [];
+    // Stills belong to the attempt that took them. Any still still in
+    // flight from an abandoned attempt is cancelled here, before its
+    // bucket is emptied, so it cannot land in the next one.
+    clearStillTimers();
+    timerShotsRef.current = [];
+    cubeShotsRef.current = [];
     // A NEW ATTEMPT IS A NEW CLIP, so it is a new set of marks and a new
     // origin. Cleared BEFORE the recorder exists, so there is no window
     // in which a mark could be measured against the previous attempt's
@@ -222,7 +389,7 @@ export function useSolveRecorder() {
     recorderRef.current = recorder;
     recorder.start();
     return true;
-  }, []);
+  }, [clearStillTimers]);
 
   const stopRecording = useCallback((): Promise<Blob> => {
     return new Promise((resolve) => {
@@ -243,14 +410,20 @@ export function useSolveRecorder() {
   }, [mark]);
 
   const releaseCamera = useCallback(() => {
+    clearStillTimers();
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    // The clone is a track in its own right: stopping the stream it was
+    // cloned from does NOT stop it, and a live clone keeps the camera's
+    // in-use light on after the athlete has left the run.
+    recordingStreamRef.current?.getTracks().forEach((t) => t.stop());
+    recordingStreamRef.current = null;
     if (audioContextRef.current) {
       audioContextRef.current.close().catch(() => {});
       audioContextRef.current = null;
     }
     setHasCamera(false);
-  }, []);
+  }, [clearStillTimers]);
 
   /** The marks gathered for the attempt just recorded, AS A COPY.
    *
@@ -263,6 +436,17 @@ export function useSolveRecorder() {
    *  attempt is handed to the queue. */
   const readMarks = useCallback((): Partial<SolveMarks> => ({ ...marksRef.current }), []);
 
+  /** The stills gathered for the attempt just recorded, AS COPIES — the
+   *  same reason readMarks copies: filing outlives the attempt, and the
+   *  next startRecording empties these arrays. */
+  const readShots = useCallback(
+    (): { timerShots: Blob[]; cubeShots: Blob[] } => ({
+      timerShots: [...timerShotsRef.current],
+      cubeShots: [...cubeShotsRef.current],
+    }),
+    [],
+  );
+
   return {
     videoRef,
     hasCamera,
@@ -274,5 +458,7 @@ export function useSolveRecorder() {
     playBeep,
     mark,
     readMarks,
+    captureBurst,
+    readShots,
   };
 }

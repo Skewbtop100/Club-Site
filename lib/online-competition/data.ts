@@ -484,6 +484,11 @@ export async function createSubmission(input: {
    *  attempt must file regardless — the marks help a reviewer seek, they
    *  are not what the submission is for. */
   marks?: Partial<SolveMarks>;
+  /** Cloudinary public ids for this attempt's stills, at most three each.
+   *  Optional and legal while empty, exactly as `marks` is: a submission
+   *  with no stills still files and still reviews. */
+  timerShotIds?: string[];
+  cubeShotIds?: string[];
 }): Promise<string> {
   const retentionExpiresAt = Timestamp.fromMillis(
     Date.now() + RETENTION_DAYS * 24 * 60 * 60 * 1000,
@@ -518,6 +523,10 @@ export async function createSubmission(input: {
       // half-filled still lands, which is the requirement that matters:
       // no set of seek positions is worth refusing a solve over.
       marks: input.marks ?? {},
+      // Same handling as marks above: always written, empty when nothing
+      // was captured, and never a reason for a write to be withheld.
+      timerShotIds: input.timerShotIds ?? [],
+      cubeShotIds: input.cubeShotIds ?? [],
       penalty: null,
       status: 'pending',
       createdAt: serverTimestamp(),
