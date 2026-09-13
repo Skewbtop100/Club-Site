@@ -115,13 +115,20 @@ export default function RecStage({
 
         {/* SMALL AND PERIPHERAL, opposite the recording flag. It is a
             thing to glance at, not to watch: an athlete inspecting a cube
-            should be looking at the cube. */}
-        <span
+            should be looking at the cube.
+
+            THE LABEL IS INSIDE THE SAME BOX AS THE NUMBER, not a second
+            element beside it. One scrim, one object in the corner, one
+            thing to fade — the label cannot drift out of step with the
+            counter or outlive it, because there is nothing to keep in
+            sync. `oc-solve-insp-done` fades the pair together. */}
+        <div
           className={`oc-solve-insp${cueClass(elapsed)}${windowClosed ? ' oc-solve-insp-done' : ''}`}
           aria-hidden
         >
-          {elapsed}
-        </span>
+          <span className="oc-solve-insp-label">АЖИГЛАЛТ</span>
+          <span className="oc-solve-insp-n">{elapsed}</span>
+        </div>
       </div>
 
       {/* BELOW THE VIDEO, NOT OVER IT. The only way out of an attempt has

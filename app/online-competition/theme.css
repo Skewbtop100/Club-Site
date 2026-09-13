@@ -2314,12 +2314,6 @@
   letter-spacing: -0.015em;
   max-width: 560px;
 }
-.oc-solve-ready-lead {
-  font: 400 13px/1.7 var(--oc-font-heading), sans-serif;
-  color: #9A958A;
-  text-align: center;
-  max-width: 440px;
-}
 .oc-solve-ready-go {
   min-width: 300px;
   max-width: 100%;
@@ -2453,11 +2447,37 @@
   background: rgba(8, 8, 10, 0.72);
   -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
-  font: 600 15px/1 var(--oc-font-mono), monospace;
+  /* The label and the number stack inside the ONE scrim the counter
+     already had. A second box in the corner would be a second thing on a
+     screen whose whole design is having almost nothing on it. */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
   font-variant-numeric: tabular-nums;
   text-align: center;
   color: #9A958A;
   transition: color 300ms ease, opacity 900ms ease;
+}
+/* THE EYEBROW: what the number is, in the type every other unit label in
+   the run uses — 9px mono, wide tracking, the faintest ink token. It is
+   quieter than the digits it labels (#6E6A62 against #9A958A), which is
+   the right order: the value changes, the label never does, and a label
+   that competed with its own number would be the thing drawing the eye.
+
+   ITS COLOUR IS DECLARED, NOT INHERITED, and that is load-bearing. The
+   cue classes set `color` on the container, so without this the label
+   would turn amber at eight seconds and red at twelve along with the
+   digits — a word flashing red in the corner at the moment the athlete
+   should be looking at a cube. The cue is a fact about the NUMBER's
+   value; the label has no value to report. */
+.oc-solve-insp-label {
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.2em;
+  color: #6E6A62;
+}
+.oc-solve-insp-n {
+  font: 600 15px/1 var(--oc-font-mono), monospace;
 }
 /* The two moments a judge calls aloud during inspection, as colour and
    nothing else — no words, no sound, no border. */

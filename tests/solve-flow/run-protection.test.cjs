@@ -1609,8 +1609,24 @@ console.log('\n  -- 11. the inspection --');
     (stripComments(ready).match(/<button/g) ?? []).length === 1);
   ok('  ...which still cannot end a hold early',
     !stripComments(ready).includes('seconds') && !stripComments(ready).includes('setTimeout'));
-  // ...and it now starts the inspection rather than the solve, so it says so.
-  ok('  ...and says what it now starts', ready.includes('ажиглалтаа эхлүүлээрэй') || ready.includes('Ажиглалтаа эхлүүлэх'));
+  // THE BUTTON AND THE HEADING NAME THE SAME ACT. It used to say
+  // "start inspecting" while the heading said the same thing a second
+  // time; both now say SOLVE. What it does is unchanged — it still hands
+  // to rec, which runs the fifteen seconds and then the solve — but the
+  // screen no longer names the inspection at all.
+  ok('  ...and says what it now starts', ready.includes('Эвлүүлэлтээ эхлүүлэх'));
+  ok('  ...matching the heading above it',
+    ready.includes('Шоогоо коверт нуугаад бэлэн болмогц эвлүүлэлтээ эхлээрэй') &&
+      !stripComments(ready).includes('ажиглалтаа'));
+  // THE LEAD IS GONE, markup and CSS. It was the run's ONLY statement
+  // that the fifteen seconds exist, that they are inspection, and that
+  // the cube comes out from under its cover — and the counter on the next
+  // screen still runs 1 -> 15 with nothing naming it. That loss is
+  // deliberate and recorded in the component's own header, not silently
+  // replaced: nothing was added anywhere else to cover it.
+  ok('  ...with the lead gone entirely, and nothing put in its place',
+    !ready.includes('oc-solve-ready-lead') && !theme.includes('.oc-solve-ready-lead') &&
+      !stripComments(ready).includes('15 секунд'));
 
   // ── THE INSPECTION, ON THE SOLVE SCREEN ──
   // Fifteen seconds, counted UP. Up, not down, because a countdown is a
@@ -1625,7 +1641,8 @@ console.log('\n  -- 11. the inspection --');
   // SMALL AND PERIPHERAL. An athlete inspecting a cube should be looking
   // at the cube, so the counter is sized and placed to be glanced at.
   ok('  ...shown small, in the corner, not as a 210px number',
-    /\.oc-solve-insp \{[\s\S]{0,400}?position: absolute;[\s\S]{0,400}?font: 600 15px\/1/.test(theme) &&
+    /\.oc-solve-insp \{[\s\S]{0,400}?position: absolute;/.test(theme) &&
+      /\.oc-solve-insp-n \{[\s\S]{0,140}?font: 600 15px\/1/.test(theme) &&
       !theme.includes('.oc-solve-count-n'));
   // AT FIFTEEN IT GOES. A number parked at the end of a closed window
   // still looks like it means something, and the only thing it could be
@@ -1662,12 +1679,49 @@ console.log('\n  -- 11. the inspection --');
     fs.readFileSync(path.join(ROOT, 'firestore.rules'), 'utf8')
       .includes('request.resource.data.penalty == null'));
 
-  // EXACTLY ONE THING OWNS THE INSPECTION, and now it is the solve
-  // screen's counter. The old panel's label is gone with its stage: a
-  // bare number needs no heading, and a heading would make it something
-  // to read rather than glance at.
-  ok('the inspection is a bare counter, with no panel or label',
-    !recCode2.includes('АЖИГЛАХ') && !theme.includes('oc-solve-count-label'));
+  // EXACTLY ONE THING OWNS THE INSPECTION, and it is the solve screen's
+  // counter. The old `count` stage's PANEL is still gone — that is what
+  // this guards — but the counter is no longer bare: it carries a
+  // one-word eyebrow.
+  //
+  // WHY THAT REVERSED. "A bare number needs no heading" held only while
+  // something else in the run said what the number was. Nothing does:
+  // the ready screen's lead was the last statement that the fifteen
+  // seconds exist and that they are inspection, and it was deleted. A
+  // first-timer met an unexplained number climbing over their camera.
+  // The word is cheaper than the confusion, and it goes where the number
+  // already is rather than on a screen before it.
+  ok('the inspection counter is labelled, and owns the word alone',
+    rec.includes('oc-solve-insp-label') && rec.includes('АЖИГЛАЛТ') &&
+      !theme.includes('oc-solve-count-label') &&
+      (stripComments(page).match(/АЖИГЛАЛТ/g) ?? []).length === 0);
+  // IT IS AS PERIPHERAL AS THE NUMBER. Same scrim — it is INSIDE the
+  // counter's box, not a second box beside it — and the run's standard
+  // unit-label type: 9px mono, 0.2em tracking, the faintest ink token,
+  // quieter than the digits it labels.
+  ok('  ...in the same scrim as the counter, at unit-label weight',
+    /\.oc-solve-insp-label \{[\s\S]{0,200}?font: 500 9px\/1 var\(--oc-font-mono\)/.test(theme) &&
+      /\.oc-solve-insp-label \{[\s\S]{0,200}?letter-spacing: 0\.2em;/.test(theme) &&
+      /\.oc-solve-insp-label \{[\s\S]{0,200}?color: #6E6A62;/.test(theme) &&
+      (rec.match(/oc-solve-insp[^-]/g) ?? []).length === 1);
+  // THE CUE NEVER TOUCHES IT. The amber and red classes set `color` on
+  // the container, so an inherited label would flash red at twelve
+  // seconds — a word changing colour in the corner of the eye at the
+  // exact moment the athlete should be looking at a cube. Its colour is
+  // declared, so the cue stays a fact about the number's value.
+  ok('  ...and never takes the cue colour the digits do',
+    /\.oc-solve-insp-label \{[^}]*color: #6E6A62;/.test(theme));
+  // IT GOES WHEN THE COUNTER GOES, and not because of symmetry: a label
+  // reading АЖИГЛАЛТ left alone after the window closed would assert
+  // that inspection is still running, during the solve. That is worse
+  // than the parked number this screen already refuses to show. Being
+  // inside the faded box, it cannot do otherwise.
+  // Comment-stripped, and asserted as ORDER rather than as the exact
+  // template literal: the fading class, then the label, then the number,
+  // all inside one element — which is what makes the pair inseparable.
+  ok('  ...and fades with it rather than outliving the window',
+    /oc-solve-insp-done[\s\S]{0,120}?oc-solve-insp-label[\s\S]{0,120}?oc-solve-insp-n/
+      .test(stripComments(rec)));
   // THE EARLY EXIT IS GONE WITH THE STAGE, and nothing replaced it,
   // because there is nothing left to exit. `count` needed a "done"
   // button so an athlete who had planned their solve at six was not held

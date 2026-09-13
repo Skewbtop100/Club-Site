@@ -15,6 +15,15 @@
  *  immediately before it is a camera hold whose whole job is framing. A
  *  second framing check here would be the third preview in a row.
  *
+ *  WHAT THIS SCREEN NO LONGER SAYS. It carried a lead — "press the
+ *  button, take the cover off, fifteen seconds of inspection start, begin
+ *  solving before they run out" — and that was the run's ONLY statement
+ *  that the fifteen seconds exist, that they are inspection, and that the
+ *  cube comes out from under its cover. The screen after it shows a
+ *  counter running 1 -> 15 with nothing naming it. That is a real gap and
+ *  it is recorded here rather than quietly patched: nothing was added
+ *  anywhere else to cover it.
+ *
  *  Recording has been running continuously since zeroDisplay; this stage
  *  starts and stops nothing. */
 export default function ReadyPromptStage({ onDone }: { onDone: () => void }) {
@@ -34,22 +43,20 @@ export default function ReadyPromptStage({ onDone }: { onDone: () => void }) {
         <span className="oc-solve-ready-badge-text">ХОЛИЛТ ХИЙГДЛЭЭ</span>
       </div>
 
-      {/* The mockup's ready sits between the countdown and the scramble,
-          so its words are about bringing the scramble out. This one sits
-          after the orientation hold, with the scramble already applied —
-          the layout is the mockup's, the sentence is about where it
-          actually is. */}
-      <p className="oc-solve-ready-title">Бэлэн болмогц ажиглалтаа эхлүүлээрэй</p>
-      {/* Re-pointed, not restyled: the button used to start the solve and
-          now starts the fifteen seconds before it. The layout is
-          untouched. */}
-      <p className="oc-solve-ready-lead">
-        Товч дарсны дараа ковероо авч, 15 секунд шоогоо ажиглах хугацаа явж эхэлнэ. Хугацаа
-        дуусхаас өмнө эвлүүлэлтээ эхлээрэй.
+      {/* THE HEADING CARRIES THE WHOLE SCREEN NOW, and it names the two
+          things the athlete does in order: hide the cube under its cover,
+          then start solving when ready. The lead that used to sit under
+          it is gone — see the note at the top of this file for what went
+          with it. */}
+      <p className="oc-solve-ready-title">
+        Шоогоо коверт нуугаад бэлэн болмогц эвлүүлэлтээ эхлээрэй
       </p>
 
+      {/* Sentence case in the source; .oc-solve-ready-go uppercases it.
+          It says ЭВЛҮҮЛЭЛТЭЭ, not АЖИГЛАЛТАА — the button and the heading
+          now name the same act. */}
       <button type="button" className="oc-solve-ready-go" onClick={onDone}>
-        Ажиглалтаа эхлүүлэх
+        Эвлүүлэлтээ эхлүүлэх
       </button>
     </div>
   );
