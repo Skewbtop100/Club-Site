@@ -313,7 +313,7 @@ console.log('\n  -- 5. the camera hold is ONE component --');
   // its job, and added the hiding that makes the inspection measurable.
   ok('the orientation hold became the cover stage',
     !page.includes("'orientationHold'") && page.includes("{stage === 'cover' && ("));
-  ok('  ...at its own, longer duration', page.includes('<CoverStage seconds={COVER_SECONDS}'));
+  ok('  ...at its own, longer duration', /<CoverStage\s*\n\s*seconds=\{COVER_SECONDS\}/.test(page));
   // All three holds — the timer at zero, the cube's orientation, the timer
   // at the finish — are the same component with the same clock.
   // Two, not three, since cover: the two TIMER holds share the component;
@@ -360,21 +360,13 @@ console.log('\n  -- 5. the camera hold is ONE component --');
     ok('  ...with both colour words still tinted to match the diagrams',
       /color: GREEN \}\}>Ногоон</.test(cover) && /color: WHITE \}\}>цагаан</.test(cover));
 
-    // ── THE FOOTNOTE CARRIES THE DEADLINE, NOT THE ORDER ──
-    // It read "Хугацаа дуусгаад коверт шоогоо нуугаарай" — hide your cube
-    // in the cover — a third imperative on a screen whose instruction
-    // already gives that order and whose video already performs it. What
-    // it says now is the one fact nothing else on the screen states: the
-    // cube must ALREADY be covered when the count reaches zero, because a
-    // cube still on its way in leaves the clip with no visible mark for
-    // the inspection to be measured from.
-    ok('the footnote states the deadline and what follows it',
-      cover.replace(/\s+/g, ' ').includes(
-        'Хугацаа дуусахад шоо аль хэдийн халхлагдсан байх ёстой — дараа нь ажиглалтаа эхлүүлнэ.'));
-    // Comment-stripped: the component quotes the wording it replaced and
-    // explains why, and that explanation contains the old imperative.
-    ok('  ...and is no longer a third imperative',
-      !stripComments(cover).includes('нуугаарай'));
+    // ── THE FOOTNOTE IS GONE, markup and CSS ──
+    // It carried the deadline — the cube must ALREADY be covered when the
+    // count reaches zero — which nothing else on the screen states, and
+    // still does not. That loss is deliberate and recorded in the report,
+    // not silently replaced: nothing was added back to cover it.
+    ok('the footnote is gone entirely',
+      !cover.includes('oc-solve-cover-note') && !theme.includes('.oc-solve-cover-note'));
 
     // ── THE INSTRUCTION VIDEO ──
     // A still diagram says which face goes where; the video says what the
@@ -400,9 +392,38 @@ console.log('\n  -- 5. the camera hold is ONE component --');
     // compete for the camera the run is recording from. MediaRecorder
     // reads the camera TRACK, never a <video> element, so nothing here can
     // reach the clip either.
-    ok('  ...and cannot touch the recording or the camera',
-      !/srcObject|videoRef|getUserMedia|startRecording|stopRecording|recorder/
+    // THE LIVE PREVIEW USES THE RECORDER'S OWN REF, handed in as a prop.
+    // The point is that it attaches the stream the run has been recording
+    // from since the opening hold, rather than asking for a second one.
+    ok('the cover shows the athlete their own camera, live',
+      cover.includes('<video ref={videoRef} className="oc-solve-cover-live"') &&
+        page.includes('videoRef={recorder.videoRef}'));
+    // A SECOND getUserMedia would be a second request for a device the
+    // run already holds. Neither <video> may start, stop or reach the
+    // clip either: MediaRecorder reads the camera TRACK, never an element.
+    ok('  ...without a second getUserMedia, and touching no recording',
+      !/getUserMedia|srcObject|MediaRecorder|startRecording|stopRecording/
         .test(stripComments(cover)));
+    // THE TWO FRAMES MATCH, which is what makes the screen a comparison
+    // rather than two pictures: same 3/4 box, same half of the row.
+    ok('  ...in a frame matching the demonstration beside it',
+      /\.oc-solve-cover-demo,\s*\n\.oc-solve-cover-live \{[\s\S]{0,300}?aspect-ratio: 3 \/ 4;/.test(theme) &&
+        /\.oc-solve-cover-demo,\s*\n\.oc-solve-cover-live \{[\s\S]{0,300}?flex: 1 1 0;/.test(theme));
+    // FIXED, not the stream's own ratio — the holds' rule, not the
+    // lobby's: one object, centred, and `cover` can only ever make the
+    // athlete over-correct.
+    ok('  ...at a fixed ratio, cropped from the centre',
+      /\.oc-solve-cover-demo,\s*\n\.oc-solve-cover-live \{[\s\S]{0,300}?object-fit: cover;/.test(theme) &&
+        /\.oc-solve-cover-demo,\s*\n\.oc-solve-cover-live \{[\s\S]{0,300}?object-position: center center;/.test(theme) &&
+        !stripComments(cover).includes('videoWidth'));
+    // THE COUNT MOVED TO THE BOTTOM. The two frames earn the top of a
+    // short screen; the sentence explains them; the time left is a
+    // readout and belongs after the thing it reads out.
+    ok('  ...under two frames at the top, with the count last',
+      stripComments(cover).indexOf('oc-solve-cover-videos') <
+        stripComments(cover).indexOf('oc-solve-cover-say') &&
+        stripComments(cover).indexOf('oc-solve-cover-say') <
+          stripComments(cover).indexOf('oc-solve-cover-count'));
   }
 }
 
@@ -420,7 +441,7 @@ console.log('\n  -- 7. durations and markers --');
       (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3);
   ok('  ...and the cover has a longer one of its own',
     page.includes('const COVER_SECONDS = 20;') &&
-      page.includes('<CoverStage seconds={COVER_SECONDS}'));
+      /<CoverStage\s*\n\s*seconds=\{COVER_SECONDS\}/.test(page));
   ok('  ...with no bare number at any call site',
     !/seconds=\{\d/.test(page));
   // THE DRIFT THE REFACTOR DID NOT FIX: the sentence names the duration,
@@ -916,7 +937,7 @@ console.log('\n  -- 9. the lobby and the between screen --');
   ok('the 8-second holds did not move',
     page.includes('const HOLD_SECONDS = 8;') && (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3);
   ok('  ...and the cover now runs longer, on its own constant',
-    page.includes('<CoverStage seconds={COVER_SECONDS}'));
+    /<CoverStage\s*\n\s*seconds=\{COVER_SECONDS\}/.test(page));
   ok('the markers are gone and stayed gone', !rec.includes('MARKER_TIMES_MS'));
 }
 
@@ -1091,7 +1112,7 @@ console.log('\n  -- 10. the mockup restyle --');
     /label="ШООГОО ХАРУУЛ · ЭЦСИЙН БАЙДАЛ"[\s\S]{0,1200}?onDone=\{finishRecording\}/.test(page) &&
       !/label="ШООГОО ХАРУУЛ · ЭЦСИЙН БАЙДАЛ"[\s\S]{0,1200}?end=/.test(page));
   ok('  ...and the cover hold too, still auto-advancing',
-    page.includes("<CoverStage seconds={COVER_SECONDS} onDone={() => setStage('readyPrompt')} />"));
+    /<CoverStage[\s\S]{0,300}?onDone=\{\(\) => setStage\('readyPrompt'\)\}/.test(page));
   ok('  ...so "auto" is still what a hold does unless told otherwise',
     hold.includes("end = 'auto',") && hold.includes("end?: 'auto' | { label: string };"));
 
@@ -1366,7 +1387,7 @@ console.log('\n  -- 11. the inspection --');
     !fs.existsSync(path.join(ROOT, SOLVE, '_components/CoverPrepStage.tsx')) &&
       !page.includes('coverPrep') && !page.includes('CoverPrepStage') &&
       !theme.includes('oc-solve-prep'));
-  ok('  ...cover to ready', page.includes("<CoverStage seconds={COVER_SECONDS} onDone={() => setStage('readyPrompt')} />"));
+  ok('  ...cover to ready', /<CoverStage[\s\S]{0,300}?onDone=\{\(\) => setStage\('readyPrompt'\)\}/.test(page));
   // STRAIGHT TO THE SOLVE SCREEN. `count` and `go` sat between these
   // two — three screens for one continuous moment, and the middle one
   // told the athlete when to begin, which WCA does not.

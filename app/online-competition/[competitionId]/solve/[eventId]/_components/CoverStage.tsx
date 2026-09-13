@@ -34,19 +34,25 @@ const GREEN = '#00FF55';
  *  opening hold and runs through this; the only effect here is the clock
  *  that calls onDone.
  *
- *  NO CAMERA PREVIEW, per the mockup: the athlete is looking at their
- *  cube, not at the page. The solve screen brings the camera back.
+ *  TWO FRAMES, SIDE BY SIDE, AND THAT PAIRING IS THE SCREEN. The left
+ *  one is a silent loop of the thing being done; the right one is the
+ *  athlete's own camera, live. They watch how it goes on one side and
+ *  check their own shot on the other, and the comparison only works
+ *  because the two frames are the SAME SHAPE — a demonstration in one
+ *  aspect next to a preview in another is two pictures, not a comparison.
  *
- *  THE ONE <video> ON THIS SCREEN IS A FILE, NOT A CAMERA, and that
- *  distinction is the whole of its safety. It plays /cube-cover.mp4 from
- *  `src`; it never receives `srcObject`, never touches the recorder's
- *  videoRef, and calls no getUserMedia. Playing a file opens no capture
- *  device, so it cannot compete for the camera the run is already
- *  recording from — and MediaRecorder reads the camera TRACK, never a
- *  <video> element, so nothing here can reach the clip either. This
- *  stage still starts and stops no recording. */
+ *  NEITHER <video> CAN REACH THE RECORDING, for two different reasons.
+ *  The left one plays a FILE from `src`: it never receives `srcObject`,
+ *  never touches the recorder's videoRef, and calls no getUserMedia, so
+ *  it opens no capture device and cannot compete for the camera. The
+ *  right one is handed the recorder's OWN callback ref — the same one
+ *  every other preview in the run uses — so it attaches the stream that
+ *  already exists rather than asking for a second one. And MediaRecorder
+ *  reads the camera TRACK, never a <video> element, so neither of them
+ *  can alter the clip. This stage still starts and stops no recording. */
 export default function CoverStage({
   seconds,
+  videoRef,
   onDone,
 }: {
   /** The SAME hold duration as the two timer holds — this stage replaced
@@ -54,6 +60,10 @@ export default function CoverStage({
    *  the run's one clock, so this stage cannot drift from the two timer
    *  holds about how long a hold is. */
   seconds: number;
+  /** The recorder's own callback ref, exactly as the holds get it. NOT a
+   *  second getUserMedia: it attaches the stream the run has been
+   *  recording from since the opening hold. */
+  videoRef: (el: HTMLVideoElement | null) => void;
   onDone: () => void;
 }) {
   // The same clock every other hold uses. This stage used to keep its own
@@ -65,9 +75,20 @@ export default function CoverStage({
 
   return (
     <div className="oc-solve-cover">
-      <div className="oc-solve-cover-count">
-        <span className="oc-solve-cover-n">{remaining}</span>
-        <span className="oc-solve-cover-unit">СЕКУНД</span>
+      {/* THE DEMONSTRATION AND THE ATHLETE'S OWN SHOT, matched frames.
+          Left plays the file; right is the live camera and is the only
+          one holding the recorder's ref. */}
+      <div className="oc-solve-cover-videos">
+        <video
+          className="oc-solve-cover-demo"
+          src="/cube-cover.mp4"
+          autoPlay
+          loop
+          muted
+          playsInline
+          aria-hidden
+        />
+        <video ref={videoRef} className="oc-solve-cover-live" autoPlay playsInline muted />
       </div>
 
       {/* The two colour words stay tinted, as they were: they are the
@@ -79,49 +100,22 @@ export default function CoverStage({
         байрлуулна уу.
       </p>
 
-      {/* THE ONE FACT NOTHING ELSE ON THIS SCREEN CARRIES: the deadline,
-          and what the end of the count brings.
 
-          It said "Хугацаа дуусгаад коверт шоогоо нуугаарай" — hide your
-          cube in the cover — which was a third imperative on a screen
-          whose instruction already gives that order and whose video
-          already performs it. This is not an instruction at all: it is a
-          STATE that has to be true at zero. "аль хэдийн халхлагдсан" —
-          already covered — is the whole point, because a cube still on
-          its way into the cover when the count ends leaves the clip with
-          no visible mark for the inspection to be measured from.
-
-          The verb root recurs, and that is deliberate: it is the deadline
-          ON that action, so it has to name it. What does not recur is the
-          speech act — an order above, a condition here — nor the
-          orientation, nor anything the video shows. */}
-      <p className="oc-solve-cover-note">
-        Хугацаа дуусахад шоо аль хэдийн халхлагдсан байх ёстой — дараа нь ажиглалтаа
-        эхлүүлнэ.
-      </p>
-
-      {/* THE SAME INSTRUCTION, PERFORMED. A still diagram says which face
-          goes where; this says what the hand does, which is the part a
-          first-time athlete gets wrong.
-
-          playsInline AND muted are both required and both set. Without
-          playsInline iOS Safari takes a playing <video> fullscreen, which
-          would cover the run mid-attempt; without muted the browser
-          blocks autoplay outright and the athlete gets a still frame.
-          The file itself carries no audio track, so muted costs nothing.
-
-          aria-hidden: it is a silent loop demonstrating exactly what the
-          sentence above already says. A screen reader that announced it
-          would be repeating the instruction as an unlabelled video. */}
-      <video
-        className="oc-solve-cover-demo"
-        src="/cube-cover.mp4"
-        autoPlay
-        loop
-        muted
-        playsInline
-        aria-hidden
-      />
+      {/* THE COUNT SITS LAST. The two frames are what the athlete is
+          looking at and they earn the top of a short screen; the sentence
+          explains them; the time left is a readout, and a readout belongs
+          after the thing it is a readout for. It also keeps the frames
+          hard against the bar, which is where they are most visible on a
+          phone.
+          playsInline AND muted on the demonstration above are both
+          required: without playsInline iOS Safari takes a playing <video>
+          fullscreen and covers the run mid-attempt, and without muted the
+          browser blocks autoplay outright and the athlete gets a still
+          frame. The file carries no audio track, so muted costs nothing. */}
+      <div className="oc-solve-cover-count">
+        <span className="oc-solve-cover-n">{remaining}</span>
+        <span className="oc-solve-cover-unit">СЕКУНД</span>
+      </div>
     </div>
   );
 }

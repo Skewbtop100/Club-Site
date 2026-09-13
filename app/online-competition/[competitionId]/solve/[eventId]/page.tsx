@@ -1491,7 +1491,12 @@ export default function SolvePage() {
             holds: this stage took over orientationHold's duration along
             with its job. */}
         {stage === 'cover' && (
-          <CoverStage seconds={COVER_SECONDS} onDone={() => setStage('readyPrompt')} />
+          <CoverStage
+            seconds={COVER_SECONDS}
+            /* The run's existing stream, not a second request for it. */
+            videoRef={recorder.videoRef}
+            onDone={() => setStage('readyPrompt')}
+          />
         )}
 
         {/* The single go-ahead. It starts the INSPECTION now, not the
