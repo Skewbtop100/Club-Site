@@ -405,13 +405,25 @@ console.log('\n  -- 5. the camera hold is ONE component --');
     ok('  ...without a second getUserMedia, and touching no recording',
       !/getUserMedia|srcObject|MediaRecorder|startRecording|stopRecording/
         .test(stripComments(cover)));
-    // ACROSS THE TOP, at 40% of the column, and cropped LOW. A solve
-    // happens low in the camera's frame — cube, cover and hands on the
-    // mat — while the top of the shot is wall and the athlete's own
-    // face. Centre-cropping a wide band out of a portrait phone stream
-    // would spend most of the band on that.
-    ok('  ...cropped toward the bottom of the frame, not the centre',
-      /\.oc-solve-cover-live \{\s*\n\s*object-position: center 75%;/.test(theme));
+    // ACROSS THE TOP, at 40% of the column, AND PINNED TO THE FRAME'S
+    // LOWER EDGE. This band is where the athlete checks their whole cube
+    // is in shot, and the lower edge is the only thing that tells them.
+    //
+    // ANY VALUE SHORT OF THE BOTTOM CUTS IT. `center 75%` was here, and
+    // it lost 9.1% of frame height off the bottom on a 3/4 stream at
+    // 375x812 and 15.5% on a 9/16 one — the cube and the cover were what
+    // was in it. The band is short and wide (1.18-1.48) while a phone
+    // streams portrait, so the height ALWAYS overflows and the only
+    // vertical position that cannot eat the bottom is the bottom.
+    //
+    // Asserted as the property, not the spelling: `bottom` and `100%`
+    // are the same declaration and either is fine, anything else is not.
+    ok('  ...pinned to the bottom of the frame, so the lower edge survives',
+      (() => {
+        const m = theme.match(/\.oc-solve-cover-live \{\s*\n\s*object-position: center ([a-z0-9.%]+);/);
+        if (!m) return false;
+        return m[1] === 'bottom' || parseFloat(m[1]) === 100;
+      })());
     // THE DEMONSTRATION'S CROP MUST NOT REACH THE CUBE, and this is
     // arithmetic rather than a pinned string, so it still holds if the
     // band's ratio changes.

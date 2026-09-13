@@ -1924,16 +1924,39 @@
   height: 100%;
   object-fit: cover;
 }
-/* THE LIVE CROP LOOKS DOWN. A solve happens LOW in the camera's frame —
-   the cube, the cover and the hands are on the mat, and the top of the
-   shot is wall and the athlete's own face. Centre-cropping a wide band
-   out of a portrait phone stream would spend most of the band on that.
-   `center 75%` slides the visible window three quarters of the way down
-   the overflow: it keeps the mat and the hands and gives up the wall,
-   without going all the way to `bottom`, which would start eating the
-   near edge of the table instead. */
+/* THE LIVE CROP GOES ALL THE WAY DOWN, and the point of it is the frame's
+   BOTTOM EDGE rather than any particular subject. This band is where the
+   athlete checks that their whole cube is in shot, and the only thing
+   that can tell them so is the lower edge: a band that stops short of it
+   shows a cube that looks fine and may not be.
+
+   `center 75%` DID NOT DO THAT. It was picked to keep the mat and drop
+   the wall, on the assumption the subject sat around three quarters down.
+   On a real phone it sits lower, and 75% cut the bottom of the frame off
+   — measured, across every stream shape the constraints can return:
+   9.1% lost off the bottom on a 3/4 portrait stream at 375x812, 12.4% at
+   360x640, and 15.5% on a 9/16 one. The cube and the cover are exactly
+   what was in it.
+
+   `bottom` is the only value that cannot do that. It pins the window to
+   the source's lower edge, so the loss is entirely at the top no matter
+   what the box or the stream turn out to be — and the top is the wall
+   and the athlete's own face. What goes: about 37% of frame height on a
+   3/4 stream at 375x812 and 49% at 360x640, rising to 52-62% on a 9/16
+   stream; on a landscape 4/3 webcam, 10% or nothing at all, since a wide
+   source in this band often has no vertical overflow to slide.
+
+   NOT THE SOLVE SCREEN'S VALUE, and they should not be made to match.
+   .oc-solve-rec-feed is `center center`, but its box is PORTRAIT and
+   tall (0.56-0.73 against this band's 1.18-1.48), so a portrait stream
+   covers it by matching WIDTH and the full height survives — its
+   object-position has no vertical effect to have. Copying `center` here,
+   where the band is short and wide and the height always overflows,
+   would put the cut back on both edges and lose the bottom again. The
+   two screens share the rule (never lose the lower edge), not the
+   value: rec gets it from its shape, this band has to ask for it. */
 .oc-solve-cover-live {
-  object-position: center 75%;
+  object-position: center bottom;
 }
 /* THE DEMONSTRATION CROP LOOKS UP, and this number is measured, not
    judged by eye. Its source is 720x720 square in a 3/2 band, so `cover`
