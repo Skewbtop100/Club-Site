@@ -329,8 +329,8 @@ console.log('\n  -- 5. the camera hold is ONE component --');
     const labels = (page.match(/label="([^"]+)"/g) ?? []).map((m) => m.slice(7, -1));
     ok('  ...each labelled for what it asks for', labels.length === 3 && new Set(labels).size === 3,
       labels.join(' | '));
-    ok('  ...the timer holds say which side of the solve they are on',
-      labels.includes('ЦАГАА ХАРУУЛ · ЭХЛЭХИЙН ӨМНӨ') && labels.includes('ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА'));
+    ok('  ...the timer holds name the timer',
+      labels.includes('ЦАГАА ХАРУУЛАХ ХЭСЭГ') && labels.includes('ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА'));
     // The third is the only hold whose subject is the cube rather than
     // a clock, and says so.
     ok('  ...and the cube check names the cube, not a timer',
@@ -387,7 +387,7 @@ console.log('\n  -- 7. durations and markers --');
   ok('  ...under the SAME stage name, so every transition still lands',
     page.includes("{stage === 'zeroDisplay' && (") && (page.match(/setStage\([^)]*zeroDisplay/g) ?? []).length === 2);
   ok('  ...showing the athlete their own timer at 0.00',
-    /Хугацаа хэмжигчийг 0\.00 болгосон байдалтай цаг дуустал камерлуу харуулна уу\./.test(page));
+    /Цагийг 0\.00 болгож, хугацаа дуустал камерт харуулна уу\./.test(page));
 
   // THE 8/12/15 CUES ARE BACK, AND SOMEWHERE ELSE. They were removed
   // when a dedicated inspection countdown made them misleading — they
@@ -995,8 +995,21 @@ console.log('\n  -- 10. the mockup restyle --');
   // THE SECONDS ARE EVIDENCE. The button cannot be pressed early, and it
   // is gated on the DISPLAYED count rather than a second timer of its
   // own — a throttled background tab then enables it late, never early.
+  // STRONGER THAN IT WAS. The button used to render throughout and lean
+  // on `disabled={!done}`; it does not exist at all until `done` now, so
+  // there is nothing to press early rather than something inert to
+  // press. Comment-stripped, because the component explains the
+  // attribute it replaced and that explanation contains it.
   ok('  ...and cannot be pressed before the time runs out',
-    hold.includes('disabled={!done}'));
+    /\{done \? \(\s*\n\s*<button type="button" className="oc-solve-hold-go" onClick=\{onDone\}>/.test(hold) &&
+      !stripComments(hold).includes('disabled='));
+  // Either way the decision is the real-time timeout, never the ticking
+  // number — an interval that drifts or is throttled could open a gate
+  // early; a timeout can only fire late.
+  ok('  ...off the timeout, not the displayed number',
+    hold.includes('const { remaining, done } = useHoldClock(') &&
+      !stripComments(hold).includes('remaining === 0') &&
+      !stripComments(hold).includes('remaining > 0'));
   // A hold that waits for a press hands useHoldClock no onElapsed at
   // all, so there is no second timer able to advance it behind the
   // button.
@@ -1021,20 +1034,43 @@ console.log('\n  -- 10. the mockup restyle --');
     hold.includes("end = 'auto',") && hold.includes("end?: 'auto' | { label: string };"));
 
   // ── THE TIMER CHECK'S LAYOUT ──
-  // The sentence is the task and the count is how long it lasts; leading
-  // with the number asked the athlete to read a clock before they knew
-  // what it was for.
-  ok('the timer check leads with its instruction, not its count',
-    page.includes('layout="instruction-first"') &&
-      hold.includes("{layout === 'instruction-first' ? say : count}"));
-  ok('  ...and the closing hold still leads with the count',
-    (page.match(/layout="instruction-first"/g) ?? []).length === 1 &&
-      hold.includes("layout = 'count-first',"));
+  // ITS CLOCK IS AT THE BOTTOM, in the slot the button will take. One
+  // element becomes the other in one place, so "the wait is over" is a
+  // single change where the athlete is already looking — not a number
+  // going quiet at the top while something lights up at the bottom.
+  ok('the timer check puts its count in the slot the button will take',
+    hold.includes('{!waitsForPress && count}') &&
+      /<div className="oc-solve-hold-slot">[\s\S]{0,300}?done \?[\s\S]{0,300}?oc-solve-hold-go[\s\S]{0,300}?\) : \(\s*\n\s*count\s*\n\s*\)/.test(hold));
+  // The swap must not reflow the column: a button that arrives 20px
+  // from where the count was is a button that moves out from under a
+  // thumb at the moment it becomes pressable.
+  ok('  ...in a slot whose height does not change when they swap',
+    /\.oc-solve-hold-slot \{[\s\S]{0,300}?min-height: 56px;/.test(theme));
+  // WHICH LEAVES ONLY THE INSTRUCTION ABOVE THE PREVIEW, so `layout`
+  // had nothing left to choose and went with it.
+  ok('  ...leaving no layout prop to pick between them',
+    !stripComments(hold).includes('layout') && !page.includes('layout="'));
+  // THE TWO AUTO HOLDS ARE UNTOUCHED. Nothing on their screen is going
+  // to change when the count ends except the screen itself, so there is
+  // no slot for the clock to share and it stays at the top.
+  ok('  ...while an auto hold still leads with its count',
+    hold.includes('{!waitsForPress && count}'));
   // THE PREVIEW MAY CROP HERE — different job from the lobby's. The
   // athlete is centring one object, so the centre of the frame is the
   // whole question. Centred ON PURPOSE rather than by `cover`'s default,
   // and display-only: MediaRecorder reads the raw track, never a
   // stylesheet, so what is recorded is the full frame either way.
+  // THE PREVIEW TOOK THE COUNT'S HEIGHT. At 375px the 4/3 box is
+  // limited by WIDTH — it is already the full column — so freeing
+  // vertical space buys it nothing unless the shape changes too. Square
+  // is taller at the same width, and crops a phone's portrait stream
+  // LESS rather than more, which is the stream this hold usually sees.
+  ok('the timer check\u2019s preview is taller than the other holds\u2019',
+    hold.includes("waitsForPress ? ' oc-solve-hold-cam-tall' : ''") &&
+      /\.oc-solve-hold-cam-tall \{[\s\S]{0,200}?aspect-ratio: 1 \/ 1;/.test(theme));
+  ok('  ...and the two auto holds keep the 4/3 box',
+    /\.oc-solve-hold-cam \{[\s\S]{0,400}?aspect-ratio: 4 \/ 3;/.test(theme) &&
+      (page.match(/oc-solve-hold-cam-tall/g) ?? []).length === 0);
   ok('the hold preview crops from the centre, deliberately',
     /\.oc-solve-hold-cam \.oc-solve-camera-video \{\s*\n\s*object-position: center center;/.test(theme) &&
       /\.oc-solve-camera-video \{[\s\S]{0,160}?object-fit: cover;/.test(theme));

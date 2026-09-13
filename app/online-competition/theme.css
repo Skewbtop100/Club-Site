@@ -1844,6 +1844,20 @@
   letter-spacing: -0.01em;
   max-width: 520px;
 }
+/* THE SLOT AT THE BOTTOM OF A BUTTON HOLD: the count, and then the way
+   out, one replacing the other in one place. A fixed minimum height so
+   the swap changes what is in the slot and never how tall it is — a
+   column that reflows at the moment the athlete is told they may go is a
+   column that moves the button out from under their thumb. */
+.oc-solve-hold-slot {
+  width: 100%;
+  max-width: 460px;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 /* THE HOLD'S PREVIEW MAY CROP, unlike the lobby's.
    Different job, so a different rule. The lobby is where the athlete
    frames the shot, so its preview must show every pixel that will be
@@ -1871,6 +1885,17 @@
 }
 .oc-solve-hold-cam .oc-solve-camera-video {
   object-position: center center;
+}
+/* ONLY THE HOLD THAT MOVED ITS COUNT. That screen has the count's height
+   going spare, and at 375px the 4/3 box is limited by WIDTH — it is
+   already the full column — so freeing vertical space buys it nothing
+   unless the shape changes too. Square is the change: it is taller at the
+   same width, and it crops a phone's portrait stream LESS rather than
+   more, which is the stream this hold is usually looking at.
+   The two auto-advancing holds keep the 4/3 box above, untouched. */
+.oc-solve-hold-cam-tall {
+  aspect-ratio: 1 / 1;
+  max-height: 52vh;
 }
 .oc-solve-hold-cam .oc-solve-camera-video {
   position: absolute;

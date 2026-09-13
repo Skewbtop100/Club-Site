@@ -32,18 +32,28 @@ import { useHoldClock } from '../_lib/useHoldClock';
  *  What the three holds share with it is the CLOCK (useHoldClock), not
  *  the presentation.
  *
- *  `layout` and `end` vary AROUND that count, and only they do. The timer
- *  check before an attempt leads with its instruction and ends on a
- *  button; the closing hold leads with the count and advances itself.
- *  They are passed explicitly rather than inferred from `label`, so a
- *  call site says which it is instead of a reader having to work it
- *  out. */
+ *  WHERE THE COUNT SITS FOLLOWS FROM `end`, and there is no separate
+ *  prop for it any more.
+ *
+ *  A hold that ADVANCES ITSELF puts the count at the top: nothing else on
+ *  the screen is going to change, so the clock leads.
+ *
+ *  A hold that ENDS ON A BUTTON puts the count in the button's slot at the
+ *  bottom, and the button replaces it there when the time is up. One
+ *  element becomes the other in one place, so "the wait is over" is a
+ *  single change in a spot the athlete is already watching rather than a
+ *  number going quiet at the top while something lights up at the bottom.
+ *  It also gives the preview the height the count was using, which is the
+ *  thing the athlete is actually looking at.
+ *
+ *  That is why `layout` is gone: with the count at the bottom, the only
+ *  thing left above the preview is the instruction, so "instruction-first"
+ *  had nothing left to choose. */
 export default function CameraHoldStage({
   seconds,
   label,
   instruction,
   footnote,
-  layout = 'count-first',
   end = 'auto',
   videoRef,
   onDone,
@@ -69,15 +79,8 @@ export default function CameraHoldStage({
    *  on a button that names where it goes, which said the same thing
    *  twice. */
   footnote: string | null;
-  /** Which block leads.
-   *  'count-first'       — the count, then the instruction (the closing hold).
-   *  'instruction-first' — the instruction, then the count. For the timer
-   *                        check, where the sentence is the task and the
-   *                        count is how long it lasts; leading with the
-   *                        number asked the athlete to read the clock
-   *                        before they knew what it was for. */
-  layout?: 'count-first' | 'instruction-first';
-  /** How the hold ends.
+  /** How the hold ends. Also decides where the count sits — see the
+   *  note at the top of this file.
    *  'auto'    — advances itself the instant the count reaches zero.
    *  { label } — shows that button and WAITS. Used where the athlete has
    *              something physical to do between the hold and the next
@@ -100,14 +103,20 @@ export default function CameraHoldStage({
       <span className="oc-solve-hold-unit">СЕКУНД</span>
     </div>
   );
-  const say = <p className="oc-solve-hold-say">{instruction(seconds)}</p>;
 
   return (
     <div className="oc-solve-hold">
-      {layout === 'instruction-first' ? say : count}
-      {layout === 'instruction-first' ? count : say}
+      {/* An auto hold's clock leads. A button hold's is at the bottom,
+          in the slot the button will take. */}
+      {!waitsForPress && count}
 
-      <div className="oc-solve-hold-cam">
+      <p className="oc-solve-hold-say">{instruction(seconds)}</p>
+
+      {/* TALLER ON THE HOLD THAT MOVED ITS COUNT, and only there: that
+          screen has the count's height going spare, and the preview is
+          what the athlete is looking at. The other two holds are
+          untouched — same box, same 4/3. */}
+      <div className={`oc-solve-hold-cam${waitsForPress ? ' oc-solve-hold-cam-tall' : ''}`}>
         <video ref={videoRef} autoPlay playsInline muted className="oc-solve-camera-video" />
         <span className="oc-solve-hold-caption">{label}</span>
         <span className="oc-solve-hold-corner oc-solve-hold-corner-tl" aria-hidden />
@@ -118,24 +127,29 @@ export default function CameraHoldStage({
 
       {footnote !== null && <p className="oc-solve-hold-next">{footnote}</p>}
 
-      {/* THE HOLD IS EVIDENCE. The button cannot be pressed before the
-          time runs out, because the seconds in front of the camera are
-          the thing a judge measures — a hold the athlete could cut short
-          is not a hold.
-          Gated on useHoldClock's `done` — a single real-time timeout —
-          and NOT on the displayed number reaching zero. An interval that
-          drifts or is throttled could otherwise open the gate early,
-          whereas a timeout can only fire late, and late is the only
-          direction worth failing in for something that is evidence. */}
+      {/* THE SLOT: the clock, and then the way out, in one place.
+          THE HOLD IS EVIDENCE, and the gate is unchanged in strength —
+          it is STRONGER. The button used to render throughout and lean on
+          `disabled={!done}`; now it does not exist until `done`, so there
+          is nothing to press early rather than something inert to press.
+          Either way the decision is useHoldClock's `done` — a single
+          real-time timeout — and NOT the displayed number reaching zero.
+          An interval that drifts or is throttled could open a gate early;
+          a timeout can only fire late, and late is the only direction
+          worth failing in for something a judge measures.
+          The slot never empties: before `done` it holds the count, so the
+          athlete watches the wait end in the exact spot the way out will
+          appear. */}
       {end !== 'auto' && (
-        <button
-          type="button"
-          className="oc-solve-hold-go"
-          disabled={!done}
-          onClick={onDone}
-        >
-          {end.label}
-        </button>
+        <div className="oc-solve-hold-slot">
+          {done ? (
+            <button type="button" className="oc-solve-hold-go" onClick={onDone}>
+              {end.label}
+            </button>
+          ) : (
+            count
+          )}
+        </div>
       )}
     </div>
   );

@@ -1461,14 +1461,11 @@ export default function SolvePage() {
         {stage === 'zeroDisplay' && (
           <CameraHoldStage
             seconds={HOLD_SECONDS}
-            label="ЦАГАА ХАРУУЛ · ЭХЛЭХИЙН ӨМНӨ"
-            instruction={() =>
-              'Хугацаа хэмжигчийг 0.00 болгосон байдалтай цаг дуустал камерлуу харуулна уу.'
-            }
+            label="ЦАГАА ХАРУУЛАХ ХЭСЭГ"
+            instruction={() => 'Цагийг 0.00 болгож, хугацаа дуустал камерт харуулна уу.'}
             /* The button names where it goes, so the footnote that said
                the same thing is gone. */
             footnote={null}
-            layout="instruction-first"
             end={{ label: 'ХОЛИЛТ ХАРАХ' }}
             videoRef={recorder.videoRef}
             onDone={() => setStage('scrambleReveal')}
