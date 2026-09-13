@@ -1,7 +1,39 @@
 import { NextResponse } from 'next/server';
 import { isOnlineCompAdmin } from '@/lib/online-competition/admin-auth';
 import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
-import type { OnlineSubmissionAdminView, OnlineSubmissionStatus } from '@/lib/online-competition/types';
+import type {
+  OnlineSubmissionAdminView,
+  OnlineSubmissionStatus,
+  SolveMarks,
+} from '@/lib/online-competition/types';
+
+/** The five stage marks, in the order they occur. Listed rather than
+ *  spread from the stored map so a key nobody expects cannot reach the
+ *  review UI: this route reads through the Admin SDK, which bypasses
+ *  firestore.rules entirely, so the map's shape is not guaranteed here
+ *  the way it is on create. */
+const MARK_KEYS = [
+  'scrambleShown',
+  'solveStart',
+  'solveEnd',
+  'cubeShown',
+  'recordingEnd',
+] as const satisfies readonly (keyof SolveMarks)[];
+
+/** Stage marks as the review UI can trust them: known keys, finite
+ *  non-negative numbers, and `undefined` rather than `{}` when there is
+ *  nothing usable — so "no marks recorded" is one condition downstream
+ *  instead of three. */
+function readMarks(value: unknown): Partial<SolveMarks> | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const src = value as Record<string, unknown>;
+  const out: Partial<SolveMarks> = {};
+  for (const key of MARK_KEYS) {
+    const v = src[key];
+    if (typeof v === 'number' && Number.isFinite(v) && v >= 0) out[key] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
 
 const VALID_STATUSES: OnlineSubmissionStatus[] = ['pending', 'approved', 'rejected'];
 
@@ -58,6 +90,7 @@ export async function GET(req: Request) {
       isDnf: data.isDnf ?? false,
       penalty: data.penalty ?? null,
       status: data.status,
+      marks: readMarks(data.marks),
       createdAt: data.createdAt?.toMillis?.() ?? null,
     };
   });

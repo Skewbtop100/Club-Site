@@ -818,6 +818,16 @@ export interface OnlineSubmissionAdminView {
   isDnf?: boolean;
   penalty: OnlineSubmissionPenalty;
   status: OnlineSubmissionStatus;
+  /** Stage offsets into the video, in ms — see SolveMarks. Carried
+   *  through unchanged (they are already plain numbers, so unlike the
+   *  Timestamps around them there is nothing to convert).
+   *
+   *  ABSENT IS THE COMMON CASE and always will be: every submission filed
+   *  before marks existed has none, and the field is optional going
+   *  forward too. The review UI must read this as "no jump targets", not
+   *  as an error — see the jump row in SubmissionDetailPanel. Individual
+   *  keys can be missing independently of each other. */
+  marks?: Partial<SolveMarks>;
   createdAt: number | null;
 }
 

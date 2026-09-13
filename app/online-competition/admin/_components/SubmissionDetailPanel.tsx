@@ -1,10 +1,37 @@
 'use client';
 
-import { useState } from 'react';
-import type { OnlineSubmissionAdminView } from '@/lib/online-competition/types';
+import { useRef, useState } from 'react';
+import type { OnlineSubmissionAdminView, SolveMarks } from '@/lib/online-competition/types';
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
 
 type ReviewAction = 'approve' | 'approve_plus2' | 'dnf';
+
+// ── Jumping to the moments a judge actually watches ────────────────────
+// The clip runs about ninety seconds and four of them matter: the
+// scramble going on, the solve starting, the timer being shown, the cube
+// being shown. Finding those by dragging a scrubber is the slowest part
+// of judging a round, and the submission already knows where they are —
+// `marks` stores each stage press as a millisecond offset into the video
+// (SolveMarks in types.ts).
+//
+// THE +3s ON THREE OF THEM IS NOT PADDING FOR ITS OWN SAKE. A mark names
+// the instant a button was PRESSED, which is the instant a stage BEGAN —
+// and for the three holds, what a judge needs to see is the thing being
+// held up, which is not yet in frame at that instant. The athlete is
+// still moving their hands at +0. Three seconds into an eight-second hold
+// is the middle of it: the timer (or the cube) is up, steady, and being
+// shown deliberately. `solveStart` takes no offset because it is the
+// opposite kind of moment — not a hold to settle into but an act to
+// catch, and the interesting frame is the one where the cover comes off.
+const JUMPS: { label: string; key: keyof SolveMarks | null; offsetMs: number }[] = [
+  // No key at all: the top of the file is where it is regardless of what
+  // was recorded, so this one needs nothing from `marks` to be correct.
+  { label: 'ЭХЛЭЛ', key: null, offsetMs: 0 },
+  { label: 'ХОЛИЛТ', key: 'scrambleShown', offsetMs: 3000 },
+  { label: 'ЭВЛҮҮЛЭХ', key: 'solveStart', offsetMs: 0 },
+  { label: 'ЦАГ', key: 'solveEnd', offsetMs: 3000 },
+  { label: 'ШОО', key: 'cubeShown', offsetMs: 3000 },
+];
 
 /** Inline attempt-review panel — the video treatment and the three
  *  decision actions are the same ones the old card-list ReviewDashboard
@@ -33,6 +60,55 @@ export default function SubmissionDetailPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  const marks = submission.marks;
+
+  /** Where this button should land, in MILLISECONDS, or null when the
+   *  mark it depends on was never recorded. Null is what disables the
+   *  button — the one guard that keeps a missing mark from becoming a
+   *  NaN seek. */
+  function targetMs(jump: (typeof JUMPS)[number]): number | null {
+    if (jump.key === null) return jump.offsetMs;
+    const at = marks?.[jump.key];
+    if (typeof at !== 'number' || !Number.isFinite(at)) return null;
+    return at + jump.offsetMs;
+  }
+
+  // Nothing usable at all: no field (every submission from before marks
+  // existed), or a map that came back empty. The API already collapses
+  // both to undefined, so this is one condition rather than three.
+  const noMarks = !marks || JUMPS.every((j) => j.key !== null && targetMs(j) === null);
+
+  /** Seeks and plays. MILLISECONDS IN, seconds out — currentTime is in
+   *  seconds and handing it a millisecond figure would seek ninety
+   *  seconds into a clip that is ninety seconds long, i.e. silently to
+   *  the end, which is why the conversion happens here and once. */
+  function jumpTo(ms: number) {
+    const el = videoRef.current;
+    if (el === null) return;
+
+    let seconds = ms / 1000;
+
+    // CLAMP. A mark can legitimately sit past the end of the file: the
+    // marks are measured from the recorder's own clock, and a truncated
+    // upload (a dropped connection, a stream that died mid-attempt) makes
+    // a shorter video than the run it recorded. Seeking past the end
+    // leaves most browsers parked on the last frame with the controls in
+    // a confusing state; landing just inside it plays the little there is.
+    // `duration` is NaN until metadata loads, so it is only trusted once
+    // it is a real positive number.
+    const duration = el.duration;
+    if (Number.isFinite(duration) && duration > 0 && seconds > duration - 0.1) {
+      seconds = duration - 0.1;
+    }
+    if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
+
+    el.currentTime = seconds;
+    // A play() interrupted by the next seek rejects; that is ordinary use
+    // of these buttons, not an error worth surfacing to a judge.
+    void el.play().catch(() => {});
+  }
 
   async function act(action: ReviewAction) {
     setBusy(true);
@@ -58,11 +134,74 @@ export default function SubmissionDetailPanel({
       <div style={{ padding: 16 }}>
         <div className="aspect-[3/4] w-full overflow-hidden" style={{ border: '1px solid #2A2A31' }}>
           <video
+            ref={videoRef}
             src={submission.videoUrl}
             controls
             playsInline
             className="h-full w-full bg-black object-contain"
           />
+        </div>
+
+        {/* ── The jump row ──
+            NAVIGATION, NOT A DECISION, and it is styled to say so. The
+            three buttons below the fold commit a verdict and wear the
+            palette that goes with it — green, amber, red, one per
+            outcome. These move the playhead and nothing else, so they
+            take the muted border and text this file already uses for its
+            non-committal actions (the ҮГҮЙ cancel), at the same height
+            and gap as the decision row. A judge should never have to
+            look twice to tell which row changes a result.
+
+            Read-only in the strictest sense: nothing here writes, and
+            nothing here can reach the review actions. */}
+        {noMarks && (
+          <p
+            style={{
+              marginTop: 12,
+              font: '400 10px var(--oc-font-mono), monospace',
+              letterSpacing: '.06em',
+              color: '#6E6A62',
+            }}
+          >
+            Энэ бичлэгт үе шатын цаг бүртгэгдээгүй
+          </p>
+        )}
+        {/* flexWrap, so five labels become two rows on a narrow screen
+            rather than a horizontal scrollbar under the video. Each
+            button may grow but starts from its content width, which keeps
+            the wrap points at sensible places instead of stretching one
+            orphan across a whole row. */}
+        <div style={{ marginTop: noMarks ? 8 : 12, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {JUMPS.map((jump) => {
+            const ms = targetMs(jump);
+            // Two ways to be dead, and they are deliberately different
+            // questions: this submission has no marks at all (the whole
+            // row goes, including ЭХЛЭЛ, because the row as a whole has
+            // nothing to offer), or this ONE mark is missing while its
+            // neighbours are fine.
+            const disabled = noMarks || ms === null;
+            return (
+              <button
+                key={jump.label}
+                type="button"
+                disabled={disabled}
+                onClick={() => ms !== null && jumpTo(ms)}
+                style={{
+                  flex: '1 1 auto',
+                  border: '1px solid #2A2A31',
+                  background: 'transparent',
+                  color: '#9A958A',
+                  padding: 12,
+                  font: '600 11px var(--oc-font-mono), monospace',
+                  letterSpacing: '.08em',
+                  cursor: disabled ? 'not-allowed' : 'pointer',
+                  opacity: disabled ? 0.4 : 1,
+                }}
+              >
+                {jump.label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
