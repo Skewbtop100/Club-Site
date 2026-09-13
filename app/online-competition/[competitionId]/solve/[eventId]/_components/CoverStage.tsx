@@ -34,12 +34,16 @@ const GREEN = '#00FF55';
  *  opening hold and runs through this; the only effect here is the clock
  *  that calls onDone.
  *
- *  TWO FRAMES, SIDE BY SIDE, AND THAT PAIRING IS THE SCREEN. The left
- *  one is a silent loop of the thing being done; the right one is the
- *  athlete's own camera, live. They watch how it goes on one side and
- *  check their own shot on the other, and the comparison only works
- *  because the two frames are the SAME SHAPE — a demonstration in one
- *  aspect next to a preview in another is two pictures, not a comparison.
+ *  THREE BANDS, STACKED. The athlete's own camera across the top, the
+ *  sentence under it, and the demonstration filling everything below.
+ *  Side by side, each frame got half a phone's width; stacked, each gets
+ *  all of it — and the two are doing different jobs at different moments
+ *  anyway. The live band is where they check their own shot; the
+ *  demonstration is where they look to see how it goes.
+ *
+ *  EACH BAND CROPS TOWARD ITS OWN SUBJECT, and the two crops point
+ *  different ways on purpose — see .oc-solve-cover-live and
+ *  .oc-solve-cover-demo for what each keeps and what it gives up.
  *
  *  NEITHER <video> CAN REACH THE RECORDING, for two different reasons.
  *  The left one plays a FILE from `src`: it never receives `srcObject`,
@@ -75,19 +79,9 @@ export default function CoverStage({
 
   return (
     <div className="oc-solve-cover">
-      {/* THE DEMONSTRATION AND THE ATHLETE'S OWN SHOT, matched frames.
-          Left plays the file; right is the live camera and is the only
-          one holding the recorder's ref. */}
-      <div className="oc-solve-cover-videos">
-        <video
-          className="oc-solve-cover-demo"
-          src="/cube-cover.mp4"
-          autoPlay
-          loop
-          muted
-          playsInline
-          aria-hidden
-        />
+      {/* THE ATHLETE'S OWN SHOT, across the top. The only element on this
+          screen holding the recorder's ref. */}
+      <div className="oc-solve-cover-band">
         <video ref={videoRef} className="oc-solve-cover-live" autoPlay playsInline muted />
       </div>
 
@@ -101,20 +95,33 @@ export default function CoverStage({
       </p>
 
 
-      {/* THE COUNT SITS LAST. The two frames are what the athlete is
-          looking at and they earn the top of a short screen; the sentence
-          explains them; the time left is a readout, and a readout belongs
-          after the thing it is a readout for. It also keeps the frames
-          hard against the bar, which is where they are most visible on a
-          phone.
-          playsInline AND muted on the demonstration above are both
-          required: without playsInline iOS Safari takes a playing <video>
-          fullscreen and covers the run mid-attempt, and without muted the
-          browser blocks autoplay outright and the athlete gets a still
-          frame. The file carries no audio track, so muted costs nothing. */}
-      <div className="oc-solve-cover-count">
-        <span className="oc-solve-cover-n">{remaining}</span>
-        <span className="oc-solve-cover-unit">СЕКУНД</span>
+      {/* THE DEMONSTRATION, filling everything under the sentence, with
+          the count laid into the corner of it.
+
+          WHY THE CORNER. That frame's bottom right is the emptiest part
+          of either picture — the subject is stacked up the middle — so
+          the count costs nothing there, and it stops being a band of its
+          own that the two videos have to share height with.
+
+          playsInline AND muted are both required on it: without
+          playsInline iOS Safari takes a playing <video> fullscreen and
+          covers the run mid-attempt, and without muted the browser blocks
+          autoplay outright and the athlete gets a still frame. The file
+          carries no audio track, so muted costs nothing. */}
+      <div className="oc-solve-cover-band oc-solve-cover-band-demo">
+        <video
+          className="oc-solve-cover-demo"
+          src="/cube-cover.mp4"
+          autoPlay
+          loop
+          muted
+          playsInline
+          aria-hidden
+        />
+        <div className="oc-solve-cover-count">
+          <span className="oc-solve-cover-n">{remaining}</span>
+          <span className="oc-solve-cover-unit">СЕКУНД</span>
+        </div>
       </div>
     </div>
   );

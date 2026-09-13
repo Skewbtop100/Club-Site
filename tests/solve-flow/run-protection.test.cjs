@@ -404,18 +404,25 @@ console.log('\n  -- 5. the camera hold is ONE component --');
     ok('  ...without a second getUserMedia, and touching no recording',
       !/getUserMedia|srcObject|MediaRecorder|startRecording|stopRecording/
         .test(stripComments(cover)));
-    // THE TWO FRAMES MATCH, which is what makes the screen a comparison
-    // rather than two pictures: same 3/4 box, same half of the row.
-    ok('  ...in a frame matching the demonstration beside it',
-      /\.oc-solve-cover-demo,\s*\n\.oc-solve-cover-live \{[\s\S]{0,300}?aspect-ratio: 3 \/ 4;/.test(theme) &&
-        /\.oc-solve-cover-demo,\s*\n\.oc-solve-cover-live \{[\s\S]{0,300}?flex: 1 1 0;/.test(theme));
-    // FIXED, not the stream's own ratio — the holds' rule, not the
-    // lobby's: one object, centred, and `cover` can only ever make the
-    // athlete over-correct.
-    ok('  ...at a fixed ratio, cropped from the centre',
-      /\.oc-solve-cover-demo,\s*\n\.oc-solve-cover-live \{[\s\S]{0,300}?object-fit: cover;/.test(theme) &&
-        /\.oc-solve-cover-demo,\s*\n\.oc-solve-cover-live \{[\s\S]{0,300}?object-position: center center;/.test(theme) &&
-        !stripComments(cover).includes('videoWidth'));
+    // ACROSS THE TOP, at 40% of the column, and cropped LOW. A solve
+    // happens low in the camera's frame — cube, cover and hands on the
+    // mat — while the top of the shot is wall and the athlete's own
+    // face. Centre-cropping a wide band out of a portrait phone stream
+    // would spend most of the band on that.
+    ok('  ...cropped toward the bottom of the frame, not the centre',
+      /\.oc-solve-cover-live \{\s*\n\s*object-position: center 75%;/.test(theme));
+    // THE DEMONSTRATION CROPS THE OTHER AXIS, and stays centred: a
+    // square source in a landscape band keeps full width and takes equal
+    // slices off top and bottom, which is where the cube is not.
+    ok('  ...while the demonstration crops top and bottom, centred',
+      /\.oc-solve-cover-demo \{\s*\n\s*object-position: center center;/.test(theme) &&
+        /\.oc-solve-cover-live,\s*\n\.oc-solve-cover-demo \{[\s\S]{0,200}?object-fit: cover;/.test(theme));
+    // FIXED BOXES, not the stream's own ratio — the holds' rule, not the
+    // lobby's: one object, and `cover` shows a SUBSET of what is
+    // recorded, so it can only ever make the athlete over-correct.
+    ok('  ...at fixed ratios, never measured off the stream',
+      !stripComments(cover).includes('videoWidth') &&
+        !stripComments(cover).includes('loadedmetadata'));
     // THE COUNT MOVED TO THE BOTTOM. The two frames earn the top of a
     // short screen; the sentence explains them; the time left is a
     // readout and belongs after the thing it reads out.
@@ -983,12 +990,26 @@ console.log('\n  -- 10. the mockup restyle --');
       /\.oc-solve-hold-cam \{[\s\S]{0,400}?aspect-ratio: 4 \/ 3;/.test(theme));
   ok('  ...and the cover counting the same way, off the shared clock',
     cover.includes('useHoldClock(seconds, onDone)') &&
-      cover.includes('className="oc-solve-cover-n"') &&
-      /\.oc-solve-cover-n \{[\s\S]{0,140}?font: 700 50px\/1 var\(--oc-font-mono\)/.test(theme));
+      cover.includes('className="oc-solve-cover-n"'));
+  // IT IS A CORNER OVERLAY, not a band of its own: laid into the
+  // demonstration's bottom right, which is the emptiest part of either
+  // picture, so it costs no height.
+  ok('  ...as an overlay in the demonstration\u2019s empty corner',
+    /\.oc-solve-cover-count \{[\s\S]{0,400}?position: absolute;[\s\S]{0,200}?bottom: 10px;/.test(theme) &&
+      /\.oc-solve-cover-n \{[\s\S]{0,140}?font: 700 26px\/1 var\(--oc-font-mono\)/.test(theme));
+  // THE CLIP IS NEAR-WHITE and volt on near-white is about 1.1:1 —
+  // invisible. The scrim is what the number is actually read against,
+  // and it is the same one the recording flag and the lobby's band use.
+  ok('  ...legible over a near-white clip, on a scrim',
+    /\.oc-solve-cover-count \{[\s\S]{0,400}?background: rgba\(8, 8, 10, 0\.78\);/.test(theme) &&
+      /\.oc-solve-cover-count \{[\s\S]{0,500}?backdrop-filter: blur\(6px\);/.test(theme));
   // NO FILL ON A SCREEN WITH A PREVIEW. The number and the fill must not
   // both live in the shared hold component when only one screen fills.
+  // Comment-stripped: both files describe bands that FILL space, and
+  // the word is not the colour fill this is looking for.
   ok('  ...with no colour fill left on any hold',
-    !hold.includes('fill') && !cover.includes('fill') &&
+    !stripComments(hold).includes('fill') &&
+      !/oc-solve-fill/.test(stripComments(cover)) &&
       !/\.oc-solve-hold[a-z-]* \{[^}]*animation: oc-solve-fill-rise/.test(theme));
   ok('  ...with four corner brackets at 22px', ['tl', 'tr', 'bl', 'br']
     .every((c) => theme.includes(`.oc-solve-hold-corner-${c} {`)) &&
@@ -1438,7 +1459,17 @@ console.log('\n  -- 11. the inspection --');
 
   // ── COVER ──
   ok('cover is still the mockup’s 620px column',
-    /\.oc-solve-cover \{[\s\S]{0,200}?max-width: 620px;[\s\S]{0,120}?gap: 24px;/.test(theme));
+    /\.oc-solve-cover \{[\s\S]{0,200}?max-width: 620px;/.test(theme));
+  // THREE BANDS, and the column fills the body so the top one can be a
+  // percentage of it: the athlete's camera across the top at 40%, the
+  // sentence under it, the demonstration taking the rest.
+  ok('  ...filling the body as a three-band stack',
+    /\.oc-solve-cover \{[\s\S]{0,300}?flex: 1;[\s\S]{0,80}?min-height: 0;/.test(theme) &&
+      /\.oc-solve-cover-band \{[\s\S]{0,300}?flex: 0 0 40%;/.test(theme));
+  // WIDE, not merely not-portrait. Left to fill the leftover it came
+  // out 1.03 on a tall phone — square in all but name.
+  ok('  ...with the demonstration capped to a landscape rectangle',
+    /\.oc-solve-cover-band-demo \{[\s\S]{0,400}?aspect-ratio: 3 \/ 2;/.test(theme));
   // THE TWO 78px STICKER DIAGRAMS ARE GONE, markup and CSS. They said
   // which face goes where; the video below says that AND what the hand
   // does, and the instruction's two tinted colour words carry the colour

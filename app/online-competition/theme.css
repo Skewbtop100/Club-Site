@@ -1553,25 +1553,8 @@
   .oc-solve-btn-finish {
     font-size: 16px;
   }
-  /* 210px of digit is 2.4 screens wide at 375. The number stays the
-     largest thing on the screen by a distance; it just fits on it. */
-  .oc-solve-cover-count {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-}
-.oc-solve-cover-n {
-  font: 700 50px/1 var(--oc-font-mono), monospace;
-  font-variant-numeric: tabular-nums;
-  color: #DFFF4F;
-}
-.oc-solve-cover-unit {
-  font: 500 9px/1 var(--oc-font-mono), monospace;
-  letter-spacing: 0.2em;
-  color: #6E6A62;
-}
-.oc-solve-cover-say {
-    font-size: 20px;
+  .oc-solve-cover-say {
+    font-size: 14px;
   }
 }
 
@@ -1998,57 +1981,63 @@
   border-bottom: 1px solid #DFFF4F;
   border-right: 1px solid #DFFF4F;
 }
-/* ── THE COVER'S TWO FRAMES ───────────────────────────────────────────
-   The athlete watches the demonstration on the left and their own camera
-   on the right. The comparison only works if the two frames are the SAME
-   SHAPE — a demonstration in one aspect beside a preview in another is
-   two pictures, not a comparison — so both are 3/4 portrait and both are
-   half the row.
+/* ── THE COVER'S THREE BANDS ──────────────────────────────────────────
+   The athlete's camera across the top, the sentence under it, the
+   demonstration filling the rest. Both bands are full width: side by side
+   each frame got half a phone, stacked each gets all of it.
 
-   3/4, NOT 9/16. The demonstration's source is 720x720 square, so any
-   portrait frame crops it, and `cover` on a portrait box from a square
-   keeps the FULL HEIGHT and takes the sides: 12.5% off each edge at 3/4,
-   against 22% each side at 9/16. The subject is stacked vertically —
-   cube centre, mat below it, phone stand at the bottom — so height is the
-   axis that must survive, and it survives whole. What goes is the outer
-   left and right of the mat, which carries nothing. 9/16 would have cost
-   nearly half the width to buy a shape nothing needs.
-
-   object-position is stated rather than left to `cover`'s default, so
-   nobody has to know that centre is what it would have picked: the
-   subject is centre-frame and the crop has to stay there.
-
-   THE LIVE FRAME IS FIXED AT THE SAME 3/4 rather than taking the
-   stream's own ratio, and that is a departure from the lobby on purpose.
-   The lobby measures videoWidth/videoHeight because the athlete aims TWO
-   things there — the cube and the timer — against the edges of that box,
-   and a box in the wrong shape would have them framing against edges the
-   recording does not have. This screen is the HOLDS' situation, not the
-   lobby's: one object, centred, and the only question is whether the
-   camera can see it. It is why the timer check and the cube check crop
-   too.
-   With `cover` the preview shows a SUBSET of what is recorded, so it can
-   only ever make the athlete over-correct — anything visible here is
-   certainly on the clip, and believing something is in shot when it is
-   not cannot happen. */
-.oc-solve-cover-videos {
-  display: flex;
-  width: 100%;
-  max-width: 420px;
-  margin-inline: auto;
-  gap: 10px;
-  align-items: flex-start;
-}
-.oc-solve-cover-demo,
-.oc-solve-cover-live {
-  flex: 1 1 0;
-  min-width: 0;
-  aspect-ratio: 3 / 4;
-  display: block;
-  object-fit: cover;
-  object-position: center center;
+   40% TO THE LIVE BAND, measured against the column — which is the body's
+   usable height, since .oc-solve-cover fills it. A percentage rather than
+   a pixel count so the split holds on a tall phone and a short one alike;
+   the demonstration takes whatever the sentence leaves of the other 60%. */
+.oc-solve-cover-band {
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+  flex: 0 0 40%;
   background: #0A0A0C;
   border: 1px solid #1C1C21;
+}
+/* WIDE, NOT MERELY "NOT PORTRAIT". Left to fill whatever the live band
+   and the sentence leave, this came out 343x334 on a tall phone — a ratio
+   of 1.03, square in all but name. An aspect-ratio caps how TALL it may
+   get, so it stays a landscape rectangle on a tall screen; where the
+   leftover is shorter than 3:2 the band shrinks to fit and only gets
+   wider. The column spaces the remainder around the sentence rather than
+   leaving it dead at the bottom. */
+.oc-solve-cover-band-demo {
+  flex: 0 1 auto;
+  aspect-ratio: 3 / 2;
+}
+.oc-solve-cover-live,
+.oc-solve-cover-demo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* THE LIVE CROP LOOKS DOWN. A solve happens LOW in the camera's frame —
+   the cube, the cover and the hands are on the mat, and the top of the
+   shot is wall and the athlete's own face. Centre-cropping a wide band
+   out of a portrait phone stream would spend most of the band on that.
+   `center 75%` slides the visible window three quarters of the way down
+   the overflow: it keeps the mat and the hands and gives up the wall,
+   without going all the way to `bottom`, which would start eating the
+   near edge of the table instead. */
+.oc-solve-cover-live {
+  object-position: center 75%;
+}
+/* THE DEMONSTRATION CROP STAYS CENTRED, and it is cropping the other
+   axis. Its source is 720x720 square in a landscape band, so `cover`
+   keeps the full WIDTH and takes equal slices off the top and the
+   bottom. The subject is stacked vertically — cube centre, mat below it,
+   phone stand at the bottom — so the cube and the covering action, which
+   are the instruction, sit in the middle and survive whole. What goes is
+   sky above and the foot of the stand below: setup context, not the
+   lesson, and the athlete's own stand has been holding their phone for a
+   minute by the time they reach this screen. */
+.oc-solve-cover-demo {
+  object-position: center center;
 }
 
 
@@ -2232,19 +2221,39 @@
 .oc-solve-cover {
   width: 100%;
   max-width: 620px;
-  margin: auto;
+  margin-inline: auto;
+  /* Fills the column so the bands below can be a percentage of it. */
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 24px;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 12px;
 }
+/* LAID INTO THE DEMONSTRATION'S BOTTOM-RIGHT, which is the emptiest
+   corner of either picture.
+
+   IT NEEDS THE SCRIM, and this is the one place on the run where that is
+   not decoration. The clip is near-white, and volt on near-white is about
+   1.1:1 — invisible. Over this scrim the same volt lands near 9:1 even
+   when the pixel behind it is pure white, because the scrim is what the
+   text is actually read against. Same treatment as the recording flag and
+   the lobby's band, for the same reason: arbitrary video underneath. */
 .oc-solve-cover-count {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: 7px;
+  padding: 6px 10px;
+  background: rgba(8, 8, 10, 0.78);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
 }
 .oc-solve-cover-n {
-  font: 700 50px/1 var(--oc-font-mono), monospace;
+  font: 700 26px/1 var(--oc-font-mono), monospace;
   font-variant-numeric: tabular-nums;
   color: #DFFF4F;
 }
@@ -2253,12 +2262,16 @@
   letter-spacing: 0.2em;
   color: #6E6A62;
 }
+/* Between the two bands, and smaller than it was: it is a caption on a
+   screen whose content is two pictures, not the content itself. */
 .oc-solve-cover-say {
-  font: 600 24px/1.4 var(--oc-font-heading), sans-serif;
+  flex: none;
+  font: 500 15px/1.45 var(--oc-font-heading), sans-serif;
   color: #F4F1EA;
   text-align: center;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
   max-width: 520px;
+  margin-inline: auto;
 }
 
 /* ── COUNT: WCA's fifteen seconds, counted for real ──────────────────────
