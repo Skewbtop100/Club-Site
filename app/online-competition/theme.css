@@ -2008,6 +2008,14 @@
 .oc-solve-cover-band-demo {
   flex: 0 1 auto;
   aspect-ratio: 3 / 2;
+  /* FOUR FIFTHS OF THE COLUMN, not all of it. The live band is the one
+     the athlete checks themselves against and it keeps the full width;
+     this one is a demonstration they glance at, and inset it reads as the
+     subordinate of the two rather than a second equal panel. The column
+     stretches its children by default, so the width has to be stated and
+     the band has to opt out of that stretch. */
+  width: 80%;
+  align-self: center;
 }
 .oc-solve-cover-live,
 .oc-solve-cover-demo {
