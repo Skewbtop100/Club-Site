@@ -43,6 +43,7 @@ const screenFill = fs.readFileSync(path.join(ROOT, SOLVE, '_components/ScreenFil
 const chunks = fs.readFileSync(path.join(ROOT, SOLVE, '_lib/scrambleChunks.ts'), 'utf8');
 const cover = fs.readFileSync(path.join(ROOT, SOLVE, '_components/CoverStage.tsx'), 'utf8');
 const rec = fs.readFileSync(path.join(ROOT, SOLVE, '_components/RecStage.tsx'), 'utf8');
+const recorder = fs.readFileSync(path.join(ROOT, SOLVE, '_lib/useSolveRecorder.ts'), 'utf8');
 const theme = fs.readFileSync(path.join(ROOT, 'app/online-competition/theme.css'), 'utf8');
 const bar = fs.readFileSync(path.join(ROOT, SOLVE, '_components/SolveHeader.tsx'), 'utf8');
 const summary = fs.readFileSync(path.join(ROOT, SOLVE, '_components/SummaryStage.tsx'), 'utf8');
@@ -492,13 +493,15 @@ console.log('\n  -- 7. durations and markers --');
   // so it is built from the same number rather than written beside it.
   ok('the instruction is a function of seconds, not a literal',
     hold.includes('instruction: (seconds: number) => string;') && hold.includes('{instruction(seconds)}'));
-  // One call site takes `sec` now, not two: the timer check's sentence
-  // stopped naming a duration at all ("цаг дуустал" — until the count
-  // runs out), so it has no number to get wrong. The guard that matters
-  // is unchanged and still absolute: NO call site may write a literal
-  // number of seconds into its sentence.
+  // NO call site takes `sec` any more: all three sentences now end at
+  // "until the count runs out" or "until the signal sounds" rather than
+  // naming a duration, so none of them has a number to get wrong. The
+  // prop stays a function of `seconds` because that is the guard — the
+  // next sentence that wants to name the duration has to take it from
+  // the clock — and the absolute rule is unchanged: NO call site may
+  // write a literal number of seconds into its sentence.
   ok('  ...and no call site writes the number into the sentence itself',
-    (page.match(/instruction=\{\(sec\) =>/g) ?? []).length === 2 && !/\d+ секунд/.test(page));
+    (page.match(/instruction=\{\(sec\) =>/g) ?? []).length === 0 && !/\d+ секунд/.test(page));
 
   // THE OPENING HOLD is now the athlete's own timer, held to the camera —
   // with a preview to aim at, which the on-screen "0.00" never gave them.
@@ -539,10 +542,14 @@ console.log('\n  -- 7. durations and markers --');
       /\.oc-solve-insp-amber \{\s*\n\s*color: #E0A020;/.test(theme) &&
       /\.oc-solve-insp-red \{\s*\n\s*color: #D8402C;/.test(theme) &&
       !/\.oc-solve-rec-feed \{[^}]*border/.test(theme));
-  // The beeps they replaced are still gone, and nothing audio-shaped came
-  // back with the removal.
-  ok('  ...and the beeps are still gone',
-    !rec.includes('BEEP') && !rec.includes('onBeep') && !page.includes('playBeep'));
+  // THE INSPECTION BEEPS STAY GONE. The solve screen is silent: its 8s
+  // and 12s cues are colour on the counter, not sound. The run does make
+  // exactly ONE noise now — the cube check's end-of-hold tone — and it
+  // is nowhere near this screen.
+  ok('  ...and the inspection beeps are still gone',
+    !rec.includes('BEEP') && !rec.includes('onBeep') && !rec.includes('playBeep') &&
+      (stripComments(page).match(/playBeep/g) ?? []).length === 1 &&
+      /label="ШООГОО ХАРУУЛ · ЭЦСИЙН БАЙДАЛ"[\s\S]{0,2400}?recorder\.playBeep/.test(page));
   const recCode = rec.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
   ok('nothing audio-shaped was added near the recorder',
     !/audio/i.test(recCode) && !/oscillator/i.test(recCode) && !recCode.includes('playBeep'));
@@ -591,18 +598,26 @@ console.log('\n  -- 6. the recording stops AFTER the cube check --');
   ok('  ...at the same 8 seconds, from the same constant',
     /label="ШООГОО ХАРУУЛ · ЭЦСИЙН БАЙДАЛ"/.test(page) &&
       /<CameraHoldStage\s*\n\s*seconds=\{HOLD_SECONDS\}\s*\n\s*label="ШООГОО ХАРУУЛ · ЭЦСИЙН БАЙДАЛ"/.test(page));
-  // THE TWO THINGS THE INSTRUCTION MUST SAY. Turning a single layer
+  // WHAT THE INSTRUCTION MUST SAY. Every face has to reach the camera,
+  // and the cube must not be altered on the way: a single turned layer
   // here would erase the difference between a finished solve, a +2 and a
   // DNF — the athlete destroying the evidence they are providing.
   ok('  ...telling the athlete to turn the cube so every face is seen',
-    page.includes('Шоогоо аажмаар эргүүлж бүх талыг нь'));
-  ok('  ...and NOT to turn a layer, with the reason',
-    page.includes('Аль ч давхаргыг эргүүлж болохгүй') &&
-      page.includes('эвлүүлэлтийн эцсийн байдлыг шүүгч шалгана'));
+    page.includes('шоог тойруулан бүх талыг') && page.includes('харуулна уу'));
+  ok('  ...and not to touch it while they do',
+    page.includes('Шоонд гар хүрэлгүйгээр'));
+  // IT ENDS ON THE TONE, not on a number: the sentence and the sound
+  // agree about when the hold is over, which is why the tone fires from
+  // onElapsed rather than from the press.
+  ok('  ...and that the tone is what ends it',
+    page.includes('камераар дохио дуугартал'));
   // THE CLIP NOW STOPS HERE, and in exactly one place.
+  // THE CLIP STOPS ON THE PRESS NOW, not when the count ends — the hold
+  // gained a button, and finishRecording moved with onDone rather than
+  // being called from anywhere new. Still exactly one call site.
   ok('  ...and it is the one stage that ends the recording',
     (page.match(/onDone=\{finishRecording\}/g) ?? []).length === 1 &&
-      /label="ШООГОО ХАРУУЛ · ЭЦСИЙН БАЙДАЛ"[\s\S]{0,1200}?onDone=\{finishRecording\}/.test(page));
+      /label="ШООГОО ХАРУУЛ · ЭЦСИЙН БАЙДАЛ"[\s\S]{0,2400}?onDone=\{finishRecording\}/.test(page));
   ok('  ...so the closing hold no longer ends it',
     !/label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"[\s\S]{0,500}?onDone=\{finishRecording\}/.test(page));
 
@@ -976,6 +991,49 @@ console.log('\n  -- 9. the lobby and the between screen --');
       !/\.oc-solve-slots \{[\s\S]{0,120}?repeat\(3/.test(theme));
 
   // NOT IN THIS DIFF.
+  // ── THE TONE AT THE END OF THE CUBE CHECK ──
+  // IT IS THE EXISTING playBeep, NOT A SECOND AUDIO PATH, and that
+  // matters more here than anywhere else in the run: the recording is
+  // STILL RUNNING when it fires. The clip stops when the button below it
+  // is pressed, so a tone that could reach MediaRecorder would reach it
+  // mid-attempt.
+  //
+  // WHAT ONCE BROKE IT WAS A TRACK, NOT A SOUND. An earlier version
+  // routed the oscillator through a MediaStreamAudioDestinationNode and
+  // added that audio track to the stream MediaRecorder was reading;
+  // every attempt came out \110 bytes. The isolated test that found it
+  // reported the failure "regardless of whether anything was ever played
+  // through that audio track", and its healthy arm had a running
+  // AudioContext too — so the AudioContext was never the problem, the
+  // extra track was.
+  //
+  // These assertions pin the shape that makes it safe rather than the
+  // conclusion: the hook opens the camera with audio:false, builds no
+  // MediaStream of its own, adds no track, and sends the oscillator to
+  // the speaker.
+  ok('the cube check sounds the existing beep, at zero',
+    /label="ШООГОО ХАРУУЛ · ЭЦСИЙН БАЙДАЛ"[\s\S]{0,2400}?onElapsed=\{recorder\.playBeep\}/.test(page) &&
+      (page.match(/onElapsed=/g) ?? []).length === 1);
+  // COMMENT-STRIPPED, and that is not fussiness: the hook's own line 25
+  // reads "audio: false here on purpose", so an unstripped includes()
+  // passes this even after the constraint is flipped to true. Verified by
+  // mutation — the unstripped form did exactly that.
+  const recorderCode = stripComments(recorder);
+  ok('  ...through the speaker, never into the recorded stream',
+    /audio: false,/.test(recorderCode) && !/audio: true/.test(recorderCode) &&
+      recorderCode.includes('gain.connect(ctx.destination)') &&
+      !recorderCode.includes('createMediaStreamDestination') &&
+      !/\.addTrack\(/.test(recorderCode) && !/new MediaStream\(/.test(recorderCode));
+  // MediaRecorder still reads the getUserMedia stream itself, unwrapped.
+  ok('  ...and MediaRecorder still reads the camera stream untouched',
+    /new MediaRecorder\(stream, \{/.test(recorderCode) &&
+      /const stream = streamRef\.current;/.test(recorderCode));
+  // onElapsed marks ZERO; onDone marks the PRESS. The tone must not wait
+  // for the athlete, and the clip must not stop without them.
+  ok('  ...at the count’s end, not when the athlete presses',
+    hold.includes('useHoldClock(seconds, onElapsed)') &&
+      /onElapsed=\{recorder\.playBeep\}[\s\S]{0,300}?onDone=\{finishRecording\}/.test(page));
+
   ok('the recording boundary did not move',
     page.includes("onFinish={() => setStage('finishHold')}") && page.includes('async function finishRecording'));
   ok('the 8-second holds did not move',
@@ -1022,9 +1080,9 @@ console.log('\n  -- 10. the mockup restyle --');
   // preview — see below.
   ok('  ...showing the mockup’s countdown, not a tick bar',
     hold.includes('className="oc-solve-hold-n"') && !hold.includes('oc-solve-chunk-bar'));
-  ok('  ...at the mockup’s 50px volt over a 4/3 frame',
+  ok('  ...at the mockup’s 50px volt over a square frame',
     /\.oc-solve-hold-n \{[\s\S]{0,140}?font: 700 50px\/1 var\(--oc-font-mono\)/.test(theme) &&
-      /\.oc-solve-hold-cam \{[\s\S]{0,400}?aspect-ratio: 4 \/ 3;/.test(theme));
+      /\.oc-solve-hold-cam \{[\s\S]{0,1400}?aspect-ratio: 1 \/ 1;/.test(theme));
   ok('  ...and the cover counting the same way, off the shared clock',
     cover.includes('useHoldClock(seconds, onDone)') &&
       cover.includes('className="oc-solve-cover-n"'));
@@ -1062,12 +1120,12 @@ console.log('\n  -- 10. the mockup restyle --');
   ok('every timer hold says what the count leads to', (() => {
     const footnotes = page.match(/footnote="([^"]+)"/g) ?? [];
     const silenced = page.match(/footnote=\{null\}/g) ?? [];
-    const buttons = page.match(/end=\{\{ label: '[^']+' \}\}/g) ?? [];
-    // Three CameraHoldStage call sites: two footnotes (the closing hold
-    // and the cube check), one button (the timer check), and all of them
-    // saying something different.
-    return footnotes.length === 2 && silenced.length === 1 && buttons.length === 1 &&
-      new Set(footnotes).size === 2;
+    const buttons = page.match(/endLabel="([^"]+)"/g) ?? [];
+    // Three CameraHoldStage call sites, and all three say it on the
+    // BUTTON now: three distinct labels, three silenced footnotes, and
+    // not one footnote left repeating what the button already says.
+    return buttons.length === 3 && new Set(buttons).size === 3 &&
+      silenced.length === 3 && footnotes.length === 0;
   })());
 
   // ── THE BEAT BEFORE THE TIMER CHECK ──
@@ -1132,7 +1190,7 @@ console.log('\n  -- 10. the mockup restyle --');
   // the other. Advancing on its own started the scramble appearing while
   // their hands were still full.
   ok('the timer check waits for a press instead of advancing itself',
-    page.includes("end={{ label: 'ХОЛИЛТ ХАРАХ' }}"));
+    page.includes('endLabel="ХОЛИЛТ ХАРАХ"'));
   // THE SECONDS ARE EVIDENCE. The button cannot be pressed early, and it
   // is gated on the DISPLAYED count rather than a second timer of its
   // own — a throttled background tab then enables it late, never early.
@@ -1151,28 +1209,36 @@ console.log('\n  -- 10. the mockup restyle --');
     hold.includes('const { remaining, done } = useHoldClock(') &&
       !stripComments(hold).includes('remaining === 0') &&
       !stripComments(hold).includes('remaining > 0'));
-  // A hold that waits for a press hands useHoldClock no onElapsed at
-  // all, so there is no second timer able to advance it behind the
-  // button.
+  // useHoldClock NEVER GETS onDone any more. It gets onElapsed, which
+  // marks zero and nothing else, so no timer anywhere can advance the
+  // run behind a button — `done` only decides whether the button is on
+  // screen to be pressed.
   ok('  ...with nothing left able to advance it but the press',
-    hold.includes('useHoldClock(seconds, waitsForPress ? undefined : onDone)'));
+    hold.includes('useHoldClock(seconds, onElapsed)') &&
+      !/useHoldClock\([^)]*onDone/.test(stripComments(hold)));
   ok('  ...as the button arrives lit, not merely enabled',
     /\.oc-solve-hold-go:not\(:disabled\) \{\s*\n\s*box-shadow: 0 0 26px 0 rgba\(223, 255, 79, 0\.34\);/.test(theme));
-  // THE OTHER TWO HOLDS DID NOT CHANGE. finishHold and cover are both
-  // after the scramble, where nothing may move; and neither asks the
-  // athlete to swap what is in their hands before the next screen, which
-  // is the only reason this one needed a button.
-  ok('  ...while the closing hold still advances on its own',
-    (page.match(/end=\{\{ label:/g) ?? []).length === 1 &&
-      /label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"[\s\S]{0,500}?onDone=\{\(\) => setStage\('cubeCheck'\)\}/.test(page) &&
-      !/label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"[\s\S]{0,500}?end=/.test(page));
-  ok('  ...and the cube check too, which is what ends the clip',
-    /label="ШООГОО ХАРУУЛ · ЭЦСИЙН БАЙДАЛ"[\s\S]{0,1200}?onDone=\{finishRecording\}/.test(page) &&
-      !/label="ШООГОО ХАРУУЛ · ЭЦСИЙН БАЙДАЛ"[\s\S]{0,1200}?end=/.test(page));
-  ok('  ...and the cover hold too, still auto-advancing',
+  // THE OTHER TWO HOLDS NOW END THE SAME WAY. Each asks the athlete to
+  // change what is in their hands before the next screen — put the timer
+  // down, pick the cube up, put the cube down — which is the whole
+  // reason the timer check needed a button in the first place.
+  ok('  ...and so does the closing timer hold',
+    /label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"[\s\S]{0,600}?endLabel="ШООГОО ХАРУУЛАХ"/.test(page) &&
+      /label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"[\s\S]{0,900}?onDone=\{\(\) => setStage\('cubeCheck'\)\}/.test(page));
+  ok('  ...and the cube check, which is what ends the clip',
+    /label="ШООГОО ХАРУУЛ · ЭЦСИЙН БАЙДАЛ"[\s\S]{0,1800}?endLabel="ҮЗҮҮЛЭЛТ БИЧИХ"/.test(page) &&
+      /label="ШООГОО ХАРУУЛ · ЭЦСИЙН БАЙДАЛ"[\s\S]{0,2400}?onDone=\{finishRecording\}/.test(page));
+  ok('  ...while the cover, which is not a camera hold, still advances itself',
     /<CoverStage[\s\S]{0,300}?onDone=\{\(\) => setStage\('readyPrompt'\)\}/.test(page));
-  ok('  ...so "auto" is still what a hold does unless told otherwise',
-    hold.includes("end = 'auto',") && hold.includes("end?: 'auto' | { label: string };"));
+  // WITH NOTHING AUTO LEFT, THE FLAG WENT. `end` defaulted to 'auto' and
+  // the timer check was the only opt-out; once all three opted out there
+  // was nothing on the other side of the branch. The label is required
+  // now, so a hold with no way out is a type error rather than a screen
+  // that strands an athlete.
+  ok('  ...so the auto branch is gone, and the label is required',
+    !stripComments(hold).includes("'auto'") &&
+      hold.includes('endLabel: string;') && !hold.includes('endLabel?:') &&
+      !stripComments(page).includes('end={{'));
 
   // ── THE TIMER CHECK'S LAYOUT ──
   // ITS CLOCK IS AT THE BOTTOM, in the slot the button will take. One
@@ -1180,7 +1246,7 @@ console.log('\n  -- 10. the mockup restyle --');
   // single change where the athlete is already looking — not a number
   // going quiet at the top while something lights up at the bottom.
   ok('the timer check puts its count in the slot the button will take',
-    hold.includes('{!waitsForPress && count}') &&
+    !stripComments(hold).includes('&& count}') &&
       /<div className="oc-solve-hold-slot">[\s\S]{0,300}?done \?[\s\S]{0,300}?oc-solve-hold-go[\s\S]{0,300}?\) : \(\s*\n\s*count\s*\n\s*\)/.test(hold));
   // The swap must not reflow the column: a button that arrives 20px
   // from where the count was is a button that moves out from under a
@@ -1191,27 +1257,29 @@ console.log('\n  -- 10. the mockup restyle --');
   // had nothing left to choose and went with it.
   ok('  ...leaving no layout prop to pick between them',
     !stripComments(hold).includes('layout') && !page.includes('layout="'));
-  // THE TWO AUTO HOLDS ARE UNTOUCHED. Nothing on their screen is going
-  // to change when the count ends except the screen itself, so there is
-  // no slot for the clock to share and it stays at the top.
-  ok('  ...while an auto hold still leads with its count',
-    hold.includes('{!waitsForPress && count}'));
+  // AND SO DO THE OTHER TWO, because there is only one layout left.
+  // The count is rendered in exactly one place in the component now, and
+  // the instruction is the only thing above the preview.
+  ok('  ...as every hold does, there being one layout left',
+    (stripComments(hold).match(/^\s*count\s*$/gm) ?? []).length === 1 &&
+      /oc-solve-hold-say[\s\S]{0,200}?oc-solve-hold-cam/.test(stripComments(hold)));
+  // THE PREVIEW TOOK THE HEIGHT the count gave up — on every hold, so
+  // the `-tall` modifier one of them opted into has no one left to
+  // contrast with and folded into the box itself.
+  ok('  ...and the preview keeps the height the count gave up',
+    !theme.includes('.oc-solve-hold-cam-tall') && !page.includes('hold-cam-tall') &&
+      /\.oc-solve-hold-cam \{[\s\S]{0,1400}?aspect-ratio: 1 \/ 1;[\s\S]{0,80}?max-height: 52vh;/.test(theme));
   // THE PREVIEW MAY CROP HERE — different job from the lobby's. The
   // athlete is centring one object, so the centre of the frame is the
   // whole question. Centred ON PURPOSE rather than by `cover`'s default,
   // and display-only: MediaRecorder reads the raw track, never a
   // stylesheet, so what is recorded is the full frame either way.
-  // THE PREVIEW TOOK THE COUNT'S HEIGHT. At 375px the 4/3 box is
-  // limited by WIDTH — it is already the full column — so freeing
+  // THE PREVIEW TOOK THE COUNT'S HEIGHT, on every hold. At 375px a 4/3
+  // box is limited by WIDTH — it is already the full column — so freeing
   // vertical space buys it nothing unless the shape changes too. Square
   // is taller at the same width, and crops a phone's portrait stream
-  // LESS rather than more, which is the stream this hold usually sees.
-  ok('the timer check\u2019s preview is taller than the other holds\u2019',
-    hold.includes("waitsForPress ? ' oc-solve-hold-cam-tall' : ''") &&
-      /\.oc-solve-hold-cam-tall \{[\s\S]{0,200}?aspect-ratio: 1 \/ 1;/.test(theme));
-  ok('  ...and the two auto holds keep the 4/3 box',
-    /\.oc-solve-hold-cam \{[\s\S]{0,400}?aspect-ratio: 4 \/ 3;/.test(theme) &&
-      (page.match(/oc-solve-hold-cam-tall/g) ?? []).length === 0);
+  // LESS rather than more, which is the stream these holds usually see.
+  // Asserted where the box is defined, above.
   ok('the hold preview crops from the centre, deliberately',
     /\.oc-solve-hold-cam \.oc-solve-camera-video \{\s*\n\s*object-position: center center;/.test(theme) &&
       /\.oc-solve-camera-video \{[\s\S]{0,160}?object-fit: cover;/.test(theme));

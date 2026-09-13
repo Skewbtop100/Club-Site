@@ -1466,7 +1466,7 @@ export default function SolvePage() {
             /* The button names where it goes, so the footnote that said
                the same thing is gone. */
             footnote={null}
-            end={{ label: 'ХОЛИЛТ ХАРАХ' }}
+            endLabel="ХОЛИЛТ ХАРАХ"
             videoRef={recorder.videoRef}
             onDone={() => setStage('scrambleReveal')}
           />
@@ -1520,9 +1520,12 @@ export default function SolvePage() {
           <CameraHoldStage
             seconds={HOLD_SECONDS}
             label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"
-            instruction={(sec) => `Хэмжсэн цагаа камерт тод харагдахаар ${sec} секунд барина уу.`}
-            /* It hands to the cube check now, not to the keypad. */
-            footnote="Хугацаа дуусаад шоогоо харуулна."
+            instruction={() => 'Цагийг хугацаа дуустал камерт харуулна уу.'}
+            /* The button names where it goes, so the footnote that said
+               the same thing is gone — the timer check's rule, now that
+               this hold ends the same way. */
+            footnote={null}
+            endLabel="ШООГОО ХАРУУЛАХ"
             videoRef={recorder.videoRef}
             onDone={() => setStage('cubeCheck')}
           />
@@ -1543,11 +1546,27 @@ export default function SolvePage() {
                quarter-turn here would erase the difference between a
                finished solve, a +2 and a DNF — the athlete would be
                destroying the evidence they are being asked to provide. */
-            instruction={(sec) =>
-              `Шоогоо аажмаар эргүүлж бүх талыг нь ${sec} секунд камерт харуулна уу. ` +
-              'Аль ч давхаргыг эргүүлж болохгүй — эвлүүлэлтийн эцсийн байдлыг шүүгч шалгана.'
+            instruction={() =>
+              'Шоонд гар хүрэлгүйгээр, камераар дохио дуугартал шоог тойруулан бүх талыг ' +
+              'харуулна уу.'
             }
-            footnote="Хугацаа дуусаад цагаа бичих хэсэг нээгдэнэ."
+            footnote={null}
+            endLabel="ҮЗҮҮЛЭЛТ БИЧИХ"
+            /* THE TONE, AND IT IS SAFE TO PLAY HERE. playBeep drives its
+               own AudioContext into ctx.destination — the speaker — and
+               never touches streamRef, which getUserMedia opened with
+               `audio: false`. What once reduced every attempt to a ~110
+               byte file was adding a second TRACK to the stream
+               MediaRecorder was reading, via a
+               MediaStreamAudioDestinationNode; that node does not exist
+               in this hook, and the same isolated test that found the
+               bug had a running AudioContext on its healthy arm too.
+               The recording IS still running when this fires — the clip
+               stops when the button below is pressed — so the tone is
+               heard live and is NOT on the clip, the recording being
+               video-only. A judge reviewing the video will not hear it.
+               onElapsed, not onDone: it marks zero, not the press. */
+            onElapsed={recorder.playBeep}
             videoRef={recorder.videoRef}
             onDone={finishRecording}
           />

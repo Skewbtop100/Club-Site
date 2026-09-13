@@ -1815,8 +1815,19 @@
   width: 100%;
   max-width: 420px;
   position: relative;
-  aspect-ratio: 4 / 3;
-  max-height: 36vh;
+  /* EVERY HOLD MOVED ITS COUNT into the button's slot at the bottom, so
+     every hold has the count's height going spare and the preview takes
+     it. This was a `-tall` modifier that one hold opted into; once all
+     three moved their count there was nothing left to contrast with.
+
+     SQUARE, NOT 4/3, AND THAT IS THE POINT OF THE SWAP. At 375px the box
+     is limited by WIDTH — it is already the full column — so freeing
+     vertical space buys it nothing unless the shape changes too. Square
+     is taller at the same width, and it crops a phone's portrait stream
+     LESS rather than more, which is the stream these holds are usually
+     looking at. */
+  aspect-ratio: 1 / 1;
+  max-height: 52vh;
   border: 1px solid #2A2A31;
   overflow: hidden;
   background: #0A0A0C;
@@ -1826,17 +1837,6 @@
 }
 .oc-solve-hold-cam .oc-solve-camera-video {
   object-position: center center;
-}
-/* ONLY THE HOLD THAT MOVED ITS COUNT. That screen has the count's height
-   going spare, and at 375px the 4/3 box is limited by WIDTH — it is
-   already the full column — so freeing vertical space buys it nothing
-   unless the shape changes too. Square is the change: it is taller at the
-   same width, and it crops a phone's portrait stream LESS rather than
-   more, which is the stream this hold is usually looking at.
-   The two auto-advancing holds keep the 4/3 box above, untouched. */
-.oc-solve-hold-cam-tall {
-  aspect-ratio: 1 / 1;
-  max-height: 52vh;
 }
 .oc-solve-hold-cam .oc-solve-camera-video {
   position: absolute;
