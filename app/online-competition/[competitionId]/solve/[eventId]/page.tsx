@@ -21,7 +21,7 @@ import {
   type FiledAttempt,
 } from '@/lib/online-competition/run-resume';
 import { uploadVideoToCloudinary } from '@/lib/online-competition/cloudinary';
-import type { OnlineCompetition } from '@/lib/online-competition/types';
+import type { OnlineCompetition, SolveMarks } from '@/lib/online-competition/types';
 import { useSolveRecorder } from './_lib/useSolveRecorder';
 import type { AttemptTime } from '@/lib/online-competition/ao5';
 import {
@@ -252,7 +252,9 @@ export default function SolvePage() {
    *
    *  A ref, not state: the filing worker below reads it across awaits, and
    *  a state mirror would be one render behind. */
-  const pendingUploadsRef = useRef<Map<number, { blob: Blob; timeCs: number | null; isDnf: boolean }>>(new Map());
+  const pendingUploadsRef = useRef<
+    Map<number, { blob: Blob; timeCs: number | null; isDnf: boolean; marks: Partial<SolveMarks> }>
+  >(new Map());
   /** Attempt indices waiting to be filed, oldest first. The head stays put
    *  until it succeeds, so attempts are always filed IN ORDER and a
    *  failure cannot let the run run ahead of it. */
@@ -846,6 +848,10 @@ export default function SolvePage() {
             cloudinaryPublicId: publicId,
             reportedTime: held.isDnf ? 0 : (held.timeCs as number),
             isDnf: held.isDnf,
+            // Snapshotted when the attempt was queued, not read now: by
+            // the time this upload lands the athlete may already be
+            // recording the next attempt, which has emptied the live set.
+            marks: held.marks,
           });
           // FILED — and this is the line the whole changeset is for: the
           // recording is dropped the moment the server has it.
@@ -889,7 +895,10 @@ export default function SolvePage() {
   /** Hands a just-recorded attempt to the queue. Never awaited — the run
    *  moves on to the next attempt while this works. */
   const enqueueFiling = useCallback(
-    (index: number, held: { blob: Blob; timeCs: number | null; isDnf: boolean }) => {
+    (
+      index: number,
+      held: { blob: Blob; timeCs: number | null; isDnf: boolean; marks: Partial<SolveMarks> },
+    ) => {
       pendingUploadsRef.current.set(index, held);
       filingQueueRef.current.push(index);
       void pumpFiling();
@@ -982,6 +991,11 @@ export default function SolvePage() {
       blob,
       timeCs: result.timeCs,
       isDnf: result.isDnf,
+      // READ HERE, where the attempt is closed and the next one has not
+      // begun: the recording stopped in finishRecording (which is what
+      // set the last mark), and the next startRecording is two screens
+      // away. Taken as a value, so the queue owns it across its awaits.
+      marks: recorder.readMarks(),
     });
     // Cleared with the attempt it belonged to: the next keypad cannot
     // reach a stale recording, because there is none to reach.
@@ -1468,7 +1482,13 @@ export default function SolvePage() {
             footnote={null}
             endLabel="ХОЛИЛТ ХАРАХ"
             videoRef={recorder.videoRef}
-            onDone={() => setStage('scrambleReveal')}
+            /* mark() FIRST, before the state change — the mark is meant
+               to name the press, and anything run ahead of it puts its
+               own duration into the number. */
+            onDone={() => {
+              recorder.mark('scrambleShown');
+              setStage('scrambleReveal');
+            }}
           />
         )}
 
@@ -1504,7 +1524,14 @@ export default function SolvePage() {
             its own, and two go-aheads on two consecutive screens is one
             too many. This is the one that must not be pressable early,
             so it is the one that stayed. */}
-        {stage === 'readyPrompt' && <ReadyPromptStage onDone={() => setStage('rec')} />}
+        {stage === 'readyPrompt' && (
+          <ReadyPromptStage
+            onDone={() => {
+              recorder.mark('solveStart');
+              setStage('rec');
+            }}
+          />
+        )}
 
         {stage === 'rec' && (
           <RecStage
@@ -1512,7 +1539,10 @@ export default function SolvePage() {
             /* The solve is over; the RECORDING IS NOT. It runs through
                the closing hold, where the athlete shows the timer that
                produced the number they are about to type. */
-            onFinish={() => setStage('finishHold')}
+            onFinish={() => {
+              recorder.mark('solveEnd');
+              setStage('finishHold');
+            }}
           />
         )}
 
@@ -1527,7 +1557,10 @@ export default function SolvePage() {
             footnote={null}
             endLabel="ШООГОО ХАРУУЛАХ"
             videoRef={recorder.videoRef}
-            onDone={() => setStage('cubeCheck')}
+            onDone={() => {
+              recorder.mark('cubeShown');
+              setStage('cubeCheck');
+            }}
           />
         )}
 

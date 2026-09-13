@@ -52,6 +52,29 @@ const components = fs
   .readdirSync(path.join(ROOT, SOLVE, '_components'))
   .filter((f) => f.endsWith('.tsx'));
 
+// ── The three stage handlers that used to be one-liners ────────────────
+// Each of these was asserted as an exact source string, because what they
+// guard is the RECORDING BOUNDARY: the solve's end button must change
+// stage and stop nothing, ready must go straight to rec, the closing hold
+// must go to the cube check. Every one of them now leads with a
+// recorder.mark() call — the stage marks, SolveMarks in types.ts — so the
+// exact strings no longer exist.
+//
+// THEY ARE PATTERNS, NOT LOOSENED CHECKS. Each pins the whole handler
+// body: the mark first, the setStage second, and NOTHING else. A handler
+// that grew a stopRecording() still fails, which is the property these
+// were written for. The mark leading is pinned deliberately too — a mark
+// is meant to name the press, and anything run ahead of it puts its own
+// duration into the number.
+const ENDS_SOLVE_AT_FINISH_HOLD =
+  /onFinish=\{\(\) => \{\s*recorder\.mark\('solveEnd'\);\s*setStage\('finishHold'\);\s*\}\}/;
+const READY_STRAIGHT_TO_REC =
+  /<ReadyPromptStage\s*\n\s*onDone=\{\(\) => \{\s*recorder\.mark\('solveStart'\);\s*setStage\('rec'\);\s*\}\}\s*\n\s*\/>/;
+/** Source of the closing hold's onDone, for embedding in the larger
+ *  label-to-handler regexes below. */
+const TO_CUBE_CHECK_SRC =
+  "onDone=\\{\\(\\) => \\{\\s*recorder\\.mark\\('cubeShown'\\);\\s*setStage\\('cubeCheck'\\);\\s*\\}\\}";
+
 let pass = 0;
 let fail = 0;
 function ok(name, cond, detail) {
@@ -570,7 +593,7 @@ console.log('\n  -- 7. durations and markers --');
   ok('the recording boundary is untouched: starts at zeroDisplay',
     page.includes("if (stage === 'zeroDisplay') {"));
   ok('  ...and still stops after the closing hold, not at the solve',
-    page.includes("onFinish={() => setStage('finishHold')}") &&
+    ENDS_SOLVE_AT_FINISH_HOLD.test(page) &&
       page.includes('async function finishRecording'));
   ok('no instructions stage was added', !page.includes("'instructions'"));
   ok('resume is untouched: a complete run still lands on the summary',
@@ -589,7 +612,7 @@ console.log('\n  -- 6. the recording stops AFTER the cube check --');
   // is unchanged, and the assertions below on its contents are the same
   // ones that guarded the previous boundary.
   ok('the solve’s end button only changes stage — it stops nothing',
-    page.includes("onFinish={() => setStage('finishHold')}"));
+    ENDS_SOLVE_AT_FINISH_HOLD.test(page));
   // (Changeset 3 folded FINISH_HOLD_SECONDS into the one HOLD_SECONDS
   // every hold shares.)
   ok('the closing hold is 8 seconds of CameraHoldStage',
@@ -604,7 +627,9 @@ console.log('\n  -- 6. the recording stops AFTER the cube check --');
   // the time was evidenced and the solve was not.
   ok('a cube check follows the closing hold',
     page.includes("| 'cubeCheck'") &&
-      /label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"[\s\S]{0,500}?onDone=\{\(\) => setStage\('cubeCheck'\)\}/.test(page));
+      new RegExp(
+        'label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"[\\s\\S]{0,500}?' + TO_CUBE_CHECK_SRC,
+      ).test(page));
   ok('  ...in ATTEMPT_STAGES, between the closing hold and the keypad',
     /'finishHold',\s*\n\s*'cubeCheck',\s*\n\s*'entry',/.test(page));
   ok('  ...at the same 8 seconds, from the same constant',
@@ -733,7 +758,7 @@ console.log('\n  -- 8. the competition environment --');
   ok('the run has fifteen stages', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 15);
   ok('the recording boundary is untouched',
     page.includes("if (stage === 'zeroDisplay') {") &&
-      page.includes("onFinish={() => setStage('finishHold')}") &&
+      ENDS_SOLVE_AT_FINISH_HOLD.test(page) &&
       page.includes('async function finishRecording'));
   ok('the 8-second holds are untouched: three of them, all 8',
     page.includes('const HOLD_SECONDS = 8;') &&
@@ -1047,7 +1072,7 @@ console.log('\n  -- 9. the lobby and the between screen --');
       /onElapsed=\{recorder\.playBeep\}[\s\S]{0,300}?onDone=\{finishRecording\}/.test(page));
 
   ok('the recording boundary did not move',
-    page.includes("onFinish={() => setStage('finishHold')}") && page.includes('async function finishRecording'));
+    ENDS_SOLVE_AT_FINISH_HOLD.test(page) && page.includes('async function finishRecording'));
   ok('the 8-second holds did not move',
     page.includes('const HOLD_SECONDS = 8;') && (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3);
   ok('  ...and the cover now runs longer, on its own constant',
@@ -1236,7 +1261,9 @@ console.log('\n  -- 10. the mockup restyle --');
   // reason the timer check needed a button in the first place.
   ok('  ...and so does the closing timer hold',
     /label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"[\s\S]{0,600}?endLabel="ШООГОО ХАРУУЛАХ"/.test(page) &&
-      /label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"[\s\S]{0,900}?onDone=\{\(\) => setStage\('cubeCheck'\)\}/.test(page));
+      new RegExp(
+        'label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"[\\s\\S]{0,900}?' + TO_CUBE_CHECK_SRC,
+      ).test(page));
   ok('  ...and the cube check, which is what ends the clip',
     /label="ШООГОО ХАРУУЛ · ЭЦСИЙН БАЙДАЛ"[\s\S]{0,1800}?endLabel="ҮЗҮҮЛЭЛТ БИЧИХ"/.test(page) &&
       /label="ШООГОО ХАРУУЛ · ЭЦСИЙН БАЙДАЛ"[\s\S]{0,2400}?onDone=\{finishRecording\}/.test(page));
@@ -1464,7 +1491,7 @@ console.log('\n  -- 10. the mockup restyle --');
   // ── WHAT MUST NOT MOVE ──
   ok('the recording boundary did not move',
     page.includes("if (stage === 'zeroDisplay') {") &&
-      page.includes("onFinish={() => setStage('finishHold')}") &&
+      ENDS_SOLVE_AT_FINISH_HOLD.test(page) &&
       page.includes('async function finishRecording'));
   ok('the hold durations did not move',
     page.includes('const HOLD_SECONDS = 8;') && (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3);
@@ -1529,7 +1556,7 @@ console.log('\n  -- 11. the inspection --');
   // STRAIGHT TO THE SOLVE SCREEN. `count` and `go` sat between these
   // two — three screens for one continuous moment, and the middle one
   // told the athlete when to begin, which WCA does not.
-  ok('  ...and ready straight to rec', page.includes("<ReadyPromptStage onDone={() => setStage('rec')} />"));
+  ok('  ...and ready straight to rec', READY_STRAIGHT_TO_REC.test(page));
   ok('  ...with both merged stages gone, files and all',
     !fs.existsSync(path.join(ROOT, SOLVE, '_components/CountStage.tsx')) &&
       !fs.existsSync(path.join(ROOT, SOLVE, '_components/GoStage.tsx')) &&
@@ -1543,7 +1570,7 @@ console.log('\n  -- 11. the inspection --');
   // ── ALL THREE ARE INSIDE THE RECORDING ──
   ok('the recording still starts at the opening hold', page.includes("if (stage === 'zeroDisplay') {"));
   ok('  ...and still stops after the closing hold, nowhere else',
-    page.includes("onFinish={() => setStage('finishHold')}") &&
+    ENDS_SOLVE_AT_FINISH_HOLD.test(page) &&
       /async function finishRecording[\s\S]{0,200}?await recorder\.stopRecording\(\)/.test(page));
   // THE MERGE MOVED NEITHER END OF THE CLIP. It already ran across all
   // three of the screens folded together here, so folding them changes
@@ -1808,7 +1835,7 @@ console.log('\n  -- 12. the attestation --');
   // ── WHAT MUST NOT MOVE ──
   ok('the recording boundary did not move',
     page.includes("if (stage === 'zeroDisplay') {") &&
-      page.includes("onFinish={() => setStage('finishHold')}") &&
+      ENDS_SOLVE_AT_FINISH_HOLD.test(page) &&
       /async function finishRecording[\s\S]{0,200}?await recorder\.stopRecording\(\)/.test(page));
   ok('the hold durations did not move',
     page.includes('const HOLD_SECONDS = 8;') && (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3);

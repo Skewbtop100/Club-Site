@@ -32,6 +32,7 @@ import type {
   OnlineRegistration,
   OnlineSeasonAthletePoints,
   OnlineSubmission,
+  SolveMarks,
 } from './types';
 
 const RETENTION_DAYS = 14;
@@ -477,6 +478,12 @@ export async function createSubmission(input: {
    *  original solve page's call site (which never reports DNF) is
    *  unaffected. */
   isDnf?: boolean;
+  /** Where each stage button was pressed, in ms from the first frame of
+   *  the video (see SolveMarks). Optional, and legal while incomplete: a
+   *  recorder that never fired `onstart` yields none at all, and the
+   *  attempt must file regardless — the marks help a reviewer seek, they
+   *  are not what the submission is for. */
+  marks?: Partial<SolveMarks>;
 }): Promise<string> {
   const retentionExpiresAt = Timestamp.fromMillis(
     Date.now() + RETENTION_DAYS * 24 * 60 * 60 * 1000,
@@ -505,6 +512,12 @@ export async function createSubmission(input: {
       cloudinaryPublicId: input.cloudinaryPublicId,
       reportedTime: input.reportedTime,
       isDnf,
+      // ALWAYS WRITTEN, even empty. firestore.rules accepts the field as
+      // optional (for the submissions filed before it existed) and the
+      // map as partial — so an attempt whose marks are missing or
+      // half-filled still lands, which is the requirement that matters:
+      // no set of seek positions is worth refusing a solve over.
+      marks: input.marks ?? {},
       penalty: null,
       status: 'pending',
       createdAt: serverTimestamp(),

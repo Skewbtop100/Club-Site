@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
+import type { SolveMarks } from '@/lib/online-competition/types';
 
 // Ideal hint only, deliberately in the sensor's native landscape shape
 // (NOT width:480/height:640 portrait — that was tried and reverted: it
@@ -87,6 +88,38 @@ export function useSolveRecorder() {
   // subsequent beep across all 5 attempts.
   const audioContextRef = useRef<AudioContext | null>(null);
 
+  // ── Stage marks: where each press lands in the clip ──────────────────
+  // WHY THESE LIVE IN THE HOOK and not in the page that renders the
+  // buttons: the origin is MediaRecorder's own `onstart`, and the last
+  // mark is its `onstop`. Both are events on an object nothing outside
+  // this file holds. A ref in the page would have to be handed the two
+  // moments anyway, so the ref belongs where the moments are; the page
+  // calls mark() from its handlers and reads `marks` when it files.
+  //
+  // performance.now() at the recorder's `onstart`, NOT at the line that
+  // calls .start(). The two are not the same instant — the browser
+  // negotiates the encoder in between — and the gap is precisely the
+  // stretch of time that never made it into the file. Measuring from the
+  // call would push every mark later than the frame it names.
+  //
+  // Null until onstart fires, and reset to null at the top of every
+  // startRecording: an attempt whose recorder never started has no origin
+  // to measure from, and mark() below refuses rather than inventing one
+  // from the previous attempt's clip.
+  const recordingT0 = useRef<number | null>(null);
+  const marksRef = useRef<Partial<SolveMarks>>({});
+
+  /** Records where we are in the current clip, in whole milliseconds.
+   *
+   *  SILENT WHEN IT CANNOT. No origin means no mark — not a zero, not a
+   *  guess. A partial or empty set of marks is an expected outcome and
+   *  must never block a submission (see SolveMarks): the video and the
+   *  time are the evidence, these are only seek positions into it. */
+  const mark = useCallback((key: keyof SolveMarks) => {
+    if (recordingT0.current == null) return;
+    marksRef.current[key] = Math.round(performance.now() - recordingT0.current);
+  }, []);
+
   const [hasCamera, setHasCamera] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -167,12 +200,24 @@ export function useSolveRecorder() {
     }
 
     chunksRef.current = [];
+    // A NEW ATTEMPT IS A NEW CLIP, so it is a new set of marks and a new
+    // origin. Cleared BEFORE the recorder exists, so there is no window
+    // in which a mark could be measured against the previous attempt's
+    // start — and so an attempt whose recorder fails to start files with
+    // no marks rather than with the last one's.
+    marksRef.current = {};
+    recordingT0.current = null;
     const recorder = new MediaRecorder(stream, {
       mimeType: pickMimeType(),
       videoBitsPerSecond: VIDEO_BITS_PER_SECOND,
     });
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) chunksRef.current.push(e.data);
+    };
+    // FRAME ZERO OF THE FILE, as the browser reports it — see the note on
+    // recordingT0 for why this is not the .start() call below.
+    recorder.onstart = () => {
+      recordingT0.current = performance.now();
     };
     recorderRef.current = recorder;
     recorder.start();
@@ -186,10 +231,16 @@ export function useSolveRecorder() {
         resolve(new Blob(chunksRef.current, { type: 'video/webm' }));
         return;
       }
-      recorder.onstop = () => resolve(new Blob(chunksRef.current, { type: 'video/webm' }));
+      recorder.onstop = () => {
+        // BEFORE the promise resolves, so finishRecording's continuation
+        // — and therefore everything downstream that reads `marks` —
+        // cannot observe the clip as ended without its last mark.
+        mark('recordingEnd');
+        resolve(new Blob(chunksRef.current, { type: 'video/webm' }));
+      };
       recorder.stop();
     });
-  }, []);
+  }, [mark]);
 
   const releaseCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -201,5 +252,27 @@ export function useSolveRecorder() {
     setHasCamera(false);
   }, []);
 
-  return { videoRef, hasCamera, error, requestCamera, startRecording, stopRecording, releaseCamera, playBeep };
+  /** The marks gathered for the attempt just recorded, AS A COPY.
+   *
+   *  A copy, and that is the whole point of it being a function rather
+   *  than the ref's contents on the returned object. Filing runs BEHIND
+   *  the athlete — the upload for attempt 3 is still in flight while
+   *  attempt 4's startRecording clears these — so anything that holds
+   *  this across an await must hold a value, not a live reference to a
+   *  ref the next attempt will empty. Read it once, at the moment the
+   *  attempt is handed to the queue. */
+  const readMarks = useCallback((): Partial<SolveMarks> => ({ ...marksRef.current }), []);
+
+  return {
+    videoRef,
+    hasCamera,
+    error,
+    requestCamera,
+    startRecording,
+    stopRecording,
+    releaseCamera,
+    playBeep,
+    mark,
+    readMarks,
+  };
 }

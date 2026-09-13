@@ -204,51 +204,120 @@ await check('28. a backdated createdAt', 'DENY', () =>
   setDoc(doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 2)), attemptDoc({ round: 2, createdAt: new Date(2020, 0, 1) })),
 );
 
+// ── CREATE: the stage marks ─────────────────────────────────────────────
+// Where each stage button was pressed, in ms from the first frame of the
+// attempt's video (SolveMarks in types.ts). They are seek positions for a
+// reviewer, NOT a timing authority — reportedTime is still the athlete's
+// own stopwatch, read off the video — so the rule's job here is only to
+// keep the map well-formed, never to make a solve unfileable.
+//
+// Filed in competition round 3, so these land at ids nothing else in this
+// file uses: attempt 2 of round 1 must stay non-existent for the "a get of
+// an attempt that does not exist is denied" check further down.
+//
+// Note that every ALLOW above already covers the other half of "optional":
+// attemptDoc() carries no marks at all.
+const MARKS = { scrambleShown: 8100, solveStart: 24300, solveEnd: 39750, cubeShown: 48200, recordingEnd: 56400 };
+await check('29. an attempt filed WITH its stage marks', 'ALLOW', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 2, 3)),
+    attemptDoc({ round: 2, competitionRound: 3, marks: MARKS }),
+  ),
+);
+// The requirement the whole field is subordinate to: a recorder that never
+// fired `onstart`, or an attempt whose marks are half-gathered, must still
+// file. An empty map and a partial one are both normal outcomes.
+await check('30. ...or with only some of them', 'ALLOW', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 3, 3)),
+    attemptDoc({ round: 3, competitionRound: 3, marks: { solveStart: 24300, recordingEnd: 56400 } }),
+  ),
+);
+await check('31. ...or with none gathered at all', 'ALLOW', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 4, 3)),
+    attemptDoc({ round: 4, competitionRound: 3, marks: {} }),
+  ),
+);
+await check('32. a mark that is not a number', 'DENY', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 2, 4)),
+    attemptDoc({ round: 2, competitionRound: 4, marks: { ...MARKS, solveEnd: '39750' } }),
+  ),
+);
+await check('33. ...or a null one', 'DENY', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 2, 4)),
+    attemptDoc({ round: 2, competitionRound: 4, marks: { ...MARKS, cubeShown: null } }),
+  ),
+);
+// A mark is an offset from the first frame; there is no video before it.
+await check('34. ...or a negative one', 'DENY', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 2, 4)),
+    attemptDoc({ round: 2, competitionRound: 4, marks: { ...MARKS, scrambleShown: -1 } }),
+  ),
+);
+// The same hole submissionKeysOk closes at the top level, one level down:
+// an unvalidated field must not be smuggled in INSIDE the map either.
+await check('35. an unknown key smuggled into the map', 'DENY', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 2, 4)),
+    attemptDoc({ round: 2, competitionRound: 4, marks: { ...MARKS, judgedBy: CLUB_ADMIN } }),
+  ),
+);
+await check('36. marks that are not a map at all', 'DENY', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 2, 4)),
+    attemptDoc({ round: 2, competitionRound: 4, marks: 56400 }),
+  ),
+);
+
 // ── UPDATE: a filed attempt is immutable to the athlete ─────────────────
 // The quieter half of the hole: rewriting your own pending attempt is
 // re-solving it.
 await seed(idFor(ATHLETE, 3), attemptDoc({ round: 3, reportedTime: 2500 }));
-await check('29. THE OTHER HOLE: rewriting their own pending attempt’s time', 'DENY', () =>
+await check('37. THE OTHER HOLE: rewriting their own pending attempt’s time', 'DENY', () =>
   updateDoc(doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 3)), { reportedTime: 900 }),
 );
-await check('30. ...or its video', 'DENY', () =>
+await check('38. ...or its video', 'DENY', () =>
   updateDoc(doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 3)), { videoUrl: 'https://example.com/better.webm' }),
 );
-await check('31. ...or by re-filing the whole document at the same id', 'DENY', () =>
+await check('39. ...or by re-filing the whole document at the same id', 'DENY', () =>
   setDoc(doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 3)), attemptDoc({ round: 3, reportedTime: 900 })),
 );
-await check('32. ...even re-filing it IDENTICALLY (the client treats this denial as success)', 'DENY', () =>
+await check('40. ...even re-filing it IDENTICALLY (the client treats this denial as success)', 'DENY', () =>
   setDoc(doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 3)), attemptDoc({ round: 3, reportedTime: 2500 })),
 );
-await check('33. ...or flipping their own status to approved', 'DENY', () =>
+await check('41. ...or flipping their own status to approved', 'DENY', () =>
   updateDoc(doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 3)), { status: 'approved' }),
 );
-await check("34. ...or touching another athlete's", 'DENY', () =>
+await check("42. ...or touching another athlete's", 'DENY', () =>
   updateDoc(doc(other(), 'onlineSubmissions', idFor(ATHLETE, 3)), { reportedTime: 900 }),
 );
-await check('35. deleting a filed attempt', 'DENY', () =>
+await check('43. deleting a filed attempt', 'DENY', () =>
   deleteDoc(doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 3))),
 );
 
 // ── READ: unchanged ─────────────────────────────────────────────────────
-await check('36. the athlete reads their own attempt', 'ALLOW', () =>
+await check('44. the athlete reads their own attempt', 'ALLOW', () =>
   getDoc(doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 3))),
 );
-await check("37. another athlete cannot read it", 'DENY', () =>
+await check("45. another athlete cannot read it", 'DENY', () =>
   getDoc(doc(other(), 'onlineSubmissions', idFor(ATHLETE, 3))),
 );
 // Known and relied upon by createSubmission's already-filed check: a get
 // of a document that does not exist is DENIED, not empty, because the read
 // rule dereferences resource.data.uid.
-await check('38. a get of an attempt that does not exist is denied, not empty', 'DENY', () =>
+await check('46. a get of an attempt that does not exist is denied, not empty', 'DENY', () =>
   getDoc(doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 2))),
 );
 
 // ── The club admin, and the judge ───────────────────────────────────────
-await check('39. the club admin may still correct a submission', 'ALLOW', () =>
+await check('47. the club admin may still correct a submission', 'ALLOW', () =>
   updateDoc(doc(clubAdmin(), 'onlineSubmissions', idFor(ATHLETE, 3)), { status: 'approved', penalty: '+2' }),
 );
-await check('40. the club admin may still delete one', 'ALLOW', () =>
+await check('48. the club admin may still delete one', 'ALLOW', () =>
   deleteDoc(doc(clubAdmin(), 'onlineSubmissions', idFor(ATHLETE, 5))),
 );
 // The khorom judge dashboard has no Firebase Auth identity at all — it is
@@ -256,7 +325,7 @@ await check('40. the club admin may still delete one', 'ALLOW', () =>
 // bypasses these rules entirely. withSecurityRulesDisabled is how that is
 // modelled here, the same way participants.test.mjs models the admin
 // registration write.
-await check('41. the judge’s verdict (Admin SDK: rules bypassed) still lands', 'ALLOW', async () => {
+await check('49. the judge’s verdict (Admin SDK: rules bypassed) still lands', 'ALLOW', async () => {
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
     await setDoc(
       doc(ctx.firestore(), 'onlineSubmissions', idFor(ATHLETE, 1)),
@@ -264,7 +333,7 @@ await check('41. the judge’s verdict (Admin SDK: rules bypassed) still lands',
     );
   });
 });
-await check('42. ...including a shape the athlete could never write', 'ALLOW', async () => {
+await check('50. ...including a shape the athlete could never write', 'ALLOW', async () => {
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
     await setDoc(doc(ctx.firestore(), 'onlineSubmissions', 'legacy-random-id-from-addDoc'), {
       ...attemptDoc({ status: 'rejected' }),

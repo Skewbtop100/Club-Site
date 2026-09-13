@@ -670,9 +670,49 @@ export interface OnlineSubmission {
    *  solve. */
   penalty: OnlineSubmissionPenalty;
   status: OnlineSubmissionStatus;
+  /** Where each stage button was pressed, in milliseconds from the first
+   *  frame of this attempt's video — the timestamps a judge scrubs to.
+   *
+   *  OPTIONAL, AND PARTIAL IS LEGAL. Every submission filed before this
+   *  field existed has none, and a run whose recorder never emitted
+   *  `onstart` records none either — see SolveMarks. A submission must
+   *  still file with marks missing or half-filled: they are a convenience
+   *  for review, never evidence in their own right, and an attempt that
+   *  cannot be filed is a solve thrown away. */
+  marks?: Partial<SolveMarks>;
   createdAt?: Timestamp;
   /** 14 days from submission — drives scheduled deletion of the raw video. */
   retentionExpiresAt?: Timestamp;
+}
+
+/** THE STAGE PRESSES, AS OFFSETS INTO THE VIDEO. Whole milliseconds from
+ *  the moment MediaRecorder reported it had started (its `onstart`, not
+ *  the line that called `.start()` — the gap between the two is real and
+ *  is exactly the part of the clip that does not exist yet), so each
+ *  number is a position a reviewer can seek the file to.
+ *
+ *  Measured with performance.now(), which is monotonic: a device clock
+ *  corrected mid-solve cannot move a mark, and no mark can precede the
+ *  one before it.
+ *
+ *  NOT A TIMING AUTHORITY. `reportedTime` is the athlete's own stopwatch,
+ *  read off the video by a judge; nothing here replaces it, and
+ *  solveEnd - solveStart is NOT the solve time (it includes inspection
+ *  and every hesitation before the athlete pressed). These are seek
+ *  positions and nothing more. */
+export interface SolveMarks {
+  /** "ХОЛИЛТ ХАРАХ" — the end of the 0.00 timer hold; the scramble is
+   *  about to be shown. */
+  scrambleShown: number;
+  /** "ЭВЛҮҮЛЭЛТЭЭ ЭХЛҮҮЛЭХ" — the go-ahead; inspection starts here. */
+  solveStart: number;
+  /** "ЭВЛҮҮЛЭЛТ ДУУССАН" — the athlete says the solve is over. */
+  solveEnd: number;
+  /** "ШООГОО ХАРУУЛАХ" — the end of the closing timer hold; the cube
+   *  check is about to start. */
+  cubeShown: number;
+  /** MediaRecorder's `onstop` — the last frame. */
+  recordingEnd: number;
 }
 
 export type OnlineSubmissionPenalty = '+2' | 'DNF' | null;

@@ -408,17 +408,55 @@ service cloud.firestore {
       // a field nobody validates cannot be smuggled in alongside; hasAll
       // refuses a partial document that would read as a submission with
       // holes in it.
+      //
+      // 'marks' is in hasOnly but deliberately NOT in hasAll: it is the
+      // one optional field here. Submissions filed before it existed have
+      // none, and an attempt whose recorder never reported a start has
+      // none either — both must stay fileable, because a set of video
+      // seek positions is not worth refusing a solve over.
       function submissionKeysOk() {
         return request.resource.data.keys().hasOnly([
           'competitionId', 'uid', 'event', 'round', 'competitionRound',
           'videoUrl', 'cloudinaryPublicId', 'reportedTime', 'isDnf',
-          'penalty', 'status', 'createdAt', 'retentionExpiresAt'
+          'marks', 'penalty', 'status', 'createdAt', 'retentionExpiresAt'
         ]) &&
         request.resource.data.keys().hasAll([
           'competitionId', 'uid', 'event', 'round', 'competitionRound',
           'videoUrl', 'cloudinaryPublicId', 'reportedTime', 'isDnf',
           'penalty', 'status', 'createdAt', 'retentionExpiresAt'
         ]);
+      }
+
+      // The stage marks (SolveMarks in types.ts): a map of ms offsets into
+      // this attempt's video. Checked key by key rather than over
+      // .values(), because the rules language has no way to assert a
+      // predicate across a list — and checking each named key is the
+      // stronger form anyway: hasOnly here means an unvalidated field
+      // cannot be smuggled in INSIDE the map, which is exactly the hole
+      // submissionKeysOk closes at the top level.
+      //
+      // EVERY KEY IS INDIVIDUALLY OPTIONAL. A run that files three of the
+      // five marks is a normal outcome, not a malformed document, so the
+      // shape is "absent, or a number" per key rather than hasAll.
+      // Negative is refused: a mark is an offset from the first frame, and
+      // there is no video before it.
+      function markOk(key) {
+        return !request.resource.data.marks.keys().hasAny([key]) ||
+               (request.resource.data.marks[key] is number &&
+                request.resource.data.marks[key] >= 0);
+      }
+
+      function submissionMarksOk() {
+        return !request.resource.data.keys().hasAny(['marks']) ||
+               (request.resource.data.marks is map &&
+                request.resource.data.marks.keys().hasOnly([
+                  'scrambleShown', 'solveStart', 'solveEnd', 'cubeShown', 'recordingEnd'
+                ]) &&
+                markOk('scrambleShown') &&
+                markOk('solveStart') &&
+                markOk('solveEnd') &&
+                markOk('cubeShown') &&
+                markOk('recordingEnd'));
       }
 
       function submissionTypesOk() {
@@ -482,6 +520,7 @@ service cloud.firestore {
                        request.resource.data.uid == request.auth.uid &&
                        submissionKeysOk() &&
                        submissionTypesOk() &&
+                       submissionMarksOk() &&
                        submissionIdMatchesContents() &&
                        request.resource.data.status == 'pending' &&
                        request.resource.data.penalty == null &&
