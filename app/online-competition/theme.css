@@ -1458,106 +1458,6 @@
     font-size: 21px;
   }
 }
-@media (max-width: 460px) {
-  .oc-solve-bar-comp {
-    display: none;
-  }
-  .oc-solve-bar-attempt {
-    display: none;
-  }
-  .oc-solve-bar-pip {
-    width: 14px;
-  }
-  .oc-solve-bar-btn {
-    padding: 9px 9px;
-  }
-  .oc-solve-body {
-    padding: 16px;
-  }
-  /* Five cards across 343px: 64px each. The grid never becomes two rows
-     — the point of the row is that five attempts are one run. */
-  .oc-solve-slots {
-    gap: 6px;
-  }
-  .oc-solve-slot {
-    padding: 12px 4px;
-    gap: 8px;
-    min-height: 88px;
-  }
-  .oc-solve-slot-time {
-    font-size: 13px;
-  }
-  .oc-solve-slot-mark {
-    width: 12px;
-  }
-  .oc-solve-lobby-go,
-  .oc-solve-between-go {
-    padding: 17px;
-    font-size: 14px;
-  }
-  .oc-solve-reveal-n {
-    font-size: 44px;
-  }
-  .oc-solve-reveal-eyebrow {
-    font-size: 11px;
-  }
-  /* THE COUNTDOWN NUMBER, on all three camera holds.
-   The colour fill that briefly replaced it lives on the attempt intro
-   now, and only there: the intro is a bare sentence on an empty screen,
-   while these three carry a live preview, and colour moving behind the
-   picture an athlete is trying to frame competes with the one thing they
-   are meant to be looking at. */
-.oc-solve-hold-count {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.oc-solve-hold-rule {
-  width: 26px;
-  height: 1px;
-  background: #2A2A31;
-}
-.oc-solve-hold-n {
-  font: 700 50px/1 var(--oc-font-mono), monospace;
-  font-variant-numeric: tabular-nums;
-  color: #DFFF4F;
-}
-.oc-solve-hold-unit {
-  font: 500 9px/1 var(--oc-font-mono), monospace;
-  letter-spacing: 0.2em;
-  color: #6E6A62;
-}
-.oc-solve-hold-say {
-    font-size: 21px;
-  }
-  .oc-solve-ready-title {
-    font-size: 25px;
-  }
-  .oc-solve-ready-go {
-    min-width: 0;
-    width: 100%;
-    padding: 20px 18px;
-    font-size: 15px;
-  }
-  /* "00:00.00" at 56px mono is ~269px, which clears 343px — but only
-     just, and the well has 40px of its own padding. */
-  .oc-solve-entry-digits {
-    font-size: 44px;
-  }
-  .oc-solve-attempt-time {
-    font-size: 20px;
-  }
-  .oc-solve-ao5-value {
-    font-size: 36px;
-  }
-  .oc-solve-btn-finish {
-    font-size: 16px;
-  }
-  .oc-solve-cover-say {
-    font-size: 14px;
-  }
-}
-
 .oc-solve-page {
   min-height: 100vh;
   background: #0D0C0A;
@@ -2035,17 +1935,41 @@
 .oc-solve-cover-live {
   object-position: center 75%;
 }
-/* THE DEMONSTRATION CROP STAYS CENTRED, and it is cropping the other
-   axis. Its source is 720x720 square in a landscape band, so `cover`
-   keeps the full WIDTH and takes equal slices off the top and the
-   bottom. The subject is stacked vertically — cube centre, mat below it,
-   phone stand at the bottom — so the cube and the covering action, which
-   are the instruction, sit in the middle and survive whole. What goes is
-   sky above and the foot of the stand below: setup context, not the
-   lesson, and the athlete's own stand has been holding their phone for a
-   minute by the time they reach this screen. */
+/* THE DEMONSTRATION CROP LOOKS UP, and this number is measured, not
+   judged by eye. Its source is 720x720 square in a 3/2 band, so `cover`
+   keeps the full WIDTH and two thirds of the HEIGHT — a third of the
+   frame has to go, and the only question is from where.
+
+   THE SUBJECT IS NOT IN THE MIDDLE OF ITS FRAME. Sampled across the
+   loop, the cube and the hand occupy 13.8%–60.3% of the source's height
+   and nothing below that is anything but backdrop; the clip was shot
+   with the cube high and a lot of empty mat under it. `center` therefore
+   cut from 0% to 16.7% — three percent INTO the cube, and the three
+   percent it took was the white top face, which is the one face the
+   sentence above names. A crop that removes the thing the instruction is
+   about is not a crop, it is a bug.
+
+   `center 12%` slides the visible window up to 4%–70.7%, which recentres
+   the measured subject: about ten percent of clear backdrop above the
+   cube and ten below the hand. The whole white face survives with real
+   margin rather than a hairline, and the margin is symmetric, so the
+   demonstration reads as composed rather than as something shoved
+   against the top edge.
+
+   WHAT IS LOST is the bottom 29% of the frame: bare mat, and the foot of
+   the phone stand. That is setup context for a stand the athlete's own
+   phone has been sitting in since the lobby — it teaches nothing the
+   cube and the hand do not. Nothing of the cube, the cover or the
+   covering motion is cut on either axis.
+
+   WHY NOT `contain`. It would cut nothing, but a square in a 3/2 band
+   pillarboxes: the picture would render 183x183 inside a 274x183 band,
+   spending a third of the width on backdrop and shrinking the cube by
+   about a third at the exact moment the athlete is trying to read which
+   face is which. Repositioning keeps the full width, so the cube is
+   larger here than `contain` could make it and still whole. */
 .oc-solve-cover-demo {
-  object-position: center center;
+  object-position: center 12%;
 }
 
 
@@ -2270,11 +2194,17 @@
   letter-spacing: 0.2em;
   color: #6E6A62;
 }
-/* Between the two bands, and smaller than it was: it is a caption on a
-   screen whose content is two pictures, not the content itself. */
+/* Between the two bands. It is a caption on a screen whose content is
+   two pictures, not the content itself — but 15px over-corrected from
+   the 24px it had before the rebuild. This sentence is the only place
+   the two colours are NAMED, and the coloured words inside it are what
+   the athlete matches against their cube; at 15px on a phone that is a
+   footnote, not an instruction. 19px is legible at arm's length without
+   competing with the pictures, and the screen still does not scroll on
+   the smallest phone it has to survive. */
 .oc-solve-cover-say {
   flex: none;
-  font: 500 15px/1.45 var(--oc-font-heading), sans-serif;
+  font: 500 19px/1.45 var(--oc-font-heading), sans-serif;
   color: #F4F1EA;
   text-align: center;
   letter-spacing: 0;
@@ -2852,6 +2782,85 @@
 .oc-solve-btn-back:hover {
   border-color: #8A8474;
   color: #F4F1EA;
+}
+
+/* ── THE SOLVE FLOW'S NARROW-PHONE BREAKPOINT ─────────────────────────
+   IT MUST STAY LAST IN THIS SECTION, and that is not a style preference.
+   A media query adds NO SPECIFICITY. This block used to sit above the
+   solve rules it overrides, so every equally-specific base rule declared
+   after it won at every width and the whole breakpoint was dead — 13
+   overrides that had never once applied, on the reveal, the three camera
+   holds, the ready screen, the entry pad and the results. It was found
+   four separate times by accident before it was found on purpose.
+
+   Anything added below this block that re-declares one of these
+   selectors will kill its override silently: no warning, no error, it
+   just stops working on phones. tests/solve-flow guards it. */
+@media (max-width: 460px) {
+  .oc-solve-bar-comp {
+    display: none;
+  }
+  .oc-solve-bar-attempt {
+    display: none;
+  }
+  .oc-solve-bar-pip {
+    width: 14px;
+  }
+  .oc-solve-bar-btn {
+    padding: 9px 9px;
+  }
+  .oc-solve-body {
+    padding: 16px;
+  }
+  /* Five cards across 343px: 64px each. The grid never becomes two rows
+     — the point of the row is that five attempts are one run. */
+  .oc-solve-slots {
+    gap: 6px;
+  }
+  .oc-solve-slot {
+    padding: 12px 4px;
+    gap: 8px;
+    min-height: 88px;
+  }
+  .oc-solve-slot-time {
+    font-size: 13px;
+  }
+  .oc-solve-slot-mark {
+    width: 12px;
+  }
+  .oc-solve-lobby-go,
+  .oc-solve-between-go {
+    padding: 17px;
+    font-size: 14px;
+  }
+  /* THE THREE CAMERA HOLDS ARE THE MOST HEIGHT-PRESSURED SCREENS IN THE
+     FLOW — count, sentence, camera box, footnote and a button slot — and
+     they are where the headroom regressions have actually happened. 48px
+     is the largest single saving any of these overrides makes, and the
+     harness substitutes a narrower face than Geologica, so the real wrap
+     is wider than anything measured here. */
+  .oc-solve-hold-say {
+    font-size: 21px;
+  }
+  /* THE BASE RULE'S `min-width: 300px` IS A HARD FLOOR, and min-width
+     beats max-width, so `max-width: 100%` cannot rescue it: at 320px the
+     stage is 268px and the button renders 300px — 32px wider than what
+     contains it. Filling the width instead removes the floor rather than
+     picking a smaller number that would meet the same wall lower down. */
+  .oc-solve-ready-go {
+    min-width: 0;
+    width: 100%;
+    padding: 20px 18px;
+    font-size: 15px;
+  }
+  /* "00:00.00" AT 56px MONO IS ~269px. The stage is 268px wide at
+     320px, so the base size is a pixel the wrong side of its container
+     on the narrowest phone still in use — and these are the digits the
+     athlete's own time is typed into, where clipping is a data bug and
+     not a cosmetic one. 44px retires the risk instead of surviving it. */
+  .oc-solve-entry-digits {
+    font-size: 44px;
+  }
 }
 
 /* ── Phase 6 — athlete profile verification

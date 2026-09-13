@@ -411,15 +411,52 @@ console.log('\n  -- 5. the camera hold is ONE component --');
     // would spend most of the band on that.
     ok('  ...cropped toward the bottom of the frame, not the centre',
       /\.oc-solve-cover-live \{\s*\n\s*object-position: center 75%;/.test(theme));
-    // THE DEMONSTRATION CROPS THE OTHER AXIS, and stays centred: a
-    // square source in a landscape band keeps full width and takes equal
-    // slices off top and bottom, which is where the cube is not.
-    ok('  ...while the demonstration crops top and bottom, centred',
-      /\.oc-solve-cover-demo \{\s*\n\s*object-position: center center;/.test(theme) &&
+    // THE DEMONSTRATION'S CROP MUST NOT REACH THE CUBE, and this is
+    // arithmetic rather than a pinned string, so it still holds if the
+    // band's ratio changes.
+    //
+    // THE SUBJECT IS NOT CENTRED IN ITS OWN FRAME. Sampled off the file
+    // across seven frames, agreeing to 0.1%: the cube and the hand occupy
+    // 13.8%-60.3% of the 720x720 source's height, and everything below
+    // that is bare mat. So `center center` in a 3/2 band cut from 0% to
+    // 16.7% — three percent INTO the white top face, which is the one
+    // face the sentence above names. A crop that removes the thing the
+    // instruction is about is a bug, and it was a real one on a phone.
+    //
+    // A square source in a landscape band keeps the full WIDTH and shows
+    // 1/ratio of its height; object-position P slides that window down by
+    // P x the overflow.
+    const cropRatio = (() => {
+      const m = theme.match(
+        /\.oc-solve-cover-band-demo \{[\s\S]{0,400}?aspect-ratio: (\d+) \/ (\d+);/);
+      return m ? Number(m[1]) / Number(m[2]) : null;
+    })();
+    const cropPos = (() => {
+      const m = theme.match(
+        /\.oc-solve-cover-demo \{\s*\n\s*object-position: center ([\d.]+)%;/);
+      return m ? Number(m[1]) / 100 : null;
+    })();
+    const cropKeep = cropRatio && cropRatio > 1 ? 1 / cropRatio : null;
+    const cropTop = cropKeep === null || cropPos === null
+      ? null : cropPos * (1 - cropKeep) * 100;
+    const cropBot = cropTop === null ? null : cropTop + cropKeep * 100;
+    ok('  ...while the demonstration crops clear of the cube’s white top',
+      cropTop !== null && cropTop < 13.8 && cropBot > 60.3 &&
         /\.oc-solve-cover-live,\s*\n\.oc-solve-cover-demo \{[\s\S]{0,200}?object-fit: cover;/.test(theme));
+    // NOT `contain`, which would cut nothing but pillarbox a square source
+    // into a landscape band and shrink the cube by about a third.
+    ok('  ...by repositioning the picture rather than shrinking it',
+      !/\.oc-solve-cover-demo \{[\s\S]{0,200}?object-fit: contain;/.test(theme));
     // FIXED BOXES, not the stream's own ratio — the holds' rule, not the
     // lobby's: one object, and `cover` shows a SUBSET of what is
     // recorded, so it can only ever make the athlete over-correct.
+    // THE SENTENCE IS THE ONLY PLACE THE TWO COLOURS ARE NAMED, and the
+    // coloured words in it are what the athlete matches against their own
+    // cube. The rebuild took it 24px -> 15px, which over-corrected it into
+    // a footnote. It reads at arm's length again and still does not scroll
+    // the smallest phone: 45px spare at 360x640, measured.
+    ok('  ...with the sentence sized as an instruction, not a footnote',
+      /\.oc-solve-cover-say \{[\s\S]{0,200}?font: 500 19px\/1\.45/.test(theme));
     ok('  ...at fixed ratios, never measured off the stream',
       !stripComments(cover).includes('videoWidth') &&
         !stripComments(cover).includes('loadedmetadata'));
@@ -1655,6 +1692,59 @@ console.log('\n  -- 12. the attestation --');
     /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page) &&
       page.includes('setResumeMessage(resumeNotice(plan))'));
   ok('the stage list did not move', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 15);
+
+  // ── THE NARROW-PHONE BREAKPOINT IS STILL LAST ──
+  // A MEDIA QUERY ADDS NO SPECIFICITY. An equally-specific base rule
+  // declared AFTER the breakpoint beats it at every width, so the
+  // override silently stops applying — no warning, no error, it just
+  // never runs on a phone. That had happened to all thirteen rules in
+  // this block, and it was found four separate times by accident before
+  // anyone went looking.
+  //
+  // This walks every selector the block declares and fails if a base
+  // rule for it appears later in the file. It guards the trap itself,
+  // not the thirteen instances of it.
+  const bp = (() => {
+    const i = theme.indexOf('@media (max-width: 460px) {');
+    if (i < 0) return null;
+    let d = 0, j = i;
+    while (j < theme.length) {
+      if (theme[j] === '{') d += 1;
+      else if (theme[j] === '}') { d -= 1; if (!d) break; }
+      j += 1;
+    }
+    return { start: i, end: j, body: theme.slice(i, j) };
+  })();
+  const beatenLater = [];
+  if (bp) {
+    const sels = new Set();
+    for (const m of bp.body.matchAll(/^  (\.[-\w]+(?:,\n  \.[-\w]+)*) \{/gm)) {
+      m[1].split(',').forEach((x) => sels.add(x.trim()));
+    }
+    for (const sel of sels) {
+      // A base rule is one at column 0 — anything indented is inside an
+      // at-rule and carries its own condition.
+      for (const needle of ['\n' + sel + ' {', '\n' + sel + ',']) {
+        if (theme.indexOf(needle, bp.end) >= 0) beatenLater.push(sel);
+      }
+    }
+  }
+  ok('the narrow-phone breakpoint still comes after the rules it overrides',
+    bp !== null && beatenLater.length === 0);
+  if (beatenLater.length) console.log('        beaten later by: ' + [...new Set(beatenLater)].join(', '));
+  // The three overrides that guard a MEASURED break, as opposed to the
+  // six cosmetic shrinks deleted with them: the ready button's base
+  // `min-width: 300px` renders 300px inside a 268px stage at 320px; the
+  // entry digits are \269px of mono in that same 268px; and the camera
+  // holds are the flow's most height-pressured screens.
+  ok('  ...and still carries the three overrides that guard a real break',
+    /\.oc-solve-ready-go \{[^}]*min-width: 0;/.test(bp ? bp.body : '') &&
+      /\.oc-solve-entry-digits \{[^}]*font-size: 44px;/.test(bp ? bp.body : '') &&
+      /\.oc-solve-hold-say \{[^}]*font-size: 21px;/.test(bp ? bp.body : ''));
+  // The four rules that were pasted into the middle of this block at
+  // column 0 — byte-identical copies of base rules — are gone.
+  ok('  ...and no base rule is stranded inside it',
+    bp !== null && !/^\.oc-solve/m.test(bp.body.slice(bp.body.indexOf('{') + 1)));
 }
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
