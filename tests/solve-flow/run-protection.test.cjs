@@ -1138,13 +1138,23 @@ console.log('\n  -- 10. the mockup restyle --');
   ok('  ...above the scramble, not beside it',
     revealCode.indexOf('oc-solve-reveal-rec') < revealCode.indexOf('oc-solve-reveal-head') &&
       !theme.includes('oc-solve-camera-box-mini'));
-  // SMALLER THAN A MOVE TILE AT EVERY WIDTH. Tiles shrink on a narrow
-  // screen and a fixed box does not: at 64px this was 1.27x a tile in a
-  // six-move chunk at 375px — wider than the thing it must not compete
-  // with.
+  // PORTRAIT, because a phone held in portrait records a portrait track
+  // and a 4/3 box showed a landscape slice of a shape the camera does not
+  // produce. FIXED, not measured off the stream: the lobby reads
+  // videoWidth/videoHeight because framing is its job and its box must be
+  // the recording's shape or it lies to the athlete. Nothing is framed
+  // against this one, so it owes no such promise — and a fixed ratio
+  // cannot resize when metadata lands, next to a five-second count.
+  ok('  ...portrait, at a fixed ratio rather than the stream’s',
+    /\.oc-solve-reveal-cam \{[\s\S]{0,300}?aspect-ratio: 9 \/ 16;/.test(theme) &&
+      !revealCode.includes('videoWidth') && !revealCode.includes('loadedmetadata'));
+  // UNDER A TILE IN AREA at every width. Tiles shrink on a narrow screen
+  // and a fixed box does not, and a portrait box is tall for its width —
+  // so it has to be narrower again to keep the same weight. Measured:
+  // 0.43x-0.74x a tile's area, worst case a six-move chunk at 375px.
   ok('  ...smaller than a move tile, and dimmed',
-    /\.oc-solve-reveal-cam \{[\s\S]{0,300}?width: 48px;/.test(theme) &&
-      /\.oc-solve-reveal-cam \{[\s\S]{0,400}?opacity: 0\.72;/.test(theme));
+    /\.oc-solve-reveal-cam \{[\s\S]{0,300}?width: 32px;/.test(theme) &&
+      /\.oc-solve-reveal-cam \{[\s\S]{0,500}?opacity: 0\.72;/.test(theme));
   // THE SAME SIGNAL AS THE SOLVE SCREEN'S, from the same two classes: a
   // reassurance only reassures if it is recognised, and a bare dot
   // elsewhere would be a second thing to learn for one fact.

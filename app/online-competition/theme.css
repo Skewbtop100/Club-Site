@@ -1726,12 +1726,14 @@
 
    HOW IT STAYS OUT OF THE WAY. Four things, none of them just "make it
    smaller":
-     - 48px wide, against move tiles that are 52-68px. It has to be
-       smaller than a tile at EVERY width, and tiles shrink on a narrow
-       screen while a fixed box does not: at 64px this was 1.27x a tile
-       in a six-move chunk at 375px — wider than the thing it must not
-       compete with. 48px is smaller in width, height and area (about
-       two thirds of a tile) in every case measured.
+     - 32px wide, against move tiles that are 52-68px. It has to stay
+       under a tile IN AREA at every width, and tiles shrink on a narrow
+       screen while a fixed box does not: at 64px and 4/3 this was 1.27x
+       a tile wide in a six-move chunk at 375px — wider than the thing it
+       must not compete with. A portrait box is tall for its width, so it
+       has to be narrower again to keep the same weight: 32x57 is about
+       three quarters of a tile's area, the same as the 4/3 box it
+       replaces.
      - DIMMED to 0.72, so it sits back from tiles that are near-white on
        near-black at full strength.
      - NO BORDER BRACKETS. The hold previews wear four volt corners
@@ -1747,9 +1749,25 @@
   justify-content: center;
   gap: 9px;
 }
+/* PORTRAIT, AND A FIXED ONE. A phone held in portrait records a portrait
+   track, so a 4/3 box showed a landscape slice of a shape the camera does
+   not produce.
+
+   FIXED 9/16, not the stream's real ratio, and that is the difference
+   between this and the lobby. The lobby measures videoWidth/videoHeight
+   because FRAMING IS ITS JOB — the athlete aims the cube and the timer
+   against the edges of that box, so the box has to be the recording's
+   shape or it lies to them. Nothing is framed against this one: it says
+   "the camera is alive" and nothing else, so it owes no promise about
+   what the clip contains. Fixing the ratio also keeps it from resizing
+   when metadata lands, which on a screen whose whole job is a five-second
+   chunk rhythm would be a box twitching next to the count.
+   The cost, stated: a landscape webcam is centre-cropped to a narrow
+   strip here. That costs nothing, because nothing is measured against it
+   — movement and light are the whole message. */
 .oc-solve-reveal-cam {
-  width: 48px;
-  aspect-ratio: 4 / 3;
+  width: 32px;
+  aspect-ratio: 9 / 16;
   flex: none;
   position: relative;
   overflow: hidden;
