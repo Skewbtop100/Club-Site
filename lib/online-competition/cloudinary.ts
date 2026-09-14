@@ -16,6 +16,17 @@ const UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
 export interface CloudinaryUploadResult {
   secureUrl: string;
   publicId: string;
+  /** THE CLIP'S REAL LENGTH IN MILLISECONDS, from the upload response.
+   *
+   *  Cloudinary returns `duration` on a VIDEO upload, in SECONDS as a
+   *  float (e.g. 104.033). It is converted once, here, because everything
+   *  that compares it — the stage marks — is in milliseconds, and a
+   *  seconds/milliseconds mix-up in a consistency check would make the
+   *  check fire on every honest submission.
+   *
+   *  Undefined for an image upload, which has no duration, and for any
+   *  response that omits it. Callers must treat it as optional. */
+  durationMs?: number;
 }
 
 // XMLHttpRequest (not fetch) is used deliberately — fetch has no built-in
@@ -50,8 +61,16 @@ function uploadToCloudinary(
           const data = JSON.parse(xhr.responseText) as {
             secure_url: string;
             public_id: string;
+            duration?: number;
           };
-          resolve({ secureUrl: data.secure_url, publicId: data.public_id });
+          resolve({
+            secureUrl: data.secure_url,
+            publicId: data.public_id,
+            durationMs:
+              typeof data.duration === 'number' && Number.isFinite(data.duration)
+                ? Math.round(data.duration * 1000)
+                : undefined,
+          });
         } catch {
           reject(new Error('Cloudinary хариу уншиж чадсангүй'));
         }

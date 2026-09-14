@@ -489,6 +489,12 @@ export async function createSubmission(input: {
    *  with no stills still files and still reviews. */
   timerShotIds?: string[];
   cubeShotIds?: string[];
+  /** The uploaded clip's length in ms, from Cloudinary's own response —
+   *  not from the recorder, deliberately. It is the length of the file a
+   *  judge will actually watch, which is the only number worth comparing
+   *  the marks against. Optional: an upload response without a duration
+   *  must still file. */
+  videoDurationMs?: number;
 }): Promise<string> {
   const retentionExpiresAt = Timestamp.fromMillis(
     Date.now() + RETENTION_DAYS * 24 * 60 * 60 * 1000,
@@ -527,6 +533,13 @@ export async function createSubmission(input: {
       // was captured, and never a reason for a write to be withheld.
       timerShotIds: input.timerShotIds ?? [],
       cubeShotIds: input.cubeShotIds ?? [],
+      // OMITTED RATHER THAN NULLED when absent. Firestore rejects an
+      // explicit undefined, and a stored null would have to be told apart
+      // from a real zero by every reader; an absent field is already the
+      // shape every other optional here uses.
+      ...(typeof input.videoDurationMs === 'number'
+        ? { videoDurationMs: input.videoDurationMs }
+        : {}),
       penalty: null,
       status: 'pending',
       createdAt: serverTimestamp(),

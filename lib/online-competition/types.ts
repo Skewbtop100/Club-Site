@@ -699,6 +699,19 @@ export interface OnlineSubmission {
    *  video remains the evidence. */
   timerShotIds?: string[];
   cubeShotIds?: string[];
+  /** The uploaded clip's length in milliseconds, as Cloudinary measured
+   *  it on upload (its `duration`, in seconds, times 1000).
+   *
+   *  THE FILE'S LENGTH, NOT THE RECORDER'S IDEA OF IT. That distinction
+   *  is the entire point: the marks come from the recorder's clock and
+   *  this comes from the artefact a judge watches, so comparing them
+   *  catches a whole class of fault the marks cannot catch on their own —
+   *  a recorder-start gap shifts every mark by the same amount, which
+   *  every difference-based check reads as perfectly consistent.
+   *
+   *  Optional and permanently so: absent on every submission filed before
+   *  it existed, and absent whenever an upload response omits it. */
+  videoDurationMs?: number;
   createdAt?: Timestamp;
   /** 14 days from submission — drives scheduled deletion of the raw video. */
   retentionExpiresAt?: Timestamp;
@@ -860,6 +873,19 @@ export interface OnlineSubmissionAdminView {
    *  the review panel renders nothing at all for an empty row. */
   timerShotIds?: string[];
   cubeShotIds?: string[];
+  /** The uploaded clip's length in milliseconds, as Cloudinary measured
+   *  it on upload (its `duration`, in seconds, times 1000).
+   *
+   *  THE FILE'S LENGTH, NOT THE RECORDER'S IDEA OF IT. That distinction
+   *  is the entire point: the marks come from the recorder's clock and
+   *  this comes from the artefact a judge watches, so comparing them
+   *  catches a whole class of fault the marks cannot catch on their own —
+   *  a recorder-start gap shifts every mark by the same amount, which
+   *  every difference-based check reads as perfectly consistent.
+   *
+   *  Optional and permanently so: absent on every submission filed before
+   *  it existed, and absent whenever an upload response omits it. */
+  videoDurationMs?: number;
   createdAt: number | null;
 }
 

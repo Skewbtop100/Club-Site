@@ -32,6 +32,7 @@
     "test:ranking": "firebase emulators:exec --only firestore \"node tests/competition-fields/ranking.test.cjs\"",
     "test:reset": "firebase emulators:exec --only firestore \"node tests/competition-fields/reset-attempts.test.cjs\"",
     "test:videoshape": "node tests/competition-fields/review-video-shape.test.cjs",
+    "test:adminview": "node tests/competition-fields/admin-view-coverage.test.cjs",
     "test:checks": "node tests/competition-fields/submission-checks.test.cjs",
     "test:seeding": "firebase emulators:exec --only firestore \"node tests/competition-fields/group-seeding.test.cjs\"",
     "test:roundready": "firebase emulators:exec --only firestore \"node tests/competition-fields/round-readiness.test.cjs\"",

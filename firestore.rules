@@ -409,18 +409,22 @@ service cloud.firestore {
       // refuses a partial document that would read as a submission with
       // holes in it.
       //
-      // 'marks', 'timerShotIds' and 'cubeShotIds' are in hasOnly but
-      // deliberately NOT in hasAll: they are the optional fields here.
+      // 'marks', 'timerShotIds', 'cubeShotIds' and 'videoDurationMs' are
+      // in hasOnly but deliberately NOT in hasAll: they are the optional
+      // fields here.
       // Submissions filed before they existed have none, an attempt whose
       // recorder never reported a start has no marks, and a camera that
       // would not yield a frame produces no stills — all of them must
       // stay fileable, because neither a set of video seek positions nor
-      // a few JPEGs is worth refusing a solve over.
+      // a few JPEGs is worth refusing a solve over. videoDurationMs is
+      // absent for the same reason and one more: it comes from the upload
+      // response, and a response that omits it must still produce a
+      // fileable attempt.
       function submissionKeysOk() {
         return request.resource.data.keys().hasOnly([
           'competitionId', 'uid', 'event', 'round', 'competitionRound',
           'videoUrl', 'cloudinaryPublicId', 'reportedTime', 'isDnf',
-          'marks', 'timerShotIds', 'cubeShotIds',
+          'marks', 'timerShotIds', 'cubeShotIds', 'videoDurationMs',
           'penalty', 'status', 'createdAt', 'retentionExpiresAt'
         ]) &&
         request.resource.data.keys().hasAll([
@@ -447,6 +451,16 @@ service cloud.firestore {
         return !request.resource.data.marks.keys().hasAny([key]) ||
                (request.resource.data.marks[key] is number &&
                 request.resource.data.marks[key] >= 0);
+      }
+
+      // The uploaded clip's length in ms (videoDurationMs in types.ts).
+      // Absent, or a non-negative number — a duration cannot run
+      // backwards, and the checks that read it compare it against marks
+      // measured from the same zero.
+      function submissionDurationOk() {
+        return !request.resource.data.keys().hasAny(['videoDurationMs']) ||
+               (request.resource.data.videoDurationMs is number &&
+                request.resource.data.videoDurationMs >= 0);
       }
 
       function submissionMarksOk() {
@@ -557,6 +571,7 @@ service cloud.firestore {
                        submissionKeysOk() &&
                        submissionTypesOk() &&
                        submissionMarksOk() &&
+                       submissionDurationOk() &&
                        shotIdsOk('timerShotIds') &&
                        shotIdsOk('cubeShotIds') &&
                        submissionIdMatchesContents() &&

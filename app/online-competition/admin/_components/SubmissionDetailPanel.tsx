@@ -79,6 +79,7 @@ const FLAG_LABELS: Record<SubmissionFlagCode, string> = {
   IMPOSSIBLE: 'Бичсэн цаг эвлүүлэлтийн хугацаанаас урт',
   SUSPICIOUS_GAP: 'Эвлүүлэлтийн хугацаа хэт урт',
   MISSING_MARKS: 'Үе шатын цаг дутуу',
+  DURATION_MISMATCH: 'Бичлэгийн урт таарахгүй',
 };
 
 const JUMPS: {

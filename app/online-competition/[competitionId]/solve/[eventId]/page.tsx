@@ -889,7 +889,7 @@ export default function SolvePage() {
         }
         patchAttempt(index, { fileState: 'uploading', uploadPercent: 0, fileError: null });
         try {
-          const { secureUrl, publicId } = await uploadVideoToCloudinary(held.blob, (pct) =>
+          const { secureUrl, publicId, durationMs } = await uploadVideoToCloudinary(held.blob, (pct) =>
             patchAttempt(index, { uploadPercent: pct }),
           );
           // THE VIDEO IS ON THE SERVER BEFORE ANY STILL IS SENT. The
@@ -910,6 +910,7 @@ export default function SolvePage() {
             competitionRound,
             videoUrl: secureUrl,
             cloudinaryPublicId: publicId,
+            videoDurationMs: durationMs,
             reportedTime: held.isDnf ? 0 : (held.timeCs as number),
             isDnf: held.isDnf,
             // Snapshotted when the attempt was queued, not read now: by

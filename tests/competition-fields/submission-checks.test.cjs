@@ -42,7 +42,7 @@ function compile() {
 }
 
 compile();
-const { checkSubmission, SUSPICIOUS_GAP_MS } = require(
+const { checkSubmission, SUSPICIOUS_GAP_MS, DURATION_MISMATCH_MS } = require(
   path.join(OUT, 'submission-checks.js'),
 );
 
@@ -72,6 +72,11 @@ const sub = (over = {}) => ({
   isDnf: false,
   penalty: null,
   marks: { ...MARKS },
+  // Matches recordingEnd exactly, so the baseline attempt is FULLY
+  // checked. Without it every fixture here would read 'neutral' — the
+  // duration comparison is the one that cannot be skipped and still
+  // honestly report "checked and agreed".
+  videoDurationMs: 86_000,
   ...over,
 });
 
@@ -325,6 +330,95 @@ for (const key of ['coverStart', 'solveStart', 'solveEnd', 'cubeShown']) {
   const got = checkSubmission(both);
   ok('41. a DNF that is both time-shaped and missing marks reports only MISSING_MARKS',
     got.flags.join() === 'MISSING_MARKS' && got.severity === 'red', JSON.stringify(got));
+}
+
+// ── DURATION_MISMATCH ──────────────────────────────────────────────────
+// The one check that compares two DIFFERENT clocks: the recorder's, via
+// recordingEnd, and Cloudinary's reading of the file that actually
+// arrived. Every other check here compares marks with marks, so a
+// constant offset — a recorder that started late and shifted all of them
+// together — cancels out and reads as perfect consistency. That is not a
+// hypothetical: it shipped, stayed green, and was found by an athlete
+// with a stopwatch.
+{
+  ok('42. the threshold is exported for tuning in one place',
+    DURATION_MISMATCH_MS === 5_000, String(DURATION_MISMATCH_MS));
+}
+{
+  // The real bug, reproduced: a clip six seconds shorter than the
+  // recorder thought it was.
+  const short = sub({ videoDurationMs: 80_000 });
+  ok('43. a clip shorter than recordingEnd by >5s fires',
+    codes(short) === 'DURATION_MISMATCH', codes(short));
+  ok('44. ...and is red', sev(short) === 'red', sev(short));
+}
+{
+  // And the other direction — a file LONGER than the marks account for
+  // is equally a disagreement between the two clocks.
+  ok('45. a clip longer than recordingEnd by >5s also fires',
+    codes(sub({ videoDurationMs: 92_000 })) === 'DURATION_MISMATCH');
+}
+{
+  // The encoder flushes after the last mark, so a small honest gap is
+  // expected. This is looking for seconds of missing clip, not for
+  // milliseconds of flush.
+  ok('46. a difference under the threshold does not fire',
+    codes(sub({ videoDurationMs: 83_000 })) === '');
+  ok('47. ...nor exactly at it, since the rule is "greater than"',
+    codes(sub({ videoDurationMs: 81_000 })) === '');
+  ok('48. ...but one millisecond past it does',
+    codes(sub({ videoDurationMs: 80_999 })) === 'DURATION_MISMATCH');
+}
+{
+  // SKIPPED, NOT PASSED. Neither half is evidence on its own, and
+  // reporting 'none' would be claiming a comparison that never happened.
+  const noDuration = sub({ videoDurationMs: undefined });
+  ok('49. no stored duration skips the check',
+    codes(noDuration) === '', codes(noDuration));
+  ok('50. ...and reads neutral, never none',
+    sev(noDuration) === 'neutral', sev(noDuration));
+}
+{
+  const marks = { ...MARKS };
+  delete marks.recordingEnd;
+  const noEnd = sub({ marks });
+  ok('51. no recordingEnd skips the check',
+    codes(noEnd) === '', codes(noEnd));
+  ok('52. ...and reads neutral, never none', sev(noEnd) === 'neutral', sev(noEnd));
+}
+{
+  // A legacy attempt has neither, and is already neutral for having no
+  // marks field at all — it must not acquire a flag from this.
+  const legacy = sub({ marks: undefined, videoDurationMs: undefined });
+  ok('53. a legacy attempt with neither raises nothing',
+    codes(legacy) === '' && sev(legacy) === 'neutral', `${codes(legacy)} / ${sev(legacy)}`);
+}
+{
+  // A DNF is recorded like any other attempt, so a truncated DNF clip is
+  // just as much a problem — the athlete failing to solve says nothing
+  // about whether the file is whole.
+  const dnf = sub({ reportedTime: 9999, isDnf: true, videoDurationMs: 70_000 });
+  ok('54. a DNF is still checked against its file',
+    codes(dnf) === 'DURATION_MISMATCH' && sev(dnf) === 'red', JSON.stringify(checkSubmission(dnf)));
+}
+{
+  // A non-numeric or negative duration is no duration.
+  ok('55. a malformed duration is treated as absent',
+    codes(sub({ videoDurationMs: '86000' })) === '' &&
+      sev(sub({ videoDurationMs: -1 })) === 'neutral');
+}
+{
+  // Several at once, including this one.
+  const marks = { ...MARKS };
+  delete marks.cubeShown;
+  const both = sub({ reportedTime: 2500, marks, videoDurationMs: 60_000 });
+  const got = checkSubmission(both);
+  ok('56. it reports alongside the other checks, not instead of them',
+    got.flags.includes('DURATION_MISMATCH') &&
+      got.flags.includes('MISSING_MARKS') &&
+      got.flags.includes('IMPOSSIBLE') &&
+      got.severity === 'red',
+    JSON.stringify(got));
 }
 
 // ── Malformed data must not throw ──────────────────────────────────────

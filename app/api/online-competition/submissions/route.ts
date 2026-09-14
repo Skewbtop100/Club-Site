@@ -119,6 +119,12 @@ export async function GET(req: Request) {
       checks: checkSubmission(data),
       timerShotIds: readShotIds(data.timerShotIds),
       cubeShotIds: readShotIds(data.cubeShotIds),
+      videoDurationMs:
+        typeof data.videoDurationMs === 'number' &&
+        Number.isFinite(data.videoDurationMs) &&
+        data.videoDurationMs >= 0
+          ? data.videoDurationMs
+          : undefined,
       createdAt: data.createdAt?.toMillis?.() ?? null,
     };
   });

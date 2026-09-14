@@ -35,13 +35,37 @@ import type { SolveMarks } from './types';
  *  as a literal inside a comparison. */
 export const SUSPICIOUS_GAP_MS = 30_000;
 
+/** How far the last mark may sit from the uploaded clip's real length
+ *  before it is worth a look, in MILLISECONDS.
+ *
+ *  THIS IS THE CHECK THAT WOULD HAVE CAUGHT THE RECORDER-START GAP. A
+ *  recording once began several seconds after the recorder reported it
+ *  had, so every mark was shifted by the same amount — and every
+ *  difference-based check here stayed green, because a constant offset
+ *  cancels in a subtraction. An athlete found it with a stopwatch.
+ *
+ *  `recordingEnd` and the file's duration are the one pair measured from
+ *  DIFFERENT clocks: the recorder's, and Cloudinary's reading of the
+ *  artefact that arrived. That is exactly why comparing them catches what
+ *  the marks cannot check about themselves.
+ *
+ *  Five seconds is loose on purpose. The last mark is taken at the
+ *  recorder's `onstop` and the encoder flushes after it, so a small
+ *  honest difference is expected; this is looking for seconds of missing
+ *  clip, not for milliseconds of flush. */
+export const DURATION_MISMATCH_MS = 5_000;
+
 /** The marks a complete attempt carries. `recordingEnd` is deliberately
  *  not in this list — it is written from MediaRecorder's `onstop`, which
  *  can legitimately be missed if the recorder is torn down abruptly, and
  *  flagging that would report a recorder detail as an athlete problem. */
 const REQUIRED_MARKS = ['coverStart', 'solveStart', 'solveEnd', 'cubeShown'] as const;
 
-export type SubmissionFlagCode = 'IMPOSSIBLE' | 'SUSPICIOUS_GAP' | 'MISSING_MARKS';
+export type SubmissionFlagCode =
+  | 'IMPOSSIBLE'
+  | 'SUSPICIOUS_GAP'
+  | 'MISSING_MARKS'
+  | 'DURATION_MISMATCH';
 
 /** 'red'     — at least one check fired; worth opening.
  *  'none'    — checked, and everything agreed.
@@ -71,6 +95,10 @@ export interface CheckableSubmission {
    *  field — a legacy attempt — which is a different thing from a marks
    *  map that is present and empty, and the two get different answers. */
   marks?: unknown;
+  /** The uploaded clip's length in ms. Absent on every attempt filed
+   *  before it was recorded, and whenever the upload response omitted
+   *  it. */
+  videoDurationMs?: unknown;
 }
 
 function markMs(marks: Record<string, unknown>, key: keyof SolveMarks): number | null {
@@ -141,6 +169,27 @@ export function checkSubmission(sub: CheckableSubmission): SubmissionChecks {
     flags.push('MISSING_MARKS');
   }
 
+  // ── DURATION_MISMATCH, and it runs on a DNF too ──
+  // It compares the recorder's clock against the file that arrived, and a
+  // DNF is recorded exactly like any other attempt — the athlete failing
+  // to solve says nothing about whether the clip is whole. Needs no
+  // reported time, so like MISSING_MARKS it sits above the DNF gate.
+  //
+  // SKIPPED, NOT PASSED, when either side is missing. A legacy attempt
+  // has no duration and an interrupted recorder has no recordingEnd;
+  // neither is evidence of agreement.
+  const durationMs =
+    typeof sub.videoDurationMs === 'number' &&
+    Number.isFinite(sub.videoDurationMs) &&
+    sub.videoDurationMs >= 0
+      ? sub.videoDurationMs
+      : null;
+  const recordingEnd = markMs(marks, 'recordingEnd');
+  const durationCheckable = durationMs !== null && recordingEnd !== null;
+  if (durationCheckable && Math.abs(recordingEnd - durationMs) > DURATION_MISMATCH_MS) {
+    flags.push('DURATION_MISMATCH');
+  }
+
   // DNF: the TIME checks stop here. Both of them compare a reported time
   // against the recorded solve window, and a DNF has no reported time to
   // compare — the athlete is not claiming one.
@@ -171,5 +220,11 @@ export function checkSubmission(sub: CheckableSubmission): SubmissionChecks {
     }
   }
 
-  return { flags, severity: flags.length > 0 ? 'red' : 'none' };
+  // 'none' means CHECKED AND AGREED, so it may only be reported when
+  // every check actually ran. An attempt with no stored duration has not
+  // been compared against its own file — the one comparison that does not
+  // cancel a constant offset — and calling that clean would be the exact
+  // false assurance this field was added to remove.
+  if (flags.length > 0) return { flags, severity: 'red' };
+  return { flags, severity: durationCheckable ? 'none' : 'neutral' };
 }

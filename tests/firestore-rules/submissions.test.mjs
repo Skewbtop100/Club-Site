@@ -308,6 +308,51 @@ await check('36d. ...or a non-numeric one', 'DENY', () =>
   ),
 );
 
+// ── CREATE: the uploaded clip's length ──────────────────────────────────
+// videoDurationMs, from Cloudinary's own upload response. It exists so a
+// check can compare the recorder's clock against the file that actually
+// arrived — the one comparison that survives a constant offset, and the
+// one that was missing when a recording started several seconds late and
+// every mark shifted together while every check stayed green.
+//
+// Optional, like marks and the still ids, and for the same reason: an
+// upload response without a duration must still produce a fileable
+// attempt.
+await check('37a. an attempt filed WITH its clip length', 'ALLOW', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 1, 7)),
+    attemptDoc({ round: 1, competitionRound: 7, videoDurationMs: 104_033 }),
+  ),
+);
+// Every ALLOW above already covers the other half: attemptDoc() carries
+// no duration at all.
+await check('37b. a negative clip length', 'DENY', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 2, 7)),
+    attemptDoc({ round: 2, competitionRound: 7, videoDurationMs: -1 }),
+  ),
+);
+await check('37c. ...or a non-numeric one', 'DENY', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 3, 7)),
+    attemptDoc({ round: 3, competitionRound: 7, videoDurationMs: '104033' }),
+  ),
+);
+await check('37d. ...or a null one', 'DENY', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 4, 7)),
+    attemptDoc({ round: 4, competitionRound: 7, videoDurationMs: null }),
+  ),
+);
+// Zero is legal: a clip can genuinely be empty, and the duration check
+// treats it as a real value to disagree with rather than as absent.
+await check('37e. zero is a real length, not an absent one', 'ALLOW', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 5, 7)),
+    attemptDoc({ round: 5, competitionRound: 7, videoDurationMs: 0 }),
+  ),
+);
+
 // ── CREATE: the still ids ───────────────────────────────────────────────
 // Cloudinary public ids for the full-resolution frames grabbed during the
 // two 8-second holds — the video is bitrate-capped and cannot carry a legible
