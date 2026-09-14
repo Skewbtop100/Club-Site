@@ -423,13 +423,15 @@ service cloud.firestore {
       function submissionKeysOk() {
         return request.resource.data.keys().hasOnly([
           'competitionId', 'uid', 'event', 'round', 'competitionRound',
-          'videoUrl', 'cloudinaryPublicId', 'reportedTime', 'isDnf',
+          'videoUrl', 'cloudinaryPublicId', 'videoKey', 'reportedTime', 'isDnf',
           'marks', 'timerShotIds', 'cubeShotIds', 'videoDurationMs',
           'penalty', 'status', 'createdAt', 'retentionExpiresAt'
         ]) &&
+        // The video fields are NOT in hasAll: a document carries one of two
+        // evidence shapes, and submissionEvidenceOk decides which is valid.
         request.resource.data.keys().hasAll([
           'competitionId', 'uid', 'event', 'round', 'competitionRound',
-          'videoUrl', 'cloudinaryPublicId', 'reportedTime', 'isDnf',
+          'reportedTime', 'isDnf',
           'penalty', 'status', 'createdAt', 'retentionExpiresAt'
         ]);
       }
@@ -461,6 +463,49 @@ service cloud.firestore {
         return !request.resource.data.keys().hasAny(['videoDurationMs']) ||
                (request.resource.data.videoDurationMs is number &&
                 request.resource.data.videoDurationMs >= 0);
+      }
+
+      // ── THE EVIDENCE, in exactly one of two shapes ──
+      // Cloudinary (videoUrl + cloudinaryPublicId): every submission filed
+      // before videos moved to R2. R2 (videoKey): everything since.
+      //
+      // EXACTLY ONE, never both and never neither. Playback reads videoKey
+      // first while deletion reads cloudinaryPublicId, so a document with
+      // both could play one asset and delete another; a document with
+      // neither has no video, which a judge can only reject.
+      function cloudinaryEvidenceOk() {
+        return request.resource.data.keys().hasAll(['videoUrl', 'cloudinaryPublicId']) &&
+               request.resource.data.videoUrl is string &&
+               request.resource.data.videoUrl.size() > 0 &&
+               request.resource.data.cloudinaryPublicId is string &&
+               request.resource.data.cloudinaryPublicId.size() > 0;
+      }
+
+      // THE KEY MUST BE THE WRITER'S OWN, AND FOR THIS ATTEMPT. The presign
+      // route derives keys server-side, but it is the client that writes
+      // one here — so without this an athlete could file a document that
+      // points at another athlete's video, or at their own attempt 1 from
+      // attempt 5. string() on the two ints is exact because they are
+      // checked `is int` before this runs. [.] rather than an escaped dot,
+      // so the pattern survives the rules string literal unambiguously.
+      function videoKeyOk() {
+        return request.resource.data.videoKey is string &&
+               request.resource.data.videoKey.size() <= 512 &&
+               request.resource.data.videoKey.matches(
+                 'videos/' + request.resource.data.uid + '/' +
+                 request.resource.data.competitionId + '/' +
+                 request.resource.data.event + '/r' +
+                 string(request.resource.data.competitionRound) + '/a' +
+                 string(request.resource.data.round) + '/[A-Za-z0-9-]+[.]webm'
+               );
+      }
+
+      function submissionEvidenceOk() {
+        return (request.resource.data.keys().hasAny(['videoKey']) &&
+                !request.resource.data.keys().hasAny(['videoUrl', 'cloudinaryPublicId']) &&
+                videoKeyOk()) ||
+               (!request.resource.data.keys().hasAny(['videoKey']) &&
+                cloudinaryEvidenceOk());
       }
 
       function submissionMarksOk() {
@@ -526,11 +571,9 @@ service cloud.firestore {
                request.resource.data.competitionRound is int &&
                request.resource.data.competitionRound >= 1 &&
                // The evidence. A submission without a video is one a judge
-               // can only reject.
-               request.resource.data.videoUrl is string &&
-               request.resource.data.videoUrl.size() > 0 &&
-               request.resource.data.cloudinaryPublicId is string &&
-               request.resource.data.cloudinaryPublicId.size() > 0 &&
+               // can only reject — see submissionEvidenceOk for its shapes.
+               // After the int checks above, which videoKeyOk relies on.
+               submissionEvidenceOk() &&
                // Centiseconds; 0 is what a DNF stores.
                request.resource.data.reportedTime is number &&
                request.resource.data.reportedTime >= 0 &&

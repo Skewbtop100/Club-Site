@@ -471,8 +471,12 @@ export async function createSubmission(input: {
    *  round-access gate rather than letting it default here, so the stored
    *  value can never disagree with the gate that admitted the athlete. */
   competitionRound: number;
-  videoUrl: string;
-  cloudinaryPublicId: string;
+  /** Cloudinary evidence — every submission filed before videos moved to
+   *  R2. Never written together with videoKey. */
+  videoUrl?: string;
+  cloudinaryPublicId?: string;
+  /** R2 evidence — the object key the presign route derived. */
+  videoKey?: string;
   reportedTime: number;
   /** Self-reported DNF (Phase 5's manual keypad entry) — optional so the
    *  original solve page's call site (which never reports DNF) is
@@ -510,6 +514,12 @@ export async function createSubmission(input: {
     competitionRound: input.competitionRound,
     attempt: input.round,
   });
+  // Refused here, before Firestore sees it: an undefined field would be
+  // rejected as an unsupported value anyway, with a far less useful error,
+  // and an attempt with no video is one a judge can only reject.
+  if (!input.videoKey && !(input.videoUrl && input.cloudinaryPublicId)) {
+    throw new Error('createSubmission: no video evidence (videoKey, or videoUrl + cloudinaryPublicId)');
+  }
   const ref = doc(onlineCompDb, 'onlineSubmissions', id);
   const isDnf = input.isDnf ?? false;
   try {
@@ -519,8 +529,13 @@ export async function createSubmission(input: {
       event: input.event,
       round: input.round,
       competitionRound: input.competitionRound,
-      videoUrl: input.videoUrl,
-      cloudinaryPublicId: input.cloudinaryPublicId,
+      // THE EVIDENCE, in exactly one of its two shapes. firestore.rules
+      // refuses a document carrying both — playback reads the key first
+      // and deletion reads the Cloudinary id, so a document with both
+      // could play one asset while deleting another.
+      ...(input.videoKey
+        ? { videoKey: input.videoKey }
+        : { videoUrl: input.videoUrl, cloudinaryPublicId: input.cloudinaryPublicId }),
       reportedTime: input.reportedTime,
       isDnf,
       // ALWAYS WRITTEN, even empty. firestore.rules accepts the field as

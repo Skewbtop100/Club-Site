@@ -20,7 +20,8 @@ import {
   resumeNotice,
   type FiledAttempt,
 } from '@/lib/online-competition/run-resume';
-import { uploadImageToCloudinary, uploadVideoToCloudinary } from '@/lib/online-competition/cloudinary';
+import { uploadImageToCloudinary } from '@/lib/online-competition/cloudinary';
+import { uploadVideoToR2 } from '@/lib/online-competition/r2-upload-client';
 import type { OnlineCompetition, SolveMarks } from '@/lib/online-competition/types';
 import { COVER_SECONDS } from '@/lib/online-competition/solve-stage-timing';
 import { useSolveRecorder } from './_lib/useSolveRecorder';
@@ -889,8 +890,13 @@ export default function SolvePage() {
         }
         patchAttempt(index, { fileState: 'uploading', uploadPercent: 0, fileError: null });
         try {
-          const { secureUrl, publicId, durationMs } = await uploadVideoToCloudinary(held.blob, (pct) =>
-            patchAttempt(index, { uploadPercent: pct }),
+          // THE VIDEO GOES TO R2; the stills below still go to Cloudinary.
+          // Any failure in here throws into the catch below, which gives
+          // the same retries and the same could-not-save state as before.
+          const { videoKey, durationMs } = await uploadVideoToR2(
+            held.blob,
+            { competitionId, event: eventId, competitionRound, attempt: index + 1 },
+            (pct) => patchAttempt(index, { uploadPercent: pct }),
           );
           // THE VIDEO IS ON THE SERVER BEFORE ANY STILL IS SENT. The
           // recording is the evidence and the stills are a convenience
@@ -908,8 +914,7 @@ export default function SolvePage() {
             event: eventId,
             round: index + 1,
             competitionRound,
-            videoUrl: secureUrl,
-            cloudinaryPublicId: publicId,
+            videoKey,
             videoDurationMs: durationMs,
             reportedTime: held.isDnf ? 0 : (held.timeCs as number),
             isDnf: held.isDnf,

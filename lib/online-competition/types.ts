@@ -653,10 +653,16 @@ export interface OnlineSubmission {
    *  matches on it directly rather than inferring a round from createdAt. */
   competitionRound: number;
   /** Cloudinary secure_url for the uploaded solve video. */
-  videoUrl: string;
+  videoUrl?: string;
   /** Cloudinary public_id — needed to delete/manage the asset later
    *  (retention cleanup, moderation). */
-  cloudinaryPublicId: string;
+  cloudinaryPublicId?: string;
+  /** The R2 object key for this submission's video. Present on every
+   *  submission filed since videos moved to R2; absent on every one
+   *  before, which carry videoUrl + cloudinaryPublicId instead. A document
+   *  holds exactly one of the two shapes (firestore.rules). Playback URLs
+   *  are built from this at read time — see resolveVideoSrc. */
+  videoKey?: string;
   /** Centiseconds, as reported by the in-browser stopwatch. */
   reportedTime: number;
   /** True when the athlete self-reported this attempt as a DNF at time-
@@ -699,8 +705,8 @@ export interface OnlineSubmission {
    *  video remains the evidence. */
   timerShotIds?: string[];
   cubeShotIds?: string[];
-  /** The uploaded clip's length in milliseconds, as Cloudinary measured
-   *  it on upload (its `duration`, in seconds, times 1000).
+  /** The uploaded clip's length in milliseconds, read from the recorded
+   *  file itself in the browser before upload (see video-duration.ts).
    *
    *  THE FILE'S LENGTH, NOT THE RECORDER'S IDEA OF IT. That distinction
    *  is the entire point: the marks come from the recorder's clock and
@@ -842,8 +848,14 @@ export interface OnlineSubmissionAdminView {
    *  Defaulted to 1 for any document written before the field existed:
    *  there was only one round then. */
   competitionRound: number;
-  videoUrl: string;
-  cloudinaryPublicId: string;
+  videoUrl?: string;
+  cloudinaryPublicId?: string;
+  /** The R2 object key for this submission's video. Present on every
+   *  submission filed since videos moved to R2; absent on every one
+   *  before, which carry videoUrl + cloudinaryPublicId instead. A document
+   *  holds exactly one of the two shapes (firestore.rules). Playback URLs
+   *  are built from this at read time — see resolveVideoSrc. */
+  videoKey?: string;
   reportedTime: number;
   isDnf?: boolean;
   penalty: OnlineSubmissionPenalty;
@@ -873,8 +885,8 @@ export interface OnlineSubmissionAdminView {
    *  the review panel renders nothing at all for an empty row. */
   timerShotIds?: string[];
   cubeShotIds?: string[];
-  /** The uploaded clip's length in milliseconds, as Cloudinary measured
-   *  it on upload (its `duration`, in seconds, times 1000).
+  /** The uploaded clip's length in milliseconds, read from the recorded
+   *  file itself in the browser before upload (see video-duration.ts).
    *
    *  THE FILE'S LENGTH, NOT THE RECORDER'S IDEA OF IT. That distinction
    *  is the entire point: the marks come from the recorder's clock and

@@ -10,6 +10,7 @@ import {
   cloudinaryStillThumb,
 } from '@/lib/online-competition/cloudinary';
 import ScramblePreview from '@/components/shared/ScramblePreview';
+import { resolveVideoSrc } from '@/lib/online-competition/video-source';
 
 type ReviewAction = 'approve' | 'approve_plus2' | 'dnf';
 
@@ -263,6 +264,9 @@ export default function SubmissionDetailPanel({
   const [pos, setPos] = useState(0);
 
   const marks = submission.marks;
+  // R2 key or legacy Cloudinary URL — decided in resolveVideoSrc and
+  // nowhere else.
+  const videoSrc = resolveVideoSrc(submission);
 
   /** Where this button should land, in MILLISECONDS, or null when what it
    *  depends on was never recorded. */
@@ -446,7 +450,7 @@ export default function SubmissionDetailPanel({
           <div style={{ position: 'relative', width: '100%', height: '100%' }}>
           <video
             ref={videoRef}
-            src={submission.videoUrl}
+            src={videoSrc ?? undefined}
             controls
             playsInline
             onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}

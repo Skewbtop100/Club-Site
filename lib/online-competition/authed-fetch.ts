@@ -42,11 +42,20 @@ export class NotSignedInError extends Error {
  *  good, or a refresh that failed while offline. Callers use it for their
  *  ONE retry after a 401; retrying with the same rejected token would just
  *  fail again. */
-export async function authedFetch(url: string, options: { forceRefresh?: boolean } = {}): Promise<Response> {
+export async function authedFetch(
+  url: string,
+  options: { forceRefresh?: boolean; init?: RequestInit } = {},
+): Promise<Response> {
   const user = onlineCompAuth.currentUser;
   if (!user || user.isAnonymous) throw new NotSignedInError();
   const token = await user.getIdToken(options.forceRefresh ?? false);
-  return fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const init = options.init ?? {};
+  // Authorization is set LAST, over whatever the caller passed: a request
+  // made through this function is made as the signed-in athlete, and no
+  // caller-supplied header gets to change who that is.
+  const headers = new Headers(init.headers);
+  headers.set('Authorization', `Bearer ${token}`);
+  return fetch(url, { ...init, headers });
 }
 
 /** authedFetch with the standard retry: one repeat with a freshly minted
@@ -56,8 +65,10 @@ export async function authedFetch(url: string, options: { forceRefresh?: boolean
  *  long run, and a device whose clock is behind will keep serving one the
  *  server has already rejected. Both are fixed by asking for a new token,
  *  which is cheap, so it happens before anyone is told anything. */
-export async function authedFetchWithRetry(url: string): Promise<Response> {
-  const first = await authedFetch(url);
+export async function authedFetchWithRetry(url: string, init?: RequestInit): Promise<Response> {
+  // The same init is sent twice on a 401, so its body must be reusable —
+  // a string (JSON) is; a one-shot stream would not be.
+  const first = await authedFetch(url, { init });
   if (first.status !== 401) return first;
-  return authedFetch(url, { forceRefresh: true });
+  return authedFetch(url, { init, forceRefresh: true });
 }

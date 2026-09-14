@@ -353,6 +353,54 @@ await check('37e. zero is a real length, not an absent one', 'ALLOW', () =>
   ),
 );
 
+// ── CREATE: the R2 video key ────────────────────────────────────────────
+// Videos moved to R2. A submission now carries its evidence in ONE of two
+// shapes: the Cloudinary pair (videoUrl + cloudinaryPublicId) that every
+// earlier submission has, or a videoKey. Never both — playback reads the
+// key first while deletion reads the Cloudinary id, so a document with
+// both could play one asset and delete another — and never neither.
+//
+// The key is derived server-side, but the CLIENT writes it here, so the
+// rule also pins it to the writer's own uid and to this exact attempt.
+// Competition rounds 8 and 9: ids nothing else in this file uses.
+const r2Doc = (round, competitionRound, key) => {
+  const { videoUrl, cloudinaryPublicId, ...rest } = attemptDoc({ round, competitionRound });
+  return { ...rest, videoKey: key };
+};
+const ownKey = (round, competitionRound) =>
+  `videos/${ATHLETE}/${COMP}/${EVENT}/r${competitionRound}/a${round}/1700000000000-a1b2c3.webm`;
+
+await check('37f. an attempt filed with a videoKey and no cloudinaryPublicId', 'ALLOW', () =>
+  setDoc(doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 1, 8)), r2Doc(1, 8, ownKey(1, 8))),
+);
+await check('37g. BOTH evidence shapes at once', 'DENY', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 2, 8)),
+    attemptDoc({ round: 2, competitionRound: 8, videoKey: ownKey(2, 8) }),
+  ),
+);
+await check('37h. neither shape — a submission with no video at all', 'DENY', () => {
+  const { videoUrl, cloudinaryPublicId, ...noVideo } = attemptDoc({ round: 3, competitionRound: 8 });
+  return setDoc(doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 3, 8)), noVideo);
+});
+await check('37i. a key under ANOTHER athlete’s uid', 'DENY', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 4, 8)),
+    r2Doc(4, 8, `videos/${OTHER}/${COMP}/${EVENT}/r8/a4/1700000000000-a1b2c3.webm`),
+  ),
+);
+// The attempt-5 document pointing at attempt 1's video: the swap the
+// deterministic document id already forbids, now forbidden for the key.
+await check('37j. a key for a different attempt than the document', 'DENY', () =>
+  setDoc(doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 5, 8)), r2Doc(5, 8, ownKey(1, 8))),
+);
+await check('37k. a key that is not a .webm object', 'DENY', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 1, 9)),
+    r2Doc(1, 9, `videos/${ATHLETE}/${COMP}/${EVENT}/r9/a1/../../escape.webm`),
+  ),
+);
+
 // ── CREATE: the still ids ───────────────────────────────────────────────
 // Cloudinary public ids for the full-resolution frames grabbed during the
 // two 8-second holds — the video is bitrate-capped and cannot carry a legible

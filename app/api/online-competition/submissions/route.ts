@@ -103,8 +103,14 @@ export async function GET(req: Request) {
       // field; round 1 was the only round that existed when they were
       // written.
       competitionRound: typeof data.competitionRound === 'number' ? data.competitionRound : 1,
-      videoUrl: data.videoUrl,
-      cloudinaryPublicId: data.cloudinaryPublicId,
+      // Either evidence shape; resolveVideoSrc picks between them at
+      // render time. Empty strings read as absent, like every optional here.
+      videoUrl: typeof data.videoUrl === 'string' && data.videoUrl.length > 0 ? data.videoUrl : undefined,
+      cloudinaryPublicId:
+        typeof data.cloudinaryPublicId === 'string' && data.cloudinaryPublicId.length > 0
+          ? data.cloudinaryPublicId
+          : undefined,
+      videoKey: typeof data.videoKey === 'string' && data.videoKey.length > 0 ? data.videoKey : undefined,
       reportedTime: data.reportedTime,
       isDnf: data.isDnf ?? false,
       penalty: data.penalty ?? null,

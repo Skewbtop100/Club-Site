@@ -99,7 +99,7 @@ ok('  ...and is actually populated, not merely declared',
 // ── The specific fields that got dropped, named ───────────────────────
 // Redundant with the rule above, and kept anyway: a failure here names
 // the exact field that went missing rather than a general invariant.
-for (const field of ['marks', 'checks', 'timerShotIds', 'cubeShotIds', 'videoDurationMs']) {
+for (const field of ['marks', 'checks', 'timerShotIds', 'cubeShotIds', 'videoDurationMs', 'videoKey']) {
   ok(`  ${field} survives the boundary`, declared.has(field) && mapped.has(field),
     `declared=${declared.has(field)} mapped=${mapped.has(field)}`);
 }

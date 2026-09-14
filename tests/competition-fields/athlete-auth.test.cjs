@@ -121,16 +121,28 @@ console.log('\n  -- the client sends a header, not a uid --');
 {
   const src = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
   const fetcher = src('lib/online-competition/authed-fetch.ts');
+  // Set onto a Headers object AFTER the caller's own headers are copied
+  // in, so no caller — the R2 presign POST carries a Content-Type of its
+  // own — can replace or drop the identity a request is made under.
   ok('the token is attached as a Bearer header',
-    fetcher.includes('Authorization: `Bearer ${token}`'));
+    /headers\.set\('Authorization', `Bearer \$\{token\}`\)/.test(fetcher) &&
+      fetcher.indexOf('new Headers(init.headers)') > -1 &&
+      fetcher.indexOf('new Headers(init.headers)') < fetcher.indexOf("headers.set('Authorization'"));
   // The SECOND named app. A token from the club site's default app would
   // carry a club member's identity.
   ok('  ...minted by the online-competition app, not the club’s default',
     fetcher.includes("from './firebase'") && fetcher.includes('onlineCompAuth.currentUser'));
   ok('anonymous sessions never even send a request', fetcher.includes('user.isAnonymous'));
+  // The same request, carried twice: the retry must resend the caller's
+  // method and body (a POST that silently became a GET on retry would be
+  // a request that "worked" and did nothing), and only once.
   ok('a 401 is retried ONCE with a freshly minted token',
-    fetcher.includes('if (first.status !== 401) return first;') &&
-      fetcher.includes('authedFetch(url, { forceRefresh: true })'));
+    (() => {
+      const retry = fetcher.slice(fetcher.indexOf('export async function authedFetchWithRetry'));
+      return retry.includes('if (first.status !== 401) return first;') &&
+        /authedFetch\(url, \{ init, forceRefresh: true \}\)/.test(retry) &&
+        (retry.match(/authedFetch\(url/g) ?? []).length === 2;
+    })());
 
   for (const rel of [
     'app/online-competition/dashboard/_components/LiveCard.tsx',
