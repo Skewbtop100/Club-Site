@@ -21,13 +21,26 @@ import { roundKey } from './scrambles';
 import { normalizeCompetitionStatus } from './admin-competitions';
 import type { OnlineCompetitionStatus } from './types';
 import type { RoundStatus } from './rounds';
+import {
+  ROUND_READINESS_MESSAGE,
+  roundScrambleReadiness,
+  type UnassignedAthlete,
+} from './round-readiness';
 
 export class RoundOpenError extends Error {
   readonly status: number;
-  constructor(message: string, status = 400) {
+  /** The athletes this refusal is ABOUT, when it is about athletes.
+   *
+   *  Carried separately from `message` because the admin's next action
+   *  depends on the names: "3 athletes are unassigned" sends them hunting
+   *  through a roster, while the three names are the fix. The route puts
+   *  this in the JSON and the rounds UI lists it under the message. */
+  readonly unassigned?: UnassignedAthlete[];
+  constructor(message: string, status = 400, unassigned?: UnassignedAthlete[]) {
     super(message);
     this.name = 'RoundOpenError';
     this.status = status;
+    this.unassigned = unassigned;
   }
 }
 
@@ -74,6 +87,28 @@ export async function openRound(
 ): Promise<OpenRoundResult> {
   const compRef = db.collection('onlineCompetitions').doc(competitionId);
   const key = roundKey(eventId, round);
+
+  // ── SCRAMBLE READINESS, BEFORE THE TRANSACTION ──
+  // Outside it deliberately. The check reads a collectionGroup query and
+  // a batch get (the registration roster), neither of which belongs in a
+  // transaction that exists to keep two status fields in step; and its
+  // answer is about the state of the round's preparation, which no
+  // concurrent writer is racing us for. What a transaction would buy here
+  // is protection against an athlete registering in the same millisecond
+  // as the round opens — and that athlete is handled correctly anyway,
+  // because the scramble route refuses them on their own request.
+  //
+  // BEFORE the round is live rather than after, which is the whole point:
+  // an unassigned athlete found here costs an assignment click, and the
+  // same athlete found later costs them a competition.
+  const readiness = await roundScrambleReadiness(db, competitionId, eventId, round);
+  if (!readiness.ok) {
+    throw new RoundOpenError(
+      ROUND_READINESS_MESSAGE[readiness.reason],
+      400,
+      readiness.reason === 'unassigned' ? readiness.athletes : undefined,
+    );
+  }
 
   return db.runTransaction(async (tx) => {
     // ── every read first ──

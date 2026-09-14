@@ -154,7 +154,14 @@ export async function POST(req: Request) {
       return NextResponse.json(result);
     } catch (e) {
       if (e instanceof RoundOpenError) {
-        return NextResponse.json({ error: e.message }, { status: e.status });
+        // `unassigned` rides alongside the message rather than being
+        // formatted into it: the UI lists the names, and a server that
+        // pre-joined them into one string would decide how — and how
+        // many — for a screen it cannot see.
+        return NextResponse.json(
+          { error: e.message, unassigned: e.unassigned },
+          { status: e.status },
+        );
       }
       throw e;
     }

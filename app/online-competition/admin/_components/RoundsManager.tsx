@@ -49,7 +49,14 @@ export default function RoundsManager() {
    *  effect said out loud, rather than discovered on the public site. */
   const [announced, setAnnounced] = useState('');
   const [busyKey, setBusyKey] = useState<string | null>(null);
-  const [rowError, setRowError] = useState<{ key: string; message: string } | null>(null);
+  const [rowError, setRowError] = useState<{
+    key: string;
+    message: string;
+    /** Named athletes behind a refusal, when there are any — the
+     *  round-start check returns who is unassigned, and the admin's
+     *  next click is to assign exactly these people. */
+    unassigned?: { uid: string; displayName: string }[];
+  } | null>(null);
   const [qualifyKey, setQualifyKey] = useState<string | null>(null);
 
   useEffect(() => {
@@ -134,9 +141,14 @@ export default function RoundsManager() {
       const data = (await res.json().catch(() => ({}))) as {
         error?: string;
         announcedLive?: boolean;
+        unassigned?: { uid: string; displayName: string }[];
       };
       if (!res.ok) {
-        setRowError({ key, message: data.error ?? 'Үйлдэл амжилтгүй боллоо.' });
+        setRowError({
+          key,
+          message: data.error ?? 'Үйлдэл амжилтгүй боллоо.',
+          unassigned: data.unassigned,
+        });
         return;
       }
       if (data.announcedLive) {
@@ -296,9 +308,40 @@ export default function RoundsManager() {
                 </div>
 
                 {rowError?.key === key && (
-                  <p className="oc-sc-msg-err" style={{ padding: '0 14px 12px' }}>
-                    {rowError.message}
-                  </p>
+                  <div style={{ padding: '0 14px 12px' }}>
+                    <p className="oc-sc-msg-err">{rowError.message}</p>
+                    {/* NAMES, NOT A COUNT. "3 athletes are unassigned"
+                        leaves the admin to find out which three; the list
+                        IS the next action. Wraps rather than scrolls, and
+                        falls back to the uid for an athlete with no
+                        display name so nobody is silently omitted. */}
+                    {rowError.unassigned && rowError.unassigned.length > 0 && (
+                      <ul
+                        style={{
+                          margin: '8px 0 0',
+                          padding: 0,
+                          listStyle: 'none',
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          gap: 6,
+                        }}
+                      >
+                        {rowError.unassigned.map((a) => (
+                          <li
+                            key={a.uid}
+                            style={{
+                              border: '1px solid #2A2A31',
+                              padding: '4px 8px',
+                              font: '500 10px var(--oc-font-mono), monospace',
+                              color: '#F4F1EA',
+                            }}
+                          >
+                            {a.displayName || a.uid.slice(0, 10)}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 )}
 
                 {qualifyKey === key && competitionId && (

@@ -35,6 +35,61 @@ export type GroupScrambleLookup =
    *  competition that doesn't use WCA imports. */
   | null;
 
+/** The rule itself, given the two documents' contents and nothing else.
+ *
+ *  SEPARATED FROM THE READS so that the admin's round-start check can
+ *  apply the SAME rule to every registered athlete from one pair of
+ *  document reads, instead of asking Firestore the same two questions
+ *  once per athlete — and, more importantly, instead of growing a second
+ *  opinion about what "this athlete has an official scramble" means. Two
+ *  such opinions would drift, and the drift would show up as a round that
+ *  starts cleanly and then refuses somebody mid-competition.
+ *
+ *  Never returns null: "this round has no import at all" is a fact about
+ *  the DOCUMENT, not about the athlete, so it belongs to the caller. */
+export function resolveOfficialScramble(params: {
+  /** scrambleData/{event}_{round}.groups, unvalidated. */
+  groups: unknown;
+  /** groupAssignments/{event}_{round}.assignments, or undefined when that
+   *  document does not exist at all. */
+  assignments: unknown;
+  uid: string;
+  attempt: number;
+}): Exclude<GroupScrambleLookup, null> {
+  const { groups, assignments, uid, attempt } = params;
+
+  if (typeof assignments !== 'object' || assignments === null) {
+    return { noGroup: true as const };
+  }
+
+  const groupIndex = (assignments as Record<string, unknown>)[uid];
+  if (typeof groupIndex !== 'number') return { noGroup: true as const };
+
+  if (!Array.isArray(groups)) return { noGroup: true as const };
+  const group = groups[groupIndex] as ScrambleGroup | undefined;
+  if (!group || !Array.isArray(group.scrambles)) return { noGroup: true as const };
+
+  // OUT OF RANGE IS AN ERROR, NOT A FALLBACK. This group has a definite
+  // number of scrambles; an attempt beyond it means the caller and the
+  // imported data disagree about the round's shape. Falling through to
+  // random cstimer generation would hand the athlete an UNOFFICIAL
+  // scramble in an official round, silently. With a fixed 5 that was
+  // nearly unreachable; with per-event formats an off-by-one is a real
+  // possibility, so it is surfaced instead.
+  if (attempt > group.scrambles.length) {
+    return { outOfRange: true as const, max: group.scrambles.length };
+  }
+
+  // Present in the array but unusable — a blank or non-string entry from
+  // a malformed import. Same reasoning as out-of-range: this athlete has
+  // no official scramble for this attempt, and inventing one silently is
+  // the outcome being prevented.
+  const scramble = group.scrambles[attempt - 1];
+  if (typeof scramble !== 'string' || scramble.trim() === '') return { noGroup: true as const };
+
+  return { scramble, groupLabel: group.label ?? '' };
+}
+
 export async function lookupGroupScramble(
   db: Firestore,
   params: {
@@ -60,35 +115,16 @@ export async function lookupGroupScramble(
   // a refusal rather than a fallback: handing this athlete a random
   // scramble in a round everyone else is solving officially produces an
   // attempt no judge can check.
+  //
+  // The admin's round-start precondition asks this same question the same
+  // way (see roundScrambleReadiness) rather than inventing its own test
+  // for "is this an official round".
   if (!scrambleSnap.exists) return null;
 
-  if (!assignSnap.exists) return { noGroup: true as const };
-
-  const groupIndex = (assignSnap.get('assignments') ?? {})[uid];
-  if (typeof groupIndex !== 'number') return { noGroup: true as const };
-
-  const groups = scrambleSnap.get('groups');
-  if (!Array.isArray(groups)) return { noGroup: true as const };
-  const group = groups[groupIndex] as ScrambleGroup | undefined;
-  if (!group) return { noGroup: true as const };
-
-  // OUT OF RANGE IS AN ERROR, NOT A FALLBACK. This group has a definite
-  // number of scrambles; an attempt beyond it means the caller and the
-  // imported data disagree about the round's shape. Returning null here
-  // would fall through to random cstimer generation and hand the athlete
-  // an UNOFFICIAL scramble in an official round, silently. With a fixed 5
-  // that was nearly unreachable; with per-event formats an off-by-one is
-  // a real possibility, so it is surfaced instead.
-  if (attempt > group.scrambles.length) {
-    return { outOfRange: true as const, max: group.scrambles.length };
-  }
-
-  // Present in the array but unusable — a blank or non-string entry from
-  // a malformed import. Same reasoning as out-of-range: this athlete has
-  // no official scramble for this attempt, and inventing one silently is
-  // the outcome being prevented.
-  const scramble = group.scrambles[attempt - 1];
-  if (typeof scramble !== 'string' || scramble.trim() === '') return { noGroup: true as const };
-
-  return { scramble, groupLabel: group.label ?? '' };
+  return resolveOfficialScramble({
+    groups: scrambleSnap.get('groups'),
+    assignments: assignSnap.exists ? (assignSnap.get('assignments') ?? {}) : undefined,
+    uid,
+    attempt,
+  });
 }
