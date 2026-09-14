@@ -10,18 +10,38 @@ import type { SolveMarks } from '@/lib/online-competition/types';
 // 'user' targets the front/selfie camera — the one a laptop webcam or a
 // phone propped up facing the solver's own setup actually has.
 //
-// No canvas, no manual rotate()/translate() here — an earlier version of
-// this hook recorded from an off-screen canvas that redrew (and, for a
-// while, also rotated) every video frame, on the theory that MediaRecorder
-// sees a differently-oriented raw frame than what <video> displays.
-// Verified false: pulling the recorded files directly from Cloudinary
-// showed they were correctly oriented, upright, full field of view all
-// along, under these exact constraints — MediaRecorder on the raw track
-// was never the problem. (The actual bug turned out to be downstream, in
-// how the admin review dashboard's <video> box cropped a portrait clip
-// into a landscape-shaped container.) MediaRecorder now reads directly
-// off the camera track, which is simpler and avoids the canvas
-// indirection entirely.
+// ── THE CANVAS IS BACK, AND THIS TIME IT IS LOAD-BEARING ──
+// Read this before removing it again.
+//
+// An earlier version recorded from an off-screen canvas that redrew (and
+// for a while rotated) every frame, on the theory that MediaRecorder saw
+// a differently-oriented raw frame than <video> displayed. That was
+// VERIFIED FALSE — the files were upright and complete all along, and the
+// real bug was downstream, in an admin <video> box that cropped a
+// portrait clip into a landscape container. So the canvas was removed as
+// indirection that bought nothing, and guards were added forbidding it.
+// That removal was correct ON ITS OWN REASONING.
+//
+// It is back for a completely different reason, which those guards could
+// not have anticipated: THE RECORDING CANNOT BE DOWNSCALED BY
+// CONSTRAINTS ON THIS HARDWARE. applyConstraints on a cloned track is
+// ignored outright on the athlete's device — a max on the long edge was
+// tried at 640 and again at 720 and both produced a full 1080x1920 clip,
+// ~8MB for 104 seconds. Worse, constraining BOTH dimensions made the
+// browser crop to the implied ratio instead of scaling to it, cutting the
+// top and bottom off the frame (1080x1440 from a 1080x1920 source, while
+// the stills from the same stream came back whole).
+//
+// Drawing to a canvas at a chosen size is the only remaining way to
+// control what MediaRecorder encodes: the canvas IS the frame size, so
+// there is nothing left for a browser to ignore. The rotation theory is
+// still false and nothing here rotates — the draw is a straight scale of
+// the whole frame into a canvas of the same aspect ratio.
+//
+// So: do not remove this as "unnecessary indirection" a second time
+// without first confirming that applyConstraints has started working on
+// the devices athletes actually use. The guards in run-protection now pin
+// the canvas IN rather than out.
 //
 // audio: false here on purpose — no microphone/ambient audio is ever
 // captured, for the athlete's privacy and to save bandwidth.
@@ -95,6 +115,19 @@ const RECORDING_MAX_HEIGHT = 480;
 // 720x1280 is 44% of 1080x1920's pixels, so the same encoder settings
 // land near 270kbps ~= 3.5MB for a 104-second attempt.
 const RECORDING_MAX_EDGE = 720;
+
+/** How often the camera frame is copied onto the recording canvas.
+ *
+ *  A TIMER, NOT requestAnimationFrame, and the difference matters here.
+ *  rAF is paced by the compositor — it fires at the display's refresh
+ *  rate (so 60Hz would need every other frame thrown away to reach 30)
+ *  and, more importantly, it STOPS ENTIRELY when the page is not being
+ *  painted. This canvas is not being drawn for anyone to look at; it is
+ *  feeding an encoder for ninety seconds while the athlete is looking at
+ *  a cube, and a draw loop that pauses whenever the compositor does would
+ *  freeze the clip on its last frame. A timer targets 30 directly and
+ *  keeps running (clamped) when the page is backgrounded. */
+const DRAW_FPS = 30;
 // Raised from 250k with the frame size. The old value was set against a
 // 640x480 clip and, at 1080p, was being ignored outright — the encoder
 // delivered 611kbps when asked for 250. A hint pitched below what the
@@ -170,6 +203,21 @@ export function useSolveRecorder() {
    *  getUserMedia, one video track, no audio and no canvas: the only
    *  difference between it and streamRef is frame size. */
   const recordingStreamRef = useRef<MediaStream | null>(null);
+  /** THE HOOK'S OWN <video>, not the preview.
+   *
+   *  The preview element belongs to whichever stage is on screen, and one
+   *  of them — zeroDisplay, the stage that STARTS the recording — renders
+   *  none at all. Drawing from `videoElRef` would therefore mean drawing
+   *  from null at the exact moment every clip begins. This one is created
+   *  once with the stream and lives until releaseCamera, so the draw loop
+   *  always has a frame source.
+   *
+   *  In the document but 1px and transparent, not `display: none`: a
+   *  display-none video is allowed to stop decoding, which would leave
+   *  the canvas with nothing to copy. */
+  const drawElRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const drawTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const videoElRef = useRef<HTMLVideoElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -295,7 +343,21 @@ export function useSolveRecorder() {
   // and a still landing after that would be filed against whatever
   // attempt happened to be in the bucket next. Cleared on unmount here,
   // and at the top of every startRecording below.
-  useEffect(() => clearStillTimers, [clearStillTimers]);
+  // EXIT PATH 3 OF 3. clearStillTimers was already here; the draw loop
+  // joins it, because an unmounted hook's interval keeps firing forever.
+  useEffect(
+    () => () => {
+      clearStillTimers();
+      // The ref directly, not stopDrawLoop — that helper is defined
+      // further down and this effect must not depend on declaration
+      // order to be the last thing that ever stops the loop.
+      if (drawTimerRef.current !== null) {
+        clearInterval(drawTimerRef.current);
+        drawTimerRef.current = null;
+      }
+    },
+    [clearStillTimers],
+  );
 
   const [hasCamera, setHasCamera] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -311,6 +373,88 @@ export function useSolveRecorder() {
     if (el && streamRef.current) el.srcObject = streamRef.current;
   }, []);
 
+  /** Stops the draw loop. Safe to call repeatedly and from anywhere; the
+   *  three exit paths (recording stop, releaseCamera, unmount) all reach
+   *  it, because a loop that outlives its recording is a battery drain
+   *  the athlete has no way to see. */
+  const stopDrawLoop = useCallback(() => {
+    if (drawTimerRef.current !== null) {
+      clearInterval(drawTimerRef.current);
+      drawTimerRef.current = null;
+    }
+  }, []);
+
+  /** The source's real frame size, preferred from the element actually
+   *  being drawn (it reports what decoded) and falling back to the track's
+   *  own settings. */
+  const sourceSize = useCallback((): { w: number; h: number } | null => {
+    const el = drawElRef.current;
+    if (el && el.videoWidth > 0 && el.videoHeight > 0) {
+      return { w: el.videoWidth, h: el.videoHeight };
+    }
+    const s = streamRef.current?.getVideoTracks()[0]?.getSettings();
+    if (s?.width && s?.height) return { w: s.width, h: s.height };
+    return null;
+  }, []);
+
+  /** Sizes the canvas, starts the draw loop and hands back a stream of it.
+   *
+   *  THE LONG EDGE BECOMES RECORDING_MAX_EDGE AND THE RATIO IS KEPT
+   *  EXACTLY. One scale factor is applied to both dimensions, so
+   *  1080x1920 becomes 405x720 and 640x480 becomes 720x540. drawImage
+   *  fills the whole canvas from the whole frame, which means there is
+   *  nothing to letterbox, nothing to crop and nothing to pad — the only
+   *  way to lose part of the frame here would be to compute two
+   *  independent scales, which is exactly what constraining two
+   *  dimensions did.
+   *
+   *  Returns null rather than throwing if anything is missing, so
+   *  startRecording can fall back to the raw track: a clip at the wrong
+   *  size is worth having and no clip is not. */
+  const startCanvasPipeline = useCallback((): MediaStream | null => {
+    try {
+      const el = drawElRef.current;
+      const size = sourceSize();
+      if (!el || !size) return null;
+
+      const scale = RECORDING_MAX_EDGE / Math.max(size.w, size.h);
+      const canvas = canvasRef.current ?? document.createElement('canvas');
+      canvasRef.current = canvas;
+      canvas.width = Math.round(size.w * scale);
+      canvas.height = Math.round(size.h * scale);
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+
+      diag('2 canvas sized', {
+        source: `${size.w}x${size.h}`,
+        canvas: `${canvas.width}x${canvas.height}`,
+        scale: Math.round(scale * 1000) / 1000,
+      });
+
+      stopDrawLoop();
+      drawTimerRef.current = setInterval(() => {
+        // readyState < 2 is a decoder that has not produced a frame yet.
+        // Skipping leaves the PREVIOUS canvas contents in place, which
+        // captureStream re-emits — a repeated frame, never a black one.
+        if (el.readyState < 2) return;
+        try {
+          ctx.drawImage(el, 0, 0, canvas.width, canvas.height);
+        } catch {
+          // A transient decode error must not kill the loop; the next
+          // tick is 33ms away.
+        }
+      }, 1000 / DRAW_FPS);
+
+      const stream = canvas.captureStream(DRAW_FPS);
+      diag('3 canvas stream track', stream.getVideoTracks()[0]?.getSettings());
+      return stream;
+    } catch (e) {
+      console.warn('Could not start the canvas recording pipeline:', e);
+      return null;
+    }
+  }, [sourceSize, stopDrawLoop]);
+
   /** Requests the camera stream if it doesn't already exist; a no-op
    *  (resolves true immediately) once granted, so attempts 2-5 never
    *  re-prompt. Called once, by the cameraSetup stage. */
@@ -325,50 +469,28 @@ export function useSolveRecorder() {
         streamRef.current = stream;
         if (videoElRef.current) videoElRef.current.srcObject = stream;
 
-        // ── The recorder's own, smaller view of the same camera ──
-        // Cloned and constrained HERE, once, rather than per attempt:
-        // applyConstraints is async, and doing it inside startRecording
-        // would either make that function async (its caller checks a
-        // synchronous boolean) or let the first frames of every clip
-        // encode at full size before shrinking mid-stream. Once per run,
-        // awaited, means every attempt records at a settled frame size.
+        // ── The frame source the recorder draws from ──
+        // A <video> of our own, because the recording must not depend on
+        // whichever preview element a stage happens to have mounted —
+        // and the stage that starts the recording has none. See drawElRef.
         //
-        // A REJECTION IS NOT FATAL. Some browsers apply track constraints
-        // by reconfiguring the shared source instead of downscaling the
-        // clone; the worst case is that the stills come back no larger
-        // than they used to be, which is exactly where this feature
-        // started. Recording must not be the thing that fails.
-        const source = stream.getVideoTracks()[0];
-        if (source) {
-          // 1 — what the camera actually gave us, before anything is
-          //     cloned or constrained.
-          diag('1 source AFTER getUserMedia', source.getSettings());
-          const recordingTrack = source.clone();
-          try {
-            // NOTHING HERE MAY IMPLY A RATIO — no width, no aspectRatio,
-            // and `max` alone rather than a max/ideal pair, since an
-            // `ideal` the browser chooses to hit exactly is one more way
-            // to end up at a shape nobody asked for. See
-            // RECORDING_MAX_EDGE.
-            await recordingTrack.applyConstraints({
-              height: { max: RECORDING_MAX_EDGE },
-            });
-            diag('   applyConstraints RESOLVED (no rejection)', true);
-          } catch (e) {
-            console.warn('Could not pin the recording track size:', e);
-            diag('   applyConstraints REJECTED', String(e));
-          }
-          // 2 — what the recorder's own track reports now. Honoured ==
-          //     360x640-ish, still 9:16. Ignored == a full 1080x1920.
-          //     ANY OTHER SHAPE means it cropped, and C2 has not held.
-          diag('2 clone AFTER applyConstraints', recordingTrack.getSettings());
-          // 3 — THE DECIDING ONE. Same source object as line 1. If these
-          //     two differ, constraining the clone reconfigured the shared
-          //     camera and the preview and stills are affected too; if
-          //     they match, the clone was reconfigured alone.
-          diag('3 source AFTER the clone was constrained', source.getSettings());
-          recordingStreamRef.current = new MediaStream([recordingTrack]);
-        }
+        // The cloned-and-constrained track that used to live here is
+        // GONE: applyConstraints was ignored on the devices this runs on,
+        // so the clone downscaled nothing and only added a second live
+        // track to stop. The canvas does the sizing now.
+        const drawEl = document.createElement('video');
+        drawEl.muted = true;
+        drawEl.playsInline = true;
+        drawEl.setAttribute('playsinline', '');
+        drawEl.srcObject = stream;
+        drawEl.style.cssText =
+          'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none';
+        document.body.appendChild(drawEl);
+        drawElRef.current = drawEl;
+        // Autoplay is permitted because it is muted; a rejection here is
+        // not fatal, the draw loop simply skips until frames arrive.
+        await drawEl.play().catch(() => {});
+        diag('1 source AFTER getUserMedia', stream.getVideoTracks()[0]?.getSettings());
 
         setHasCamera(true);
         return true;
@@ -416,11 +538,14 @@ export function useSolveRecorder() {
    *  Assumes requestCamera() already succeeded; returns false (and does
    *  nothing) if there's no stream to record from. */
   const startRecording = useCallback((): boolean => {
-    // The DOWNSCALED clone, not streamRef — see RECORDING_MAX_WIDTH for
-    // why the recorder gets its own view of the camera. Falls back to the
-    // full-size stream if the clone could not be made, because a clip at
-    // the wrong size is worth having and no clip is not.
-    const stream = recordingStreamRef.current ?? streamRef.current;
+    // THE CANVAS STREAM, not the camera track. The canvas is the only
+    // place the frame size can actually be chosen on this hardware — see
+    // the header. Falls back to the full-size camera stream if the
+    // pipeline could not start, because a clip at the wrong size is worth
+    // having and no clip is not.
+    const canvasStream = startCanvasPipeline();
+    if (canvasStream) recordingStreamRef.current = canvasStream;
+    const stream = canvasStream ?? streamRef.current;
     if (!stream) {
       setError('Камерын урсгал олдсонгүй');
       return false;
@@ -462,7 +587,7 @@ export function useSolveRecorder() {
     diag('  recorder REPORTS mimeType', recorder.mimeType);
     diag('  track being encoded', stream.getVideoTracks()[0]?.getSettings());
     return true;
-  }, [clearStillTimers]);
+  }, [clearStillTimers, startCanvasPipeline]);
 
   const stopRecording = useCallback((): Promise<Blob> => {
     return new Promise((resolve) => {
@@ -472,6 +597,9 @@ export function useSolveRecorder() {
         return;
       }
       recorder.onstop = () => {
+        // EXIT PATH 1 OF 3. The encoder has what it needs; every further
+        // draw is work nobody will ever see.
+        stopDrawLoop();
         // BEFORE the promise resolves, so finishRecording's continuation
         // — and therefore everything downstream that reads `marks` —
         // cannot observe the clip as ended without its last mark.
@@ -480,23 +608,33 @@ export function useSolveRecorder() {
       };
       recorder.stop();
     });
-  }, [mark]);
+  }, [mark, stopDrawLoop]);
 
   const releaseCamera = useCallback(() => {
     clearStillTimers();
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
-    // The clone is a track in its own right: stopping the stream it was
-    // cloned from does NOT stop it, and a live clone keeps the camera's
-    // in-use light on after the athlete has left the run.
+    // EXIT PATH 2 OF 3.
+    stopDrawLoop();
+    // The canvas track is a track in its own right: stopping the camera
+    // does not stop it.
     recordingStreamRef.current?.getTracks().forEach((t) => t.stop());
     recordingStreamRef.current = null;
+    canvasRef.current = null;
+    // The hook put this element in the document, so the hook takes it out
+    // again — otherwise every run leaves one behind, each still holding a
+    // reference to a stream.
+    if (drawElRef.current) {
+      drawElRef.current.srcObject = null;
+      drawElRef.current.remove();
+      drawElRef.current = null;
+    }
     if (audioContextRef.current) {
       audioContextRef.current.close().catch(() => {});
       audioContextRef.current = null;
     }
     setHasCamera(false);
-  }, [clearStillTimers]);
+  }, [clearStillTimers, stopDrawLoop]);
 
   /** The marks gathered for the attempt just recorded, AS A COPY.
    *

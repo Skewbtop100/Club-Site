@@ -1085,51 +1085,52 @@ console.log('\n  -- 9. the lobby and the between screen --');
   // passes this even after the constraint is flipped to true. Verified by
   // mutation — the unstripped form did exactly that.
   const recorderCode = stripComments(recorder);
-  // A MediaStream IS assembled here now — one, wrapping one downscaled
-  // clone of the camera's video track, so the clip keeps its old frame
-  // size while the stills read the full-size original (see
-  // RECORDING_MAX_WIDTH in the hook). The blanket "no new MediaStream"
-  // that used to stand in for "no second track" is therefore pinned to
-  // that exact shape instead: one construction, from one named video
-  // track, with addTrack and createMediaStreamDestination still nowhere —
-  // which is what actually kept the ~110-byte-recording bug out.
+  // NO MediaStream IS ASSEMBLED HERE ANY MORE. The downscaled clone is
+  // gone (applyConstraints was ignored on real devices) and the recorder
+  // reads canvas.captureStream() instead, which constructs its own. So
+  // the count is ZERO, and the clauses that actually kept the
+  // ~110-byte-recording bug out — no addTrack, no
+  // createMediaStreamDestination — carry the whole weight.
+  //
+  // AUDIO: the camera is requested with audio:false and a canvas stream
+  // has no audio track to begin with, so there is nothing to lose and
+  // nothing to add back. The beep reaches ctx.destination, the speaker,
+  // and no MediaStream anywhere.
   ok('  ...through the speaker, never into the recorded stream',
     /audio: false,/.test(recorderCode) && !/audio: true/.test(recorderCode) &&
       recorderCode.includes('gain.connect(ctx.destination)') &&
       !recorderCode.includes('createMediaStreamDestination') &&
       !/\.addTrack\(/.test(recorderCode) &&
-      (recorderCode.match(/new MediaStream\(/g) ?? []).length === 1 &&
-      /new MediaStream\(\[recordingTrack\]\)/.test(recorderCode));
-  // MediaRecorder still reads a camera track — cloned and shrunk, never
-  // re-encoded through anything. `recordingStreamRef` holds the clone and
-  // falls back to the camera stream itself if the clone could not be made.
-  ok('  ...and MediaRecorder still reads the camera stream untouched',
-    /new MediaRecorder\(stream, \{/.test(recorderCode) &&
-      /const stream = recordingStreamRef\.current \?\? streamRef\.current;/.test(recorderCode) &&
-      /const recordingTrack = source\.clone\(\);/.test(recorderCode) &&
-      /const source = stream\.getVideoTracks\(\)\[0\];/.test(recorderCode));
-  // THE CLIP'S FRAME SIZE IS CAPPED ON ONE DIMENSION, and the count is
-  // the assertion. Constraining BOTH width and height states an aspect
-  // ratio, and a browser satisfied that ratio by CROPPING: a run came
-  // back 1080x1440, full width with 480px cut off the top and bottom,
-  // while the stills from the same stream were a complete 1080x1920.
-  // Neither size cap had been honoured — only the shape the pair of them
-  // implied.
+      (recorderCode.match(/new MediaStream\(/g) ?? []).length === 0);
+  // ── THE RECORDER RECORDS A CANVAS, AND THAT IS DELIBERATE ──
+  // It used to record a cloned camera track shrunk with applyConstraints.
+  // That was ignored outright on the devices athletes use — 640 and 720
+  // both produced a full 1080x1920 clip — and constraining both
+  // dimensions made one browser CROP to the implied ratio instead of
+  // scaling to it. The canvas IS the frame size, so there is nothing left
+  // for a browser to ignore.
   //
-  // So: exactly one dimension, and nothing else that names a shape. A
-  // browser that honours it scales proportionally; one that ignores it
-  // hands back the full frame. Neither can crop, because there is no
-  // target ratio to crop toward.
-  // THE NUMBERS ARE NOT PINNED, deliberately. The edge cap and the
-  // bitrate are tuning knobs — 640 became 720 when a full-resolution
-  // clip turned out to need fewer PIXELS rather than fewer bits per
-  // pixel, and they will move again. What must not move is the shape of
-  // the constraint: one named edge cap, used as the only thing
-  // constrained, and a named bitrate cap that exists at all.
-  ok('  ...capped on ONE dimension, so no ratio is ever implied',
+  // These guards used to forbid exactly this. They now pin it IN. See the
+  // header of useSolveRecorder before changing them back.
+  ok('  ...and MediaRecorder records the downscaled canvas stream',
+    /new MediaRecorder\(stream, \{/.test(recorderCode) &&
+      /const canvasStream = startCanvasPipeline\(\);/.test(recorderCode) &&
+      /const stream = canvasStream \?\? streamRef\.current;/.test(recorderCode) &&
+      /canvas\.captureStream\(DRAW_FPS\)/.test(recorderCode));
+  // THE LONG EDGE IS THE CAP AND ONE SCALE IS APPLIED TO BOTH SIDES.
+  // Two independent scales is precisely what distorts or crops; a single
+  // factor cannot. The number is not pinned — it is a tuning knob and has
+  // already moved twice — but the shape of the arithmetic is.
+  ok('  ...at a canvas whose long edge is the cap, ratio preserved',
     /const RECORDING_MAX_EDGE = \d+;/.test(recorderCode) &&
-      /height: \{ max: RECORDING_MAX_EDGE \}/.test(recorderCode) &&
+      /RECORDING_MAX_EDGE \/ Math\.max\(size\.w, size\.h\)/.test(recorderCode) &&
+      /canvas\.width = Math\.round\(size\.w \* scale\);/.test(recorderCode) &&
+      /canvas\.height = Math\.round\(size\.h \* scale\);/.test(recorderCode) &&
       /const VIDEO_BITS_PER_SECOND = \d[\d_]*;/.test(recorderCode));
+  // No width/height pair anywhere near the camera any more: the whole
+  // mechanism that could state a ratio is gone, not merely unused.
+  ok('  ...with no track constraint left to state a shape',
+    !/applyConstraints/.test(recorderCode));
   // DECLARED IS NOT APPLIED. The assertion above was happy with the
   // constant merely existing, so deleting it from the MediaRecorder
   // options broke nothing — and an uncapped encoder is invisible to
@@ -1137,13 +1138,25 @@ console.log('\n  -- 9. the lobby and the between screen --');
   // right and only the file would quietly grow.
   ok('  ...with the bitrate cap actually handed to MediaRecorder',
     /videoBitsPerSecond: VIDEO_BITS_PER_SECOND/.test(recorderCode));
-  ok('  ...and the recorder constrains nothing that states a shape',
+  // THE DRAW LOOP IS TORN DOWN ON ALL THREE EXIT PATHS. An interval that
+  // outlives its recording keeps copying camera frames into a canvas
+  // nobody reads, for as long as the page is open — invisible to the
+  // athlete and straight out of their battery.
+  ok('  ...and the draw loop stops on stop, release and unmount',
+    (recorderCode.match(/stopDrawLoop\(\)/g) ?? []).length >= 3 &&
+      /clearInterval\(drawTimerRef\.current\)/.test(recorderCode));
+  // grabStill READS THE ORIGINAL TRACK, never the canvas. The whole point
+  // of the stills is resolution the clip does not have; sourcing them
+  // from the downscaled canvas would quietly make them worthless.
+  ok('  ...while the stills still read the full-size camera track',
     (() => {
-      const call = recorderCode.slice(
-        recorderCode.indexOf('applyConstraints'),
-        recorderCode.indexOf('recordingStreamRef.current = new MediaStream'),
+      const grab = recorderCode.slice(
+        recorderCode.indexOf('const grabStill'),
+        recorderCode.indexOf('const clearStillTimers'),
       );
-      return !/width:/.test(call) && !/aspectRatio/.test(call);
+      return /streamRef\.current\?\.getVideoTracks\(\)\[0\]/.test(grab) &&
+        !/canvasRef/.test(grab) &&
+        !/captureStream/.test(grab);
     })());
   // `ideal`/`max`, never `exact`: a camera that cannot manage these must
   // hand back what it has, not fail and end the run before it starts.
@@ -1408,23 +1421,30 @@ console.log('\n  -- 10. the mockup restyle --');
       /\.oc-solve-camera-video \{[\s\S]{0,160}?object-fit: cover;/.test(theme));
   ok('  ...and the crop cannot reach the recording',
     (() => {
-      // Comment-stripped: the hook's own comment explains at length the
-      // off-screen canvas it USED to redraw through and why that was
-      // removed, which would fail the assertion that it is gone.
       const rec = stripComments(
         fs.readFileSync(path.join(ROOT, SOLVE, '_lib/useSolveRecorder.ts'), 'utf8'),
       );
-      // A canvas IS in this file now — grabStill draws one frame of the
-      // preview into it to make a JPEG. It is NOT in the recording path
-      // and must never get there, so the assertion moved from "no canvas
-      // at all" to the thing that was actually being forbidden: no canvas
-      // can become a stream, and the recorder reads a camera track.
-      // captureStream() is the only way the former could happen.
-      const grab = rec.slice(rec.indexOf('const grabStill'), rec.indexOf('const clearStillTimers'));
-      const canvasesOutsideGrab =
-        (rec.match(/canvas/g) ?? []).length - (grab.match(/canvas/g) ?? []).length;
-      return !rec.includes('captureStream') &&
-        canvasesOutsideGrab === 0 &&
+      // THE CANVAS IS THE RECORDING PATH NOW, so "no canvas" is no longer
+      // the rule — the rule is that the canvas cannot cut anything out.
+      //
+      // drawImage has two forms. The five-argument one (image, dx, dy,
+      // dw, dh) draws the WHOLE source frame into the destination box.
+      // The nine-argument one takes a source rectangle first, and that is
+      // the only way a draw can crop. So: the destination is the entire
+      // canvas, and there is no source rectangle anywhere.
+      //
+      // EVERY draw in the file is checked, not just the recording one:
+      // grabStill uses the same call and must not start cropping either.
+      const draws = rec.match(/ctx\.drawImage\([^)]*\)/g) ?? [];
+      const noSourceRect =
+        draws.length > 0 && draws.every((d) => d.split(',').length <= 5);
+      // And the recording draw specifically fills the whole canvas.
+      const pipeline = rec.slice(
+        rec.indexOf('const startCanvasPipeline'),
+        rec.indexOf('const requestCamera'),
+      );
+      return noSourceRect &&
+        /ctx\.drawImage\(el, 0, 0, canvas\.width, canvas\.height\)/.test(pipeline) &&
         rec.includes('new MediaRecorder(stream');
     })());
 

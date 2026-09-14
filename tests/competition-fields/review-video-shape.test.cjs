@@ -40,6 +40,14 @@ const RECORDER = path.join(
 const panel = fs.readFileSync(PANEL, 'utf8');
 const recorder = fs.readFileSync(RECORDER, 'utf8');
 
+/** Code only. The recorder's comments discuss aspect ratios and the
+ *  constraints that used to be there at length — precisely because of
+ *  this bug — so any "X appears nowhere" assertion has to read past the
+ *  prose explaining why X appears nowhere. */
+const stripComments = (src) =>
+  src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ 	]*\/\/.*$/gm, '');
+const recorderCode = stripComments(recorder);
+
 let pass = 0;
 let fail = 0;
 function ok(name, cond, detail) {
@@ -102,24 +110,30 @@ ok('the admin renders the submission video exactly once', videoTags === 1,
 // with the stills proving the source was whole. So the recorder now caps
 // the long edge alone, which leaves nothing to crop toward.
 //
-// Scoped to the applyConstraints CALL, not the whole file: the hook's
-// comments discuss ratios at length precisely because of this bug, and a
-// file-wide scan would be tripped by the explanation of the rule it is
-// trying to enforce.
-const constraintCall = recorder.slice(
-  recorder.indexOf('await recordingTrack.applyConstraints('),
-  recorder.indexOf('recordingStreamRef.current = new MediaStream'),
+// Track constraints are gone entirely — the device ignored them, so the
+// sizing moved to a canvas the recorder draws into. Which means the
+// anti-crop rule moved with it: ONE scale factor, applied to both
+// dimensions. Two independently chosen numbers is the only way a canvas
+// can distort or crop, exactly as two independent constraints was.
+//
+// Scoped to the pipeline, not the whole file: the hook's comments discuss
+// ratios at length precisely because of this bug, and a file-wide scan
+// would be tripped by the explanation of the rule it is enforcing.
+const pipeline = recorder.slice(
+  recorder.indexOf('const startCanvasPipeline'),
+  recorder.indexOf('const requestCamera'),
 );
-ok('the recorder caps one dimension, and names no shape',
-  /height:\s*\{\s*max:\s*RECORDING_MAX_EDGE\s*\}/.test(constraintCall) &&
-    !/width:/.test(constraintCall) &&
-    !/aspectRatio/.test(constraintCall));
+ok('the recorder sizes one canvas by a single scale factor',
+  /RECORDING_MAX_EDGE \/ Math\.max\(size\.w, size\.h\)/.test(pipeline) &&
+    /canvas\.width = Math\.round\(size\.w \* scale\)/.test(pipeline) &&
+    /canvas\.height = Math\.round\(size\.h \* scale\)/.test(pipeline) &&
+    !/aspectRatio/.test(pipeline));
 ok('  ...and uses ideal, never exact, on the source constraints',
   /width:\s*\{\s*ideal:\s*1920\s*\}/.test(recorder) && !/exact:/.test(recorder));
-// The cap is `max` only — no paired `ideal`. An ideal the browser chooses
-// to hit exactly is one more route to a shape nobody asked for.
-ok('  ...with no ideal paired onto the cap',
-  !/ideal/.test(constraintCall));
+// Nothing constrains the track any more, so there is no second place a
+// shape could be stated.
+ok('  ...with no track constraint left anywhere',
+  !/applyConstraints/.test(recorderCode));
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);
