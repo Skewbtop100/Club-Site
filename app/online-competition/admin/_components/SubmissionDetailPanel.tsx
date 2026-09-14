@@ -406,15 +406,43 @@ export default function SubmissionDetailPanel({
           borderRight: '1px solid #1C1C21',
         }}
       >
+        {/* ── THE SHAPE OF A JUDGING VIDEO ──
+            NO FIXED RATIO HERE, AND THAT IS THE POINT. The box fills its
+            column and `object-fit: contain` on the element inside fits
+            the clip within it, whatever shape the clip is. Contain is the
+            whole mechanism; a ratio on the box was never what prevented
+            cropping, only what guessed at the common case.
+
+            The guess was wrong often enough to matter. A ratio sized for
+            a phone held upright turns every laptop-webcam recording into
+            a thin strip between two black bars — correct, but most of the
+            column spent on nothing.
+
+            THIS EXACT BUG HAS SHIPPED TWICE, both times as a box shaped
+            for the wrong clip. First the dashboard put a portrait clip in
+            a 16:9 box (see the note in useSolveRecorder, which was
+            rewritten around a canvas to chase a rotation bug that was
+            really this); then the panel used 3:4 and quietly cropped the
+            top and bottom of every recording. A judge cannot see what was
+            cut — the frame just looks tight — so it fails silently every
+            time.
+
+            The recorder pins no ratio either: it pins a 640x480 BOUNDING
+            BOX with `max`, which caps each dimension independently and
+            leaves the shape to the camera. So nothing anywhere knows the
+            ratio in advance, which is exactly why nothing should declare
+            one. See tests/competition-fields/review-video-shape. */}
         <div
           style={{
             flex: 1,
             minHeight: 0,
-            position: 'relative',
-            background: '#08080A',
             display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: '#08080A',
           }}
         >
+          <div style={{ position: 'relative', width: '100%', height: '100%' }}>
           <video
             ref={videoRef}
             src={submission.videoUrl}
@@ -463,6 +491,7 @@ export default function SubmissionDetailPanel({
             >
               {currentJump.label}
             </span>
+          </div>
           </div>
         </div>
 
