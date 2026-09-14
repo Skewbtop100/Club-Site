@@ -64,6 +64,27 @@ const VIDEO_CONSTRAINTS: MediaStreamConstraints = {
 // this already satisfies it.
 const RECORDING_MAX_WIDTH = 640;
 const RECORDING_MAX_HEIGHT = 480;
+
+// ── ONE DIMENSION, AND ONLY ONE ──
+// The recorder's clone used to be constrained on BOTH width and height
+// (max 640 x max 480). Two dimensions state an ASPECT RATIO whether you
+// meant to or not, and at least one browser satisfied that ratio the
+// cheapest way available: it cropped. A run came back 1080x1440 — full
+// width, 480px of height cut off the top and bottom — while the stills
+// from the same stream were a complete 1080x1920. Neither size cap had
+// been applied at all; only the 4:3 the two of them implied.
+//
+// Capping the LONG EDGE alone leaves no ratio to crop toward. A browser
+// that honours it scales the whole frame down proportionally (1080x1920
+// -> 360x640, still 9:16); one that ignores it hands back the full frame
+// untouched. The bad outcome becomes "larger than we wanted", never
+// "missing the part of the frame the judge needs".
+//
+// HEIGHT is the long edge because these are recorded upright, on a phone
+// or a propped-up laptop. 640 rather than the 480 above: 480 was the
+// short side of the old landscape box, and using it here would shrink
+// the clip well past what it has always been.
+const RECORDING_MAX_EDGE = 640;
 const VIDEO_BITS_PER_SECOND = 250_000;
 
 /** JPEG quality for the stills. High on purpose: the entire point of
@@ -78,6 +99,18 @@ const STILL_OFFSETS_MS = [2000, 4000, 6000];
 const BEEP_FREQUENCY_HZ = 880;
 const BEEP_DURATION_S = 0.25;
 const BEEP_GAIN = 0.2;
+
+// ── TEMPORARY DIAGNOSTIC · REMOVE WHEN THE CROP IS FIXED ──────────────
+// A recording came back 1080x1440 (3:4), 5.75MB/96s ~= 479kbps, missing
+// the top and bottom of the frame that the stills from the same run show
+// complete at 1080x1920. So neither the size caps nor the bitrate cap
+// below is taking effect, and something is cropping.
+//
+// These four lines answer which. They log only; nothing here changes what
+// is captured, recorded or uploaded.
+function diag(label: string, value: unknown) {
+  console.log(`[khorom-diag] ${label}`, value);
+}
 
 function pickMimeType(): string {
   const candidates = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
@@ -292,15 +325,33 @@ export function useSolveRecorder() {
         // started. Recording must not be the thing that fails.
         const source = stream.getVideoTracks()[0];
         if (source) {
+          // 1 — what the camera actually gave us, before anything is
+          //     cloned or constrained.
+          diag('1 source AFTER getUserMedia', source.getSettings());
           const recordingTrack = source.clone();
           try {
+            // NOTHING HERE MAY IMPLY A RATIO — no width, no aspectRatio,
+            // and `max` alone rather than a max/ideal pair, since an
+            // `ideal` the browser chooses to hit exactly is one more way
+            // to end up at a shape nobody asked for. See
+            // RECORDING_MAX_EDGE.
             await recordingTrack.applyConstraints({
-              width: { max: RECORDING_MAX_WIDTH, ideal: RECORDING_MAX_WIDTH },
-              height: { max: RECORDING_MAX_HEIGHT, ideal: RECORDING_MAX_HEIGHT },
+              height: { max: RECORDING_MAX_EDGE },
             });
+            diag('   applyConstraints RESOLVED (no rejection)', true);
           } catch (e) {
             console.warn('Could not pin the recording track size:', e);
+            diag('   applyConstraints REJECTED', String(e));
           }
+          // 2 — what the recorder's own track reports now. Honoured ==
+          //     360x640-ish, still 9:16. Ignored == a full 1080x1920.
+          //     ANY OTHER SHAPE means it cropped, and C2 has not held.
+          diag('2 clone AFTER applyConstraints', recordingTrack.getSettings());
+          // 3 — THE DECIDING ONE. Same source object as line 1. If these
+          //     two differ, constraining the clone reconfigured the shared
+          //     camera and the preview and stills are affected too; if
+          //     they match, the clone was reconfigured alone.
+          diag('3 source AFTER the clone was constrained', source.getSettings());
           recordingStreamRef.current = new MediaStream([recordingTrack]);
         }
 
@@ -388,6 +439,13 @@ export function useSolveRecorder() {
     };
     recorderRef.current = recorder;
     recorder.start();
+    // 4 — what MediaRecorder settled on, versus what it was asked for,
+    //     plus the frame size it is actually encoding at the moment it
+    //     starts (which is the number that ends up in the file).
+    diag('4 recorder asked for videoBitsPerSecond', VIDEO_BITS_PER_SECOND);
+    diag('  recorder REPORTS videoBitsPerSecond', recorder.videoBitsPerSecond);
+    diag('  recorder REPORTS mimeType', recorder.mimeType);
+    diag('  track being encoded', stream.getVideoTracks()[0]?.getSettings());
     return true;
   }, [clearStillTimers]);
 

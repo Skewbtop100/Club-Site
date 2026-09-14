@@ -1108,16 +1108,30 @@ console.log('\n  -- 9. the lobby and the between screen --');
       /const stream = recordingStreamRef\.current \?\? streamRef\.current;/.test(recorderCode) &&
       /const recordingTrack = source\.clone\(\);/.test(recorderCode) &&
       /const source = stream\.getVideoTracks\(\)\[0\];/.test(recorderCode));
-  // THE CLIP'S FRAME SIZE IS PINNED, and that is the whole reason the
-  // clone exists: the source was raised to 1080p for the stills, and
-  // MediaRecorder encodes whatever the track hands it at a bitrate that
-  // is capped — so without this the file would stay the same SIZE and get
-  // materially worse to watch, which no size check can catch.
-  ok('  ...at the frame size it has always recorded at',
-    /const RECORDING_MAX_WIDTH = 640;/.test(recorderCode) &&
-      /const RECORDING_MAX_HEIGHT = 480;/.test(recorderCode) &&
-      /width: \{ max: RECORDING_MAX_WIDTH, ideal: RECORDING_MAX_WIDTH \}/.test(recorderCode) &&
+  // THE CLIP'S FRAME SIZE IS CAPPED ON ONE DIMENSION, and the count is
+  // the assertion. Constraining BOTH width and height states an aspect
+  // ratio, and a browser satisfied that ratio by CROPPING: a run came
+  // back 1080x1440, full width with 480px cut off the top and bottom,
+  // while the stills from the same stream were a complete 1080x1920.
+  // Neither size cap had been honoured — only the shape the pair of them
+  // implied.
+  //
+  // So: exactly one dimension, and nothing else that names a shape. A
+  // browser that honours it scales proportionally; one that ignores it
+  // hands back the full frame. Neither can crop, because there is no
+  // target ratio to crop toward.
+  ok('  ...capped on ONE dimension, so no ratio is ever implied',
+    /const RECORDING_MAX_EDGE = 640;/.test(recorderCode) &&
+      /height: \{ max: RECORDING_MAX_EDGE \}/.test(recorderCode) &&
       /const VIDEO_BITS_PER_SECOND = 250_000;/.test(recorderCode));
+  ok('  ...and the recorder constrains nothing that states a shape',
+    (() => {
+      const call = recorderCode.slice(
+        recorderCode.indexOf('applyConstraints'),
+        recorderCode.indexOf('recordingStreamRef.current = new MediaStream'),
+      );
+      return !/width:/.test(call) && !/aspectRatio/.test(call);
+    })());
   // `ideal`/`max`, never `exact`: a camera that cannot manage these must
   // hand back what it has, not fail and end the run before it starts.
   ok('  ...and nothing about the camera is demanded exactly',

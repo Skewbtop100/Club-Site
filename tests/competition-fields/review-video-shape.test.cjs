@@ -96,17 +96,30 @@ ok('the admin renders the submission video exactly once', videoTags === 1,
 
 // ── The premise the rule rests on ─────────────────────────────────────
 // If the recorder ever DID pin a ratio, a reader might reasonably decide
-// the container could stop worrying. It does not: it pins a bounding box
-// with `max`, which caps each dimension independently and leaves the
-// ratio to the camera. These assertions exist so that "the recorder
-// guarantees 9:16" cannot be quietly assumed later.
-ok('the recorder pins a bounding box, not a ratio',
-  /width:\s*\{\s*max:\s*RECORDING_MAX_WIDTH/.test(recorder) &&
-    /height:\s*\{\s*max:\s*RECORDING_MAX_HEIGHT/.test(recorder));
+// the container could stop worrying. It does not, and it no longer even
+// caps two dimensions: capping both states a ratio, and a browser reached
+// that ratio by CROPPING — 1080x1440 recorded from a 1080x1920 source,
+// with the stills proving the source was whole. So the recorder now caps
+// the long edge alone, which leaves nothing to crop toward.
+//
+// Scoped to the applyConstraints CALL, not the whole file: the hook's
+// comments discuss ratios at length precisely because of this bug, and a
+// file-wide scan would be tripped by the explanation of the rule it is
+// trying to enforce.
+const constraintCall = recorder.slice(
+  recorder.indexOf('await recordingTrack.applyConstraints('),
+  recorder.indexOf('recordingStreamRef.current = new MediaStream'),
+);
+ok('the recorder caps one dimension, and names no shape',
+  /height:\s*\{\s*max:\s*RECORDING_MAX_EDGE\s*\}/.test(constraintCall) &&
+    !/width:/.test(constraintCall) &&
+    !/aspectRatio/.test(constraintCall));
 ok('  ...and uses ideal, never exact, on the source constraints',
   /width:\s*\{\s*ideal:\s*1920\s*\}/.test(recorder) && !/exact:/.test(recorder));
-ok('  ...so nothing downstream may assume a fixed aspect ratio',
-  !/aspectRatio/.test(recorder));
+// The cap is `max` only — no paired `ideal`. An ideal the browser chooses
+// to hit exactly is one more route to a shape nobody asked for.
+ok('  ...with no ideal paired onto the cap',
+  !/ideal/.test(constraintCall));
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);
