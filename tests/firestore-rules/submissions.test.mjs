@@ -273,6 +273,41 @@ await check('36. marks that are not a map at all', 'DENY', () =>
   ),
 );
 
+// ── CREATE: coverStart, the one automatic mark ──────────────────────────
+// Every other mark names a button the athlete pressed. This one names the
+// scramble reveal running itself out and handing over to the cover stage,
+// which is what the judge's КОВЕР jump aims at.
+//
+// It is OPTIONAL IN A SECOND SENSE, which is what these three cover: not
+// merely "the recorder might not have gathered it" like the others, but
+// "every attempt filed before this mark existed has the other five and
+// never this one". Both shapes have to keep filing, forever.
+await check('36a. an attempt filed WITH coverStart', 'ALLOW', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 5, 3)),
+    attemptDoc({ round: 5, competitionRound: 3, marks: { ...MARKS, coverStart: 14200 } }),
+  ),
+);
+// The legacy shape, and the reason the field could not be made required.
+await check('36b. ...or without it, as every older attempt is', 'ALLOW', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 1, 5)),
+    attemptDoc({ round: 1, competitionRound: 5, marks: MARKS }),
+  ),
+);
+await check('36c. a negative coverStart', 'DENY', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 2, 5)),
+    attemptDoc({ round: 2, competitionRound: 5, marks: { ...MARKS, coverStart: -1 } }),
+  ),
+);
+await check('36d. ...or a non-numeric one', 'DENY', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 3, 5)),
+    attemptDoc({ round: 3, competitionRound: 5, marks: { ...MARKS, coverStart: '14200' } }),
+  ),
+);
+
 // ── CREATE: the still ids ───────────────────────────────────────────────
 // Cloudinary public ids for the full-resolution frames grabbed during the
 // two 8-second holds — the video is 250kbps and cannot carry a legible

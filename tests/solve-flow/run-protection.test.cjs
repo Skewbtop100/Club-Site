@@ -1614,8 +1614,13 @@ console.log('\n  -- 11. the inspection --');
   // one changeset and is gone, file and all — the cover's own twenty
   // seconds are now long enough to read the instruction and act on it,
   // which is what the extra screen was compensating for.
-  ok('reveal hands to cover',
-    /<RevealStage[\s\S]{0,400}?onDone=\{\(\) => setStage\('cover'\)\}/.test(page));
+  // Pinned whole, the same way the three button handlers above are, and
+  // for the same reason: the mark leads, the setStage follows, and
+  // NOTHING else is in the handler. This one is the only mark with no
+  // button behind it — the reveal simply runs out — which is exactly why
+  // it needs pinning here rather than being visible at a call site.
+  ok('reveal hands to cover, marking the handover',
+    /<RevealStage[\s\S]{0,900}?onDone=\{\(\) => \{\s*recorder\.mark\('coverStart'\);\s*setStage\('cover'\);\s*\}\}/.test(page));
   ok('  ...and the prep screen is gone, file and all',
     !fs.existsSync(path.join(ROOT, SOLVE, '_components/CoverPrepStage.tsx')) &&
       !page.includes('coverPrep') && !page.includes('CoverPrepStage') &&

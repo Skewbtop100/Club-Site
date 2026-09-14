@@ -14,6 +14,10 @@ import type {
  *  the way it is on create. */
 const MARK_KEYS = [
   'scrambleShown',
+  // Optional and absent on every submission filed before it existed —
+  // the review panel falls back to inferring this moment when it is not
+  // here, so dropping it silently would look like working software.
+  'coverStart',
   'solveStart',
   'solveEnd',
   'cubeShown',

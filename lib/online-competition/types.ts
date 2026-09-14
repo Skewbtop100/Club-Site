@@ -722,6 +722,22 @@ export interface SolveMarks {
   /** "ХОЛИЛТ ХАРАХ" — the end of the 0.00 timer hold; the scramble is
    *  about to be shown. */
   scrambleShown: number;
+  /** The scramble reveal ending and the cover stage beginning. NO BUTTON
+   *  PRESS — the reveal runs itself out and hands over, so this is the
+   *  one mark that names an automatic transition rather than a thing the
+   *  athlete did.
+   *
+   *  It exists because the review flow could otherwise only INFER this
+   *  moment, by adding up the reveal's chunk count times its per-chunk
+   *  clock (see solve-stage-timing.ts). That inference is correct only
+   *  for as long as those numbers never change and the athlete's scramble
+   *  can still be looked up — neither of which is guaranteed, and both of
+   *  which are silent when wrong. Recording the moment costs one number.
+   *
+   *  OPTIONAL, unlike its neighbours, and permanently so: every
+   *  submission filed before this mark existed has the other five and not
+   *  this one. Readers must fall back rather than assume. */
+  coverStart?: number;
   /** "ЭВЛҮҮЛЭЛТЭЭ ЭХЛҮҮЛЭХ" — the go-ahead; inspection starts here. */
   solveStart: number;
   /** "ЭВЛҮҮЛЭЛТ ДУУССАН" — the athlete says the solve is over. */

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import cstimer from 'cstimer_module';
 import { scrambleConfigFor } from '@/lib/online-competition/scramble-types';
 import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
-import { roundKey, type ScrambleGroup } from '@/lib/online-competition/scrambles';
+import { lookupGroupScramble } from '@/lib/online-competition/group-scramble';
 import { ROUND_ACCESS_MESSAGE, resolveRoundAccess } from '@/lib/online-competition/round-access';
 import { AthleteAuthError, requireAthlete } from '@/lib/online-competition/athlete-auth';
 
@@ -22,70 +22,24 @@ export const runtime = 'nodejs';
 //      group assignment in it, the attempt gets that group's Nth scramble
 //      (see app/online-competition/admin/scrambles).
 //   2. Random cstimer generation — the original behaviour, unchanged, and
-//      the fallback for every competition that never imported scrambles
-//      and every athlete who isn't in a group.
+//      the fallback for every competition that never imported scrambles.
+//
+// NO LONGER THE FALLBACK FOR AN ATHLETE WITH NO GROUP. Once a round has
+// imported scrambles it is an official round, and an athlete without an
+// assignment in it is REFUSED rather than handed a random scramble: they
+// would otherwise record a full set of attempts against a scramble nobody
+// else had, which no judge can verify and which is only discovered at
+// review, after the solving is done. A round with no import at all is
+// untouched and still random for everyone.
 //
 // Both are gated first on ROUND ACCESS (see below): which round is live
 // for this event, and whether this athlete qualified into it.
 //
-// The group lookup is best-effort by construction: any missing param,
-// missing doc, or Admin SDK failure falls through to (2) rather than
-// failing the request, so a competition that doesn't use this feature —
-// or a deployment without the Admin SDK env vars — behaves exactly as it
-// did before this route learned about groups.
-
-/** Looks up the athlete's official scramble; null means "fall back". */
-type GroupScrambleLookup =
-  | { scramble: string; groupLabel: string }
-  /** The athlete HAS an official group, but asked for an attempt beyond
-   *  the scrambles it holds — refuse rather than silently going random. */
-  | { outOfRange: true; max: number }
-  /** No official scramble applies (no import, or no group assignment) —
-   *  random generation is the correct answer. */
-  | null;
-
-async function lookupGroupScramble(params: {
-  competitionId: string;
-  eventId: string;
-  round: number;
-  uid: string;
-  attempt: number;
-}): Promise<GroupScrambleLookup> {
-  const { competitionId, eventId, round, uid, attempt } = params;
-  const db = getOnlineCompAdminDb();
-  const compRef = db.collection('onlineCompetitions').doc(competitionId);
-  const key = roundKey(eventId, round);
-
-  const [scrambleSnap, assignSnap] = await Promise.all([
-    compRef.collection('scrambleData').doc(key).get(),
-    compRef.collection('groupAssignments').doc(key).get(),
-  ]);
-  if (!scrambleSnap.exists || !assignSnap.exists) return null;
-
-  const groupIndex = (assignSnap.get('assignments') ?? {})[uid];
-  if (typeof groupIndex !== 'number') return null;
-
-  const groups = scrambleSnap.get('groups');
-  if (!Array.isArray(groups)) return null;
-  const group = groups[groupIndex] as ScrambleGroup | undefined;
-  if (!group) return null;
-
-  // OUT OF RANGE IS AN ERROR, NOT A FALLBACK. This group has a definite
-  // number of scrambles; an attempt beyond it means the caller and the
-  // imported data disagree about the round's shape. Returning null here
-  // would fall through to random cstimer generation and hand the athlete
-  // an UNOFFICIAL scramble in an official round, silently. With a fixed 5
-  // that was nearly unreachable; with per-event formats an off-by-one is
-  // a real possibility, so it is surfaced instead.
-  if (attempt > group.scrambles.length) {
-    return { outOfRange: true as const, max: group.scrambles.length };
-  }
-
-  const scramble = group.scrambles[attempt - 1];
-  if (typeof scramble !== 'string' || scramble.trim() === '') return null;
-
-  return { scramble, groupLabel: group.label ?? '' };
-}
+// The group lookup is still best-effort against FAILURE — a missing
+// param or an Admin SDK exception falls through to (2), so a deployment
+// without the Admin SDK env vars behaves as it did before this route
+// learned about groups. What changed is that a successful lookup which
+// finds no group is an answer, not a failure.
 
 export async function GET(req: Request) {
   // ── WHO IS ASKING ──────────────────────────────────────────────────
@@ -161,7 +115,13 @@ export async function GET(req: Request) {
 
   if (Number.isInteger(attempt) && attempt >= 1) {
     try {
-      const official = await lookupGroupScramble({ competitionId, eventId, round, uid, attempt });
+      const official = await lookupGroupScramble(getOnlineCompAdminDb(), {
+        competitionId,
+        eventId,
+        round,
+        uid,
+        attempt,
+      });
       if (official && 'outOfRange' in official) {
         return NextResponse.json(
           {
@@ -169,6 +129,27 @@ export async function GET(req: Request) {
             message: 'Энэ раундад ийм олон оролдлого байхгүй байна.',
           },
           { status: 400 },
+        );
+      }
+      // NO GROUP IN AN OFFICIAL ROUND — refused, not served randomly.
+      //
+      // It reaches the athlete through the same path a round refusal
+      // does: a Mongolian `message`, which the solve page shows in place
+      // of the start button (the blocked screen on attempt 1, the wait
+      // screen from attempt 2 on). Either way the run cannot begin, and
+      // because the solve page asks for a scramble at the START of every
+      // attempt, an athlete who loaded the page before being assigned is
+      // checked again rather than trusted from page load.
+      //
+      // Nothing here touches attempts already recorded without a group:
+      // those documents are untouched and still reviewable.
+      if (official && 'noGroup' in official) {
+        return NextResponse.json(
+          {
+            error: 'No group assignment for this athlete in an official round.',
+            message: 'Та группэд хуваарилагдаагүй байна. Зохион байгуулагчид хандана уу.',
+          },
+          { status: 403 },
         );
       }
       if (official) {
@@ -180,9 +161,21 @@ export async function GET(req: Request) {
         });
       }
     } catch (e) {
-      // Never fail a solve over the GROUP lookup — that only decides which
-      // scramble text is served, not whether the athlete may solve at all,
-      // so falling back to random generation is safe here.
+      // A THROWN lookup still falls back to random, and that is now a
+      // weaker guarantee than it reads. It used to be plainly safe: the
+      // lookup only chose which scramble text to serve. It now also
+      // decides whether an official round will serve this athlete at all,
+      // so this catch is the one remaining way an ungrouped athlete can
+      // be handed a random scramble — a Firestore error at exactly the
+      // wrong moment.
+      //
+      // Left failing OPEN deliberately, and it is a genuine trade rather
+      // than an oversight: failing closed here turns any Admin SDK blip
+      // into "nobody in this competition can solve", while failing open
+      // risks an unjudgeable attempt that review will catch. The
+      // structured no-group answer above — the common case, and the one
+      // this guard is for — is unaffected either way, because it is a
+      // RESULT and never an exception.
       console.error('Group scramble lookup failed, falling back to random:', e);
     }
   }

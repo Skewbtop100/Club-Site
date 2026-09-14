@@ -1556,7 +1556,15 @@ export default function SolvePage() {
                hold and this neither starts nor stops it — the recorder
                reads the camera track, never a <video> element. */
             videoRef={recorder.videoRef}
-            onDone={() => setStage('cover')}
+            /* The one automatic mark. Every other one names a button the
+               athlete pressed; this names the reveal running itself out,
+               which is the only way into the cover stage. mark() FIRST,
+               as everywhere else — anything ahead of it puts its own
+               duration into the number. */
+            onDone={() => {
+              recorder.mark('coverStart');
+              setStage('cover');
+            }}
           />
         )}
 

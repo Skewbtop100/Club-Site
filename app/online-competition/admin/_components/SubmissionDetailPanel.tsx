@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 import type { OnlineSubmissionAdminView, SolveMarks } from '@/lib/online-competition/types';
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
-import { coverMidpointMs } from '@/lib/online-competition/solve-stage-timing';
+import { COVER_SECONDS, coverMidpointMs } from '@/lib/online-competition/solve-stage-timing';
 
 type ReviewAction = 'approve' | 'approve_plus2' | 'dnf';
 
@@ -19,22 +19,21 @@ const BEFORE_END_MS = 5000;
 const INTO_HOLD_MS = 3000;
 
 // ── Jumping to the moments a judge actually watches ────────────────────
-// The clip runs about ninety seconds and four of them matter: the
-// scramble going on, the solve starting, the timer being shown, the cube
-// being shown. Finding those by dragging a scrubber is the slowest part
-// of judging a round, and the submission already knows where they are —
-// `marks` stores each stage press as a millisecond offset into the video
-// (SolveMarks in types.ts).
+// The clip runs a minute and a half and five moments in it decide the
+// attempt: the scrambled cube under the cover, the solve starting, the
+// cube being completed, the timer being shown, the cube shown at the end.
+// Finding those by dragging a scrubber is the slowest part of judging a
+// round, and the submission already knows where they are — `marks` stores
+// each one as a millisecond offset into the video (SolveMarks).
 //
-// THE +3s ON THREE OF THEM IS NOT PADDING FOR ITS OWN SAKE. A mark names
-// the instant a button was PRESSED, which is the instant a stage BEGAN —
-// and for the three holds, what a judge needs to see is the thing being
-// held up, which is not yet in frame at that instant. The athlete is
-// still moving their hands at +0. Three seconds into an eight-second hold
-// is the middle of it: the timer (or the cube) is up, steady, and being
-// shown deliberately. `solveStart` takes no offset because it is the
-// opposite kind of moment — not a hold to settle into but an act to
-// catch, and the interesting frame is the one where the cover comes off.
+// NONE OF THESE IS THE MARK ITSELF. A mark names the instant a stage
+// BEGAN, and what a judge needs to see is rarely at a stage's edge: the
+// holds need a moment for the thing being held up to come to rest, the
+// cover needs its instruction read first, and the finish is the one thing
+// that is only visible BEFORE its mark. Each entry below therefore says
+// where it aims and why, and the offsets are named constants rather than
+// numbers sitting in the table.
+
 /** One mark, or null when it was never recorded. Null is what disables a
  *  button — the guard that keeps a missing mark from becoming a NaN seek. */
 function at(marks: Partial<SolveMarks> | undefined, key: keyof SolveMarks): number | null {
@@ -55,16 +54,27 @@ const JUMPS: {
   // THE MIDDLE OF THE COVER STAGE, where the athlete is holding the
   // scrambled cube steady in the orientation a judge verifies.
   //
-  // It is reached by adding the reveal's length to `scrambleShown`, and
-  // THE REVEAL'S LENGTH IS NOT A CONSTANT: it plays the scramble one
-  // chunk at a time, so it runs ten seconds for a 2x2, twenty for a 3x3
-  // and forty-five for a 4x4. Hence the scramble itself as an input —
-  // without it, this button would be right for 3x3 and land mid-scramble
-  // on a 4x4 and past the cover entirely on a 2x2. See coverMidpointMs.
+  // TWO WAYS TO FIND IT, and the order matters.
+  //
+  // The recorded one: `coverStart` names the transition itself, so the
+  // midpoint is that plus half the stage. It needs nothing but the
+  // submission, and it stays right if the reveal's timing is ever
+  // changed.
+  //
+  // The inferred one, for every submission filed before that mark
+  // existed: start from `scrambleShown` and add how long the reveal must
+  // have run. THAT LENGTH IS NOT A CONSTANT — the reveal plays the
+  // scramble one chunk at a time, so it is ten seconds for a 2x2, twenty
+  // for a 3x3, forty-five for a 4x4 — which is why it needs the athlete's
+  // actual scramble, and why it is unavailable when that cannot be looked
+  // up. It is also only as correct as the assumption that today's stage
+  // timing is what that old attempt was recorded under.
   {
     label: 'КОВЕР',
     needsMarks: true,
     resolve: (marks, scramble) => {
+      const recorded = at(marks, 'coverStart');
+      if (recorded !== null) return recorded + (COVER_SECONDS * 1000) / 2;
       const shown = at(marks, 'scrambleShown');
       if (shown === null || scramble === null) return null;
       return coverMidpointMs(shown, scramble);

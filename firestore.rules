@@ -453,9 +453,16 @@ service cloud.firestore {
         return !request.resource.data.keys().hasAny(['marks']) ||
                (request.resource.data.marks is map &&
                 request.resource.data.marks.keys().hasOnly([
-                  'scrambleShown', 'solveStart', 'solveEnd', 'cubeShown', 'recordingEnd'
+                  'scrambleShown', 'coverStart', 'solveStart', 'solveEnd', 'cubeShown',
+                  'recordingEnd'
                 ]) &&
                 markOk('scrambleShown') &&
+                // The reveal handing over to the cover stage. Optional in
+                // exactly the way every other mark here is — markOk()
+                // passes an absent key — but optional for a second reason
+                // too: submissions predating this mark carry the other
+                // five without it, and must keep being accepted.
+                markOk('coverStart') &&
                 markOk('solveStart') &&
                 markOk('solveEnd') &&
                 markOk('cubeShown') &&
