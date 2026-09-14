@@ -58,13 +58,18 @@ function importIsEmpty(groups: unknown): boolean {
 
 /** Everyone who would be expected to solve this round.
  *
+ *  EXPORTED because the group seeder assigns exactly this set. Two
+ *  answers to "who is in this round" would mean a seeder that assigns a
+ *  set the round-start check then disagrees with — a round that refuses
+ *  to open immediately after being auto-assigned.
+ *
  *  Round 1 is everyone registered and competing in this event. LATER
  *  ROUNDS ARE NOT: they are gated on the previous round's qualifiers doc
  *  (see resolveRoundAccess), so an athlete who did not advance cannot
  *  attempt round 2 and has no business holding its start up. Checking
  *  every registrant instead would make round 2 un-openable the moment
  *  anybody was eliminated, which is every round 2 there has ever been. */
-async function eligibleAthletes(
+export async function eligibleAthletesForRound(
   db: Firestore,
   competitionId: string,
   eventId: string,
@@ -121,7 +126,7 @@ export async function roundScrambleReadiness(
   if (importIsEmpty(groups)) return { ok: false, reason: 'no-scrambles' };
 
   const assignments = assignSnap.exists ? (assignSnap.get('assignments') ?? {}) : undefined;
-  const athletes = await eligibleAthletes(db, competitionId, eventId, round);
+  const athletes = await eligibleAthletesForRound(db, competitionId, eventId, round);
 
   // Attempt 1: the one every athlete in the round will ask for, and the
   // minimum that has to exist for them to begin. A group short of LATER

@@ -5,6 +5,7 @@ import type { OnlineCompetitionAdminView } from '@/lib/online-competition/types'
 import type { ScrambleRosterAthlete } from '@/lib/online-competition/scramble-roster';
 import { roundKey, type ScrambleRoundData } from '@/lib/online-competition/scrambles';
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
+import type { SeedPreview, SeedScope } from '@/lib/online-competition/group-seeding';
 import { eventLabel } from './shared';
 
 // ── Tab 04 · Групп ───────────────────────────────────────────────────────
@@ -170,8 +171,14 @@ function EventGroupTable({
   // immediately instead of waiting on a refetch.
   const [local, setLocal] = useState<Record<string, number>>(assignments);
   const [busy, setBusy] = useState(false);
-  const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState('');
+  // ── Seeded assignment ──
+  // Held unapplied until the admin agrees to it. `seedPreview` being
+  // non-null IS the open state of the panel; there is no separate flag to
+  // fall out of step with it.
+  const [seedPreview, setSeedPreview] = useState<SeedPreview | null>(null);
+  const [seedScope, setSeedScope] = useState<SeedScope>('unassigned');
+  const [seedBusy, setSeedBusy] = useState(false);
 
   useEffect(() => {
     setLocal(assignments);
@@ -204,7 +211,10 @@ function EventGroupTable({
   const manualCount = rows.filter((a) => isManual(a.uid, local, autoAssignments)).length;
   const hasAuto = Object.keys(autoAssignments).length > 0;
 
-  async function post(mode: 'auto' | 'revert') {
+  /** Restores the last automatic assignment, dropping every hand edit.
+   *  The only POST this route still serves — auto-assignment moved to
+   *  the seeded action below. */
+  async function revertToAuto() {
     if (!competitionId) return;
     setBusy(true);
     setError('');
@@ -212,7 +222,12 @@ function EventGroupTable({
       const res = await fetch('/api/online-competition/admin-scrambles/assign', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ competitionId, eventId: round.eventId, round: round.round, mode }),
+        body: JSON.stringify({
+          competitionId,
+          eventId: round.eventId,
+          round: round.round,
+          mode: 'revert',
+        }),
       });
       const data = (await res.json().catch(() => ({}))) as {
         assignments?: Record<string, number>;
@@ -223,13 +238,56 @@ function EventGroupTable({
         return;
       }
       setLocal(data.assignments ?? {});
-      setConfirming(false);
       await onChanged();
     } catch (err) {
-      console.error('GroupsTab: assigning groups failed:', err);
-      setError('Хуваарилахад алдаа гарлаа. Дахин оролдоно уу.');
+      console.error('GroupsTab: reverting to the automatic assignment failed:', err);
+      setError('Буцаахад алдаа гарлаа. Дахин оролдоно уу.');
     } finally {
       setBusy(false);
+    }
+  }
+
+  /** Asks the server what it WOULD do. Writes nothing — and the scope is
+   *  part of the question, so switching between "keep existing" and
+   *  "reassign everyone" re-asks rather than reinterpreting the answer in
+   *  the browser. */
+  async function seedRequest(mode: 'preview' | 'apply', scope: SeedScope) {
+    if (!competitionId) return;
+    setSeedBusy(true);
+    setError('');
+    try {
+      const res = await fetch('/api/online-competition/admin-scrambles/seed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          competitionId,
+          eventId: round.eventId,
+          round: round.round,
+          mode,
+          scope,
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        preview?: SeedPreview;
+        applied?: boolean;
+        error?: string;
+      };
+      if (!res.ok || !data.preview) {
+        setError(data.error ?? 'Хуваарилахад алдаа гарлаа.');
+        return;
+      }
+      if (data.applied) {
+        setLocal(data.preview.assignments);
+        setSeedPreview(null);
+        await onChanged();
+      } else {
+        setSeedPreview(data.preview);
+      }
+    } catch (err) {
+      console.error('GroupsTab: seeded assignment failed:', err);
+      setError('Хуваарилахад алдаа гарлаа. Дахин оролдоно уу.');
+    } finally {
+      setSeedBusy(false);
     }
   }
 
@@ -273,53 +331,53 @@ function EventGroupTable({
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          {confirming ? (
-            <>
-              <span style={{ font: '400 11px var(--oc-font-heading), sans-serif', color: '#9A958A' }}>
-                Гараар хийсэн өөрчлөлтүүд устана. Үргэлжлүүлэх үү?
-              </span>
-              <button type="button" className="oc-sc-btn oc-sc-btn-danger" disabled={busy} onClick={() => post('auto')}>
-                ТИЙМ
-              </button>
-              <button type="button" className="oc-sc-btn" disabled={busy} onClick={() => setConfirming(false)}>
-                ҮГҮЙ
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                className="oc-sc-btn oc-sc-btn-primary"
-                disabled={busy}
-                // Re-seeding overwrites hand edits, so it takes the same
-                // two-step confirm used elsewhere in the admin — but only
-                // once there is something to lose.
-                onClick={() => (manualCount > 0 ? setConfirming(true) : post('auto'))}
-              >
-                {busy ? 'ХУВААРИЛЖ БАЙНА...' : 'АВТОМАТААР ХУВААРИЛАХ'}
-              </button>
-              <button
-                type="button"
-                className="oc-sc-btn"
-                disabled={busy || !hasAuto || manualCount === 0}
-                title={
-                  !hasAuto
-                    ? 'Эхлээд автоматаар хуваарилна уу'
-                    : manualCount === 0
-                      ? 'Гараар өөрчилсөн зүйл алга'
-                      : undefined
-                }
-                onClick={() => post('revert')}
-              >
-                ГАРААР ОРУУЛСНЫГ БУЦААХ
-              </button>
-            </>
-          )}
+          {/* THE auto-assignment, and now the only one. It opens a
+              preview rather than writing, so there is no two-step confirm
+              here any more — the preview IS the confirmation, and it
+              shows what would change instead of merely warning that
+              something would. */}
+          <button
+            type="button"
+            className="oc-sc-btn oc-sc-btn-primary"
+            disabled={busy || seedBusy}
+            onClick={() => seedRequest('preview', seedScope)}
+          >
+            {seedBusy ? 'БОДОЖ БАЙНА...' : 'АВТОМАТААР ХУВААРИЛАХ'}
+          </button>
+          <button
+            type="button"
+            className="oc-sc-btn"
+            disabled={busy || seedBusy || !hasAuto || manualCount === 0}
+            title={
+              !hasAuto
+                ? 'Эхлээд автоматаар хуваарилна уу'
+                : manualCount === 0
+                  ? 'Гараар өөрчилсөн зүйл алга'
+                  : undefined
+            }
+            onClick={() => void revertToAuto()}
+          >
+            ГАРААР ОРУУЛСНЫГ БУЦААХ
+          </button>
         </div>
       </div>
 
       <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
         {error && <p className="oc-sc-msg-err">{error}</p>}
+
+        {seedPreview && (
+          <SeedPreviewPanel
+            preview={seedPreview}
+            scope={seedScope}
+            busy={seedBusy}
+            onScope={(next) => {
+              setSeedScope(next);
+              void seedRequest('preview', next);
+            }}
+            onApply={() => void seedRequest('apply', seedScope)}
+            onCancel={() => setSeedPreview(null)}
+          />
+        )}
 
         {rows.length === 0 ? (
           <p className="oc-sc-empty">Энэ төрөлд бүртгүүлсэн тамирчин алга.</p>
@@ -416,4 +474,137 @@ function isManual(
   const now = current[uid];
   if (typeof now !== 'number') return false;
   return auto[uid] !== now;
+}
+
+/** The proposed groups, before anything is written.
+ *
+ *  EVERY ATHLETE AND EVERY SEED TIME, not a summary. The admin is being
+ *  asked to approve who competes beside whom, and a count ("18 athletes
+ *  into 3 groups") gives them nothing to check it against — an athlete in
+ *  the wrong group is only visible if the groups are shown. "—" is a real
+ *  answer in the seed column, and a common one: it means this athlete has
+ *  no judged result on this platform yet, which is every newcomer.
+ */
+function SeedPreviewPanel({
+  preview,
+  scope,
+  busy,
+  onScope,
+  onApply,
+  onCancel,
+}: {
+  preview: SeedPreview;
+  scope: SeedScope;
+  busy: boolean;
+  onScope: (next: SeedScope) => void;
+  onApply: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div style={{ border: '1px solid #2A2A31', background: '#08080A', padding: 14 }}>
+      <p className="oc-sc-mono" style={{ color: '#DFFF4F' }}>
+        САНАЛ БОЛГОЖ БУЙ ХУВААРИЛАЛТ · ХАДГАЛААГҮЙ
+      </p>
+      <p style={{ marginTop: 6, font: '400 11px var(--oc-font-heading), sans-serif', color: '#9A958A' }}>
+        Хамгийн удаан болон шинэ тамирчид эхний группэд, хамгийн хурдан нь сүүлийн группэд орно.
+        Эхлэлийн цаг нь ХОРОМ дээрх өмнөх дууссан тэмцээнүүдийн батлагдсан дүнгээс тооцов.
+      </p>
+
+      {/* STEP 7's question, asked explicitly and never assumed. It only
+          appears once there is something to lose — with nobody assigned
+          yet, the two scopes do the same thing. */}
+      {preview.alreadyAssigned > 0 && (
+        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span className="oc-sc-mono">
+            {preview.alreadyAssigned} тамирчин аль хэдийн хуваарилагдсан байна
+          </span>
+          <div className="oc-sc-seg" role="group" aria-label="Хуваарилах хүрээ">
+            <button
+              type="button"
+              disabled={busy}
+              className={`oc-sc-segbtn${scope === 'unassigned' ? ' oc-sc-segbtn-active' : ''}`}
+              onClick={() => onScope('unassigned')}
+            >
+              ХУВААРИЛАГДААГҮЙГ НЬ ЛА
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              className={`oc-sc-segbtn${scope === 'all' ? ' oc-sc-segbtn-active' : ''}`}
+              onClick={() => onScope('all')}
+            >
+              БҮГДИЙГ ДАХИН ХУВААРИЛАХ
+            </button>
+          </div>
+          {scope === 'all' && preview.moved > 0 && (
+            <span className="oc-sc-msg-err">
+              {preview.moved} тамирчин өөр группэд шилжинэ.
+            </span>
+          )}
+        </div>
+      )}
+
+      <div
+        style={{
+          marginTop: 14,
+          display: 'grid',
+          gap: 10,
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+        }}
+      >
+        {preview.groups.map((g) => (
+          <div key={g.index} style={{ border: '1px solid #1C1C21', padding: 10 }}>
+            <p className="oc-sc-mono" style={{ color: '#F4F1EA' }}>
+              ГРУПП {g.label} · {g.athletes.length}
+            </p>
+            <ul style={{ margin: '8px 0 0', padding: 0, listStyle: 'none' }}>
+              {g.athletes.map((a) => (
+                <li
+                  key={a.uid}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    gap: 8,
+                    padding: '3px 0',
+                    font: '400 11px var(--oc-font-heading), sans-serif',
+                    color: a.moved ? '#E0A020' : '#9A958A',
+                  }}
+                >
+                  <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {a.moved && '→ '}
+                    {a.displayName}
+                  </span>
+                  <span
+                    className="oc-sc-num"
+                    style={{ font: '500 11px var(--oc-font-mono), monospace' }}
+                  >
+                    {a.seedCs === null ? '—' : fmtCentiseconds(a.seedCs)}
+                  </span>
+                </li>
+              ))}
+              {g.athletes.length === 0 && (
+                <li className="oc-sc-empty" style={{ padding: '3px 0' }}>
+                  —
+                </li>
+              )}
+            </ul>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ marginTop: 14, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          className="oc-sc-btn oc-sc-btn-primary"
+          disabled={busy}
+          onClick={onApply}
+        >
+          {busy ? 'ХАДГАЛЖ БАЙНА...' : 'ЭНЭ ХУВААРИЛАЛТЫГ ХАДГАЛАХ'}
+        </button>
+        <button type="button" className="oc-sc-btn" disabled={busy} onClick={onCancel}>
+          БОЛИХ
+        </button>
+      </div>
+    </div>
+  );
 }

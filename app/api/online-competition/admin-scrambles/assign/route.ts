@@ -2,23 +2,32 @@ import { NextResponse } from 'next/server';
 import { FieldPath, FieldValue } from 'firebase-admin/firestore';
 import { isOnlineCompAdmin } from '@/lib/online-competition/admin-auth';
 import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
-import { fetchScrambleRoster } from '@/lib/online-competition/scramble-roster';
-import { autoAssign, roundKey } from '@/lib/online-competition/scrambles';
+import { roundKey } from '@/lib/online-competition/scrambles';
 
 // Group assignment writes for one event+round:
-//   POST  mode:'auto'   — (re)run the snake-seeded auto-assignment
 //   POST  mode:'revert' — drop every manual move, restoring the last
 //                         auto-assignment exactly
 //   PATCH               — move a single athlete to another group
 // All admin-cookie gated and through the Admin SDK, same as every other
 // write in this feature.
 //
+// AUTO-ASSIGNMENT NO LONGER LIVES HERE. This route used to also run a
+// snake seed (A,B,C,C,B,A...), which spreads the fast athletes evenly so
+// every group has the same average strength. That is what you want when
+// groups are heats measured against each other; this club runs every
+// athlete inside one short window, so the grouping's only job is to put
+// comparable athletes on identical scrambles — which is the opposite
+// arrangement. The block seeder at ../seed is now the only auto-assign,
+// and having two that quietly produced different rounds was the actual
+// problem.
+//
 // The doc keeps TWO maps: `assignments` (in effect) and `autoAssignments`
-// (the untouched output of the last auto-run). A manual move via PATCH
-// writes only the first, so the difference between them is exactly the set
-// of hand edits — that's what the groups tab's АВТОМАТ/ГАРААР badge reads
-// and what 'revert' undoes, with no extra per-athlete flag to keep in
-// sync.
+// (the untouched output of the last auto-run — now always the block
+// seeder's, which writes both fields exactly as this route did). A manual
+// move via PATCH writes only the first, so the difference between them is
+// exactly the set of hand edits — that's what the groups tab's
+// АВТОМАТ/ГАРААР badge reads and what 'revert' undoes, with no extra
+// per-athlete flag to keep in sync.
 
 interface RoundTarget {
   competitionId: string;
@@ -45,7 +54,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Буруу хүсэлт (тэмцээн/төрөл/раунд дутуу).' }, { status: 400 });
   }
 
-  const mode = body?.mode === 'revert' ? 'revert' : 'auto';
+  // 'revert' is the only POST this route still serves. Anything else is
+  // refused rather than quietly treated as a revert: the removed 'auto'
+  // mode wrote the whole assignments map, so a caller still sending it
+  // must fail loudly instead of appearing to succeed.
+  if (body?.mode !== 'revert') {
+    return NextResponse.json(
+      { error: 'Буруу үйлдэл. Автомат хуваарилалт "seed" үйлдэл рүү шилжсэн.' },
+      { status: 400 },
+    );
+  }
 
   const db = getOnlineCompAdminDb();
   const compRef = db.collection('onlineCompetitions').doc(target.competitionId);
@@ -63,55 +81,29 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Импортлосон холилтын группын тоо буруу байна.' }, { status: 400 });
   }
 
-  // Revert: restore the stored baseline rather than re-seeding. Re-running
-  // the seeder instead would look identical only until someone's pr
-  // changed, so this really does put the groups back the way the last
-  // auto-run left them.
-  if (mode === 'revert') {
-    const assignRef = compRef.collection('groupAssignments').doc(key);
-    const current = await assignRef.get();
-    const baseline = current.get('autoAssignments');
-    if (!current.exists || !baseline || typeof baseline !== 'object') {
-      return NextResponse.json(
-        { error: 'Буцаах автомат хуваарилалт байхгүй байна. Эхлээд автоматаар хуваарилна уу.' },
-        { status: 400 },
-      );
-    }
-    const assignments = baseline as Record<string, number>;
-    await assignRef.set(
-      { assignments, assignedAt: FieldValue.serverTimestamp() },
-      { mergeFields: ['assignments', 'assignedAt'] },
+  // Restore the stored baseline rather than re-running the seeder.
+  // Re-seeding instead would look identical only until someone's past
+  // results changed, so this really does put the groups back the way the
+  // last auto-run left them.
+  const assignRef = compRef.collection('groupAssignments').doc(key);
+  const current = await assignRef.get();
+  const baseline = current.get('autoAssignments');
+  if (!current.exists || !baseline || typeof baseline !== 'object') {
+    return NextResponse.json(
+      { error: 'Буцаах автомат хуваарилалт байхгүй байна. Эхлээд автоматаар хуваарилна уу.' },
+      { status: 400 },
     );
-    return NextResponse.json({ assignments, autoAssignments: assignments, assignedCount: Object.keys(assignments).length });
   }
-
-  // Only athletes actually registered for THIS event get seeded — someone
-  // registered for the competition but not this event has no attempt to
-  // scramble for.
-  const roster = (await fetchScrambleRoster(db, target.competitionId)).filter((a) =>
-    a.events.includes(target.eventId),
+  const assignments = baseline as Record<string, number>;
+  await assignRef.set(
+    { assignments, assignedAt: FieldValue.serverTimestamp() },
+    { mergeFields: ['assignments', 'assignedAt'] },
   );
-  const assignments = autoAssign(
-    roster.map((a) => ({
-      uid: a.uid,
-      pr: a.prByEvent[target.eventId] ?? null,
-      registeredAt: a.registeredAt,
-    })),
-    groupCount,
-  );
-
-  await compRef.collection('groupAssignments').doc(key).set({
-    eventId: target.eventId,
-    round: target.round,
+  return NextResponse.json({
     assignments,
-    // The baseline manual moves are measured against, and what 'revert'
-    // restores. Rewritten on every auto-run so re-seeding also resets what
-    // counts as "manually edited".
     autoAssignments: assignments,
-    assignedAt: FieldValue.serverTimestamp(),
+    assignedCount: Object.keys(assignments).length,
   });
-
-  return NextResponse.json({ assignments, autoAssignments: assignments, assignedCount: Object.keys(assignments).length });
 }
 
 export async function PATCH(req: Request) {

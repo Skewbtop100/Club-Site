@@ -232,51 +232,17 @@ export function parseTnoodleJson(raw: unknown, expected?: ExpectedScrambleCount)
   return { ok: true, rounds, warnings };
 }
 
-// ── Snake-seeded auto-assignment ─────────────────────────────────────────
-
-export interface SeedableAthlete {
-  uid: string;
-  /** Best single for the round's event, centiseconds; null when the
-   *  athlete has no approved result for it yet. */
-  pr: number | null;
-  /** Registration timestamp (epoch ms) — the tiebreaker, and the sole
-   *  ordering for athletes with no pr. */
-  registeredAt: number | null;
-}
-
-/** Fastest first, then everyone without a pr in registration order.
- *  Sorting is fully deterministic (uid as the final tiebreaker) so
- *  re-running auto-assignment on unchanged data reproduces the same
- *  groups rather than shuffling athletes around. */
-export function rankAthletes(athletes: SeedableAthlete[]): SeedableAthlete[] {
-  return [...athletes].sort((a, b) => {
-    const aHas = a.pr !== null;
-    const bHas = b.pr !== null;
-    if (aHas !== bHas) return aHas ? -1 : 1;
-    if (aHas && bHas && a.pr !== b.pr) return (a.pr as number) - (b.pr as number);
-    const aReg = a.registeredAt ?? Number.MAX_SAFE_INTEGER;
-    const bReg = b.registeredAt ?? Number.MAX_SAFE_INTEGER;
-    if (aReg !== bReg) return aReg - bReg;
-    return a.uid.localeCompare(b.uid);
-  });
-}
-
-/** Snake ("boustrophedon") seeding across `groupCount` groups: the ranked
- *  list fills A, B, C, then reverses back through C, B, A, and so on.
- *  This is the standard way to balance average group strength — a plain
- *  round-robin would stack every group's seed advantage into group A. */
-export function snakeSeed(rankedUids: string[], groupCount: number): Record<string, number> {
-  const out: Record<string, number> = {};
-  if (groupCount < 1) return out;
-  rankedUids.forEach((uid, i) => {
-    const cycle = Math.floor(i / groupCount);
-    const pos = i % groupCount;
-    out[uid] = cycle % 2 === 0 ? pos : groupCount - 1 - pos;
-  });
-  return out;
-}
-
-/** rankAthletes + snakeSeed — the whole auto-assignment in one call. */
-export function autoAssign(athletes: SeedableAthlete[], groupCount: number): Record<string, number> {
-  return snakeSeed(rankAthletes(athletes).map((a) => a.uid), groupCount);
-}
+// ── Auto-assignment lives in group-seeding.ts ──────────────────────────
+// A snake seeder (rankAthletes / snakeSeed / autoAssign) used to sit here
+// and deal A,B,C,C,B,A... so that every group had the same average
+// strength. It is removed, not deprecated: the club runs all athletes in
+// one short window, so groups are never heats measured against each
+// other, and the grouping's only job is to put comparable athletes on
+// identical scrambles — contiguous blocks, which is what group-seeding.ts
+// does. Two auto-assign actions producing different rounds from the same
+// button area was the problem being fixed, so the losing one is gone
+// rather than left for someone to find and call.
+//
+// groupAssignments documents it wrote remain valid and are NOT migrated:
+// they are plain uid -> groupIndex maps, indistinguishable from any other
+// seeder's output, and the round they describe already happened.
