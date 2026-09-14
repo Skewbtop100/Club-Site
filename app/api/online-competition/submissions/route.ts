@@ -6,6 +6,7 @@ import type {
   OnlineSubmissionStatus,
   SolveMarks,
 } from '@/lib/online-competition/types';
+import { checkSubmission } from '@/lib/online-competition/submission-checks';
 
 /** The five stage marks, in the order they occur. Listed rather than
  *  spread from the stored map so a key nobody expects cannot reach the
@@ -95,6 +96,13 @@ export async function GET(req: Request) {
       penalty: data.penalty ?? null,
       status: data.status,
       marks: readMarks(data.marks),
+      // From the RAW document, not from `marks` above. readMarks
+      // collapses an empty map to undefined so the jump buttons have one
+      // "nothing to aim at" condition — but these checks need the
+      // distinction it throws away: no marks FIELD is a legacy attempt
+      // nobody can check, while a marks field that came back empty is a
+      // recorder that ran and gathered nothing, which is worth flagging.
+      checks: checkSubmission(data),
       createdAt: data.createdAt?.toMillis?.() ?? null,
     };
   });

@@ -726,15 +726,39 @@ function GridRow({
           .filter(Boolean)
           .join(' ');
         const dupes = row.slotCounts.get(a) ?? 1;
+        // A consistency check fired on this attempt — see
+        // submission-checks.ts. ADVISORY ONLY: the cell still opens, still
+        // shows the same time, and the attempt is still approvable. The
+        // dot says "look here first", nothing more.
+        const flagged = s.checks?.severity === 'red';
         return (
           <button
             key={a}
             type="button"
             className={cls}
             onClick={() => onOpen(s.id)}
-            title={dupes > 1 ? `${dupes} илгээмж энэ нүдэнд` : undefined}
+            title={
+              [
+                dupes > 1 ? `${dupes} илгээмж энэ нүдэнд` : '',
+                flagged ? 'Шалгах шаардлагатай' : '',
+              ]
+                .filter(Boolean)
+                .join(' · ') || undefined
+            }
           >
             {isDnf(s) ? 'DNF' : `${fmtCentiseconds(s.reportedTime)}${s.penalty === '+2' ? '+' : ''}`}
+            {flagged && (
+              <span
+                aria-label="Шалгах шаардлагатай"
+                style={{
+                  marginLeft: 4,
+                  color: '#E8543C',
+                  font: '700 11px var(--oc-font-mono), monospace',
+                }}
+              >
+                !
+              </span>
+            )}
             {dupes > 1 && (
               <span style={{ marginLeft: 4, font: '500 9px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
                 x{dupes}

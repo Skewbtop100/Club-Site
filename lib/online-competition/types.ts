@@ -1,5 +1,6 @@
 import type { Timestamp } from 'firebase/firestore';
 import type { ResultFormat } from './ao5';
+import type { SubmissionChecks } from './submission-checks';
 
 // ── Firestore doc shapes for the public online-competition feature ─────────
 // Fully separate from the club's internal `athletes` / `results` /
@@ -844,6 +845,15 @@ export interface OnlineSubmissionAdminView {
    *  as an error — see the jump row in SubmissionDetailPanel. Individual
    *  keys can be missing independently of each other. */
   marks?: Partial<SolveMarks>;
+  /** Automatic consistency checks, computed on every read — see
+   *  submission-checks.ts. Never stored: they are arithmetic over fields
+   *  already on the document, so deriving them costs nothing and a
+   *  stored copy could only go stale against a changed threshold.
+   *
+   *  ADVISORY. Nothing in the review flow acts on these; they decide
+   *  which attempts a judge looks at FIRST, and never which attempts a
+   *  judge sees. */
+  checks: SubmissionChecks;
   createdAt: number | null;
 }
 

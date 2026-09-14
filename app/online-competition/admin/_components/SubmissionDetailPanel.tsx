@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import type { OnlineSubmissionAdminView, SolveMarks } from '@/lib/online-competition/types';
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
 import { COVER_SECONDS, coverMidpointMs } from '@/lib/online-competition/solve-stage-timing';
+import type { SubmissionFlagCode } from '@/lib/online-competition/submission-checks';
 
 type ReviewAction = 'approve' | 'approve_plus2' | 'dnf';
 
@@ -40,6 +41,21 @@ function at(marks: Partial<SolveMarks> | undefined, key: keyof SolveMarks): numb
   const ms = marks?.[key];
   return typeof ms === 'number' && Number.isFinite(ms) ? ms : null;
 }
+
+/** THE MONGOLIAN WORDING LIVES HERE, not in the API. The server returns
+ *  codes, so changing how a check reads to a judge is a change to this
+ *  screen and nothing else — and the same code can read differently in a
+ *  list and in a panel without the API knowing either exists.
+ *
+ *  Each line says what was OBSERVED, never what it means about the
+ *  athlete. "Бичсэн цаг эвлүүлэлтийн хугацаанаас урт" is a fact a judge
+ *  can verify against the video in seconds; an accusation would be a
+ *  conclusion this arithmetic has not earned. */
+const FLAG_LABELS: Record<SubmissionFlagCode, string> = {
+  IMPOSSIBLE: 'Бичсэн цаг эвлүүлэлтийн хугацаанаас урт',
+  SUSPICIOUS_GAP: 'Эвлүүлэлтийн хугацаа хэт урт',
+  MISSING_MARKS: 'Үе шатын цаг дутуу',
+};
 
 const JUMPS: {
   label: string;
@@ -378,6 +394,56 @@ export default function SubmissionDetailPanel({
           <p style={{ marginTop: 10, font: '400 11px var(--oc-font-heading), sans-serif', color: '#E8543C' }}>
             {error}
           </p>
+        )}
+
+        {/* ── What the automatic checks noticed ──
+            ADVISORY, and placed deliberately ABOVE the decision buttons
+            rather than beside them: it is something to read before
+            judging, not an option to pick. Nothing here disables,
+            preselects or colours any of the three actions below — a
+            flagged attempt is approved exactly the way any other is. */}
+        {submission.checks.flags.length > 0 && (
+          <div
+            style={{
+              marginTop: 16,
+              border: '1px solid #D8402C',
+              background: '#1A0D0A',
+              padding: 12,
+            }}
+          >
+            <p
+              style={{
+                font: '600 9px var(--oc-font-mono), monospace',
+                letterSpacing: '.12em',
+                color: '#E8543C',
+              }}
+            >
+              АВТОМАТ ШАЛГАЛТ
+            </p>
+            <ul style={{ margin: '8px 0 0', padding: 0, listStyle: 'none' }}>
+              {submission.checks.flags.map((code) => (
+                <li
+                  key={code}
+                  style={{
+                    padding: '2px 0',
+                    font: '400 12px var(--oc-font-heading), sans-serif',
+                    color: '#F4F1EA',
+                  }}
+                >
+                  {FLAG_LABELS[code]}
+                </li>
+              ))}
+            </ul>
+            <p
+              style={{
+                marginTop: 8,
+                font: '400 10px var(--oc-font-heading), sans-serif',
+                color: '#9A958A',
+              }}
+            >
+              Зөвхөн анхааруулга. Шийдвэрийг шүүгч гаргана.
+            </p>
+          </div>
         )}
 
         <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
