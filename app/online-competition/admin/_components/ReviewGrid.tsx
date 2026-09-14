@@ -192,6 +192,13 @@ export default function ReviewGrid() {
     load();
   }, [load]);
 
+  /** The attempt columns this event shows, at component scope so the
+   *  queue memo and the grid body agree on how many there are. */
+  const ATTEMPT_COLUMNS = useMemo(
+    () => attemptColumns(attemptsForFormat(resolveResultFormat(eventConfig?.resultFormat))),
+    [eventConfig],
+  );
+
   const rows: AthleteRow[] = useMemo(() => {
     if (!eventId || submissions === null) return [];
     // This event AND this round. Before competitionRound reached the
@@ -297,6 +304,31 @@ export default function ReviewGrid() {
     const text = data?.groups[index]?.scrambles[selectedSubmission.attempt - 1];
     return typeof text === 'string' && text.trim().length > 0 ? text : null;
   }, [selectedSubmission, eventId, round, scrambles]);
+
+  /** THE JUDGE'S QUEUE, in the order the grid draws it.
+   *
+   *  Row order then attempt order — top to bottom, left to right — which
+   *  is exactly how a judge reads the grid, so ДАРААХ lands on the cell
+   *  their eye would have gone to next. `rows` is already the memo the
+   *  grid renders from and nothing re-sorts it between here and the
+   *  markup, so the two orders cannot drift.
+   *
+   *  Scoped to the CURRENT FILTER by construction: `rows` is built from
+   *  the selected competition, event and round, so changing any tab
+   *  rebuilds the queue with it.
+   */
+  const queue = useMemo(
+    () => rows.flatMap((row) => ATTEMPT_COLUMNS.map((a) => row.attempts.get(a)).filter(
+      (x): x is OnlineSubmissionAdminView => x !== undefined,
+    )),
+    [rows, ATTEMPT_COLUMNS],
+  );
+
+  const queueIndex = selected ? queue.findIndex((s) => s.id === selected) : -1;
+
+  /** How many attempts in this filter still have no decision. The header
+   *  pill; nothing acts on it. */
+  const queueLeft = useMemo(() => queue.filter((s) => s.status === 'pending').length, [queue]);
 
   /** Optimistic local patch, matching the pattern the old dashboard used. */
   const patch = useCallback((id: string, next: Partial<OnlineSubmissionAdminView>) => {
@@ -635,6 +667,16 @@ export default function ReviewGrid() {
           athleteName={selectedRow?.name ?? selectedSubmission.uid.slice(0, 10)}
           groupLabel={selectedGroupLabel}
           scramble={selectedScramble}
+          queueLeft={queueLeft}
+          hasPrev={queueIndex > 0}
+          hasNext={queueIndex >= 0 && queueIndex < queue.length - 1}
+          // Move WITHIN the panel: setSelected swaps the submission the
+          // panel renders, so the judge keeps their place instead of
+          // being returned to the grid between every attempt.
+          onPrev={() => queueIndex > 0 && setSelected(queue[queueIndex - 1].id)}
+          onNext={() =>
+            queueIndex >= 0 && queueIndex < queue.length - 1 && setSelected(queue[queueIndex + 1].id)
+          }
           onClose={() => setSelected(null)}
           onReview={review}
           onDelete={remove}

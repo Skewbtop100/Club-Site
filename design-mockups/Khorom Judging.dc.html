@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin=""><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geologica:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap"><style>body{margin:0;background:#08080A;font-family:Geologica,system-ui,sans-serif;color:#F4F1EA;-webkit-font-smoothing:antialiased;overflow:hidden}*{box-sizing:border-box}a{color:#DFFF4F;text-decoration:none}a:hover{color:#E9FF7A}input,textarea{font-family:inherit}@keyframes khPulse{0%,100%{opacity:1}50%{opacity:.35}}</style></helmet>
+
+<div style="height:100vh;background:#08080A;display:flex;flex-direction:column;overflow:hidden">
+
+  <header style="flex:none;border-bottom:1px solid #1C1C21;background:#0D0D10;display:flex;gap:14px;align-items:center;justify-content:space-between;padding:9px 16px">
+    <div style="display:flex;align-items:center;gap:12px;min-width:0">
+      <div style="display:grid;grid-template-columns:repeat(3,5px);grid-template-rows:repeat(3,5px);gap:2px;flex:none">
+        <div style="background:#F4F1EA"></div><div style="background:#F4F1EA"></div><div style="background:#DFFF4F"></div>
+        <div style="background:#F4F1EA"></div><div style="background:#DFFF4F"></div><div style="background:#F4F1EA"></div>
+        <div style="background:#DFFF4F"></div><div style="background:#F4F1EA"></div><div style="background:#F4F1EA"></div>
+      </div>
+      <span style="font:600 12px/1 Geologica,sans-serif;letter-spacing:.1em;white-space:nowrap">ХОРОМ</span>
+      <span style="width:1px;height:16px;background:#1C1C21"></span>
+      <span style="font:500 8px/1 'JetBrains Mono',monospace;letter-spacing:.18em;color:#6E6A62;white-space:nowrap">ШҮҮГЧИЙН ТАЛБАР</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <div style="display:flex;align-items:center;gap:7px;border:1px solid #1C1C21;background:#08080A;padding:6px 9px">
+        <span style="width:5px;height:5px;background:#E0A020;animation:khPulse 1.8s ease-in-out infinite"></span>
+        <span style="font:500 8px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:#E0A020;white-space:nowrap">{{ queueLeft }} ХҮЛЭЭГДЭЖ</span>
+      </div>
+      <button type="button" onClick="{{ prevAttempt }}" style="border:1px solid #2A2A31;background:transparent;color:#9A958A;padding:6px 10px;cursor:pointer;font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.12em" style-hover="border-color:#4A4740;color:#F4F1EA">← ӨМНӨХ</button>
+      <button type="button" onClick="{{ nextAttempt }}" style="border:1px solid #2A2A31;background:transparent;color:#9A958A;padding:6px 10px;cursor:pointer;font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.12em" style-hover="border-color:#4A4740;color:#F4F1EA">ДАРААХ →</button>
+    </div>
+  </header>
+
+  <div style="flex:1;min-height:0;display:grid;grid-template-columns:minmax(240px,300px) minmax(0,1fr) minmax(268px,324px)">
+
+    <section style="min-height:0;display:flex;flex-direction:column;background:#0A0A0C;border-right:1px solid #1C1C21">
+      <div style="flex:1;min-height:0;position:relative;background:repeating-linear-gradient(135deg,#0E0E12 0 10px,#121217 10px 20px);display:flex;align-items:center;justify-content:center">
+        <div style="display:flex;flex-direction:column;gap:9px;align-items:center">
+          <div style="width:0;height:0;border-left:18px solid #4A4740;border-top:12px solid transparent;border-bottom:12px solid transparent"></div>
+          <span style="font:400 8px/1 'JetBrains Mono',monospace;letter-spacing:.16em;color:#4A4740">БОСОО БИЧЛЭГ · 9:16</span>
+        </div>
+        <div style="position:absolute;top:10px;left:10px;display:flex;flex-direction:column;gap:5px;align-items:flex-start">
+          <span style="background:#08080AE6;border:1px solid #2A2A31;padding:4px 7px;font:500 9px/1 'JetBrains Mono',monospace;color:#F4F1EA">{{ posLabel }} / 1:42</span>
+          <span style="background:#08080AE6;border:1px solid #2A2A31;padding:4px 7px;font:500 8px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#DFFF4F">{{ phaseLabel }}</span>
+        </div>
+        <div style="position:absolute;top:10px;right:10px;display:flex;flex-direction:column;gap:4px">
+          <sc-for list="{{ speeds }}" as="s" hint-placeholder-count="4">
+            <button type="button" onClick="{{ s.go }}" style="border:1px solid {{ s.line }};background:{{ s.bg }};color:{{ s.fg }};padding:4px 6px;cursor:pointer;font:600 8px/1 'JetBrains Mono',monospace">{{ s.label }}</button>
+          </sc-for>
+        </div>
+      </div>
+      <div style="flex:none;border-top:1px solid #1C1C21;padding:9px 11px 11px;display:flex;flex-direction:column;gap:8px">
+        <div style="position:relative;height:20px">
+          <div style="position:absolute;left:0;right:0;top:8px;height:4px;background:#16161B"></div>
+          <div style="position:absolute;left:0;top:8px;height:4px;width:{{ posPct }};background:#DFFF4F"></div>
+          <sc-for list="{{ markers }}" as="m" hint-placeholder-count="6">
+            <button type="button" onClick="{{ m.go }}" title="{{ m.title }}" style="position:absolute;top:3px;left:{{ m.left }};width:3px;height:14px;padding:0;border:none;background:{{ m.bg }};cursor:pointer"></button>
+          </sc-for>
+          <div style="position:absolute;top:2px;left:{{ posPct }};width:2px;height:16px;background:#F4F1EA"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px">
+          <button type="button" onClick="{{ back1 }}" style="border:1px solid #2A2A31;background:transparent;color:#9A958A;padding:6px 0;cursor:pointer;font:600 8px/1 'JetBrains Mono',monospace" style-hover="color:#F4F1EA;border-color:#4A4740">−1.0s</button>
+          <button type="button" onClick="{{ backF }}" style="border:1px solid #2A2A31;background:transparent;color:#9A958A;padding:6px 0;cursor:pointer;font:600 8px/1 'JetBrains Mono',monospace" style-hover="color:#F4F1EA;border-color:#4A4740">−ФРЭЙМ</button>
+          <button type="button" onClick="{{ fwdF }}" style="border:1px solid #2A2A31;background:transparent;color:#9A958A;padding:6px 0;cursor:pointer;font:600 8px/1 'JetBrains Mono',monospace" style-hover="color:#F4F1EA;border-color:#4A4740">+ФРЭЙМ</button>
+          <button type="button" onClick="{{ fwd1 }}" style="border:1px solid #2A2A31;background:transparent;color:#9A958A;padding:6px 0;cursor:pointer;font:600 8px/1 'JetBrains Mono',monospace" style-hover="color:#F4F1EA;border-color:#4A4740">+1.0s</button>
+        </div>
+      </div>
+    </section>
+
+    <main style="min-width:0;min-height:0;display:flex;flex-direction:column;gap:11px;padding:12px 14px;overflow:hidden">
+
+      <div style="flex:none;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between">
+        <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+          <div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center">
+            <span style="border:1px solid #2A2A31;background:#0D0D10;padding:4px 8px;font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:#DFFF4F">3x3x3</span>
+            <span style="border:1px solid #2A2A31;background:#0D0D10;padding:4px 8px;font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:#9A958A">РАУНД 1</span>
+            <span style="border:1px solid #2A2A31;background:#0D0D10;padding:4px 8px;font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:#9A958A">ГРУПП A</span>
+            <span style="border:1px solid #2A2A31;background:#0D0D10;padding:4px 8px;font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:#9A958A">ОРОЛДЛОГО 1</span>
+          </div>
+          <span style="font:600 17px/1.1 Geologica,sans-serif">Баялагнасан Ууганбаяр</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">
+          <span style="font:500 8px/1 'JetBrains Mono',monospace;letter-spacing:.16em;color:#6E6A62">ИЛГЭЭСЭН ЦАГ</span>
+          <span style="font:500 11px/1 'JetBrains Mono',monospace;color:#F4F1EA">2026-09-14 · 14:51:07</span>
+        </div>
+      </div>
+
+      <div style="flex:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:6px">
+        <sc-for list="{{ phases }}" as="p" hint-placeholder-count="6">
+          <button type="button" onClick="{{ p.go }}" style="display:flex;flex-direction:column;gap:6px;text-align:left;border:1px solid {{ p.line }};background:{{ p.bg }};padding:8px 9px;cursor:pointer" style-hover="border-color:#4A4740">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
+              <span style="font:600 10px/1 Geologica,sans-serif;letter-spacing:.06em;color:{{ p.fg }}">{{ p.label }}</span>
+              <span style="width:4px;height:4px;background:{{ p.dot }}"></span>
+            </div>
+            <span style="font:500 9px/1 'JetBrains Mono',monospace;color:{{ p.timeFg }}">{{ p.time }}</span>
+          </button>
+        </sc-for>
+      </div>
+
+      <div style="flex:1;min-height:0;border:1px solid #1C1C21;background:#0A0A0C;display:flex;flex-direction:column">
+        <div style="flex:none;display:flex;gap:10px;align-items:center;justify-content:space-between;padding:9px 11px;border-bottom:1px solid #1C1C21">
+          <div style="display:flex;flex-direction:column;gap:4px;min-width:0">
+            <span style="font:600 11px/1 Geologica,sans-serif;letter-spacing:.06em">{{ phaseLabel }} · КАДРУУД</span>
+            <span style="font:400 8px/1.4 'JetBrains Mono',monospace;color:#6E6A62">{{ phaseNote }}</span>
+          </div>
+          <button type="button" onClick="{{ seekPhase }}" style="flex:none;border:1px solid #DFFF4F;background:#14170A;color:#DFFF4F;padding:7px 10px;cursor:pointer;font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.12em" style-hover="background:#1A1E0C">ҮЗЭХ · {{ phaseTime }}</button>
+        </div>
+        <div style="flex:1;min-height:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:10px">
+          <sc-for list="{{ shots }}" as="f" hint-placeholder-count="3">
+            <button type="button" onClick="{{ f.go }}" style="min-height:0;display:flex;flex-direction:column;padding:0;border:1px solid {{ f.line }};background:#08080A;cursor:pointer;text-align:left" style-hover="border-color:#DFFF4F">
+              <div style="flex:1;min-height:0;overflow:hidden;background:repeating-linear-gradient(135deg,#0E0E12 0 8px,#131318 8px 16px);display:flex;flex-wrap:wrap;align-content:flex-end;align-items:flex-end;gap:4px;padding:7px">
+                <span style="flex:none;background:#08080AE6;padding:3px 5px;font:500 8px/1.3 'JetBrains Mono',monospace;color:#DFFF4F">{{ f.time }}</span>
+                <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:#08080AE6;padding:3px 5px;font:400 7px/1.3 'JetBrains Mono',monospace;letter-spacing:.1em;color:#4A4740">{{ f.kind }}</span>
+              </div>
+              <span style="flex:none;padding:7px 8px;font:400 9px/1.4 Geologica,sans-serif;color:#9A958A">{{ f.caption }}</span>
+            </button>
+          </sc-for>
+        </div>
+      </div>
+
+    </main>
+
+    <aside style="min-height:0;background:#0D0D10;border-left:1px solid #1C1C21;display:flex;flex-direction:column;gap:10px;padding:12px;overflow:auto">
+
+      <div style="flex:none;border:1px solid #1C1C21;background:#08080A;padding:11px 12px;display:flex;flex-direction:column;gap:6px">
+        <span style="font:500 8px/1 'JetBrains Mono',monospace;letter-spacing:.16em;color:#6E6A62">ТАМИРЧНЫ ИЛГЭЭСЭН ЦАГ</span>
+        <span style="font:700 32px/1.15 'JetBrains Mono',monospace;color:#DFFF4F;letter-spacing:-.02em">11.67</span>
+        <div style="display:flex;justify-content:space-between;gap:8px;border-top:1px solid #16161B;padding-top:8px">
+          <span style="font:400 8px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#4A4740">ШИЙДВЭРИЙН ДАРААХ</span>
+          <span style="font:700 10px/1 'JetBrains Mono',monospace;color:{{ finalFg }}">{{ finalTime }}</span>
+        </div>
+      </div>
+
+      <div style="flex:none;display:flex;flex-direction:column;gap:7px">
+        <button type="button" onClick="{{ pickOk }}" style="width:100%;border:1px solid {{ okLine }};background:{{ okBg }};color:#4FD07A;padding:12px;cursor:pointer;font:700 11px/1 Geologica,sans-serif;letter-spacing:.09em;text-transform:uppercase" style-hover="background:#101C13">Зөвшөөрөх · Цаг зөв</button>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
+          <button type="button" onClick="{{ pickPlus2 }}" style="border:1px solid {{ p2Line }};background:{{ p2Bg }};color:#E0A020;padding:11px 0;cursor:pointer;font:700 11px/1 'JetBrains Mono',monospace;letter-spacing:.08em" style-hover="background:#1E1709">+2</button>
+          <button type="button" onClick="{{ pickDnf }}" style="border:1px solid {{ dnfLine }};background:{{ dnfBg }};color:#FF9C8C;padding:11px 0;cursor:pointer;font:700 11px/1 'JetBrains Mono',monospace;letter-spacing:.08em" style-hover="background:#1E0F0C">DNF</button>
+        </div>
+      </div>
+
+      <sc-if value="{{ needsReason }}" hint-placeholder-val="{{ true }}">
+        <div style="flex:none;border:1px solid {{ reasonLine }};background:#08080A;display:flex;flex-direction:column">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;border-bottom:1px solid #16161B">
+            <span style="font:500 8px/1 'JetBrains Mono',monospace;letter-spacing:.14em;color:{{ reasonFg }}">{{ reasonTitle }}</span>
+            <button type="button" onClick="{{ clearDecision }}" style="border:none;background:transparent;color:#4A4740;padding:0;cursor:pointer;font:500 11px/1 'JetBrains Mono',monospace" style-hover="color:#F4F1EA">✕</button>
+          </div>
+          <div style="display:flex;flex-direction:column;padding:4px 0">
+            <sc-for list="{{ reasons }}" as="r" hint-placeholder-count="4">
+              <button type="button" onClick="{{ r.go }}" style="display:flex;gap:8px;align-items:flex-start;text-align:left;border:none;background:{{ r.bg }};padding:8px 11px;cursor:pointer" style-hover="background:#101014">
+                <span style="width:8px;height:8px;flex:none;margin-top:3px;border:1px solid {{ r.mark }};background:{{ r.fill }}"></span>
+                <span style="font:400 10px/1.4 Geologica,sans-serif;color:{{ r.fg }}">{{ r.label }}</span>
+              </button>
+            </sc-for>
+          </div>
+          <div style="padding:9px 11px 11px;border-top:1px solid #16161B;display:flex;flex-direction:column;gap:6px">
+            <textarea onChange="{{ setNote }}" rows="2" placeholder="Нэмэлт тайлбар · тамирчинд харагдана" style="width:100%;resize:none;border:1px solid #2A2A31;background:#0A0A0C;padding:8px;font:400 10px/1.5 Geologica,sans-serif;color:#F4F1EA;outline:none" style-focus="border-color:#4A4740"></textarea>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ hasDecision }}" hint-placeholder-val="{{ true }}">
+        <button type="button" onClick="{{ confirm }}" disabled="{{ confirmOff }}" style="flex:none;width:100%;border:none;background:{{ confirmBg }};color:{{ confirmFg }};padding:13px;cursor:{{ confirmCursor }};font:700 11px/1 Geologica,sans-serif;letter-spacing:.09em;text-transform:uppercase">{{ confirmLabel }}</button>
+      </sc-if>
+
+      <div style="flex:none;border:1px solid #1C1C21;background:#08080A;display:flex;flex-direction:column">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;border-bottom:1px solid #16161B">
+          <span style="font:500 8px/1 'JetBrains Mono',monospace;letter-spacing:.16em;color:#6E6A62">ХОЛИЛТ · ГРУПП A</span>
+          <span style="font:400 8px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#4A4740">R1 · #1</span>
+        </div>
+        <div style="padding:10px 11px 11px;display:flex;flex-direction:column;gap:9px">
+          <span style="font:500 10px/1.8 'JetBrains Mono',monospace;letter-spacing:.04em;color:#F4F1EA;word-spacing:.3em">F D2 F L2 B2 F D2 F2 D2 R' D2 B U R' D' F' L R2 F</span>
+          <div style="display:grid;grid-template-columns:repeat(4,16px);gap:3px;justify-content:center">
+            <sc-for list="{{ faces }}" as="f" hint-placeholder-count="6">
+              <div style="grid-area:{{ f.area }};display:grid;grid-template-columns:repeat(3,1fr);gap:1px;aspect-ratio:1">
+                <sc-for list="{{ f.cells }}" as="c" hint-placeholder-count="9">
+                  <span style="background:{{ c.color }};aspect-ratio:1"></span>
+                </sc-for>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+
+    </aside>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#DFFF4F&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;options&quot;:[&quot;#DFFF4F&quot;,&quot;#4FD07A&quot;,&quot;#8FB0FF&quot;,&quot;#F0DC30&quot;]},&quot;requireReason&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;},&quot;queueLeft&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:4,&quot;tsType&quot;:&quot;number&quot;,&quot;min&quot;:0,&quot;max&quot;:99}}">
+const PHASES = [
+  { key: "start", label: "ЭХЛЭХ", t: 4, note: "ХОЛИЛТЫГ ТАЙМЕР ДЭЭР ТАВИХ · ИНСПЕКЦ ЭХЛЭХ", shots: [
+    { t: 3, kind: "ӨМНӨ", caption: "Шоо таймер дээр, гар тавиур дээр" },
+    { t: 4, kind: "ЭХЛЭЛ", caption: "Инспекцийн эхний хугацаа" },
+    { t: 6, kind: "ДАРАА", caption: "Шоо авах мөч, гарын байрлал" }
+  ] },
+  { key: "cover", label: "КОВЕР", t: 12, note: "ХОЛИЛТЫГ ХАЛХЛАХ · БИЧЛЭГЭЭР ШАЛГАНА", shots: [
+    { t: 11, kind: "ӨМНӨ", caption: "Ковер хаагдахын өмнөх кадр" },
+    { t: 12, kind: "ХАЛХЛАЛТ", caption: "Ковер бүрэн хаагдсан эсэх" },
+    { t: 14, kind: "ДАРАА", caption: "Ковер авагдаж шоо харагдсан" }
+  ] },
+  { key: "inspect", label: "ЭВЛҮҮЛЭХ", t: 21, note: "ИНСПЕКЦИЙН ХУГАЦАА · 15 СЕКУНД ХЭТЭРСЭН ЭСЭХ", shots: [
+    { t: 19, kind: "8 СЕК", caption: "Инспекцийн дунд, шоо эргүүлээгүй" },
+    { t: 21, kind: "15 СЕК", caption: "Хугацаа дуусах мөч, гарын байрлал" },
+    { t: 22, kind: "ГАРАА", caption: "Эвлүүлэлтийн эхний эргэлт" }
+  ] },
+  { key: "finish", label: "ТӨГСГӨЛ", t: 44, note: "ЭВЛҮҮЛЭЛТИЙН ТӨГСГӨЛ · ГАР ТАЙМЕРТ ХҮРСЭН МӨЧ", shots: [
+    { t: 43, kind: "ӨМНӨ", caption: "Сүүлийн эргэлт, шоо эвлүүлэгдсэн" },
+    { t: 44, kind: "ЗОГСОЛТ", caption: "Хоёр гар таймер дээр бүрэн" },
+    { t: 45, kind: "ДАРАА", caption: "Шоо тавиур дээр, гар салсан" }
+  ] },
+  { key: "timer", label: "ЦАГ", t: 47, note: "ТАЙМЕРЫН ГАРЦ · ИЛГЭЭСЭН ЦАГТАЙ ТААРАХ ЭСЭХ", shots: [
+    { t: 46, kind: "ГАРЦ", caption: "Таймер 11.67 · тод харагдана" },
+    { t: 47, kind: "БАЙРЛАЛ", caption: "Таймер, шоо, тамирчин нэг кадрт" },
+    { t: 49, kind: "БАТАЛГАА", caption: "Дэлгэц гараар халхлагдаагүй" }
+  ] },
+  { key: "cube", label: "ШОО", t: 52, note: "ЭВЛҮҮЛЭГДСЭН ШОО · 3 ТАЛААС ХАРУУЛСАН ЭСЭХ", shots: [
+    { t: 51, kind: "ТАЛ 1", caption: "Урд, дээд тал эвлүүлэгдсэн" },
+    { t: 52, kind: "ТАЛ 2", caption: "Хажуу, доод тал" },
+    { t: 54, kind: "ТАЛ 3", caption: "Хойд тал · бүх 6 тал бүрэн" }
+  ] }
+];
+const REASONS = {
+  plus2: [
+    "Таймер зогсоход хоёр гар бүрэн хүрээгүй",
+    "Нэг тал 45°-аас бага эргэлттэй үлдсэн",
+    "Инспекц 15 секундээс хэтэрсэн",
+    "Шоог тавиур дээр буруу тавьсан"
+  ],
+  dnf: [
+    "Инспекц 17 секундээс хэтэрсэн",
+    "Шоо эвлүүлэгдээгүй",
+    "Холилт тавигдсан холилттой таарахгүй",
+    "Бичлэг тасарсан · шоо кадраас гарсан",
+    "Таймерын гарц бичлэгт харагдахгүй"
+  ]
+};
+const FACE_AREAS = ["1 / 2 / 2 / 3", "2 / 1 / 3 / 2", "2 / 2 / 3 / 3", "2 / 3 / 3 / 4", "2 / 4 / 3 / 5", "3 / 2 / 4 / 3"];
+const FACE_COLORS = ["#F4F1EA", "#F09A20", "#4FD07A", "#D8402C", "#2E6BE6", "#F0DC30"];
+const NET = [
+  [0,5,0,4,0,1,2,3,0],
+  [1,4,2,1,1,5,3,0,4],
+  [2,0,3,2,2,4,5,1,3],
+  [3,1,5,3,3,0,4,2,1],
+  [4,2,1,5,4,3,0,5,2],
+  [5,3,4,0,5,2,1,4,5]
+];
+const DUR = 102;
+
+class Component extends DCLogic {
+  state = { phase: "timer", pos: 47, speed: "1x", decision: null, reason: null, note: "", saved: false };
+
+  cur() { return PHASES.find((p) => p.key === this.state.phase) || PHASES[0]; }
+  fmt(s) { const m = Math.floor(Math.max(0, s) / 60); const r = Math.max(0, s) % 60; return m + ":" + String(Math.floor(r)).padStart(2, "0"); }
+  seek(t) { this.setState({ pos: Math.min(DUR, Math.max(0, t)) }); }
+  pick(kind) { this.setState((p) => (p.decision === kind ? { decision: null, reason: null } : { decision: kind, reason: null, saved: false })); }
+
+  renderVals() {
+    const st = this.state;
+    const accent = this.props.accent ?? "#DFFF4F";
+    const requireReason = this.props.requireReason ?? true;
+    const cur = this.cur();
+    const dec = st.decision;
+    const reasons = dec === "plus2" || dec === "dnf" ? REASONS[dec] : [];
+    const reasonOk = !requireReason || st.reason !== null;
+    const tone = dec === "dnf" ? "#E8543C" : dec === "plus2" ? "#E0A020" : accent;
+
+    return {
+      queueLeft: this.props.queueLeft ?? 4,
+      prevAttempt: () => {}, nextAttempt: () => {},
+
+      posLabel: this.fmt(st.pos),
+      posPct: Math.round((st.pos / DUR) * 1000) / 10 + "%",
+      phaseLabel: cur.label,
+      phaseNote: cur.note,
+      phaseTime: this.fmt(cur.t),
+
+      speeds: ["0.25x", "0.5x", "1x", "2x"].map((label) => ({
+        label,
+        go: () => this.setState({ speed: label }),
+        line: st.speed === label ? accent : "#2A2A31",
+        bg: st.speed === label ? "#14170A" : "#08080AE6",
+        fg: st.speed === label ? accent : "#9A958A"
+      })),
+
+      markers: PHASES.map((p) => ({
+        left: Math.round((p.t / DUR) * 1000) / 10 + "%",
+        title: p.label + " · " + this.fmt(p.t),
+        bg: p.key === st.phase ? accent : "#6E6A62",
+        go: () => this.setState({ phase: p.key, pos: p.t })
+      })),
+
+      phases: PHASES.map((p) => {
+        const on = p.key === st.phase;
+        return {
+          label: p.label, time: this.fmt(p.t),
+          go: () => this.setState({ phase: p.key, pos: p.t }),
+          line: on ? accent : "#1C1C21",
+          bg: on ? "#14170A" : "#0A0A0C",
+          fg: on ? accent : "#F4F1EA",
+          timeFg: on ? accent : "#6E6A62",
+          dot: on ? accent : "#2A2A31"
+        };
+      }),
+
+      shots: cur.shots.map((f) => ({
+        time: this.fmt(f.t), kind: f.kind, caption: f.caption,
+        line: Math.abs(st.pos - f.t) < 0.6 ? accent : "#1C1C21",
+        go: () => this.seek(f.t)
+      })),
+      seekPhase: () => this.seek(cur.t),
+      back1: () => this.seek(st.pos - 1), fwd1: () => this.seek(st.pos + 1),
+      backF: () => this.seek(st.pos - 0.04), fwdF: () => this.seek(st.pos + 0.04),
+
+      finalTime: dec === "plus2" ? "13.67 (+2)" : dec === "dnf" ? "DNF" : dec === "ok" ? "11.67" : "—",
+      finalFg: dec === "dnf" ? "#FF9C8C" : dec === "plus2" ? "#E0A020" : dec === "ok" ? "#4FD07A" : "#4A4740",
+
+      pickOk: () => this.pick("ok"), pickPlus2: () => this.pick("plus2"), pickDnf: () => this.pick("dnf"),
+      clearDecision: () => this.setState({ decision: null, reason: null }),
+      okLine: dec === "ok" ? "#4FD07A" : "#2C4A34", okBg: dec === "ok" ? "#13291A" : "#0F1A12",
+      p2Line: dec === "plus2" ? "#E0A020" : "#3A2E10", p2Bg: dec === "plus2" ? "#241A06" : "#1A1408",
+      dnfLine: dec === "dnf" ? "#D8402C" : "#3A1410", dnfBg: dec === "dnf" ? "#25100C" : "#1A0D0A",
+
+      needsReason: dec === "plus2" || dec === "dnf",
+      hasDecision: !!dec,
+      reasonTitle: dec === "dnf" ? "DNF · ШАЛТГААН СОНГОХ" : "+2 · ШАЛТГААН СОНГОХ",
+      reasonLine: dec === "dnf" ? "#3A1410" : "#3A2E10",
+      reasonFg: tone,
+      reasons: reasons.map((label, i) => ({
+        label,
+        go: () => this.setState({ reason: i }),
+        bg: st.reason === i ? "#101014" : "transparent",
+        mark: st.reason === i ? tone : "#2A2A31",
+        fill: st.reason === i ? tone : "transparent",
+        fg: st.reason === i ? "#F4F1EA" : "#9A958A"
+      })),
+      setNote: (ev) => this.setState({ note: ev.target.value }),
+
+      confirmOff: !reasonOk,
+      confirmCursor: reasonOk ? "pointer" : "not-allowed",
+      confirmBg: st.saved ? "#13291A" : reasonOk ? (dec === "ok" ? "#4FD07A" : tone) : "#16161B",
+      confirmFg: st.saved ? "#4FD07A" : reasonOk ? "#08080A" : "#4A4740",
+      confirmLabel: st.saved ? "Хадгалагдсан · дараах" : reasonOk ? "Шийдвэр батлах" : "Шалтгаан сонгоно уу",
+      confirm: () => { if (reasonOk) this.setState({ saved: true }); },
+
+      faces: NET.map((cells, i) => ({
+        area: FACE_AREAS[i],
+        cells: cells.map((c) => ({ color: FACE_COLORS[c] }))
+      }))
+    };
+  }
+}
+
+</script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { OnlineSubmissionAdminView, SolveMarks } from '@/lib/online-competition/types';
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
 import { COVER_SECONDS, coverMidpointMs } from '@/lib/online-competition/solve-stage-timing';
@@ -13,6 +13,11 @@ import ScramblePreview from '@/components/shared/ScramblePreview';
 
 type ReviewAction = 'approve' | 'approve_plus2' | 'dnf';
 
+/** The six segments of a run a judge steps through. Keyed by identity
+ *  rather than by label, so the stills lookup below — and any future one
+ *  — binds to the phase and not to its display text. */
+type PhaseKey = 'start' | 'cover' | 'inspect' | 'finish' | 'timer' | 'cube';
+
 /** How far before `solveEnd` ТӨГСГӨЛ lands — far enough back to see the
  *  last few moves land rather than the cube already finished and still. */
 const BEFORE_END_MS = 5000;
@@ -24,11 +29,19 @@ const BEFORE_END_MS = 5000;
  *  the settled middle of it. */
 const INTO_HOLD_MS = 3000;
 
-/** The jump target that lights the scramble block. Named rather than
- *  compared inline so the tie between the two is findable from either
- *  end — the cover segment is the one stretch of the clip where the
- *  scramble is what the judge is checking the cube against. */
-const SCRAMBLE_FOCUS_LABEL = 'КОВЕР';
+/** The phase that lights the scramble block. Named rather than compared
+ *  inline so the tie between the two is findable from either end — the
+ *  cover segment is the one stretch of the clip where the scramble is
+ *  what the judge is checking the cube against. */
+const SCRAMBLE_FOCUS_KEY: PhaseKey = 'cover';
+
+/** A FRAME, at the 30fps useSolveRecorder captures at. One constant, so
+ *  the two step buttons and anything added later cannot drift apart by
+ *  each carrying their own 0.033. */
+const FRAME_STEP_S = 1 / 30;
+
+/** The coarse step either side of the frame buttons. */
+const SECOND_STEP_S = 1;
 
 // ── Jumping to the moments a judge actually watches ────────────────────
 // The clip runs a minute and a half and five moments in it decide the
@@ -69,6 +82,7 @@ const FLAG_LABELS: Record<SubmissionFlagCode, string> = {
 };
 
 const JUMPS: {
+  key: PhaseKey;
   label: string;
   /** False only for ЭХЛЭЛ, which is correct whatever was recorded. Used
    *  to tell "this submission has no marks" from "this one button has
@@ -76,7 +90,7 @@ const JUMPS: {
   needsMarks: boolean;
   resolve: (marks: Partial<SolveMarks> | undefined, scramble: string | null) => number | null;
 }[] = [
-  { label: 'ЭХЛЭЛ', needsMarks: false, resolve: () => 0 },
+  { key: 'start', label: 'ЭХЛЭХ', needsMarks: false, resolve: () => 0 },
 
   // THE MIDDLE OF THE COVER STAGE, where the athlete is holding the
   // scrambled cube steady in the orientation a judge verifies.
@@ -97,6 +111,7 @@ const JUMPS: {
   // up. It is also only as correct as the assumption that today's stage
   // timing is what that old attempt was recorded under.
   {
+    key: 'cover',
     label: 'КОВЕР',
     needsMarks: true,
     resolve: (marks, scramble) => {
@@ -110,7 +125,7 @@ const JUMPS: {
 
   // No offset: not a hold to settle into but an act to catch, and the
   // frame that matters is the one where the cover comes off.
-  { label: 'ЭВЛҮҮЛЭХ', needsMarks: true, resolve: (m) => at(m, 'solveStart') },
+  { key: 'inspect', label: 'ЭВЛҮҮЛЭХ', needsMarks: true, resolve: (m) => at(m, 'solveStart') },
 
   // JUST BEFORE THE SOLVE ENDS — the cube being completed, which is the
   // thing a judge is actually checking.
@@ -120,6 +135,7 @@ const JUMPS: {
   // back past its own start, into the cover stage, and show a scrambled
   // cube at the moment labelled "the finish". Clamped to solveStart.
   {
+    key: 'finish',
     label: 'ТӨГСГӨЛ',
     needsMarks: true,
     resolve: (m) => {
@@ -131,27 +147,75 @@ const JUMPS: {
     },
   },
 
-  { label: 'ЦАГ', needsMarks: true, resolve: (m) => {
+  { key: 'timer', label: 'ЦАГ', needsMarks: true, resolve: (m) => {
     const end = at(m, 'solveEnd');
     return end === null ? null : end + INTO_HOLD_MS;
   } },
-  { label: 'ШОО', needsMarks: true, resolve: (m) => {
+  { key: 'cube', label: 'ШОО', needsMarks: true, resolve: (m) => {
     const shown = at(m, 'cubeShown');
     return shown === null ? null : shown + INTO_HOLD_MS;
   } },
 ];
 
-/** Inline attempt-review panel — the video treatment and the three
- *  decision actions are the same ones the old card-list ReviewDashboard
- *  used (aspect-[3/4] + object-contain, and the same POST to
- *  /api/online-competition/review); this is where that logic now lives so
- *  the grid doesn't duplicate it. Renders below the grid and pushes
- *  content down rather than overlaying it. */
+/** Which phases have stills, and where they come from.
+ *
+ *  THE WHOLE POINT OF THIS TABLE is that it is the only thing that knows.
+ *  Today the recorder grabs frames during the two closing holds and
+ *  nowhere else, so four of the six phases are simply absent from this
+ *  map and the frames panel renders its empty state for them. Adding
+ *  stills for, say, the cover hold later is one line here plus the field
+ *  on the submission — not a change to the panel, the grid, or the empty
+ *  state, all of which already handle "this phase has none". */
+const PHASE_STILLS: Partial<
+  Record<PhaseKey, (s: OnlineSubmissionAdminView) => string[] | undefined>
+> = {
+  timer: (s) => s.timerShotIds,
+  cube: (s) => s.cubeShotIds,
+};
+
+/** What each phase is for, shown under the frames-panel heading. Display
+ *  copy only — nothing reads these but the heading. */
+const PHASE_NOTES: Record<PhaseKey, string> = {
+  start: 'БИЧЛЭГИЙН ЭХЛЭЛ · ТАЙМЕР 0.00 ХАРУУЛСАН ЭСЭХ',
+  cover: 'ХОЛИЛТЫГ ХАЛХЛАХ · ШООНЫ БАЙРЛАЛ ШАЛГАНА',
+  inspect: 'ИНСПЕКЦ ЭХЭЛСЭН МӨЧ · КОВЕР АВАГДСАН',
+  finish: 'ЭВЛҮҮЛЭЛТИЙН ТӨГСГӨЛ · ШОО ЭВЛҮҮЛЭГДСЭН ЭСЭХ',
+  timer: 'ТАЙМЕРЫН ГАРЦ · ИЛГЭЭСЭН ЦАГТАЙ ТААРАХ ЭСЭХ',
+  cube: 'ЭВЛҮҮЛЭГДСЭН ШОО · БҮХ ТАЛААС ХАРУУЛСАН ЭСЭХ',
+};
+
+/** m:ss, the mockup's timeline format. Guards NaN, which is what
+ *  `duration` reads as until the video's metadata has loaded. */
+function fmtClock(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
+  const m = Math.floor(seconds / 60);
+  const r = Math.floor(seconds % 60);
+  return `${m}:${String(r).padStart(2, '0')}`;
+}
+
+/** Inline attempt-review panel — three columns, matching the approved
+ *  judging mockup (design-mockups/Khorom Judging.dc.html).
+ *
+ *  LEFT is the evidence: the clip, a timeline with a tick per recorded
+ *  mark, and frame-accurate stepping. MIDDLE is navigation: who this is,
+ *  the six phases of the run, and the frames captured for whichever phase
+ *  is selected. RIGHT is the decision: the time claimed, the time that
+ *  would be recorded, the three actions, and the scramble to check the
+ *  cube against.
+ *
+ *  The split is the point. A judge previously scrolled between the video
+ *  and the buttons that judge it; now the thing being decided and the
+ *  decision are on screen together. */
 export default function SubmissionDetailPanel({
   submission,
   athleteName,
   groupLabel,
   scramble,
+  queueLeft,
+  hasPrev,
+  hasNext,
+  onPrev,
+  onNext,
   onClose,
   onReview,
   onDelete,
@@ -164,10 +228,16 @@ export default function SubmissionDetailPanel({
   groupLabel: string | null;
   /** The scramble this athlete was shown for this attempt, or null when
    *  it cannot be established (no imported scrambles, no group, or a
-   *  short scramble set). Used ONLY to work out how long the reveal ran,
-   *  which is what says where the cover stage starts — see the КОВЕР
-   *  entry in JUMPS. Nothing displays it. */
+   *  short scramble set). Also feeds the КОВЕР jump's fallback maths —
+   *  see that entry in JUMPS. */
   scramble: string | null;
+  /** How many attempts in the judge's CURRENT filter still have no
+   *  decision. The header pill; nothing acts on it. */
+  queueLeft: number;
+  hasPrev: boolean;
+  hasNext: boolean;
+  onPrev: () => void;
+  onNext: () => void;
   onClose: () => void;
   onReview: (submissionId: string, action: ReviewAction) => Promise<void>;
   onDelete: (submissionId: string) => Promise<void>;
@@ -180,9 +250,16 @@ export default function SubmissionDetailPanel({
    *  boolean + index, so the overlay cannot outlive the row it came from
    *  when the panel switches to another submission. */
   const [zoomed, setZoomed] = useState<string | null>(null);
-  /** Whether the scramble block is emphasised. Purely visual: it never
-   *  hides the block, and nothing else reads it. */
-  const [coverFocus, setCoverFocus] = useState(false);
+  /** The selected phase card. Drives the frames panel, the highlighted
+   *  timeline tick, the overlay label, and the scramble emphasis. */
+  const [phase, setPhase] = useState<PhaseKey>('timer');
+  /** The decision the judge has PICKED but not yet committed. Null until
+   *  they pick one; see the confirm button. */
+  const [pending, setPending] = useState<ReviewAction | null>(null);
+  /** Video clock, mirrored into state so the timeline can draw. Both read
+   *  from the element's own events — nothing here drives playback. */
+  const [duration, setDuration] = useState(0);
+  const [pos, setPos] = useState(0);
 
   const marks = submission.marks;
 
@@ -215,9 +292,9 @@ export default function SubmissionDetailPanel({
     // a confusing state; landing just inside it plays the little there is.
     // `duration` is NaN until metadata loads, so it is only trusted once
     // it is a real positive number.
-    const duration = el.duration;
-    if (Number.isFinite(duration) && duration > 0 && seconds > duration - 0.1) {
-      seconds = duration - 0.1;
+    const d = el.duration;
+    if (Number.isFinite(d) && d > 0 && seconds > d - 0.1) {
+      seconds = d - 0.1;
     }
     if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
 
@@ -227,11 +304,33 @@ export default function SubmissionDetailPanel({
     void el.play().catch(() => {});
   }
 
+  /** Steps the playhead without playing. PAUSES FIRST, deliberately: the
+   *  frame buttons exist to hold still on one frame, and a running clock
+   *  would move off it before the judge had looked. */
+  function stepBy(deltaSeconds: number) {
+    const el = videoRef.current;
+    if (el === null) return;
+    el.pause();
+    const d = el.duration;
+    const max = Number.isFinite(d) && d > 0 ? d - 0.01 : Number.MAX_SAFE_INTEGER;
+    el.currentTime = Math.min(max, Math.max(0, el.currentTime + deltaSeconds));
+  }
+
+  /** Selects a phase and seeks to it. The seek target is JUMPS' own —
+   *  recomputing it here would be a second opinion about where a phase
+   *  starts. */
+  function openPhase(jump: (typeof JUMPS)[number]) {
+    setPhase(jump.key);
+    const ms = targetMs(jump);
+    if (ms !== null) jumpTo(ms);
+  }
+
   async function act(action: ReviewAction) {
     setBusy(true);
     setError('');
     try {
       await onReview(submission.id, action);
+      setPending(null);
       // Panel stays open and re-renders against the patched submission, so
       // the judge can see the decision land instead of the panel vanishing
       // under them. The grid cell recolours at the same time.
@@ -246,342 +345,696 @@ export default function SubmissionDetailPanel({
   const decided = submission.status !== 'pending';
   const isDnf = submission.isDnf === true || submission.penalty === 'DNF';
 
+  const currentJump = JUMPS.find((j) => j.key === phase) ?? JUMPS[0];
+  const currentTargetMs = targetMs(currentJump);
+  const currentStills = PHASE_STILLS[phase]?.(submission) ?? [];
+
+  /** One tick per mark that exists, positioned proportionally. Computed
+   *  from the video's real duration, so it is empty until metadata has
+   *  loaded rather than drawing ticks at guessed positions. */
+  const ticks = useMemo(() => {
+    if (!(duration > 0)) return [];
+    return JUMPS.map((j) => {
+      const ms = targetMs(j);
+      if (ms === null) return null;
+      const pct = Math.min(100, Math.max(0, (ms / 1000 / duration) * 100));
+      return { key: j.key, label: j.label, ms, pct };
+    }).filter((t): t is { key: PhaseKey; label: string; ms: number; pct: number } => t !== null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [duration, marks, scramble]);
+
+  /** THE TIME THAT WOULD BE RECORDED. Before a decision is picked this is
+   *  the reported time unchanged — the athlete's claim stands until a
+   *  judge moves it. A picked +2 adds its two seconds here so the judge
+   *  sees the number they are about to publish, not the arithmetic. */
+  const effective = pending ?? (decided ? (isDnf ? 'dnf' : submission.penalty === '+2' ? 'approve_plus2' : 'approve') : null);
+  const finalLabel =
+    effective === 'dnf'
+      ? 'DNF'
+      : effective === 'approve_plus2'
+        ? `${fmtCentiseconds(submission.reportedTime + 200)} (+2)`
+        : fmtCentiseconds(submission.reportedTime);
+  const finalColor =
+    effective === 'dnf' ? '#FF9C8C' : effective === 'approve_plus2' ? '#E0A020' : effective === 'approve' ? '#4FD07A' : '#9A958A';
+
+  const chip = (text: string, color: string) => (
+    <span
+      key={text}
+      style={{
+        border: '1px solid #2A2A31',
+        background: '#0D0D10',
+        padding: '4px 8px',
+        font: `600 8px/1 var(--oc-font-mono), monospace`,
+        letterSpacing: '.12em',
+        color,
+      }}
+    >
+      {text}
+    </span>
+  );
+
   return (
     <div className="oc-rv-panel">
-      <div style={{ padding: 16 }}>
-        {/* Narrowed to 78% of the column. The clip is portrait 3:4, so
-            at full column width it pushed the decision buttons below the
-            fold and left the judge scrolling between the evidence and
-            the verdict. Nothing about the element itself changed. */}
-        <div className="aspect-[3/4] w-full overflow-hidden" style={{ border: '1px solid #2A2A31', width: '78%', minWidth: 0 }}>
+      {/* ── LEFT · the evidence ─────────────────────────────────────── */}
+      <section
+        className="oc-rv-media"
+        style={{
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          background: '#0A0A0C',
+          borderRight: '1px solid #1C1C21',
+        }}
+      >
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            position: 'relative',
+            background: '#08080A',
+            display: 'flex',
+          }}
+        >
           <video
             ref={videoRef}
             src={submission.videoUrl}
             controls
             playsInline
-            className="h-full w-full bg-black object-contain"
+            onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
+            onTimeUpdate={(e) => setPos(e.currentTarget.currentTime)}
+            onSeeked={(e) => setPos(e.currentTarget.currentTime)}
+            style={{ width: '100%', height: '100%', background: '#000', objectFit: 'contain' }}
           />
-        </div>
-
-        {error && (
-          <p style={{ marginTop: 10, font: '400 11px var(--oc-font-heading), sans-serif', color: '#E8543C' }}>
-            {error}
-          </p>
-        )}
-
-        {/* ── What the automatic checks noticed ──
-            ADVISORY, and placed deliberately ABOVE the decision buttons
-            rather than beside them: it is something to read before
-            judging, not an option to pick. Nothing here disables,
-            preselects or colours any of the three actions below — a
-            flagged attempt is approved exactly the way any other is. */}
-        {submission.checks.flags.length > 0 && (
+          {/* Position and the selected phase, over the frame, as the
+              mockup has them. pointerEvents none so they never take a
+              click meant for the video's own controls. */}
           <div
             style={{
-              marginTop: 16,
-              border: '1px solid #D8402C',
-              background: '#1A0D0A',
-              padding: 12,
+              position: 'absolute',
+              top: 10,
+              left: 10,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 5,
+              alignItems: 'flex-start',
+              pointerEvents: 'none',
             }}
           >
-            <p
+            <span
               style={{
-                font: '600 9px var(--oc-font-mono), monospace',
-                letterSpacing: '.12em',
-                color: '#E8543C',
+                background: '#08080AE6',
+                border: '1px solid #2A2A31',
+                padding: '4px 7px',
+                font: '500 9px/1 var(--oc-font-mono), monospace',
+                color: '#F4F1EA',
               }}
             >
+              {fmtClock(pos)} / {fmtClock(duration)}
+            </span>
+            <span
+              style={{
+                background: '#08080AE6',
+                border: '1px solid #2A2A31',
+                padding: '4px 7px',
+                font: '500 8px/1 var(--oc-font-mono), monospace',
+                letterSpacing: '.1em',
+                color: '#DFFF4F',
+              }}
+            >
+              {currentJump.label}
+            </span>
+          </div>
+        </div>
+
+        <div
+          style={{
+            flex: 'none',
+            borderTop: '1px solid #1C1C21',
+            padding: '9px 11px 11px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+          }}
+        >
+          {/* ── The timeline ──
+              One tick per mark that exists, at its proportional position.
+              A missing mark simply has no tick: the bar is a map of what
+              was recorded, so an absent phase leaves no gap to explain. */}
+          <div style={{ position: 'relative', height: 20 }}>
+            <div style={{ position: 'absolute', left: 0, right: 0, top: 8, height: 4, background: '#16161B' }} />
+            <div
+              style={{
+                position: 'absolute',
+                left: 0,
+                top: 8,
+                height: 4,
+                width: duration > 0 ? `${Math.min(100, (pos / duration) * 100)}%` : 0,
+                background: '#DFFF4F',
+              }}
+            />
+            {ticks.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                title={`${t.label} · ${fmtClock(t.ms / 1000)}`}
+                onClick={() => {
+                  setPhase(t.key);
+                  jumpTo(t.ms);
+                }}
+                style={{
+                  position: 'absolute',
+                  top: 3,
+                  left: `${t.pct}%`,
+                  width: 3,
+                  height: 14,
+                  padding: 0,
+                  border: 'none',
+                  background: t.key === phase ? '#DFFF4F' : '#6E6A62',
+                  cursor: 'pointer',
+                }}
+              />
+            ))}
+            {duration > 0 && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 2,
+                  left: `${Math.min(100, (pos / duration) * 100)}%`,
+                  width: 2,
+                  height: 16,
+                  background: '#F4F1EA',
+                  pointerEvents: 'none',
+                }}
+              />
+            )}
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 5 }}>
+            {[
+              { label: '−1.0s', delta: -SECOND_STEP_S },
+              { label: '−ФРЭЙМ', delta: -FRAME_STEP_S },
+              { label: '+ФРЭЙМ', delta: FRAME_STEP_S },
+              { label: '+1.0s', delta: SECOND_STEP_S },
+            ].map((b) => (
+              <button
+                key={b.label}
+                type="button"
+                onClick={() => stepBy(b.delta)}
+                style={{
+                  border: '1px solid #2A2A31',
+                  background: 'transparent',
+                  color: '#9A958A',
+                  padding: '6px 0',
+                  cursor: 'pointer',
+                  font: '600 8px/1 var(--oc-font-mono), monospace',
+                }}
+              >
+                {b.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── MIDDLE · who, which phase, which frames ─────────────────── */}
+      <main
+        className="oc-rv-main"
+        style={{
+          minWidth: 0,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 11,
+          padding: '12px 14px',
+          overflow: 'hidden',
+        }}
+      >
+        <div
+          style={{
+            flex: 'none',
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 12,
+            alignItems: 'flex-end',
+            justifyContent: 'space-between',
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
+              {chip(submission.event.toUpperCase(), '#DFFF4F')}
+              {chip(`РАУНД ${submission.competitionRound}`, '#9A958A')}
+              {groupLabel ? chip(`ГРУПП ${groupLabel}`, '#9A958A') : chip('ГРУПП ХУВААРИЛААГҮЙ', '#6E6A62')}
+              {chip(`ОРОЛДЛОГО ${submission.attempt}`, '#9A958A')}
+            </div>
+            <span style={{ font: '600 17px/1.1 var(--oc-font-heading), sans-serif', color: '#F4F1EA' }}>
+              {athleteName}
+            </span>
+          </div>
+          {/* Prev / next and the queue pill. They move the judge through
+              the SAME list the grid is filtered to, without closing the
+              panel — see ReviewGrid's queue memo. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 7,
+                border: '1px solid #1C1C21',
+                background: '#08080A',
+                padding: '6px 9px',
+              }}
+            >
+              <span style={{ width: 5, height: 5, background: '#E0A020' }} />
+              <span
+                style={{
+                  font: '500 8px/1 var(--oc-font-mono), monospace',
+                  letterSpacing: '.14em',
+                  color: '#E0A020',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {queueLeft} ХҮЛЭЭГДЭЖ
+              </span>
+            </div>
+            {[
+              { label: '← ӨМНӨХ', go: onPrev, off: !hasPrev },
+              { label: 'ДАРААХ →', go: onNext, off: !hasNext },
+            ].map((b) => (
+              <button
+                key={b.label}
+                type="button"
+                disabled={b.off}
+                onClick={b.go}
+                style={{
+                  border: '1px solid #2A2A31',
+                  background: 'transparent',
+                  color: '#9A958A',
+                  padding: '6px 10px',
+                  cursor: b.off ? 'not-allowed' : 'pointer',
+                  opacity: b.off ? 0.4 : 1,
+                  font: '600 8px/1 var(--oc-font-mono), monospace',
+                  letterSpacing: '.12em',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {b.label}
+              </button>
+            ))}
+            <button
+              type="button"
+              aria-label="Хаах"
+              onClick={onClose}
+              style={{
+                border: 'none',
+                background: 'transparent',
+                color: '#6E6A62',
+                font: '500 14px var(--oc-font-mono), monospace',
+                cursor: 'pointer',
+                padding: 4,
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+
+        {/* ── Phase cards ──
+            These replaced the jump-button row and target the SAME
+            positions — every card calls JUMPS' own resolve through
+            openPhase. A card with no mark behind it shows — and is
+            inert, rather than seeking to a guessed spot. */}
+        <div
+          style={{
+            flex: 'none',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))',
+            gap: 6,
+          }}
+        >
+          {JUMPS.map((jump) => {
+            const ms = targetMs(jump);
+            const on = jump.key === phase;
+            const dead = ms === null;
+            return (
+              <button
+                key={jump.key}
+                type="button"
+                disabled={dead}
+                onClick={() => openPhase(jump)}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                  textAlign: 'left',
+                  border: `1px solid ${on ? '#DFFF4F' : '#1C1C21'}`,
+                  background: on ? '#14170A' : '#0A0A0C',
+                  padding: '8px 9px',
+                  cursor: dead ? 'not-allowed' : 'pointer',
+                  opacity: dead ? 0.45 : 1,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                  <span
+                    style={{
+                      font: '600 10px/1 var(--oc-font-heading), sans-serif',
+                      letterSpacing: '.06em',
+                      color: on ? '#DFFF4F' : '#F4F1EA',
+                    }}
+                  >
+                    {jump.label}
+                  </span>
+                  <span style={{ width: 4, height: 4, background: on ? '#DFFF4F' : '#2A2A31' }} />
+                </div>
+                <span
+                  style={{
+                    font: '500 9px/1 var(--oc-font-mono), monospace',
+                    color: on ? '#DFFF4F' : '#6E6A62',
+                  }}
+                >
+                  {ms === null ? '—' : fmtClock(ms / 1000)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* ── Frames panel ──
+            Always present, whatever the selected phase holds. Four of the
+            six phases have no stills yet and say so rather than
+            disappearing: a panel that came and went as the judge moved
+            across the cards would read as a bug. */}
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            border: '1px solid #1C1C21',
+            background: '#0A0A0C',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          <div
+            style={{
+              flex: 'none',
+              display: 'flex',
+              gap: 10,
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '9px 11px',
+              borderBottom: '1px solid #1C1C21',
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+              <span style={{ font: '600 11px/1 var(--oc-font-heading), sans-serif', color: '#F4F1EA', letterSpacing: '.06em' }}>
+                {currentJump.label} · КАДРУУД
+              </span>
+              <span style={{ font: '400 8px/1.4 var(--oc-font-mono), monospace', color: '#6E6A62' }}>
+                {noMarks ? 'ЭНЭ БИЧЛЭГТ ҮЕ ШАТЫН ЦАГ БҮРТГЭГДЭЭГҮЙ' : PHASE_NOTES[phase]}
+              </span>
+            </div>
+            <button
+              type="button"
+              disabled={currentTargetMs === null}
+              onClick={() => currentTargetMs !== null && jumpTo(currentTargetMs)}
+              style={{
+                flex: 'none',
+                border: '1px solid #DFFF4F',
+                background: '#14170A',
+                color: '#DFFF4F',
+                padding: '7px 10px',
+                cursor: currentTargetMs === null ? 'not-allowed' : 'pointer',
+                opacity: currentTargetMs === null ? 0.4 : 1,
+                font: '600 8px/1 var(--oc-font-mono), monospace',
+                letterSpacing: '.12em',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              ҮЗЭХ · {currentTargetMs === null ? '—' : fmtClock(currentTargetMs / 1000)}
+            </button>
+          </div>
+
+          {currentStills.length > 0 ? (
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                gap: 8,
+                padding: 10,
+              }}
+            >
+              {currentStills.map((id, i) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setZoomed(id)}
+                  title="Томруулах"
+                  style={{
+                    minHeight: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    padding: 0,
+                    border: '1px solid #1C1C21',
+                    background: '#08080A',
+                    cursor: 'zoom-in',
+                    textAlign: 'left',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={cloudinaryStillThumb(id)}
+                    alt=""
+                    loading="lazy"
+                    style={{ flex: 1, minHeight: 0, width: '100%', objectFit: 'contain', display: 'block' }}
+                  />
+                  <span
+                    style={{
+                      flex: 'none',
+                      padding: '7px 8px',
+                      font: '400 9px/1.4 var(--oc-font-heading), sans-serif',
+                      color: '#9A958A',
+                    }}
+                  >
+                    КАДР {i + 1}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: 10,
+                textAlign: 'center',
+              }}
+            >
+              <span
+                style={{
+                  font: '400 9px/1.6 var(--oc-font-mono), monospace',
+                  letterSpacing: '.1em',
+                  color: '#4A4740',
+                }}
+              >
+                ЭНЭ ҮЕ ШАТАД КАДР АВААГҮЙ
+                <br />
+                БИЧЛЭГЭЭС ҮЗНЭ ҮҮ
+              </span>
+            </div>
+          )}
+        </div>
+      </main>
+
+      {/* ── RIGHT · the decision ────────────────────────────────────── */}
+      <aside
+        className="oc-rv-side"
+        style={{
+          minHeight: 0,
+          background: '#0D0D10',
+          borderLeft: '1px solid #1C1C21',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+          padding: 12,
+          overflow: 'auto',
+        }}
+      >
+        <div
+          style={{
+            flex: 'none',
+            border: '1px solid #1C1C21',
+            background: '#08080A',
+            padding: '11px 12px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+          }}
+        >
+          <span style={{ font: '500 8px/1 var(--oc-font-mono), monospace', letterSpacing: '.16em', color: '#6E6A62' }}>
+            ТАМИРЧНЫ ИЛГЭЭСЭН ЦАГ
+          </span>
+          <span
+            style={{
+              font: '700 32px/1.15 var(--oc-font-mono), monospace',
+              color: '#DFFF4F',
+              letterSpacing: '-.02em',
+            }}
+          >
+            {fmtCentiseconds(submission.reportedTime)}
+          </span>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              gap: 8,
+              borderTop: '1px solid #16161B',
+              paddingTop: 8,
+            }}
+          >
+            <span style={{ font: '400 8px/1 var(--oc-font-mono), monospace', letterSpacing: '.1em', color: '#4A4740' }}>
+              ШИЙДВЭРИЙН ДАРААХ
+            </span>
+            <span style={{ font: `700 10px/1 var(--oc-font-mono), monospace`, color: finalColor }}>
+              {finalLabel}
+            </span>
+          </div>
+        </div>
+
+        {/* ── What the automatic checks noticed ──
+            ADVISORY, and kept directly above the decision buttons: it is
+            something to read before judging, not an option to pick.
+            Nothing here disables, preselects or colours any of the three
+            actions below. */}
+        {submission.checks.flags.length > 0 && (
+          <div style={{ flex: 'none', border: '1px solid #D8402C', background: '#1A0D0A', padding: 12 }}>
+            <p style={{ font: '600 9px/1 var(--oc-font-mono), monospace', letterSpacing: '.12em', color: '#E8543C' }}>
               АВТОМАТ ШАЛГАЛТ
             </p>
             <ul style={{ margin: '8px 0 0', padding: 0, listStyle: 'none' }}>
               {submission.checks.flags.map((code) => (
-                <li
-                  key={code}
-                  style={{
-                    padding: '2px 0',
-                    font: '400 12px var(--oc-font-heading), sans-serif',
-                    color: '#F4F1EA',
-                  }}
-                >
+                <li key={code} style={{ padding: '2px 0', font: '400 12px/1.4 var(--oc-font-heading), sans-serif', color: '#F4F1EA' }}>
                   {FLAG_LABELS[code]}
                 </li>
               ))}
             </ul>
-            <p
-              style={{
-                marginTop: 8,
-                font: '400 10px var(--oc-font-heading), sans-serif',
-                color: '#9A958A',
-              }}
-            >
+            <p style={{ marginTop: 8, font: '400 10px/1.4 var(--oc-font-heading), sans-serif', color: '#9A958A' }}>
               Зөвхөн анхааруулга. Шийдвэрийг шүүгч гаргана.
             </p>
           </div>
         )}
 
-        <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {decided && (
+          <p
+            style={{
+              flex: 'none',
+              font: '500 10px/1 var(--oc-font-mono), monospace',
+              letterSpacing: '.1em',
+              color: isDnf ? '#D8402C' : '#4FD07A',
+            }}
+          >
+            {isDnf ? 'ХҮЧИНГҮЙ БОЛГОСОН' : submission.penalty === '+2' ? 'БАТАЛСАН · +2' : 'БАТАЛСАН'}
+          </p>
+        )}
+        {error && (
+          <p style={{ flex: 'none', font: '400 11px/1.4 var(--oc-font-heading), sans-serif', color: '#E8543C' }}>
+            {error}
+          </p>
+        )}
+
+        {/* ── The three decisions ──
+            PICK, THEN CONFIRM, as the mockup has it. Picking is what
+            drives the "after the decision" line above, so the judge sees
+            the number they are about to publish before they publish it.
+            The three actions themselves are unchanged — each still calls
+            the same review action it always did. */}
+        <div style={{ flex: 'none', display: 'flex', flexDirection: 'column', gap: 7 }}>
           <button
             type="button"
-            className="oc-rv-decide oc-rv-decide-ok"
             disabled={busy}
-            onClick={() => act('approve')}
+            onClick={() => setPending((p) => (p === 'approve' ? null : 'approve'))}
+            style={{
+              width: '100%',
+              border: `1px solid ${pending === 'approve' ? '#4FD07A' : '#2C4A34'}`,
+              background: pending === 'approve' ? '#13291A' : '#0F1A12',
+              color: '#4FD07A',
+              padding: 12,
+              cursor: busy ? 'not-allowed' : 'pointer',
+              font: '700 11px/1 var(--oc-font-heading), sans-serif',
+              letterSpacing: '.09em',
+              textTransform: 'uppercase',
+            }}
           >
-            ЗӨВШӨӨРӨХ · ЦАГ СЭРГЭЭХ
+            Зөвшөөрөх · Цаг зөв
           </button>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
             <button
               type="button"
-              className="oc-rv-decide oc-rv-decide-warn"
               disabled={busy}
-              onClick={() => act('approve_plus2')}
+              onClick={() => setPending((p) => (p === 'approve_plus2' ? null : 'approve_plus2'))}
+              style={{
+                border: `1px solid ${pending === 'approve_plus2' ? '#E0A020' : '#3A2E10'}`,
+                background: pending === 'approve_plus2' ? '#241A06' : '#1A1408',
+                color: '#E0A020',
+                padding: '11px 0',
+                cursor: busy ? 'not-allowed' : 'pointer',
+                font: '700 11px/1 var(--oc-font-mono), monospace',
+                letterSpacing: '.08em',
+              }}
             >
               +2
             </button>
             <button
               type="button"
-              className="oc-rv-decide oc-rv-decide-dnf"
               disabled={busy}
-              onClick={() => act('dnf')}
+              onClick={() => setPending((p) => (p === 'dnf' ? null : 'dnf'))}
+              style={{
+                border: `1px solid ${pending === 'dnf' ? '#D8402C' : '#3A1410'}`,
+                background: pending === 'dnf' ? '#25100C' : '#1A0D0A',
+                color: '#FF9C8C',
+                padding: '11px 0',
+                cursor: busy ? 'not-allowed' : 'pointer',
+                font: '700 11px/1 var(--oc-font-mono), monospace',
+                letterSpacing: '.08em',
+              }}
             >
               DNF
             </button>
           </div>
         </div>
 
-        <p style={{ marginTop: 12, font: '400 10px var(--oc-font-heading), sans-serif', color: '#6E6A62' }}>
-          Шийдвэр гаргаснаар тухайн оролдлого шууд эцэглэлд тооцогдоно.
-        </p>
-
-      </div>
-
-      <div className="oc-rv-panel-info">
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-          <div style={{ minWidth: 0 }}>
-            {/* THE ROUND, and then the attempt — two different numbers.
-                This line used to print the field the admin view now calls
-                `attempt`, which is the ATTEMPT INDEX, under the label
-                РАУНД: the header showed the same number twice under two
-                names, so attempt 2 of a single-round competition read
-                "РАУНД 2". The field was renamed at the boundary so that
-                mistake no longer compiles. */}
-            <p style={{ font: '500 10px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
-              {submission.event.toUpperCase()} · РАУНД {submission.competitionRound}
-            </p>
-            <h2 style={{ marginTop: 6, font: '600 18px var(--oc-font-heading), sans-serif', color: '#F4F1EA' }}>
-              {athleteName} · Оролдлого {submission.attempt}
-            </h2>
-          </div>
+        {pending && (
           <button
             type="button"
-            aria-label="Хаах"
-            onClick={onClose}
+            disabled={busy}
+            onClick={() => void act(pending)}
             style={{
+              flex: 'none',
+              width: '100%',
               border: 'none',
-              background: 'transparent',
-              color: '#6E6A62',
-              font: '500 14px var(--oc-font-mono), monospace',
-              cursor: 'pointer',
-              padding: 4,
+              background: busy ? '#16161B' : pending === 'dnf' ? '#E8543C' : pending === 'approve_plus2' ? '#E0A020' : '#4FD07A',
+              color: busy ? '#4A4740' : '#08080A',
+              padding: 13,
+              cursor: busy ? 'not-allowed' : 'pointer',
+              font: '700 11px/1 var(--oc-font-heading), sans-serif',
+              letterSpacing: '.09em',
+              textTransform: 'uppercase',
             }}
           >
-            ✕
+            {busy ? 'Хадгалж байна...' : 'Шийдвэр батлах'}
           </button>
-        </div>
-
-        {/* Real assignment data from onlineCompetitions/{id}/
-            groupAssignments (see admin/scrambles). Falls back to the
-            original "not assigned" note — unchanged — for competitions
-            with no imported scrambles and for athletes not in a group,
-            rather than implying an assignment that doesn't exist. */}
-        <div className="oc-rv-note" style={{ marginTop: 16 }}>
-          <p
-            style={{
-              font: '500 9px var(--oc-font-mono), monospace',
-              letterSpacing: '.12em',
-              color: groupLabel ? '#DFFF4F' : '#9A958A',
-            }}
-          >
-            {groupLabel ? `ХОЛИЛТ · ГРУПП ${groupLabel}` : 'ХОЛИЛТ · ГРУПП ХУВААРИЛААГҮЙ'}
-          </p>
-          {!groupLabel && (
-            <p style={{ marginTop: 6, font: '400 9px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
-              ТАМИРЧИН ГРУППЭД ХУВААРИЛАГДААГҮЙ · ХОЛИЛТ ХЭСГЭЭС ХУВААРИЛНА
-            </p>
-          )}
-        </div>
-
-        <div style={{ marginTop: 18 }}>
-          <span className="oc-v3-stat-label">Бичсэн цаг</span>
-          <p
-            style={{
-              marginTop: 8,
-              font: '700 32px var(--oc-font-mono), monospace',
-              fontVariantNumeric: 'tabular-nums',
-              color: '#DFFF4F',
-            }}
-          >
-            {isDnf ? 'DNF' : fmtCentiseconds(submission.reportedTime)}
-            {submission.penalty === '+2' && (
-              <span style={{ font: '500 16px var(--oc-font-mono), monospace', color: '#E0A020' }}> +2</span>
-            )}
-          </p>
-          {/* The raw keypad digit sequence the athlete typed is not stored
-              anywhere on the submission (see OnlineSubmission in types.ts —
-              only the parsed `reportedTime` centiseconds survive), so
-              there is nothing to prefill an override field with. Shown
-              read-only instead of an editable raw-digit input. */}
-          <p style={{ marginTop: 6, font: '400 10px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
-            ТАМИРЧНЫ БИЧСЭН · {submission.reportedTime} сентисекунд
-          </p>
-        </div>
-
-        {decided && (
-          <p style={{ marginTop: 14, font: '500 10px var(--oc-font-mono), monospace', letterSpacing: '.1em', color: isDnf ? '#D8402C' : '#4FD07A' }}>
-            {isDnf ? 'ХҮЧИНГҮЙ БОЛГОСОН' : submission.penalty === '+2' ? 'БАТАЛСАН · +2' : 'БАТАЛСАН'}
-          </p>
         )}
-        {/* ── The jump row ──
-            NAVIGATION, NOT A DECISION, and it is styled to say so. The
-            three buttons below the fold commit a verdict and wear the
-            palette that goes with it — green, amber, red, one per
-            outcome. These move the playhead and nothing else, so they
-            take the muted border and text this file already uses for its
-            non-committal actions (the ҮГҮЙ cancel), at the same height
-            and gap as the decision row. A judge should never have to
-            look twice to tell which row changes a result.
 
-            Read-only in the strictest sense: nothing here writes, and
-            nothing here can reach the review actions. */}
-        {noMarks && (
-          <p
-            style={{
-              marginTop: 12,
-              font: '400 10px var(--oc-font-mono), monospace',
-              letterSpacing: '.06em',
-              color: '#6E6A62',
-            }}
-          >
-            Энэ бичлэгт үе шатын цаг бүртгэгдээгүй
-          </p>
-        )}
-        {/* THREE PER ROW, TWO ROWS, as a grid rather than a wrap: the
-            six targets are in chronological order, and letting them
-            reflow by content width put the break in a different place
-            at every column size. A fixed 3x2 means a judge learns one
-            arrangement. */}
-        <div style={{ marginTop: noMarks ? 8 : 12, display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
-          {JUMPS.map((jump) => {
-            const ms = targetMs(jump);
-            // Two ways to be dead, and they are deliberately different
-            // questions: this submission has no marks at all (the whole
-            // row goes, including ЭХЛЭЛ, because the row as a whole has
-            // nothing to offer), or this ONE mark is missing while its
-            // neighbours are fine.
-            const disabled = noMarks || ms === null;
-            return (
-              <button
-                key={jump.label}
-                type="button"
-                disabled={disabled}
-                onClick={() => {
-                  if (ms !== null) jumpTo(ms);
-                  // Display only — the seek above is untouched. КОВЕР is
-                  // the one segment where the scramble is what the judge
-                  // is checking the cube against, so pressing it lights
-                  // that block; every other target puts the emphasis
-                  // away again. The block never hides either way.
-                  setCoverFocus(jump.label === SCRAMBLE_FOCUS_LABEL);
-                }}
-                style={{
-                  border: '1px solid #2A2A31',
-                  background: 'transparent',
-                  color: '#9A958A',
-                  padding: 12,
-                  font: '600 11px var(--oc-font-mono), monospace',
-                  letterSpacing: '.08em',
-                  cursor: disabled ? 'not-allowed' : 'pointer',
-                  opacity: disabled ? 0.4 : 1,
-                }}
-              >
-                {jump.label}
-              </button>
-            );
-          })}
-        </div>
-        {/* ── The stills, ABOVE the video ──
-            The video is 250kbps and cannot carry a legible timer face;
-            these are full-resolution frames of the same moments. Reading
-            the digits off one of these is seconds, and scrubbing a
-            90-second clip to the same frame is not — so they come first.
-            THE VIDEO IS STILL THE SOURCE OF TRUTH and is untouched below,
-            jump buttons and all: this is a faster path to the common
-            case, not a replacement for watching the solve. */}
-        <StillRow
-          label="ЦАГ"
-          ids={submission.timerShotIds}
-          onOpen={setZoomed}
-        />
-        <StillRow
-          label="ШОО"
-          ids={submission.cubeShotIds}
-          onOpen={setZoomed}
-        />
-
-
-        {/* ── The scramble this attempt was given ──
-            Rendered with the SAME component the Холилт tab and the
-            club's Daily Practice judging flow already use
-            (components/shared/ScramblePreview, @cubing/twisty in its
-            flat unfolded-net mode) — no new dependency, and a judge
-            sees the identical diagram in both places.
-
-            Absent entirely when the athlete has no group or the
-            scramble cannot be resolved: no error, no placeholder. */}
-        {scramble && (
-          <div
-            style={{
-              marginTop: 14,
-              padding: 10,
-              background: '#08080A',
-              // The only thing КОВЕР changes. Accent border plus the
-              // panel accent on the label, both already used elsewhere
-              // in this file, so it reads as emphasis rather than as a
-              // new state to interpret.
-              border: `1px solid ${coverFocus ? '#DFFF4F' : '#2A2A31'}`,
-              transition: 'border-color .15s',
-            }}
-          >
-            <span
-              style={{
-                font: '500 9px var(--oc-font-mono), monospace',
-                letterSpacing: '.12em',
-                color: coverFocus ? '#DFFF4F' : '#6E6A62',
-              }}
-            >
-              ХОЛИЛТ{groupLabel ? ` · ГРУПП ${groupLabel}` : ''}
-            </span>
-            <p style={{ marginTop: 6, font: '500 12px var(--oc-font-mono), monospace', color: '#F4F1EA', lineHeight: 1.5, wordBreak: 'break-word' }}>
-              {scramble}
-            </p>
-            {/* Definite width AND height: ScramblePreview sizes its
-                player to 100% of the container, so an auto-height box
-                gives it nothing to resolve against. 4:3 matches the
-                unfolded net's own bounding box (four faces wide by
-                three tall), same ratio as .oc-sc-scrdiag. */}
-            <div style={{ marginTop: 8, display: 'flex', width: 208, height: 156 }}>
-              <ScramblePreview eventId={submission.event} scramble={scramble} visualization="2D" />
-            </div>
-          </div>
-        )}
-        {/* Not in the mockup, but carried over deliberately: deleting a
-            submission (video + doc) was only reachable from the old
-            card-list dashboard this page replaces, and dropping the grid
-            in without it would have silently removed a working feature.
-            Same endpoint and same explicit two-step confirm as before. */}
-        <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #1C1C21' }}>
+        {/* Deleting a submission (video, stills and doc) — carried over
+            unchanged, still behind the same explicit two-step confirm. */}
+        <div style={{ flex: 'none', marginTop: 'auto', paddingTop: 14, borderTop: '1px solid #1C1C21' }}>
           {confirmingDelete ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              <span style={{ font: '400 11px var(--oc-font-heading), sans-serif', color: '#9A958A' }}>
+              <span style={{ font: '400 11px/1.4 var(--oc-font-heading), sans-serif', color: '#9A958A' }}>
                 Устгах уу? Бичлэг эргэж сэргэхгүй.
               </span>
               <button
@@ -598,7 +1051,15 @@ export default function SubmissionDetailPanel({
                     setBusy(false);
                   }
                 }}
-                style={{ border: '1px solid #D8402C', background: '#1A0D0A', color: '#E8543C', padding: '7px 10px', font: '600 9px var(--oc-font-mono), monospace', letterSpacing: '.1em', cursor: 'pointer' }}
+                style={{
+                  border: '1px solid #D8402C',
+                  background: '#1A0D0A',
+                  color: '#E8543C',
+                  padding: '7px 10px',
+                  font: '600 9px/1 var(--oc-font-mono), monospace',
+                  letterSpacing: '.1em',
+                  cursor: 'pointer',
+                }}
               >
                 ТИЙМ
               </button>
@@ -606,7 +1067,15 @@ export default function SubmissionDetailPanel({
                 type="button"
                 disabled={busy}
                 onClick={() => setConfirmingDelete(false)}
-                style={{ border: '1px solid #2A2A31', background: 'transparent', color: '#9A958A', padding: '7px 10px', font: '600 9px var(--oc-font-mono), monospace', letterSpacing: '.1em', cursor: 'pointer' }}
+                style={{
+                  border: '1px solid #2A2A31',
+                  background: 'transparent',
+                  color: '#9A958A',
+                  padding: '7px 10px',
+                  font: '600 9px/1 var(--oc-font-mono), monospace',
+                  letterSpacing: '.1em',
+                  cursor: 'pointer',
+                }}
               >
                 ҮГҮЙ
               </button>
@@ -615,19 +1084,96 @@ export default function SubmissionDetailPanel({
             <button
               type="button"
               onClick={() => setConfirmingDelete(true)}
-              style={{ border: 'none', background: 'transparent', color: '#6E6A62', font: '500 9px var(--oc-font-mono), monospace', letterSpacing: '.1em', cursor: 'pointer', padding: 0 }}
+              style={{
+                border: 'none',
+                background: 'transparent',
+                color: '#6E6A62',
+                font: '500 9px/1 var(--oc-font-mono), monospace',
+                letterSpacing: '.1em',
+                cursor: 'pointer',
+                padding: 0,
+              }}
             >
               ИЛГЭЭМЖ УСТГАХ
             </button>
           )}
         </div>
+      </aside>
+
+      {/* The scramble is its own grid cell rather than part of the
+          aside above, and that is a layout decision with one reason:
+          collapsed to a single column it has to come LAST, after the
+          frames panel, while the decision buttons have to come second.
+          Inside the aside it could only be one or the other. On a wide
+          screen it sits directly under the aside in the same column
+          with the same background, so the seam is invisible. */}
+      <div className="oc-rv-scr">
+      {/* ── The scramble ──
+          Emphasised while the cover phase is selected, which is the one
+          stretch of the clip where the cube is checked against it. It
+          never hides — only the border and label change. */}
+      {scramble && (
+        <div
+          style={{
+            flex: 'none',
+            border: `1px solid ${phase === SCRAMBLE_FOCUS_KEY ? '#DFFF4F' : '#1C1C21'}`,
+            background: '#08080A',
+            display: 'flex',
+            flexDirection: 'column',
+            transition: 'border-color .15s',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+              padding: '9px 11px',
+              borderBottom: '1px solid #16161B',
+            }}
+          >
+            <span
+              style={{
+                font: '500 8px/1 var(--oc-font-mono), monospace',
+                letterSpacing: '.16em',
+                color: phase === SCRAMBLE_FOCUS_KEY ? '#DFFF4F' : '#6E6A62',
+              }}
+            >
+              ХОЛИЛТ{groupLabel ? ` · ГРУПП ${groupLabel}` : ''}
+            </span>
+            <span style={{ font: '400 8px/1 var(--oc-font-mono), monospace', letterSpacing: '.1em', color: '#4A4740' }}>
+              R{submission.competitionRound} · #{submission.attempt}
+            </span>
+          </div>
+          <div style={{ padding: '10px 11px 11px', display: 'flex', flexDirection: 'column', gap: 9 }}>
+            <span
+              style={{
+                font: '500 10px/1.8 var(--oc-font-mono), monospace',
+                letterSpacing: '.04em',
+                color: '#F4F1EA',
+                wordSpacing: '.3em',
+                wordBreak: 'break-word',
+              }}
+            >
+              {scramble}
+            </span>
+            {/* Definite width AND height: ScramblePreview sizes its
+                player to 100% of the container, so an auto-height box
+                gives it nothing to resolve against. 4:3 matches the
+                unfolded net's own bounding box. */}
+            <div style={{ display: 'flex', width: '100%', height: 150, alignSelf: 'center' }}>
+              <ScramblePreview eventId={submission.event} scramble={scramble} visualization="2D" />
+            </div>
+          </div>
+        </div>
+      )}
       </div>
+
 
       {/* Full resolution, because reading the timer digits is the entire
           point of having these. Deliberately plain — click anywhere to
-          close, no zoom, no next/previous. A judge who needs more than
-          one frame has the video, and a gallery here would be a second
-          thing to learn for no gain. */}
+          close, no zoom, no next/previous. */}
       {zoomed && (
         <div
           role="button"
@@ -657,76 +1203,6 @@ export default function SubmissionDetailPanel({
           />
         </div>
       )}
-    </div>
-  );
-}
-
-/** One labelled row of up to three thumbnails.
- *
- *  RENDERS NOTHING AT ALL when there is nothing to show — no heading, no
- *  placeholder, no empty frame. Submissions filed before stills existed
- *  have neither field, and a submission whose image uploads all failed
- *  has an empty one; both are ordinary and neither is worth a line of
- *  chrome telling the judge something is absent. The two rows are
- *  independent, so an attempt with timer stills and no cube stills shows
- *  exactly one row. */
-function StillRow({
-  label,
-  ids,
-  onOpen,
-}: {
-  label: string;
-  ids: string[] | undefined;
-  onOpen: (publicId: string) => void;
-}) {
-  if (!ids || ids.length === 0) return null;
-  return (
-    <div style={{ marginBottom: 12 }}>
-      <span
-        style={{
-          font: '500 9px var(--oc-font-mono), monospace',
-          letterSpacing: '.12em',
-          color: '#6E6A62',
-        }}
-      >
-        {label}
-      </span>
-      {/* flexWrap so three portrait thumbs become two rows on a narrow
-          screen rather than shrinking past legibility or scrolling
-          sideways. flex-basis 0 with a min width keeps them even. */}
-      <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-        {ids.map((id) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => onOpen(id)}
-            title="Томруулах"
-            style={{
-              // FIXED HEIGHT, auto width. These frames are portrait
-              // 1080x1920: sized by width to fill a column, three of them
-              // would stand ~350px tall and two rows would push the
-              // scramble off a 900px screen on their own. Height is the
-              // dimension that has to be budgeted, so it is the one that
-              // is set, and the width follows the aspect ratio.
-              flex: '0 0 auto',
-              height: 104,
-              padding: 0,
-              border: '1px solid #2A2A31',
-              background: '#08080A',
-              cursor: 'zoom-in',
-              lineHeight: 0,
-            }}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={cloudinaryStillThumb(id)}
-              alt=""
-              loading="lazy"
-              style={{ height: '100%', width: 'auto', display: 'block' }}
-            />
-          </button>
-        ))}
-      </div>
     </div>
   );
 }

@@ -6951,9 +6951,21 @@ button.oc-rv-cell:hover {
 /* ── Inline detail panel (pushes content down, not a modal) ────────── */
 .oc-rv-panel {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  /* The approved judging mockup's three columns: evidence, navigation,
+     decision. Literal from design-mockups/Khorom Judging.dc.html. */
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr) minmax(268px, 324px);
+  /* Two rows so the scramble can sit under the decision column while the
+     video and the middle span both. */
+  grid-template-rows: minmax(0, 1fr) auto;
   border: 1px solid #1C1C21;
   background: #0D0D10;
+  /* A DEFINITE HEIGHT, which the inner columns need: the video fills the
+     left column's free space and the frames panel fills the middle's, and
+     `flex: 1` against an auto-height grid row resolves to nothing. Capped
+     in vh so the whole panel stays on screen under the grid it opens
+     from, and floored so it does not collapse on a short window. */
+  height: min(78vh, 760px);
+  min-height: 560px;
 }
 
 /* TWO COLUMNS UNTIL 1100px, not 640. The panel carries a video and a
@@ -6963,10 +6975,58 @@ button.oc-rv-cell:hover {
    source order is already video -> decisions -> jump -> stills ->
    scramble, so the stacked order needs no reordering to be the one a
    judge works top to bottom. */
+.oc-rv-media {
+  grid-column: 1;
+  grid-row: 1 / 3;
+}
+.oc-rv-main {
+  grid-column: 2;
+  grid-row: 1 / 3;
+}
+.oc-rv-side {
+  grid-column: 3;
+  grid-row: 1;
+}
+/* Same column, same background and left border as the aside above it, so
+   the two read as one panel despite being separate grid cells. */
+.oc-rv-scr {
+  grid-column: 3;
+  grid-row: 2;
+  background: #0D0D10;
+  border-left: 1px solid #1C1C21;
+  padding: 0 12px 12px;
+}
+
 @media (max-width: 1100px) {
   .oc-rv-panel {
+    /* ONE COLUMN, and the height cap goes with it. Source order is
+       video -> decisions -> phase cards -> frames -> scramble, so the
+       stack needs no reordering to be the order a judge works down; but
+       a fixed height would turn that stack into three nested scroll
+       areas, so the panel grows instead. */
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    height: auto;
+    min-height: 0;
   }
+  /* THE ORDER A JUDGE WORKS DOWN: the clip, the decision it feeds, then
+     the navigation and frames, then the scramble. It is not the source
+     order — the decision column is the third element and has to come
+     second here — so it is set explicitly rather than left to reflow. */
+  .oc-rv-media,
+  .oc-rv-main,
+  .oc-rv-side,
+  .oc-rv-scr {
+    grid-column: auto;
+    grid-row: auto;
+  }
+  .oc-rv-media { order: 1; }
+  .oc-rv-side { order: 2; overflow: visible; }
+  .oc-rv-main { order: 3; overflow: visible; }
+  .oc-rv-scr { order: 4; border-left: none; padding: 0 12px 12px; }
+  /* The video needs a real height once it is no longer filling a
+     stretched grid row. */
+  .oc-rv-media > div:first-child { min-height: 56vh; }
 }
 .oc-rv-panel-info {
   padding: 24px;

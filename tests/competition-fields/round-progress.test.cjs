@@ -193,12 +193,26 @@ console.log('\n  -- the call sites that were reading the wrong field --');
     overview.includes('РАУНД {s.competitionRound} · ОРОЛДЛОГО {s.attempt}'));
 
   const panel = src(`${ADMIN}/SubmissionDetailPanel.tsx`);
+  // The header is a row of chips since the three-column rebuild, so these
+  // read as `${submission.x}` inside a template literal rather than as a
+  // JSX child. BOTH FORMS ARE ACCEPTED: what is being pinned is which
+  // FIELD sits under which WORD, not the syntax that interpolates it.
+  // Built by concatenation, not a template literal: the second form this
+  // has to match IS a template literal, and nesting one inside another
+  // to match a literal dollar-brace is how this assertion gets quietly
+  // wrong instead of loudly wrong.
+  const says = (word, field) =>
+    panel.includes(word + ' {submission.' + field + '}') ||
+    panel.includes(word + ' ${submission.' + field + '}');
   ok('the detail panel headlines the COMPETITION round',
-    panel.includes('РАУНД {submission.competitionRound}'));
+    says('РАУНД', 'competitionRound'));
   ok('  ...and keeps the attempt index as the attempt',
-    panel.includes('Оролдлого {submission.attempt}'));
+    says('ОРОЛДЛОГО', 'attempt'));
+  // The mistake this whole block exists for: the attempt index printed
+  // under the word РАУНД, so attempt 2 of a one-round competition read
+  // "РАУНД 2".
   ok('  ...never printing the same number under both names',
-    !panel.includes('РАУНД {submission.attempt}'));
+    !says('РАУНД', 'attempt'));
 
   const grid = src(`${ADMIN}/ReviewGrid.tsx`);
   ok('the grid derives its round tabs from the event’s configuration',
