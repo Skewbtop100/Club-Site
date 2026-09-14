@@ -193,11 +193,12 @@ for (const key of ['coverStart', 'solveStart', 'solveEnd', 'cubeShown']) {
   ok('20. ...and is NEUTRAL, not clean', sev(legacy) === 'neutral', sev(legacy));
 }
 
-// ── DNF is skipped entirely ────────────────────────────────────────────
+// ── DNF: the TIME checks are skipped ───────────────────────────────────
 {
-  // A DNF with a reported time that would otherwise be impossible.
+  // A DNF with a reported time that would otherwise be impossible. Its
+  // marks are complete, so nothing fires.
   const dnf = sub({ reportedTime: 9999, isDnf: true });
-  ok('21. a DNF is skipped entirely, even when it would be impossible',
+  ok('21. a DNF skips the time checks, even when one would fire',
     codes(dnf) === '', codes(dnf));
   ok('22. ...and reads as neutral, not clean', sev(dnf) === 'neutral', sev(dnf));
   const byPenalty = sub({ reportedTime: 9999, penalty: 'DNF' });
@@ -249,6 +250,81 @@ for (const key of ['coverStart', 'solveStart', 'solveEnd', 'cubeShown']) {
   // one needs a negative gap and the other a large positive one.
   ok('30. ...and never both IMPOSSIBLE and SUSPICIOUS_GAP',
     !(got.flags.includes('SUSPICIOUS_GAP') && got.flags.includes('IMPOSSIBLE')));
+}
+
+// ── DNF: MISSING_MARKS still runs ──────────────────────────────────────
+// A DNF is a legitimate RESULT — the athlete tried and did not solve it,
+// and pressed the stage buttons either way. Missing marks are not a
+// result: the page was closed, a button was never pressed, or the
+// recorder failed. Rolling the two together hid the second inside the
+// first, which is precisely the case a judge needs when an athlete comes
+// back afterwards reporting a technical problem.
+{
+  const complete = sub({ reportedTime: 9999, isDnf: true });
+  ok('33. a DNF with complete marks raises nothing',
+    codes(complete) === '', codes(complete));
+  // NOT 'none'. The two time checks did not run, so "checked and agreed"
+  // would be a guarantee that was never made — the same reasoning that
+  // makes a legacy attempt neutral.
+  ok('34. ...and is neutral, never none',
+    sev(complete) === 'neutral', sev(complete));
+}
+{
+  for (const key of ['coverStart', 'solveStart', 'solveEnd', 'cubeShown']) {
+    const marks = { ...MARKS };
+    delete marks[key];
+    const got = checkSubmission(sub({ reportedTime: 9999, isDnf: true, marks }));
+    ok(`35. a DNF missing ${key} is flagged`,
+      got.flags.join() === 'MISSING_MARKS' && got.severity === 'red',
+      JSON.stringify(got));
+  }
+}
+{
+  // Same again via the penalty rather than the isDnf flag — a judge's DNF
+  // and the athlete's must not behave differently.
+  const marks = { ...MARKS };
+  delete marks.solveEnd;
+  const got = checkSubmission(sub({ reportedTime: 9999, penalty: 'DNF', marks }));
+  ok('36. a judge-applied DNF is flagged the same way',
+    got.flags.join() === 'MISSING_MARKS' && got.severity === 'red', JSON.stringify(got));
+}
+{
+  // A DNF whose recorder gathered nothing at all.
+  const got = checkSubmission(sub({ reportedTime: 9999, isDnf: true, marks: {} }));
+  ok('37. a DNF with an empty marks map is flagged, not excused',
+    got.flags.join() === 'MISSING_MARKS' && got.severity === 'red', JSON.stringify(got));
+}
+{
+  // Legacy is still legacy: no marks field means nothing was recorded to
+  // check, DNF or not.
+  const legacy = sub({ reportedTime: 9999, isDnf: true, marks: undefined });
+  ok('38. a DNF with NO marks field stays legacy-neutral',
+    codes(legacy) === '' && sev(legacy) === 'neutral', `${codes(legacy)} / ${sev(legacy)}`);
+}
+{
+  // THE TIME CHECKS MUST STILL NEVER FIRE ON A DNF, including on data
+  // engineered so that each of them would fire if the skip were lost —
+  // and including when MISSING_MARKS is firing alongside.
+  const impossibleShaped = sub({
+    reportedTime: 9999,
+    isDnf: true,
+    marks: { ...MARKS, solveEnd: 50_000 + 1_000 },
+  });
+  const gapShaped = sub({
+    reportedTime: 100,
+    isDnf: true,
+    marks: { ...MARKS, solveEnd: 50_000 + 120_000 },
+  });
+  ok('39. IMPOSSIBLE never fires on a DNF',
+    !checkSubmission(impossibleShaped).flags.includes('IMPOSSIBLE'),
+    codes(impossibleShaped));
+  ok('40. SUSPICIOUS_GAP never fires on a DNF',
+    !checkSubmission(gapShaped).flags.includes('SUSPICIOUS_GAP'), codes(gapShaped));
+
+  const both = { ...impossibleShaped, marks: { solveStart: 50_000, solveEnd: 51_000 } };
+  const got = checkSubmission(both);
+  ok('41. a DNF that is both time-shaped and missing marks reports only MISSING_MARKS',
+    got.flags.join() === 'MISSING_MARKS' && got.severity === 'red', JSON.stringify(got));
 }
 
 // ── Malformed data must not throw ──────────────────────────────────────

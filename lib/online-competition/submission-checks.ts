@@ -45,10 +45,13 @@ export type SubmissionFlagCode = 'IMPOSSIBLE' | 'SUSPICIOUS_GAP' | 'MISSING_MARK
 
 /** 'red'     — at least one check fired; worth opening.
  *  'none'    — checked, and everything agreed.
- *  'neutral' — NOT CHECKED, which is a third thing and not a pass. A
- *              legacy attempt (filed before marks existed) and a DNF both
- *              land here, and a judge reading 'none' as "verified" on one
- *              of those would be reading a guarantee that was never made. */
+ *  'neutral' — NOT FULLY CHECKED, which is a third thing and not a pass.
+ *              A legacy attempt (filed before marks existed) is checked
+ *              for nothing; a DNF is checked for missing marks but not for
+ *              either time agreement, since it has no time. A judge
+ *              reading 'none' as "verified" on either would be reading a
+ *              guarantee that was never made — so neither can report it.
+ *              A DNF whose marks ARE incomplete is still plain 'red'. */
 export type SubmissionCheckSeverity = 'red' | 'none' | 'neutral';
 
 export interface SubmissionChecks {
@@ -116,21 +119,39 @@ function reportedMs(sub: CheckableSubmission): number | null {
 export function checkSubmission(sub: CheckableSubmission): SubmissionChecks {
   const hasMarksField = typeof sub.marks === 'object' && sub.marks !== null;
 
-  // LEGACY: no marks field at all. Nothing to compare the reported time
-  // against, so nothing is checked and nothing is claimed.
+  // LEGACY: no marks field at all. Nothing was recorded and nothing can
+  // be checked, so nothing is claimed either way.
   if (!hasMarksField) return { flags: [], severity: 'neutral' };
-
-  // DNF: skipped entirely. There is no reported time to reconcile — the
-  // athlete is not claiming one — so every check below is meaningless
-  // rather than passing.
-  const reported = reportedMs(sub);
-  if (reported === null) return { flags: [], severity: 'neutral' };
 
   const marks = sub.marks as Record<string, unknown>;
   const flags: SubmissionFlagCode[] = [];
 
+  // ── MISSING_MARKS RUNS ON EVERY ATTEMPT, DNF INCLUDED ──
+  // A DNF is a legitimate RESULT: the athlete tried and did not solve it,
+  // and the stage buttons get pressed either way. Missing marks are not a
+  // result at all — they mean the page was closed, a button was never
+  // pressed, or the recorder failed. Those are different events with
+  // different remedies, and a judge needs to be able to tell them apart,
+  // especially when the athlete comes back afterwards reporting a
+  // technical problem.
+  //
+  // This check needs no reported time, which is exactly why it survives
+  // the DNF skip below.
   if (REQUIRED_MARKS.some((key) => markMs(marks, key) === null)) {
     flags.push('MISSING_MARKS');
+  }
+
+  // DNF: the TIME checks stop here. Both of them compare a reported time
+  // against the recorded solve window, and a DNF has no reported time to
+  // compare — the athlete is not claiming one.
+  //
+  // AND A DNF NEVER REPORTS 'none'. A clean DNF is 'neutral', not clean:
+  // two of the three checks did not run, so "checked and agreed" would be
+  // a guarantee that was never made — the same reason legacy attempts are
+  // neutral rather than passing.
+  const reported = reportedMs(sub);
+  if (reported === null) {
+    return { flags, severity: flags.length > 0 ? 'red' : 'neutral' };
   }
 
   // The recorded solve window, button-press to button-press. Both ends
