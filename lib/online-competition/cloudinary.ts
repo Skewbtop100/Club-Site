@@ -80,3 +80,38 @@ export function uploadImageToCloudinary(
 ): Promise<CloudinaryUploadResult> {
   return uploadToCloudinary('image', blob, onProgress);
 }
+
+// ── Delivery URLs for the solve stills ────────────────────────────────
+// The stills grabbed during the two closing holds (timerShotIds /
+// cubeShotIds) are stored as Cloudinary public ids, not urls — see the
+// note on those fields in types.ts. These build the delivery urls the
+// review panel renders.
+//
+// CLOUD_NAME is the same NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME the uploads
+// above use, read once at the top of this module. Reading the env var
+// again from a component would be a second place for it to be missing.
+
+/** A width-constrained thumbnail.
+ *
+ *  THE ORIGINALS ARE ~1080x1920. Six of them at full size is tens of
+ *  megabytes shipped into a grid the judge may never click, on a
+ *  dashboard that already loads a video — so the grid gets a 320px-wide
+ *  variant and the full file is fetched only on click.
+ *
+ *  c_limit, not c_fill: it scales down to fit and never crops. A crop
+ *  would be free to cut the timer face out of the frame, which is the one
+ *  thing these images exist to show. q_auto/f_auto let Cloudinary pick
+ *  the codec and quality per browser. */
+export function cloudinaryStillThumb(publicId: string): string {
+  return `https://res.cloudinary.com/${CLOUD_NAME}/image/upload/c_limit,w_320,q_auto,f_auto/${publicId}`;
+}
+
+/** The original, untransformed.
+ *
+ *  No q_auto here, deliberately. Every other image on this site can
+ *  afford re-encoding; this one is opened precisely because a judge is
+ *  trying to read digits off a phone screen inside the frame, and that is
+ *  exactly the detail a quality heuristic spends first. */
+export function cloudinaryStillFull(publicId: string): string {
+  return `https://res.cloudinary.com/${CLOUD_NAME}/image/upload/${publicId}`;
+}

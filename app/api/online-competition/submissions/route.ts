@@ -40,6 +40,20 @@ function readMarks(value: unknown): Partial<SolveMarks> | undefined {
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/** Cloudinary public ids as the review UI can trust them: strings only,
+ *  at most the three the client schedules per hold, and `undefined`
+ *  rather than [] when there is nothing — so the panel has one "no row"
+ *  condition instead of two.
+ *
+ *  Validated here for the same reason readMarks is: this route reads
+ *  through the Admin SDK, which bypasses firestore.rules, so the shape
+ *  the rules guarantee on create is not guaranteed on read. */
+function readShotIds(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const ids = value.filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
+  return ids.length > 0 ? ids.slice(0, 3) : undefined;
+}
+
 const VALID_STATUSES: OnlineSubmissionStatus[] = ['pending', 'approved', 'rejected'];
 
 // Admin-only listing for the review dashboard. Reads go through the Admin
@@ -103,6 +117,8 @@ export async function GET(req: Request) {
       // nobody can check, while a marks field that came back empty is a
       // recorder that ran and gathered nothing, which is worth flagging.
       checks: checkSubmission(data),
+      timerShotIds: readShotIds(data.timerShotIds),
+      cubeShotIds: readShotIds(data.cubeShotIds),
       createdAt: data.createdAt?.toMillis?.() ?? null,
     };
   });

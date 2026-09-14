@@ -5,6 +5,10 @@ import type { OnlineSubmissionAdminView, SolveMarks } from '@/lib/online-competi
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
 import { COVER_SECONDS, coverMidpointMs } from '@/lib/online-competition/solve-stage-timing';
 import type { SubmissionFlagCode } from '@/lib/online-competition/submission-checks';
+import {
+  cloudinaryStillFull,
+  cloudinaryStillThumb,
+} from '@/lib/online-competition/cloudinary';
 
 type ReviewAction = 'approve' | 'approve_plus2' | 'dnf';
 
@@ -165,6 +169,10 @@ export default function SubmissionDetailPanel({
   const [error, setError] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  /** The still opened at full size, or null. A public id rather than a
+   *  boolean + index, so the overlay cannot outlive the row it came from
+   *  when the panel switches to another submission. */
+  const [zoomed, setZoomed] = useState<string | null>(null);
 
   const marks = submission.marks;
 
@@ -231,6 +239,25 @@ export default function SubmissionDetailPanel({
   return (
     <div className="oc-rv-panel">
       <div style={{ padding: 16 }}>
+        {/* ── The stills, ABOVE the video ──
+            The video is 250kbps and cannot carry a legible timer face;
+            these are full-resolution frames of the same moments. Reading
+            the digits off one of these is seconds, and scrubbing a
+            90-second clip to the same frame is not — so they come first.
+            THE VIDEO IS STILL THE SOURCE OF TRUTH and is untouched below,
+            jump buttons and all: this is a faster path to the common
+            case, not a replacement for watching the solve. */}
+        <StillRow
+          label="ЦАГ"
+          ids={submission.timerShotIds}
+          onOpen={setZoomed}
+        />
+        <StillRow
+          label="ШОО"
+          ids={submission.cubeShotIds}
+          onOpen={setZoomed}
+        />
+
         <div className="aspect-[3/4] w-full overflow-hidden" style={{ border: '1px solid #2A2A31' }}>
           <video
             ref={videoRef}
@@ -527,6 +554,105 @@ export default function SubmissionDetailPanel({
             </button>
           )}
         </div>
+      </div>
+
+      {/* Full resolution, because reading the timer digits is the entire
+          point of having these. Deliberately plain — click anywhere to
+          close, no zoom, no next/previous. A judge who needs more than
+          one frame has the video, and a gallery here would be a second
+          thing to learn for no gain. */}
+      {zoomed && (
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label="Хаах"
+          onClick={() => setZoomed(null)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') setZoomed(null);
+          }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 50,
+            background: 'rgba(4,4,6,0.92)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+            cursor: 'zoom-out',
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={cloudinaryStillFull(zoomed)}
+            alt=""
+            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One labelled row of up to three thumbnails.
+ *
+ *  RENDERS NOTHING AT ALL when there is nothing to show — no heading, no
+ *  placeholder, no empty frame. Submissions filed before stills existed
+ *  have neither field, and a submission whose image uploads all failed
+ *  has an empty one; both are ordinary and neither is worth a line of
+ *  chrome telling the judge something is absent. The two rows are
+ *  independent, so an attempt with timer stills and no cube stills shows
+ *  exactly one row. */
+function StillRow({
+  label,
+  ids,
+  onOpen,
+}: {
+  label: string;
+  ids: string[] | undefined;
+  onOpen: (publicId: string) => void;
+}) {
+  if (!ids || ids.length === 0) return null;
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <span
+        style={{
+          font: '500 9px var(--oc-font-mono), monospace',
+          letterSpacing: '.12em',
+          color: '#6E6A62',
+        }}
+      >
+        {label}
+      </span>
+      {/* flexWrap so three portrait thumbs become two rows on a narrow
+          screen rather than shrinking past legibility or scrolling
+          sideways. flex-basis 0 with a min width keeps them even. */}
+      <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {ids.map((id) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => onOpen(id)}
+            title="Томруулах"
+            style={{
+              flex: '1 1 80px',
+              minWidth: 80,
+              padding: 0,
+              border: '1px solid #2A2A31',
+              background: '#08080A',
+              cursor: 'zoom-in',
+              lineHeight: 0,
+            }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={cloudinaryStillThumb(id)}
+              alt=""
+              loading="lazy"
+              style={{ width: '100%', height: 'auto', display: 'block' }}
+            />
+          </button>
+        ))}
       </div>
     </div>
   );

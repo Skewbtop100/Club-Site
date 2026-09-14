@@ -854,6 +854,12 @@ export interface OnlineSubmissionAdminView {
    *  which attempts a judge looks at FIRST, and never which attempts a
    *  judge sees. */
   checks: SubmissionChecks;
+  /** Cloudinary public ids for the full-resolution frames grabbed during
+   *  the two closing holds. Absent on every submission filed before the
+   *  stills existed, and legitimately empty when every upload failed —
+   *  the review panel renders nothing at all for an empty row. */
+  timerShotIds?: string[];
+  cubeShotIds?: string[];
   createdAt: number | null;
 }
 
