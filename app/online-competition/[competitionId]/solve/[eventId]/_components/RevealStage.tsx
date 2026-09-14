@@ -2,8 +2,10 @@
 
 import { useEffect, useState, type CSSProperties } from 'react';
 import { splitScrambleIntoChunks } from '../_lib/scrambleChunks';
-
-const GROUP_DISPLAY_MS = 5000;
+// Unchanged at 5000, moved to a shared module: the admin review flow
+// computes where the cover stage starts from the reveal's length, so this
+// number now has a reader outside the solve flow and must not drift.
+import { GROUP_DISPLAY_MS } from '@/lib/online-competition/solve-stage-timing';
 
 function groupLabel(groups: string[], index: number): string {
   const movesPerGroup = groups.map((g) => g.split(' ').filter(Boolean).length);

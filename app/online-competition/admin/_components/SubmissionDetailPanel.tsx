@@ -3,8 +3,20 @@
 import { useRef, useState } from 'react';
 import type { OnlineSubmissionAdminView, SolveMarks } from '@/lib/online-competition/types';
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
+import { coverMidpointMs } from '@/lib/online-competition/solve-stage-timing';
 
 type ReviewAction = 'approve' | 'approve_plus2' | 'dnf';
+
+/** How far before `solveEnd` ТӨГСГӨЛ lands — far enough back to see the
+ *  last few moves land rather than the cube already finished and still. */
+const BEFORE_END_MS = 5000;
+
+/** How far into a hold the two hold buttons land. A mark names the
+ *  instant a button was PRESSED, which is the instant a stage BEGAN, and
+ *  at +0 the athlete is still moving their hands: the timer (or the cube)
+ *  is not yet up and steady. Three seconds into an eight-second hold is
+ *  the settled middle of it. */
+const INTO_HOLD_MS = 3000;
 
 // ── Jumping to the moments a judge actually watches ────────────────────
 // The clip runs about ninety seconds and four of them matter: the
@@ -23,14 +35,73 @@ type ReviewAction = 'approve' | 'approve_plus2' | 'dnf';
 // shown deliberately. `solveStart` takes no offset because it is the
 // opposite kind of moment — not a hold to settle into but an act to
 // catch, and the interesting frame is the one where the cover comes off.
-const JUMPS: { label: string; key: keyof SolveMarks | null; offsetMs: number }[] = [
-  // No key at all: the top of the file is where it is regardless of what
-  // was recorded, so this one needs nothing from `marks` to be correct.
-  { label: 'ЭХЛЭЛ', key: null, offsetMs: 0 },
-  { label: 'ХОЛИЛТ', key: 'scrambleShown', offsetMs: 3000 },
-  { label: 'ЭВЛҮҮЛЭХ', key: 'solveStart', offsetMs: 0 },
-  { label: 'ЦАГ', key: 'solveEnd', offsetMs: 3000 },
-  { label: 'ШОО', key: 'cubeShown', offsetMs: 3000 },
+/** One mark, or null when it was never recorded. Null is what disables a
+ *  button — the guard that keeps a missing mark from becoming a NaN seek. */
+function at(marks: Partial<SolveMarks> | undefined, key: keyof SolveMarks): number | null {
+  const ms = marks?.[key];
+  return typeof ms === 'number' && Number.isFinite(ms) ? ms : null;
+}
+
+const JUMPS: {
+  label: string;
+  /** False only for ЭХЛЭЛ, which is correct whatever was recorded. Used
+   *  to tell "this submission has no marks" from "this one button has
+   *  nothing to aim at". */
+  needsMarks: boolean;
+  resolve: (marks: Partial<SolveMarks> | undefined, scramble: string | null) => number | null;
+}[] = [
+  { label: 'ЭХЛЭЛ', needsMarks: false, resolve: () => 0 },
+
+  // THE MIDDLE OF THE COVER STAGE, where the athlete is holding the
+  // scrambled cube steady in the orientation a judge verifies.
+  //
+  // It is reached by adding the reveal's length to `scrambleShown`, and
+  // THE REVEAL'S LENGTH IS NOT A CONSTANT: it plays the scramble one
+  // chunk at a time, so it runs ten seconds for a 2x2, twenty for a 3x3
+  // and forty-five for a 4x4. Hence the scramble itself as an input —
+  // without it, this button would be right for 3x3 and land mid-scramble
+  // on a 4x4 and past the cover entirely on a 2x2. See coverMidpointMs.
+  {
+    label: 'КОВЕР',
+    needsMarks: true,
+    resolve: (marks, scramble) => {
+      const shown = at(marks, 'scrambleShown');
+      if (shown === null || scramble === null) return null;
+      return coverMidpointMs(shown, scramble);
+    },
+  },
+
+  // No offset: not a hold to settle into but an act to catch, and the
+  // frame that matters is the one where the cover comes off.
+  { label: 'ЭВЛҮҮЛЭХ', needsMarks: true, resolve: (m) => at(m, 'solveStart') },
+
+  // JUST BEFORE THE SOLVE ENDS — the cube being completed, which is the
+  // thing a judge is actually checking.
+  //
+  // Backwards from a mark, so it is the one target that can land before
+  // the stage it belongs to. A solve faster than BEFORE_END_MS would seek
+  // back past its own start, into the cover stage, and show a scrambled
+  // cube at the moment labelled "the finish". Clamped to solveStart.
+  {
+    label: 'ТӨГСГӨЛ',
+    needsMarks: true,
+    resolve: (m) => {
+      const end = at(m, 'solveEnd');
+      if (end === null) return null;
+      const start = at(m, 'solveStart');
+      const target = end - BEFORE_END_MS;
+      return start !== null && target < start ? start : target;
+    },
+  },
+
+  { label: 'ЦАГ', needsMarks: true, resolve: (m) => {
+    const end = at(m, 'solveEnd');
+    return end === null ? null : end + INTO_HOLD_MS;
+  } },
+  { label: 'ШОО', needsMarks: true, resolve: (m) => {
+    const shown = at(m, 'cubeShown');
+    return shown === null ? null : shown + INTO_HOLD_MS;
+  } },
 ];
 
 /** Inline attempt-review panel — the video treatment and the three
@@ -43,6 +114,7 @@ export default function SubmissionDetailPanel({
   submission,
   athleteName,
   groupLabel,
+  scramble,
   onClose,
   onReview,
   onDelete,
@@ -53,6 +125,12 @@ export default function SubmissionDetailPanel({
    *  or null when this competition has no imported scrambles for the
    *  round or the athlete isn't in a group. */
   groupLabel: string | null;
+  /** The scramble this athlete was shown for this attempt, or null when
+   *  it cannot be established (no imported scrambles, no group, or a
+   *  short scramble set). Used ONLY to work out how long the reveal ran,
+   *  which is what says where the cover stage starts — see the КОВЕР
+   *  entry in JUMPS. Nothing displays it. */
+  scramble: string | null;
   onClose: () => void;
   onReview: (submissionId: string, action: ReviewAction) => Promise<void>;
   onDelete: (submissionId: string) => Promise<void>;
@@ -64,21 +142,16 @@ export default function SubmissionDetailPanel({
 
   const marks = submission.marks;
 
-  /** Where this button should land, in MILLISECONDS, or null when the
-   *  mark it depends on was never recorded. Null is what disables the
-   *  button — the one guard that keeps a missing mark from becoming a
-   *  NaN seek. */
+  /** Where this button should land, in MILLISECONDS, or null when what it
+   *  depends on was never recorded. */
   function targetMs(jump: (typeof JUMPS)[number]): number | null {
-    if (jump.key === null) return jump.offsetMs;
-    const at = marks?.[jump.key];
-    if (typeof at !== 'number' || !Number.isFinite(at)) return null;
-    return at + jump.offsetMs;
+    return jump.resolve(marks, scramble);
   }
 
   // Nothing usable at all: no field (every submission from before marks
   // existed), or a map that came back empty. The API already collapses
   // both to undefined, so this is one condition rather than three.
-  const noMarks = !marks || JUMPS.every((j) => j.key !== null && targetMs(j) === null);
+  const noMarks = !marks || JUMPS.every((j) => !j.needsMarks || targetMs(j) === null);
 
   /** Seeks and plays. MILLISECONDS IN, seconds out — currentTime is in
    *  seconds and handing it a millisecond figure would seek ninety
@@ -166,7 +239,7 @@ export default function SubmissionDetailPanel({
             Энэ бичлэгт үе шатын цаг бүртгэгдээгүй
           </p>
         )}
-        {/* flexWrap, so five labels become two rows on a narrow screen
+        {/* flexWrap, so six labels become two rows on a narrow screen
             rather than a horizontal scrollbar under the video. Each
             button may grow but starts from its content width, which keeps
             the wrap points at sensible places instead of stretching one

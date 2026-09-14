@@ -275,6 +275,29 @@ export default function ReviewGrid() {
     return data?.groups[index]?.label ?? null;
   }, [selectedSubmission, eventId, round, scrambles]);
 
+  /** The exact scramble string this athlete was shown for THIS attempt,
+   *  or null when it cannot be established.
+   *
+   *  The detail panel needs it for one reason only: the scramble reveal
+   *  runs five seconds per chunk and the chunk count follows the
+   *  scramble's length, so the length of the scramble is what says when
+   *  the cover stage — the moment the КОВЕР button jumps to — begins. A
+   *  2x2 reveal is ten seconds and a 4x4 reveal is forty-five.
+   *
+   *  `scrambles` is indexed by ATTEMPT, so this uses `attempt - 1` and not
+   *  the competition round; a set with fewer scrambles than attempts (a
+   *  short import) yields undefined and the panel disables that one
+   *  button rather than guessing. */
+  const selectedScramble = useMemo(() => {
+    if (!selectedSubmission || !eventId || !scrambles) return null;
+    const key = roundKey(eventId, round);
+    const index = scrambles.assignments[key]?.[selectedSubmission.uid];
+    if (typeof index !== 'number') return null;
+    const data = scrambles.scrambleData.find((d) => d.eventId === eventId && d.round === round);
+    const text = data?.groups[index]?.scrambles[selectedSubmission.attempt - 1];
+    return typeof text === 'string' && text.trim().length > 0 ? text : null;
+  }, [selectedSubmission, eventId, round, scrambles]);
+
   /** Optimistic local patch, matching the pattern the old dashboard used. */
   const patch = useCallback((id: string, next: Partial<OnlineSubmissionAdminView>) => {
     setSubmissions((prev) => (prev ?? []).map((s) => (s.id === id ? { ...s, ...next } : s)));
@@ -611,6 +634,7 @@ export default function ReviewGrid() {
           submission={selectedSubmission}
           athleteName={selectedRow?.name ?? selectedSubmission.uid.slice(0, 10)}
           groupLabel={selectedGroupLabel}
+          scramble={selectedScramble}
           onClose={() => setSelected(null)}
           onReview={review}
           onDelete={remove}

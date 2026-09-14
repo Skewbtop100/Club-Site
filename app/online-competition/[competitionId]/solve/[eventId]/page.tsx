@@ -22,6 +22,7 @@ import {
 } from '@/lib/online-competition/run-resume';
 import { uploadImageToCloudinary, uploadVideoToCloudinary } from '@/lib/online-competition/cloudinary';
 import type { OnlineCompetition, SolveMarks } from '@/lib/online-competition/types';
+import { COVER_SECONDS } from '@/lib/online-competition/solve-stage-timing';
 import { useSolveRecorder } from './_lib/useSolveRecorder';
 import type { AttemptTime } from '@/lib/online-competition/ao5';
 import {
@@ -181,21 +182,14 @@ const MIN_RECORDING_BYTES = 1024;
  *  CameraHoldStage, which builds its sentence from the same number. */
 const HOLD_SECONDS = 8;
 
-/** THE COVER, which is a different kind of hold and now says so.
- *
- *  It shared HOLD_SECONDS when all three were the same job — hold still
- *  in front of the camera while a judge reads something off the video.
- *  The cover is not that. It asks the athlete to READ an instruction and
- *  then DO it: cube under the cover, green to the camera, white up. Eight
- *  seconds was the reading time and the doing time together, so the doing
- *  started late and the orientation a judge checks was being settled in
- *  the last second or two of it.
- *
- *  Separate constants rather than one with an exception, because the two
- *  numbers answer different questions: HOLD_SECONDS is "how long must a
- *  judge see this for", and this is "how long does the athlete need". A
- *  change to either must not silently move the other. */
-const COVER_SECONDS = 20;
+/* THE COVER's duration is no longer declared here. It moved, unchanged
+   at 20, to lib/online-competition/solve-stage-timing.ts (imported at the
+   top of this file) because the admin review flow now computes seek
+   positions from it: a judge's "КОВЕР" button jumps to the middle of this
+   stage, so the number has a second reader and must not be able to drift
+   between them. The note on why it is separate from HOLD_SECONDS moved
+   with it. Everything about how this page uses it is the same —
+   <CoverStage seconds={COVER_SECONDS} />, below. */
 
 /* WCA's fifteen seconds are no longer a stage duration and have no
    constant here. Nothing advances when they are reached — the window is

@@ -48,6 +48,7 @@ const theme = fs.readFileSync(path.join(ROOT, 'app/online-competition/theme.css'
 const bar = fs.readFileSync(path.join(ROOT, SOLVE, '_components/SolveHeader.tsx'), 'utf8');
 const summary = fs.readFileSync(path.join(ROOT, SOLVE, '_components/SummaryStage.tsx'), 'utf8');
 const data = fs.readFileSync(path.join(ROOT, 'lib/online-competition/data.ts'), 'utf8');
+const timing = fs.readFileSync(path.join(ROOT, 'lib/online-competition/solve-stage-timing.ts'), 'utf8');
 const components = fs
   .readdirSync(path.join(ROOT, SOLVE, '_components'))
   .filter((f) => f.endsWith('.tsx'));
@@ -524,9 +525,30 @@ console.log('\n  -- 7. durations and markers --');
   ok('the three 8-second holds share a single duration constant',
     page.includes('const HOLD_SECONDS = 8;') &&
       (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3);
+  // COVER_SECONDS now lives in lib/online-competition/solve-stage-timing
+  // rather than in the page. It MOVED, it did not change: the admin
+  // review flow computes a seek position from it (the judge's КОВЕР
+  // button lands mid-cover), so a second reader needs the same number and
+  // two copies of it would be exactly the silent drift this block exists
+  // to catch. Both halves are still pinned — the value, and the fact that
+  // CoverStage is what receives it.
   ok('  ...and the cover has a longer one of its own',
-    page.includes('const COVER_SECONDS = 20;') &&
+    timing.includes('export const COVER_SECONDS = 20;') &&
       /<CoverStage\s*\n\s*seconds=\{COVER_SECONDS\}/.test(page));
+  ok('  ...imported by the page rather than redeclared in it',
+    /import \{ COVER_SECONDS \} from '@\/lib\/online-competition\/solve-stage-timing'/.test(page) &&
+      !page.includes('const COVER_SECONDS ='));
+  const revealSrc = fs.readFileSync(path.join(ROOT, SOLVE, '_components/RevealStage.tsx'), 'utf8');
+  // The reveal's chunk clock is shared for the same reason: the cover
+  // stage starts when the reveal ends, so the review flow needs this to
+  // know where the cover is, and the reveal's length is NOT fixed —
+  // chunks * GROUP_DISPLAY_MS, which differs per event.
+  ok('  ...and the reveal chunk clock is shared the same way, not copied',
+    timing.includes('export const GROUP_DISPLAY_MS = 5000;') &&
+      !revealSrc.includes('const GROUP_DISPLAY_MS =') &&
+      /import \{ GROUP_DISPLAY_MS \} from '@\/lib\/online-competition\/solve-stage-timing'/.test(revealSrc));
+  ok('  ...with the reveal length derived from the scramble, never assumed',
+    /splitScrambleIntoChunks\(scramble\)\.length \* GROUP_DISPLAY_MS/.test(timing));
   ok('  ...with no bare number at any call site',
     !/seconds=\{\d/.test(page));
   // THE DRIFT THE REFACTOR DID NOT FIX: the sentence names the duration,
