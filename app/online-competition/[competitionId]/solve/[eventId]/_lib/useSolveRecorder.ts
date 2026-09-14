@@ -128,6 +128,22 @@ const RECORDING_MAX_EDGE = 720;
  *  freeze the clip on its last frame. A timer targets 30 directly and
  *  keeps running (clamped) when the page is backgrounded. */
 const DRAW_FPS = 30;
+
+/** How long startRecording will wait for the frame source to decode its
+ *  first frame before giving up and starting anyway.
+ *
+ *  THERE MUST BE A CEILING. The wait exists because a canvas stream emits
+ *  nothing until the canvas is drawn, so starting the recorder before the
+ *  first draw makes the clip's t=0 later than recordingT0 and every seek
+ *  position wrong by the difference — a measured run lost six seconds off
+ *  the head this way. But an unbounded wait would trade that for
+ *  something worse: an attempt that never begins on a device whose
+ *  decoder is slow or wedged. Two seconds is far longer than a warm
+ *  camera needs and comfortably inside the 8-second hold that zeroDisplay
+ *  is already showing, so the athlete never reaches the next stage
+ *  waiting for it. On timeout the recorder starts regardless and the gap
+ *  is logged. */
+const FIRST_FRAME_TIMEOUT_MS = 2000;
 // Raised from 250k with the frame size. The old value was set against a
 // 640x480 clip and, at 1080p, was being ignored outright — the encoder
 // delivered 611kbps when asked for 250. A hint pitched below what the
@@ -397,22 +413,33 @@ export function useSolveRecorder() {
     return null;
   }, []);
 
-  /** Sizes the canvas, starts the draw loop and hands back a stream of it.
+  /** Sizes the canvas, primes it with a frame, and hands back a stream.
+   *
+   *  THE PRIMING DRAW IS THE WHOLE POINT OF THIS BEING ASYNC. A canvas
+   *  stream produces no frame until the canvas is drawn to, and
+   *  MediaRecorder timestamps its file from the first frame it receives —
+   *  so a recorder started against a blank canvas produces a clip whose
+   *  t=0 is whenever the first draw eventually happened. recordingT0,
+   *  meanwhile, is set at onstart. The two clocks drifted apart by
+   *  however long that took, and every mark — every jump button — was
+   *  wrong by the same amount, pointing PAST the moment it named.
+   *
+   *  So: wait for the source, draw once, and only then create the stream.
+   *  By the time the caller starts the recorder there is already a frame
+   *  waiting, and the two clocks refer to the same instant.
    *
    *  THE LONG EDGE BECOMES RECORDING_MAX_EDGE AND THE RATIO IS KEPT
    *  EXACTLY. One scale factor is applied to both dimensions, so
    *  1080x1920 becomes 405x720 and 640x480 becomes 720x540. drawImage
    *  fills the whole canvas from the whole frame, which means there is
-   *  nothing to letterbox, nothing to crop and nothing to pad — the only
-   *  way to lose part of the frame here would be to compute two
-   *  independent scales, which is exactly what constraining two
-   *  dimensions did.
+   *  nothing to letterbox, nothing to crop and nothing to pad.
    *
    *  Returns null rather than throwing if anything is missing, so
    *  startRecording can fall back to the raw track: a clip at the wrong
    *  size is worth having and no clip is not. */
-  const startCanvasPipeline = useCallback((): MediaStream | null => {
+  const startCanvasPipeline = useCallback(async (): Promise<MediaStream | null> => {
     try {
+      const calledAt = performance.now();
       const el = drawElRef.current;
       const size = sourceSize();
       if (!el || !size) return null;
@@ -432,22 +459,61 @@ export function useSolveRecorder() {
         scale: Math.round(scale * 1000) / 1000,
       });
 
-      stopDrawLoop();
-      drawTimerRef.current = setInterval(() => {
-        // readyState < 2 is a decoder that has not produced a frame yet.
-        // Skipping leaves the PREVIOUS canvas contents in place, which
-        // captureStream re-emits — a repeated frame, never a black one.
-        if (el.readyState < 2) return;
+      /** One copy of the camera frame onto the canvas. Reports whether it
+       *  actually drew, so the priming call below can tell a real frame
+       *  from a skipped tick. readyState < 2 is a decoder that has not
+       *  produced a frame yet; skipping leaves the previous contents in
+       *  place, which captureStream re-emits — a repeated frame, never a
+       *  black one. */
+      const drawOnce = (): boolean => {
+        if (el.readyState < 2) return false;
         try {
           ctx.drawImage(el, 0, 0, canvas.width, canvas.height);
+          return true;
         } catch {
           // A transient decode error must not kill the loop; the next
           // tick is 33ms away.
+          return false;
         }
-      }, 1000 / DRAW_FPS);
+      };
+
+      // ── Wait for the source, bounded ──
+      // Polled rather than driven by a 'loadeddata' listener because the
+      // element may ALREADY be past that event — on attempts 2-5 it has
+      // been playing since the lobby — and a listener for an event that
+      // has already fired never resolves.
+      const deadline = calledAt + FIRST_FRAME_TIMEOUT_MS;
+      while (el.readyState < 2 && performance.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 16));
+      }
+
+      // PRIMED BEFORE captureStream, and therefore before the caller
+      // starts the recorder. This is the line that makes the two clocks
+      // agree; moving it after either of them reopens the gap.
+      const primed = drawOnce();
+      const gapMs = Math.round(performance.now() - calledAt);
+      diag('4 first-frame gap ms (startRecording -> first drawImage)', {
+        gapMs,
+        primed,
+        readyState: el.readyState,
+        timedOut: !primed,
+      });
+      if (!primed) {
+        // Started anyway, deliberately: a clip with a short head gap is
+        // worth far more than an attempt that never begins. The gap is in
+        // the log above and the loop will start producing frames the
+        // moment the decoder does.
+        console.warn(
+          `[khorom] recording started before the first frame (${gapMs}ms, readyState ${el.readyState})`,
+        );
+      }
 
       const stream = canvas.captureStream(DRAW_FPS);
       diag('3 canvas stream track', stream.getVideoTracks()[0]?.getSettings());
+
+      stopDrawLoop();
+      drawTimerRef.current = setInterval(drawOnce, 1000 / DRAW_FPS);
+
       return stream;
     } catch (e) {
       console.warn('Could not start the canvas recording pipeline:', e);
@@ -537,13 +603,13 @@ export function useSolveRecorder() {
    *  orientationHold -> readyPrompt -> rec as one continuous clip.
    *  Assumes requestCamera() already succeeded; returns false (and does
    *  nothing) if there's no stream to record from. */
-  const startRecording = useCallback((): boolean => {
+  const startRecording = useCallback(async (): Promise<boolean> => {
     // THE CANVAS STREAM, not the camera track. The canvas is the only
     // place the frame size can actually be chosen on this hardware — see
     // the header. Falls back to the full-size camera stream if the
     // pipeline could not start, because a clip at the wrong size is worth
     // having and no clip is not.
-    const canvasStream = startCanvasPipeline();
+    const canvasStream = await startCanvasPipeline();
     if (canvasStream) recordingStreamRef.current = canvasStream;
     const stream = canvasStream ?? streamRef.current;
     if (!stream) {

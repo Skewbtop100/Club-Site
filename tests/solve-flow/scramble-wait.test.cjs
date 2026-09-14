@@ -91,9 +91,25 @@ console.log('\n  -- the run cannot start recording without a scramble --');
     intoZero.join(' | '));
   ok('  ...one being the intro finishing WITH a scramble in hand',
     /<AttemptIntroStage[\s\S]{0,200}?onDone=\{\(\) => setStage\(scramble \? 'zeroDisplay' : 'scrambleWait'\)\}/.test(page));
+  // Either shape of the stage check — the effect became a guard clause
+  // when startRecording turned async — so long as zeroDisplay is what
+  // starts the clip and the intro never is.
   ok('  ...and the clip still begins on zeroDisplay, not on the intro',
-    /useEffect\(\(\) => \{\s*\n\s*if \(stage === 'zeroDisplay'\) \{[\s\S]{0,400}?startRecording\(\)/.test(page) &&
+    /useEffect\(\(\) => \{[\s\S]{0,240}?stage (===|!==) 'zeroDisplay'[\s\S]{0,1200}?startRecording\(\)/.test(page) &&
       !/stage === 'attemptIntro'[\s\S]{0,200}?startRecording/.test(page));
+  // AWAITED, NOT MERELY CALLED. startRecording returns a promise now, and
+  // a promise is truthy — `if (!recorder.startRecording())` still
+  // compiles and silently never fires, turning the recording-failure
+  // branch into dead code with no type error to show for it.
+  ok('  ...with the promise awaited, so the failure branch stays live',
+    (() => {
+      // Code only. The effect carries a comment quoting the discarded-
+      // promise form precisely to warn against it, and a raw scan would
+      // be tripped by the warning rather than by the mistake.
+      const code = page.replace(/^[ \t]*\/\/.*$/gm, '');
+      return /const started = await recorder\.startRecording\(\);/.test(code) &&
+        !/if \(!recorder\.startRecording\(\)\)/.test(code);
+    })());
   // The other. It lands straight on the recording rather than replaying
   // the intro: reaching this screen MEANS the intro's five seconds have
   // already been spent, so a second beat would be one the athlete has

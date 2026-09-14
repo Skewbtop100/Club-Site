@@ -816,13 +816,33 @@ export default function SolvePage() {
   // press that begins an attempt no longer has to know anything about
   // it.
   useEffect(() => {
-    if (stage === 'zeroDisplay') {
-      // The return value used to be discarded. It is false when the
-      // stream is gone — phone locked, camera taken by another app,
-      // permission revoked — and the attempt then ran to completion and
-      // uploaded a 0-byte video that only a judge ever discovered.
-      if (!recorder.startRecording()) setRecordingFailure('start');
-    }
+    if (stage !== 'zeroDisplay') return;
+    // AWAITED, AND THAT IS LOAD-BEARING. startRecording became async so it
+    // can put a frame on the canvas before starting the recorder — a
+    // canvas stream emits nothing until it is drawn, and a recorder
+    // started before that produces a clip whose t=0 is later than
+    // recordingT0, which silently shifts every mark and every jump.
+    //
+    // `if (!recorder.startRecording())` still COMPILES against a promise
+    // — a promise is truthy, so the negation is always false — which
+    // would have turned the failure branch below into dead code without
+    // a single type error. The await is what keeps it reachable.
+    let cancelled = false;
+    void (async () => {
+      // False when the stream is gone — phone locked, camera taken by
+      // another app, permission revoked — and the attempt would otherwise
+      // run to completion and upload a 0-byte video that only a judge
+      // ever discovered.
+      const started = await recorder.startRecording();
+      // The run may have left zeroDisplay while we waited (the athlete
+      // navigated away, or the camera was released). Reporting a failure
+      // into a stage that no longer exists would strand them on the
+      // recording-failed screen for an attempt they had abandoned.
+      if (!cancelled && !started) setRecordingFailure('start');
+    })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage]);
 

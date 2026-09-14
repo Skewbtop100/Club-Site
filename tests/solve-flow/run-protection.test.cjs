@@ -32,6 +32,19 @@ function stripComments(src) {
 const ROOT = path.join(__dirname, '..', '..');
 const SOLVE = 'app/online-competition/[competitionId]/solve/[eventId]';
 const page = fs.readFileSync(path.join(ROOT, SOLVE, 'page.tsx'), 'utf8');
+
+/** THE RECORDING BOUNDARY, expressed once and asserted from six places.
+ *
+ *  Every section below re-checks that the clip starts at zeroDisplay,
+ *  because every section below could move it. They used to each match the
+ *  literal `if (stage === 'zeroDisplay') {`, which stopped being the shape
+ *  of that effect when startRecording became async and it was rewritten to
+ *  a guard clause — six failures for one deliberate change, and six
+ *  regexes to re-derive. The guarantee is what is pinned now: zeroDisplay
+ *  is the stage that starts the recording, in whichever shape the effect
+ *  happens to be written. */
+const STARTS_AT_ZERO_DISPLAY =
+  /useEffect\(\(\) => \{[\s\S]{0,240}?stage (===|!==) 'zeroDisplay'[\s\S]{0,1200}?startRecording\(\)/;
 const failed = fs.readFileSync(path.join(ROOT, SOLVE, '_components/RecordingFailedStage.tsx'), 'utf8');
 const between = fs.readFileSync(path.join(ROOT, SOLVE, '_components/BetweenStage.tsx'), 'utf8');
 const lobby = fs.readFileSync(path.join(ROOT, SOLVE, '_components/LobbyStage.tsx'), 'utf8');
@@ -147,8 +160,14 @@ console.log('\n  -- 1. leaving a run in progress --');
 
 console.log('\n  -- 2. an empty recording is not accepted --');
 {
+  // AWAITED NOW. startRecording returns a promise since it primes the
+  // canvas before starting, and a promise is truthy — the old
+  // `if (!recorder.startRecording())` still compiles and silently never
+  // fires, which would turn this failure branch into dead code without a
+  // single type error.
   ok('startRecording’s return value decides whether the attempt proceeds',
-    page.includes("if (!recorder.startRecording()) setRecordingFailure('start');"));
+    /const started = await recorder\.startRecording\(\);/.test(page) &&
+      /if \(!cancelled && !started\) setRecordingFailure\('start'\);/.test(page));
   ok('a failure moves the run to its own stage, not onward',
     page.includes("if (recordingFailure !== null) setStage('recordingFailed');"));
   // Started, ran, and produced an empty container anyway. The check moved
@@ -618,7 +637,7 @@ console.log('\n  -- 7. durations and markers --');
 
   // NOT IN THIS DIFF.
   ok('the recording boundary is untouched: starts at zeroDisplay',
-    page.includes("if (stage === 'zeroDisplay') {"));
+    STARTS_AT_ZERO_DISPLAY.test(page));
   ok('  ...and still stops after the closing hold, not at the solve',
     ENDS_SOLVE_AT_FINISH_HOLD.test(page) &&
       page.includes('async function finishRecording'));
@@ -717,7 +736,7 @@ console.log('\n  -- 6. the recording stops AFTER the cube check --');
 
   // NOT IN THIS DIFF. Each is its own changeset; a short video afterwards
   // must have exactly one suspect.
-  ok('the recording still starts at the opening hold', page.includes("if (stage === 'zeroDisplay') {"));
+  ok('the recording still starts at the opening hold', STARTS_AT_ZERO_DISPLAY.test(page));
   ok('no instructions stage was added', !page.includes("'instructions'"));
   ok('resume is untouched: a complete run still lands on the summary',
     /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page) && !/plan[\s\S]{0,400}finishHold/.test(page));
@@ -786,7 +805,7 @@ console.log('\n  -- 8. the competition environment --');
   // NOT IN THIS DIFF: layout only.
   ok('the run has fifteen stages', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 15);
   ok('the recording boundary is untouched',
-    page.includes("if (stage === 'zeroDisplay') {") &&
+    STARTS_AT_ZERO_DISPLAY.test(page) &&
       ENDS_SOLVE_AT_FINISH_HOLD.test(page) &&
       page.includes('async function finishRecording'));
   ok('the 8-second holds are untouched: three of them, all 8',
@@ -1114,7 +1133,7 @@ console.log('\n  -- 9. the lobby and the between screen --');
   // header of useSolveRecorder before changing them back.
   ok('  ...and MediaRecorder records the downscaled canvas stream',
     /new MediaRecorder\(stream, \{/.test(recorderCode) &&
-      /const canvasStream = startCanvasPipeline\(\);/.test(recorderCode) &&
+      /const canvasStream = await startCanvasPipeline\(\);/.test(recorderCode) &&
       /const stream = canvasStream \?\? streamRef\.current;/.test(recorderCode) &&
       /canvas\.captureStream\(DRAW_FPS\)/.test(recorderCode));
   // THE LONG EDGE IS THE CAP AND ONE SCALE IS APPLIED TO BOTH SIDES.
@@ -1138,6 +1157,48 @@ console.log('\n  -- 9. the lobby and the between screen --');
   // right and only the file would quietly grow.
   ok('  ...with the bitrate cap actually handed to MediaRecorder',
     /videoBitsPerSecond: VIDEO_BITS_PER_SECOND/.test(recorderCode));
+  // ── THE TWO CLOCKS MUST REFER TO THE SAME INSTANT ──
+  // A canvas stream emits nothing until the canvas is drawn, and
+  // MediaRecorder timestamps its file from the FIRST FRAME it receives.
+  // recordingT0, meanwhile, is set at onstart. Start the recorder against
+  // a blank canvas and the file's t=0 lands wherever the first draw
+  // eventually happened — a measured run lost six seconds off the head,
+  // and every mark pointed that far PAST the moment it named. The
+  // consistency checks never noticed, because they compare differences.
+  //
+  // So the priming draw must come BEFORE captureStream and before the
+  // recorder starts. Source order is the assertion: there is no way to
+  // observe this at runtime from here, and it is exactly the kind of
+  // line someone moves while tidying.
+  ok('  ...priming the canvas before captureStream and before start',
+    (() => {
+      const pipe = recorderCode.slice(
+        recorderCode.indexOf('const startCanvasPipeline'),
+        recorderCode.indexOf('const requestCamera'),
+      );
+      const primed = pipe.indexOf('const primed = drawOnce();');
+      const capture = pipe.indexOf('canvas.captureStream(');
+      const loop = pipe.indexOf('setInterval(drawOnce');
+      // Primed, then the stream, then the repeating loop.
+      return primed > -1 && capture > primed && loop > capture &&
+        // and the caller waits for all of it before starting.
+        /const canvasStream = await startCanvasPipeline\(\);/.test(recorderCode) &&
+        recorderCode.indexOf('await startCanvasPipeline') <
+          recorderCode.indexOf('recorder.start()');
+    })());
+  // THE WAIT IS BOUNDED. Waiting for a decoder is right; waiting forever
+  // is an attempt that never begins on a device whose camera is slow.
+  // The ceiling has to be a real number and the loop has to read it.
+  ok('  ...with the wait for that frame bounded by a deadline',
+    /const FIRST_FRAME_TIMEOUT_MS = \d+;/.test(recorderCode) &&
+      /const deadline = calledAt \+ FIRST_FRAME_TIMEOUT_MS;/.test(recorderCode) &&
+      /while \(el\.readyState < 2 && performance\.now\(\) < deadline\)/.test(recorderCode));
+  // recordingT0 STAYS IN onstart. The fix was to make the clocks
+  // coincide, not to redefine one — moving it to the first draw would
+  // silently give new submissions' marks a different meaning from every
+  // one already filed, with nothing on the document to tell them apart.
+  ok('  ...without redefining what a mark is measured from',
+    /recorder\.onstart = \(\) => \{\s*recordingT0\.current = performance\.now\(\);/.test(recorderCode));
   // THE DRAW LOOP IS TORN DOWN ON ALL THREE EXIT PATHS. An interval that
   // outlives its recording keeps copying camera frames into a canvas
   // nobody reads, for as long as the page is open — invisible to the
@@ -1605,7 +1666,7 @@ console.log('\n  -- 10. the mockup restyle --');
 
   // ── WHAT MUST NOT MOVE ──
   ok('the recording boundary did not move',
-    page.includes("if (stage === 'zeroDisplay') {") &&
+    STARTS_AT_ZERO_DISPLAY.test(page) &&
       ENDS_SOLVE_AT_FINISH_HOLD.test(page) &&
       page.includes('async function finishRecording'));
   ok('the hold durations did not move',
@@ -1688,7 +1749,7 @@ console.log('\n  -- 11. the inspection --');
     !theme.includes('oc-solve-count') && !theme.includes('oc-solve-goflash'));
 
   // ── ALL THREE ARE INSIDE THE RECORDING ──
-  ok('the recording still starts at the opening hold', page.includes("if (stage === 'zeroDisplay') {"));
+  ok('the recording still starts at the opening hold', STARTS_AT_ZERO_DISPLAY.test(page));
   ok('  ...and still stops after the closing hold, nowhere else',
     ENDS_SOLVE_AT_FINISH_HOLD.test(page) &&
       /async function finishRecording[\s\S]{0,200}?await recorder\.stopRecording\(\)/.test(page));
@@ -1954,7 +2015,7 @@ console.log('\n  -- 12. the attestation --');
 
   // ── WHAT MUST NOT MOVE ──
   ok('the recording boundary did not move',
-    page.includes("if (stage === 'zeroDisplay') {") &&
+    STARTS_AT_ZERO_DISPLAY.test(page) &&
       ENDS_SOLVE_AT_FINISH_HOLD.test(page) &&
       /async function finishRecording[\s\S]{0,200}?await recorder\.stopRecording\(\)/.test(page));
   ok('the hold durations did not move',
