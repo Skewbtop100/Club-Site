@@ -6955,6 +6955,19 @@ button.oc-rv-cell:hover {
   border: 1px solid #1C1C21;
   background: #0D0D10;
 }
+
+/* TWO COLUMNS UNTIL 1100px, not 640. The panel carries a video and a
+   decision column on the left and the navigation, stills and scramble on
+   the right; below roughly 1100px the right column gets too narrow for a
+   3-across jump row and three portrait thumbnails, so both stack. The
+   source order is already video -> decisions -> jump -> stills ->
+   scramble, so the stacked order needs no reordering to be the one a
+   judge works top to bottom. */
+@media (max-width: 1100px) {
+  .oc-rv-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .oc-rv-panel-info {
   padding: 24px;
   min-width: 0;
@@ -7004,9 +7017,6 @@ button.oc-rv-cell:hover {
 }
 
 @media (max-width: 640px) {
-  .oc-rv-panel {
-    grid-template-columns: minmax(0, 1fr);
-  }
   .oc-rv-panel-info {
     padding: 16px;
   }

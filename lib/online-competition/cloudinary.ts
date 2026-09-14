@@ -91,7 +91,7 @@ export function uploadImageToCloudinary(
 // above use, read once at the top of this module. Reading the env var
 // again from a component would be a second place for it to be missing.
 
-/** A width-constrained thumbnail.
+/** A height-constrained thumbnail.
  *
  *  THE ORIGINALS ARE ~1080x1920. Six of them at full size is tens of
  *  megabytes shipped into a grid the judge may never click, on a
@@ -103,7 +103,7 @@ export function uploadImageToCloudinary(
  *  thing these images exist to show. q_auto/f_auto let Cloudinary pick
  *  the codec and quality per browser. */
 export function cloudinaryStillThumb(publicId: string): string {
-  return `https://res.cloudinary.com/${CLOUD_NAME}/image/upload/c_limit,w_320,q_auto,f_auto/${publicId}`;
+  return `https://res.cloudinary.com/${CLOUD_NAME}/image/upload/c_limit,h_240,q_auto,f_auto/${publicId}`;
 }
 
 /** The original, untransformed.

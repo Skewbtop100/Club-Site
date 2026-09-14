@@ -9,6 +9,7 @@ import {
   cloudinaryStillFull,
   cloudinaryStillThumb,
 } from '@/lib/online-competition/cloudinary';
+import ScramblePreview from '@/components/shared/ScramblePreview';
 
 type ReviewAction = 'approve' | 'approve_plus2' | 'dnf';
 
@@ -22,6 +23,12 @@ const BEFORE_END_MS = 5000;
  *  is not yet up and steady. Three seconds into an eight-second hold is
  *  the settled middle of it. */
 const INTO_HOLD_MS = 3000;
+
+/** The jump target that lights the scramble block. Named rather than
+ *  compared inline so the tie between the two is findable from either
+ *  end — the cover segment is the one stretch of the clip where the
+ *  scramble is what the judge is checking the cube against. */
+const SCRAMBLE_FOCUS_LABEL = 'КОВЕР';
 
 // ── Jumping to the moments a judge actually watches ────────────────────
 // The clip runs a minute and a half and five moments in it decide the
@@ -173,6 +180,9 @@ export default function SubmissionDetailPanel({
    *  boolean + index, so the overlay cannot outlive the row it came from
    *  when the panel switches to another submission. */
   const [zoomed, setZoomed] = useState<string | null>(null);
+  /** Whether the scramble block is emphasised. Purely visual: it never
+   *  hides the block, and nothing else reads it. */
+  const [coverFocus, setCoverFocus] = useState(false);
 
   const marks = submission.marks;
 
@@ -239,26 +249,11 @@ export default function SubmissionDetailPanel({
   return (
     <div className="oc-rv-panel">
       <div style={{ padding: 16 }}>
-        {/* ── The stills, ABOVE the video ──
-            The video is 250kbps and cannot carry a legible timer face;
-            these are full-resolution frames of the same moments. Reading
-            the digits off one of these is seconds, and scrubbing a
-            90-second clip to the same frame is not — so they come first.
-            THE VIDEO IS STILL THE SOURCE OF TRUTH and is untouched below,
-            jump buttons and all: this is a faster path to the common
-            case, not a replacement for watching the solve. */}
-        <StillRow
-          label="ЦАГ"
-          ids={submission.timerShotIds}
-          onOpen={setZoomed}
-        />
-        <StillRow
-          label="ШОО"
-          ids={submission.cubeShotIds}
-          onOpen={setZoomed}
-        />
-
-        <div className="aspect-[3/4] w-full overflow-hidden" style={{ border: '1px solid #2A2A31' }}>
+        {/* Narrowed to 78% of the column. The clip is portrait 3:4, so
+            at full column width it pushed the decision buttons below the
+            fold and left the judge scrolling between the evidence and
+            the verdict. Nothing about the element itself changed. */}
+        <div className="aspect-[3/4] w-full overflow-hidden" style={{ border: '1px solid #2A2A31', width: '78%', minWidth: 0 }}>
           <video
             ref={videoRef}
             src={submission.videoUrl}
@@ -268,155 +263,6 @@ export default function SubmissionDetailPanel({
           />
         </div>
 
-        {/* ── The jump row ──
-            NAVIGATION, NOT A DECISION, and it is styled to say so. The
-            three buttons below the fold commit a verdict and wear the
-            palette that goes with it — green, amber, red, one per
-            outcome. These move the playhead and nothing else, so they
-            take the muted border and text this file already uses for its
-            non-committal actions (the ҮГҮЙ cancel), at the same height
-            and gap as the decision row. A judge should never have to
-            look twice to tell which row changes a result.
-
-            Read-only in the strictest sense: nothing here writes, and
-            nothing here can reach the review actions. */}
-        {noMarks && (
-          <p
-            style={{
-              marginTop: 12,
-              font: '400 10px var(--oc-font-mono), monospace',
-              letterSpacing: '.06em',
-              color: '#6E6A62',
-            }}
-          >
-            Энэ бичлэгт үе шатын цаг бүртгэгдээгүй
-          </p>
-        )}
-        {/* flexWrap, so six labels become two rows on a narrow screen
-            rather than a horizontal scrollbar under the video. Each
-            button may grow but starts from its content width, which keeps
-            the wrap points at sensible places instead of stretching one
-            orphan across a whole row. */}
-        <div style={{ marginTop: noMarks ? 8 : 12, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {JUMPS.map((jump) => {
-            const ms = targetMs(jump);
-            // Two ways to be dead, and they are deliberately different
-            // questions: this submission has no marks at all (the whole
-            // row goes, including ЭХЛЭЛ, because the row as a whole has
-            // nothing to offer), or this ONE mark is missing while its
-            // neighbours are fine.
-            const disabled = noMarks || ms === null;
-            return (
-              <button
-                key={jump.label}
-                type="button"
-                disabled={disabled}
-                onClick={() => ms !== null && jumpTo(ms)}
-                style={{
-                  flex: '1 1 auto',
-                  border: '1px solid #2A2A31',
-                  background: 'transparent',
-                  color: '#9A958A',
-                  padding: 12,
-                  font: '600 11px var(--oc-font-mono), monospace',
-                  letterSpacing: '.08em',
-                  cursor: disabled ? 'not-allowed' : 'pointer',
-                  opacity: disabled ? 0.4 : 1,
-                }}
-              >
-                {jump.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="oc-rv-panel-info">
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-          <div style={{ minWidth: 0 }}>
-            {/* THE ROUND, and then the attempt — two different numbers.
-                This line used to print the field the admin view now calls
-                `attempt`, which is the ATTEMPT INDEX, under the label
-                РАУНД: the header showed the same number twice under two
-                names, so attempt 2 of a single-round competition read
-                "РАУНД 2". The field was renamed at the boundary so that
-                mistake no longer compiles. */}
-            <p style={{ font: '500 10px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
-              {submission.event.toUpperCase()} · РАУНД {submission.competitionRound}
-            </p>
-            <h2 style={{ marginTop: 6, font: '600 18px var(--oc-font-heading), sans-serif', color: '#F4F1EA' }}>
-              {athleteName} · Оролдлого {submission.attempt}
-            </h2>
-          </div>
-          <button
-            type="button"
-            aria-label="Хаах"
-            onClick={onClose}
-            style={{
-              border: 'none',
-              background: 'transparent',
-              color: '#6E6A62',
-              font: '500 14px var(--oc-font-mono), monospace',
-              cursor: 'pointer',
-              padding: 4,
-            }}
-          >
-            ✕
-          </button>
-        </div>
-
-        {/* Real assignment data from onlineCompetitions/{id}/
-            groupAssignments (see admin/scrambles). Falls back to the
-            original "not assigned" note — unchanged — for competitions
-            with no imported scrambles and for athletes not in a group,
-            rather than implying an assignment that doesn't exist. */}
-        <div className="oc-rv-note" style={{ marginTop: 16 }}>
-          <p
-            style={{
-              font: '500 9px var(--oc-font-mono), monospace',
-              letterSpacing: '.12em',
-              color: groupLabel ? '#DFFF4F' : '#9A958A',
-            }}
-          >
-            {groupLabel ? `ХОЛИЛТ · ГРУПП ${groupLabel}` : 'ХОЛИЛТ · ГРУПП ХУВААРИЛААГҮЙ'}
-          </p>
-          {!groupLabel && (
-            <p style={{ marginTop: 6, font: '400 9px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
-              ТАМИРЧИН ГРУППЭД ХУВААРИЛАГДААГҮЙ · ХОЛИЛТ ХЭСГЭЭС ХУВААРИЛНА
-            </p>
-          )}
-        </div>
-
-        <div style={{ marginTop: 18 }}>
-          <span className="oc-v3-stat-label">Бичсэн цаг</span>
-          <p
-            style={{
-              marginTop: 8,
-              font: '700 32px var(--oc-font-mono), monospace',
-              fontVariantNumeric: 'tabular-nums',
-              color: '#DFFF4F',
-            }}
-          >
-            {isDnf ? 'DNF' : fmtCentiseconds(submission.reportedTime)}
-            {submission.penalty === '+2' && (
-              <span style={{ font: '500 16px var(--oc-font-mono), monospace', color: '#E0A020' }}> +2</span>
-            )}
-          </p>
-          {/* The raw keypad digit sequence the athlete typed is not stored
-              anywhere on the submission (see OnlineSubmission in types.ts —
-              only the parsed `reportedTime` centiseconds survive), so
-              there is nothing to prefill an override field with. Shown
-              read-only instead of an editable raw-digit input. */}
-          <p style={{ marginTop: 6, font: '400 10px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
-            ТАМИРЧНЫ БИЧСЭН · {submission.reportedTime} сентисекунд
-          </p>
-        </div>
-
-        {decided && (
-          <p style={{ marginTop: 14, font: '500 10px var(--oc-font-mono), monospace', letterSpacing: '.1em', color: isDnf ? '#D8402C' : '#4FD07A' }}>
-            {isDnf ? 'ХҮЧИНГҮЙ БОЛГОСОН' : submission.penalty === '+2' ? 'БАТАЛСАН · +2' : 'БАТАЛСАН'}
-          </p>
-        )}
         {error && (
           <p style={{ marginTop: 10, font: '400 11px var(--oc-font-heading), sans-serif', color: '#E8543C' }}>
             {error}
@@ -506,6 +352,227 @@ export default function SubmissionDetailPanel({
           Шийдвэр гаргаснаар тухайн оролдлого шууд эцэглэлд тооцогдоно.
         </p>
 
+      </div>
+
+      <div className="oc-rv-panel-info">
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+          <div style={{ minWidth: 0 }}>
+            {/* THE ROUND, and then the attempt — two different numbers.
+                This line used to print the field the admin view now calls
+                `attempt`, which is the ATTEMPT INDEX, under the label
+                РАУНД: the header showed the same number twice under two
+                names, so attempt 2 of a single-round competition read
+                "РАУНД 2". The field was renamed at the boundary so that
+                mistake no longer compiles. */}
+            <p style={{ font: '500 10px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
+              {submission.event.toUpperCase()} · РАУНД {submission.competitionRound}
+            </p>
+            <h2 style={{ marginTop: 6, font: '600 18px var(--oc-font-heading), sans-serif', color: '#F4F1EA' }}>
+              {athleteName} · Оролдлого {submission.attempt}
+            </h2>
+          </div>
+          <button
+            type="button"
+            aria-label="Хаах"
+            onClick={onClose}
+            style={{
+              border: 'none',
+              background: 'transparent',
+              color: '#6E6A62',
+              font: '500 14px var(--oc-font-mono), monospace',
+              cursor: 'pointer',
+              padding: 4,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Real assignment data from onlineCompetitions/{id}/
+            groupAssignments (see admin/scrambles). Falls back to the
+            original "not assigned" note — unchanged — for competitions
+            with no imported scrambles and for athletes not in a group,
+            rather than implying an assignment that doesn't exist. */}
+        <div className="oc-rv-note" style={{ marginTop: 16 }}>
+          <p
+            style={{
+              font: '500 9px var(--oc-font-mono), monospace',
+              letterSpacing: '.12em',
+              color: groupLabel ? '#DFFF4F' : '#9A958A',
+            }}
+          >
+            {groupLabel ? `ХОЛИЛТ · ГРУПП ${groupLabel}` : 'ХОЛИЛТ · ГРУПП ХУВААРИЛААГҮЙ'}
+          </p>
+          {!groupLabel && (
+            <p style={{ marginTop: 6, font: '400 9px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
+              ТАМИРЧИН ГРУППЭД ХУВААРИЛАГДААГҮЙ · ХОЛИЛТ ХЭСГЭЭС ХУВААРИЛНА
+            </p>
+          )}
+        </div>
+
+        <div style={{ marginTop: 18 }}>
+          <span className="oc-v3-stat-label">Бичсэн цаг</span>
+          <p
+            style={{
+              marginTop: 8,
+              font: '700 32px var(--oc-font-mono), monospace',
+              fontVariantNumeric: 'tabular-nums',
+              color: '#DFFF4F',
+            }}
+          >
+            {isDnf ? 'DNF' : fmtCentiseconds(submission.reportedTime)}
+            {submission.penalty === '+2' && (
+              <span style={{ font: '500 16px var(--oc-font-mono), monospace', color: '#E0A020' }}> +2</span>
+            )}
+          </p>
+          {/* The raw keypad digit sequence the athlete typed is not stored
+              anywhere on the submission (see OnlineSubmission in types.ts —
+              only the parsed `reportedTime` centiseconds survive), so
+              there is nothing to prefill an override field with. Shown
+              read-only instead of an editable raw-digit input. */}
+          <p style={{ marginTop: 6, font: '400 10px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
+            ТАМИРЧНЫ БИЧСЭН · {submission.reportedTime} сентисекунд
+          </p>
+        </div>
+
+        {decided && (
+          <p style={{ marginTop: 14, font: '500 10px var(--oc-font-mono), monospace', letterSpacing: '.1em', color: isDnf ? '#D8402C' : '#4FD07A' }}>
+            {isDnf ? 'ХҮЧИНГҮЙ БОЛГОСОН' : submission.penalty === '+2' ? 'БАТАЛСАН · +2' : 'БАТАЛСАН'}
+          </p>
+        )}
+        {/* ── The jump row ──
+            NAVIGATION, NOT A DECISION, and it is styled to say so. The
+            three buttons below the fold commit a verdict and wear the
+            palette that goes with it — green, amber, red, one per
+            outcome. These move the playhead and nothing else, so they
+            take the muted border and text this file already uses for its
+            non-committal actions (the ҮГҮЙ cancel), at the same height
+            and gap as the decision row. A judge should never have to
+            look twice to tell which row changes a result.
+
+            Read-only in the strictest sense: nothing here writes, and
+            nothing here can reach the review actions. */}
+        {noMarks && (
+          <p
+            style={{
+              marginTop: 12,
+              font: '400 10px var(--oc-font-mono), monospace',
+              letterSpacing: '.06em',
+              color: '#6E6A62',
+            }}
+          >
+            Энэ бичлэгт үе шатын цаг бүртгэгдээгүй
+          </p>
+        )}
+        {/* THREE PER ROW, TWO ROWS, as a grid rather than a wrap: the
+            six targets are in chronological order, and letting them
+            reflow by content width put the break in a different place
+            at every column size. A fixed 3x2 means a judge learns one
+            arrangement. */}
+        <div style={{ marginTop: noMarks ? 8 : 12, display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+          {JUMPS.map((jump) => {
+            const ms = targetMs(jump);
+            // Two ways to be dead, and they are deliberately different
+            // questions: this submission has no marks at all (the whole
+            // row goes, including ЭХЛЭЛ, because the row as a whole has
+            // nothing to offer), or this ONE mark is missing while its
+            // neighbours are fine.
+            const disabled = noMarks || ms === null;
+            return (
+              <button
+                key={jump.label}
+                type="button"
+                disabled={disabled}
+                onClick={() => {
+                  if (ms !== null) jumpTo(ms);
+                  // Display only — the seek above is untouched. КОВЕР is
+                  // the one segment where the scramble is what the judge
+                  // is checking the cube against, so pressing it lights
+                  // that block; every other target puts the emphasis
+                  // away again. The block never hides either way.
+                  setCoverFocus(jump.label === SCRAMBLE_FOCUS_LABEL);
+                }}
+                style={{
+                  border: '1px solid #2A2A31',
+                  background: 'transparent',
+                  color: '#9A958A',
+                  padding: 12,
+                  font: '600 11px var(--oc-font-mono), monospace',
+                  letterSpacing: '.08em',
+                  cursor: disabled ? 'not-allowed' : 'pointer',
+                  opacity: disabled ? 0.4 : 1,
+                }}
+              >
+                {jump.label}
+              </button>
+            );
+          })}
+        </div>
+        {/* ── The stills, ABOVE the video ──
+            The video is 250kbps and cannot carry a legible timer face;
+            these are full-resolution frames of the same moments. Reading
+            the digits off one of these is seconds, and scrubbing a
+            90-second clip to the same frame is not — so they come first.
+            THE VIDEO IS STILL THE SOURCE OF TRUTH and is untouched below,
+            jump buttons and all: this is a faster path to the common
+            case, not a replacement for watching the solve. */}
+        <StillRow
+          label="ЦАГ"
+          ids={submission.timerShotIds}
+          onOpen={setZoomed}
+        />
+        <StillRow
+          label="ШОО"
+          ids={submission.cubeShotIds}
+          onOpen={setZoomed}
+        />
+
+
+        {/* ── The scramble this attempt was given ──
+            Rendered with the SAME component the Холилт tab and the
+            club's Daily Practice judging flow already use
+            (components/shared/ScramblePreview, @cubing/twisty in its
+            flat unfolded-net mode) — no new dependency, and a judge
+            sees the identical diagram in both places.
+
+            Absent entirely when the athlete has no group or the
+            scramble cannot be resolved: no error, no placeholder. */}
+        {scramble && (
+          <div
+            style={{
+              marginTop: 14,
+              padding: 10,
+              background: '#08080A',
+              // The only thing КОВЕР changes. Accent border plus the
+              // panel accent on the label, both already used elsewhere
+              // in this file, so it reads as emphasis rather than as a
+              // new state to interpret.
+              border: `1px solid ${coverFocus ? '#DFFF4F' : '#2A2A31'}`,
+              transition: 'border-color .15s',
+            }}
+          >
+            <span
+              style={{
+                font: '500 9px var(--oc-font-mono), monospace',
+                letterSpacing: '.12em',
+                color: coverFocus ? '#DFFF4F' : '#6E6A62',
+              }}
+            >
+              ХОЛИЛТ{groupLabel ? ` · ГРУПП ${groupLabel}` : ''}
+            </span>
+            <p style={{ marginTop: 6, font: '500 12px var(--oc-font-mono), monospace', color: '#F4F1EA', lineHeight: 1.5, wordBreak: 'break-word' }}>
+              {scramble}
+            </p>
+            {/* Definite width AND height: ScramblePreview sizes its
+                player to 100% of the container, so an auto-height box
+                gives it nothing to resolve against. 4:3 matches the
+                unfolded net's own bounding box (four faces wide by
+                three tall), same ratio as .oc-sc-scrdiag. */}
+            <div style={{ marginTop: 8, display: 'flex', width: 208, height: 156 }}>
+              <ScramblePreview eventId={submission.event} scramble={scramble} visualization="2D" />
+            </div>
+          </div>
+        )}
         {/* Not in the mockup, but carried over deliberately: deleting a
             submission (video + doc) was only reachable from the old
             card-list dashboard this page replaces, and dropping the grid
@@ -635,8 +702,14 @@ function StillRow({
             onClick={() => onOpen(id)}
             title="Томруулах"
             style={{
-              flex: '1 1 80px',
-              minWidth: 80,
+              // FIXED HEIGHT, auto width. These frames are portrait
+              // 1080x1920: sized by width to fill a column, three of them
+              // would stand ~350px tall and two rows would push the
+              // scramble off a 900px screen on their own. Height is the
+              // dimension that has to be budgeted, so it is the one that
+              // is set, and the width follows the aspect ratio.
+              flex: '0 0 auto',
+              height: 104,
               padding: 0,
               border: '1px solid #2A2A31',
               background: '#08080A',
@@ -649,7 +722,7 @@ function StillRow({
               src={cloudinaryStillThumb(id)}
               alt=""
               loading="lazy"
-              style={{ width: '100%', height: 'auto', display: 'block' }}
+              style={{ height: '100%', width: 'auto', display: 'block' }}
             />
           </button>
         ))}
