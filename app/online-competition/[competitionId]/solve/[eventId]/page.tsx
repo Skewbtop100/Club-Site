@@ -168,7 +168,7 @@ const ATTEMPT_STAGES: Stage[] = [
 /** Below this, the file is not a recording — it is an empty container.
  *
  *  A real attempt is at least the 5-second frozen "0.00" plus the reveal,
- *  the orientation hold and the solve itself; at the recorder's 250 kbps
+ *  the orientation hold and the solve itself; at the recorder's capped bitrate
  *  that is hundreds of kilobytes. A MediaRecorder that produced nothing
  *  yields ~110 bytes (measured — see the note in useSolveRecorder about
  *  the second audio track that once did exactly this to every attempt).

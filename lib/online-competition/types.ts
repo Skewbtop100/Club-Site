@@ -686,7 +686,7 @@ export interface OnlineSubmission {
    *  the closing timer hold and the cube check — at most three each, and
    *  IMAGE resources, not video ones.
    *
-   *  WHY THEY EXIST: the clip is 250kbps to fit Cloudinary's free tier,
+   *  WHY THEY EXIST: the clip is bitrate-capped to fit Cloudinary's free tier,
    *  which is enough to watch a solve and not enough to read the four
    *  digits on an athlete's timer. These are frames of that same moment
    *  at the camera's native size, so the number can actually be read.

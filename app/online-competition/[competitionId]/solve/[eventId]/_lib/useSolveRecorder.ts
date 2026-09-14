@@ -48,10 +48,10 @@ const VIDEO_CONSTRAINTS: MediaStreamConstraints = {
 };
 
 // WHAT THE CLIP STAYS AT, and why this constant had to be invented. The
-// recorded video is 250kbps on purpose — it has to fit Cloudinary's free
-// tier — and MediaRecorder has no size setting of its own: it encodes
+// recorded video is bitrate-capped on purpose — it has to fit
+// Cloudinary's free tier — and MediaRecorder has no size setting of its own: it encodes
 // whatever the track hands it. So raising the source above would have
-// silently re-aimed that same 250kbps at four times the pixels, which
+// silently re-aimed that same small bitrate at four times the pixels,
 // does NOT make the file bigger (the bitrate is capped) but makes it
 // markedly worse to watch. The file-size check that would normally catch
 // a recorder change cannot see this one.
@@ -81,11 +81,26 @@ const RECORDING_MAX_HEIGHT = 480;
 // "missing the part of the frame the judge needs".
 //
 // HEIGHT is the long edge because these are recorded upright, on a phone
-// or a propped-up laptop. 640 rather than the 480 above: 480 was the
-// short side of the old landscape box, and using it here would shrink
-// the clip well past what it has always been.
-const RECORDING_MAX_EDGE = 640;
-const VIDEO_BITS_PER_SECOND = 250_000;
+// or a propped-up laptop.
+//
+// 720, ARRIVED AT BY PIXEL COUNT RATHER THAN BY BITRATE. Uncropped but
+// unconstrained, a run came back 1080x1920 at ~611kbps — 8MB for 104
+// seconds, against a target of about 4. Halving the bitrate at that same
+// pixel count would have halved the bits available to every pixel, and
+// the first thing that costs is fine high-contrast detail: the four
+// digits on the athlete's timer, which is the one thing a judge has to
+// read. Cutting the FRAME instead gets the file to the same place with
+// MORE bits per pixel than before, not fewer.
+//
+// 720x1280 is 44% of 1080x1920's pixels, so the same encoder settings
+// land near 270kbps ~= 3.5MB for a 104-second attempt.
+const RECORDING_MAX_EDGE = 720;
+// Raised from 250k with the frame size. The old value was set against a
+// 640x480 clip and, at 1080p, was being ignored outright — the encoder
+// delivered 611kbps when asked for 250. A hint pitched below what the
+// encoder will produce anyway is not a cap, it is a number that does
+// nothing. At 720x1280 this is within reach, so it can actually bind.
+const VIDEO_BITS_PER_SECOND = 300_000;
 
 /** JPEG quality for the stills. High on purpose: the entire point of
  *  these frames is legible digits, and a still is a few hundred KB
@@ -200,7 +215,7 @@ export function useSolveRecorder() {
   }, []);
 
   // ── Stills: the frames the video is too coarse to carry ─────────────
-  // The clip is 250kbps by necessity, which is enough to watch a solve
+  // The clip is bitrate-capped by necessity, enough to watch a solve
   // and nowhere near enough to READ a timer — the digits are the first
   // thing that compression spends. So the two stages whose whole job is
   // showing something to the camera also hand back a few full-size JPEGs

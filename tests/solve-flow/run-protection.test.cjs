@@ -1120,10 +1120,23 @@ console.log('\n  -- 9. the lobby and the between screen --');
   // browser that honours it scales proportionally; one that ignores it
   // hands back the full frame. Neither can crop, because there is no
   // target ratio to crop toward.
+  // THE NUMBERS ARE NOT PINNED, deliberately. The edge cap and the
+  // bitrate are tuning knobs — 640 became 720 when a full-resolution
+  // clip turned out to need fewer PIXELS rather than fewer bits per
+  // pixel, and they will move again. What must not move is the shape of
+  // the constraint: one named edge cap, used as the only thing
+  // constrained, and a named bitrate cap that exists at all.
   ok('  ...capped on ONE dimension, so no ratio is ever implied',
-    /const RECORDING_MAX_EDGE = 640;/.test(recorderCode) &&
+    /const RECORDING_MAX_EDGE = \d+;/.test(recorderCode) &&
       /height: \{ max: RECORDING_MAX_EDGE \}/.test(recorderCode) &&
-      /const VIDEO_BITS_PER_SECOND = 250_000;/.test(recorderCode));
+      /const VIDEO_BITS_PER_SECOND = \d[\d_]*;/.test(recorderCode));
+  // DECLARED IS NOT APPLIED. The assertion above was happy with the
+  // constant merely existing, so deleting it from the MediaRecorder
+  // options broke nothing — and an uncapped encoder is invisible to
+  // every other check here, because the frame size would still look
+  // right and only the file would quietly grow.
+  ok('  ...with the bitrate cap actually handed to MediaRecorder',
+    /videoBitsPerSecond: VIDEO_BITS_PER_SECOND/.test(recorderCode));
   ok('  ...and the recorder constrains nothing that states a shape',
     (() => {
       const call = recorderCode.slice(

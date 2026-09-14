@@ -310,7 +310,7 @@ await check('36d. ...or a non-numeric one', 'DENY', () =>
 
 // ── CREATE: the still ids ───────────────────────────────────────────────
 // Cloudinary public ids for the full-resolution frames grabbed during the
-// two 8-second holds — the video is 250kbps and cannot carry a legible
+// two 8-second holds — the video is bitrate-capped and cannot carry a legible
 // timer face, so the digits are read off these instead. At most three per
 // hold, which is what the client schedules.
 //
