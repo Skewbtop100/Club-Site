@@ -131,15 +131,6 @@ export async function notifyRoundFinalised(params: {
     // numbers, so it skips this entirely.
     const results = preResults ? [] : await collectRoundResults(db, competitionId, eventId, round);
 
-    // Placement is the athlete's index in the FULL standings. It used to
-    // be their index among result-havers only, because DNF-result athletes
-    // had no placement to print. They do now — WCA ranks them below
-    // everyone with a result, on their single — so every finisher gets a
-    // number, and these indices still match the standings exactly because
-    // nothing is filtered out of them.
-    const placementByUid = new Map<string, number>();
-    results.forEach((r, i) => placementByUid.set(r.uid, i + 1));
-
     await db.runTransaction(async (tx) => {
       const snap = await tx.get(roundRef);
       const resultsDone = !!snap.get(RESULTS_MARKER);
@@ -150,14 +141,11 @@ export async function notifyRoundFinalised(params: {
       if (!resultsDone && results.length > 0) {
         // ── Results announcement (both ШАЛГАРУУЛАХ-first and ХААХ) ──
         for (const r of results) {
-          // A DNF result still has no TIME to print, but it does now have
-          // a placement, so the old "байр эзлээгүй" (took no place) copy
-          // would be wrong. Prints DNF in place of the time and the real
-          // placement beside it.
-          const body =
-            r.value === null
-              ? `${label} · ${roundLabel} дүн: DNF · ${placementByUid.get(r.uid)}-р байр`
-              : `${label} · ${roundLabel} дүн: ${fmtCentiseconds(r.value)} · ${placementByUid.get(r.uid)}-р байр`;
+          // The result, and nothing about placement: the notification
+          // used to add "N-р байр". The standings on the live view are
+          // where an athlete's place is shown. A DNF result prints DNF in
+          // place of the time.
+          const body = `${label} · ${roundLabel} дүн: ${r.value === null ? 'DNF' : fmtCentiseconds(r.value)}`;
 
           // Advancing folds into this message rather than adding a second
           // one — one notification per athlete when both are announced
@@ -181,8 +169,8 @@ export async function notifyRoundFinalised(params: {
         if (announceAdvanced) marker[ADVANCED_MARKER] = FieldValue.serverTimestamp();
       } else if (announceAdvanced) {
         // ── Advancement-only (ХААХ already sent the results) ─────────
-        // Qualifiers alone, and no time or placement: they were in the
-        // result notification this athlete already has.
+        // Qualifiers alone, and no time: it was in the result
+        // notification this athlete already has.
         for (const uid of qualifiedUids) {
           tx.create(db.collection(ONLINE_NOTIFICATIONS).doc(), {
             uid,

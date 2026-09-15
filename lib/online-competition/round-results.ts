@@ -71,7 +71,7 @@ interface ApprovedAttempt {
   time: AttemptTime;
 }
 
-/** Same effective-time rule as athleteStats/seasonPoints: a judge's +2
+/** Same effective-time rule as athleteStats: a judge's +2
  *  adds 200cs, a DNF is a DNF, and a REJECTED attempt is a DNF whatever
  *  it claims. One shared implementation (ao5.ts) — this used to be a local
  *  copy, and the rule is now status-dependent enough that three copies of

@@ -151,7 +151,9 @@ async function seed() {
     registeredAt: T.fromMillis(1_700_000_700_000),
   });
 
-  // ── Season points: OLD plus a bystander ──
+  // ── Season-points data: OLD plus a bystander ──
+  // Season points were removed; this data is orphaned. The merge must
+  // leave it EXACTLY where it is — neither moved nor rewritten.
   await db.collection('onlineSeasonPoints').doc(SEASON).collection('athletes').doc(OLD).set({
     uid: OLD, displayName: 'Old Account Name', photoURL: 'https://lh3.google/old.jpg',
     totalPoints: 45, breakdown: [{ competitionId: COMP, eventId: '333', points: 25, placement: 1 }],
@@ -330,22 +332,9 @@ async function main() {
     norm(moved?.get('results')),
     norm(before[`registrations/${OLD}`].find(([id]) => id === COMP)[1].results));
 
-  // 5 — season points
-  console.log('\n── 5. season points ─────────────────────────────────────');
-  const seasonNew = await db.collection('onlineSeasonPoints').doc(SEASON).collection('athletes').doc(NEW).get();
-  const seasonOld = await db.collection('onlineSeasonPoints').doc(SEASON).collection('athletes').doc(OLD).get();
-  check('doc exists under the new uid', seasonNew.exists);
-  check('doc gone from the old uid', !seasonOld.exists);
-  check('totalPoints carried over (45)', seasonNew.get('totalPoints') === 45, seasonNew.get('totalPoints'));
-  eq('breakdown carried over', norm(seasonNew.get('breakdown')),
-    [{ competitionId: COMP, eventId: '333', placement: 1, points: 25 }]);
-  check('uid field rewritten', seasonNew.get('uid') === NEW, seasonNew.get('uid'));
-  check('displayName refreshed from the new account',
-    seasonNew.get('displayName') === 'New Account Name', seasonNew.get('displayName'));
-  check('photoURL refreshed from the new account',
-    seasonNew.get('photoURL') === 'https://lh3.google/new.jpg', seasonNew.get('photoURL'));
-  check("bystander's season doc untouched",
-    (await db.collection('onlineSeasonPoints').doc(SEASON).collection('athletes').doc(OTHER1).get()).get('totalPoints') === 10);
+  // 5 — season-points data is no longer the merge's business
+  console.log('\n── 5. season-points data left in place ──────────────────');
+  eq('season docs exactly as seeded — not moved, not rewritten', (await snapshotWorld()).season, before.season);
 
   // 6 — merged profile
   console.log('\n── 6. merged profile ────────────────────────────────────');
@@ -483,8 +472,7 @@ async function main() {
     (await db.collection('onlineParticipants').doc(OLD).collection('registrations').get()).size === 2);
   check('0 registrations under B',
     (await db.collection('onlineParticipants').doc(NEW).collection('registrations').get()).size === 0);
-  const seasonBack = await db.collection('onlineSeasonPoints').doc(SEASON).collection('athletes').doc(OLD).get();
-  check('season doc back under A with its points', seasonBack.exists && seasonBack.get('totalPoints') === 45);
+  eq('season docs still exactly as seeded after both merges', (await snapshotWorld()).season, before.season);
   const qBack = (await db.collection('onlineCompetitions').doc(COMP).collection('qualifiers').doc(RKEY).get()).get('uids');
   eq('qualifiers array back to [OTHER1, A, OTHER2] — index 1 preserved', qBack, [OTHER1, OLD, OTHER2]);
   const gBack = (await db.collection('onlineCompetitions').doc(COMP).collection('groupAssignments').doc(RKEY).get()).get('assignments');
@@ -499,8 +487,6 @@ async function main() {
     subsBack.docs.find((d) => d.id === 'sub-other-1')?.get('uid') === OTHER1);
   check("bystander's notification still theirs",
     notifsBack.docs.find((d) => d.id === 'n-other-1')?.get('uid') === OTHER2);
-  check("bystander's season doc still 10 points",
-    (await db.collection('onlineSeasonPoints').doc(SEASON).collection('athletes').doc(OTHER1).get()).get('totalPoints') === 10);
   check('bystanders still at their original array positions',
     qBack[0] === OTHER1 && qBack[2] === OTHER2);
   check('bystanders still hold their group indices',

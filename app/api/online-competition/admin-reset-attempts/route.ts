@@ -14,7 +14,7 @@ import { resetAthleteRoundAttempts } from '@/lib/online-competition/reset-attemp
 // client-callable can reach resetAthleteRoundAttempts — it imports
 // firebase-admin, which cannot load in a browser bundle.
 //
-// POST, not DELETE, and modelled on admin-recompute-points: the scope is
+// POST, not DELETE, and modelled on admin-recompute-stats: the scope is
 // four fields, which belong in a body rather than smuggled into a path or
 // a query string.
 export async function POST(req: Request) {

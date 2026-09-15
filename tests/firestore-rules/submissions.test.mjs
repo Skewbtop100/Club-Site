@@ -10,7 +10,7 @@ import { doc, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp } from 'fire
 //
 // THE HOLE THESE CLOSE: `create` used to check nothing but the uid. An
 // athlete could file a submission already marked status:'approved' with any
-// time on it, and round-results.ts, seasonPoints.ts and athleteStats.ts all
+// time on it, and round-results.ts and athleteStats.ts both
 // trust status == 'approved'. That is a judge's verdict written by the
 // person being judged. A second, quieter hole sat next to it: `update` let
 // an athlete rewrite their OWN pending attempt's reportedTime and videoUrl,

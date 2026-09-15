@@ -13,8 +13,8 @@ import { deleteSubmissionAndVideo } from './submission-cleanup';
 //     clearing it here would also discard the athlete's OTHER round; it is
 //     write-only anyway (nothing reads it as a gate), and the next finished
 //     run overwrites it. It therefore goes stale until then, on purpose.
-//   - the participant doc's stats/PRs and the season points. Those are only
-//     ever rewritten by the admin recompute, which is where they belong.
+//   - the participant doc's stats/PRs. Those are only ever rewritten by
+//     the admin stats recompute, which is where they belong.
 //   - the round's own state (open/done) and the scramble group assignment.
 //
 // Deleting an attempt an athlete actually solved is the point of the

@@ -107,7 +107,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   // Cached at the edge, not in the browser. `s-maxage=60` because the
   // inputs move slowly — an approval is an admin action and a personal
-  // best changes only when the points recompute runs — while
+  // best changes only when the stats recompute runs — while
   // `stale-while-revalidate` keeps a newly approved athlete from waiting a
   // full minute behind a cold cache. No `max-age`, so an athlete who
   // reloads after being approved sees themselves rather than their own

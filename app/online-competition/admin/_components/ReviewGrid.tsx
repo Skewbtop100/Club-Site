@@ -418,7 +418,7 @@ export default function ReviewGrid() {
             (data.judged > 0 ? ` (${data.judged} нь шүүгдсэн байсан)` : '') +
             `. Бичлэг: ${data.videosDeleted} устсан` +
             (data.videosFailed > 0 ? `, ${data.videosFailed} устгаж чадсангүй — гараар шалгана уу` : '') +
-            '. Оноо, статистик хуучирсан хэвээр — "Онооны тооцоо шинэчлэх" товчийг дарна уу.',
+            '. Статистик хуучирсан хэвээр — тэмцээний жагсаалтын "Статистик шинэчлэх" товчийг дарна уу.',
         );
       } catch (err) {
         console.error('ReviewGrid: resetting the athlete’s attempts failed:', err);

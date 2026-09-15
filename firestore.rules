@@ -731,10 +731,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Season points were REMOVED. The stored documents are kept (a later
+    // rebuild may want them), but nothing reads or writes this collection
+    // any more — so no client may. It was publicly readable.
     match /onlineSeasonPoints/{season} {
       match /athletes/{uid} {
-        allow read: if true;
-        allow write: if false;
+        allow read, write: if false;
       }
     }
   }

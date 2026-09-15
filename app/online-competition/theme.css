@@ -516,39 +516,6 @@
   background: #FFFDF8;
 }
 
-/* Leaderboard rows (ОНООНЫ ХҮСНЭГТ) — the exact literal styles from the
-   original Phase 2 spec, only ever rendered as an empty state until the
-   season-points recompute existed to actually produce rows. */
-.oc-hub-lb-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 11px 13px;
-  border-bottom: 1px solid #EFEBE0;
-}
-.oc-hub-lb-rank {
-  width: 26px;
-  height: 26px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #F4F1EA;
-  color: #16140F;
-  font: 700 11px var(--oc-font-mono), monospace;
-}
-.oc-hub-lb-name {
-  flex: 1;
-  font: 500 13px var(--oc-font-heading), sans-serif;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.oc-hub-lb-points {
-  font: 700 15px var(--oc-font-mono), monospace;
-  font-variant-numeric: tabular-nums;
-}
-
 /* Mobile status tabs + card list */
 .oc-hub-mobile-tabs {
   display: flex;
@@ -4970,64 +4937,6 @@
   background: #E9FF7A;
 }
 
-/* ── Leaderboard ──────────────────────────────────────────────────── */
-
-.oc-v3-lb-row {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  padding: 10px 16px;
-  border-bottom: 1px solid #16161B;
-}
-.oc-v3-lb-row:hover {
-  background: #131318;
-}
-.oc-v3-lb-rank {
-  width: 24px;
-  height: 24px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #16161B;
-  color: #F4F1EA;
-  font: 700 10px var(--oc-font-mono), monospace;
-}
-.oc-v3-lb-rank-top {
-  background: #DFFF4F;
-  color: #08080A;
-}
-.oc-v3-lb-name {
-  flex: 1;
-  min-width: 0;
-  font: 500 12px var(--oc-font-heading), sans-serif;
-  color: #F4F1EA;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.oc-v3-lb-points {
-  font: 700 14px var(--oc-font-mono), monospace;
-  font-variant-numeric: tabular-nums;
-  color: #F4F1EA;
-}
-.oc-v3-lb-all {
-  display: block;
-  width: 100%;
-  border: none;
-  background: transparent;
-  color: #9A958A;
-  padding: 13px;
-  font: 600 10px var(--oc-font-mono), monospace;
-  letter-spacing: 0.16em;
-  text-align: center;
-  text-decoration: none;
-  cursor: pointer;
-}
-.oc-v3-lb-all:hover {
-  color: #DFFF4F;
-}
-
 /* ── Status / message text on the dark page ───────────────────────── */
 
 .oc-v3-status {
@@ -5514,7 +5423,6 @@
   .oc-v3-pill,
   .oc-v3-row-action,
   .oc-v3-reg-btn,
-  .oc-v3-lb-all,
   .oc-v3-live-btn,
   .oc-v3-hero-cta,
   .oc-v3-section-toggle,
@@ -5525,7 +5433,6 @@
   /* These are text-flow elements (inline links / centred labels), so a
      min-height alone would leave the label pinned to the top of the box. */
   .oc-v3-reg-btn,
-  .oc-v3-lb-all,
   .oc-v3-live-btn,
   .oc-v3-hero-cta,
   .oc-v3-row-action,

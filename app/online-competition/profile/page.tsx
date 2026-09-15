@@ -4,8 +4,6 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import {
-  fetchAllCompetitions,
-  fetchAthleteSeasonPoints,
   fetchParticipant,
   resolveParticipantPhoto,
   resolveProfileStatus,
@@ -19,7 +17,6 @@ import type {
 } from '@/lib/online-competition/types';
 import HubNav from '../_components/hub/v3/HubNav';
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
-import { toMillisOrNull } from '../_components/hub/format';
 import AuthModal from '../_components/hub/v3/AuthModal';
 import CountryPicker from './_components/CountryPicker';
 
@@ -83,6 +80,13 @@ function totalSolves(participant: OnlineParticipant | null): number | null {
   return entries.reduce((sum, e) => sum + (e.solveCount ?? 0), 0);
 }
 
+/** How many events the athlete has a stats rollup for — events they have
+ *  judged results in. null when there are none. */
+function eventsWithResults(participant: OnlineParticipant | null): number | null {
+  const count = Object.keys(participant?.stats ?? {}).length;
+  return count > 0 ? count : null;
+}
+
 function fmtOrDash(cs: number | null): string {
   return cs === null ? '—' : fmtCentiseconds(cs);
 }
@@ -121,38 +125,6 @@ export default function ProfilePage() {
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [savedToast, setSavedToast] = useState(false);
-  // Season-points total for the stat grid below. `participant` (which
-  // feeds the other three cells) is already loaded by the effect further
-  // down for the verification form, so it is reused rather than fetched
-  // a second time.
-  const [points, setPoints] = useState<number | null>(null);
-
-  // Season-points total for the stat grid. Season is derived the same way
-  // the hub and the dashboard did it: whichever competition with a season
-  // set has the latest startAt.
-  useEffect(() => {
-    const uid = user && !user.isAnonymous ? user.uid : null;
-    if (uid === null) return;
-    let cancelled = false;
-    fetchAllCompetitions()
-      .then(async (list) => {
-        const withSeason = list.filter((c) => c.season);
-        if (withSeason.length === 0) return null;
-        const latest = withSeason.reduce((best, c) =>
-          (toMillisOrNull(c.startAt) ?? 0) > (toMillisOrNull(best.startAt) ?? 0) ? c : best,
-        );
-        return fetchAthleteSeasonPoints(latest.season as string, uid);
-      })
-      .then((row) => {
-        if (!cancelled) setPoints(row?.totalPoints ?? null);
-      })
-      .catch(() => {
-        if (!cancelled) setPoints(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [user]);
 
   useEffect(() => {
     if (!user || user.isAnonymous) {
@@ -241,7 +213,6 @@ export default function ProfilePage() {
         uid={user.uid}
         email={user.email}
         displayName={user.displayName}
-        points={points}
         participant={participant}
         status={status}
         onSubmitted={(next) => {
@@ -261,7 +232,6 @@ function ProfileBody({
   uid,
   email,
   displayName,
-  points,
   participant,
   status,
   onSubmitted,
@@ -269,7 +239,6 @@ function ProfileBody({
   uid: string;
   email: string | null;
   displayName: string | null;
-  points: number | null;
   participant: OnlineParticipant | null;
   status: OnlineParticipantProfileStatus;
   onSubmitted: (next: OnlineParticipant) => void;
@@ -508,13 +477,14 @@ function ProfileBody({
             </div>
           </div>
 
-          {/* Stats — real values from the stats rollup + season points;
-              "—" only when the data genuinely isn't there yet (no recompute
-              has run, or the athlete has no approved solves). */}
+          {/* Stats — real values from the stats rollup; "—" only when the
+              data genuinely isn't there yet (no recompute has run, or the
+              athlete has no judged solves). Төрөл took the cell season
+              points (Оноо) held, so the 2×2 grid has no empty slot. */}
           <div className="oc-v3-stat-grid">
             <StatCell label="ПР" accent value={fmtOrDash(bestAcrossEvents(participant, 'pr'))} />
             <StatCell label="Дундаж" value={fmtOrDash(bestAcrossEvents(participant, 'ao5'))} />
-            <StatCell label="Оноо" value={points === null ? '—' : String(points)} />
+            <StatCell label="Төрөл" value={eventsWithResults(participant) === null ? '—' : String(eventsWithResults(participant))} />
             <StatCell label="Эвлүүлэлт" value={totalSolves(participant) === null ? '—' : String(totalSolves(participant))} />
           </div>
         </div>

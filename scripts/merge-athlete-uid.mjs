@@ -7,8 +7,10 @@
 // The case this exists for: an athlete loses access to the Gmail they
 // signed up with, signs in with a new one, and Firebase issues a new uid
 // with an empty participant doc. Everything they have done — profile
-// verification, registrations, submissions, season points, group
-// assignments, qualification — hangs off the old uid.
+// verification, registrations, submissions, group assignments,
+// qualification — hangs off the old uid. (Season-points documents were
+// once moved too; season points were removed and that data is left where
+// it is.)
 //
 // IDENTITY IS VERIFIED OFF-PLATFORM. This performs the move; it does not
 // and cannot decide that the two accounts are the same person.
@@ -133,14 +135,6 @@ function printPlan(planned) {
   for (const id of plan.C) console.log(`      onlineSubmissions/${id}  uid: ${short(oldUid)} -> ${short(newUid)}`);
   console.log('');
 
-  console.log('── D — season points (copy, then delete) ─────────────────');
-  if (!plan.D.length) console.log('  (none)');
-  for (const d of plan.D) {
-    console.log(`  onlineSeasonPoints/${d.season}/athletes/${oldUid}  totalPoints=${d.data.totalPoints}`);
-    console.log(`      -> .../athletes/${newUid}   uid + displayName + photoURL refreshed from the new account`);
-  }
-  console.log('');
-
   console.log('── E — onlineNotifications.uid (field rewrite) ────────────');
   console.log(`  ${plan.E.length} document(s)${plan.E.length ? ':' : ''}`);
   for (const id of plan.E) console.log(`      onlineNotifications/${id}  uid: ${short(oldUid)} -> ${short(newUid)}`);
@@ -208,12 +202,12 @@ async function main() {
     console.log('  SKIP  new-account freshness checks (--resume)');
     console.log(
       `          new uid currently holds: ${s.submissions} submission(s), ${s.registrations} registration(s), ` +
-        `${s.seasonDocs} season doc(s), profileStatus=${show(s.profileStatus ?? undefined)}`,
+        `profileStatus=${show(s.profileStatus ?? undefined)}`,
     );
   }
 
   const { plan } = planned;
-  const total = plan.B.length + plan.C.length + plan.D.length + plan.E.length + plan.F.length + plan.G.length + 2;
+  const total = plan.B.length + plan.C.length + plan.E.length + plan.F.length + plan.G.length + 2;
   console.log('');
   // Counts of what the plan CONTAINS, printed before anything is written
   // in either mode — so the nouns are neutral and the heading states what
@@ -223,7 +217,6 @@ async function main() {
   console.log('  A participant docs   : 2 (merge target + tombstone)');
   console.log(`  B registrations      : ${plan.B.length}`);
   console.log(`  C submissions        : ${plan.C.length}`);
-  console.log(`  D season-points docs : ${plan.D.length}`);
   console.log(`  E notifications      : ${plan.E.length}`);
   console.log(`  F qualifier arrays   : ${plan.F.length}`);
   console.log(`  G assignment maps    : ${plan.G.length}`);
@@ -246,7 +239,6 @@ async function main() {
   console.log(`  C submissions: ${counts.C} rewritten`);
   console.log(`  E notifications: ${counts.E} rewritten`);
   console.log(`  B registrations: ${counts.B} moved`);
-  console.log(`  D season points: ${counts.D} moved`);
   console.log(`  F qualifier arrays: ${counts.F} edited`);
   console.log(`  G assignment maps: ${counts.G} rekeyed`);
   console.log(`  A participant: merged into ${planned.newUid}, old doc tombstoned`);

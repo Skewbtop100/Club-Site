@@ -2820,9 +2820,9 @@ function GeneralTab(p: GeneralTabProps) {
       </div>
 
       <div>
-        {/* СЕЗОН is not in the mockup but is load-bearing: the season-points
-            recompute refuses to run without it ("Энэ тэмцээнд сезон
-            тохируулаагүй байна" on the list). It stays on this tab. */}
+        {/* СЕЗОН is not in the mockup. A label only since season points
+            were removed — the athlete's own competition list shows it as a
+            caption. It stays on this tab. */}
         <FieldLabel>СЕЗОН</FieldLabel>
         <input
           className={INPUT_CLASS}

@@ -1,22 +1,19 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { fetchAllCompetitions, fetchSeasonLeaderboard } from '@/lib/online-competition/data';
+import { fetchAllCompetitions } from '@/lib/online-competition/data';
 import { pickFeatured } from '@/lib/online-competition/featured';
-import type { OnlineCompetition, OnlineSeasonAthletePoints } from '@/lib/online-competition/types';
+import type { OnlineCompetition } from '@/lib/online-competition/types';
 import { toMillisOrNull } from './_components/hub/format';
 import FeaturedBanner from './_components/hub/v3/FeaturedBanner';
 import HubNav from './_components/hub/v3/HubNav';
 import LiveHero from './_components/hub/v3/LiveHero';
 import UpcomingCard from './_components/hub/v3/UpcomingCard';
 import LiveMiniCard from './_components/hub/v3/LiveMiniCard';
-import LeaderboardCard from './_components/hub/v3/LeaderboardCard';
 
 export default function OnlineCompetitionHubPage() {
   const [competitions, setCompetitions] = useState<OnlineCompetition[] | null>(null);
   const [error, setError] = useState('');
-  const [leaderboard, setLeaderboard] = useState<OnlineSeasonAthletePoints[]>([]);
-  const [season, setSeason] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -61,27 +58,6 @@ export default function OnlineCompetitionHubPage() {
     };
   }, [competitions]);
 
-  // "Current" season = the season of whichever competition (with a
-  // season set at all) has the latest startAt — a simple, good-enough
-  // heuristic since seasons don't have their own doc/dates to compare.
-  useEffect(() => {
-    if (!competitions) return;
-    const withSeason = competitions.filter((c) => c.season);
-    if (withSeason.length === 0) {
-      setSeason('');
-      setLeaderboard([]);
-      return;
-    }
-    const latest = withSeason.reduce((best, c) =>
-      (toMillisOrNull(c.startAt) ?? 0) > (toMillisOrNull(best.startAt) ?? 0) ? c : best,
-    );
-    const currentSeason = latest.season as string;
-    setSeason(currentSeason);
-    fetchSeasonLeaderboard(currentSeason)
-      .then(setLeaderboard)
-      .catch(() => setLeaderboard([]));
-  }, [competitions]);
-
   return (
     <div className="oc-v3-page">
       <HubNav live={live[0] ?? null} />
@@ -98,15 +74,22 @@ export default function OnlineCompetitionHubPage() {
 
           {live[0] && <LiveHero competition={live[0]} />}
 
-          <div className="oc-v3-grid">
-            <div className="oc-v3-col">
-              <UpcomingCard competitions={upcoming} />
+          {/* The right column held the season-points leaderboard, which was
+              removed. It now exists only while a competition is live, for
+              the live card; otherwise the upcoming list takes the full
+              width rather than sitting beside an empty column. */}
+          {live[0] ? (
+            <div className="oc-v3-grid">
+              <div className="oc-v3-col">
+                <UpcomingCard competitions={upcoming} />
+              </div>
+              <div className="oc-v3-col">
+                <LiveMiniCard competition={live[0]} />
+              </div>
             </div>
-            <div className="oc-v3-col">
-              {live[0] && <LiveMiniCard competition={live[0]} />}
-              <LeaderboardCard season={season} leaderboard={leaderboard} />
-            </div>
-          </div>
+          ) : (
+            <UpcomingCard competitions={upcoming} />
+          )}
         </main>
       )}
     </div>

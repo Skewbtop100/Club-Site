@@ -32,7 +32,6 @@ interface MergeSummary {
   newUid: string;
   registrations: { competitionId: string; events: string[] }[];
   submissions: number;
-  seasonPoints: { season: string; totalPoints: number }[];
   notifications: number;
   qualifiers: { path: string; index: number; length: number }[];
   assignments: { path: string; groupIndex: number; otherAthletes: number }[];
@@ -91,13 +90,6 @@ function errorCopy(err: MergeError, newEmail: string): { title: string; body: st
         title: 'Шинэ бүртгэл хоосон биш',
         body:
           `${newEmail} хаягтай бүртгэл ${err.count ?? ''} тэмцээнд бүртгүүлсэн байна. Энэ нь ` +
-          'мэйл солих тохиолдол биш, өөр тамирчны бүртгэл байж магадгүй. Шилжүүлэхгүй.',
-      };
-    case 'NEW_HAS_SEASON_POINTS':
-      return {
-        title: 'Шинэ бүртгэл хоосон биш',
-        body:
-          `${newEmail} хаягтай бүртгэлд улирлын оноо аль хэдийн бүртгэгдсэн байна. Энэ нь ` +
           'мэйл солих тохиолдол биш, өөр тамирчны бүртгэл байж магадгүй. Шилжүүлэхгүй.',
       };
     case 'NEW_HAS_PROFILE':
@@ -259,7 +251,7 @@ export default function EmailChangeDialog({
           {stage === 'done' && counts && (
             <div className="oc-sc-warn" style={{ borderColor: '#2E9E5B', color: '#4FD07A', background: '#0A140D' }}>
               Шилжүүлэлт амжилттай. Бичлэг {counts.C}, мэдэгдэл {counts.E}, бүртгэл {counts.B},
-              улирлын оноо {counts.D}, шалгаруулалт {counts.F}, групп {counts.G}.
+              шалгаруулалт {counts.F}, групп {counts.G}.
             </div>
           )}
         </div>
@@ -334,11 +326,6 @@ function PreviewList({ summary }: { summary: MergeSummary }) {
           : summary.registrations.map((r) => `${r.competitionId} (${r.events.join(', ')})`).join(' · ')}
       </Row>
       <Row label="ИЛГЭЭМЖ">{summary.submissions}</Row>
-      <Row label="УЛИРЛЫН ОНОО">
-        {summary.seasonPoints.length === 0
-          ? '—'
-          : summary.seasonPoints.map((s) => `${s.season}: ${s.totalPoints}`).join(' · ')}
-      </Row>
       <Row label="МЭДЭГДЭЛ">{summary.notifications}</Row>
       <Row label="ШАЛГАРУУЛАЛТ">
         {summary.qualifiers.length === 0

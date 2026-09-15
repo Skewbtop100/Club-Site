@@ -7,7 +7,7 @@
 //   · the ranking, and where the athletes with no result go
 //
 // WHAT THIS RANKS BY: each athlete's LIFETIME personal best, from the
-// onlineParticipants[uid].stats rollup the admin points-recompute writes.
+// onlineParticipants[uid].stats rollup the admin stats recompute writes.
 // Not results in this competition — nothing here reads onlineSubmissions
 // or round-results, and the tab is therefore meaningful before the
 // competition has started, which is the point of it.

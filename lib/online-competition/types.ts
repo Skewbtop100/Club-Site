@@ -76,7 +76,7 @@ export interface OnlineCompetitionEventConfig {
    *  THE DEFAULT IS null — NO LIMIT — AND MUST STAY THAT WAY. WCA's own
    *  default is 10:00, and adopting it as this field's default would
    *  retroactively DNF every historical solve slower than ten minutes:
-   *  scores already announced, season points already awarded, PRs already
+   *  scores already announced, PRs already
    *  shown. A limit only ever exists because an admin typed one.
    *
    *  Per EVENT, not per round. Real WCA time limits are per round, but
@@ -389,10 +389,11 @@ export interface OnlineCompetition {
    *  ХУВААРЬ tab reads this array in order and lays it out as a timeline,
    *  which needs no shape change. */
   schedule?: OnlineCompetitionScheduleEntry[];
-  /** e.g. "2026-spring" — groups competitions into onlineSeasonPoints
-   *  leaderboards. Optional for the same legacy-doc reason as the fields
-   *  above; a competition without one simply doesn't contribute to any
-   *  season leaderboard when points are recomputed. */
+  /** e.g. "2026-spring" — a label grouping competitions by season, shown
+   *  as the caption on the athlete's own competition list. It also keyed
+   *  the season-points leaderboard, which was removed; nothing is computed
+   *  from it now. Optional for the same legacy-doc reason as the fields
+   *  above. */
   season?: string;
 }
 
@@ -638,7 +639,7 @@ export interface OnlineSubmission {
   event: string;
   /** ATTEMPT INDEX 1-5 within one run — NOT a competition round. The solve
    *  flow writes `round: i + 1` per attempt, and every Ao5 consumer
-   *  (seasonPoints, athleteStats, round-results, ReviewGrid) reads it that
+   *  (athleteStats, round-results, ReviewGrid) reads it that
    *  way. The competition round lives in `competitionRound` below; the two
    *  are deliberately separate fields, and this one must not be renamed or
    *  repurposed. */
@@ -790,7 +791,7 @@ export interface NextEventRound {
  *  other's Firebase client. */
 export const ONLINE_NOTIFICATIONS = 'onlineNotifications';
 
-/** 'round_result'   — your round is finalised, here is your placement.
+/** 'round_result'   — your round is finalised, here is your result.
  *  'round_advanced' — same, plus you made the cut into the next round.
  *  An athlete gets exactly ONE of these per round, never both. (The
  *  earlier per-judge-decision kinds are gone: they fired five times for
@@ -1016,22 +1017,3 @@ export interface OnlineCompetitionWriteInput {
   schedule: OnlineCompetitionScheduleEntry[];
 }
 
-// ── Season points / leaderboard ─────────────────────────────────────────
-// onlineSeasonPoints/{season}/athletes/{uid} — recomputed by an admin
-// action (see app/api/online-competition/admin-recompute-points), not
-// live-aggregated on every hub page load.
-
-export interface OnlineSeasonPointsBreakdownEntry {
-  competitionId: string;
-  eventId: string;
-  points: number;
-  placement: number;
-}
-
-export interface OnlineSeasonAthletePoints {
-  uid: string;
-  displayName: string;
-  photoURL: string | null;
-  totalPoints: number;
-  breakdown: OnlineSeasonPointsBreakdownEntry[];
-}

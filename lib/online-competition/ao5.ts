@@ -1,7 +1,6 @@
 // Shared by the solve flow (app/online-competition/[competitionId]/solve/
-// [eventId]) and the season-points recompute
-// (lib/online-competition/seasonPoints.ts, server-side) — moved here from
-// the solve route's own _lib folder so the recompute logic can genuinely
+// [eventId]) and the server-side scorers (round-results.ts, athleteStats.ts)
+// — moved here from the solve route's own _lib folder so they genuinely
 // reuse it rather than duplicating the WCA Ao5 rule.
 
 export type AttemptTime = number | 'DNF';
@@ -20,11 +19,11 @@ export interface JudgedAttempt {
 
 /** One attempt's contribution to an average, for every scorer.
  *
- *  Lives here, shared, because it is now status-dependent and three
- *  separate scorers (round-results, seasonPoints, athleteStats) each used
- *  to carry their own copy of the old rule. A rule this subtle with three
- *  implementations is the exact shape of the bug this function exists to
- *  fix.
+ *  Lives here, shared, because it is now status-dependent and the scorers
+ *  (round-results, athleteStats, and the since-removed season points) each
+ *  used to carry their own copy of the old rule. A rule this subtle with
+ *  several implementations is the exact shape of the bug this function
+ *  exists to fix.
  *
  *  REJECTED IS ALWAYS A DNF, and it is checked FIRST — deliberately not
  *  via `penalty === 'DNF'`. A judge's only rejection action today does set
@@ -42,9 +41,9 @@ export interface JudgedAttempt {
  *  This is also the single authoritative place a TIME LIMIT is applied.
  *  The solve flow warns the athlete at entry, but that check is
  *  client-side, runs on a self-reported number, and cannot know about a
- *  penalty a judge adds later. Every scorer — round-results, seasonPoints
- *  and athleteStats — converges here, so enforcing it once here covers
- *  all three and they cannot drift apart. */
+ *  penalty a judge adds later. Every scorer — round-results, athleteStats
+ *  and the live view — converges here, so enforcing it once here covers
+ *  all of them and they cannot drift apart. */
 export function effectiveAttemptTime(a: JudgedAttempt, timeLimitCs: number | null): AttemptTime {
   if (a.status !== 'approved') return 'DNF';
   if (a.isDnf === true || a.penalty === 'DNF') return 'DNF';
@@ -105,7 +104,7 @@ export function resolveResultFormat(raw: unknown): ResultFormat {
  *    - the TNoodle import (expectedScrambleCountFor in scrambles.ts)
  *    - the scramble route's attempt bound
  *    - round-results.ts: attempt count, completeness, result, tie-break
- *    - seasonPoints.ts and athleteStats.ts
+ *    - athleteStats.ts
  *
  *  The one remaining Ao5-shaped thing is computeAo5 itself, kept as a
  *  compatibility wrapper (see below), and the STORED field names
@@ -279,8 +278,8 @@ export interface Ao5Result {
  *
  *  Now a thin projection of computeResult(times, 'ao5') — same maths, same
  *  numbers, different shape. The shape is unchanged on purpose: every
- *  existing caller (summaryStats, round-results, athleteStats,
- *  seasonPoints) keeps calling this and reading .ao5/.bestIndex/
+ *  existing caller (summaryStats, round-results, athleteStats) keeps
+ *  calling this and reading .ao5/.bestIndex/
  *  .worstIndex, and SummaryStage greys attempts out by those two indices.
  *  Migrating callers to computeResult is a later step, not this one. */
 export function computeAo5(times: AttemptTime[]): Ao5Result {

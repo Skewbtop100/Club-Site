@@ -30,7 +30,6 @@ function compile() {
     [
       require.resolve('typescript/bin/tsc'),
       'lib/online-competition/round-results.ts',
-      'lib/online-competition/seasonPoints.ts',
       'lib/online-competition/athleteStats.ts',
     'lib/online-competition/rounds.ts',
     'lib/online-competition/admin-competitions.ts',
@@ -47,7 +46,7 @@ function compile() {
 }
 
 process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
-// seasonPoints/athleteStats call getOnlineCompAdminDb() internally, which
+// athleteStats calls getOnlineCompAdminDb() internally, which
 // builds its own credentialed app via cert(). cert() PARSES the private
 // key eagerly, even though FIRESTORE_EMULATOR_HOST means it is never used
 // to authenticate anything — so a placeholder string fails outright. Generate
@@ -66,7 +65,6 @@ compile();
 
 const { collectRoundResults, rankRoundResults } = require(path.join(OUT, 'round-results.js'));
 const { selectQualifiers: selectQualifiersFn } = require(path.join(OUT, 'rounds.js'));
-const { recomputeSeasonPointsForCompetition } = require(path.join(OUT, 'seasonPoints.js'));
 const { recomputeAthleteStatsForCompetition } = require(path.join(OUT, 'athleteStats.js'));
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, Timestamp } = require('firebase-admin/firestore');
@@ -108,8 +106,6 @@ async function seed() {
     const snap = await db.collection(col).get();
     await Promise.all(snap.docs.map((d) => d.ref.delete()));
   }
-  const seasonSnap = await db.collection('onlineSeasonPoints').doc('s1').collection('athletes').get();
-  await Promise.all(seasonSnap.docs.map((d) => d.ref.delete()));
 
   await db.collection('onlineCompetitions').doc(COMP).set({
     name: 'Ranking test',
@@ -198,32 +194,6 @@ const ONE_DNF_AO5 = 1200;
   // includes the one-DNF athlete where it previously could not have.
   ok('a rejected attempt never contributes its reportedTime',
     ranked.every((r) => r.value !== 999 && r.value < 1500), JSON.stringify(ranked.map((r) => r.value)));
-
-  // ── season points ───────────────────────────────────────────────────
-  await recomputeSeasonPointsForCompetition(COMP);
-  const seasonDocs = await db.collection('onlineSeasonPoints').doc('s1').collection('athletes').get();
-  const points = new Map(seasonDocs.docs.map((d) => [d.id, d.data()]));
-
-  ok('season: 5-approved athlete scores', (points.get('full')?.totalPoints ?? 0) > 0, JSON.stringify(points.get('full')?.breakdown));
-  ok(
-    'season: one-DNF athlete scores (the bug: used to score nothing)',
-    (points.get('oneDnf')?.totalPoints ?? 0) > 0,
-    JSON.stringify(points.get('oneDnf')?.breakdown),
-  );
-  ok(
-    'season: DNF-average athlete gets no placement',
-    (points.get('twoDnf')?.breakdown ?? []).length === 0,
-    JSON.stringify(points.get('twoDnf')?.breakdown),
-  );
-  ok(
-    'season: incomplete athlete gets no placement',
-    (points.get('pending')?.breakdown ?? []).length === 0,
-    JSON.stringify(points.get('pending')?.breakdown),
-  );
-  // Both finishers averaged 1200, so they tie; the placement set must be
-  // exactly the two of them, not one.
-  const placed = [...points.entries()].filter(([, v]) => (v.breakdown ?? []).length > 0).map(([k]) => k).sort();
-  ok('season: exactly the two ranked athletes are placed', placed.join(',') === 'full,oneDnf', placed.join(','));
 
   // ── athlete stats ───────────────────────────────────────────────────
   await recomputeAthleteStatsForCompetition(COMP);
@@ -466,40 +436,9 @@ const ONE_DNF_AO5 = 1200;
   ok('bo3: produces NO ao5', bonly?.ao5 === null, JSON.stringify(bonly));
   ok('bo3: produces NO mo3', bonly?.mo3 === null, JSON.stringify(bonly));
 
-  // ── season points for a non-Ao5 round ────────────────────────────────
-  await seedComp('x-season', 'mo3', 3, {
-    sWinner: [1000, 1000, 1000], // mean 1000
-    sSecond: [1100, 1100, 1100], // mean 1100
-    sDnfd:   [1000, 1100, 'DNF'], // any DNF kills an Mo3
-  }, 's3');
-  await recomputeSeasonPointsForCompetition('x-season');
-  const seasonRows = await db.collection('onlineSeasonPoints').doc('s3').collection('athletes').get();
-  const pts = new Map(seasonRows.docs.map((d) => [d.id, d.data()]));
-  const placementOf = (uid) => (pts.get(uid)?.breakdown ?? []).find((b) => b.competitionId === 'x-season')?.placement;
-  ok('season/mo3: the better mean places first', placementOf('sWinner') === 1, String(placementOf('sWinner')));
-  ok('season/mo3: the slower mean places second', placementOf('sSecond') === 2, String(placementOf('sSecond')));
-  ok('season/mo3: a DNF mean gets no placement', placementOf('sDnfd') === undefined, String(placementOf('sDnfd')));
-  ok('season/mo3: the winner scores more than second',
-    (pts.get('sWinner')?.totalPoints ?? 0) > (pts.get('sSecond')?.totalPoints ?? 0),
-    `${pts.get('sWinner')?.totalPoints} vs ${pts.get('sSecond')?.totalPoints}`);
-
-  // The season tie-break: equal means, better single wins the placement —
-  // and placement is what decides +15 vs +10.
-  await seedComp('x-tie', 'mo3', 3, {
-    sAaa: [1000, 1100, 1200], // mean 1100, best 1000
-    sZzz: [900, 1100, 1300],  // mean 1100, best 900   <- better single
-  }, 's4');
-  await recomputeSeasonPointsForCompetition('x-tie');
-  const tieRows = await db.collection('onlineSeasonPoints').doc('s4').collection('athletes').get();
-  const tiePts = new Map(tieRows.docs.map((d) => [d.id, d.data()]));
-  const tiePlace = (uid) => (tiePts.get(uid)?.breakdown ?? []).find((b) => b.competitionId === 'x-tie')?.placement;
-  ok('season tie-break: the better single takes 1st (not read order)', tiePlace('sZzz') === 1, String(tiePlace('sZzz')));
-  ok('season tie-break: the other takes 2nd', tiePlace('sAaa') === 2, String(tiePlace('sAaa')));
-
   // ── THE REGRESSION THAT MATTERS MOST ─────────────────────────────────
   // Every Ao5-only case above (the original suite) must be byte-identical.
-  // Re-run the original competition's recomputes and re-assert them.
-  await recomputeSeasonPointsForCompetition(COMP);
+  // Re-run the original competition's stats recompute and re-assert it.
   await recomputeAthleteStatsForCompetition(COMP);
   const regStats = await Promise.all(
     Object.keys(ATHLETES).map(async (uid) => [uid, (await db.collection('onlineParticipants').doc(uid).get()).data()?.stats?.[EVENT]]),
@@ -514,13 +453,6 @@ const ONE_DNF_AO5 = 1200;
   // An Ao5-only athlete has no Mo3 — the new field is null, not absent-
   // and-undefined, so readers get a consistent shape.
   ok('REGRESSION ao5: an Ao5-only athlete has mo3 === null', reg.get('full')?.mo3 === null, JSON.stringify(reg.get('full')));
-
-  const regSeason = await db.collection('onlineSeasonPoints').doc('s1').collection('athletes').get();
-  const regPts = new Map(regSeason.docs.map((d) => [d.id, d.data()]));
-  ok('REGRESSION ao5: season points still awarded to the two finishers',
-    (regPts.get('full')?.totalPoints ?? 0) > 0 && (regPts.get('oneDnf')?.totalPoints ?? 0) > 0);
-  ok('REGRESSION ao5: DNF-average athlete still unplaced',
-    (regPts.get('twoDnf')?.breakdown ?? []).length === 0);
 
 
   // ══ TIME LIMIT ═══════════════════════════════════════════════════════
@@ -730,18 +662,6 @@ const ONE_DNF_AO5 = 1200;
     selectQualifiers(mixedRanked, 'percent', 50).map((r) => r.uid).join(',') === 'avgFast',
     JSON.stringify(selectQualifiers(mixedRanked, 'percent', 50).map((r) => r.uid)));
   ok('advancement: a top-1 cut is unaffected', selectQualifiers(mixedRanked, 'count', 1)[0]?.uid === 'avgFast');
-
-  // ── season points are deliberately NOT changed ───────────────────────
-  await recomputeSeasonPointsForCompetition(MIXED);
-  const mixedSeason = await db.collection('onlineSeasonPoints').doc('s6').collection('athletes').get();
-  const mixedPts = new Map(mixedSeason.docs.map((d) => [d.id, d.data()]));
-  const mixedPlace = (uid) => (mixedPts.get(uid)?.breakdown ?? []).find((b) => b.competitionId === MIXED)?.placement;
-  ok('season: a DNF-average athlete still earns NO placement', mixedPlace('dnfBetterSingle') === undefined,
-    String(mixedPlace('dnfBetterSingle')));
-  ok('season: the all-DNF athlete earns no placement', mixedPlace('allDnf') === undefined);
-  ok('season: average-having athletes place 1 and 2, unchanged',
-    mixedPlace('avgFast') === 1 && mixedPlace('avgSlow') === 2,
-    `${mixedPlace('avgFast')}, ${mixedPlace('avgSlow')}`);
 
   // ── THE REGRESSION: inserting athletes BELOW must not move anyone ────
   // The original Ao5 competition has one DNF-average athlete (twoDnf) who

@@ -60,10 +60,6 @@ export async function POST(req: Request) {
           events: r.data.events ?? [],
         })),
         submissions: planned.plan.C.length,
-        seasonPoints: planned.plan.D.map((d: { season: string; data: { totalPoints?: number } }) => ({
-          season: d.season,
-          totalPoints: d.data.totalPoints ?? 0,
-        })),
         notifications: planned.plan.E.length,
         qualifiers: planned.plan.F.map((f: { path: string; before: string[]; after: string[]; index: number }) => ({
           path: f.path,

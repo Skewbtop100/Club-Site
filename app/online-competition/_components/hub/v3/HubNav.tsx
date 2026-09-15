@@ -23,7 +23,6 @@ const COMPETITIONS = '/online-competition/competitions';
 // component's "ink" tone is #16140F — invisible on #0D0D10).
 const LOGO_PATTERN = ['ink', 'ink', 'volt', 'ink', 'volt', 'ink', 'volt', 'ink', 'ink'] as const;
 const LOGO_COLOR = { ink: '#F4F1EA', volt: '#DFFF4F' } as const;
-const RANK = '/online-competition/rank';
 const DASHBOARD = '/online-competition/dashboard';
 const PROFILE = '/online-competition/profile';
 
@@ -40,7 +39,7 @@ export default function HubNav({
   live: OnlineCompetition | null;
   /** Which top-level tab this page is. Passed explicitly rather than read
    *  from usePathname(), which reports the pre-rewrite "/" on comp.*. */
-  active?: 'home' | 'competitions' | 'rank';
+  active?: 'home' | 'competitions';
 }) {
   const router = useRouter();
   const { user, participant, loading, signOut } = useOnlineAuth();
@@ -153,10 +152,6 @@ export default function HubNav({
           )}
         </div>
 
-        <Link href={RANK} className={`oc-v3-tab${active === 'rank' ? ' oc-v3-tab-active' : ''}`}>
-          Ранк
-        </Link>
-
         {live && (
           <Link href={`${HUB}/${live.id}/live`} className="oc-v3-tab oc-v3-tab-live">
             <span className="oc-v3-dot" aria-hidden />
@@ -208,14 +203,23 @@ export default function HubNav({
                   >
                     {user.displayName ?? 'Тамирчин'}
                   </p>
-                  {/* No per-athlete stat aggregate exists client-side yet
-                      (season points are keyed by uid but only fetched for
-                      the top-10 leaderboard, and solve counts aren't
-                      publicly readable) — "—" placeholders, same
-                      convention the dashboard uses. */}
-                  <p style={{ marginTop: 3, font: '400 9px var(--oc-font-mono), monospace', color: '#6E6A62' }}>
-                    — оноо · — тэмцээн
-                  </p>
+                  {/* The account the athlete is signed in as. This line was
+                      a permanent "— оноо · — тэмцээн" placeholder until
+                      season points were removed. */}
+                  {user.email && (
+                    <p
+                      style={{
+                        marginTop: 3,
+                        font: '400 9px var(--oc-font-mono), monospace',
+                        color: '#6E6A62',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {user.email}
+                    </p>
+                  )}
                 </div>
               </div>
               <Link

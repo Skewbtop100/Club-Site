@@ -1,7 +1,7 @@
 # Merge tool fixture test — `scripts/merge-athlete-uid.mjs`
 
 Runs the **real merge script** against the Firestore emulator over a synthetic
-fixture, then asserts the end state. 84 assertions.
+fixture, then asserts the end state. 123 assertions.
 
 ## Running
 
@@ -35,7 +35,7 @@ Four athletes: **OLD** (approved, full profile, two-event `stats`), **NEW**
 | --- | --- |
 | B registrations | 2 under OLD, one carrying a `results.333` object |
 | C submissions | 3 on OLD, 1 on a bystander |
-| D season points | athlete doc for OLD, plus one for a bystander |
+| D season points | athlete doc for OLD, plus one for a bystander — orphaned data since season points were removed; the merge must leave both exactly where they are |
 | E notifications | 3 on OLD (2 unread, 1 read), 1 on a bystander |
 | F qualifiers | `uids: [OTHER1, OLD, OTHER2]` — OLD at **index 1 of 3** |
 | G groupAssignments | `{ OTHER1: 0, OLD: 2, OTHER2: 1 }` |
@@ -54,8 +54,8 @@ the assignments map loses the old key and gains the new one carrying the same
 group index, with both bystanders' entries intact; every submission and
 notification carries the new uid and none the old, with read/unread preserved;
 registrations move with their `results` object and leave nothing behind; the
-season doc moves with `displayName`/`photoURL` refreshed from the new account;
-the merged profile takes `uid`/`email`/`displayName`/`photoURL` from NEW and
+season-points docs are left untouched (season points were removed, and the merge
+no longer reads or writes them); the merged profile takes `uid`/`email`/`displayName`/`photoURL` from NEW and
 everything else from OLD including `createdAt`, with `stats` **replaced**
 wholesale rather than deep-merged; the old doc is tombstoned but still exists;
 and both bystander participant docs are byte-identical in every field.

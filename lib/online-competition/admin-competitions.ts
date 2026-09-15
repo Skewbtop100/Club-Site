@@ -760,7 +760,7 @@ export class CompetitionWriteError extends Error {}
  *  for it is if anything stronger: a solve that was legal under a 15:00
  *  limit becomes a DNF under 10:00, and adding a limit where there was
  *  none can only ever turn valid solves into DNFs. Either silently
- *  rewrites Ao5s, standings, season points and PRs for results that have
+ *  rewrites Ao5s, standings and PRs for results that have
  *  already been announced. Identical hazard, identical guard. */
 interface ScoringRules {
   resultFormat: string;
@@ -919,7 +919,7 @@ export async function writeCompetitionDoc(
     // Changing an event's format once results exist would silently
     // re-derive that history under a different rule: an Ao5 recomputed as
     // an Mo3 is a different number from the same attempts, and stored
-    // season points and athlete stats would shift with no record of why.
+    // athlete stats would shift with no record of why.
     //
     // Enforced HERE, not in validateCompetitionInput, for the simple
     // reason that validateCompetitionInput is a pure function of the

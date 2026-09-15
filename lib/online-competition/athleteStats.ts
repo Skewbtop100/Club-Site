@@ -27,8 +27,8 @@ interface JudgedSubmission {
   penalty: '+2' | 'DNF' | null;
 }
 
-/** The one shared rule (ao5.ts) — literally the same function the
- *  season-points scorer and the round ranker use, not a third copy of it. */
+/** The one shared rule (ao5.ts) — literally the same function the round
+ *  ranker uses, not a second copy of it. */
 function effectiveTime(s: JudgedSubmission, timeLimitCs: number | null): AttemptTime {
   return effectiveAttemptTime(s, timeLimitCs);
 }
@@ -100,9 +100,7 @@ async function loadScoringRulesIndex(
  *  equality-only queries from its automatic single-field indexes).
  *
  *  Independent of seasons: an athlete's PR is a fact about their solves,
- *  not about a season, so this runs even for a competition with no season
- *  set — which is also why the caller runs it before the points recompute
- *  (that one throws when `season` is empty).
+ *  not about a season, so this runs for a competition with no season set.
  */
 export async function recomputeAthleteStatsForCompetition(
   competitionId: string,

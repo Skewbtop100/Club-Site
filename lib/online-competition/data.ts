@@ -5,8 +5,6 @@ import {
   deleteField,
   getDocs,
   runTransaction,
-  limit,
-  orderBy,
   query,
   serverTimestamp,
   where,
@@ -30,7 +28,6 @@ import type {
   OnlineParticipantProfileInput,
   OnlineParticipantProfileStatus,
   OnlineRegistration,
-  OnlineSeasonAthletePoints,
   OnlineSubmission,
   SolveMarks,
 } from './types';
@@ -145,21 +142,6 @@ export async function fetchAllCompetitions(): Promise<OnlineCompetition[]> {
     query(collection(onlineCompDb, 'onlineCompetitions'), where('status', '!=', 'draft')),
   );
   return snap.docs.map((d) => toPublicCompetition(d.id, d.data() as Omit<OnlineCompetition, 'id'>));
-}
-
-// Public read for the hub's "ОНООНЫ ХҮСНЭГТ" section — points are
-// recomputed by an admin action (lib/online-competition/seasonPoints.ts),
-// not live-aggregated here. Empty array (not an error) if the season has
-// no computed points yet, e.g. right after it's created.
-export async function fetchSeasonLeaderboard(season: string, count = 10): Promise<OnlineSeasonAthletePoints[]> {
-  const snap = await getDocs(
-    query(
-      collection(onlineCompDb, 'onlineSeasonPoints', season, 'athletes'),
-      orderBy('totalPoints', 'desc'),
-      limit(count),
-    ),
-  );
-  return snap.docs.map((d) => d.data() as OnlineSeasonAthletePoints);
 }
 
 // Called from useOnlineAuth.tsx whenever onAuthStateChanged reports a
@@ -373,18 +355,6 @@ export async function fetchMyRegistrations(uid: string): Promise<OnlineRegistrat
 //     "fields": [ { "fieldPath": "uid", "order": "ASCENDING" },
 //                 { "fieldPath": "createdAt", "order": "DESCENDING" } ] }
 // to firestore.indexes.json and push the ordering into the query.
-// One athlete's own season-points doc. The leaderboard query above only
-// returns the top N, so the dashboard's "ОНОО" card needs a direct read —
-// same collection, same public read rule.
-export async function fetchAthleteSeasonPoints(
-  season: string,
-  uid: string,
-): Promise<OnlineSeasonAthletePoints | null> {
-  const snap = await getDoc(doc(onlineCompDb, 'onlineSeasonPoints', season, 'athletes', uid));
-  if (!snap.exists()) return null;
-  return snap.data() as OnlineSeasonAthletePoints;
-}
-
 export async function fetchMySubmissions(uid: string, count = 5): Promise<OnlineSubmission[]> {
   const snap = await getDocs(query(collection(onlineCompDb, 'onlineSubmissions'), where('uid', '==', uid)));
   return snap.docs

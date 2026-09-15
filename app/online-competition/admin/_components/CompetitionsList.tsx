@@ -82,39 +82,25 @@ export default function CompetitionsList() {
     setRecomputingId(competitionId);
     setRecomputeMsg(null);
     try {
-      const res = await fetch('/api/online-competition/admin-recompute-points', {
+      const res = await fetch('/api/online-competition/admin-recompute-stats', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ competitionId }),
       });
-      const data = (await res.json()) as {
-        season?: string;
-        athletesUpdated?: number;
-        error?: string;
-        stats?: { athletesUpdated: number; events: number } | null;
-      };
-      const statsNote = data.stats ? ` · Статистик: ${data.stats.athletesUpdated} тамирчин` : '';
+      const data = (await res.json()) as { athletesUpdated?: number; events?: number; error?: string };
       if (!res.ok) throw new Error(data.error ?? 'failed');
       setRecomputeMsg({
         id: competitionId,
-        text: `Шинэчлэгдлээ: ${data.athletesUpdated} тамирчин (${data.season})${statsNote}`,
+        text: `Статистик шинэчлэгдлээ: ${data.athletesUpdated ?? 0} тамирчин`,
         isError: false,
       });
     } catch (err) {
-      // Logged as well as shown: the branch below reads err.message, which
-      // is empty for a network failure, so the console is the only place
-      // that kind of failure is visible.
-      console.error('CompetitionsList: the points recompute failed:', err);
-      // The per-athlete stats recompute runs first and independently of
-      // the season, so points can fail while stats succeeded — the server
-      // says so in its message and it would be misleading to replace that
-      // with a flat "something went wrong".
-      const raw = err instanceof Error ? err.message : '';
+      // Logged as well as shown: a network failure has an empty message,
+      // so the console is the only place that kind of failure is visible.
+      console.error('CompetitionsList: the stats recompute failed:', err);
       setRecomputeMsg({
         id: competitionId,
-        text: raw.startsWith('Competition has no season set')
-          ? `Энэ тэмцээнд сезон тохируулаагүй байна${raw.includes('статистик') ? ' · Статистик шинэчлэгдсэн' : ''}`
-          : raw || 'Онооны тооцоо шинэчлэхэд алдаа гарлаа',
+        text: 'Статистик шинэчлэхэд алдаа гарлаа',
         isError: true,
       });
     } finally {
@@ -243,11 +229,9 @@ export default function CompetitionsList() {
                 )}
 
                 {/* Its own strip below the row, not squeezed into the 80px
-                    last column — "Онооны тооцоо шинэчлэх" is far too long
-                    a label to fit that column's fixed width. Kept on the
-                    list (not the detail page) since it's a season-points
-                    action, unrelated to either of the detail page's two
-                    tabs. */}
+                    last column — the label does not fit that column's
+                    fixed width. Refreshes athlete stats (PRs, averages)
+                    from this competition's judged attempts. */}
                 {c.status === 'finished' && (
                   <div
                     style={{
@@ -274,7 +258,7 @@ export default function CompetitionsList() {
                       disabled={recomputingId === c.id}
                       onClick={() => handleRecompute(c.id)}
                     >
-                      {recomputingId === c.id ? 'Тооцож байна...' : 'Онооны тооцоо шинэчлэх'}
+                      {recomputingId === c.id ? 'Шинэчилж байна...' : 'Статистик шинэчлэх'}
                     </Button>
                   </div>
                 )}
