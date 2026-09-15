@@ -7,8 +7,9 @@ import type { OnlineCompetition } from '@/lib/online-competition/types';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import { initials } from './util';
 import { resolveParticipantPhoto } from '@/lib/online-competition/data';
-import NotificationBell from './NotificationBell';
+import NotificationBell, { useNotifications } from './NotificationBell';
 import AuthModal from './AuthModal';
+import BottomNav, { type BottomSection } from './BottomNav';
 
 // Canonical in-app paths. The comp.* subdomain rewrite (middleware.ts)
 // maps "/" -> "/online-competition" and passes anything already under
@@ -35,11 +36,16 @@ const PROFILE = '/online-competition/profile';
 export default function HubNav({
   live,
   active = 'home',
+  section,
 }: {
   live: OnlineCompetition | null;
   /** Which top-level tab this page is. Passed explicitly rather than read
    *  from usePathname(), which reports the pre-rewrite "/" on comp.*. */
   active?: 'home' | 'competitions';
+  /** Which item the MOBILE bottom bar marks. Defaults from `active`; a page
+   *  whose desktop tab and bar item differ (the live view, the dashboard,
+   *  the profile) passes it. The desktop tabs never read this. */
+  section?: BottomSection;
 }) {
   const router = useRouter();
   const { user, participant, loading, signOut } = useOnlineAuth();
@@ -47,6 +53,10 @@ export default function HubNav({
   // same rule the old NavBar and the registration gate use.
   const signedIn = !!user && !user.isAnonymous;
   const athletePhoto = resolveParticipantPhoto(participant);
+  // ONE subscription, shared by the bell (desktop) and the bottom bar's
+  // МЭДЭГДЭЛ (mobile).
+  const notifications = useNotifications(signedIn && user ? user.uid : null);
+  const barSection: BottomSection = section !== undefined ? section : active;
 
   const [compsOpen, setCompsOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
@@ -96,6 +106,7 @@ export default function HubNav({
   }
 
   return (
+    <>
     <nav className="oc-v3-nav">
       {/* Brand row — hidden on desktop (the approved desktop header has no
           wordmark; tabs sit flush left). Below 640px the header splits into
@@ -163,15 +174,19 @@ export default function HubNav({
       <div className="oc-v3-nav-auth" style={{ gap: 10 }}>
       {loading ? null : signedIn ? (
         <>
-        <NotificationBell
-          uid={user.uid}
-          open={notifOpen}
-          onToggle={() => {
-            setNotifOpen((v) => !v);
-            setUserOpen(false);
-          }}
-          onClose={closeNotif}
-        />
+        {/* Desktop only: below 640px the bell lives in the bottom bar. */}
+        <span className="oc-v3-nav-bell">
+          <NotificationBell
+            uid={user.uid}
+            items={notifications}
+            open={notifOpen}
+            onToggle={() => {
+              setNotifOpen((v) => !v);
+              setUserOpen(false);
+            }}
+            onClose={closeNotif}
+          />
+        </span>
         <div className="oc-v3-menu-wrap" ref={userRef}>
           <button
             type="button"
@@ -182,7 +197,11 @@ export default function HubNav({
             }}
           >
             <Avatar photo={athletePhoto} name={user.displayName} />
-            <span style={{ font: '500 12px var(--oc-font-heading), sans-serif', color: '#F4F1EA' }}>
+            {/* Below 640px only the round avatar shows (theme.css). */}
+            <span
+              className="oc-v3-userbtn-name"
+              style={{ font: '500 12px var(--oc-font-heading), sans-serif', color: '#F4F1EA' }}
+            >
               {user.displayName ?? 'Тамирчин'}
             </span>
             <span className="oc-v3-tri" aria-hidden />
@@ -282,6 +301,17 @@ export default function HubNav({
         }}
       />
     </nav>
+
+    {/* Mobile only (theme.css hides it above 640px). Outside the header so
+        its fixed positioning is relative to the viewport, not the sticky
+        bar. */}
+    <BottomNav
+      section={barSection}
+      uid={signedIn && user ? user.uid : null}
+      notifications={notifications}
+      onSignIn={() => setAuthOpen(true)}
+    />
+    </>
   );
 }
 

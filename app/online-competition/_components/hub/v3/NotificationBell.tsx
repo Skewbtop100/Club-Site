@@ -21,35 +21,48 @@ import type { OnlineNotification } from '@/lib/online-competition/types';
 // Open state is CONTROLLED by HubNav so the bell and the user menu can be
 // mutually exclusive; the outside-click and Escape listeners live here,
 // scoped to this component's own wrapper.
+//
+// The notifications themselves come from useNotifications, called ONCE in
+// HubNav and handed to both the bell (desktop) and the bottom bar's
+// МЭДЭГДЭЛ sheet (mobile) — one subscription, one unread count.
 
 const VOLT = '#DFFF4F';
 const MONO = "'JetBrains Mono', monospace";
 
+/** One live subscription per signed-in athlete, kept open whether or not a
+ *  list is showing — the unread badge has to be right before anyone opens
+ *  it. */
+export function useNotifications(uid: string | null): OnlineNotification[] {
+  const [items, setItems] = useState<OnlineNotification[]>([]);
+  useEffect(() => {
+    if (!uid) {
+      setItems([]);
+      return;
+    }
+    return subscribeToNotifications(uid, setItems);
+  }, [uid]);
+  return items;
+}
+
+export function unreadCountOf(items: OnlineNotification[]): number {
+  return items.filter((n) => !n.read).length;
+}
+
 export default function NotificationBell({
   uid,
+  items,
   open,
   onToggle,
   onClose,
 }: {
   uid: string;
+  items: OnlineNotification[];
   open: boolean;
   onToggle: () => void;
   onClose: () => void;
 }) {
-  const router = useRouter();
   const wrapRef = useRef<HTMLDivElement | null>(null);
-  const [items, setItems] = useState<OnlineNotification[]>([]);
   const [bellHover, setBellHover] = useState(false);
-  const [markHover, setMarkHover] = useState(false);
-  const [hoverRow, setHoverRow] = useState<string | null>(null);
-
-  // One live subscription per signed-in athlete, kept open whether or not
-  // the popup is showing — the unread badge has to be right before the
-  // user ever clicks the bell.
-  useEffect(() => {
-    if (!uid) return;
-    return subscribeToNotifications(uid, setItems);
-  }, [uid]);
 
   useEffect(() => {
     if (!open) return;
@@ -67,17 +80,7 @@ export default function NotificationBell({
     };
   }, [open, onClose]);
 
-  const unreadCount = useMemo(() => items.filter((n) => !n.read).length, [items]);
-
-  function openRow(n: OnlineNotification) {
-    if (!n.read && n.id) {
-      markRead(n.id).catch((err) =>
-        console.warn('[online-competition] mark notification read failed', err),
-      );
-    }
-    onClose();
-    if (n.href) router.push(n.href);
-  }
+  const unreadCount = useMemo(() => unreadCountOf(items), [items]);
 
   return (
     <div ref={wrapRef} style={{ position: 'relative' }}>
@@ -101,55 +104,9 @@ export default function NotificationBell({
           color: open ? VOLT : bellHover ? '#F4F1EA' : '#9A958A',
         }}
       >
-        {/* Bell glyph: dome, clapper bar, tongue — all currentColor, so the
-            whole icon follows the button's open/hover state. */}
-        <span
-          aria-hidden
-          style={{
-            display: 'block',
-            width: 14,
-            height: 12,
-            border: '1.6px solid currentColor',
-            borderBottom: 'none',
-            borderRadius: '7px 7px 0 0',
-          }}
-        />
-        <span
-          aria-hidden
-          style={{ position: 'absolute', bottom: 9, width: 18, height: 1.6, background: 'currentColor' }}
-        />
-        <span
-          aria-hidden
-          style={{
-            position: 'absolute',
-            bottom: 6,
-            width: 5,
-            height: 2.6,
-            borderRadius: '0 0 3px 3px',
-            background: 'currentColor',
-          }}
-        />
+        <BellGlyph />
 
-        {unreadCount > 0 && (
-          <span
-            style={{
-              position: 'absolute',
-              top: -5,
-              right: -5,
-              minWidth: 16,
-              height: 16,
-              padding: '0 4px',
-              background: VOLT,
-              color: '#08080A',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              font: `700 9px/1 ${MONO}`,
-            }}
-          >
-            {unreadCount > 9 ? '9+' : unreadCount}
-          </span>
-        )}
+        {unreadCount > 0 && <UnreadBadge count={unreadCount} />}
       </button>
 
       {open && (
@@ -169,99 +126,194 @@ export default function NotificationBell({
             overflowY: 'auto',
           }}
         >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 12,
-              padding: '13px 14px',
-              borderBottom: '1px solid #1C1C21',
-            }}
-          >
-            <span
-              style={{
-                font: `500 9px/1 ${MONO}`,
-                letterSpacing: '.18em',
-                color: '#6E6A62',
-              }}
-            >
-              МЭДЭГДЭЛ
-            </span>
-            {unreadCount > 0 && (
-              <button
-                type="button"
-                onClick={() =>
-                  markAllRead(uid).catch((err) =>
-                    console.warn('[online-competition] mark all read failed', err),
-                  )
-                }
-                onMouseEnter={() => setMarkHover(true)}
-                onMouseLeave={() => setMarkHover(false)}
-                style={{
-                  border: 'none',
-                  background: 'transparent',
-                  color: markHover ? VOLT : '#9A958A',
-                  cursor: 'pointer',
-                  font: `500 9px/1 ${MONO}`,
-                  letterSpacing: '.1em',
-                }}
-              >
-                БҮГДИЙГ УНШСАН
-              </button>
-            )}
-          </div>
-
-          {items.length === 0 ? (
-            <p
-              style={{
-                padding: '44px 16px',
-                textAlign: 'center',
-                font: '500 13px/1 Geologica, sans-serif',
-                color: '#6E6A62',
-              }}
-            >
-              Мэдэгдэл алга.
-            </p>
-          ) : (
-            items.map((n) => (
-              <div
-                key={n.id}
-                onClick={() => openRow(n)}
-                onMouseEnter={() => setHoverRow(n.id ?? null)}
-                onMouseLeave={() => setHoverRow(null)}
-                style={{
-                  display: 'flex',
-                  gap: 11,
-                  padding: '13px 14px',
-                  borderBottom: '1px solid #16161B',
-                  background: hoverRow === n.id ? '#16161B' : n.read ? 'transparent' : '#111309',
-                  cursor: n.href ? 'pointer' : 'default',
-                }}
-              >
-                <span
-                  aria-hidden
-                  style={{
-                    width: 6,
-                    height: 6,
-                    marginTop: 5,
-                    flex: 'none',
-                    background: n.read ? '#2A2A31' : VOLT,
-                  }}
-                />
-                <span style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
-                  <span style={{ font: '500 12px/1.4 Geologica, sans-serif', color: '#F4F1EA' }}>
-                    {n.title}
-                  </span>
-                  <span style={{ font: `400 9px/1 ${MONO}`, color: '#4A4740' }}>
-                    {formatNotifMeta(n.contextLabel, n.createdAt)}
-                  </span>
-                </span>
-              </div>
-            ))
-          )}
+          <NotificationList uid={uid} items={items} onNavigate={onClose} />
         </div>
       )}
     </div>
+  );
+}
+
+/** Bell glyph: dome, clapper bar, tongue — all currentColor, so the whole
+ *  icon follows its button's state. Positioned against the nearest
+ *  relatively positioned parent. */
+export function BellGlyph() {
+  return (
+    <>
+      <span
+        aria-hidden
+        style={{
+          display: 'block',
+          width: 14,
+          height: 12,
+          border: '1.6px solid currentColor',
+          borderBottom: 'none',
+          borderRadius: '7px 7px 0 0',
+        }}
+      />
+      <span
+        aria-hidden
+        style={{ position: 'absolute', bottom: 9, width: 18, height: 1.6, background: 'currentColor' }}
+      />
+      <span
+        aria-hidden
+        style={{
+          position: 'absolute',
+          bottom: 6,
+          width: 5,
+          height: 2.6,
+          borderRadius: '0 0 3px 3px',
+          background: 'currentColor',
+        }}
+      />
+    </>
+  );
+}
+
+export function UnreadBadge({ count, style }: { count: number; style?: React.CSSProperties }) {
+  return (
+    <span
+      style={{
+        position: 'absolute',
+        top: -5,
+        right: -5,
+        minWidth: 16,
+        height: 16,
+        padding: '0 4px',
+        background: VOLT,
+        color: '#08080A',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        font: `700 9px/1 ${MONO}`,
+        ...style,
+      }}
+    >
+      {count > 9 ? '9+' : count}
+    </span>
+  );
+}
+
+/** The list itself: the header with БҮГДИЙГ УНШСАН, then one row per
+ *  notification. Rendered inside the bell's popup and the bottom bar's
+ *  sheet, so the two cannot drift apart. */
+export function NotificationList({
+  uid,
+  items,
+  onNavigate,
+}: {
+  uid: string;
+  items: OnlineNotification[];
+  /** Called when a row is opened, before navigating — closes the container. */
+  onNavigate: () => void;
+}) {
+  const router = useRouter();
+  const [markHover, setMarkHover] = useState(false);
+  const [hoverRow, setHoverRow] = useState<string | null>(null);
+  const unreadCount = useMemo(() => unreadCountOf(items), [items]);
+
+  function openRow(n: OnlineNotification) {
+    if (!n.read && n.id) {
+      markRead(n.id).catch((err) =>
+        console.warn('[online-competition] mark notification read failed', err),
+      );
+    }
+    onNavigate();
+    if (n.href) router.push(n.href);
+  }
+
+  return (
+    <>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          padding: '13px 14px',
+          borderBottom: '1px solid #1C1C21',
+        }}
+      >
+        <span
+          style={{
+            font: `500 9px/1 ${MONO}`,
+            letterSpacing: '.18em',
+            color: '#6E6A62',
+          }}
+        >
+          МЭДЭГДЭЛ
+        </span>
+        {unreadCount > 0 && (
+          <button
+            type="button"
+            onClick={() =>
+              markAllRead(uid).catch((err) =>
+                console.warn('[online-competition] mark all read failed', err),
+              )
+            }
+            onMouseEnter={() => setMarkHover(true)}
+            onMouseLeave={() => setMarkHover(false)}
+            style={{
+              border: 'none',
+              background: 'transparent',
+              color: markHover ? VOLT : '#9A958A',
+              cursor: 'pointer',
+              font: `500 9px/1 ${MONO}`,
+              letterSpacing: '.1em',
+            }}
+          >
+            БҮГДИЙГ УНШСАН
+          </button>
+        )}
+      </div>
+
+      {items.length === 0 ? (
+        <p
+          style={{
+            padding: '44px 16px',
+            textAlign: 'center',
+            font: '500 13px/1 Geologica, sans-serif',
+            color: '#6E6A62',
+          }}
+        >
+          Мэдэгдэл алга.
+        </p>
+      ) : (
+        items.map((n) => (
+          <div
+            key={n.id}
+            onClick={() => openRow(n)}
+            onMouseEnter={() => setHoverRow(n.id ?? null)}
+            onMouseLeave={() => setHoverRow(null)}
+            style={{
+              display: 'flex',
+              gap: 11,
+              padding: '13px 14px',
+              borderBottom: '1px solid #16161B',
+              background: hoverRow === n.id ? '#16161B' : n.read ? 'transparent' : '#111309',
+              cursor: n.href ? 'pointer' : 'default',
+            }}
+          >
+            <span
+              aria-hidden
+              style={{
+                width: 6,
+                height: 6,
+                marginTop: 5,
+                flex: 'none',
+                background: n.read ? '#2A2A31' : VOLT,
+              }}
+            />
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
+              <span style={{ font: '500 12px/1.4 Geologica, sans-serif', color: '#F4F1EA' }}>
+                {n.title}
+              </span>
+              <span style={{ font: `400 9px/1 ${MONO}`, color: '#4A4740' }}>
+                {formatNotifMeta(n.contextLabel, n.createdAt)}
+              </span>
+            </span>
+          </div>
+        ))
+      )}
+    </>
   );
 }

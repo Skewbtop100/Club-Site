@@ -31,7 +31,7 @@ interface RegisteredView {
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="oc-v3-page">
-      <HubNav live={null} />
+      <HubNav live={null} section="competitions" />
       <main className="oc-v3-main">{children}</main>
     </div>
   );

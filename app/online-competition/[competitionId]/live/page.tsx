@@ -43,7 +43,7 @@ type LiveTab = 'attempts' | 'standings';
 function Shell({ competition, children }: { competition: OnlineCompetition | null; children: React.ReactNode }) {
   return (
     <div className="oc-v3-page">
-      <HubNav live={competition?.status === 'live' ? competition : null} active="competitions" />
+      <HubNav live={competition?.status === 'live' ? competition : null} active="competitions" section="attempts" />
       {children}
     </div>
   );

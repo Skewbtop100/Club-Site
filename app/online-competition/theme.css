@@ -5355,6 +5355,12 @@
   display: flex;
   align-items: center;
 }
+/* The mobile bottom bar (BottomNav.tsx) — absent above 640px, so the
+   desktop header is exactly as it was. Everything but `display` is
+   inline on the component. */
+.oc-v3-bottomnav {
+  display: none;
+}
 
 @media (max-width: 640px) {
   /* ── Header: two stacked rows ─────────────────────────────────────────
@@ -5414,6 +5420,39 @@
      scroller. */
   .oc-v3-tabs .oc-v3-menu {
     display: none;
+  }
+
+  /* ── Bottom navigation replaces the tab strip ─────────────────────────
+     НҮҮР / ТЭМЦЭЭН / ОРОЛДЛОГО / МЭДЭГДЭЛ move to the fixed bottom bar,
+     within thumb reach. The top bar keeps only the brand and a round
+     avatar (the profile menu). */
+  .oc-v3-tabs,
+  .oc-v3-nav-bell {
+    display: none;
+  }
+  .oc-v3-bottomnav {
+    display: grid;
+  }
+  .oc-v3-userbtn {
+    border-color: transparent;
+    padding: 0;
+  }
+  .oc-v3-userbtn .oc-v3-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+  }
+  .oc-v3-userbtn-name,
+  .oc-v3-userbtn .oc-v3-tri {
+    display: none;
+  }
+  /* Nothing sits under the bar. Every screen that renders the bar is a
+     .oc-v3-page (the bar comes with HubNav), so this one rule covers the
+     hub, the lists, the details page and the live view: the bar's 60px,
+     its 1px border, and the home-indicator inset it pads itself by. The
+     solve page renders no HubNav and no bar, and is untouched. */
+  .oc-v3-page {
+    padding-bottom: calc(61px + env(safe-area-inset-bottom, 0px));
   }
 
   /* ── Touch targets ────────────────────────────────────────────────── */
