@@ -30,7 +30,9 @@ export interface ScheduleItem {
   viewNote: string;
 }
 
-/** Every other event and round of the competition, in configured order. */
+/** The athlete's other rounds: events they registered for, rounds they
+ *  have reached (roundsReached), in configured order. The page does not
+ *  render this at all when there are none. */
 export default function SchedulePanel({
   items,
   competitionId,
@@ -58,13 +60,9 @@ export default function SchedulePanel({
         <span style={{ font: `400 9px/1.3 ${MONO}`, color: '#6E6A62' }}>РАУНД НЭЭГДМЭГЦ ТОВЧ ИДЭВХЖИНЭ</span>
       </div>
 
-      {items.length === 0 ? (
-        <p style={{ padding: '18px 16px', font: `400 11px/1.5 ${MONO}`, color: '#6E6A62' }}>Өөр раунд алга.</p>
-      ) : (
-        items.map((item) => (
-          <Row key={item.key} item={item} competitionId={competitionId} onSelect={onSelect} />
-        ))
-      )}
+      {items.map((item) => (
+        <Row key={item.key} item={item} competitionId={competitionId} onSelect={onSelect} />
+      ))}
     </section>
   );
 }
@@ -159,8 +157,9 @@ function RowBody({ item, competitionId }: { item: ScheduleItem; competitionId: s
     case 'open-view':
       return <DashedBox label="ЯВАГДАЖ БУЙ" note={item.viewNote} center />;
     case 'notqualified':
-      // Not a disabled button: a round the athlete cannot enter says why.
-      return <DashedBox label="ШАЛГАРААГҮЙ" note="ӨМНӨХ РАУНДАД ШАЛГАРААГҮЙ" center />;
+      // Unreachable: roundsReached lists no round the athlete missed the
+      // cut for. Such a round is left out of the schedule, not labelled.
+      return null;
     case 'notopen':
       return <LockedBox label="НЭЭГДЭЭГҮЙ" extra={item.qualified === true ? 'ТА ШАЛГАРСАН' : null} center />;
   }

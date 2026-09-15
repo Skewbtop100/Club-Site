@@ -241,6 +241,24 @@ console.log('\n  -- round states --');
   eq('idle: nothing opened on an upcoming competition', lv.idleReason(upcoming), 'not-started');
 }
 
+console.log('\n  -- the athlete’s own rounds --');
+{
+  const R = (round, status, qualified = null) => ({ round, status, qualified, label: `R${round}`, scheduledAt: null, standings: [] });
+  const ev = (me, rounds) => ({ rounds, me });
+  const mine = (registered) => ({ registered, access: null, planKind: null, nextAttempt: null, slotsByRound: {} });
+  const reached = (e) => lv.roundsReached(e).map((r) => r.round);
+
+  eq('signed out: nothing', reached(ev(null, [R(1, 'live')])), []);
+  eq('not registered for the event: nothing', reached(ev(mine(false), [R(1, 'live'), R(2, 'closed', true)])), []);
+  eq('registered: round 1, and no later round before the cut',
+    reached(ev(mine(true), [R(1, 'live'), R(2, 'closed', null), R(3, 'closed', null)])), [1]);
+  eq('qualified into round 2: listed', reached(ev(mine(true), [R(1, 'done'), R(2, 'live', true), R(3, 'closed', null)])), [1, 2]);
+  eq('did not qualify: that round is not listed at all',
+    reached(ev(mine(true), [R(1, 'done'), R(2, 'live', false)])), [1]);
+  eq('a later round never skips an unreached one',
+    reached(ev(mine(true), [R(1, 'done'), R(2, 'done', false), R(3, 'closed', true)])), [1]);
+}
+
 console.log('\n  -- schedule --');
 {
   const start = new Date(2026, 8, 20, 10, 0).getTime();
@@ -281,6 +299,23 @@ console.log('\n  -- the wiring --');
   ok('the dashboard no longer drops straight into the solve flow',
     !src('app/online-competition/dashboard/_components/LiveCard.tsx').includes('/solve/'));
   ok('the solve flow is reached from the live view', src('app/online-competition/[competitionId]/live/_components/ui.tsx').includes('/solve/'));
+
+  // ── the page ──
+  const LIVE_DIR = 'app/online-competition/[competitionId]/live';
+  const livePage = src(`${LIVE_DIR}/page.tsx`);
+  const schedule = src(`${LIVE_DIR}/_components/SchedulePanel.tsx`);
+  const theme = src('app/online-competition/theme.css');
+  ok('the header banner is gone', !fs.existsSync(path.join(ROOT, LIVE_DIR, '_components/LiveHeader.tsx')) && !livePage.includes('LiveHeader'));
+  ok('  ...its three numbers kept', livePage.includes('<LiveStats stats={derived.stats} />'));
+  ok('the schedule lists only rounds the athlete reached', livePage.includes('return roundsReached(e)'));
+  ok('  ...and is not rendered when that leaves nothing', livePage.includes('derived.scheduleItems.length > 0 && ('));
+  ok('  ...and never labels a round they missed', !schedule.includes('ШАЛГАРААГҮЙ'));
+  ok('the tab opens on ОРОЛДЛОГО', livePage.includes("useState<LiveTab>('attempts')"));
+  ok('  ...and is held by the page, not by a child that remounts', livePage.includes('data-tab={tab}'));
+  ok('the tabs exist only below 900px',
+    /\.oc-live-tabs \{\s*display: none;/.test(theme) &&
+      /@media \(max-width: 899px\) \{[\s\S]{0,400}?\.oc-live-tabs \{\s*display: flex;/.test(theme) &&
+      theme.includes(".oc-live-grid[data-tab='attempts'] > .oc-live-col-standings"));
 
   // ── and back again ──
   const SOLVE = 'app/online-competition/[competitionId]/solve/[eventId]';

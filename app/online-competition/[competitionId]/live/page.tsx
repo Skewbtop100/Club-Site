@@ -14,15 +14,15 @@ import {
   ownRoundStats,
   pickCurrentRound,
   roundRowState,
+  roundsReached,
   statsRound,
   type LiveViewPayload,
   type RoundRef,
 } from '@/lib/online-competition/live-view';
-import type { CompetitionRoster } from '@/app/api/online-competition/competitions/[id]/roster/route';
 import HubNav from '../../_components/hub/v3/HubNav';
 import AuthModal from '../../_components/hub/v3/AuthModal';
 import { toMillisOrNull } from '../../_components/hub/format';
-import LiveHeader from './_components/LiveHeader';
+import LiveStats from './_components/LiveStats';
 import CurrentRoundPanel, { CURRENT_PANEL_ID } from './_components/CurrentRoundPanel';
 import SchedulePanel, { type ScheduleItem } from './_components/SchedulePanel';
 import StandingsPanel from './_components/StandingsPanel';
@@ -31,10 +31,14 @@ import StandingsPanel from './_components/StandingsPanel';
 // Where an athlete lands on a live competition. The solve flow is reached
 // from the start buttons here; nothing on this page writes anything.
 //
-// Data: the competition document (name, events, start) through the same
-// client reader the details page uses; the approved athlete count from the
-// public roster route; and everything else from the live route, which is
-// read-only and does its reads with the Admin SDK.
+// Data: the competition document (start time, and the nav's live tab)
+// through the same client reader the details page uses; everything else
+// from the live route, which is read-only and does its reads with the
+// Admin SDK.
+
+/** Below 900px the two columns become these two tabs; above it both are
+ *  shown side by side and this value has no visible effect. */
+type LiveTab = 'attempts' | 'standings';
 
 function Shell({ competition, children }: { competition: OnlineCompetition | null; children: React.ReactNode }) {
   return (
@@ -43,12 +47,6 @@ function Shell({ competition, children }: { competition: OnlineCompetition | nul
       {children}
     </div>
   );
-}
-
-function fmtMoment(ms: number): string {
-  const d = new Date(ms);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())} · ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 export default function LiveCompetitionPage() {
@@ -62,7 +60,6 @@ export default function LiveCompetitionPage() {
   const [competition, setCompetition] = useState<OnlineCompetition | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState('');
-  const [athleteCount, setAthleteCount] = useState<number | null>(null);
   const [view, setView] = useState<LiveViewPayload | null>(null);
   const [viewFailed, setViewFailed] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -70,6 +67,13 @@ export default function LiveCompetitionPage() {
   /** The event the athlete picked from the schedule, if any. */
   const [selected, setSelected] = useState<string | null>(null);
   const [standingsTarget, setStandingsTarget] = useState<RoundRef | null>(null);
+  // TAB STATE LIVES HERE, in the page, beside the other view state — not in
+  // a child that mounts with the data. A refresh replaces `view` with the
+  // new payload but never clears it, and nothing above this line is keyed
+  // on `version`, so a re-read (the ШИНЭЧЛЭХ button, coming back to the
+  // tab, signing in) re-renders the tabs without resetting them. Only a
+  // fresh navigation to the page starts again on ОРОЛДЛОГО.
+  const [tab, setTab] = useState<LiveTab>('attempts');
   const [authOpen, setAuthOpen] = useState(false);
 
   useEffect(() => {
@@ -83,22 +87,6 @@ export default function LiveCompetitionPage() {
       .catch((err) => {
         console.error('LiveCompetitionPage: loading the competition failed:', err);
         if (!cancelled) setLoadError('Тэмцээний мэдээллийг ачааллаж чадсангүй');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [competitionId]);
-
-  // The ТАМИРЧИН count — the same approved count the details page shows.
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`/api/online-competition/competitions/${encodeURIComponent(competitionId)}/roster`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('failed'))))
-      .then((d: CompetitionRoster) => {
-        if (!cancelled) setAthleteCount(d.approvedCount);
-      })
-      .catch(() => {
-        // The cell keeps its em dash; a missing count is not worth a page error.
       });
     return () => {
       cancelled = true;
@@ -140,7 +128,7 @@ export default function LiveCompetitionPage() {
 
   // Re-read on coming back to the tab — including coming back from the
   // solve flow — rather than polling: every read of this route scans the
-  // competition's approved submissions.
+  // competition's judged submissions.
   useEffect(() => {
     function onVisible() {
       if (document.visibilityState === 'visible') setVersion((v) => v + 1);
@@ -181,9 +169,12 @@ export default function LiveCompetitionPage() {
     }
 
     const gate = view.registration ? competeGateCopy(view.registration.status) : null;
+    // THE ATHLETE'S OWN SCHEDULE: only events they registered for, and in
+    // each only the rounds they have reached (roundsReached). A round they
+    // did not qualify for is not listed at all.
     const scheduleItems: ScheduleItem[] = view.events.flatMap((e) => {
       const me = meContextFor(view, e);
-      return e.rounds
+      return roundsReached(e)
         .filter((r) => !(current && current.eventId === e.eventId && current.round === r.round))
         .map((r) => ({
           key: `${e.eventId}_${r.round}`,
@@ -194,13 +185,9 @@ export default function LiveCompetitionPage() {
           scheduledAt: r.scheduledAt,
           qualified: r.qualified,
           state: roundRowState(r, me),
-          viewNote: !view.signedIn
-            ? 'НЭВТЭРЧ ОРОЛЦОНО'
-            : !view.registration || !e.me?.registered
-              ? 'БҮРТГҮҮЛЭЭГҮЙ ТӨРӨЛ'
-              : gate
-                ? gate.label
-                : 'ТАНЫ РАУНД БИШ',
+          // Every listed round is the athlete's own event, so the only thing
+          // that can keep them out of an open one is the registration review.
+          viewNote: gate ? gate.label : 'ТАНЫ РАУНД БИШ',
         }));
     });
 
@@ -218,7 +205,6 @@ export default function LiveCompetitionPage() {
 
   const selectRound = useCallback((eventId: string) => {
     setSelected(eventId);
-    // On a phone the panel this changes is above the schedule, off screen.
     document.getElementById(CURRENT_PANEL_ID)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
 
@@ -245,13 +231,6 @@ export default function LiveCompetitionPage() {
   }
 
   const startAtMs = toMillisOrNull(competition.startAt);
-  const status = view?.status ?? competition.status;
-  const context =
-    derived?.currentEvent && derived.currentRound
-      ? `${derived.currentEvent.label} · ${derived.currentRound.label}`.toUpperCase()
-      : status === 'upcoming' && startAtMs !== null
-        ? `ЭХЛЭХ ${fmtMoment(startAtMs)}`
-        : null;
 
   const target =
     view &&
@@ -263,35 +242,35 @@ export default function LiveCompetitionPage() {
   return (
     <Shell competition={competition}>
       <main className="oc-v3-main">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-          <LiveHeader
-            name={competition.name}
-            status={status}
-            athleteCount={athleteCount}
-            eventCount={competition.events.length}
-            context={context}
-            stats={derived?.stats ?? null}
-            detailsHref={detailsHref}
-          />
-
-          {!view || !derived ? (
-            viewFailed ? (
-              <p className="oc-v3-status oc-v3-status-error">
-                Шууд мэдээллийг ачааллаж чадсангүй.{' '}
-                <button
-                  type="button"
-                  onClick={refresh}
-                  style={{ border: 'none', background: 'transparent', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', font: 'inherit' }}
-                >
-                  Дахин оролдох
-                </button>
-              </p>
-            ) : (
-              <p className="oc-v3-status">Ачааллаж байна...</p>
-            )
+        {!view || !derived ? (
+          viewFailed ? (
+            <p className="oc-v3-status oc-v3-status-error">
+              Шууд мэдээллийг ачааллаж чадсангүй.{' '}
+              <button
+                type="button"
+                onClick={refresh}
+                style={{ border: 'none', background: 'transparent', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', font: 'inherit' }}
+              >
+                Дахин оролдох
+              </button>
+            </p>
           ) : (
-            <div className="oc-live-grid">
-              <div className="oc-live-col">
+            <p className="oc-v3-status">Ачааллаж байна...</p>
+          )
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+            {/* Hidden above 900px, where both columns are on screen. */}
+            <div className="oc-live-tabs oc-cd-tabs" role="tablist" aria-label="Шууд үзүүлэлт">
+              <LiveTabButton id="attempts" label="ОРОЛДЛОГО" tab={tab} onSelect={setTab} />
+              <LiveTabButton id="standings" label="ҮЗҮҮЛЭЛТ" tab={tab} onSelect={setTab} />
+            </div>
+
+            <div className="oc-live-grid" data-tab={tab}>
+              <div id="oc-live-col-attempts" className="oc-live-col oc-live-col-attempts">
+                {/* The athlete's own numbers open the page, on the tab that is
+                    selected on open. Absent when there is no round to describe
+                    — a row of dashes is not something to open on. */}
+                {derived.stats && <LiveStats stats={derived.stats} />}
                 <CurrentRoundPanel
                   competitionId={competitionId}
                   event={derived.currentEvent}
@@ -303,9 +282,12 @@ export default function LiveCompetitionPage() {
                   detailsHref={detailsHref}
                   onSignIn={() => setAuthOpen(true)}
                 />
-                <SchedulePanel items={derived.scheduleItems} competitionId={competitionId} onSelect={selectRound} />
+                {/* No rounds of their own left to list: no panel at all. */}
+                {derived.scheduleItems.length > 0 && (
+                  <SchedulePanel items={derived.scheduleItems} competitionId={competitionId} onSelect={selectRound} />
+                )}
               </div>
-              <div className="oc-live-col">
+              <div id="oc-live-col-standings" className="oc-live-col oc-live-col-standings">
                 {target && (
                   <StandingsPanel
                     events={view.events}
@@ -317,12 +299,38 @@ export default function LiveCompetitionPage() {
                 )}
               </div>
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </main>
       {/* Plain sign-in: the athlete is already where they want to be, so the
           modal closes and the page re-reads as them. */}
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
     </Shell>
+  );
+}
+
+function LiveTabButton({
+  id,
+  label,
+  tab,
+  onSelect,
+}: {
+  id: LiveTab;
+  label: string;
+  tab: LiveTab;
+  onSelect: (tab: LiveTab) => void;
+}) {
+  const on = tab === id;
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={on}
+      aria-controls={`oc-live-col-${id}`}
+      className={`oc-cd-tab${on ? ' oc-cd-tab-active' : ''}`}
+      onClick={() => onSelect(id)}
+    >
+      {label}
+    </button>
   );
 }

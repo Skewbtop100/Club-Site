@@ -407,6 +407,29 @@ export function roundRowState(
   return 'notopen';
 }
 
+/** The rounds of one event this athlete has REACHED, in order — what their
+ *  schedule lists.
+ *
+ *    · not signed in, or not registered for the event: none;
+ *    · round 1: reached by registering;
+ *    · round N > 1: reached only once they are on round N-1's qualifier
+ *      list (`qualified === true`, resolved server-side from that list).
+ *      Not qualified, or the cut not made yet, and the round is not
+ *      listed — and neither is anything after it, so an inconsistent
+ *      document cannot list round 3 for someone who never reached round 2.
+ *
+ *  The same qualifier document resolveRoundAccess reads, so a round listed
+ *  here is a round the solve gate admits them to once it is opened. */
+export function roundsReached(event: Pick<LiveEventView, 'rounds' | 'me'>): LiveRoundView[] {
+  if (!event.me?.registered) return [];
+  const out: LiveRoundView[] = [];
+  for (const r of [...event.rounds].sort((a, b) => a.round - b.round)) {
+    if (r.round > 1 && r.qualified !== true) break;
+    out.push(r);
+  }
+  return out;
+}
+
 export interface RoundRef {
   eventId: string;
   round: number;

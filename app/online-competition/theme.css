@@ -8745,29 +8745,39 @@ button.oc-rv-cell:hover {
 /* ── LIVE COMPETITION VIEW ────────────────────────────────────────────
    app/online-competition/[competitionId]/live. Everything visual on that
    screen is inline, lifted from the Khorom v2 mockup's live view; these
-   are only what inline styles cannot express — the breakpoints that stack
-   the three panels and fold the standings table onto a phone, and the
-   row hover. */
-.oc-live-head {
+   are only what inline styles cannot express — the breakpoint that turns
+   the two columns into two tabs, the fold of the standings table onto a
+   phone, and the row hover. */
+
+/* The athlete's three numbers, at the top of the ОРОЛДЛОГО column. Equal
+   thirds of that column; labels may wrap, because at 900px the column is
+   under 300px wide and the mockup's nowrap labels would overflow. */
+.oc-live-stats {
   display: flex;
-  flex-wrap: wrap;
-  gap: 22px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 22px 26px;
+  gap: 1px;
+  background: #2A2A31;
+  border: 1px solid #2A2A31;
 }
 .oc-live-stat {
+  flex: 1 1 0;
+  min-width: 0;
   background: #0D0D10;
-  padding: 11px 16px;
+  padding: 11px 12px;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 .oc-live-stat-label {
-  font: 500 8px/1 var(--oc-font-mono), monospace;
+  font: 500 8px/1.3 var(--oc-font-mono), monospace;
   letter-spacing: .16em;
   color: #6E6A62;
-  white-space: nowrap;
+}
+
+/* The mobile tab strip. Styled by the details page's .oc-cd-tabs /
+   .oc-cd-tab, and not shown at all above the breakpoint. Declared after
+   .oc-cd-tabs so this display wins at equal specificity. */
+.oc-live-tabs {
+  display: none;
 }
 .oc-live-grid {
   display: grid;
@@ -8809,31 +8819,29 @@ button.oc-rv-cell:hover {
 .oc-live-st-row:hover {
   background: #131318;
 }
+/* Below 900px: two tabs instead of two stacked columns. The page sets
+   data-tab on the grid; the column that is not selected is not shown.
+   Above 900px data-tab matches nothing and both columns stay side by
+   side. */
 @media (max-width: 899px) {
   .oc-live-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .oc-live-tabs {
+    display: flex;
+  }
+  .oc-live-tabs .oc-cd-tab {
+    flex: 1 1 0;
+  }
+  .oc-live-grid[data-tab='attempts'] > .oc-live-col-standings,
+  .oc-live-grid[data-tab='standings'] > .oc-live-col-attempts {
+    display: none;
   }
 }
 /* Phone: nothing may scroll sideways. The table keeps rank, name, result
    and single on the first line and moves the attempts to a second line
    under the name; the header drops its attempt numbers. */
 @media (max-width: 599px) {
-  .oc-live-head {
-    padding: 18px 16px;
-    gap: 16px;
-  }
-  .oc-live-stats {
-    width: 100%;
-  }
-  .oc-live-stat {
-    flex: 1 1 0;
-    min-width: 0;
-    padding: 10px 12px;
-  }
-  .oc-live-stat-label {
-    white-space: normal;
-    line-height: 1.3;
-  }
   .oc-live-slot-time {
     font-size: 13px;
   }
