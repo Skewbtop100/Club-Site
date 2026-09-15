@@ -6,7 +6,7 @@ import CompetitionEditor from '../../_components/CompetitionEditor';
 // id happens to be "new".
 export default function OnlineCompetitionAdminNewCompetitionPage() {
   return (
-    <AdminGate current="competitions">
+    <AdminGate current="newCompetition">
       <CompetitionEditor competitionId={null} />
     </AdminGate>
   );

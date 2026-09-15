@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 export type AdminSection =
   | 'overview'
   | 'competitions'
+  | 'newCompetition'
   | 'athletes'
   | 'review'
   | 'scrambles'
@@ -35,6 +36,29 @@ interface Counts {
   review: number | null;
 }
 
+// ── The two groups ───────────────────────────────────────────────────────
+// design-mockups/Khorom Admin.dc.html: Хяналтын самбар alone above, then the
+// Тэмцээн and Тамирчид groups, then Тохиргоо below.
+//
+// Бүртгэлийн хүсэлт — the mockup's cross-competition queue of requests to
+// enter a competition — is NOT listed: no such page exists yet (registration
+// requests are reviewed per competition, inside its detail page), and a
+// sidebar item must not be a dead link.
+
+type GroupKey = 'competitions' | 'athletes';
+
+const GROUP_OF: Partial<Record<AdminSection, GroupKey>> = {
+  competitions: 'competitions',
+  newCompetition: 'competitions',
+  scrambles: 'competitions',
+  rounds: 'competitions',
+  review: 'competitions',
+  athletes: 'athletes',
+};
+
+/** Which groups the admin has opened, for this browser tab. */
+const OPEN_KEY = 'oc-adm-nav-open';
+
 /** Persistent admin chrome: a fixed left rail on desktop, a slide-in
  *  drawer below 640px. Replaces the old AdminHeader top-tab strip.
  *
@@ -42,7 +66,7 @@ interface Counts {
  *  from admin-athletes?status=pending, review from
  *  submissions?status=pending with NO competitionId — i.e. the
  *  cross-competition pending queue, the same scope the "Шүүлт" route and
- *  the overview page's queue preview use. */
+ *  the overview page's queue preview use. A failed count shows "—". */
 export default function AdminShell({
   current,
   children,
@@ -53,6 +77,45 @@ export default function AdminShell({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [counts, setCounts] = useState<Counts>({ competitions: null, athletes: null, review: null });
+
+  // ── Group open state ──
+  // The group holding the current page is ALWAYS open on load. Any other
+  // group the admin opened is remembered for the browser TAB
+  // (sessionStorage): every admin page mounts its own shell, so without it
+  // each navigation would close what was just opened — while a new session
+  // starts from the plain "current group open" state rather than one left
+  // from days ago. Read after mount, so the server render and the first
+  // client render agree.
+  const currentGroup = GROUP_OF[current] ?? null;
+  const [openGroups, setOpenGroups] = useState<Record<GroupKey, boolean>>({
+    competitions: currentGroup === 'competitions',
+    athletes: currentGroup === 'athletes',
+  });
+
+  useEffect(() => {
+    let stored: Partial<Record<GroupKey, unknown>> = {};
+    try {
+      stored = JSON.parse(window.sessionStorage.getItem(OPEN_KEY) ?? '{}') ?? {};
+    } catch {
+      // Storage unavailable or unreadable: just the current group.
+    }
+    setOpenGroups({
+      competitions: currentGroup === 'competitions' || stored.competitions === true,
+      athletes: currentGroup === 'athletes' || stored.athletes === true,
+    });
+  }, [currentGroup]);
+
+  const toggleGroup = useCallback((group: GroupKey) => {
+    setOpenGroups((prev) => {
+      const next = { ...prev, [group]: !prev[group] };
+      try {
+        window.sessionStorage.setItem(OPEN_KEY, JSON.stringify(next));
+      } catch {
+        // Not remembered; the toggle itself still works.
+      }
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -95,21 +158,51 @@ export default function AdminShell({
 
         <nav className="oc-adm-navlist">
           <NavItem href={ADMIN} label="Хяналтын самбар" active={current === 'overview'} />
-          <NavItem
-            href={`${ADMIN}/competitions`}
-            label="Тэмцээнүүд"
-            active={current === 'competitions'}
-            count={counts.competitions}
-          />
-          <NavItem href={`${ADMIN}/review`} label="Шүүлт" active={current === 'review'} count={counts.review} />
-          <NavItem
-            href={`${ADMIN}/athletes`}
+
+          <NavGroup
+            id="competitions"
+            label="Тэмцээн"
+            open={openGroups.competitions}
+            holdsCurrent={currentGroup === 'competitions'}
+            onToggle={() => toggleGroup('competitions')}
+          >
+            <NavChild
+              href={`${ADMIN}/competitions`}
+              label="Тэмцээнүүд"
+              active={current === 'competitions'}
+              count={counts.competitions}
+            />
+            <NavChild href={`${ADMIN}/competitions/new`} label="Шинэ тэмцээн" active={current === 'newCompetition'} />
+            <NavChild href={`${ADMIN}/scrambles`} label="Холилт ба групп" active={current === 'scrambles'} />
+            <NavChild href={`${ADMIN}/rounds`} label="Раунд удирдах" active={current === 'rounds'} />
+            <NavChild
+              href={`${ADMIN}/review`}
+              label="Шүүлт"
+              active={current === 'review'}
+              count={counts.review}
+              urgent
+            />
+          </NavGroup>
+
+          <NavGroup
+            id="athletes"
             label="Тамирчид"
-            active={current === 'athletes'}
-            count={counts.athletes}
-          />
-          <NavItem href={`${ADMIN}/scrambles`} label="Холилт ба групп" active={current === 'scrambles'} />
-          <NavItem href={`${ADMIN}/rounds`} label="Раунд удирдах" active={current === 'rounds'} />
+            open={openGroups.athletes}
+            holdsCurrent={currentGroup === 'athletes'}
+            onToggle={() => toggleGroup('athletes')}
+          >
+            {/* The count is the pending VERIFICATION requests, shown in the
+                page's own "Ирсэн хүсэлт" section — the number an admin has
+                to act on, and the one this item's badge has always shown. */}
+            <NavChild
+              href={`${ADMIN}/athletes`}
+              label="Тамирчдын бүртгэл"
+              active={current === 'athletes'}
+              count={counts.athletes}
+              urgent
+            />
+          </NavGroup>
+
           <NavItem href={`${ADMIN}/settings`} label="Тохиргоо" active={current === 'settings'} />
         </nav>
 
@@ -157,9 +250,98 @@ function NavItem({
   count?: number | null;
 }) {
   return (
-    <Link href={href} className={`oc-adm-navitem${active ? ' oc-adm-navitem-active' : ''}`}>
+    <Link
+      href={href}
+      aria-current={active ? 'page' : undefined}
+      className={`oc-adm-navitem${active ? ' oc-adm-navitem-active' : ''}`}
+    >
       {label}
       {count !== undefined && <span className="oc-adm-navcount">{count ?? '—'}</span>}
+    </Link>
+  );
+}
+
+/** A group header and, while open, its children. The header is lit
+ *  (#131318) when the group holds the current page, whether or not it is
+ *  open, so a collapsed group still says "you are in here". */
+function NavGroup({
+  id,
+  label,
+  open,
+  holdsCurrent,
+  onToggle,
+  children,
+}: {
+  id: string;
+  label: string;
+  open: boolean;
+  holdsCurrent: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  const listId = `oc-adm-navgroup-${id}`;
+  return (
+    <>
+      <button
+        type="button"
+        className={`oc-adm-navgroup${holdsCurrent ? ' oc-adm-navgroup-current' : ''}`}
+        aria-expanded={open}
+        aria-controls={listId}
+        onClick={onToggle}
+      >
+        <span>{label}</span>
+        {/* Open: a volt triangle pointing up. Closed: a muted one pointing
+            down. The mockup's exact 4px/5px geometry. */}
+        <span
+          aria-hidden
+          style={{
+            width: 0,
+            height: 0,
+            flex: 'none',
+            borderLeft: '4px solid transparent',
+            borderRight: '4px solid transparent',
+            ...(open ? { borderBottom: '5px solid #DFFF4F' } : { borderTop: '5px solid #6E6A62' }),
+          }}
+        />
+      </button>
+      {open && (
+        <div id={listId} className="oc-adm-navchildren">
+          {children}
+        </div>
+      )}
+    </>
+  );
+}
+
+function NavChild({
+  href,
+  label,
+  active,
+  count,
+  urgent = false,
+}: {
+  href: string;
+  label: string;
+  active: boolean;
+  count?: number | null;
+  /** Volt when above zero — something is waiting on the admin. */
+  urgent?: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      aria-current={active ? 'page' : undefined}
+      className={`oc-adm-navchild${active ? ' oc-adm-navchild-active' : ''}`}
+    >
+      <span>{label}</span>
+      {count !== undefined && (
+        <span
+          className="oc-adm-navcount"
+          style={{ flex: 'none', color: urgent && typeof count === 'number' && count > 0 ? '#DFFF4F' : undefined }}
+        >
+          {count ?? '—'}
+        </span>
+      )}
     </Link>
   );
 }
