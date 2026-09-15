@@ -8,9 +8,18 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // The club admin: users/{uid}.role == 'admin'.
+    //
+    // FAILS CLOSED. No users document, no role field, or any value other
+    // than the exact string 'admin' is not an admin. exists() first, so a
+    // missing document is a plain false rather than an evaluation error.
+    //
+    // Only safe because clients cannot write their own role — see
+    // match /users/{uid}. Every rule below that calls this depends on that.
     function isAdmin() {
       return isSignedIn() &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin';
     }
 
     // ─── Existing collections ─────────────────────────────────────────────────
@@ -30,9 +39,32 @@ service cloud.firestore {
       allow write: if isSignedIn();
     }
 
+    // ── users/{uid} — the club account ───────────────────────────────────
+    // `role` is what isAdmin() reads, so NO CLIENT MAY GRANT ITSELF A ROLE.
+    // This used to be `allow write: if request.auth.uid == uid`: any
+    // signed-in user could set role: 'admin' on their own document and then
+    // approve their own submissions, delete rivals', and read every draft.
+    //
+    // What each client write may do now:
+    //   create — only your own document, and only as 'member' (or with no
+    //            role). That is exactly what auth-context's first-sign-in
+    //            upsert writes.
+    //   update — your own document, any field EXCEPT role (the sign-in
+    //            refresh, the profile edit, every points.ts transaction);
+    //            or, as an admin, any user's document including role (the
+    //            club admin's UsersTab: role change, points, athlete link).
+    //   delete — your own document, or any as an admin. Deleting your own
+    //            and re-creating it can only land you back on 'member'.
     match /users/{uid} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && request.auth.uid == uid;
+      allow create: if isSignedIn() &&
+                       request.auth.uid == uid &&
+                       (!('role' in request.resource.data) || request.resource.data.role == 'member');
+      allow update: if isSignedIn() &&
+                       ((request.auth.uid == uid &&
+                         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role'])) ||
+                        isAdmin());
+      allow delete: if isSignedIn() && (request.auth.uid == uid || isAdmin());
     }
 
     match /assignments/{doc} {
@@ -148,11 +180,13 @@ service cloud.firestore {
       // inequality filter that list must use already skips field-less
       // docs. Test 8 in competitions.test.mjs pins this trade-off.
       //
-      // The `isAdmin()` disjunct is the club's Firebase Auth admin. It is
-      // effectively dead for this feature — the online-competition admin
-      // is a shared password, not an auth identity, so there is no
-      // request.auth for it to match — and is kept only so a club admin
-      // is never locked out of a collection they can already write.
+      // The `isAdmin()` disjunct is the club's Firebase Auth admin. The
+      // online-competition judges do not use it — they are a shared
+      // password, not an auth identity — but it is NOT dead: a club admin
+      // passes it with the client SDK. It was self-grantable until
+      // users/{uid}.role was locked against client writes; it is kept so a
+      // club admin is never locked out of a collection they can already
+      // write.
       //
       // Hiding drafts at the rules layer WORKS regardless, because the
       // online-competition admin UI never reads this collection through
@@ -649,6 +683,13 @@ service cloud.firestore {
                        request.resource.data.diff(resource.data)
                          .affectedKeys().hasOnly(['read']);
       allow delete: if false;
+    }
+
+    // Rate-limit counters for the judges' login
+    // (lib/online-competition/admin-login-limit.ts). Admin SDK only; no
+    // client — admin or not — may read or write them.
+    match /onlineAdminLoginAttempts/{key} {
+      allow read, write: if false;
     }
 
     match /onlineSeasonPoints/{season} {
