@@ -46,10 +46,11 @@ for (const [label, route] of children) {
 }
 const people = nav.slice(at('label="Тамирчид"'), at('label="Тохиргоо"'));
 ok('Тамирчид > Тамирчдын бүртгэл, to /athletes', people.includes('label="Тамирчдын бүртгэл"') && people.includes('/athletes`'));
-ok('Бүртгэлийн хүсэлт has no page yet, so no item — not a dead link', !nav.includes('Бүртгэлийн хүсэлт'));
+ok('Тамирчид > Бүртгэлийн хүсэлт, after it, to /athletes/requests',
+  people.indexOf('label="Бүртгэлийн хүсэлт"') > people.indexOf('label="Тамирчдын бүртгэл"') && people.includes('/athletes/requests`'));
 
 console.log('\n  -- every item goes to a page that exists --');
-for (const route of ['', '/competitions', '/competitions/new', '/scrambles', '/rounds', '/review', '/athletes', '/settings']) {
+for (const route of ['', '/competitions', '/competitions/new', '/scrambles', '/rounds', '/review', '/athletes', '/athletes/requests', '/settings']) {
   ok(`app/online-competition/admin${route}/page.tsx exists`, fs.existsSync(path.join(ROOT, `app/online-competition/admin${route}/page.tsx`)));
 }
 ok('the new-competition page marks its own item', src('app/online-competition/admin/competitions/new/page.tsx').includes('<AdminGate current="newCompetition">'));
@@ -64,10 +65,13 @@ ok('other opened groups are remembered for the tab, failing safely',
     (shell.match(/try \{\s*(stored = JSON\.parse|window\.sessionStorage\.setItem)/g) || []).length === 2);
 ok('the current item is marked (aria-current + class)',
   shell.includes("className={`oc-adm-navchild${active ? ' oc-adm-navchild-active' : ''}`}") && shell.includes("aria-current={active ? 'page' : undefined}"));
-ok('counts: Тэмцээнүүд, Шүүлт (urgent), Тамирчдын бүртгэл (urgent)',
+ok('counts: Тэмцээнүүд, Шүүлт (urgent), Тамирчдын бүртгэл (verified), Бүртгэлийн хүсэлт (pending, urgent)',
   /label="Тэмцээнүүд"[\s\S]{0,80}count=\{counts\.competitions\}/.test(nav) &&
     /label="Шүүлт"[\s\S]{0,80}count=\{counts\.review\}\s*urgent/.test(nav) &&
-    /label="Тамирчдын бүртгэл"[\s\S]{0,80}count=\{counts\.athletes\}\s*urgent/.test(nav));
+    /label="Тамирчдын бүртгэл"[\s\S]{0,80}count=\{counts\.approvedAthletes\}\s*\/>/.test(nav) &&
+    /label="Бүртгэлийн хүсэлт"[\s\S]{0,80}count=\{counts\.athletes\}\s*urgent/.test(nav));
+ok('  ...fed from verified and pending athlete lists',
+  shell.includes('admin-athletes?status=approved`') && shell.includes('admin-athletes?status=pending`'));
 
 console.log('\n  -- the mockup\'s values --');
 const css = src('app/online-competition/theme.css');

@@ -6472,6 +6472,22 @@
   color: #F4F1EA;
 }
 
+/* ── Тамирчдын бүртгэл table (VerifiedAthletesTable.tsx) ──────────────
+   The name column is pinned while the table scrolls sideways; it needs a
+   solid background so later columns do not show through it. Row hover as
+   the mockup's #131318 — including the pinned cell, which is why hover
+   lives here and not inline. */
+.oc-adm-people-sticky {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: #0D0D10;
+  box-shadow: 1px 0 0 #1C1C21;
+}
+.oc-adm-people-row:hover > td {
+  background: #131318;
+}
+
 .oc-adm-sidefoot {
   margin-top: auto;
   padding: 16px;

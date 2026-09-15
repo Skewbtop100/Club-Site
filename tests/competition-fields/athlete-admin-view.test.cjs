@@ -128,13 +128,10 @@ console.log('\n  -- the route --');
 
 console.log('\n  -- the list and the panel --');
 {
-  const list = src('app/online-competition/admin/_components/AthletesList.tsx');
+  const list = src('app/online-competition/admin/_components/VerifiedAthletesTable.tsx');
   const panel = src('app/online-competition/admin/_components/AthleteDetailPanel.tsx');
-  ok('the table keeps exactly its seven columns',
-    list.includes("['', 'Нэр', 'И-мэйл', 'Улс', 'WCA ID', 'Баталгаажсан', '']"));
-  ok('  ...and МЭЙЛ СОЛИХ', list.includes('МЭЙЛ СОЛИХ') && list.includes('setMerging(a)'));
-  ok('approved rows open the panel', list.includes("setViewing({ list: 'approved', uid: a.uid })"));
-  ok('pending requests open it too', list.includes("setViewing({ list: 'pending', uid: a.uid })"));
+  ok('the verified table keeps МЭЙЛ СОЛИХ', list.includes('МЭЙЛ СОЛИХ') && list.includes('setMerging(a)'));
+  ok('the avatar opens the panel, for the photo', list.includes('onClick={() => setViewingUid(a.uid)}'));
   ok('the panel is read-only: no inputs, no requests',
     !/<input|<textarea|<select|<form|fetch\(/.test(panel));
   for (const label of ['ОВОГ', 'НЭР', 'ТӨРСӨН ОГНОО', 'ХҮЙС', 'WCA ID', 'УЛС', 'И-МЭЙЛ', 'ТӨЛӨВ', 'БҮРТГҮҮЛСЭН']) {
@@ -143,6 +140,29 @@ console.log('\n  -- the list and the panel --');
   ok('the photo is never cropped and fits the screen',
     panel.includes("objectFit: 'contain'") && panel.includes("maxHeight: '70vh'") && panel.includes("width: '100%'"));
   ok('  ...and the original opens full size', panel.includes('target="_blank"') && panel.includes('rel="noopener noreferrer"'));
+}
+
+console.log('\n  -- the two athlete pages --');
+{
+  const table = src('app/online-competition/admin/_components/VerifiedAthletesTable.tsx');
+  const requests = src('app/online-competition/admin/_components/AthleteRequests.tsx');
+  ok('Тамирчдын бүртгэл lists VERIFIED athletes only', table.includes("admin-athletes?status=approved'") && !table.includes('status=pending'));
+  for (const head of ['ОВОГ · НЭР', 'И-МЭЙЛ', 'WCA ID', 'ТӨРСӨН', 'НАС', 'ХҮЙС', 'УЛС', 'БАТАЛГААЖСАН', 'ХҮСЭЛТ ИЛГЭЭСЭН', 'БҮРТГҮҮЛСЭН', 'GOOGLE НЭР']) {
+    ok(`  ...column ${head}`, table.includes(`>${head}</th>`) || table.includes(`>\n                  ${head}\n                </th>`));
+  }
+  ok('  ...scrolls sideways in its own box, name column pinned',
+    table.includes("<div style={{ overflowX: 'auto' }}>") && table.includes('className="oc-adm-people-sticky"'));
+  ok('Бүртгэлийн хүсэлт lists PENDING requests only', requests.includes("admin-athletes?status=pending'") && !requests.includes('status=approved'));
+  ok('  ...one request expanded at a time', requests.includes('onClick={() => setOpenUid(open ? null : a.uid)}'));
+  ok('  ...through the existing verification route, unchanged',
+    requests.includes('`/api/online-competition/admin-athletes/${encodeURIComponent(a.uid)}`') &&
+      requests.includes("decide(a, { action: 'approve' })") && requests.includes("decide(a, { action: 'reject', reason })"));
+  ok('  ...admitting needs BOTH approvals (approve records details and photo together)',
+    requests.includes('{bothApproved && !anyRejected ? ('));
+  ok('  ...closing needs a reason for every rejected part', requests.includes('disabled={busy || !reasonsComplete}'));
+  ok('the requests page is behind the admin gate',
+    src('app/online-competition/admin/athletes/requests/page.tsx').includes('<AdminGate current="athleteRequests">'));
+  ok('the old combined list is gone', !fs.existsSync(path.join(ROOT, 'app/online-competition/admin/_components/AthletesList.tsx')));
 }
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);

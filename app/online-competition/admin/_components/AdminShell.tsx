@@ -9,6 +9,7 @@ export type AdminSection =
   | 'competitions'
   | 'newCompetition'
   | 'athletes'
+  | 'athleteRequests'
   | 'review'
   | 'scrambles'
   | 'rounds'
@@ -32,18 +33,17 @@ export function AdminMark({ size = 6 }: { size?: number }) {
 
 interface Counts {
   competitions: number | null;
+  /** Verified athletes — Тамирчдын бүртгэл. */
+  approvedAthletes: number | null;
+  /** Pending verification requests — Бүртгэлийн хүсэлт. */
   athletes: number | null;
   review: number | null;
 }
 
 // ── The two groups ───────────────────────────────────────────────────────
 // design-mockups/Khorom Admin.dc.html: Хяналтын самбар alone above, then the
-// Тэмцээн and Тамирчид groups, then Тохиргоо below.
-//
-// Бүртгэлийн хүсэлт — the mockup's cross-competition queue of requests to
-// enter a competition — is NOT listed: no such page exists yet (registration
-// requests are reviewed per competition, inside its detail page), and a
-// sidebar item must not be a dead link.
+// Тэмцээн and Тамирчид groups, then Тохиргоо below. Бүртгэлийн хүсэлт is the
+// athlete-verification queue (/athletes/requests).
 
 type GroupKey = 'competitions' | 'athletes';
 
@@ -54,6 +54,7 @@ const GROUP_OF: Partial<Record<AdminSection, GroupKey>> = {
   rounds: 'competitions',
   review: 'competitions',
   athletes: 'athletes',
+  athleteRequests: 'athletes',
 };
 
 /** Which groups the admin has opened, for this browser tab. */
@@ -76,7 +77,7 @@ export default function AdminShell({
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [counts, setCounts] = useState<Counts>({ competitions: null, athletes: null, review: null });
+  const [counts, setCounts] = useState<Counts>({ competitions: null, approvedAthletes: null, athletes: null, review: null });
 
   // ── Group open state ──
   // The group holding the current page is ALWAYS open on load. Any other
@@ -123,10 +124,11 @@ export default function AdminShell({
       r.ok ? r.json().then((d: Record<string, unknown[]>) => (d[key] ?? []).length) : Promise.resolve(null);
     Promise.all([
       fetch(`/api/online-competition/admin-competitions`).then((r) => num(r, 'competitions')).catch(() => null),
+      fetch(`/api/online-competition/admin-athletes?status=approved`).then((r) => num(r, 'athletes')).catch(() => null),
       fetch(`/api/online-competition/admin-athletes?status=pending`).then((r) => num(r, 'athletes')).catch(() => null),
       fetch(`/api/online-competition/submissions?status=pending`).then((r) => num(r, 'submissions')).catch(() => null),
-    ]).then(([competitions, athletes, review]) => {
-      if (!cancelled) setCounts({ competitions, athletes, review });
+    ]).then(([competitions, approvedAthletes, athletes, review]) => {
+      if (!cancelled) setCounts({ competitions, approvedAthletes, athletes, review });
     });
     return () => {
       cancelled = true;
@@ -191,13 +193,18 @@ export default function AdminShell({
             holdsCurrent={currentGroup === 'athletes'}
             onToggle={() => toggleGroup('athletes')}
           >
-            {/* The count is the pending VERIFICATION requests, shown in the
-                page's own "Ирсэн хүсэлт" section — the number an admin has
-                to act on, and the one this item's badge has always shown. */}
+            {/* Verified athletes, counted plainly — as the mockup has it. */}
             <NavChild
               href={`${ADMIN}/athletes`}
               label="Тамирчдын бүртгэл"
               active={current === 'athletes'}
+              count={counts.approvedAthletes}
+            />
+            {/* Pending verification requests — volt while any wait. */}
+            <NavChild
+              href={`${ADMIN}/athletes/requests`}
+              label="Бүртгэлийн хүсэлт"
+              active={current === 'athleteRequests'}
               count={counts.athletes}
               urgent
             />
