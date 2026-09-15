@@ -540,6 +540,15 @@ export interface OnlineParticipantAdminView {
   photoUrl: string | null;
   profileStatus: OnlineParticipantProfileStatus;
   approvedPhotoUrl: string | null;
+  /** The identity an admin last approved — see the approved* fields on
+   *  OnlineParticipant. The detail panel shows where the live value differs. */
+  approvedLastName: string | null;
+  approvedFirstName: string | null;
+  approvedDateOfBirth: string | null;
+  approvedGender: string | null;
+  approvedCitizenship: string | null;
+  /** First sign-in (upsertGoogleParticipant): when the athlete registered. */
+  createdAt: number | null;
   submittedAt: number | null;
   reviewedAt: number | null;
   rejectionReason: string | null;

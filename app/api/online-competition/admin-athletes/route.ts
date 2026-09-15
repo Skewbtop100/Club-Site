@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { isOnlineCompAdmin } from '@/lib/online-competition/admin-auth';
 import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
+import { toParticipantAdminView } from '@/lib/online-competition/participant-admin-view';
 import type { OnlineParticipantAdminView, OnlineParticipantProfileStatus } from '@/lib/online-competition/types';
 
 const VALID_STATUSES: OnlineParticipantProfileStatus[] = ['incomplete', 'pending', 'approved', 'rejected'];
@@ -31,26 +32,9 @@ export async function GET(req: Request) {
   // 'approved'.
   const snap = await db.collection('onlineParticipants').where('profileStatus', '==', status).get();
 
-  const athletes: OnlineParticipantAdminView[] = snap.docs.map((d) => {
-    const data = d.data();
-    return {
-      uid: d.id,
-      displayName: data.displayName ?? '',
-      email: data.email ?? null,
-      lastName: data.lastName ?? '',
-      firstName: data.firstName ?? '',
-      dateOfBirth: data.dateOfBirth ?? '',
-      gender: data.gender ?? null,
-      citizenship: data.citizenship ?? '',
-      wcaId: data.wcaId ?? '',
-      photoUrl: data.photoUrl ?? null,
-      profileStatus: status,
-      approvedPhotoUrl: data.approvedPhotoUrl ?? null,
-      submittedAt: data.submittedAt?.toMillis?.() ?? null,
-      reviewedAt: data.reviewedAt?.toMillis?.() ?? null,
-      rejectionReason: data.rejectionReason ?? null,
-    };
-  });
+  // The full record verification needs — the detail panel in AthletesList
+  // renders it. participant-admin-view.ts decides the fields.
+  const athletes: OnlineParticipantAdminView[] = snap.docs.map((d) => toParticipantAdminView(d.id, d.data(), status));
 
   if (status === 'pending') {
     // Oldest first — first come, first reviewed.

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { EmptyState } from '../../_components/ui';
 import EmailChangeDialog from './EmailChangeDialog';
+import AthleteDetailPanel from './AthleteDetailPanel';
 import { countryName } from '@/lib/online-competition/countries';
 import { resolveParticipantPhoto } from '@/lib/online-competition/data';
 import type { OnlineParticipantAdminView, OnlineParticipantGender } from '@/lib/online-competition/types';
@@ -25,6 +26,9 @@ export default function AthletesList() {
   const [approved, setApproved] = useState<OnlineParticipantAdminView[]>([]);
   // The athlete whose МЭЙЛ СОЛИХ dialog is open, if any.
   const [merging, setMerging] = useState<OnlineParticipantAdminView | null>(null);
+  // The athlete whose read-only detail panel is open, and which list it was
+  // opened from — ӨМНӨХ / ДАРААХ step through that list in its shown order.
+  const [viewing, setViewing] = useState<{ list: 'pending' | 'approved'; uid: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [actionLoadingUid, setActionLoadingUid] = useState<string | null>(null);
@@ -70,7 +74,19 @@ export default function AthletesList() {
       if (athlete) {
         setApproved((prev) => [
           ...prev,
-          { ...athlete, profileStatus: 'approved', approvedPhotoUrl: athlete.photoUrl, reviewedAt: Date.now() },
+          {
+            ...athlete,
+            profileStatus: 'approved',
+            approvedPhotoUrl: athlete.photoUrl,
+            // The same snapshot the approve route just wrote.
+            approvedLastName: athlete.lastName,
+            approvedFirstName: athlete.firstName,
+            approvedDateOfBirth: athlete.dateOfBirth,
+            approvedGender: athlete.gender,
+            approvedCitizenship: athlete.citizenship,
+            rejectionReason: null,
+            reviewedAt: Date.now(),
+          },
         ]);
       }
     } catch (err) {
@@ -201,6 +217,13 @@ export default function AthletesList() {
                         >
                           Татгалзах
                         </button>
+                        <button
+                          type="button"
+                          className="oc-btn oc-btn-outline"
+                          onClick={() => setViewing({ list: 'pending', uid: a.uid })}
+                        >
+                          Дэлгэрэнгүй
+                        </button>
                       </div>
                     )}
                   </div>
@@ -241,22 +264,51 @@ export default function AthletesList() {
               {approved.map((a) => (
                 <div key={a.uid} className="oc-adm-ath-row">
                   <span className="oc-adm-ath-c1">
-                    {resolveParticipantPhoto(a) ? (
-                      // eslint-disable-next-line @next/next/no-img-element -- Cloudinary URL, not our own image pipeline.
-                      <img
-                        src={resolveParticipantPhoto(a) ?? undefined}
-                        alt=""
-                        style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover', display: 'block' }}
-                      />
-                    ) : (
-                      <span style={{ width: 32, height: 32, borderRadius: '50%', display: 'block', background: '#131318' }} />
-                    )}
+                    {/* Avatar and name open the read-only detail panel — the
+                        table itself gains no column. */}
+                    <button
+                      type="button"
+                      aria-label={`${a.lastName} ${a.firstName} — дэлгэрэнгүй`}
+                      onClick={() => setViewing({ list: 'approved', uid: a.uid })}
+                      style={{ display: 'block', padding: 0, border: 0, background: 'none', cursor: 'pointer' }}
+                    >
+                      {resolveParticipantPhoto(a) ? (
+                        // eslint-disable-next-line @next/next/no-img-element -- Cloudinary URL, not our own image pipeline.
+                        <img
+                          src={resolveParticipantPhoto(a) ?? undefined}
+                          alt=""
+                          style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover', display: 'block' }}
+                        />
+                      ) : (
+                        <span style={{ width: 32, height: 32, borderRadius: '50%', display: 'block', background: '#131318' }} />
+                      )}
+                    </button>
                   </span>
-                  <span
-                    className="oc-adm-ath-c2"
-                    style={{ font: '500 13px var(--oc-font-heading), sans-serif', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                  >
-                    {a.lastName} {a.firstName}
+                  <span className="oc-adm-ath-c2" style={{ minWidth: 0 }}>
+                    <button
+                      type="button"
+                      title="Дэлгэрэнгүй харах"
+                      onClick={() => setViewing({ list: 'approved', uid: a.uid })}
+                      style={{
+                        display: 'block',
+                        maxWidth: '100%',
+                        padding: 0,
+                        border: 0,
+                        background: 'none',
+                        color: '#F4F1EA',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        font: '500 13px var(--oc-font-heading), sans-serif',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        textDecoration: 'underline',
+                        textDecorationColor: '#2A2A31',
+                        textUnderlineOffset: 3,
+                      }}
+                    >
+                      {a.lastName} {a.firstName}
+                    </button>
                   </span>
                   <span
                     className="oc-adm-ath-c3"
@@ -291,6 +343,24 @@ export default function AthletesList() {
           )}
         </div>
       </section>
+
+      {viewing &&
+        (() => {
+          const list = viewing.list === 'pending' ? pending : approved;
+          const index = list.findIndex((a) => a.uid === viewing.uid);
+          // Gone from its list (approved or rejected meanwhile): nothing to show.
+          if (index === -1) return null;
+          const step = (to: number) => () => setViewing({ list: viewing.list, uid: list[to].uid });
+          return (
+            <AthleteDetailPanel
+              athlete={list[index]}
+              position={{ index, total: list.length }}
+              onPrev={index > 0 ? step(index - 1) : null}
+              onNext={index < list.length - 1 ? step(index + 1) : null}
+              onClose={() => setViewing(null)}
+            />
+          );
+        })()}
 
       {merging && (
         <EmailChangeDialog
