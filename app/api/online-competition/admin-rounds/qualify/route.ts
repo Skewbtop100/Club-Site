@@ -1,16 +1,14 @@
 import { NextResponse } from 'next/server';
-import { FieldValue } from 'firebase-admin/firestore';
 import { isOnlineCompAdmin } from '@/lib/online-competition/admin-auth';
 import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
-import { roundKey } from '@/lib/online-competition/scrambles';
 import { rankRoundResults } from '@/lib/online-competition/round-results';
 import { notifyRoundFinalised } from '@/lib/online-competition/notifications-server';
+import { RoundCutError, commitRoundCut } from '@/lib/online-competition/round-cut';
 import {
   selectQualifiers,
   validateQualifierInput,
   type QualifierMethod,
   type RoundRanking,
-  type RoundStatus,
 } from '@/lib/online-competition/rounds';
 
 // ШАЛГАРУУЛАХ — advance a round.
@@ -82,29 +80,25 @@ export async function POST(req: Request) {
     return NextResponse.json(payload);
   }
 
-  const key = roundKey(eventId, round);
-  const batch = db.batch();
-  batch.set(compRef.collection('qualifiers').doc(key), {
-    eventId,
-    round,
-    uids: qualifiers.map((q) => q.uid),
-    qualifiedAt: FieldValue.serverTimestamp(),
-  });
-  // Advancing a round also ends it — there is no state where a round has
-  // produced qualifiers but is still accepting attempts.
-  batch.set(
-    compRef.collection('roundState').doc(key),
-    {
+  // REFUSED ONCE THE NEXT ROUND HAS STARTED — round-cut.ts. Round N+1's
+  // access reads this cut on every scramble request, so rewriting it while
+  // N+1 is under way would eject athletes mid-round. The check and the
+  // writes are one transaction; a failed read writes nothing.
+  try {
+    await commitRoundCut(db, {
+      competitionId,
       eventId,
       round,
-      status: 'done' satisfies RoundStatus,
-      qualifierMethod: method,
-      qualifierValue: value,
-      updatedAt: FieldValue.serverTimestamp(),
-    },
-    { merge: true },
-  );
-  await batch.commit();
+      method,
+      value,
+      qualifierUids: qualifiers.map((q) => q.uid),
+    });
+  } catch (e) {
+    if (e instanceof RoundCutError) {
+      return NextResponse.json({ error: e.message }, { status: e.status });
+    }
+    throw e;
+  }
 
   // Advancing also ends the round, so this is the other moment athletes
   // are told — here with the qualifier list in hand, so those who made the

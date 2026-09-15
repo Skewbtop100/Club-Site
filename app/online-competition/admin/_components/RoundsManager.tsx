@@ -41,9 +41,12 @@ export default function RoundsManager() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [rounds, setRounds] = useState<RoundAdminView[] | null>(null);
   // Events with no round open at all, straight from the API (computed
-  // there with the solve gate's own findLiveRound) — never derived from
-  // `rounds` here, which would be a second copy of that rule.
+  // there with the solve gate's own liveRoundsForEvent) — never derived
+  // from `rounds` here, which would be a second copy of that rule.
   const [gaps, setGaps] = useState<RoundGapEvent[]>([]);
+  // Events with MORE than one live round, same source. The gate admits
+  // nobody to such an event until one round is closed.
+  const [conflicts, setConflicts] = useState<{ eventId: string; label: string; rounds: number[] }[]>([]);
   const [loadError, setLoadError] = useState('');
   /** Set when opening a round also announced the competition — the side
    *  effect said out loud, rather than discovered on the public site. */
@@ -95,13 +98,16 @@ export default function RoundsManager() {
       const d = (await res.json()) as {
         rounds: RoundAdminView[];
         eventsWithoutLiveRound?: RoundGapEvent[];
+        eventsWithConflictingLiveRounds?: { eventId: string; label: string; rounds: number[] }[];
       };
       setRounds(d.rounds ?? []);
       setGaps(d.eventsWithoutLiveRound ?? []);
+      setConflicts(d.eventsWithConflictingLiveRounds ?? []);
     } catch (err) {
       console.error('RoundsManager: loading rounds failed:', err);
       setRounds(null);
       setGaps([]);
+      setConflicts([]);
       setLoadError('Раундын мэдээллийг ачааллаж чадсангүй');
     }
   }, [competitionId]);
@@ -114,7 +120,17 @@ export default function RoundsManager() {
     load();
   }, [load]);
 
-  async function toggle(row: RoundAdminView, action: 'open' | 'close') {
+  async function toggle(row: RoundAdminView, action: 'open' | 'close' | 'reset') {
+    // БУЦААХ undoes a round so the cut before it can be redone. The server
+    // refuses it if anything was filed in the round; asked first regardless,
+    // because it discards this round's own cut.
+    if (action === 'reset') {
+      const ok = window.confirm(
+        `${row.label} · ${row.round}-р раундыг НЭЭГЭЭГҮЙ төлөвт буцаах уу? ` +
+          `Энэ раундын шалгаруулалт устна. Оролдлого бүртгэгдсэн бол буцаахгүй.`,
+      );
+      if (!ok) return;
+    }
     const key = roundKey(row.eventId, row.round);
     // OPENING A ROUND ANNOUNCES THE COMPETITION. An upcoming competition
     // becomes live in the same transaction (round-open.ts), because every
@@ -238,6 +254,23 @@ export default function RoundsManager() {
         </div>
       )}
 
+      {/* Two live rounds of one event: every athlete in it is refused until
+          one is closed. openRound no longer allows this, so it only shows
+          for a state left over from before. */}
+      {conflicts.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {conflicts.map((c) => (
+            <div key={c.eventId} className="oc-sc-warn" style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+              <span aria-hidden>▲</span>
+              <span>
+                {c.label}: {c.rounds.map((r) => `${r}-р`).join(', ')} раунд зэрэг нээлттэй — тамирчид эвлүүлэлт хийж
+                чадахгүй. Нэгийг нь хаана уу.
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {rounds === null && !loadError ? (
         <p className="oc-v3-status">Ачааллаж байна...</p>
       ) : rounds && rounds.length === 0 ? (
@@ -294,6 +327,17 @@ export default function RoundsManager() {
                         onClick={() => toggle(row, 'open')}
                       >
                         РАУНД НЭЭХ
+                      </button>
+                    )}
+                    {row.status !== 'live' && (row.status === 'done' || row.openedAt !== null) && (
+                      <button
+                        type="button"
+                        className="oc-sc-btn"
+                        disabled={busyKey === key}
+                        title="Раундыг нээгээгүй төлөвт буцаах — өмнөх раундын шалгаруулалтыг дахин хийхэд"
+                        onClick={() => toggle(row, 'reset')}
+                      >
+                        БУЦААХ
                       </button>
                     )}
                     <button

@@ -124,7 +124,7 @@ export async function GET() {
         // would cost a query per competition. See the field's comment.
         lockedEventIds: [],
         eventsWithoutLiveRound: liveRounds
-          .filter((e) => e.liveRound === null)
+          .filter((e) => e.liveRounds.length === 0)
           .map((e) => ({ eventId: e.eventId, label: e.label })),
       };
     }),

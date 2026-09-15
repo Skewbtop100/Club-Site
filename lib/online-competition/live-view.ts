@@ -399,8 +399,9 @@ export function roundRowState(
       if (me.access.reason === 'ok') return me.planKind === 'complete' ? 'open-done' : 'open';
     }
     if (round.qualified === false) return 'notqualified';
-    // Live, but not the round the gate admits to (only one per event is
-    // expected; the gate takes the lowest).
+    // Live, but not the round the gate admits to. Only one round per event
+    // may be live (openRound refuses a second); if two ever are, the gate
+    // admits nobody and liveRound is null, so every live row lands here.
     return 'open-view';
   }
   if (me?.canCompete && round.qualified === false) return 'notqualified';

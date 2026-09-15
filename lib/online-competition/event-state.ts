@@ -41,7 +41,8 @@ export function deriveEventState(
 ): EventRowState {
   if (access) {
     if (access.reason === 'not-qualified') return 'notqualified';
-    if (access.reason === 'no-live-round') return 'idle';
+    // Two live rounds of one event: the gate refuses, so no start button.
+    if (access.reason === 'no-live-round' || access.reason === 'conflicting-live-rounds') return 'idle';
     if (access.reason === 'ok') return 'live';
   }
 

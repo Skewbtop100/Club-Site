@@ -77,7 +77,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     season: typeof data.season === 'string' ? data.season : '',
     lockedEventIds,
     eventsWithoutLiveRound: liveRounds
-      .filter((e) => e.liveRound === null)
+      .filter((e) => e.liveRounds.length === 0)
       .map((e) => ({ eventId: e.eventId, label: e.label })),
   };
 

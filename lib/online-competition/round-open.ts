@@ -21,6 +21,7 @@ import { roundKey } from './scrambles';
 import { normalizeCompetitionStatus } from './admin-competitions';
 import type { OnlineCompetitionStatus } from './types';
 import type { RoundStatus } from './rounds';
+import { liveRoundsForEvent } from './round-access';
 import {
   ROUND_READINESS_MESSAGE,
   roundScrambleReadiness,
@@ -136,6 +137,32 @@ export async function openRound(
     if (before === 'finished') {
       throw new RoundOpenError(
         'Дууссан тэмцээний раундыг нээх боломжгүй. Үргэлжлүүлэх бол эхлээд тэмцээний статусыг өөрчилнө үү.',
+      );
+    }
+
+    // ── ONE LIVE ROUND PER EVENT ──
+    // Refused while ANY other round of this event is live — earlier or
+    // later. Reopening round 1 while round 2 was live used to succeed, and
+    // the solve gate then took the lowest live round: round-2 qualifiers got
+    // round-1 scrambles and filed into round 1. Reopening the round that is
+    // already live is not a conflict. Read inside the transaction, so two
+    // admins opening two rounds at once cannot both pass.
+    const statesSnap = await tx.get(compRef.collection('roundState'));
+    const otherLive = liveRoundsForEvent(
+      statesSnap.docs.map((d) => [d.id, { status: d.get('status') }] as [string, { status: unknown }]),
+      eventId,
+    ).filter((r) => r !== round);
+    if (otherLive.length > 0) {
+      const events = compSnap.get('events');
+      const configured = Array.isArray(events)
+        ? (events as { eventId?: unknown; label?: unknown }[]).find((e) => e?.eventId === eventId)
+        : undefined;
+      const label = typeof configured?.label === 'string' && configured.label ? configured.label : eventId.toUpperCase();
+      const live = otherLive.map((r) => `${r}-р`).join(', ');
+      throw new RoundOpenError(
+        `${label}: ${live} раунд одоо нээлттэй байна. Нэг төрөлд нэг удаад нэг л раунд нээлттэй байж болно — ` +
+          `${round}-р раундыг нээхээс өмнө ${live} раундыг хаана уу.`,
+        409,
       );
     }
 

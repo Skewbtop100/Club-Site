@@ -7,6 +7,7 @@ import { fetchRoundStates } from '@/lib/online-competition/round-results';
 import { resolveEventLiveRounds } from '@/lib/online-competition/round-access';
 import { notifyRoundFinalised } from '@/lib/online-competition/notifications-server';
 import { RoundOpenError, openRound } from '@/lib/online-competition/round-open';
+import { RoundCutError, resetRound } from '@/lib/online-competition/round-cut';
 import type { QualifierMethod, RoundStatus } from '@/lib/online-competition/rounds';
 
 // ── Round management (Раунд удирдах) ────────────────────────────────────
@@ -108,11 +109,18 @@ export async function GET(req: Request) {
   // Which events have no round open at all — the same findLiveRound rule
   // the solve gate uses, not a scan of the `rounds` array above, so the
   // panel's warning and the athlete's 409 can never disagree.
-  const eventsWithoutLiveRound = (await resolveEventLiveRounds(db, competitionId))
-    .filter((e) => e.liveRound === null)
+  const liveStatus = await resolveEventLiveRounds(db, competitionId);
+  const eventsWithoutLiveRound = liveStatus
+    .filter((e) => e.liveRounds.length === 0)
     .map((e) => ({ eventId: e.eventId, label: e.label }));
+  // More than one live round of an event: every athlete in it is refused
+  // ('conflicting-live-rounds') until an admin closes one. openRound no
+  // longer creates this state; this surfaces one left from before.
+  const eventsWithConflictingLiveRounds = liveStatus
+    .filter((e) => e.liveRounds.length > 1)
+    .map((e) => ({ eventId: e.eventId, label: e.label, rounds: e.liveRounds }));
 
-  return NextResponse.json({ rounds, eventsWithoutLiveRound });
+  return NextResponse.json({ rounds, eventsWithoutLiveRound, eventsWithConflictingLiveRounds });
 }
 
 /** Opens or closes a round.
@@ -132,7 +140,8 @@ export async function POST(req: Request) {
   const competitionId = typeof body?.competitionId === 'string' ? body.competitionId : '';
   const eventId = typeof body?.eventId === 'string' ? body.eventId : '';
   const round = typeof body?.round === 'number' ? body.round : NaN;
-  const action = body?.action === 'open' || body?.action === 'close' ? body.action : null;
+  const action =
+    body?.action === 'open' || body?.action === 'close' || body?.action === 'reset' ? body.action : null;
   if (!competitionId || !eventId || !Number.isInteger(round) || round < 1 || !action) {
     return NextResponse.json({ error: 'Буруу хүсэлт.' }, { status: 400 });
   }
@@ -162,6 +171,20 @@ export async function POST(req: Request) {
           { error: e.message, unassigned: e.unassigned },
           { status: e.status },
         );
+      }
+      throw e;
+    }
+  }
+
+  if (action === 'reset') {
+    // БУЦААХ — the way to redo a cut once the next round has started: close
+    // that round, then reset it. Refused while live, while the round after
+    // it has started, or once anything is filed in it — see resetRound.
+    try {
+      return NextResponse.json(await resetRound(db, competitionId, eventId, round));
+    } catch (e) {
+      if (e instanceof RoundCutError) {
+        return NextResponse.json({ error: e.message }, { status: e.status });
       }
       throw e;
     }
