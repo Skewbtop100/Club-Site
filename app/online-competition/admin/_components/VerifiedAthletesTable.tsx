@@ -1,21 +1,22 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import EmailChangeDialog from './EmailChangeDialog';
 import AthleteDetailPanel from './AthleteDetailPanel';
-import { countryName } from '@/lib/online-competition/countries';
+import { countryName, flagUrl } from '@/lib/online-competition/countries';
 import { resolveParticipantPhoto } from '@/lib/online-competition/data';
 import type { OnlineParticipantAdminView, OnlineParticipantGender } from '@/lib/online-competition/types';
 
 // ── Тамирчдын бүртгэл ────────────────────────────────────────────────────
-// VERIFIED athletes only, as a dense spreadsheet-style table: every field on
-// screen at once. Values from design-mockups/Khorom Admin.dc.html (the
-// "people" table), widened to the full record.
+// VERIFIED athletes only, as a dense spreadsheet-style table. Values from
+// design-mockups/Khorom Admin.dc.html (the "people" table), widened to the
+// full record.
 //
 // Wider than the content column on most screens, so the table scrolls
-// horizontally inside its own box, with the name column PINNED (position:
-// sticky) so a row stays identifiable while scrolling to its later columns.
-// Pending requests are their own page (AthleteRequests).
+// horizontally inside its own box. Above 640px the ЗУРАГ, ОВОГ and НЭР
+// columns are PINNED (theme.css .oc-adm-people-sticky), so a row stays
+// identifiable while scrolling to its later columns; on a phone nothing is
+// pinned, because three pinned columns would fill the screen.
 
 const MONO = 'var(--oc-font-mono), monospace';
 const HEADING = 'var(--oc-font-heading), sans-serif';
@@ -25,6 +26,12 @@ const GENDER_LABEL: Record<OnlineParticipantGender, string> = {
   female: 'Эмэгтэй',
   other: 'Бусад',
 };
+
+/** Pinned column geometry: each pinned cell's left offset is the widths
+ *  before it, so they are fixed widths, not content-sized. */
+const PHOTO_W = 56; // 28px photo + 14px padding each side
+const SURNAME_W = 150;
+const GIVEN_W = 150;
 
 /** YYYY.MM.DD, the mockup's date form. */
 function fmtDay(ms: number | null): string {
@@ -65,13 +72,27 @@ const TD: React.CSSProperties = {
   verticalAlign: 'middle',
 };
 const MUTED_MONO: React.CSSProperties = { font: `500 11px/1 ${MONO}`, color: '#9A958A', fontVariantNumeric: 'tabular-nums' };
+const NAME: React.CSSProperties = {
+  display: 'block',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  font: `500 13px/1 ${HEADING}`,
+  color: '#F4F1EA',
+};
+
+/** A pinned column's cell style: fixed width and its left offset. */
+function pinned(left: number, width: number): React.CSSProperties {
+  return { left, width, minWidth: width, maxWidth: width };
+}
 
 export default function VerifiedAthletesTable() {
   const [athletes, setAthletes] = useState<OnlineParticipantAdminView[] | null>(null);
   const [error, setError] = useState('');
   const [merging, setMerging] = useState<OnlineParticipantAdminView | null>(null);
-  // The athlete whose photo panel is open — see the note on the avatar.
+  // The athlete whose photo panel is open — see the note on the photo cell.
   const [viewingUid, setViewingUid] = useState<string | null>(null);
+  // The БАТАЛГААЖСАН cell whose dates popup is open, and where to draw it.
+  const [dates, setDates] = useState<{ uid: string; anchor: DOMRect } | null>(null);
 
   const load = useCallback(async () => {
     setError('');
@@ -91,6 +112,7 @@ export default function VerifiedAthletesTable() {
   }, [load]);
 
   const viewingIndex = athletes && viewingUid ? athletes.findIndex((a) => a.uid === viewingUid) : -1;
+  const datesFor = athletes && dates ? athletes.find((a) => a.uid === dates.uid) ?? null : null;
 
   return (
     <div style={{ border: '1px solid #1C1C21', background: '#0D0D10' }}>
@@ -127,12 +149,21 @@ export default function VerifiedAthletesTable() {
           Баталгаажсан тамирчин алга.
         </p>
       ) : (
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', minWidth: 1240, borderCollapse: 'separate', borderSpacing: 0 }}>
+        <div style={{ overflowX: 'auto' }} onScroll={() => setDates(null)}>
+          <table style={{ width: '100%', minWidth: 1120, borderCollapse: 'separate', borderSpacing: 0 }}>
             <thead>
               <tr>
-                <th className="oc-adm-people-sticky" style={{ ...TH, zIndex: 2 }}>
-                  ОВОГ · НЭР
+                <th className="oc-adm-people-sticky" style={{ ...TH, ...pinned(0, PHOTO_W), zIndex: 2 }}>
+                  ЗУРАГ
+                </th>
+                <th className="oc-adm-people-sticky" style={{ ...TH, ...pinned(PHOTO_W, SURNAME_W), zIndex: 2 }}>
+                  ОВОГ
+                </th>
+                <th
+                  className="oc-adm-people-sticky oc-adm-people-sticky-edge"
+                  style={{ ...TH, ...pinned(PHOTO_W + SURNAME_W, GIVEN_W), zIndex: 2 }}
+                >
+                  НЭР
                 </th>
                 <th style={TH}>И-МЭЙЛ</th>
                 <th style={TH}>WCA ID</th>
@@ -141,9 +172,6 @@ export default function VerifiedAthletesTable() {
                 <th style={TH}>ХҮЙС</th>
                 <th style={TH}>УЛС</th>
                 <th style={TH}>БАТАЛГААЖСАН</th>
-                <th style={TH}>ХҮСЭЛТ ИЛГЭЭСЭН</th>
-                <th style={TH}>БҮРТГҮҮЛСЭН</th>
-                <th style={TH}>GOOGLE НЭР</th>
                 <th style={TH} aria-label="Үйлдэл" />
               </tr>
             </thead>
@@ -151,44 +179,53 @@ export default function VerifiedAthletesTable() {
               {athletes.map((a) => {
                 const photo = resolveParticipantPhoto(a);
                 const age = ageFrom(a.dateOfBirth);
+                const datesOpen = dates?.uid === a.uid;
                 return (
                   <tr key={a.uid} className="oc-adm-people-row">
-                    <td className="oc-adm-people-sticky" style={TD}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        {/* The avatar opens the athlete panel: its one remaining
-                            job is the verification photo at a legible size,
-                            which a table cell cannot show. */}
-                        <button
-                          type="button"
-                          title="Зураг харах"
-                          aria-label={`${a.lastName} ${a.firstName} — зураг харах`}
-                          onClick={() => setViewingUid(a.uid)}
-                          style={{ padding: 0, border: 0, background: 'none', cursor: 'pointer', flex: 'none' }}
-                        >
-                          {photo ? (
-                            // eslint-disable-next-line @next/next/no-img-element -- Cloudinary URL, not our own image pipeline.
-                            <img src={photo} alt="" style={{ width: 28, height: 28, objectFit: 'cover', display: 'block' }} />
-                          ) : (
-                            <span
-                              style={{
-                                width: 28,
-                                height: 28,
-                                background: '#16161B',
-                                color: '#9A958A',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                font: `600 10px/1 ${MONO}`,
-                              }}
-                            >
-                              {initialsOf(a)}
-                            </span>
-                          )}
-                        </button>
-                        <span style={{ font: `500 13px/1 ${HEADING}`, color: '#F4F1EA' }}>
-                          {`${a.lastName} ${a.firstName}`.trim() || a.displayName || '—'}
-                        </span>
-                      </div>
+                    <td className="oc-adm-people-sticky" style={{ ...TD, ...pinned(0, PHOTO_W) }}>
+                      {/* Opens the athlete panel: its one remaining job is the
+                          verification photo at a legible size, which a table
+                          cell cannot show. */}
+                      <button
+                        type="button"
+                        title="Зураг харах"
+                        aria-label={`${a.lastName} ${a.firstName} — зураг харах`}
+                        onClick={() => setViewingUid(a.uid)}
+                        style={{ display: 'block', padding: 0, border: 0, background: 'none', cursor: 'pointer' }}
+                      >
+                        {photo ? (
+                          // eslint-disable-next-line @next/next/no-img-element -- Cloudinary URL, not our own image pipeline.
+                          <img src={photo} alt="" style={{ width: 28, height: 28, objectFit: 'cover', display: 'block' }} />
+                        ) : (
+                          <span
+                            style={{
+                              width: 28,
+                              height: 28,
+                              background: '#16161B',
+                              color: '#9A958A',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              font: `600 10px/1 ${MONO}`,
+                            }}
+                          >
+                            {initialsOf(a)}
+                          </span>
+                        )}
+                      </button>
+                    </td>
+                    <td className="oc-adm-people-sticky" style={{ ...TD, ...pinned(PHOTO_W, SURNAME_W) }}>
+                      <span style={NAME} title={a.lastName}>
+                        {a.lastName || '—'}
+                      </span>
+                    </td>
+                    <td
+                      className="oc-adm-people-sticky oc-adm-people-sticky-edge"
+                      style={{ ...TD, ...pinned(PHOTO_W + SURNAME_W, GIVEN_W) }}
+                    >
+                      <span style={NAME} title={a.firstName}>
+                        {a.firstName || '—'}
+                      </span>
                     </td>
                     <td style={TD}>
                       <span style={{ font: `400 11px/1 ${MONO}`, color: '#9A958A' }}>{a.email || '—'}</span>
@@ -212,24 +249,64 @@ export default function VerifiedAthletesTable() {
                       </span>
                     </td>
                     <td style={TD}>
-                      <span style={{ font: `400 12px/1 ${HEADING}`, color: '#9A958A' }}>
-                        {a.citizenship ? `${countryName(a.citizenship)}` : '—'}
-                      </span>
-                      {a.citizenship && (
-                        <span style={{ marginLeft: 6, font: `400 9px/1 ${MONO}`, color: '#6E6A62' }}>{a.citizenship.toUpperCase()}</span>
+                      {a.citizenship ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                          {/* The mockup's 20x13 flag, from the same flagcdn
+                              helper the profile picker and the registration
+                              review use. */}
+                          <span
+                            aria-hidden
+                            style={{
+                              width: 20,
+                              height: 13,
+                              flex: 'none',
+                              border: '1px solid #2A2A31',
+                              backgroundImage: `url(${flagUrl(a.citizenship)})`,
+                              backgroundSize: '100% 100%',
+                              backgroundRepeat: 'no-repeat',
+                              backgroundColor: '#0A0A0C',
+                            }}
+                          />
+                          <span style={{ font: `400 12px/1 ${HEADING}`, color: '#9A958A' }}>{countryName(a.citizenship)}</span>
+                        </span>
+                      ) : (
+                        <span style={{ font: `400 12px/1 ${HEADING}`, color: '#6E6A62' }}>—</span>
                       )}
                     </td>
                     <td style={TD}>
-                      <span style={MUTED_MONO}>{fmtDay(a.reviewedAt)}</span>
-                    </td>
-                    <td style={TD}>
-                      <span style={MUTED_MONO}>{fmtDay(a.submittedAt)}</span>
-                    </td>
-                    <td style={TD}>
-                      <span style={MUTED_MONO}>{fmtDay(a.createdAt)}</span>
-                    </td>
-                    <td style={TD}>
-                      <span style={{ font: `400 12px/1 ${HEADING}`, color: '#6E6A62' }}>{a.displayName || '—'}</span>
+                      {/* The one date column. The other two are a click away. */}
+                      <button
+                        type="button"
+                        aria-expanded={datesOpen}
+                        aria-haspopup="dialog"
+                        title="Бусад огноо"
+                        onClick={(e) => {
+                          const anchor = e.currentTarget.getBoundingClientRect();
+                          setDates(datesOpen ? null : { uid: a.uid, anchor });
+                        }}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 7,
+                          padding: '4px 6px',
+                          margin: '-4px -6px',
+                          border: `1px solid ${datesOpen ? '#DFFF4F' : 'transparent'}`,
+                          background: 'transparent',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <span style={MUTED_MONO}>{fmtDay(a.reviewedAt)}</span>
+                        <span
+                          aria-hidden
+                          style={{
+                            width: 0,
+                            height: 0,
+                            borderTop: '3px solid transparent',
+                            borderBottom: '3px solid transparent',
+                            borderLeft: `4px solid ${datesOpen ? '#DFFF4F' : '#6E6A62'}`,
+                          }}
+                        />
+                      </button>
                     </td>
                     <td style={{ ...TD, textAlign: 'right' }}>
                       {/* Opens the two-step merge dialog. Nothing is written
@@ -252,6 +329,8 @@ export default function VerifiedAthletesTable() {
         </div>
       )}
 
+      {dates && datesFor && <DatesPopup athlete={datesFor} anchor={dates.anchor} onClose={() => setDates(null)} />}
+
       {athletes && viewingIndex !== -1 && (
         <AthleteDetailPanel
           athlete={athletes[viewingIndex]}
@@ -272,6 +351,91 @@ export default function VerifiedAthletesTable() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+const POPUP_W = 220;
+const POPUP_H = 104;
+const EDGE = 8;
+
+/** ХҮСЭЛТ ИЛГЭЭСЭН and БҮРТГҮҮЛСЭН, beside the БАТАЛГААЖСАН cell.
+ *
+ *  Drawn with position: fixed from the cell's own rectangle — NOT absolutely
+ *  inside the table, whose horizontal-scroll box would clip it. To the RIGHT
+ *  of the cell by default; when that would cross the viewport's right edge it
+ *  flips to the LEFT of the cell, and it is clamped to stay 8px inside the
+ *  viewport on every side.
+ *
+ *  Closes on: a click anywhere outside it (the cell's own button toggles it),
+ *  Escape, and any scroll or resize — a fixed popup would otherwise float
+ *  away from the row it describes. */
+function DatesPopup({
+  athlete,
+  anchor,
+  onClose,
+}: {
+  athlete: OnlineParticipantAdminView;
+  anchor: DOMRect;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    function onDown(e: MouseEvent) {
+      const target = e.target as Node;
+      if (ref.current?.contains(target)) return;
+      // The trigger toggles itself; let its own click handle it.
+      if ((target as HTMLElement).closest?.('[aria-haspopup="dialog"][aria-expanded="true"]')) return;
+      onClose();
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', onClose, true);
+    window.addEventListener('resize', onClose);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', onClose, true);
+      window.removeEventListener('resize', onClose);
+    };
+  }, [onClose]);
+
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
+  let left = anchor.right + EDGE;
+  if (left + POPUP_W > vw - EDGE) left = anchor.left - POPUP_W - EDGE;
+  left = Math.max(EDGE, Math.min(left, vw - POPUP_W - EDGE));
+  const top = Math.max(EDGE, Math.min(anchor.top - 10, vh - POPUP_H - EDGE));
+
+  const row = (label: string, ms: number | null) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', borderBottom: '1px solid #16161B' }}>
+      <span style={{ font: `500 8px/1 ${MONO}`, letterSpacing: '.14em', color: '#6E6A62' }}>{label}</span>
+      <span style={{ font: `500 11px/1 ${MONO}`, color: '#F4F1EA', fontVariantNumeric: 'tabular-nums' }}>{fmtDay(ms)}</span>
+    </div>
+  );
+
+  return (
+    <div
+      ref={ref}
+      role="dialog"
+      aria-label="Огноо"
+      style={{
+        position: 'fixed',
+        left,
+        top,
+        width: POPUP_W,
+        zIndex: 70,
+        border: '1px solid #2A2A31',
+        background: '#0D0D10',
+        boxShadow: '0 18px 40px -14px rgba(0,0,0,.9)',
+      }}
+    >
+      {row('ХҮСЭЛТ ИЛГЭЭСЭН', athlete.submittedAt)}
+      {row('БҮРТГҮҮЛСЭН', athlete.createdAt)}
     </div>
   );
 }

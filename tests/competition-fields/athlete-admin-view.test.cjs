@@ -147,11 +147,20 @@ console.log('\n  -- the two athlete pages --');
   const table = src('app/online-competition/admin/_components/VerifiedAthletesTable.tsx');
   const requests = src('app/online-competition/admin/_components/AthleteRequests.tsx');
   ok('Тамирчдын бүртгэл lists VERIFIED athletes only', table.includes("admin-athletes?status=approved'") && !table.includes('status=pending'));
-  for (const head of ['ОВОГ · НЭР', 'И-МЭЙЛ', 'WCA ID', 'ТӨРСӨН', 'НАС', 'ХҮЙС', 'УЛС', 'БАТАЛГААЖСАН', 'ХҮСЭЛТ ИЛГЭЭСЭН', 'БҮРТГҮҮЛСЭН', 'GOOGLE НЭР']) {
-    ok(`  ...column ${head}`, table.includes(`>${head}</th>`) || table.includes(`>\n                  ${head}\n                </th>`));
-  }
-  ok('  ...scrolls sideways in its own box, name column pinned',
-    table.includes("<div style={{ overflowX: 'auto' }}>") && table.includes('className="oc-adm-people-sticky"'));
+  const heads = [...table.matchAll(/<th\b[^>]*>\s*([^<{]+?)\s*<\/th>/g)].map((m) => m[1]);
+  ok('  ...columns, in order: ЗУРАГ, ОВОГ, НЭР, И-МЭЙЛ, WCA ID, ТӨРСӨН, НАС, ХҮЙС, УЛС, БАТАЛГААЖСАН',
+    heads.join('|') === 'ЗУРАГ|ОВОГ|НЭР|И-МЭЙЛ|WCA ID|ТӨРСӨН|НАС|ХҮЙС|УЛС|БАТАЛГААЖСАН', heads.join('|'));
+  ok('  ...no Google name column', !table.includes('GOOGLE НЭР'));
+  ok('  ...the other two dates are a popup, not columns',
+    !/>\s*ХҮСЭЛТ ИЛГЭЭСЭН\s*<\/th>/.test(table) && table.includes("row('ХҮСЭЛТ ИЛГЭЭСЭН', athlete.submittedAt)") &&
+      table.includes("row('БҮРТГҮҮЛСЭН', athlete.createdAt)"));
+  ok('  ...the popup closes on outside click, Escape, scroll and resize, and flips at the right edge',
+    table.includes("document.addEventListener('mousedown', onDown)") && table.includes("e.key === 'Escape'") &&
+      table.includes("window.addEventListener('scroll', onClose, true)") && table.includes("window.addEventListener('resize', onClose)") &&
+      table.includes('if (left + POPUP_W > vw - EDGE) left = anchor.left - POPUP_W - EDGE;'));
+  ok('  ...the country carries its flag', table.includes('backgroundImage: `url(${flagUrl(a.citizenship)})`'));
+  ok('  ...scrolls sideways in its own box, photo and both name columns pinned',
+    table.includes("style={{ overflowX: 'auto' }}") && (table.match(/className="oc-adm-people-sticky/g) || []).length === 6);
   ok('Бүртгэлийн хүсэлт lists PENDING requests only', requests.includes("admin-athletes?status=pending'") && !requests.includes('status=approved'));
   ok('  ...one request expanded at a time', requests.includes('onClick={() => setOpenUid(open ? null : a.uid)}'));
   ok('  ...through the existing verification route, unchanged',
