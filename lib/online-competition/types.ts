@@ -689,7 +689,11 @@ export interface OnlineSubmission {
    *  for review, never evidence in their own right, and an attempt that
    *  cannot be filed is a solve thrown away. */
   marks?: Partial<SolveMarks>;
-  /** Cloudinary public ids for the full-resolution stills taken during
+  /** LEGACY. Stills are no longer captured, and firestore.rules now accepts
+   *  these only absent or EMPTY on a new submission. Non-empty lists exist
+   *  only on documents filed while stills were captured.
+   *
+   *  Cloudinary public ids for the full-resolution stills taken during
    *  the closing timer hold and the cube check — at most three each, and
    *  IMAGE resources, not video ones.
    *
@@ -720,7 +724,10 @@ export interface OnlineSubmission {
    *  it existed, and absent whenever an upload response omits it. */
   videoDurationMs?: number;
   createdAt?: Timestamp;
-  /** 14 days from submission — drives scheduled deletion of the raw video. */
+  /** 14 days from submission, as the client computed it. It can only DELAY
+   *  the nightly sweep: that deletes on createdAt (server-pinned) plus the
+   *  retention period AND this date having passed — see
+   *  submission-retention.ts. firestore.rules refuses a date already past. */
   retentionExpiresAt?: Timestamp;
 }
 

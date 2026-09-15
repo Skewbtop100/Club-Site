@@ -31,8 +31,7 @@ import type {
   OnlineSubmission,
   SolveMarks,
 } from './types';
-
-const RETENTION_DAYS = 14;
+import { SUBMISSION_RETENTION_MS } from './submission-retention';
 
 // Must list every member of OnlineCompetitionStatus — see the identical
 // list (and the same warning) in admin-competitions.ts. Omitting 'draft'
@@ -441,12 +440,9 @@ export async function createSubmission(input: {
    *  round-access gate rather than letting it default here, so the stored
    *  value can never disagree with the gate that admitted the athlete. */
   competitionRound: number;
-  /** Cloudinary evidence — every submission filed before videos moved to
-   *  R2. Never written together with videoKey. */
-  videoUrl?: string;
-  cloudinaryPublicId?: string;
-  /** R2 evidence — the object key the presign route derived. */
-  videoKey?: string;
+  /** R2 evidence — the object key the presign route derived. The legacy
+   *  Cloudinary pair is no longer fileable (firestore.rules). */
+  videoKey: string;
   reportedTime: number;
   /** Self-reported DNF (Phase 5's manual keypad entry) — optional so the
    *  original solve page's call site (which never reports DNF) is
@@ -458,11 +454,6 @@ export async function createSubmission(input: {
    *  attempt must file regardless — the marks help a reviewer seek, they
    *  are not what the submission is for. */
   marks?: Partial<SolveMarks>;
-  /** Cloudinary public ids for this attempt's stills, at most three each.
-   *  Optional and legal while empty, exactly as `marks` is: a submission
-   *  with no stills still files and still reviews. */
-  timerShotIds?: string[];
-  cubeShotIds?: string[];
   /** The uploaded clip's length in ms, from Cloudinary's own response —
    *  not from the recorder, deliberately. It is the length of the file a
    *  judge will actually watch, which is the only number worth comparing
@@ -470,9 +461,10 @@ export async function createSubmission(input: {
    *  must still file. */
   videoDurationMs?: number;
 }): Promise<string> {
-  const retentionExpiresAt = Timestamp.fromMillis(
-    Date.now() + RETENTION_DAYS * 24 * 60 * 60 * 1000,
-  );
+  // Informational from the sweep's point of view: it deletes on the server-
+  // pinned createdAt plus the same period (submission-retention.ts), and
+  // this stored date can only delay that, never bring it forward.
+  const retentionExpiresAt = Timestamp.fromMillis(Date.now() + SUBMISSION_RETENTION_MS);
   // setDoc at a deterministic id, NOT addDoc: see submission-id.ts. A
   // second file of the same attempt replaces the first — a re-uploaded
   // video, a re-solved redo of the same round — instead of adding a
@@ -487,8 +479,11 @@ export async function createSubmission(input: {
   // Refused here, before Firestore sees it: an undefined field would be
   // rejected as an unsupported value anyway, with a far less useful error,
   // and an attempt with no video is one a judge can only reject.
-  if (!input.videoKey && !(input.videoUrl && input.cloudinaryPublicId)) {
-    throw new Error('createSubmission: no video evidence (videoKey, or videoUrl + cloudinaryPublicId)');
+  // A videoKey only: firestore.rules no longer accepts the legacy Cloudinary
+  // pair on a new submission (a client-chosen public id was one the sweep
+  // would delete), so filing one would only come back permission-denied.
+  if (!input.videoKey) {
+    throw new Error('createSubmission: no video evidence (videoKey)');
   }
   const ref = doc(onlineCompDb, 'onlineSubmissions', id);
   const isDnf = input.isDnf ?? false;
@@ -499,13 +494,9 @@ export async function createSubmission(input: {
       event: input.event,
       round: input.round,
       competitionRound: input.competitionRound,
-      // THE EVIDENCE, in exactly one of its two shapes. firestore.rules
-      // refuses a document carrying both — playback reads the key first
-      // and deletion reads the Cloudinary id, so a document with both
-      // could play one asset while deleting another.
-      ...(input.videoKey
-        ? { videoKey: input.videoKey }
-        : { videoUrl: input.videoUrl, cloudinaryPublicId: input.cloudinaryPublicId }),
+      // THE EVIDENCE: this attempt's own R2 object. firestore.rules pins the
+      // key to the writer's uid, competition, event, round and attempt.
+      videoKey: input.videoKey,
       reportedTime: input.reportedTime,
       isDnf,
       // ALWAYS WRITTEN, even empty. firestore.rules accepts the field as
@@ -514,10 +505,11 @@ export async function createSubmission(input: {
       // half-filled still lands, which is the requirement that matters:
       // no set of seek positions is worth refusing a solve over.
       marks: input.marks ?? {},
-      // Same handling as marks above: always written, empty when nothing
-      // was captured, and never a reason for a write to be withheld.
-      timerShotIds: input.timerShotIds ?? [],
-      cubeShotIds: input.cubeShotIds ?? [],
+      // Stills are no longer captured. Written empty, which is the only
+      // value firestore.rules accepts: a non-empty list was a set of
+      // Cloudinary image ids cleanup would delete.
+      timerShotIds: [],
+      cubeShotIds: [],
       // OMITTED RATHER THAN NULLED when absent. Firestore rejects an
       // explicit undefined, and a stored null would have to be told apart
       // from a real zero by every reader; an absent field is already the

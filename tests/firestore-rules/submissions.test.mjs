@@ -47,24 +47,31 @@ const idFor = (uid, attempt, round = 1, comp = COMP, event = EVENT) =>
 /** Exactly what createSubmission writes. `createdAt` is serverTimestamp()
  *  at the call site; the rule requires request.time, which is what that
  *  resolves to. */
-const attemptDoc = (over = {}) => ({
-  competitionId: COMP,
-  uid: ATHLETE,
-  event: EVENT,
-  round: 1,
-  competitionRound: 1,
-  videoUrl: 'https://res.cloudinary.com/x/video/upload/v1/a.webm',
-  cloudinaryPublicId: 'oc/a',
-  reportedTime: 1234,
-  isDnf: false,
-  penalty: null,
-  status: 'pending',
-  // serverTimestamp(), not a client Date: the rule pins createdAt to
-  // request.time, so a client-chosen value cannot backdate a submission.
-  createdAt: serverTimestamp(),
-  retentionExpiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000),
-  ...over,
-});
+const attemptDoc = (over = {}) => {
+  const d = {
+    competitionId: COMP,
+    uid: ATHLETE,
+    event: EVENT,
+    round: 1,
+    competitionRound: 1,
+    reportedTime: 1234,
+    isDnf: false,
+    penalty: null,
+    status: 'pending',
+    // serverTimestamp(), not a client Date: the rule pins createdAt to
+    // request.time, so a client-chosen value cannot backdate a submission.
+    createdAt: serverTimestamp(),
+    // now + 14 days, as createSubmission computes it.
+    retentionExpiresAt: new Date(Date.now() + 14 * 24 * 3600 * 1000),
+    ...over,
+  };
+  // The evidence every new submission carries: the athlete's own R2 key for
+  // this exact attempt — unless a case supplies its own evidence fields.
+  if (!('videoKey' in over) && !('videoUrl' in over) && !('cloudinaryPublicId' in over)) {
+    d.videoKey = `videos/${d.uid}/${d.competitionId}/${d.event}/r${d.competitionRound}/a${d.round}/1700000000000-a1b2c3.webm`;
+  }
+  return d;
+};
 
 /** runTicketId in lib/online-competition/scramble-gate.ts, mirrored. */
 const ticketRef = (db, uid, event, round, comp = COMP) =>
@@ -188,7 +195,7 @@ await check('19. ...even one that looks official', 'DENY', () =>
 );
 await check('20. a document with a field missing', 'DENY', () => {
   const d = attemptDoc({ round: 2 });
-  delete d.videoUrl;
+  delete d.isDnf;
   return setDoc(doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 2)), d);
 });
 await check('21. a reportedTime that is not a number', 'DENY', () =>
@@ -209,8 +216,11 @@ await check('25. an attempt beyond any format’s run length', 'DENY', () =>
 await check('26. competition round 0', 'DENY', () =>
   setDoc(doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 2, 0)), attemptDoc({ round: 2, competitionRound: 0 })),
 );
-await check('27. an empty videoUrl — a submission with no evidence', 'DENY', () =>
-  setDoc(doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 2)), attemptDoc({ round: 2, videoUrl: '' })),
+await check('27. the legacy Cloudinary evidence shape, closed to new submissions', 'DENY', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 2)),
+    attemptDoc({ round: 2, videoUrl: 'https://res.cloudinary.com/x/video/upload/v1/a.webm', cloudinaryPublicId: 'oc/a' }),
+  ),
 );
 await check('28. a backdated createdAt', 'DENY', () =>
   setDoc(doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 2)), attemptDoc({ round: 2, createdAt: new Date(2020, 0, 1) })),
@@ -366,11 +376,10 @@ await check('37e. zero is a real length, not an absent one', 'ALLOW', () =>
 );
 
 // ── CREATE: the R2 video key ────────────────────────────────────────────
-// Videos moved to R2. A submission now carries its evidence in ONE of two
-// shapes: the Cloudinary pair (videoUrl + cloudinaryPublicId) that every
-// earlier submission has, or a videoKey. Never both — playback reads the
-// key first while deletion reads the Cloudinary id, so a document with
-// both could play one asset and delete another — and never neither.
+// Videos moved to R2. A NEW submission carries its evidence as a videoKey
+// and nothing else: the Cloudinary pair (videoUrl + cloudinaryPublicId) is
+// refused outright now, alone or alongside a key — a public id the athlete
+// chose was one the sweep would delete.
 //
 // The key is derived server-side, but the CLIENT writes it here, so the
 // rule also pins it to the writer's own uid and to this exact attempt.
@@ -388,11 +397,17 @@ await check('37f. an attempt filed with a videoKey and no cloudinaryPublicId', '
 await check('37g. BOTH evidence shapes at once', 'DENY', () =>
   setDoc(
     doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 2, 8)),
-    attemptDoc({ round: 2, competitionRound: 8, videoKey: ownKey(2, 8) }),
+    attemptDoc({
+      round: 2,
+      competitionRound: 8,
+      videoKey: ownKey(2, 8),
+      videoUrl: 'https://res.cloudinary.com/x/video/upload/v1/a.webm',
+      cloudinaryPublicId: 'oc/a',
+    }),
   ),
 );
 await check('37h. neither shape — a submission with no video at all', 'DENY', () => {
-  const { videoUrl, cloudinaryPublicId, ...noVideo } = attemptDoc({ round: 3, competitionRound: 8 });
+  const { videoUrl, cloudinaryPublicId, videoKey, ...noVideo } = attemptDoc({ round: 3, competitionRound: 8 });
   return setDoc(doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 3, 8)), noVideo);
 });
 await check('37i. a key under ANOTHER athlete’s uid', 'DENY', () =>
@@ -414,22 +429,18 @@ await check('37k. a key that is not a .webm object', 'DENY', () =>
 );
 
 // ── CREATE: the still ids ───────────────────────────────────────────────
-// Cloudinary public ids for the full-resolution frames grabbed during the
-// two 8-second holds — the video is bitrate-capped and cannot carry a legible
-// timer face, so the digits are read off these instead. At most three per
-// hold, which is what the client schedules.
-//
-// As with marks, the rule's job is to keep the field well-formed and
-// NEVER to make a solve unfileable: a run that captured nothing files
-// with two empty lists and reviews exactly like any other.
+// LEGACY. Stills are no longer captured, so a new submission may carry the
+// lists only absent or EMPTY (createSubmission writes two empty lists). A
+// non-empty list was a set of Cloudinary image ids the athlete chose — and
+// cleanup deleted them, from the same place posters and photos live.
 const SHOTS = ['oc/t1', 'oc/t2', 'oc/t3'];
-await check('37. an attempt filed with a full set of stills, both holds', 'ALLOW', () =>
+await check('37. stills are no longer accepted: a full set is refused', 'DENY', () =>
   setDoc(
     doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 2, 5)),
     attemptDoc({ round: 2, competitionRound: 5, timerShotIds: SHOTS, cubeShotIds: SHOTS }),
   ),
 );
-await check('38. ...or a partial set, which a dropped grab leaves behind', 'ALLOW', () =>
+await check('38. ...and so is a single still', 'DENY', () =>
   setDoc(
     doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 3, 5)),
     attemptDoc({ round: 3, competitionRound: 5, timerShotIds: ['oc/t1'], cubeShotIds: [] }),
@@ -440,6 +451,12 @@ await check('39. ...or none at all, the field absent entirely', 'ALLOW', () =>
   setDoc(
     doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 4, 5)),
     attemptDoc({ round: 4, competitionRound: 5 }),
+  ),
+);
+await check('39b. ...or two EMPTY lists, exactly what createSubmission writes', 'ALLOW', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 5, 5)),
+    attemptDoc({ round: 5, competitionRound: 5, timerShotIds: [], cubeShotIds: [] }),
   ),
 );
 await check('40. a fourth still, beyond what the run can capture', 'DENY', () =>
@@ -470,6 +487,53 @@ await check('44. shot ids that are not a list at all', 'DENY', () =>
   setDoc(
     doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 2, 6)),
     attemptDoc({ round: 2, competitionRound: 6, timerShotIds: 'oc/t1' }),
+  ),
+);
+
+// ── CREATE: nothing that points at someone else's files ────────────────
+// THE HOLE: a submission named a competition poster's public id with a
+// retention date of yesterday, and the nightly sweep deleted the poster.
+// Competition round 9 (ticket served through 5); attempt 1 of it is 37k's.
+const DAY_MS = 24 * 3600 * 1000;
+await check('F1. THE HOLE: a Cloudinary public id naming a poster, dated yesterday', 'DENY', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 2, 9)),
+    attemptDoc({
+      round: 2,
+      competitionRound: 9,
+      videoUrl: 'https://res.cloudinary.com/x/image/upload/competition-poster.jpg',
+      cloudinaryPublicId: 'competition-poster',
+      retentionExpiresAt: new Date(Date.now() - DAY_MS),
+    }),
+  ),
+);
+await check("F2. a still id naming another athlete's profile photo, beside a valid video", 'DENY', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 2, 9)),
+    attemptDoc({ round: 2, competitionRound: 9, cubeShotIds: ['profile-photo-of-bob'] }),
+  ),
+);
+await check('F3. a PAST retention date, on an otherwise valid submission', 'DENY', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 2, 9)),
+    attemptDoc({ round: 2, competitionRound: 9, retentionExpiresAt: new Date(Date.now() - 60 * 1000) }),
+  ),
+);
+await check('F4. a retention date far beyond any real window', 'DENY', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 2, 9)),
+    attemptDoc({ round: 2, competitionRound: 9, retentionExpiresAt: new Date(Date.now() + 400 * DAY_MS) }),
+  ),
+);
+await check('F5. no retention date at all', 'DENY', () => {
+  const d = attemptDoc({ round: 2, competitionRound: 9 });
+  delete d.retentionExpiresAt;
+  return setDoc(doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 2, 9)), d);
+});
+await check('F6. the real shape — own key, empty still lists, now + 14 days — still files', 'ALLOW', () =>
+  setDoc(
+    doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 3, 9)),
+    attemptDoc({ round: 3, competitionRound: 9, timerShotIds: [], cubeShotIds: [] }),
   ),
 );
 

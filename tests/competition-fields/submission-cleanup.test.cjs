@@ -28,6 +28,7 @@ function compile() {
     [
       require.resolve('typescript/bin/tsc'),
       'lib/online-competition/submission-cleanup.ts',
+      'lib/online-competition/submission-retention.ts',
       '--outDir', path.basename(OUT),
       '--module', 'commonjs',
       '--target', 'es2022',
@@ -42,6 +43,26 @@ function compile() {
 
 compile();
 const { deleteSubmissionAndVideo } = require(path.join(OUT, 'submission-cleanup.js'));
+const { isSweepable, SUBMISSION_RETENTION_MS } = require(path.join(OUT, 'submission-retention.js'));
+
+const DAY = 86_400_000;
+/** When every fixture submission below was filed. Its legacy assets are, by
+ *  default, uploaded a minute before — which is what a genuine one looks
+ *  like. */
+const CREATED_MS = Date.UTC(2026, 8, 10, 3, 0);
+/** The identity every fixture document carries, so an R2 key built for it
+ *  is its OWN key. A case that wants a foreign key names one. */
+const OWN = {
+  uid: 'uid123',
+  competitionId: 'comp1',
+  event: '333',
+  competitionRound: 1,
+  round: 2,
+  createdAt: { toMillis: () => CREATED_MS },
+};
+/** deleteSubmissionAndVideo over a document that carries OWN's identity. */
+const del = (ref, data, context, deps) =>
+  deleteSubmissionAndVideo(ref, data === undefined ? undefined : { ...OWN, ...data }, context, deps);
 
 // Credentials must EXIST here, unlike the reset suite which deliberately
 // clears them to keep that module's network half inert. This suite is
@@ -67,11 +88,18 @@ function fakeRef(id = 'sub1') {
   return { id, deleted: false, delete() { this.deleted = true; return Promise.resolve(); } };
 }
 
-/** Replaces global fetch with a recorder. `handler` decides each response;
- *  returns the list of calls made, each parsed into resource type and the
- *  public ids the URL asked for. */
-function withFetch(handler, run) {
+/** Replaces global fetch with a recorder. `handler` decides each DELETE's
+ *  response; `calls` lists the DELETEs, each parsed into resource type and
+ *  the public ids the URL asked for.
+ *
+ *  The ownership LOOKUPS (GET, same path) are answered separately and listed
+ *  on `calls.lookups`. `uploadedAt(id)` gives each asset's upload time: a
+ *  number (ms), null for an asset that no longer exists, or 'FAIL' to make
+ *  the lookup itself fail. By default every asset was uploaded a minute
+ *  before the submission was filed — a genuine legacy asset. */
+function withFetch(handler, run, uploadedAt = () => CREATED_MS - 60_000) {
   const calls = [];
+  calls.lookups = [];
   const real = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     const u = new URL(url);
@@ -81,6 +109,23 @@ function withFetch(handler, run) {
       publicIds: u.searchParams.getAll('public_ids[]'),
       method: init?.method,
     };
+    if (call.method === 'GET') {
+      calls.lookups.push(call);
+      const times = call.publicIds.map((id) => [id, uploadedAt(id, call.resourceType)]);
+      if (times.some(([, t]) => t === 'FAIL')) {
+        return { ok: false, status: 500, text: async () => 'boom', json: async () => ({}) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          resources: times
+            .filter(([, t]) => typeof t === 'number')
+            .map(([id, t]) => ({ public_id: id, created_at: new Date(t).toISOString() })),
+        }),
+        text: async () => '',
+      };
+    }
     calls.push(call);
     return handler(call);
   };
@@ -113,7 +158,7 @@ console.error = (...args) => errors.push(args.join(' '));
   // ── A full submission: one video, six stills ──────────────────────────
   await withFetch(allDeleted, async (calls) => {
     const ref = fakeRef();
-    const result = await deleteSubmissionAndVideo(
+    const result = await del(
       ref,
       { cloudinaryPublicId: 'oc/a', timerShotIds: SHOTS_T, cubeShotIds: SHOTS_C },
       'test',
@@ -145,7 +190,7 @@ console.error = (...args) => errors.push(args.join(' '));
   // ── An old submission: video only, no stills fields at all ────────────
   await withFetch(allDeleted, async (calls) => {
     const ref = fakeRef();
-    const result = await deleteSubmissionAndVideo(ref, { cloudinaryPublicId: 'oc/old' }, 'test');
+    const result = await del(ref, { cloudinaryPublicId: 'oc/old' }, 'test');
     ok('9. a submission with no stills destroys only the video',
       calls.length === 1 && calls[0].resourceType === 'video',
       JSON.stringify(calls));
@@ -159,7 +204,7 @@ console.error = (...args) => errors.push(args.join(' '));
   // ── Empty lists, the shape createSubmission actually writes ───────────
   await withFetch(allDeleted, async (calls) => {
     const ref = fakeRef();
-    await deleteSubmissionAndVideo(
+    await del(
       ref,
       { cloudinaryPublicId: 'oc/e', timerShotIds: [], cubeShotIds: [] },
       'test',
@@ -171,7 +216,7 @@ console.error = (...args) => errors.push(args.join(' '));
   // ── Malformed stored data must not reach the URL builder ──────────────
   await withFetch(allDeleted, async (calls) => {
     const ref = fakeRef();
-    await deleteSubmissionAndVideo(
+    await del(
       ref,
       { cloudinaryPublicId: 'oc/m', timerShotIds: ['oc/good', 42, null, ''], cubeShotIds: 'nope' },
       'test',
@@ -192,7 +237,7 @@ console.error = (...args) => errors.push(args.join(' '));
     },
     async (calls) => {
       const ref = fakeRef();
-      const result = await deleteSubmissionAndVideo(
+      const result = await del(
         ref,
         { cloudinaryPublicId: 'oc/a', timerShotIds: SHOTS_T, cubeShotIds: SHOTS_C },
         'test',
@@ -216,7 +261,7 @@ console.error = (...args) => errors.push(args.join(' '));
     },
     async () => {
       const ref = fakeRef();
-      const result = await deleteSubmissionAndVideo(
+      const result = await del(
         ref,
         { cloudinaryPublicId: 'oc/a', timerShotIds: SHOTS_T, cubeShotIds: [] },
         'test',
@@ -239,7 +284,7 @@ console.error = (...args) => errors.push(args.join(' '));
     },
     async () => {
       const ref = fakeRef();
-      const result = await deleteSubmissionAndVideo(
+      const result = await del(
         ref,
         { cloudinaryPublicId: 'oc/a', timerShotIds: SHOTS_T, cubeShotIds: SHOTS_C },
         'test',
@@ -263,7 +308,7 @@ console.error = (...args) => errors.push(args.join(' '));
     }),
     async () => {
       const ref = fakeRef();
-      const result = await deleteSubmissionAndVideo(
+      const result = await del(
         ref,
         { cloudinaryPublicId: 'oc/a', timerShotIds: SHOTS_T, cubeShotIds: [] },
         'test',
@@ -278,7 +323,7 @@ console.error = (...args) => errors.push(args.join(' '));
   // ── No document data at all ───────────────────────────────────────────
   await withFetch(allDeleted, async (calls) => {
     const ref = fakeRef();
-    const result = await deleteSubmissionAndVideo(ref, undefined, 'test');
+    const result = await del(ref, undefined, 'test');
     ok('26. an undefined document deletes nothing and still removes the doc',
       calls.length === 0 && ref.deleted && result.cloudinaryDetail === 'no-public-id');
   });
@@ -327,7 +372,7 @@ console.error = (...args) => errors.push(args.join(' '));
   await withFetch(allDeleted, async (calls) => {
     const r2 = fakeR2(() => 204);
     const ref = fakeRef();
-    const result = await deleteSubmissionAndVideo(ref, { videoKey: R2_KEY }, 'test', r2.deps);
+    const result = await del(ref, { videoKey: R2_KEY }, 'test', r2.deps);
     const req = r2.requests[0];
     ok('27. an R2 submission deletes its object', r2.requests.length === 1 && req.method === 'DELETE',
       JSON.stringify(r2.requests.map((r) => r.method)));
@@ -345,7 +390,7 @@ console.error = (...args) => errors.push(args.join(' '));
   await withFetch(allDeleted, async (calls) => {
     const r2 = fakeR2(() => 204);
     const ref = fakeRef();
-    const result = await deleteSubmissionAndVideo(ref, { cloudinaryPublicId: 'oc/legacy' }, 'test', r2.deps);
+    const result = await del(ref, { cloudinaryPublicId: 'oc/legacy' }, 'test', r2.deps);
     ok('28. a legacy submission deletes its Cloudinary video',
       calls.some((c) => c.resourceType === 'video' && c.publicIds.join() === 'oc/legacy') &&
         result.cloudinaryDeleted === true,
@@ -366,7 +411,7 @@ console.error = (...args) => errors.push(args.join(' '));
     let result = {};
     let rejection = null;
     try {
-      result = await deleteSubmissionAndVideo(
+      result = await del(
         ref,
         { videoKey: R2_KEY, timerShotIds: SHOTS_T, cubeShotIds: SHOTS_C },
         'test',
@@ -389,7 +434,7 @@ console.error = (...args) => errors.push(args.join(' '));
   await withFetch(allDeleted, async (calls) => {
     const r2 = fakeR2(() => 204);
     const ref = fakeRef();
-    const result = await deleteSubmissionAndVideo(ref, {}, 'test', r2.deps);
+    const result = await del(ref, {}, 'test', r2.deps);
     ok('30. a submission with neither video field deletes no video',
       r2.requests.length === 0 && calls.length === 0, `${r2.requests.length} r2, ${calls.length} fetch`);
     ok('  ...and still removes the document',
@@ -399,7 +444,7 @@ console.error = (...args) => errors.push(args.join(' '));
   // A missing object is not an error.
   await withFetch(allDeleted, async () => {
     const r2 = fakeR2(() => { throw r2Error('NoSuchKey', 404); });
-    const result = await deleteSubmissionAndVideo(fakeRef(), { videoKey: R2_KEY }, 'test', r2.deps);
+    const result = await del(fakeRef(), { videoKey: R2_KEY }, 'test', r2.deps);
     ok('31. an object that is already gone counts as deleted',
       result.r2Deleted === true && result.r2Detail === 'not-found (already gone)', JSON.stringify(result));
   });
@@ -407,7 +452,7 @@ console.error = (...args) => errors.push(args.join(' '));
   // A document the Admin SDK wrote with both shapes loses both.
   await withFetch(allDeleted, async (calls) => {
     const r2 = fakeR2(() => 204);
-    const result = await deleteSubmissionAndVideo(
+    const result = await del(
       fakeRef(), { videoKey: R2_KEY, cloudinaryPublicId: 'oc/both' }, 'test', r2.deps,
     );
     ok('32. a document carrying BOTH shapes has both videos deleted',
@@ -422,7 +467,7 @@ console.error = (...args) => errors.push(args.join(' '));
     const log = [];
     const r2 = fakeR2(() => 204, log);
     const ref = { id: 'ordered', deleted: false, delete() { log.push('doc'); this.deleted = true; return Promise.resolve(); } };
-    await deleteSubmissionAndVideo(ref, { videoKey: R2_KEY }, 'test', r2.deps);
+    await del(ref, { videoKey: R2_KEY }, 'test', r2.deps);
     ok('33. the object is deleted before the document that names it', log.join() === 'r2,doc', log.join());
   });
 
@@ -430,11 +475,117 @@ console.error = (...args) => errors.push(args.join(' '));
   // This is what keeps the emulator suites inert against the real bucket.
   await withFetch(allDeleted, async () => {
     const ref = fakeRef();
-    const result = await deleteSubmissionAndVideo(ref, { videoKey: R2_KEY }, 'test');
+    const result = await del(ref, { videoKey: R2_KEY }, 'test');
     ok('34. unconfigured R2 makes no request and still removes the document',
       ref.deleted && result.r2Deleted === false && result.r2Detail === 'missing-credentials',
       JSON.stringify(result));
   });
+
+  // ══ WHOSE ASSET IS IT — the second check, at deletion time ═══════════
+  // firestore.rules now refuses a new submission that names foreign assets.
+  // These cover what the rules cannot: documents already stored.
+  const FOREIGN_KEY = 'videos/victim999/comp1/333/r1/a2/1700000000000-a1b2c3.webm';
+  await withFetch(allDeleted, async () => {
+    const r2 = fakeR2(() => 204);
+    const ref = fakeRef('forged-r2');
+    const before = errors.length;
+    const result = await del(ref, { videoKey: FOREIGN_KEY }, 'test', r2.deps);
+    ok("39. an R2 key under ANOTHER athlete's uid is not deleted",
+      r2.requests.length === 0 && result.r2Deleted === false && /^refused/.test(result.r2Detail), JSON.stringify(result));
+    ok('  ...listed as refused', result.refused.some((x) => x.kind === 'r2' && x.id === FOREIGN_KEY));
+    ok('  ...logged as NOT deleted, with the submission named',
+      errors.slice(before).some((e) => e.includes('forged-r2') && e.includes('NOT deleted')));
+    ok('  ...and the forged document itself is still removed', ref.deleted);
+  });
+  await withFetch(allDeleted, async () => {
+    const r2 = fakeR2(() => 204);
+    const result = await del(fakeRef(), { videoKey: 'videos/uid123/comp1/333/r1/a5/1700000000000-a1b2c3.webm' }, 'test', r2.deps);
+    ok("40. the athlete's own key for a DIFFERENT attempt is not deleted either",
+      r2.requests.length === 0 && /^refused/.test(result.r2Detail), JSON.stringify(result));
+  });
+  await withFetch(allDeleted, async () => {
+    const r2 = fakeR2(() => 204);
+    const result = await del(fakeRef(), { videoKey: 'videos/uid123/comp1/333/r1/a2/../../../victim999/x.webm' }, 'test', r2.deps);
+    ok('41. a key that climbs out of its folder is not deleted', r2.requests.length === 0 && /^refused/.test(result.r2Detail));
+  });
+
+  const POSTER = 'competition-poster';
+  await withFetch(
+    allDeleted,
+    async (calls) => {
+      const ref = fakeRef();
+      const result = await del(ref, { cloudinaryPublicId: 'oc/v', timerShotIds: ['oc/t1', POSTER] }, 'test');
+      const imageIds = calls.filter((c) => c.resourceType === 'image').flatMap((c) => c.publicIds);
+      ok('42. THE HOLE: a still id naming a months-old asset (a poster) is NOT deleted',
+        !imageIds.includes(POSTER), JSON.stringify(imageIds));
+      ok('  ...while the genuine still in the same document is', imageIds.includes('oc/t1'));
+      ok('  ...counted as refused, not as failed',
+        result.stillsRefused === 1 && result.stillsDeleted === 1 && result.stillsFailed === 0, JSON.stringify(result));
+      ok('  ...the genuine video still goes', result.cloudinaryDeleted === true);
+      ok('  ...and the document is removed', ref.deleted);
+    },
+    (id) => (id === POSTER ? CREATED_MS - 120 * DAY : CREATED_MS - 60_000),
+  );
+  await withFetch(
+    allDeleted,
+    async (calls) => {
+      const result = await del(fakeRef(), { cloudinaryPublicId: 'someone-elses-video' }, 'test');
+      ok('43. a Cloudinary video uploaded days before the submission is NOT deleted',
+        !calls.some((c) => c.resourceType === 'video') && result.cloudinaryDeleted === false &&
+          /^refused/.test(result.cloudinaryDetail), JSON.stringify(result));
+    },
+    () => CREATED_MS - 3 * DAY,
+  );
+  await withFetch(
+    allDeleted,
+    async (calls) => {
+      const ref = fakeRef();
+      const result = await del(ref, { cloudinaryPublicId: 'oc/v', timerShotIds: ['oc/t1'] }, 'test');
+      ok('44. FAIL CLOSED: when upload times cannot be read, nothing in Cloudinary is deleted',
+        calls.length === 0 && result.stillsRefused === 1 && /^refused/.test(result.cloudinaryDetail), JSON.stringify(result));
+      ok('  ...and the document is still removed', ref.deleted);
+    },
+    () => 'FAIL',
+  );
+  await withFetch(
+    allDeleted,
+    async (calls) => {
+      const result = await del(fakeRef(), { cloudinaryPublicId: 'oc/gone', timerShotIds: ['oc/t-gone'] }, 'test');
+      ok('45. an asset that no longer exists is not a refusal, so a re-run sweep stays clean',
+        result.stillsRefused === 0 && result.refused.length === 0 && calls.length === 2, JSON.stringify(result));
+    },
+    () => null,
+  );
+  await withFetch(allDeleted, async (calls) => {
+    const direct = deleteSubmissionAndVideo;
+    const result = await direct(fakeRef(), { cloudinaryPublicId: 'oc/v' }, 'test');
+    ok('46. a legacy document with no createdAt cannot be verified, so its asset is kept',
+      calls.length === 0 && /^refused/.test(result.cloudinaryDetail), JSON.stringify(result));
+  });
+  await withFetch(allDeleted, async (calls) => {
+    const ref = fakeRef();
+    const result = await del(ref, { cloudinaryPublicId: 'oc/legacy-v', timerShotIds: SHOTS_T, cubeShotIds: SHOTS_C }, 'test');
+    ok('47. LEGACY SUBMISSIONS STILL CLEAN UP: video and all six stills uploaded with it are deleted',
+      result.cloudinaryDeleted && result.stillsDeleted === 6 && result.stillsRefused === 0 && ref.deleted,
+      JSON.stringify(result));
+    ok('  ...after their upload times were checked (one lookup per resource type)', calls.lookups.length === 2);
+  });
+
+  // ══ WHEN THE SWEEP MAY DELETE ════════════════════════════════════════
+  {
+    const NOW = Date.UTC(2026, 8, 30);
+    const c = (o) => ({ status: 'approved', createdAtMs: NOW - 15 * DAY, retentionExpiresAtMs: NOW - DAY, ...o });
+    ok('48. a judged submission past its retention period and its stored date is swept', isSweepable(c({}), NOW));
+    ok('49. THE HOLE: a stored date of yesterday on a submission filed today is NOT swept',
+      !isSweepable(c({ createdAtMs: NOW - 60_000, retentionExpiresAtMs: NOW - DAY }), NOW));
+    ok('50. exactly the retention period after creation is due',
+      isSweepable(c({ createdAtMs: NOW - SUBMISSION_RETENTION_MS }), NOW));
+    ok('51. a later stored date only DELAYS a sweep', !isSweepable(c({ retentionExpiresAtMs: NOW + DAY }), NOW));
+    ok('52. no stored date: never swept, as before', !isSweepable(c({ retentionExpiresAtMs: null }), NOW));
+    ok('53. no createdAt: never swept', !isSweepable(c({ createdAtMs: null }), NOW));
+    ok('54. pending: never swept, however old', !isSweepable(c({ status: 'pending', createdAtMs: NOW - 90 * DAY }), NOW));
+    ok('  ...and a rejected submission is swept like an approved one', isSweepable(c({ status: 'rejected' }), NOW));
+  }
 
   // ── Wiring, read from the source ──
   {
@@ -464,6 +615,13 @@ console.error = (...args) => errors.push(args.join(' '));
       /NextResponse\.json\(\{[\s\S]*r2Deleted,[\s\S]*r2Detail,[\s\S]*\}\)/.test(admin));
     const reset = src('lib/online-competition/reset-attempts.ts');
     ok('38. an attempt reset counts R2 videos too', /if \(data\.videoKey\)/.test(reset));
+    ok('55. the sweep decides with isSweepable, over the server-pinned createdAt',
+      /isSweepable\(/.test(sweep) && /\.where\('createdAt', '<=', /.test(sweep) && !/\.where\('retentionExpiresAt'/.test(sweep));
+    ok('56. the client writes the same retention period the sweep checks',
+      src('lib/online-competition/data.ts').includes('Date.now() + SUBMISSION_RETENTION_MS'));
+    ok('57. cleanup checks R2 ownership before any R2 delete',
+      cleanup.indexOf('videoKeyBelongsTo(videoKey, data)') > -1 &&
+        cleanup.indexOf('videoKeyBelongsTo(videoKey, data)') < cleanup.indexOf('destroyR2Video(videoKey'));
   }
 
   console.error = realError;

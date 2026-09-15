@@ -3,7 +3,7 @@ import { DeleteObjectCommand, type S3Client } from '@aws-sdk/client-s3';
 // The R2 client is CONSTRUCTED IN ONE PLACE — r2Client() in r2-video.ts,
 // the same instance and credentials the presign route signs uploads with.
 // Nothing here builds a second one.
-import { r2Bucket, r2Client } from './r2-video';
+import { VIDEO_KEY_PREFIX, r2Bucket, r2Client } from './r2-video';
 
 // ── Shared submission deletion ────────────────────────────────────────────
 // Server-only (Cloudinary Admin API credentials + firebase-admin). EVERY
@@ -24,6 +24,23 @@ import { r2Bucket, r2Client } from './r2-video';
 // the club's athletes include minors, and the retention window is a
 // promise about all of it and not just the .webm. Hence: the function
 // takes the DOCUMENT, and decides here what belongs to a submission.
+//
+// ── AND WHETHER IT REALLY DOES ──
+// A document names its assets, but the athlete's client wrote that document.
+// Before firestore.rules was tightened, a submission could name ANY public id
+// — a competition poster, another athlete's profile photo — with a retention
+// date of yesterday, and the nightly sweep would delete it. The rules now
+// refuse that for new submissions; this module refuses it at deletion time
+// too, independently, because documents filed before the rules changed (and
+// anything the Admin SDK writes) are not covered by them:
+//   · R2 — EXACT. A key must be the one buildVideoKey makes for this
+//     document's own uid, competition, event, round and attempt.
+//   · Cloudinary (legacy only) — BEST AVAILABLE. Unsigned uploads record no
+//     owner, and the account is shared with the club site, so an id proves
+//     nothing. What does: the asset's upload time. A submission's video and
+//     stills were uploaded in the minutes before it was filed (createdAt is
+//     pinned to the server clock); a poster or a photo was not. An asset
+//     whose upload time cannot be read is not deleted.
 
 export interface DestroyOutcome {
   ok: boolean;
@@ -178,6 +195,143 @@ function readShotIds(value: unknown): string[] {
   return value.filter((v): v is string => typeof v === 'string' && v.length > 0);
 }
 
+// ── Ownership, checked at deletion time ─────────────────────────────────
+
+/** The identity fields a submission document carries — `unknown` until
+ *  checked, since the document may predate any rule about them. */
+export interface SubmissionIdentityFields {
+  uid?: unknown;
+  competitionId?: unknown;
+  event?: unknown;
+  competitionRound?: unknown;
+  /** The ATTEMPT index, under its stored name. */
+  round?: unknown;
+  createdAt?: unknown;
+}
+
+const KEY_SEGMENT = /^[A-Za-z0-9_-]{1,128}$/;
+const KEY_FILE = /^[A-Za-z0-9-]+\.webm$/;
+
+/** Is this R2 key the submission's OWN object?
+ *
+ *  The same parts buildVideoKey (r2-video.ts) derives a key from, taken from
+ *  the document itself: videos/{uid}/{competitionId}/{event}/r{round}/a{attempt}/
+ *  then a nonce file. Anything else — another athlete's uid, another attempt,
+ *  a path that climbs out of its folder — is refused. Every segment must be a
+ *  plain segment, the same rule the presign route applies when it builds one. */
+export function videoKeyBelongsTo(key: string, doc: SubmissionIdentityFields | undefined): boolean {
+  const { uid, competitionId, event, competitionRound, round } = doc ?? {};
+  if (typeof uid !== 'string' || !KEY_SEGMENT.test(uid)) return false;
+  if (typeof competitionId !== 'string' || !KEY_SEGMENT.test(competitionId)) return false;
+  if (typeof event !== 'string' || !KEY_SEGMENT.test(event)) return false;
+  if (typeof competitionRound !== 'number' || !Number.isInteger(competitionRound) || competitionRound < 1) return false;
+  if (typeof round !== 'number' || !Number.isInteger(round) || round < 1) return false;
+  const prefix = `${VIDEO_KEY_PREFIX}/${uid}/${competitionId}/${event}/r${competitionRound}/a${round}/`;
+  return key.startsWith(prefix) && KEY_FILE.test(key.slice(prefix.length));
+}
+
+/** How long before a submission was filed its legacy assets may have been
+ *  uploaded. The solve page uploaded the video and stills and filed the
+ *  document straight after; a retry re-uploaded. Half an hour covers a slow
+ *  upload many times over. */
+export const LEGACY_UPLOAD_MAX_LEAD_MS = 30 * 60 * 1000;
+/** Clock difference tolerated between Cloudinary and Firestore. */
+export const LEGACY_UPLOAD_MAX_LAG_MS = 5 * 60 * 1000;
+
+/** Was this asset uploaded with this submission? */
+export function uploadedWithSubmission(assetUploadedAtMs: number, submissionCreatedAtMs: number): boolean {
+  return (
+    assetUploadedAtMs >= submissionCreatedAtMs - LEGACY_UPLOAD_MAX_LEAD_MS &&
+    assetUploadedAtMs <= submissionCreatedAtMs + LEGACY_UPLOAD_MAX_LAG_MS
+  );
+}
+
+/** A Firestore Timestamp, Date or epoch-ms number, as ms — or null. */
+export function timestampMs(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (value instanceof Date) return value.getTime();
+  const t = value as { toMillis?: () => number } | null | undefined;
+  return t && typeof t.toMillis === 'function' ? t.toMillis() : null;
+}
+
+export interface RefusedAsset {
+  kind: 'r2' | 'cloudinary-video' | 'cloudinary-image';
+  id: string;
+  reason: string;
+}
+
+function cloudinaryConfigured(): boolean {
+  return !!(
+    process.env.CLOUDINARY_API_KEY &&
+    process.env.CLOUDINARY_API_SECRET &&
+    process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME
+  );
+}
+
+/** public_id -> upload time (ms), for the ids Cloudinary still holds, via the
+ *  Admin API's list-by-ids. An id that no longer exists is simply absent.
+ *  THROWS when the lookup cannot be made or read — the caller refuses. */
+async function lookupUploadTimes(resourceType: 'video' | 'image', publicIds: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const auth = Buffer.from(`${process.env.CLOUDINARY_API_KEY}:${process.env.CLOUDINARY_API_SECRET}`).toString('base64');
+  const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+  for (let i = 0; i < publicIds.length; i += DELETE_BATCH_MAX) {
+    const chunk = publicIds.slice(i, i + DELETE_BATCH_MAX);
+    const query = `${chunk.map((id) => `public_ids[]=${encodeURIComponent(id)}`).join('&')}&max_results=${chunk.length}`;
+    const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/resources/${resourceType}/upload?${query}`, {
+      method: 'GET',
+      headers: { Authorization: `Basic ${auth}` },
+    });
+    if (!res.ok) throw new Error(`lookup http-${res.status}`);
+    const body = (await res.json()) as { resources?: { public_id?: unknown; created_at?: unknown }[] };
+    if (!Array.isArray(body.resources)) throw new Error('lookup returned no resources list');
+    for (const r of body.resources) {
+      if (typeof r?.public_id !== 'string' || typeof r?.created_at !== 'string') continue;
+      const ms = Date.parse(r.created_at);
+      if (Number.isFinite(ms)) out.set(r.public_id, ms);
+    }
+  }
+  return out;
+}
+
+/** Splits a legacy submission's Cloudinary ids into those it may delete and
+ *  those it may not. Never throws: a lookup that fails refuses everything. */
+async function screenLegacyAssets(
+  resourceType: 'video' | 'image',
+  publicIds: string[],
+  submissionCreatedAtMs: number | null,
+): Promise<{ allowed: string[]; refused: { id: string; reason: string }[] }> {
+  if (publicIds.length === 0) return { allowed: [], refused: [] };
+  if (submissionCreatedAtMs === null) {
+    return {
+      allowed: [],
+      refused: publicIds.map((id) => ({ id, reason: 'the submission has no createdAt to check the upload against' })),
+    };
+  }
+  let uploadedAt: Map<string, number>;
+  try {
+    uploadedAt = await lookupUploadTimes(resourceType, publicIds);
+  } catch (err) {
+    const why = (err as Error)?.message ?? 'unknown';
+    return { allowed: [], refused: publicIds.map((id) => ({ id, reason: `upload time could not be verified (${why})` })) };
+  }
+  const allowed: string[] = [];
+  const refused: { id: string; reason: string }[] = [];
+  for (const id of publicIds) {
+    const t = uploadedAt.get(id);
+    // Not there any more: nothing to protect, and deleting it is a no-op
+    // that keeps a re-run sweep clean.
+    if (t === undefined || uploadedWithSubmission(t, submissionCreatedAtMs)) allowed.push(id);
+    else {
+      refused.push({
+        id,
+        reason: `uploaded ${new Date(t).toISOString()}, not with this submission (filed ${new Date(submissionCreatedAtMs).toISOString()})`,
+      });
+    }
+  }
+  return { allowed, refused };
+}
+
 /** Test seam for the R2 half. Production passes nothing and gets the
  *  shared client and bucket; a test passes a client whose requests never
  *  leave the process. */
@@ -235,6 +389,11 @@ export interface SubmissionDeleteResult {
    *  stills existed. */
   stillsDeleted: number;
   stillsFailed: number;
+  /** Stills the document named that were NOT deleted, because they were not
+   *  provably this submission's own. Not failures: they belong elsewhere. */
+  stillsRefused: number;
+  /** Every asset refused, with why — for the sweep's report and the logs. */
+  refused: RefusedAsset[];
   /** The R2 video's outcome, for everything filed since videos moved
    *  there. r2Detail is 'no-video-key' when the submission has none —
    *  every legacy submission — mirroring cloudinaryDetail's
@@ -254,7 +413,7 @@ export interface SubmissionDeleteResult {
  *  assets belong to a submission" is written here, once, and a field
  *  added later is one edit in one file rather than a thing three callers
  *  have to remember. */
-export interface SubmissionAssetFields {
+export interface SubmissionAssetFields extends SubmissionIdentityFields {
   cloudinaryPublicId?: unknown;
   videoKey?: unknown;
   timerShotIds?: unknown;
@@ -301,11 +460,34 @@ export async function deleteSubmissionAndVideo(
   // Both holds' stills, as one list: they are the same kind of asset, go
   // to the same endpoint, and no caller distinguishes them.
   const shotIds = [...readShotIds(data?.timerShotIds), ...readShotIds(data?.cubeShotIds)];
+  const submissionCreatedAtMs = timestampMs(data?.createdAt);
+  const refused: RefusedAsset[] = [];
+  const logRefused = (kind: RefusedAsset['kind'], items: { id: string; reason: string }[]) => {
+    for (const item of items) refused.push({ kind, ...item });
+    if (items.length === 0) return;
+    console.error(
+      `[online-competition] ${context}: submission ${ref.id} names ${kind} asset(s) that are NOT deleted — ` +
+        'not provably this submission’s own, so they may belong to someone else: ' +
+        items.map((x) => `"${x.id}" (${x.reason})`).join('; '),
+    );
+  };
 
   let cloudinaryDeleted = false;
   let cloudinaryDetail = 'no-public-id';
 
-  if (cloudinaryPublicId) {
+  // Unconfigured Cloudinary makes no request of any kind — the lookup
+  // included — which is what keeps the emulator suites inert.
+  let videoMayBeDeleted = true;
+  if (cloudinaryPublicId && cloudinaryConfigured()) {
+    const screen = await screenLegacyAssets('video', [cloudinaryPublicId], submissionCreatedAtMs);
+    if (screen.refused.length > 0) {
+      videoMayBeDeleted = false;
+      cloudinaryDetail = `refused: ${screen.refused[0].reason}`;
+      logRefused('cloudinary-video', screen.refused);
+    }
+  }
+
+  if (cloudinaryPublicId && videoMayBeDeleted) {
     try {
       const result = await destroyCloudinaryVideo(cloudinaryPublicId);
       cloudinaryDeleted = result.ok;
@@ -339,7 +521,10 @@ export async function deleteSubmissionAndVideo(
   // failure is logged with the KEY NAMED and never reaches ref.delete().
   let r2Deleted = false;
   let r2Detail = 'no-video-key';
-  if (videoKey) {
+  if (videoKey && !videoKeyBelongsTo(videoKey, data)) {
+    r2Detail = 'refused: the key is not this submission’s own object';
+    logRefused('r2', [{ id: videoKey, reason: 'the key does not match the submission’s own uid, competition, event, round and attempt' }]);
+  } else if (videoKey) {
     try {
       const result = await destroyR2Video(videoKey, deps.r2);
       r2Deleted = result.ok;
@@ -377,15 +562,23 @@ export async function deleteSubmissionAndVideo(
   // not delete blocks a judge.
   let stillsDeleted = 0;
   let stillsFailed = 0;
-  if (shotIds.length > 0) {
+  let stillsRefused = 0;
+  let stillsToDelete = shotIds;
+  if (shotIds.length > 0 && cloudinaryConfigured()) {
+    const screen = await screenLegacyAssets('image', shotIds, submissionCreatedAtMs);
+    stillsToDelete = screen.allowed;
+    stillsRefused = screen.refused.length;
+    logRefused('cloudinary-image', screen.refused);
+  }
+  if (stillsToDelete.length > 0) {
     try {
-      const stills = await destroyCloudinaryImages(shotIds);
+      const stills = await destroyCloudinaryImages(stillsToDelete);
       stillsDeleted = stills.deleted;
       stillsFailed = stills.failed;
       if (stills.failed > 0) {
         console.error(
           `[online-competition] ${context}: Cloudinary STILL delete FAILED for submission ` +
-            `${ref.id} — ${stills.failed} of ${shotIds.length} image(s): ` +
+            `${ref.id} — ${stills.failed} of ${stillsToDelete.length} image(s): ` +
             stills.failures.map((f) => `"${f.publicId}" (${f.detail})`).join('; ') +
             '. Firestore doc is still being deleted — those images must be removed manually.',
         );
@@ -393,10 +586,10 @@ export async function deleteSubmissionAndVideo(
     } catch (err) {
       // destroyCloudinaryImages is written not to throw; this is the
       // belt-and-braces for the day that stops being true.
-      stillsFailed = shotIds.length;
+      stillsFailed = stillsToDelete.length;
       console.error(
         `[online-competition] ${context}: Cloudinary STILL delete THREW for submission ` +
-          `${ref.id} (${shotIds.length} image(s)): ${(err as Error)?.message ?? 'unknown'}. ` +
+          `${ref.id} (${stillsToDelete.length} image(s)): ${(err as Error)?.message ?? 'unknown'}. ` +
           'Firestore doc is still being deleted — those images must be removed manually.',
       );
     }
@@ -404,5 +597,14 @@ export async function deleteSubmissionAndVideo(
 
   await ref.delete();
 
-  return { cloudinaryDeleted, cloudinaryDetail, stillsDeleted, stillsFailed, r2Deleted, r2Detail };
+  return {
+    cloudinaryDeleted,
+    cloudinaryDetail,
+    stillsDeleted,
+    stillsFailed,
+    stillsRefused,
+    refused,
+    r2Deleted,
+    r2Detail,
+  };
 }

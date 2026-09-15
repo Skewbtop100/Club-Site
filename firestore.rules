@@ -455,27 +455,26 @@ service cloud.firestore {
       //
       // 'marks', 'timerShotIds', 'cubeShotIds' and 'videoDurationMs' are
       // in hasOnly but deliberately NOT in hasAll: they are the optional
-      // fields here.
-      // Submissions filed before they existed have none, an attempt whose
-      // recorder never reported a start has no marks, and a camera that
-      // would not yield a frame produces no stills — all of them must
-      // stay fileable, because neither a set of video seek positions nor
-      // a few JPEGs is worth refusing a solve over. videoDurationMs is
-      // absent for the same reason and one more: it comes from the upload
-      // response, and a response that omits it must still produce a
-      // fileable attempt.
+      // fields here. An attempt whose recorder never reported a start has
+      // no marks, and videoDurationMs comes from the upload response, which
+      // may omit it — neither is worth refusing a solve over.
+      //
+      // 'videoUrl' and 'cloudinaryPublicId' are NOT in hasOnly any more.
+      // They were the legacy Cloudinary evidence; every new submission
+      // carries a videoKey (R2), and a Cloudinary public id the athlete
+      // chose was a name the nightly sweep would delete — a competition
+      // poster, another athlete's photo. Documents already stored keep
+      // theirs; these rules only govern new writes.
       function submissionKeysOk() {
         return request.resource.data.keys().hasOnly([
           'competitionId', 'uid', 'event', 'round', 'competitionRound',
-          'videoUrl', 'cloudinaryPublicId', 'videoKey', 'reportedTime', 'isDnf',
+          'videoKey', 'reportedTime', 'isDnf',
           'marks', 'timerShotIds', 'cubeShotIds', 'videoDurationMs',
           'penalty', 'status', 'createdAt', 'retentionExpiresAt'
         ]) &&
-        // The video fields are NOT in hasAll: a document carries one of two
-        // evidence shapes, and submissionEvidenceOk decides which is valid.
         request.resource.data.keys().hasAll([
           'competitionId', 'uid', 'event', 'round', 'competitionRound',
-          'reportedTime', 'isDnf',
+          'videoKey', 'reportedTime', 'isDnf',
           'penalty', 'status', 'createdAt', 'retentionExpiresAt'
         ]);
       }
@@ -509,21 +508,11 @@ service cloud.firestore {
                 request.resource.data.videoDurationMs >= 0);
       }
 
-      // ── THE EVIDENCE, in exactly one of two shapes ──
-      // Cloudinary (videoUrl + cloudinaryPublicId): every submission filed
-      // before videos moved to R2. R2 (videoKey): everything since.
-      //
-      // EXACTLY ONE, never both and never neither. Playback reads videoKey
-      // first while deletion reads cloudinaryPublicId, so a document with
-      // both could play one asset and delete another; a document with
-      // neither has no video, which a judge can only reject.
-      function cloudinaryEvidenceOk() {
-        return request.resource.data.keys().hasAll(['videoUrl', 'cloudinaryPublicId']) &&
-               request.resource.data.videoUrl is string &&
-               request.resource.data.videoUrl.size() > 0 &&
-               request.resource.data.cloudinaryPublicId is string &&
-               request.resource.data.cloudinaryPublicId.size() > 0;
-      }
+      // ── THE EVIDENCE: the writer's own R2 object, and nothing else ──
+      // The legacy Cloudinary shape (videoUrl + cloudinaryPublicId) is no
+      // longer accepted: submissionKeysOk refuses both keys. Everything
+      // that could name an asset now names one under this athlete's own
+      // prefix, for this exact attempt — see videoKeyOk.
 
       // THE KEY MUST BE THE WRITER'S OWN, AND FOR THIS ATTEMPT. The presign
       // route derives keys server-side, but it is the client that writes
@@ -545,11 +534,7 @@ service cloud.firestore {
       }
 
       function submissionEvidenceOk() {
-        return (request.resource.data.keys().hasAny(['videoKey']) &&
-                !request.resource.data.keys().hasAny(['videoUrl', 'cloudinaryPublicId']) &&
-                videoKeyOk()) ||
-               (!request.resource.data.keys().hasAny(['videoKey']) &&
-                cloudinaryEvidenceOk());
+        return request.resource.data.keys().hasAny(['videoKey']) && videoKeyOk();
       }
 
       function submissionMarksOk() {
@@ -572,30 +557,16 @@ service cloud.firestore {
                 markOk('recordingEnd'));
       }
 
-      // The still ids (timerShotIds / cubeShotIds in types.ts): Cloudinary
-      // public ids for the full-resolution frames taken during the two
-      // 8-second holds. At most three each, because three is what the
-      // client schedules per hold.
-      //
-      // Element-by-element for the same reason markOk is: the rules
-      // language cannot assert a predicate across a list. Each index is
-      // guarded by the size check before it, since indexing past the end
-      // of a list is an error rather than null — which is also why the
-      // size check has to come first and not merely alongside.
-      //
-      // ABSENT AND EMPTY ARE BOTH FINE. A submission with no stills is
-      // the expected outcome on a device that would not give us a frame,
-      // and the video is what a judge adjudicates either way.
+      // The still ids (timerShotIds / cubeShotIds in types.ts): LEGACY.
+      // Stills are no longer captured, so a new submission may carry these
+      // only ABSENT or EMPTY — createSubmission still writes two empty
+      // lists. A non-empty list was a set of Cloudinary IMAGE public ids
+      // the athlete chose, which cleanup deleted: the same endpoint that
+      // holds competition posters and profile photos.
       function shotIdsOk(key) {
         return !request.resource.data.keys().hasAny([key]) ||
                (request.resource.data[key] is list &&
-                request.resource.data[key].size() <= 3 &&
-                (request.resource.data[key].size() < 1 ||
-                 request.resource.data[key][0] is string) &&
-                (request.resource.data[key].size() < 2 ||
-                 request.resource.data[key][1] is string) &&
-                (request.resource.data[key].size() < 3 ||
-                 request.resource.data[key][2] is string));
+                request.resource.data[key].size() == 0);
       }
 
       function submissionTypesOk() {
@@ -622,10 +593,16 @@ service cloud.firestore {
                request.resource.data.reportedTime is number &&
                request.resource.data.reportedTime >= 0 &&
                request.resource.data.isDnf is bool &&
-               // Not range-checked: the client computes it as now + 30
-               // days, and a device clock far enough out would otherwise
-               // fail a legitimate write.
-               request.resource.data.retentionExpiresAt is timestamp;
+               // In the FUTURE, and not absurdly far. The client computes it
+               // as now + 14 days. A date already past was how a forged
+               // submission got swept — and its named assets deleted — the
+               // next night. The sweep no longer trusts this alone (it
+               // deletes on createdAt, pinned below to request.time, plus the
+               // retention period), so the bounds are wide: a device clock
+               // days out must not make a real solve unfileable.
+               request.resource.data.retentionExpiresAt is timestamp &&
+               request.resource.data.retentionExpiresAt > request.time &&
+               request.resource.data.retentionExpiresAt < request.time + duration.value(60, 'd');
       }
 
       // THE DOCUMENT ID MUST DESCRIBE ITS OWN CONTENTS. The id is built by
