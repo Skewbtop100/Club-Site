@@ -9,7 +9,8 @@
 // went badly — the athlete comes back to the attempt AFTER the last one
 // they filed, with the earlier ones intact and counted.
 
-import type { AttemptTime, ResultFormat } from './ao5';
+import { attemptsForFormat, cutoffPhaseFor, resolveResultFormat, type AttemptTime, type ResultFormat } from './ao5';
+import type { OnlineCompetitionEventConfig } from './types';
 
 /** One attempt already on the server, as the solve page reads it back.
  *  `attempt` is the stored `round` field: the 1-based index within the
@@ -34,6 +35,25 @@ export interface RunShape {
    *  null when the round has none. */
   cutoffCs: number | null;
   cutoffPhase: number | null;
+}
+
+/** The run shape for one round of a stored event — what the SERVER plans
+ *  with (the scramble gate, the live view). Same derivation the solve page
+ *  captures for itself: attempts from the format, the event's limit, and
+ *  this round's cutoff with its phase. */
+export function runShapeFor(
+  event: Pick<OnlineCompetitionEventConfig, 'resultFormat' | 'timeLimitCs' | 'cutoffs'>,
+  round: number,
+): RunShape {
+  const format = resolveResultFormat(event.resultFormat);
+  const cutoffCs = (event.cutoffs ?? []).find((c) => c.round === round)?.cutoffCs ?? null;
+  return {
+    format,
+    attempts: attemptsForFormat(format),
+    timeLimitCs: typeof event.timeLimitCs === 'number' ? event.timeLimitCs : null,
+    cutoffCs,
+    cutoffPhase: cutoffCs !== null ? cutoffPhaseFor(format) : null,
+  };
 }
 
 export type ResumeKind =

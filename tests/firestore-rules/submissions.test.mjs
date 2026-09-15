@@ -66,12 +66,24 @@ const attemptDoc = (over = {}) => ({
   ...over,
 });
 
+/** runTicketId in lib/online-competition/scramble-gate.ts, mirrored. */
+const ticketRef = (db, uid, event, round, comp = COMP) =>
+  doc(db, 'onlineCompetitions', comp, 'runTickets', `${uid}__${event}__r${round}`);
+
 await testEnv.clearFirestore();
 await testEnv.withSecurityRulesDisabled(async (ctx) => {
   const db = ctx.firestore();
   // isAdmin() reads users/{uid}.role — the club's Firebase Auth admin.
   await setDoc(doc(db, 'users', CLUB_ADMIN), { role: 'admin' });
   await setDoc(doc(db, 'users', ATHLETE), { role: 'athlete' });
+  // RUN TICKETS — what the scramble route writes (Admin SDK) when its gate
+  // serves this athlete an attempt. Every create below needs one for its
+  // (uid, event, round); rounds 1-9 are the ids the shape tests use, each
+  // served through attempt 5 so those tests are about shape, not tickets.
+  // The ticket cases themselves use rounds 10+.
+  for (let round = 1; round <= 9; round++) {
+    await setDoc(ticketRef(db, ATHLETE, EVENT, round), { uid: ATHLETE, eventId: EVENT, competitionRound: round, servedThrough: 5 });
+  }
 });
 
 const anon = () => testEnv.unauthenticatedContext().firestore();
@@ -460,6 +472,46 @@ await check('44. shot ids that are not a list at all', 'DENY', () =>
     attemptDoc({ round: 2, competitionRound: 6, timerShotIds: 'oc/t1' }),
   ),
 );
+
+// ── CREATE: the run ticket ──────────────────────────────────────────────
+// THE HOLE: competitionRound was whatever the client wrote. A round-1
+// non-qualifier, or an athlete never registered, could file into any round.
+// A submission now needs the ticket the scramble route's gate writes when
+// it admits the athlete and serves them an attempt.
+async function seedTicket(uid, event, round, data) {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(ticketRef(ctx.firestore(), uid, event, round), data);
+  });
+}
+await check('T1. THE HOLE: filing into a round the gate never admitted them to (no ticket)', 'DENY', () =>
+  setDoc(doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 1, 10)), attemptDoc({ round: 1, competitionRound: 10 })),
+);
+await seedTicket(ATHLETE, EVENT, 11, { uid: ATHLETE, eventId: EVENT, competitionRound: 11, servedThrough: 2 });
+await check('T2. an attempt whose scramble was served files', 'ALLOW', () =>
+  setDoc(doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 2, 11)), attemptDoc({ round: 2, competitionRound: 11 })),
+);
+await check('T3. ...an earlier one too (a retried upload)', 'ALLOW', () =>
+  setDoc(doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 1, 11)), attemptDoc({ round: 1, competitionRound: 11 })),
+);
+await check('T4. an attempt BEYOND what was served does not', 'DENY', () =>
+  setDoc(doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 3, 11)), attemptDoc({ round: 3, competitionRound: 11 })),
+);
+await seedTicket(OTHER, EVENT, 12, { uid: OTHER, eventId: EVENT, competitionRound: 12, servedThrough: 5 });
+await check("T5. another athlete's ticket for that round does not admit this one", 'DENY', () =>
+  setDoc(doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 1, 12)), attemptDoc({ round: 1, competitionRound: 12 })),
+);
+await seedTicket(ATHLETE, '222', 13, { uid: ATHLETE, eventId: '222', competitionRound: 13, servedThrough: 5 });
+await check('T6. a ticket for a different event does not admit this one', 'DENY', () =>
+  setDoc(doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 1, 13)), attemptDoc({ round: 1, competitionRound: 13 })),
+);
+await seedTicket(ATHLETE, EVENT, 14, { uid: ATHLETE, eventId: EVENT, competitionRound: 14 });
+await check('T7. a ticket with no servedThrough admits nothing', 'DENY', () =>
+  setDoc(doc(athlete(), 'onlineSubmissions', idFor(ATHLETE, 1, 14)), attemptDoc({ round: 1, competitionRound: 14 })),
+);
+await check('T8. an athlete cannot write themselves a ticket', 'DENY', () =>
+  setDoc(ticketRef(athlete(), ATHLETE, EVENT, 15), { uid: ATHLETE, eventId: EVENT, competitionRound: 15, servedThrough: 5 }),
+);
+await check('T9. ...or read one', 'DENY', () => getDoc(ticketRef(athlete(), ATHLETE, EVENT, 11)));
 
 // ── UPDATE: a filed attempt is immutable to the athlete ─────────────────
 // The quieter half of the hole: rewriting your own pending attempt is

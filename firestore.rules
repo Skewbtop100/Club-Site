@@ -233,6 +233,16 @@ service cloud.firestore {
       match /qualifiers/{roundId} {
         allow read, write: if false;
       }
+
+      // Run tickets (lib/online-competition/scramble-gate.ts): written by
+      // the scramble route, with the Admin SDK, each time it serves an
+      // attempt — { uid, eventId, competitionRound, servedThrough }. The
+      // onlineSubmissions create rule below requires one. Denied to every
+      // client: a ticket an athlete could write would be a round they
+      // could file into.
+      match /runTickets/{ticketId} {
+        allow read, write: if false;
+      }
     }
 
     match /onlineParticipants/{uid} {
@@ -636,6 +646,34 @@ service cloud.firestore {
           string(request.resource.data.round);
       }
 
+      // ── THE ROUND AND THE ATTEMPT MUST BE ONES THE SERVER ADMITTED ──
+      // competitionRound used to be whatever the client wrote (an int >= 1),
+      // so a round-1 non-qualifier — or someone never registered — could
+      // file straight into any round.
+      //
+      // The decision is NOT re-made here. Which round is live, whether the
+      // athlete is registered, approved and qualified, which scramble they
+      // were given: that is the scramble route's gate (scramble-gate.ts),
+      // and the gate records its answer as a run ticket. This rule only
+      // requires that ticket to exist for this (uid, event, round), and
+      // this attempt to be one whose scramble was served (<= servedThrough).
+      //
+      // WHAT THIS GUARANTEES: the gate admitted this athlete to this round
+      // of this event, and served them at least this many attempts.
+      // WHAT IT DOES NOT: that they are still registered or the round still
+      // open at the moment of filing (deliberately — an upload may land
+      // after an admin closes the round, and must still file), or anything
+      // about the solve itself.
+      //
+      // One document read per create. The ticket id format is repeated from
+      // runTicketId (scramble-gate.ts); tests pin the two together.
+      function runTicketOk() {
+        let ticket = /databases/$(database)/documents/onlineCompetitions/$(request.resource.data.competitionId)/runTickets/$(request.resource.data.uid + '__' + request.resource.data.event + '__r' + string(request.resource.data.competitionRound));
+        return exists(ticket) &&
+               get(ticket).data.servedThrough is number &&
+               request.resource.data.round <= get(ticket).data.servedThrough;
+      }
+
       allow read: if isSignedIn() &&
                      (resource.data.uid == request.auth.uid || isAdmin());
 
@@ -652,6 +690,7 @@ service cloud.firestore {
                        shotIdsOk('timerShotIds') &&
                        shotIdsOk('cubeShotIds') &&
                        submissionIdMatchesContents() &&
+                       runTicketOk() &&
                        request.resource.data.status == 'pending' &&
                        request.resource.data.penalty == null &&
                        request.resource.data.createdAt == request.time;

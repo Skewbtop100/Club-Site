@@ -4,11 +4,11 @@ import { AthleteAuthError, bearerToken, requireAthlete } from '@/lib/online-comp
 import { normalizeCompetitionStatus } from '@/lib/online-competition/admin-competitions';
 import { normalizeStoredEvents, normalizeStoredSchedule } from '@/lib/online-competition/competition-shape';
 import { normalizeRegistrationStatus } from '@/lib/online-competition/registration-shape';
-import { attemptsForFormat, cutoffPhaseFor, resolveResultFormat } from '@/lib/online-competition/ao5';
+import { attemptsForFormat, resolveResultFormat } from '@/lib/online-competition/ao5';
 import { fetchRoundStates } from '@/lib/online-competition/round-results';
 import { resolveRoundAccess } from '@/lib/online-competition/round-access';
 import { roundKey } from '@/lib/online-competition/scrambles';
-import { planResume, type FiledAttempt, type ResumeKind } from '@/lib/online-competition/run-resume';
+import { planResume, runShapeFor, type FiledAttempt, type ResumeKind } from '@/lib/online-competition/run-resume';
 import { rosterName } from '@/lib/online-competition/roster-view';
 import { roundLabel } from '@/lib/online-competition/detail-view';
 import {
@@ -184,7 +184,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         let planKind: ResumeKind | null = null;
         let nextAttempt: number | null = null;
         if (access.liveRound !== null) {
-          const cutoffCs = rulesFor(access.liveRound).cutoffCs;
           const filed: FiledAttempt[] = myEvent.map((s) => ({
             submissionId: '',
             attempt: s.attempt,
@@ -192,13 +191,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
             reportedTime: s.reportedTime,
             isDnf: s.isDnf,
           }));
-          const plan = planResume(filed, access.liveRound, {
-            format,
-            attempts,
-            timeLimitCs: rulesFor(access.liveRound).timeLimitCs,
-            cutoffCs,
-            cutoffPhase: cutoffCs !== null ? cutoffPhaseFor(format) : null,
-          });
+          // runShapeFor: the same shape the scramble gate plans with.
+          const plan = planResume(filed, access.liveRound, runShapeFor(e, access.liveRound));
           planKind = plan.kind;
           nextAttempt = plan.nextAttempt;
         }

@@ -106,7 +106,11 @@ console.log('\n  -- the routes verify, and no uid parameter survives --');
   // The unauthenticated path around the round gate.
   ok('the scramble route’s generator-only mode is gone',
     scramble.includes("error: 'Missing competitionId param'") && !scramble.includes('round = 1;'));
-  ok('  ...so every request is gated', /const access = await resolveRoundAccess\(/.test(scramble));
+  // The gate moved into lib/online-competition/scramble-gate.ts, where it
+  // also checks registration and derives the attempt; the route calls it.
+  ok('  ...so every request is gated',
+    scramble.includes('authorizeScrambleRequest(') &&
+      /const access = await resolveRoundAccess\(/.test(src('lib/online-competition/scramble-gate.ts')));
 
   // Anonymous sessions mint valid tokens; the solve page already treats
   // them as signed-out and the route has to agree.
