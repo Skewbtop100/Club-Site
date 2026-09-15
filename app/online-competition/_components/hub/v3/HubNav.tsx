@@ -158,7 +158,7 @@ export default function HubNav({
         </Link>
 
         {live && (
-          <Link href={`${HUB}/${live.id}/details`} className="oc-v3-tab oc-v3-tab-live">
+          <Link href={`${HUB}/${live.id}/live`} className="oc-v3-tab oc-v3-tab-live">
             <span className="oc-v3-dot" aria-hidden />
             {live.name}
           </Link>

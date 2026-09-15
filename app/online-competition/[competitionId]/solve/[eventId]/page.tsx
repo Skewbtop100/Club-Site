@@ -1196,7 +1196,7 @@ export default function SolvePage() {
             {blockedMessage}
           </p>
           <Link
-            href="/online-competition/dashboard"
+            href={`/online-competition/${competitionId}/live`}
             /* Only rendered when the FIRST attempt was refused, so there
                is normally nothing to lose — but a link is a link, and
                beforeunload does not fire for a client-side one. */
@@ -1311,7 +1311,8 @@ export default function SolvePage() {
    *  the athlete is offered on purpose. */
   function exitRun() {
     if (runAtRisk && !window.confirm(leaveConfirmMessage(unfiledCount))) return;
-    router.push('/online-competition/dashboard');
+    // Back to this competition's live view, where the run was started.
+    router.push(`/online-competition/${competitionId}/live`);
   }
 
   return (
@@ -1704,7 +1705,7 @@ export default function SolvePage() {
           />
         )}
 
-          {stage === 'sent' && <SentStage ao5={finalAo5} />}
+          {stage === 'sent' && <SentStage ao5={finalAo5} competitionId={competitionId} />}
         </div>
       </div>
     </div>

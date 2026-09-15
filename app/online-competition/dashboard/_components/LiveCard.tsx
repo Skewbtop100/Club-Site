@@ -64,8 +64,10 @@ function EventStatus({
     );
   }
   if (state === 'live') {
+    // To the live view, not the solve flow: the athlete sees their times,
+    // what is left and the standings, and starts the attempt from there.
     return (
-      <Link href={`/online-competition/${competitionId}/solve/${eventId}`} className="oc-v3-start-btn">
+      <Link href={`/online-competition/${competitionId}/live`} className="oc-v3-start-btn">
         Эхлүүлэх
       </Link>
     );

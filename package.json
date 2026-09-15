@@ -25,6 +25,7 @@
     "test:resume": "node tests/competition-fields/run-resume.test.cjs",
     "test:progress": "node tests/competition-fields/round-progress.test.cjs",
     "test:eventstate": "node tests/competition-fields/event-state.test.cjs",
+    "test:live": "node tests/competition-fields/live-view.test.cjs",
     "test:roster": "node tests/competition-fields/roster-view.test.cjs",
     "test:athleteauth": "node tests/competition-fields/athlete-auth.test.cjs",
     "test:limit": "node tests/competition-fields/participant-limit.test.cjs",

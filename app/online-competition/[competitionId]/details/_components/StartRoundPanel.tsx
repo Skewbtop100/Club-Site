@@ -72,7 +72,7 @@ export default function StartRoundPanel({
                   {liveRound !== null ? `РАУНД ${liveRound}` : `${e.rounds} раунд`}
                 </span>
                 {state === 'live' ? (
-                  <Link href={`/online-competition/${competitionId}/solve/${e.eventId}`} className="oc-v3-start-btn">
+                  <Link href={`/online-competition/${competitionId}/live`} className="oc-v3-start-btn">
                     Эхлүүлэх
                   </Link>
                 ) : (

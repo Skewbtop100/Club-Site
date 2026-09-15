@@ -21,7 +21,7 @@ export default function CompetitionGroups({
         ) : (
           <div className="oc-hub-row-list">
             {live.map((c) => (
-              <Link key={c.id} href={`/online-competition/${c.id}/details`} className="oc-hub-row-live">
+              <Link key={c.id} href={`/online-competition/${c.id}/live`} className="oc-hub-row-live">
                 <div>
                   <p style={{ font: '500 15px var(--oc-font-heading), sans-serif', color: '#16140F' }}>{c.name}</p>
                   <p style={{ marginTop: 4, font: '400 11px var(--oc-font-mono), monospace', color: '#8A8474' }}>

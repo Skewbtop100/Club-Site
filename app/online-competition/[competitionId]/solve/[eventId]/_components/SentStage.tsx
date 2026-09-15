@@ -4,7 +4,7 @@ import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
 const GRID_PATTERN = ['volt', 'volt', 'volt', 'ink', 'volt', 'ink', 'ink', 'volt', 'ink'] as const;
 const COLOR = { ink: '#1C1C21', volt: '#DFFF4F' } as const;
 
-export default function SentStage({ ao5 }: { ao5: number | null }) {
+export default function SentStage({ ao5, competitionId }: { ao5: number | null; competitionId: string }) {
   return (
     <div className="oc-solve-sent">
       <div className="oc-solve-sent-grid" aria-hidden>
@@ -34,7 +34,9 @@ export default function SentStage({ ao5 }: { ao5: number | null }) {
         </span>
       </span>
 
-      <Link href="/online-competition/dashboard" className="oc-solve-btn-back">
+      {/* Back to the competition's live view — where the run was started,
+          and where the athlete sees these attempts waiting for a judge. */}
+      <Link href={`/online-competition/${competitionId}/live`} className="oc-solve-btn-back">
         ЭХЭЛЖ ҮЗЭХ
       </Link>
     </div>

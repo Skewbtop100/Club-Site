@@ -66,7 +66,7 @@ export default function LiveMiniCard({ competition }: { competition: OnlineCompe
           </div>
         )}
 
-        <Link href={`/online-competition/${competition.id}/details`} className="oc-v3-live-btn">
+        <Link href={`/online-competition/${competition.id}/live`} className="oc-v3-live-btn">
           Тэмцээнд орох
         </Link>
       </div>

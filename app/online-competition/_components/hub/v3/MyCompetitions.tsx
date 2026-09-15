@@ -158,7 +158,12 @@ function Row({ view }: { view: RegisteredView }) {
         </span>
       </div>
 
-      <Link href={`${HUB}/${competition.id}/details`} className="oc-v3-row-action">
+      {/* ОРОХ goes to the live view, where solving starts; ДЭЛГЭРЭНГҮЙ
+          stays on the details page. */}
+      <Link
+        href={`${HUB}/${competition.id}/${competition.status === 'live' && !gate ? 'live' : 'details'}`}
+        className="oc-v3-row-action"
+      >
         {competition.status === 'live' && !gate ? 'ОРОХ' : 'ДЭЛГЭРЭНГҮЙ'}
       </Link>
     </div>

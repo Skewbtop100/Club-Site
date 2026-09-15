@@ -23,7 +23,7 @@ export default function LiveBanner({ competition }: { competition: OnlineCompeti
         </p>
       </div>
       <div style={{ display: 'flex', alignItems: 'center' }}>
-        <Link href={`/online-competition/${competition.id}/details`} className="oc-btn-live-cta">
+        <Link href={`/online-competition/${competition.id}/live`} className="oc-btn-live-cta">
           Тэмцээнд орох
         </Link>
       </div>
