@@ -33,7 +33,7 @@ ok('Хяналтын самбар, then Тэмцээн, then Тамирчид, t
 const comp = nav.slice(at('label="Тэмцээн"'), at('label="Тамирчид"'));
 const children = [
   ['Тэмцээнүүд', '/competitions`'],
-  ['Шинэ тэмцээн', '/competitions/new`'],
+  ['Шинэ тэмцээн', '/competitions/drafts`'],
   ['Холилт ба групп', '/scrambles`'],
   ['Раунд удирдах', '/rounds`'],
   ['Шүүлт', '/review`'],
@@ -50,10 +50,11 @@ ok('Тамирчид > Бүртгэлийн хүсэлт, after it, to /athletes
   people.indexOf('label="Бүртгэлийн хүсэлт"') > people.indexOf('label="Тамирчдын бүртгэл"') && people.includes('/athletes/requests`'));
 
 console.log('\n  -- every item goes to a page that exists --');
-for (const route of ['', '/competitions', '/competitions/new', '/scrambles', '/rounds', '/review', '/athletes', '/athletes/requests', '/settings']) {
+for (const route of ['', '/competitions', '/competitions/drafts', '/competitions/new', '/scrambles', '/rounds', '/review', '/athletes', '/athletes/requests', '/settings']) {
   ok(`app/online-competition/admin${route}/page.tsx exists`, fs.existsSync(path.join(ROOT, `app/online-competition/admin${route}/page.tsx`)));
 }
 ok('the new-competition page marks its own item', src('app/online-competition/admin/competitions/new/page.tsx').includes('<AdminGate current="newCompetition">'));
+ok('  ...and so does the drafts page it is reached from', src('app/online-competition/admin/competitions/drafts/page.tsx').includes('<AdminGate current="newCompetition">'));
 
 console.log('\n  -- behaviour --');
 ok('a group toggles on click and says whether it is open', shell.includes('aria-expanded={open}') && shell.includes('onClick={onToggle}'));

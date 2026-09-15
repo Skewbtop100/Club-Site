@@ -174,7 +174,9 @@ export default function AdminShell({
               active={current === 'competitions'}
               count={counts.competitions}
             />
-            <NavChild href={`${ADMIN}/competitions/new`} label="Шинэ тэмцээн" active={current === 'newCompetition'} />
+            {/* The drafts page (unannounced competitions + create). Also lit
+                on the create form itself, which is marked newCompetition. */}
+            <NavChild href={`${ADMIN}/competitions/drafts`} label="Шинэ тэмцээн" active={current === 'newCompetition'} />
             <NavChild href={`${ADMIN}/scrambles`} label="Холилт ба групп" active={current === 'scrambles'} />
             <NavChild href={`${ADMIN}/rounds`} label="Раунд удирдах" active={current === 'rounds'} />
             <NavChild

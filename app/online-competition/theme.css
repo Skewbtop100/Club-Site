@@ -5682,6 +5682,50 @@
   border-color: #DFFF4F;
   color: #DFFF4F;
 }
+
+/* ── Admin: unannounced competitions (Шинэ тэмцээн) ──────────
+   DraftCompetitions.tsx styles its rows inline, with the mockup's values.
+   Only what changes on hover lives here (an inline value would outrank
+   :hover), plus the phone restack: name, readiness and the button each take
+   the full width, the date and event count share a line. */
+.oc-adm-draft-row:hover {
+  background: #131318;
+}
+.oc-adm-draft-open {
+  border: 1px solid #2A2A31;
+  color: #9A958A;
+}
+.oc-adm-draft-open:hover {
+  border-color: #DFFF4F;
+  color: #DFFF4F;
+}
+.oc-adm-draft-new {
+  background: #DFFF4F;
+}
+.oc-adm-draft-new:hover {
+  background: #E9FF7A;
+}
+/* "4 төрөл" on a phone, where there is no ТӨРӨЛ column header. */
+.oc-adm-draft-unit {
+  display: none;
+}
+@media (max-width: 640px) {
+  .oc-adm-draft-head {
+    display: none !important;
+  }
+  .oc-adm-draft-row {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+  }
+  .oc-adm-draft-name,
+  .oc-adm-draft-bar,
+  .oc-adm-draft-open {
+    grid-column: 1 / -1;
+  }
+  .oc-adm-draft-unit {
+    display: inline;
+  }
+}
+
 /* Square, so the star sits centred rather than in a text-shaped box. */
 .oc-adm-comp-star {
   width: 34px;
