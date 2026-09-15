@@ -59,7 +59,7 @@ export interface ResetAttemptsResult {
   /** How many of those a judge had already decided (approved/rejected).
    *  Reported so the response can say what went, not just how much. */
   judged: number;
-  /** Cloudinary outcomes, from deleteSubmissionAndVideo. `videosFailed`
+  /** Video outcomes (R2 or Cloudinary), from deleteSubmissionAndVideo. `videosFailed`
    *  counts assets that may still exist — the Firestore doc went anyway,
    *  which is that function's documented tradeoff. */
   videosDeleted: number;
@@ -86,7 +86,7 @@ export interface ResetAttemptsResult {
  *  already proven here, and one athlete's submissions are a small bounded
  *  set.
  *
- *  Videos go through deleteSubmissionAndVideo — the same Cloudinary-then-
+ *  Videos go through deleteSubmissionAndVideo — the same assets-then-
  *  Firestore routine the manual admin delete and the nightly retention
  *  sweep use — so a reset cannot orphan assets in a way those two would
  *  not. Sequential, not Promise.all: five destroys in a row against the
@@ -111,7 +111,7 @@ export async function resetAthleteRoundAttempts(scope: ResetScope): Promise<Rese
 
     // The document, not just its video id: the stills belong to the
     // submission too, and deleteSubmissionAndVideo owns that decision.
-    const { cloudinaryDeleted } = await deleteSubmissionAndVideo(
+    const { cloudinaryDeleted, r2Deleted } = await deleteSubmissionAndVideo(
       doc.ref,
       data,
       `attempt reset (${scope.uid} / ${scope.event} / round ${scope.competitionRound})`,
@@ -119,6 +119,12 @@ export async function resetAthleteRoundAttempts(scope: ResetScope): Promise<Rese
 
     if (data.cloudinaryPublicId) {
       if (cloudinaryDeleted) result.videosDeleted += 1;
+      else result.videosFailed += 1;
+    }
+    // R2 videos count too. Without this every submission filed since the
+    // move to R2 would report zero videos, as if it never had one.
+    if (data.videoKey) {
+      if (r2Deleted) result.videosDeleted += 1;
       else result.videosFailed += 1;
     }
     result.deleted += 1;

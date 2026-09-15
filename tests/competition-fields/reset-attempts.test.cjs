@@ -50,6 +50,13 @@ process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '12
 // failure: that is the "asset may linger" path the module documents.)
 delete process.env.CLOUDINARY_API_KEY;
 delete process.env.CLOUDINARY_API_SECRET;
+// Same for R2, for the same reason: cleared, destroyR2Video returns
+// 'missing-credentials' with no request made, so a fixture that ever gains
+// a videoKey still cannot delete from the production bucket.
+delete process.env.R2_ACCOUNT_ID;
+delete process.env.R2_ACCESS_KEY_ID;
+delete process.env.R2_SECRET_ACCESS_KEY;
+delete process.env.R2_BUCKET;
 
 // resetAthleteRoundAttempts calls getOnlineCompAdminDb() internally, which
 // builds its own credentialed app via cert(). cert() PARSES the private key

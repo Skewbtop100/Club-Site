@@ -283,6 +283,189 @@ console.error = (...args) => errors.push(args.join(' '));
       calls.length === 0 && ref.deleted && result.cloudinaryDetail === 'no-public-id');
   });
 
+  // ── R2 videos ───────────────────────────────────────────────────────────
+  // Everything filed since videos moved to R2 carries a videoKey instead of
+  // a Cloudinary id, and cleanup used to know only the Cloudinary id — so
+  // an R2 submission's document was deleted and its object left in the
+  // bucket forever. These run the REAL S3 client (the same factory the
+  // presign route uses) with one middleware that captures each request and
+  // answers it in-process: the SDK builds and signs the actual DELETE, and
+  // nothing leaves the machine.
+  const stripCode = (src) =>
+    src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+  for (const v of ['R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET']) {
+    delete process.env[v];
+  }
+  const { createR2Client } = require(path.join(OUT, 'r2-video.js'));
+  const R2_KEY = 'videos/uid123/comp1/333/r1/a2/1700000000000-a1b2c3.webm';
+
+  /** A real client whose requests are answered by `respond` instead of R2.
+   *  `respond` returns an HTTP status, or throws the error R2 would. */
+  function fakeR2(respond, log) {
+    const client = createR2Client({
+      accountId: 'acct123',
+      accessKeyId: 'AKIDEXAMPLE',
+      secretAccessKey: 'secretEXAMPLE',
+    });
+    const requests = [];
+    client.middlewareStack.add(
+      () => async (args) => {
+        const req = args.request;
+        requests.push({ method: req.method, path: req.path, host: req.hostname, headers: req.headers });
+        if (log) log.push('r2');
+        const status = respond(req);
+        return { output: { $metadata: { httpStatusCode: status } }, response: { statusCode: status, headers: {} } };
+      },
+      { step: 'finalizeRequest', priority: 'low', name: 'captureR2' },
+    );
+    return { client, requests, deps: { r2: { client, bucket: 'bucket-x' } } };
+  }
+  const r2Error = (name, status) =>
+    Object.assign(new Error(name), { name, $metadata: { httpStatusCode: status }, $fault: 'client' });
+
+  // STEP 7 · an R2 submission deletes its object.
+  await withFetch(allDeleted, async (calls) => {
+    const r2 = fakeR2(() => 204);
+    const ref = fakeRef();
+    const result = await deleteSubmissionAndVideo(ref, { videoKey: R2_KEY }, 'test', r2.deps);
+    const req = r2.requests[0];
+    ok('27. an R2 submission deletes its object', r2.requests.length === 1 && req.method === 'DELETE',
+      JSON.stringify(r2.requests.map((r) => r.method)));
+    ok('  ...the exact key, in the configured bucket, path-style',
+      req && req.host === 'acct123.r2.cloudflarestorage.com' && req.path === `/bucket-x/${R2_KEY}`,
+      req && `${req.host}${req.path}`);
+    ok('  ...signed with the shared client factory’s credentials',
+      req && String(req.headers.authorization ?? '').includes('AKIDEXAMPLE'));
+    ok('  ...reported as deleted', result.r2Deleted === true && result.r2Detail === 'deleted', JSON.stringify(result));
+    ok('  ...touching no Cloudinary video', !calls.some((c) => c.resourceType === 'video'));
+    ok('  ...and removing the document', ref.deleted);
+  });
+
+  // STEP 7 · a legacy submission still deletes its Cloudinary video.
+  await withFetch(allDeleted, async (calls) => {
+    const r2 = fakeR2(() => 204);
+    const ref = fakeRef();
+    const result = await deleteSubmissionAndVideo(ref, { cloudinaryPublicId: 'oc/legacy' }, 'test', r2.deps);
+    ok('28. a legacy submission deletes its Cloudinary video',
+      calls.some((c) => c.resourceType === 'video' && c.publicIds.join() === 'oc/legacy') &&
+        result.cloudinaryDeleted === true,
+      JSON.stringify(calls));
+    ok('  ...making no R2 request at all', r2.requests.length === 0);
+    ok('  ...and says so', result.r2Deleted === false && result.r2Detail === 'no-video-key', JSON.stringify(result));
+    ok('  ...and removes the document', ref.deleted);
+  });
+
+  // STEP 7 · a failed R2 delete still removes the document.
+  await withFetch(allDeleted, async (calls) => {
+    const r2 = fakeR2(() => { throw r2Error('AccessDenied', 403); });
+    const ref = fakeRef('sub-r2-fail');
+    const before = errors.length;
+    // CAUGHT, not awaited bare. If an R2 failure ever escaped as a thrown
+    // error it would crash this suite before any assertion named the
+    // problem; caught here, it fails test 29 by name instead.
+    let result = {};
+    let rejection = null;
+    try {
+      result = await deleteSubmissionAndVideo(
+        ref,
+        { videoKey: R2_KEY, timerShotIds: SHOTS_T, cubeShotIds: SHOTS_C },
+        'test',
+        r2.deps,
+      );
+    } catch (e) {
+      rejection = e;
+    }
+    ok('29. a failed R2 delete still removes the document', ref.deleted && rejection === null,
+      rejection ? `the delete REJECTED: ${rejection.name ?? rejection.message}` : 'document not deleted');
+    ok('  ...and still deletes the stills',
+      result.stillsDeleted === 6 && calls.some((c) => c.resourceType === 'image'), JSON.stringify(result));
+    ok('  ...reporting the failure rather than a success',
+      result.r2Deleted === false && /AccessDenied/.test(result.r2Detail), JSON.stringify(result));
+    ok('  ...with the key named in the log, for manual removal',
+      errors.slice(before).some((e) => e.includes(R2_KEY) && e.includes('sub-r2-fail')));
+  });
+
+  // STEP 7 · neither field is a no-op.
+  await withFetch(allDeleted, async (calls) => {
+    const r2 = fakeR2(() => 204);
+    const ref = fakeRef();
+    const result = await deleteSubmissionAndVideo(ref, {}, 'test', r2.deps);
+    ok('30. a submission with neither video field deletes no video',
+      r2.requests.length === 0 && calls.length === 0, `${r2.requests.length} r2, ${calls.length} fetch`);
+    ok('  ...and still removes the document',
+      ref.deleted && result.cloudinaryDetail === 'no-public-id' && result.r2Detail === 'no-video-key');
+  });
+
+  // A missing object is not an error.
+  await withFetch(allDeleted, async () => {
+    const r2 = fakeR2(() => { throw r2Error('NoSuchKey', 404); });
+    const result = await deleteSubmissionAndVideo(fakeRef(), { videoKey: R2_KEY }, 'test', r2.deps);
+    ok('31. an object that is already gone counts as deleted',
+      result.r2Deleted === true && result.r2Detail === 'not-found (already gone)', JSON.stringify(result));
+  });
+
+  // A document the Admin SDK wrote with both shapes loses both.
+  await withFetch(allDeleted, async (calls) => {
+    const r2 = fakeR2(() => 204);
+    const result = await deleteSubmissionAndVideo(
+      fakeRef(), { videoKey: R2_KEY, cloudinaryPublicId: 'oc/both' }, 'test', r2.deps,
+    );
+    ok('32. a document carrying BOTH shapes has both videos deleted',
+      result.r2Deleted && result.cloudinaryDeleted && r2.requests.length === 1 &&
+        calls.some((c) => c.resourceType === 'video'),
+      JSON.stringify(result));
+  });
+
+  // The R2 delete happens BEFORE the document goes — the document is the
+  // only record of which key belonged to this submission.
+  await withFetch(allDeleted, async () => {
+    const log = [];
+    const r2 = fakeR2(() => 204, log);
+    const ref = { id: 'ordered', deleted: false, delete() { log.push('doc'); this.deleted = true; return Promise.resolve(); } };
+    await deleteSubmissionAndVideo(ref, { videoKey: R2_KEY }, 'test', r2.deps);
+    ok('33. the object is deleted before the document that names it', log.join() === 'r2,doc', log.join());
+  });
+
+  // No R2 configuration: no request, no throw, document still removed.
+  // This is what keeps the emulator suites inert against the real bucket.
+  await withFetch(allDeleted, async () => {
+    const ref = fakeRef();
+    const result = await deleteSubmissionAndVideo(ref, { videoKey: R2_KEY }, 'test');
+    ok('34. unconfigured R2 makes no request and still removes the document',
+      ref.deleted && result.r2Deleted === false && result.r2Detail === 'missing-credentials',
+      JSON.stringify(result));
+  });
+
+  // ── Wiring, read from the source ──
+  {
+    const src = (rel) => stripCode(fs.readFileSync(path.join(ROOT, rel), 'utf8'));
+    const cleanup = src('lib/online-competition/submission-cleanup.ts');
+    ok('35. cleanup uses the shared R2 client rather than building its own',
+      /deps\.client \?\? r2Client\(\)/.test(cleanup) && !/new S3Client\(|createR2Client\(/.test(cleanup));
+    const constructors = [];
+    const walk = (dir) => {
+      for (const entry of fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
+        const rel = `${dir}/${entry.name}`;
+        if (entry.isDirectory()) walk(rel);
+        else if (/\.(ts|tsx)$/.test(entry.name) && /new S3Client\(/.test(src(rel))) constructors.push(rel);
+      }
+    };
+    walk('app');
+    walk('lib');
+    ok('  ...and an S3 client is constructed in exactly one file',
+      constructors.length === 1 && constructors[0] === 'lib/online-competition/r2-video.ts', constructors.join(', '));
+
+    const sweep = src('app/api/online-competition/cron/sweep-videos/route.ts');
+    ok('36. the sweep counts R2 deletes and names failing keys',
+      /r2Deleted,\s*\n\s*r2Failed,/.test(sweep) && /videoKey: videoKey \?\? null/.test(sweep) &&
+        /const r2Ok = !videoKey \|\| result\.r2Deleted;/.test(sweep));
+    const admin = src('app/api/online-competition/submissions/[id]/route.ts');
+    ok('37. the admin delete response carries the R2 outcome',
+      /NextResponse\.json\(\{[\s\S]*r2Deleted,[\s\S]*r2Detail,[\s\S]*\}\)/.test(admin));
+    const reset = src('lib/online-competition/reset-attempts.ts');
+    ok('38. an attempt reset counts R2 videos too', /if \(data\.videoKey\)/.test(reset));
+  }
+
   console.error = realError;
   fs.rmSync(OUT, { recursive: true, force: true });
   console.log(`\n  ${pass} passed, ${fail} failed\n`);

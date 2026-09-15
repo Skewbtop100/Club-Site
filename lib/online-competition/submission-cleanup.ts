@@ -1,4 +1,9 @@
 import type { DocumentReference } from 'firebase-admin/firestore';
+import { DeleteObjectCommand, type S3Client } from '@aws-sdk/client-s3';
+// The R2 client is CONSTRUCTED IN ONE PLACE — r2Client() in r2-video.ts,
+// the same instance and credentials the presign route signs uploads with.
+// Nothing here builds a second one.
+import { r2Bucket, r2Client } from './r2-video';
 
 // ── Shared submission deletion ────────────────────────────────────────────
 // Server-only (Cloudinary Admin API credentials + firebase-admin). EVERY
@@ -173,6 +178,51 @@ function readShotIds(value: unknown): string[] {
   return value.filter((v): v is string => typeof v === 'string' && v.length > 0);
 }
 
+/** Test seam for the R2 half. Production passes nothing and gets the
+ *  shared client and bucket; a test passes a client whose requests never
+ *  leave the process. */
+export interface R2CleanupDeps {
+  client?: S3Client;
+  bucket?: string;
+}
+
+export interface SubmissionCleanupDeps {
+  r2?: R2CleanupDeps;
+}
+
+/** Removes a submission's video from R2.
+ *
+ *  A MISSING OBJECT IS SUCCESS. S3's DeleteObject answers 204 whether or
+ *  not the key existed, so an already-deleted video usually looks exactly
+ *  like a deleted one — which is the right answer for a cleanup, and what
+ *  makes the sweep safe to re-run. A NoSuchKey/404 from a stricter
+ *  implementation is folded into the same outcome.
+ *
+ *  Returns 'missing-credentials' WITHOUT making any request when R2 is not
+ *  configured, exactly like destroyCloudinaryVideo — which is what keeps
+ *  the emulator-backed suites from ever issuing a live delete against the
+ *  production bucket. Never throws. */
+export async function destroyR2Video(key: string, deps: R2CleanupDeps = {}): Promise<DestroyOutcome> {
+  let client: S3Client;
+  let bucket: string;
+  try {
+    client = deps.client ?? r2Client();
+    bucket = deps.bucket ?? r2Bucket();
+  } catch {
+    return { ok: false, detail: 'missing-credentials' };
+  }
+  try {
+    await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+    return { ok: true, detail: 'deleted' };
+  } catch (err) {
+    const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
+    if (e?.name === 'NoSuchKey' || e?.$metadata?.httpStatusCode === 404) {
+      return { ok: true, detail: 'not-found (already gone)' };
+    }
+    return { ok: false, detail: `${e?.name ?? 'error'} ${e?.$metadata?.httpStatusCode ?? ''}`.trim() };
+  }
+}
+
 export interface SubmissionDeleteResult {
   /** The VIDEO's outcome. Named from before there was anything else to
    *  delete, and left alone: three callers read it, and the video is
@@ -185,6 +235,13 @@ export interface SubmissionDeleteResult {
    *  stills existed. */
   stillsDeleted: number;
   stillsFailed: number;
+  /** The R2 video's outcome, for everything filed since videos moved
+   *  there. r2Detail is 'no-video-key' when the submission has none —
+   *  every legacy submission — mirroring cloudinaryDetail's
+   *  'no-public-id'. A caller that only read cloudinaryDeleted would count
+   *  every R2 submission as having no video at all. */
+  r2Deleted: boolean;
+  r2Detail: string;
 }
 
 /** The fields this module deletes assets for — the submission document as
@@ -199,11 +256,18 @@ export interface SubmissionDeleteResult {
  *  have to remember. */
 export interface SubmissionAssetFields {
   cloudinaryPublicId?: unknown;
+  videoKey?: unknown;
   timerShotIds?: unknown;
   cubeShotIds?: unknown;
 }
 
-/** Deletes a submission's Cloudinary video and then its Firestore doc.
+/** Deletes a submission's video, its stills, and then its Firestore doc.
+ *
+ *  THE VIDEO LIVES IN ONE OF TWO PLACES: R2 (videoKey) for everything
+ *  filed since videos moved there, Cloudinary (cloudinaryPublicId) for
+ *  everything before — and legacy submissions are still inside their
+ *  retention window, so both are handled. Each is attempted independently
+ *  and neither can prevent the other, the stills, or the document delete.
  *
  *  Cloudinary FIRST, Firestore second — deliberately this order. The
  *  Firestore doc is the only record of which public_id belongs to this
@@ -226,11 +290,14 @@ export async function deleteSubmissionAndVideo(
   ref: DocumentReference,
   data: SubmissionAssetFields | undefined,
   context: string,
+  deps: SubmissionCleanupDeps = {},
 ): Promise<SubmissionDeleteResult> {
   const cloudinaryPublicId =
     typeof data?.cloudinaryPublicId === 'string' && data.cloudinaryPublicId.length > 0
       ? data.cloudinaryPublicId
       : undefined;
+  const videoKey =
+    typeof data?.videoKey === 'string' && data.videoKey.length > 0 ? data.videoKey : undefined;
   // Both holds' stills, as one list: they are the same kind of asset, go
   // to the same endpoint, and no caller distinguishes them.
   const shotIds = [...readShotIds(data?.timerShotIds), ...readShotIds(data?.cubeShotIds)];
@@ -256,6 +323,41 @@ export async function deleteSubmissionAndVideo(
         `[online-competition] ${context}: Cloudinary delete THREW for submission ${ref.id} ` +
           `(public_id "${cloudinaryPublicId}"): ${cloudinaryDetail}. ` +
           'Firestore doc is still being deleted — the asset must be removed manually.',
+      );
+    }
+  }
+
+  // ── The R2 video ──
+  // An INDEPENDENT branch, not an else of the Cloudinary one above.
+  // firestore.rules keeps client-written documents to exactly one video
+  // shape, but this module also runs over documents the Admin SDK wrote,
+  // which no rule constrains — and a document that somehow carries both
+  // should lose both, not whichever branch happened to come first.
+  //
+  // Before the doc for the same reason as everything else: the document is
+  // the only record of which key belongs to this submission. Wrapped so a
+  // failure is logged with the KEY NAMED and never reaches ref.delete().
+  let r2Deleted = false;
+  let r2Detail = 'no-video-key';
+  if (videoKey) {
+    try {
+      const result = await destroyR2Video(videoKey, deps.r2);
+      r2Deleted = result.ok;
+      r2Detail = result.detail;
+      if (!result.ok) {
+        console.error(
+          `[online-competition] ${context}: R2 delete FAILED for submission ${ref.id} ` +
+            `(key "${videoKey}"): ${result.detail}. ` +
+            'Firestore doc is still being deleted — the object must be removed manually.',
+        );
+      }
+    } catch (err) {
+      // destroyR2Video is written not to throw; belt-and-braces.
+      r2Detail = `threw ${(err as Error)?.message ?? 'unknown'}`;
+      console.error(
+        `[online-competition] ${context}: R2 delete THREW for submission ${ref.id} ` +
+          `(key "${videoKey}"): ${r2Detail}. ` +
+          'Firestore doc is still being deleted — the object must be removed manually.',
       );
     }
   }
@@ -302,5 +404,5 @@ export async function deleteSubmissionAndVideo(
 
   await ref.delete();
 
-  return { cloudinaryDeleted, cloudinaryDetail, stillsDeleted, stillsFailed };
+  return { cloudinaryDeleted, cloudinaryDetail, stillsDeleted, stillsFailed, r2Deleted, r2Detail };
 }

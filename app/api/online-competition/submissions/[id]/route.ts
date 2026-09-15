@@ -27,7 +27,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   // The whole document, not one field: deleteSubmissionAndVideo decides
   // which assets a submission owns (video AND stills), so this route
   // cannot fall behind when that answer changes.
-  const { cloudinaryDeleted, cloudinaryDetail, stillsDeleted, stillsFailed } =
+  const { cloudinaryDeleted, cloudinaryDetail, stillsDeleted, stillsFailed, r2Deleted, r2Detail } =
     await deleteSubmissionAndVideo(ref, snap.data(), 'admin delete');
 
   return NextResponse.json({
@@ -36,5 +36,9 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     cloudinaryDetail,
     stillsDeleted,
     stillsFailed,
+    // The R2 video, for anything filed since videos moved there. r2Detail
+    // is 'no-video-key' for a legacy submission.
+    r2Deleted,
+    r2Detail,
   });
 }

@@ -81,32 +81,56 @@ export async function GET(request: Request) {
 
   let succeeded = 0;
   let failed = 0;
-  const failures: { id: string; publicId: string | null; detail: string }[] = [];
+  const failures: { id: string; publicId: string | null; videoKey: string | null; detail: string }[] = [];
 
   // Sequential, not Promise.all: Cloudinary's Admin API is rate limited
   // (and this is a nightly background job with no latency budget), so
   // there's nothing to gain from firing 200 deletes at once.
   let stillsDeleted = 0;
   let stillsFailed = 0;
+  let r2Deleted = 0;
+  let r2Failed = 0;
 
   for (const doc of sweepable) {
     const data = doc.data();
     const publicId = data?.cloudinaryPublicId as string | undefined;
+    const videoKey = data?.videoKey as string | undefined;
     // The document itself — see deleteSubmissionAndVideo: the stills go
     // with the video, and which fields those are is its decision, not
     // this route's.
     const result = await deleteSubmissionAndVideo(doc.ref, data, 'retention sweep');
     stillsDeleted += result.stillsDeleted;
     stillsFailed += result.stillsFailed;
-    if (result.cloudinaryDeleted || !publicId) {
+    if (videoKey) {
+      if (result.r2Deleted) r2Deleted += 1;
+      else r2Failed += 1;
+    }
+    // SUCCESS MEANS EVERY VIDEO THIS SUBMISSION HAD IS GONE, in whichever
+    // store held it. The old test was `cloudinaryDeleted || !publicId`,
+    // which reads an R2 submission — no public id — as a success no matter
+    // what happened to its object, so a failed R2 delete could never
+    // appear here.
+    const cloudinaryOk = !publicId || result.cloudinaryDeleted;
+    const r2Ok = !videoKey || result.r2Deleted;
+    if (cloudinaryOk && r2Ok) {
       succeeded += 1;
     } else {
       // The Firestore doc is gone either way (see submission-cleanup's
-      // tradeoff note) — "failed" here means the video may still exist in
-      // Cloudinary and needs manual removal. Per-item detail was already
-      // logged there with the submission id and public_id.
+      // tradeoff note) — "failed" here means a video may still exist in
+      // Cloudinary or R2 and needs manual removal. Per-item detail was
+      // already logged there with the submission id and the id or key.
       failed += 1;
-      failures.push({ id: doc.id, publicId: publicId ?? null, detail: result.cloudinaryDetail });
+      failures.push({
+        id: doc.id,
+        publicId: publicId ?? null,
+        videoKey: videoKey ?? null,
+        detail: [
+          cloudinaryOk ? null : `cloudinary: ${result.cloudinaryDetail}`,
+          r2Ok ? null : `r2: ${result.r2Detail}`,
+        ]
+          .filter(Boolean)
+          .join('; '),
+      });
     }
   }
 
@@ -121,6 +145,11 @@ export async function GET(request: Request) {
     // per-item log lines carry the public ids for manual removal.
     stillsDeleted,
     stillsFailed,
+    // R2 videos, counted like the stills. `succeeded`/`failed` already
+    // fold these in; these say how much of that was R2 specifically, so a
+    // run where R2 deletes are failing is visible without reading logs.
+    r2Deleted,
+    r2Failed,
     skippedNotSweepable: expired.length - sweepable.length,
     hitBatchCap: expired.length === MAX_PER_RUN,
   };
@@ -133,7 +162,7 @@ export async function GET(request: Request) {
   );
   if (failed > 0) {
     console.error(
-      `[online-competition] retention sweep: ${failed} Cloudinary deletion(s) failed — ` +
+      `[online-competition] retention sweep: ${failed} video deletion(s) failed (Cloudinary or R2) — ` +
         `assets may still exist: ${JSON.stringify(failures)}`,
     );
   }
