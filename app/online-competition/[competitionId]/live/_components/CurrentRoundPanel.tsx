@@ -1,11 +1,14 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { formatLabel } from '@/lib/online-competition/ao5';
+import { opensInLabel } from '@/lib/online-competition/registration-view';
 import type {
   AttemptSlot,
   IdleReason,
   LiveEventView,
   LiveRoundView,
+  NextRound,
 } from '@/lib/online-competition/live-view';
 import {
   DashedBox,
@@ -39,6 +42,7 @@ export default function CurrentRoundPanel({
   round,
   state,
   idle,
+  next,
   gate,
   startAtMs,
   detailsHref,
@@ -51,6 +55,9 @@ export default function CurrentRoundPanel({
   state: 'open' | 'open-done' | null;
   /** Why there is no current round. Read only when `state` is null. */
   idle: IdleReason | null;
+  /** The round the athlete takes part in next, while none is open to them
+   *  (live-view.ts pickNextRound). Read only when `state` is null. */
+  next: NextRound | null;
   gate: { label: string; message: string } | null;
   startAtMs: number | null;
   detailsHref: string;
@@ -90,7 +97,7 @@ export default function CurrentRoundPanel({
             </span>
           </>
         ) : (
-          <span style={panelLabelStyle}>ОДООГИЙН РАУНД</span>
+          <span style={panelLabelStyle}>{next ? 'ДАРААГИЙН РАУНД' : 'ОДООГИЙН РАУНД'}</span>
         )}
       </div>
 
@@ -134,6 +141,8 @@ export default function CurrentRoundPanel({
               </p>
             </>
           )
+        ) : next ? (
+          <NextRoundBox next={next} idle={idle} startAtMs={startAtMs} />
         ) : (
           <IdleFooter idle={idle} gate={gate} startAtMs={startAtMs} detailsHref={detailsHref} onSignIn={onSignIn} />
         )}
@@ -185,6 +194,59 @@ function Slot({ slot, next }: { slot: AttemptSlot; next: boolean }) {
         </span>
       )}
     </div>
+  );
+}
+
+/** The athlete's next round, while no round is open to them.
+ *
+ *  DISPLAY ONLY: no link and no button. A round is started from the active
+ *  panel, which appears only once the round-access gate admits them.
+ *
+ *  The countdown runs to the PROGRAMME's time for the round (the route's
+ *  scheduledAtMs), updating every second like the registration countdown.
+ *  The organiser opens rounds by hand, so reaching zero opens nothing — the
+ *  box then says the scheduled time has come and the organiser will open
+ *  it. With no programme time, it says the organiser has not opened it. */
+function NextRoundBox({ next, idle, startAtMs }: { next: NextRound; idle: IdleReason | null; startAtMs: number | null }) {
+  const [now, setNow] = useState(() => Date.now());
+  const at = next.scheduledAtMs;
+  const counting = at !== null && now < at;
+
+  useEffect(() => {
+    if (!counting) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [counting]);
+
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0 }}>
+        <EventGlyph eventId={next.eventId} size={20} color="#F4F1EA" />
+        <span style={{ font: `600 15px/1.2 ${HEAD}`, color: '#F4F1EA' }}>
+          {next.eventLabel} · {next.roundLabel}
+        </span>
+      </div>
+      {at === null ? (
+        <>
+          <DashedBox label="РАУНД НЭЭГДЭЭГҮЙ" note="Зохион байгуулагч энэ раундыг хараахан нээгээгүй байна." />
+          {/* What this panel said before the next round was shown: kept,
+              since the competition's start is still worth knowing. */}
+          {idle === 'not-started' && startAtMs !== null && <LockedBox label="ТЭМЦЭЭН ЭХЛЭХ" value={fmtStart(startAtMs)} />}
+        </>
+      ) : counting ? (
+        <>
+          <LockedBox label="ХУВААРИЙН ДАГУУ НЭЭГДЭХЭД" value={opensInLabel(at - now)} />
+          <p style={bodyTextStyle}>
+            Хуваарьт {fmtStart(at)}-д. Раундыг зохион байгуулагч нээнэ — нээгдмэгц энд эхлэх товч гарна.
+          </p>
+        </>
+      ) : (
+        <DashedBox
+          label="ХУВААРИЙН ЦАГ БОЛСОН"
+          note={`Хуваарьт ${fmtStart(at)}-д. Зохион байгуулагч раундыг нээхэд энд эхлэх товч гарна.`}
+        />
+      )}
+    </>
   );
 }
 

@@ -272,6 +272,63 @@ console.log('\n  -- schedule --');
   );
   eq('rounds get their accumulated start', [starts.get('333_1'), starts.get('222_1')], ['10:30', '11:30']);
   eq('no start time, no clock', lv.scheduledRoundStarts([{ kind: 'round', eventId: '333', round: 1, durationMin: 30 }], null).size, 0);
+
+  const entries = [
+    { kind: 'other', durationMin: 30 },
+    { kind: 'round', eventId: '333', round: 1, durationMin: 60 },
+    { kind: 'round', eventId: '222', round: 1, durationMin: 30 },
+    { kind: 'round', eventId: '333', round: 1, durationMin: 30 },
+  ];
+  const ms = lv.scheduledRoundStartMs(entries, start);
+  eq('as instants: the start plus the programme before each round', [ms.get('333_1') - start, ms.get('222_1') - start], [30 * 60000, 90 * 60000]);
+  eq('  ...the first entry for a round wins, as for the clock', ms.get('333_1') - start, 30 * 60000);
+  eq('  ...no start time, no instants', lv.scheduledRoundStartMs(entries, null).size, 0);
+  // THE TIMEZONE: an instant offset from startAt does not depend on the zone
+  // of the machine computing it. The same schedule anchored an arbitrary
+  // number of hours later moves every instant by exactly that much.
+  const shifted = lv.scheduledRoundStartMs(entries, start + 8 * 3600000);
+  eq('  ...the same offsets whatever the anchor', shifted.get('222_1') - ms.get('222_1'), 8 * 3600000);
+  eq('the clock is formatted in the viewer\'s zone', lv.fmtScheduledClock(ms.get('222_1'), start), '11:30');
+  eq('  ...marked past the first day', lv.fmtScheduledClock(new Date(2026, 8, 21, 6, 30).getTime(), start), '06:30 (+1)');
+}
+
+console.log('\n  -- the next round, before one opens --');
+{
+  const H = 3600000;
+  const T = new Date(2026, 8, 20, 10, 0).getTime();
+  const shut = { liveRound: null, allowed: false, reason: 'no-live-round' };
+  const R = (round, status, extra = {}) => ({ round, status, qualified: null, label: `Раунд ${round}`, scheduledAt: null, scheduledAtMs: null, standings: [], ...extra });
+  const E = (eventId, rounds, registered = true) => ({
+    eventId, label: eventId, format: 'ao5', attempts: 5, rounds,
+    me: { registered, access: shut, planKind: null, nextAttempt: null, slotsByRound: {} },
+  });
+  const P = (events, over = {}) => ({
+    competitionId: 'c', status: 'upcoming', signedIn: true,
+    registration: { status: 'approved', events: events.map((e) => e.eventId) }, events, ...over,
+  });
+  const n = (p) => {
+    const x = lv.pickNextRound(p);
+    return x && `${x.eventId}/${x.round}/${x.scheduledAtMs === null ? 'none' : (x.scheduledAtMs - T) / H}`;
+  };
+  eq('the earliest in the programme wins, not the first configured',
+    n(P([E('333', [R(1, 'closed', { scheduledAtMs: T + 2 * H })]), E('222', [R(1, 'closed', { scheduledAtMs: T + H })])])), '222/1/1');
+  eq('a round with a programme time before one without',
+    n(P([E('333', [R(1, 'closed')]), E('222', [R(1, 'closed', { scheduledAtMs: T + 5 * H })])])), '222/1/5');
+  eq('none timed: configured event order', n(P([E('333', [R(1, 'closed')]), E('222', [R(1, 'closed')])])), '333/1/none');
+  const label = lv.pickNextRound(P([E('333', [R(1, 'closed', { label: 'Финал' })])]));
+  eq('  ...carrying the event and round labels', [label.eventLabel, label.roundLabel], ['333', 'Финал']);
+  eq('round 1 done and qualified into round 2: round 2',
+    n(P([E('333', [R(1, 'done'), R(2, 'closed', { qualified: true, scheduledAtMs: T })])], { status: 'live' })), '333/2/0');
+  eq('round 1 done, the cut not made yet: nothing for that event',
+    n(P([E('333', [R(1, 'done'), R(2, 'closed')])], { status: 'live' })), null);
+  eq('an event NOT registered for is never the next round',
+    n(P([E('333', [R(1, 'closed', { scheduledAtMs: T })], false), E('222', [R(1, 'closed')])])), '222/1/none');
+  eq('an event whose round is live is skipped — the panel speaks for a live round',
+    n(P([E('333', [R(1, 'live'), R(2, 'closed', { qualified: true, scheduledAtMs: T })]), E('222', [R(1, 'closed')])], { status: 'live' })), '222/1/none');
+  eq('a registration under review: none', n(P([E('333', [R(1, 'closed')])], { registration: { status: 'pending', events: ['333'] } })), null);
+  eq('signed out: none', n(P([E('333', [R(1, 'closed')])], { signedIn: false })), null);
+  eq('a finished competition: none', n(P([E('333', [R(1, 'closed')])], { status: 'finished' })), null);
+  eq('every round finished: none', n(P([E('333', [R(1, 'done')])], { status: 'live' })), null);
 }
 
 console.log('\n  -- the wiring --');
@@ -310,6 +367,20 @@ console.log('\n  -- the wiring --');
   ok('the schedule lists only rounds the athlete reached', livePage.includes('return roundsReached(e)'));
   ok('  ...and is not rendered when that leaves nothing', livePage.includes('derived.scheduleItems.length > 0 && ('));
   ok('  ...and never labels a round they missed', !schedule.includes('ШАЛГАРААГҮЙ'));
+  const panel = src(`${LIVE_DIR}/_components/CurrentRoundPanel.tsx`);
+  const nextBox = panel.slice(panel.indexOf('function NextRoundBox'), panel.indexOf('function IdleFooter'));
+  ok('before a round opens, the panel shows the athlete\'s next round',
+    panel.includes(') : next ? (') && panel.includes('<NextRoundBox next={next}'));
+  ok('  ...only for the two waiting reasons',
+    livePage.includes("next: idle === 'not-started' || idle === 'no-open-round' ? pickNextRound(view) : null"));
+  ok('  ...an OPEN round still shows the start panel first', panel.indexOf('state === \'open\' ? (') < panel.indexOf(') : next ? ('));
+  ok('  ...DISPLAY ONLY: no start button, link or solve route in it',
+    nextBox.length > 0 && !/StartButton|OutlineLink|solveHref|href=|<Link/.test(nextBox));
+  ok('  ...its countdown ticks every second while counting', nextBox.includes('setInterval(() => setNow(Date.now()), 1000)') && nextBox.includes('if (!counting) return;'));
+  ok('  ...no programme time: the organiser has not opened it', nextBox.includes('Зохион байгуулагч энэ раундыг хараахан нээгээгүй байна.'));
+  ok('  ...the time reached: says the organiser opens it, not that it opened', nextBox.includes('ХУВААРИЙН ЦАГ БОЛСОН'));
+  ok('the route sends each round\'s programme instant', route.includes('scheduledAtMs: startsMs.get(') && route.includes('scheduledRoundStartMs(schedule, startAtMs)'));
+  ok('the schedule panel\'s clock is formatted in the browser', livePage.includes('fmtScheduledClock(r.scheduledAtMs, competitionStartMs)'));
   ok('the tab opens on ОРОЛДЛОГО', livePage.includes("useState<LiveTab>('attempts')"));
   ok('  ...and is held by the page, not by a child that remounts', livePage.includes('data-tab={tab}'));
   ok('the tabs exist only below 900px',

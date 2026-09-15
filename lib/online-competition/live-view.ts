@@ -298,8 +298,14 @@ export interface LiveRoundView {
    *  once the previous round's qualifier list exists, null for round 1,
    *  for a signed-out viewer, and while the cut has not been made. */
   qualified: boolean | null;
-  /** "13:00" from the announced programme, or null. Display only. */
+  /** "13:00" from the announced programme, or null. Display only.
+   *  Computed on the server, in the SERVER's timezone — the live view now
+   *  formats `scheduledAtMs` in the browser instead (fmtScheduledClock). */
   scheduledAt: string | null;
+  /** The same programme time as an instant (epoch ms), or null when the
+   *  programme has no row for this round or the competition no start time.
+   *  Display only: rounds are opened by the organiser, not by the clock. */
+  scheduledAtMs: number | null;
   standings: StandingRow[];
 }
 
@@ -357,6 +363,44 @@ export function scheduledRoundStarts(
     if (!out.has(key)) out.set(key, fmtClock(timings[i].startMin));
   });
   return out;
+}
+
+/** The instant each announced round starts, keyed `event_round`: the
+ *  competition's start plus the durations of every programme row before it
+ *  (the same accumulation, and the same first-entry-wins rule, as
+ *  scheduledRoundStarts).
+ *
+ *  Deliberately NOT derived from that function's "13:00": minutesOfDay reads
+ *  the time of day in the timezone of whichever machine runs it, which on
+ *  the server is not the athlete's. An offset from startAt is the same
+ *  instant everywhere. Empty when the competition has no start time. */
+export function scheduledRoundStartMs(
+  entries: Pick<OnlineCompetitionScheduleEntry, 'kind' | 'eventId' | 'round' | 'durationMin'>[],
+  startAtMs: number | null,
+): Map<string, number> {
+  const out = new Map<string, number>();
+  if (startAtMs === null) return out;
+  const timings = scheduleTimings(0, entries.map((e) => e.durationMin));
+  entries.forEach((e, i) => {
+    if (e.kind !== 'round' || !e.eventId || typeof e.round !== 'number') return;
+    const key = slotKey(e.eventId, e.round);
+    if (!out.has(key)) out.set(key, startAtMs + timings[i].startMin * 60_000);
+  });
+  return out;
+}
+
+const twoDigits = (n: number) => String(n).padStart(2, '0');
+
+/** "13:00", or "06:30 (+1)" once past the competition's first day — in the
+ *  VIEWER's timezone, which is why the live view calls it in the browser. */
+export function fmtScheduledClock(ms: number, startAtMs: number | null): string {
+  const d = new Date(ms);
+  const clock = `${twoDigits(d.getHours())}:${twoDigits(d.getMinutes())}`;
+  if (startAtMs === null) return clock;
+  const s = new Date(startAtMs);
+  const midnight = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((midnight(d) - midnight(s)) / 86_400_000);
+  return days > 0 ? `${clock} (+${days})` : clock;
 }
 
 // ── what each round is, for this viewer ─────────────────────────────────
@@ -450,6 +494,54 @@ export function pickCurrentRound(payload: LiveViewPayload): RoundRef | null {
     }
   }
   return finishedFiling;
+}
+
+export interface NextRound {
+  eventId: string;
+  /** "3x3x3" */
+  eventLabel: string;
+  round: number;
+  /** "Раунд 1" / "Финал" */
+  roundLabel: string;
+  /** The programme's time for it, or null when the programme names none. */
+  scheduledAtMs: number | null;
+}
+
+/** The round the athlete will take part in next, while none is open to them.
+ *
+ *  Per event they registered for: the first round they have REACHED
+ *  (roundsReached) that is not finished — and only if that round has not
+ *  been opened ('notopen'). An event whose current round is live contributes
+ *  nothing: the panel already speaks for a live round. Of the rounds found,
+ *  the earliest programme time wins; rounds with no programme time come
+ *  after every timed one; ties go to configured event order.
+ *
+ *  Only for a signed-in athlete whose registration is approved, in a
+ *  competition that has not finished. DISPLAY ONLY — whether anything can
+ *  be started is still roundRowState and the round-access gate. */
+export function pickNextRound(payload: LiveViewPayload): NextRound | null {
+  if (payload.status === 'finished' || !payload.signedIn || payload.registration?.status !== 'approved') return null;
+  const found: { next: NextRound; order: number }[] = [];
+  payload.events.forEach((e, order) => {
+    const me = meContextFor(payload, e);
+    for (const r of roundsReached(e)) {
+      const state = roundRowState(r, me);
+      if (state === 'finished') continue;
+      if (state === 'notopen') {
+        found.push({
+          next: { eventId: e.eventId, eventLabel: e.label, round: r.round, roundLabel: r.label, scheduledAtMs: r.scheduledAtMs ?? null },
+          order,
+        });
+      }
+      break;
+    }
+  });
+  found.sort(
+    (a, b) =>
+      (a.next.scheduledAtMs ?? Number.POSITIVE_INFINITY) - (b.next.scheduledAtMs ?? Number.POSITIVE_INFINITY) ||
+      a.order - b.order,
+  );
+  return found[0]?.next ?? null;
 }
 
 /** Why there is no current round, most decisive reason first. */

@@ -9,10 +9,12 @@ import { authedFetchWithRetry } from '@/lib/online-competition/authed-fetch';
 import { competeGateCopy } from '@/lib/online-competition/registration-view';
 import {
   defaultStandingsTarget,
+  fmtScheduledClock,
   idleReason,
   meContextFor,
   ownRoundStats,
   pickCurrentRound,
+  pickNextRound,
   roundRowState,
   roundsReached,
   statsRound,
@@ -141,6 +143,7 @@ export default function LiveCompetitionPage() {
 
   const derived = useMemo(() => {
     if (!view) return null;
+    const competitionStartMs = toMillisOrNull(competition?.startAt);
 
     // The athlete's pick wins while it is still a round they can act on.
     let current: RoundRef | null = null;
@@ -182,7 +185,9 @@ export default function LiveCompetitionPage() {
           label: `${e.label} · ${r.label}`,
           round: r.round,
           status: r.status,
-          scheduledAt: r.scheduledAt,
+          // Formatted HERE, in the athlete's timezone, from the instant —
+          // the route's own "13:00" is in the server's.
+          scheduledAt: r.scheduledAtMs != null ? fmtScheduledClock(r.scheduledAtMs, competitionStartMs) : r.scheduledAt,
           qualified: r.qualified,
           state: roundRowState(r, me),
           // Every listed round is the athlete's own event, so the only thing
@@ -191,6 +196,7 @@ export default function LiveCompetitionPage() {
         }));
     });
 
+    const idle = currentState ? null : idleReason(view);
     return {
       currentEvent,
       currentRound,
@@ -198,10 +204,14 @@ export default function LiveCompetitionPage() {
       stats,
       gate,
       scheduleItems,
-      idle: currentState ? null : idleReason(view),
+      idle,
+      // Before a round opens: the athlete's next round, only for the two
+      // "waiting" reasons. Every other idle reason (finished, signed out,
+      // not registered, under review, missed the cut) keeps its own message.
+      next: idle === 'not-started' || idle === 'no-open-round' ? pickNextRound(view) : null,
       defaultTarget: defaultStandingsTarget(view, statsRef),
     };
-  }, [view, selected]);
+  }, [view, selected, competition]);
 
   const selectRound = useCallback((eventId: string) => {
     setSelected(eventId);
@@ -277,6 +287,7 @@ export default function LiveCompetitionPage() {
                   round={derived.currentRound}
                   state={derived.currentState}
                   idle={derived.idle}
+                  next={derived.next}
                   gate={derived.gate}
                   startAtMs={startAtMs}
                   detailsHref={detailsHref}

@@ -14,6 +14,7 @@ import { roundLabel } from '@/lib/online-competition/detail-view';
 import {
   attemptSlots,
   rankJudgedStandings,
+  scheduledRoundStartMs,
   scheduledRoundStarts,
   type AttemptSlot,
   type JudgedSubmission,
@@ -84,7 +85,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
     const events = normalizeStoredEvents(compSnap.get('events'));
     const startAtMs: number | null = compSnap.get('startAt')?.toMillis?.() ?? null;
-    const starts = scheduledRoundStarts(normalizeStoredSchedule(compSnap.get('schedule')), startAtMs);
+    const schedule = normalizeStoredSchedule(compSnap.get('schedule'));
+    const starts = scheduledRoundStarts(schedule, startAtMs);
+    // The same programme times as instants, timezone-free — what the
+    // athlete's countdown and clock are built from.
+    const startsMs = scheduledRoundStartMs(schedule, startAtMs);
 
     const [states, judgedSnap, mineSnap, regSnap] = await Promise.all([
       fetchRoundStates(db, id),
@@ -168,6 +173,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
           status: states.get(roundKey(e.eventId, round))?.status ?? 'closed',
           qualified: uid && round > 1 && advancedOut.has(prevKey) ? advancedOut.get(prevKey)! : null,
           scheduledAt: starts.get(`${e.eventId}_${round}`) ?? null,
+          scheduledAtMs: startsMs.get(`${e.eventId}_${round}`) ?? null,
           standings: rankJudgedStandings(
             judged.filter((s) => s.event === e.eventId && s.competitionRound === round),
             rulesFor(round),

@@ -39,9 +39,10 @@ function ok(name, cond, detail) {
 // Line endings normalised: the CSS assertions match multi-line rules, and a
 // CRLF checkout must not fail them.
 const src = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8').replace(/\r\n/g, '\n');
-const c = (id, over = {}) => ({ competitionId: id, startAtMs: 1000, events: ['333'], liveRounds: { 333: null }, ...over });
+const c = (id, over = {}) => ({ competitionId: id, status: 'live', startAtMs: 1000, events: ['333'], liveRounds: { 333: null }, ...over });
+const up = (id, over = {}) => c(id, { status: 'upcoming', liveRounds: {}, ...over });
 
-console.log('\n  -- where ОРОЛДЛОГО goes --');
+console.log('\n  -- where ОРОЛДЛОГО goes: lit when a round is open --');
 {
   const t = pickAttemptsTarget([c('a', { liveRounds: { 333: 1 } })]);
   ok('a round open for a registered event: ACTIVE, to that live view',
@@ -56,31 +57,67 @@ console.log('\n  -- where ОРОЛДЛОГО goes --');
   ok('an active competition wins over an earlier one with nothing open', t.kind === 'active' && t.competitionId === 'open');
 }
 {
-  const t = pickAttemptsTarget([c('x', { events: ['222'], liveRounds: { 333: 1, 222: null } })]);
-  ok('a round open only for an event they did NOT register for is not active',
-    t.kind === 'live-no-round' && t.href === liveViewHref('x'), JSON.stringify(t));
+  const t = pickAttemptsTarget([up('soon', { startAtMs: 10 }), c('open', { startAtMs: 9000, liveRounds: { 333: 1 } })]);
+  ok('  ...and over an upcoming one', t.kind === 'active' && t.competitionId === 'open');
 }
 {
-  const t = pickAttemptsTarget([c('x')]);
-  ok('approved for a live competition, no round open: routed to its live view, not lit',
-    t.kind === 'live-no-round' && t.href === liveViewHref('x'));
+  const t = pickAttemptsTarget([c('x', { events: ['222'], liveRounds: { 333: 1, 222: null } })]);
+  ok('a round open only for an event they did NOT register for is not active',
+    t.kind === 'next' && t.href === liveViewHref('x'), JSON.stringify(t));
 }
 {
   const t = pickAttemptsTarget([c('x', { liveRounds: null })]);
-  ok('the gate could not be read: routed to the live view, never shown as active', t.kind === 'live-no-round');
+  ok('the gate could not be read: routed to the live view, never shown as active', t.kind === 'next' && t.competitionId === 'x');
+}
+{
+  const t = pickAttemptsTarget([up('x', { liveRounds: { 333: 1 } })]);
+  ok('an UPCOMING competition is never lit, whatever the map says', t.kind === 'next');
+}
+
+console.log('\n  -- ...otherwise the SOONEST live view, not the dashboard --');
+{
+  const t = pickAttemptsTarget([c('x')]);
+  ok('approved for a live competition, no round open: its live view, not lit', t.kind === 'next' && t.href === liveViewHref('x'));
+}
+{
+  const t = pickAttemptsTarget([up('only', { startAtMs: 5000 })]);
+  ok('approved ONLY for an upcoming competition: its live view, not the dashboard',
+    t.kind === 'next' && t.href === liveViewHref('only'), JSON.stringify(t));
+}
+{
+  const t = pickAttemptsTarget([up('later', { startAtMs: 9000 }), up('sooner', { startAtMs: 3000 })]);
+  ok('several upcoming: the earliest start', t.competitionId === 'sooner', JSON.stringify(t));
+}
+{
+  const t = pickAttemptsTarget([up('tomorrow', { startAtMs: 10 }), c('under-way', { startAtMs: 50 })]);
+  ok('a live competition before an upcoming one, even one with an earlier start', t.competitionId === 'under-way');
+}
+{
+  const t = pickAttemptsTarget([up('undated', { startAtMs: null }), up('dated', { startAtMs: 99999 })]);
+  ok('no start time comes after every dated one', t.competitionId === 'dated');
+}
+{
+  const a = pickAttemptsTarget([up('b', { startAtMs: null }), up('a', { startAtMs: null })]);
+  const b = pickAttemptsTarget([up('a', { startAtMs: null }), up('b', { startAtMs: null })]);
+  ok('equal: decided by id, the same whatever the order', a.competitionId === 'a' && b.competitionId === 'a');
 }
 {
   const t = pickAttemptsTarget([]);
-  ok('nothing live: routed to the dashboard, not disabled', t.kind === 'none' && t.href === DASHBOARD_HREF);
+  ok('approved for NOTHING live or upcoming: the dashboard, not disabled', t.kind === 'none' && t.href === DASHBOARD_HREF);
 }
 
 console.log('\n  -- the data behind it --');
 {
   const hook = src('app/online-competition/_components/hub/v3/useAttemptsTarget.ts');
   ok('only APPROVED registrations count', hook.includes('.filter((r) => isCompetingRegistration(r.status))'));
-  ok('  ...for LIVE competitions', hook.includes("j.competition?.status === 'live'"));
-  ok('  ...asking the same round-access gate the solve route enforces with', hook.includes('/api/online-competition/round-access?competitionId='));
+  ok('  ...for LIVE or UPCOMING competitions — finished and drafts are out',
+    hook.includes("j.competition.status === 'live' || j.competition.status === 'upcoming'"));
+  ok('  ...asking the round-access gate, for live ones only',
+    hook.includes('/api/online-competition/round-access?competitionId=') && hook.includes("if (status === 'live') {") &&
+      hook.includes("status === 'upcoming' ? {} : null"));
   ok('  ...decided by pickAttemptsTarget', hook.includes('return pickAttemptsTarget(candidates);'));
+  ok('the bar lights only for an ACTIVE target',
+    src('app/online-competition/_components/hub/v3/BottomNav.tsx').includes("live={target.kind === 'active'}"));
 }
 
 console.log('\n  -- the bar --');
