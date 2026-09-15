@@ -11,7 +11,8 @@ import type {
 import { REGISTRATION_NOTE_MAX } from '@/lib/online-competition/types';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import { onlineCompAuth } from '@/lib/online-competition/firebase';
-import { fetchParticipant, registerForCompetition, resolveProfileStatus } from '@/lib/online-competition/data';
+import { fetchParticipant, registerForCompetition } from '@/lib/online-competition/data';
+import { rejectionSummary, resolveVerification } from '@/lib/online-competition/verification';
 import {
   competeGateCopy,
   feeView,
@@ -147,14 +148,16 @@ export default function RegistrationPanel({
     }
     if (!uid) return;
 
-    // The profile gate: only an APPROVED athlete reaches the form.
+    // The profile gate: only a VERIFIED athlete — details and photo both
+    // approved — reaches the form.
     setAuthError('');
     setCheckingProfile(true);
     try {
-      const participant = await fetchParticipant(uid);
-      const status = resolveProfileStatus(participant);
+      const verification = resolveVerification(await fetchParticipant(uid));
+      const status = verification.status;
       if (status !== 'approved') {
-        setGate({ status, reason: participant?.rejectionReason ?? null });
+        // Each rejected part with its own reason.
+        setGate({ status, reason: rejectionSummary(verification) });
         setState('gated');
         return;
       }

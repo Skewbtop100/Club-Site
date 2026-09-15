@@ -16,6 +16,7 @@ import type {
   OnlineParticipantGender,
   OnlineParticipantProfileStatus,
 } from './types';
+import { resolveVerification } from './verification';
 
 const GENDERS: readonly string[] = ['male', 'female', 'other'];
 
@@ -33,6 +34,8 @@ export function toParticipantAdminView(
   data: Record<string, unknown>,
   status: OnlineParticipantProfileStatus,
 ): OnlineParticipantAdminView {
+  // Each part on its own, old single-approval records included.
+  const verification = resolveVerification(data);
   return {
     uid,
     displayName: text(data.displayName),
@@ -45,6 +48,10 @@ export function toParticipantAdminView(
     wcaId: text(data.wcaId),
     photoUrl: textOrNull(data.photoUrl),
     profileStatus: status,
+    detailsStatus: verification.details.status,
+    photoStatus: verification.photo.status,
+    detailsRejectionReason: verification.details.reason,
+    photoRejectionReason: verification.photo.reason,
     approvedPhotoUrl: textOrNull(data.approvedPhotoUrl),
     approvedLastName: textOrNull(data.approvedLastName),
     approvedFirstName: textOrNull(data.approvedFirstName),

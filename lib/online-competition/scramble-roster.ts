@@ -4,6 +4,7 @@ import type { Firestore } from 'firebase-admin/firestore';
 // suites use.
 import { isCompetingRegistration } from './registration-shape';
 import type { OnlineParticipantProfileStatus } from './types';
+import { resolveVerification } from './verification';
 
 /** One registered athlete, with everything the group-assignment UI and the
  *  auto-seeder need: which events they signed up for, when they registered
@@ -21,19 +22,11 @@ export interface ScrambleRosterAthlete {
   /** eventId -> best Ao5 in centiseconds, same nullability as prByEvent.
    *  Drives the groups tab's Сингл/Дундаж ranking toggle. */
   ao5ByEvent: Record<string, number | null>;
-  /** Identity-verification status of the athlete's profile. Resolved the
-   *  same way resolveProfileStatus does client-side: a doc with no
-   *  `profileStatus` field at all counts as 'incomplete' rather than
-   *  having the value written onto it. */
+  /** Identity-verification status of the athlete's profile, from the two
+   *  verification parts — 'approved' only when details and photo both are
+   *  (verification.ts, the same resolver the client uses). A doc with no
+   *  status at all counts as 'incomplete'. */
   profileStatus: OnlineParticipantProfileStatus;
-}
-
-const PROFILE_STATUSES: OnlineParticipantProfileStatus[] = ['incomplete', 'pending', 'approved', 'rejected'];
-
-function resolveStatus(value: unknown): OnlineParticipantProfileStatus {
-  return PROFILE_STATUSES.includes(value as OnlineParticipantProfileStatus)
-    ? (value as OnlineParticipantProfileStatus)
-    : 'incomplete';
 }
 
 /** APPROVED athletes for one competition, joined against their
@@ -97,7 +90,7 @@ export async function fetchScrambleRoster(
       registeredAt: data.registeredAt?.toMillis?.() ?? null,
       prByEvent,
       ao5ByEvent,
-      profileStatus: resolveStatus(profile.profileStatus),
+      profileStatus: resolveVerification(profile).status,
     };
   });
 

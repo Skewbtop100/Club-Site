@@ -87,9 +87,10 @@ export default function AthleteDetailPanel({
   const age = ageFrom(athlete.dateOfBirth);
 
   // The photo an admin approved and the one most recently submitted can
-  // differ; verification needs to see both, each labelled.
+  // differ; verification needs to see both, each labelled. Keyed on the
+  // PHOTO part: it can be approved while the details are re-reviewed.
   const photos: { url: string; label: string }[] = [];
-  if (athlete.profileStatus === 'approved') {
+  if (athlete.photoStatus === 'approved') {
     const main = athlete.approvedPhotoUrl ?? athlete.photoUrl;
     if (main) photos.push({ url: main, label: 'Баталсан зураг' });
     if (athlete.photoUrl && athlete.photoUrl !== main) photos.push({ url: athlete.photoUrl, label: 'Сүүлд илгээсэн зураг' });
@@ -238,7 +239,10 @@ export default function AthleteDetailPanel({
             <span className="oc-v3-label">Баталгаажуулалт</span>
             <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 1, background: '#1C1C21', border: '1px solid #1C1C21' }}>
               <Row label="ТӨЛӨВ" value={status.text} color={status.color} />
-              {athlete.rejectionReason && <Row label="ШАЛТГААН" value={athlete.rejectionReason} />}
+              <Row label="МЭДЭЭЛЭЛ" value={STATUS[athlete.detailsStatus].text} color={STATUS[athlete.detailsStatus].color} />
+              {athlete.detailsRejectionReason && <Row label="МЭДЭЭЛЛИЙН ШАЛТГААН" value={athlete.detailsRejectionReason} />}
+              <Row label="ЗУРАГ" value={STATUS[athlete.photoStatus].text} color={STATUS[athlete.photoStatus].color} />
+              {athlete.photoRejectionReason && <Row label="ЗУРГИЙН ШАЛТГААН" value={athlete.photoRejectionReason} />}
               <Row label="БҮРТГҮҮЛСЭН" value={fmtDateTime(athlete.createdAt)} mono />
               <Row label="ХҮСЭЛТ ИЛГЭЭСЭН" value={fmtDateTime(athlete.submittedAt)} mono />
               <Row label="ШИЙДВЭРЛЭСЭН" value={fmtDateTime(athlete.reviewedAt)} mono />

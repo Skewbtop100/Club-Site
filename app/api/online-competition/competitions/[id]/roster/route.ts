@@ -5,6 +5,7 @@ import { normalizeStoredEvents } from '@/lib/online-competition/competition-shap
 import { normalizeCompetitionStatus } from '@/lib/online-competition/admin-competitions';
 import { resolveResultFormat, type ResultFormat } from '@/lib/online-competition/ao5';
 import { toRosterAthlete, type RosterAthlete } from '@/lib/online-competition/roster-view';
+import { isPubliclyVerified } from '@/lib/online-competition/verification';
 
 // ── The public athlete roster ───────────────────────────────────────────
 // GET /api/online-competition/competitions/{id}/roster
@@ -31,8 +32,9 @@ export interface CompetitionRoster {
    *  filter buttons, and nothing beyond them. */
   events: { eventId: string; label: string; format: ResultFormat }[];
   athletes: RosterAthlete[];
-  /** Approved registrations. What the ТАМИРЧИН cell has been showing as
-   *  "—" since the beginning, because it was not publicly readable. */
+  /** Approved registrations of VERIFIED athletes — the athletes listed. What
+   *  the ТАМИРЧИН cell has been showing as "—" since the beginning, because
+   *  it was not publicly readable. */
   approvedCount: number;
 }
 
@@ -83,7 +85,15 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       : [];
   const profileByUid = new Map(profiles.map((p) => [p.id, (p.data() ?? {}) as Record<string, unknown>]));
 
-  const athletes: RosterAthlete[] = matches.map((d) => {
+  const athletes: RosterAthlete[] = matches
+    // VERIFIED ATHLETES ONLY. An athlete an admin has not verified is not
+    // published by name, even with an approved registration: the
+    // registration review does not check the profile, so without this an
+    // unverified, self-entered name reached this public list.
+    // isPubliclyVerified keeps an athlete listed, under the name an admin
+    // approved, while an edit to their profile is re-reviewed.
+    .filter((d) => isPubliclyVerified(profileByUid.get(d.ref.parent.parent!.id)))
+    .map((d) => {
     const uid = d.ref.parent.parent!.id;
     const registered = Array.isArray(d.data().events)
       ? (d.data().events as unknown[]).filter((e): e is string => typeof e === 'string')

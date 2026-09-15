@@ -338,6 +338,99 @@ service cloud.firestore {
               !touchesReviewedIdentity()));
       }
 
+      // ── The two verification parts ──────────────────────────────────
+      // Verification is stored as two parts, each with its own decision
+      // (lib/online-competition/verification.ts):
+      //   detailsStatus — lastName, firstName, dateOfBirth, gender, citizenship
+      //   photoStatus   — photoUrl
+      // each 'pending' | 'approved' | 'rejected', and profileStatus is
+      // derived from them. Only the admin route (Admin SDK) approves or
+      // rejects a part. What an athlete may write, per part:
+      //   * 'pending' — always: a submission or resubmission;
+      //   * the part's CURRENT status, unchanged — but an approved part only
+      //     while its values are untouched or equal to the approved
+      //     snapshot, and a rejected part only while untouched.
+      // So an athlete can never produce 'approved' or 'rejected' for a part
+      // that was not already so, and cannot keep an approval over values an
+      // admin did not approve.
+      //
+      // OLD RECORDS, decided under the single approval, have no part
+      // fields. They are read as both parts having their profileStatus —
+      // the same mapping verification.ts resolveVerification makes — and a
+      // write that adds no part fields to them is checked exactly as before
+      // (profileStatusTransitionAllowed), so an app still running the old
+      // code keeps working on them. Once a record has part fields, they may
+      // not be removed.
+      function detailKeys() {
+        return ['lastName', 'firstName', 'dateOfBirth', 'gender', 'citizenship'];
+      }
+
+      function touchesKeys(keys) {
+        return resource == null
+          ? request.resource.data.keys().hasAny(keys)
+          : request.resource.data.diff(resource.data).affectedKeys().hasAny(keys);
+      }
+
+      function hasPartFields(data) {
+        return 'detailsStatus' in data || 'photoStatus' in data;
+      }
+
+      // A part's status on the STORED record, old records mapped.
+      function priorPart(field) {
+        return resource == null
+          ? 'incomplete'
+          : (resource.data.get(field, null) != null
+              ? resource.data.get(field, null)
+              : (resource.data.get('profileStatus', null) in ['pending', 'approved', 'rejected']
+                  ? resource.data.get('profileStatus', null)
+                  : 'incomplete'));
+      }
+
+      // The approved* snapshot is locked by judgeFieldsUntouched, so the
+      // incoming document's copy IS the stored one.
+      function detailsMatchApproved() {
+        return request.resource.data.get('lastName', null) == request.resource.data.get('approvedLastName', null) &&
+               request.resource.data.get('firstName', null) == request.resource.data.get('approvedFirstName', null) &&
+               request.resource.data.get('dateOfBirth', null) == request.resource.data.get('approvedDateOfBirth', null) &&
+               request.resource.data.get('gender', null) == request.resource.data.get('approvedGender', null) &&
+               request.resource.data.get('citizenship', null) == request.resource.data.get('approvedCitizenship', null);
+      }
+
+      function photoMatchesApproved() {
+        return request.resource.data.get('photoUrl', null) == request.resource.data.get('approvedPhotoUrl', null);
+      }
+
+      function partTransitionAllowed(field, keys, matchesApproved) {
+        let next = request.resource.data.get(field, null);
+        let prior = priorPart(field);
+        return next == 'pending' ||
+               (next == prior &&
+                (next == 'approved'
+                  ? (!touchesKeys(keys) || matchesApproved)
+                  : (next == 'rejected' && !touchesKeys(keys))));
+      }
+
+      function derivedProfileStatus() {
+        return request.resource.data.detailsStatus == 'approved' && request.resource.data.photoStatus == 'approved'
+          ? 'approved'
+          : (request.resource.data.detailsStatus == 'pending' || request.resource.data.photoStatus == 'pending'
+              ? 'pending'
+              : 'rejected');
+      }
+
+      function verificationWriteAllowed() {
+        return hasPartFields(request.resource.data)
+          ? ('detailsStatus' in request.resource.data &&
+             'photoStatus' in request.resource.data &&
+             request.resource.data.detailsStatus in ['pending', 'approved', 'rejected'] &&
+             request.resource.data.photoStatus in ['pending', 'approved', 'rejected'] &&
+             request.resource.data.get('profileStatus', null) == derivedProfileStatus() &&
+             partTransitionAllowed('detailsStatus', detailKeys(), detailsMatchApproved()) &&
+             partTransitionAllowed('photoStatus', ['photoUrl'], photoMatchesApproved()))
+          : ((resource == null || !hasPartFields(resource.data)) &&
+             profileStatusTransitionAllowed());
+      }
+
       // Admin-owned fields. An admin (or the admin-triggered recompute)
       // writes these through the Admin SDK, which bypasses rules
       // entirely; a client may never introduce, change, or erase them.
@@ -371,6 +464,8 @@ service cloud.firestore {
              !('approvedCitizenship' in request.resource.data) &&
              !('reviewedAt' in request.resource.data) &&
              !('rejectionReason' in request.resource.data) &&
+             !('detailsRejectionReason' in request.resource.data) &&
+             !('photoRejectionReason' in request.resource.data) &&
              !('stats' in request.resource.data))
           : (request.resource.data.get('approvedPhotoUrl', null) == resource.data.get('approvedPhotoUrl', null) &&
              request.resource.data.get('approvedLastName', null) == resource.data.get('approvedLastName', null) &&
@@ -380,6 +475,8 @@ service cloud.firestore {
              request.resource.data.get('approvedCitizenship', null) == resource.data.get('approvedCitizenship', null) &&
              request.resource.data.get('reviewedAt', null) == resource.data.get('reviewedAt', null) &&
              request.resource.data.get('rejectionReason', null) == resource.data.get('rejectionReason', null) &&
+             request.resource.data.get('detailsRejectionReason', null) == resource.data.get('detailsRejectionReason', null) &&
+             request.resource.data.get('photoRejectionReason', null) == resource.data.get('photoRejectionReason', null) &&
              request.resource.data.get('stats', null) == resource.data.get('stats', null));
       }
 
@@ -413,7 +510,7 @@ service cloud.firestore {
                                 (!('wcaId' in request.resource.data) || request.resource.data.wcaId is string) &&
                                 (!('photoUrl' in request.resource.data) || request.resource.data.photoUrl == null || request.resource.data.photoUrl is string) &&
                                 (!('photoPublicId' in request.resource.data) || request.resource.data.photoPublicId == null || request.resource.data.photoPublicId is string) &&
-                                profileStatusTransitionAllowed() &&
+                                verificationWriteAllowed() &&
                                 judgeFieldsUntouched();
 
       match /registrations/{competitionId} {

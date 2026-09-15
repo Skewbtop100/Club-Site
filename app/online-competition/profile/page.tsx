@@ -10,6 +10,7 @@ import {
   submitParticipantProfile,
 } from '@/lib/online-competition/data';
 import { uploadImageToCloudinary } from '@/lib/online-competition/cloudinary';
+import { resolveVerification, type PartStatus, type Verification } from '@/lib/online-competition/verification';
 import type {
   OnlineParticipant,
   OnlineParticipantGender,
@@ -114,6 +115,38 @@ function StatusChip({ status }: { status: OnlineParticipantProfileStatus }) {
   if (status === 'approved') return <span className="oc-v3-chip oc-v3-chip-approved">БАТАЛГААЖСАН</span>;
   if (status === 'rejected') return <span className="oc-v3-chip oc-v3-chip-rejected">ТАТГАЛЗСАН</span>;
   return null;
+}
+
+const PART_TEXT: Record<PartStatus, { text: string; color: string }> = {
+  incomplete: { text: 'ИЛГЭЭГЭЭГҮЙ', color: '#6E6A62' },
+  pending: { text: 'ХҮЛЭЭГДЭЖ БУЙ', color: '#E0A020' },
+  approved: { text: 'БАТАЛГААЖСАН', color: '#4FD07A' },
+  rejected: { text: 'ТАТГАЛЗСАН', color: '#E8543C' },
+};
+
+/** Each verification part's own status — the two are decided separately. */
+function PartLines({ verification }: { verification: Verification }) {
+  return (
+    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+      {(['details', 'photo'] as const).map((part) => {
+        const s = PART_TEXT[verification[part].status];
+        return (
+          <span key={part} style={{ font: '600 9px/1.4 var(--oc-font-mono), monospace', letterSpacing: '.14em', color: '#6E6A62' }}>
+            {part === 'details' ? 'МЭДЭЭЛЭЛ' : 'ЗУРАГ'} · <span style={{ color: s.color }}>{s.text}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+/** While a review is in flight, what has already been approved and what is
+ *  still being looked at. */
+function pendingNote(v: Verification): string {
+  const after = 'Баталгаажсаны дараа тэмцээнд бүртгүүлэх боломжтой.';
+  if (v.details.status === 'approved') return `Таны мэдээлэл баталгаажсан. Зургийг админ хянаж байна. ${after}`;
+  if (v.photo.status === 'approved') return `Таны зураг баталгаажсан. Мэдээллийг админ хянаж байна. ${after}`;
+  return `Таны мэдээллийг админ хянаж байна. ${after}`;
 }
 
 export default function ProfilePage() {
@@ -258,10 +291,11 @@ function ProfileBody({
   // starts open.
   const [uploadOpen, setUploadOpen] = useState(status === 'incomplete');
   // An approved athlete edits only after asking to — the МЭДЭЭЛЭЛ ЗАСАХ
-  // button below. Saving re-submits for review (submitParticipantProfile
-  // always writes profileStatus: 'pending'), which is the point: a changed
-  // identity is no longer the one an admin approved.
+  // button below. Saving sends back for review only the part that changed
+  // (submitParticipantProfile → resubmissionStatuses): new details re-review
+  // the details, a new photo the photo, a WCA ID neither.
   const [editing, setEditing] = useState(false);
+  const verification = resolveVerification(participant);
 
   // 'incomplete' and 'rejected' have nothing approved to protect, so they
   // are always open. 'approved' opens only via the explicit button.
@@ -328,7 +362,7 @@ function ProfileBody({
         photoPublicId = uploaded.publicId;
       }
 
-      await submitParticipantProfile(uid, {
+      const statuses = await submitParticipantProfile(uid, {
         lastName: lastName.trim(),
         firstName: firstName.trim(),
         dateOfBirth,
@@ -340,6 +374,9 @@ function ProfileBody({
       });
 
       onSubmitted({
+        // The stored record carries the approved snapshot and the reasons,
+        // which the page still needs; the save changes only what follows.
+        ...(participant ?? {}),
         uid,
         displayName: participant?.displayName ?? `${lastName.trim()} ${firstName.trim()}`,
         photoURL: participant?.photoURL ?? null,
@@ -352,11 +389,12 @@ function ProfileBody({
         wcaId: wcaId.trim().toUpperCase(),
         photoUrl,
         photoPublicId,
-        profileStatus: 'pending',
-        approvedPhotoUrl: participant?.approvedPhotoUrl ?? null,
+        detailsStatus: statuses.detailsStatus,
+        photoStatus: statuses.photoStatus,
+        profileStatus: statuses.profileStatus,
       });
-      // Status is now 'pending'; the form goes back to read-only and the
-      // warning below disappears with it.
+      // Pending, or still approved when nothing reviewable changed; either
+      // way the form goes back to read-only and the warning below with it.
       setEditing(false);
       setUploadOpen(false);
     } catch {
@@ -447,7 +485,7 @@ function ProfileBody({
               <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap', alignItems: 'center' }}>
                 {editable && !uploadOpen && (
                   <button type="button" className="oc-v3-ghost-btn" onClick={() => setUploadOpen(true)}>
-                    {status === 'rejected' ? 'ДАХИН ОРУУЛАХ' : 'ЗУРАГ СОЛИХ'}
+                    {verification.photo.status === 'rejected' ? 'ДАХИН ОРУУЛАХ' : 'ЗУРАГ СОЛИХ'}
                   </button>
                 )}
                 {status === 'approved' && !editing && (
@@ -458,20 +496,26 @@ function ProfileBody({
                 <StatusChip status={status} />
               </div>
 
-              {status === 'rejected' && participant?.rejectionReason && (
-                <div className="oc-v3-reject-block">
-                  <p style={{ font: '600 9px var(--oc-font-mono), monospace', letterSpacing: '.14em', color: '#E8543C' }}>
-                    ТАТГАЛЗСАН ШАЛТГААН
-                  </p>
-                  <p style={{ marginTop: 8, font: '400 12px var(--oc-font-heading), sans-serif', color: '#F4F1EA' }}>
-                    {participant.rejectionReason}
-                  </p>
-                </div>
+              {status !== 'incomplete' && <PartLines verification={verification} />}
+
+              {/* One block per rejected part, each with its own reason. */}
+              {(['details', 'photo'] as const).map(
+                (part) =>
+                  verification[part].status === 'rejected' && (
+                    <div key={part} className="oc-v3-reject-block">
+                      <p style={{ font: '600 9px var(--oc-font-mono), monospace', letterSpacing: '.14em', color: '#E8543C' }}>
+                        {part === 'details' ? 'МЭДЭЭЛЛИЙГ ТАТГАЛЗСАН ШАЛТГААН' : 'ЗУРГИЙГ ТАТГАЛЗСАН ШАЛТГААН'}
+                      </p>
+                      <p style={{ marginTop: 8, font: '400 12px var(--oc-font-heading), sans-serif', color: '#F4F1EA' }}>
+                        {verification[part].reason ?? 'Шалтгаан бичээгүй.'}
+                      </p>
+                    </div>
+                  ),
               )}
 
               {status === 'pending' && (
                 <p style={{ font: '400 12px var(--oc-font-heading), sans-serif', color: '#9A958A' }}>
-                  Таны мэдээллийг админ хянаж байна. Баталгаажсаны дараа тэмцээнд бүртгүүлэх боломжтой.
+                  {pendingNote(verification)}
                 </p>
               )}
             </div>
@@ -494,7 +538,8 @@ function ProfileBody({
             they should see BEFORE typing, not after. */}
         {editing && status === 'approved' && (
           <div className="oc-sc-warn" style={{ margin: '0 18px 18px' }}>
-            Мэдээллээ засвал профайл дахин хянагдана. Хянагдах хүртэл тэмцээнд бүртгүүлэх боломжгүй.
+            Овог, нэр, төрсөн огноо, хүйс, улсаа өөрчилбөл мэдээлэл дахин хянагдана; зураг солибол зураг дахин
+            хянагдана. Хянагдах хүртэл тэмцээнд бүртгүүлэх боломжгүй. WCA ID өөрчлөхөд хянагдахгүй.
           </div>
         )}
 
@@ -538,6 +583,14 @@ function ProfileBody({
       {/* ── Personal details ──────────────────────────────────────────── */}
       <div className="oc-v3-card">
         <CardHead>Хувийн мэдээлэл</CardHead>
+        {/* The photo was rejected but the details were not: say that the
+            details stand as they are, so fixing the photo does not look like
+            it needs them re-entered. */}
+        {editable && status !== 'approved' && verification.details.status === 'approved' && (
+          <p style={{ margin: '14px 18px 0', font: '400 12px/1.6 var(--oc-font-heading), sans-serif', color: '#9A958A' }}>
+            Мэдээлэл баталгаажсан. Өөрчлөхгүй бол дахин хянагдахгүй.
+          </p>
+        )}
         <div className="oc-v3-form-grid">
           <Field label="Овог">
             {editable ? (

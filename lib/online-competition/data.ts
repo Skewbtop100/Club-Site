@@ -32,6 +32,7 @@ import type {
   SolveMarks,
 } from './types';
 import { SUBMISSION_RETENTION_MS } from './submission-retention';
+import { resolveVerification, resubmissionStatuses, type ResubmissionStatuses } from './verification';
 
 // Must list every member of OnlineCompetitionStatus — see the identical
 // list (and the same warning) in admin-competitions.ts. Omitting 'draft'
@@ -203,8 +204,11 @@ export async function fetchParticipant(uid: string): Promise<OnlineParticipant |
 // writing that value onto every doc on sign-in, same reasoning as
 // normalizeStatus() above and the shared event normaliser for legacy
 // competition docs.
+//
+// Derived from the two verification parts (verification.ts): 'approved'
+// only when details AND photo are both approved.
 export function resolveProfileStatus(participant: OnlineParticipant | null): OnlineParticipantProfileStatus {
-  return participant?.profileStatus ?? 'incomplete';
+  return resolveVerification(participant).status;
 }
 
 /** Which image represents an athlete, everywhere in this feature.
@@ -230,6 +234,7 @@ export function resolveParticipantPhoto(
   participant:
     | {
         profileStatus?: OnlineParticipantProfileStatus | null;
+        photoStatus?: string | null;
         approvedPhotoUrl?: string | null;
         photoUrl?: string | null;
       }
@@ -237,51 +242,71 @@ export function resolveParticipantPhoto(
     | undefined,
 ): string | null {
   if (!participant) return null;
-  if (participant.profileStatus === 'approved') {
+  // The PHOTO part, not the whole profile: a photo approved while the
+  // details are re-reviewed is still the official one.
+  if (resolveVerification(participant).photo.status === 'approved') {
     return participant.approvedPhotoUrl ?? participant.photoUrl ?? null;
   }
   return participant.photoUrl ?? null;
 }
 
 // Written by the athlete profile form (app/online-competition/profile) on
-// submit — both the first-ever submission and a resubmission after
-// rejection. Always moves profileStatus to 'pending'; approval/rejection
-// only ever happen server-side via the Admin SDK (see
-// app/api/online-competition/admin-athletes/[uid]/route.ts), which is also
-// what the Firestore rules for this collection enforce (see the rules
-// snippet in that route's file comment).
-export async function submitParticipantProfile(uid: string, input: OnlineParticipantProfileInput): Promise<void> {
-  await setDoc(
-    doc(onlineCompDb, 'onlineParticipants', uid),
-    {
-      lastName: input.lastName,
-      firstName: input.firstName,
-      dateOfBirth: input.dateOfBirth,
-      gender: input.gender,
-      citizenship: input.citizenship,
-      wcaId: input.wcaId,
-      photoUrl: input.photoUrl,
-      photoPublicId: input.photoPublicId,
-      profileStatus: 'pending',
-      submittedAt: serverTimestamp(),
-      // An account whose data was merged away is left empty and fully
-      // reusable. Filling in a profile is the moment it stops being
-      // "merged away", so the record of that move is cleared HERE rather
-      // than anywhere else: this is the single write that gives the
-      // document content again, so the flag and the content it describes
-      // change atomically. deleteField() on an absent field is a no-op,
-      // so the ordinary first-time submission is unaffected.
-      //
-      // Permitted by firestore.rules: mergedInto/mergedAt are not in
-      // judgeFieldsUntouched()'s admin-owned lockout, and no clause
-      // constrains them, so a client may clear them. Proven by the
-      // 'a merged-away athlete may submit a fresh profile' case in
-      // tests/firestore-rules.
-      mergedInto: deleteField(),
-      mergedAt: deleteField(),
-    },
-    { merge: true },
-  );
+// submit — the first submission, a resubmission after rejection, and an
+// approved athlete's edit. Approval/rejection only ever happen server-side
+// via the Admin SDK (app/api/online-competition/admin-athletes/[uid]/route.ts),
+// which is also what the Firestore rules for this collection enforce.
+//
+// Each verification part is decided on its own (resubmissionStatuses): a
+// rejected part goes back to pending; an approved part stays approved
+// unless this save changes it. A transaction, because that decision is made
+// against the stored record, and a stale copy from the page could keep a
+// part "approved" that the rules would then refuse.
+export async function submitParticipantProfile(
+  uid: string,
+  input: OnlineParticipantProfileInput,
+): Promise<ResubmissionStatuses> {
+  const ref = doc(onlineCompDb, 'onlineParticipants', uid);
+  return runTransaction(onlineCompDb, async (tx) => {
+    const snap = await tx.get(ref);
+    const next = resubmissionStatuses(snap.exists() ? snap.data() : null, input);
+    tx.set(
+      ref,
+      {
+        lastName: input.lastName,
+        firstName: input.firstName,
+        dateOfBirth: input.dateOfBirth,
+        gender: input.gender,
+        citizenship: input.citizenship,
+        wcaId: input.wcaId,
+        photoUrl: input.photoUrl,
+        photoPublicId: input.photoPublicId,
+        detailsStatus: next.detailsStatus,
+        photoStatus: next.photoStatus,
+        profileStatus: next.profileStatus,
+        // Only when something now waits for the admin: the review queue is
+        // ordered by it, and a save that changed nothing reviewable (a WCA
+        // ID) is not a new request.
+        ...(next.anyPending ? { submittedAt: serverTimestamp() } : {}),
+        // An account whose data was merged away is left empty and fully
+        // reusable. Filling in a profile is the moment it stops being
+        // "merged away", so the record of that move is cleared HERE rather
+        // than anywhere else: this is the single write that gives the
+        // document content again, so the flag and the content it describes
+        // change atomically. deleteField() on an absent field is a no-op,
+        // so the ordinary first-time submission is unaffected.
+        //
+        // Permitted by firestore.rules: mergedInto/mergedAt are not in
+        // judgeFieldsUntouched()'s admin-owned lockout, and no clause
+        // constrains them, so a client may clear them. Proven by the
+        // 'a merged-away athlete may submit a fresh profile' case in
+        // tests/firestore-rules.
+        mergedInto: deleteField(),
+        mergedAt: deleteField(),
+      },
+      { merge: true },
+    );
+    return next;
+  });
 }
 
 function registrationRef(uid: string, competitionId: string) {

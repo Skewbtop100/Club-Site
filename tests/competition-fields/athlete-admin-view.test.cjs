@@ -88,8 +88,10 @@ console.log('\n  -- the full record reaches the admin --');
   eq('EXACTLY these keys are sent',
     keys(v),
     'approvedCitizenship,approvedDateOfBirth,approvedFirstName,approvedGender,approvedLastName,approvedPhotoUrl,' +
-      'citizenship,createdAt,dateOfBirth,displayName,email,firstName,gender,lastName,photoUrl,profileStatus,' +
-      'rejectionReason,reviewedAt,submittedAt,uid,wcaId');
+      'citizenship,createdAt,dateOfBirth,detailsRejectionReason,detailsStatus,displayName,email,firstName,gender,' +
+      'lastName,photoRejectionReason,photoStatus,photoUrl,profileStatus,rejectionReason,reviewedAt,submittedAt,uid,wcaId');
+  eq('each verification part: details (an old pending record)', v.detailsStatus, 'pending');
+  eq('  ...photo', v.photoStatus, 'pending');
   eq('surname', v.lastName, 'Бат');
   eq('given name', v.firstName, 'Эрдэнэ');
   eq('date of birth', v.dateOfBirth, '2011-04-12');
@@ -110,7 +112,17 @@ console.log('\n  -- the full record reaches the admin --');
 }
 {
   const v = toParticipantAdminView('u2', { displayName: 'Only Google', gender: 'robot', createdAt: 'not a timestamp' }, 'approved');
-  eq('a sparse record still yields every key', keys(v).split(',').length, 21);
+  eq('a sparse record still yields every key', keys(v).split(',').length, 25);
+  eq('  ...its parts resolve to incomplete', `${v.detailsStatus}/${v.photoStatus}`, 'incomplete/incomplete');
+}
+{
+  const v = toParticipantAdminView('u3', {
+    detailsStatus: 'approved', photoStatus: 'rejected', photoRejectionReason: 'Бүдэг', detailsRejectionReason: 'old',
+    profileStatus: 'rejected',
+  }, 'rejected');
+  eq('a two-part record: details approved', v.detailsStatus, 'approved');
+  eq('  ...photo rejected, with its reason', `${v.photoStatus}: ${v.photoRejectionReason}`, 'rejected: Бүдэг');
+  eq('  ...no reason on an approved part', v.detailsRejectionReason, null);
   eq('  ...missing text is empty', v.lastName, '');
   eq('  ...missing email is null', v.email, null);
   eq('  ...an unknown gender is null, not passed through', v.gender, null);
@@ -163,12 +175,12 @@ console.log('\n  -- the two athlete pages --');
     table.includes("style={{ overflowX: 'auto' }}") && (table.match(/className="oc-adm-people-sticky/g) || []).length === 6);
   ok('Бүртгэлийн хүсэлт lists PENDING requests only', requests.includes("admin-athletes?status=pending'") && !requests.includes('status=approved'));
   ok('  ...one request expanded at a time', requests.includes('onClick={() => setOpenUid(open ? null : a.uid)}'));
-  ok('  ...through the existing verification route, unchanged',
+  ok('  ...through the verification route, each part decided separately',
     requests.includes('`/api/online-competition/admin-athletes/${encodeURIComponent(a.uid)}`') &&
-      requests.includes("decide(a, { action: 'approve' })") && requests.includes("decide(a, { action: 'reject', reason })"));
-  ok('  ...admitting needs BOTH approvals (approve records details and photo together)',
-    requests.includes('{bothApproved && !anyRejected ? ('));
-  ok('  ...closing needs a reason for every rejected part', requests.includes('disabled={busy || !reasonsComplete}'));
+      requests.includes('decide(a, decisionBodyFor(a, checklistOf(a)))'));
+  ok('  ...admitting needs BOTH parts approved', requests.includes('{bothApproved ? ('));
+  ok('  ...closing needs both decided and a reason for every rejected part',
+    requests.includes('disabled={busy || !anyRejected || !decisionsComplete}'));
   ok('the requests page is behind the admin gate',
     src('app/online-competition/admin/athletes/requests/page.tsx').includes('<AdminGate current="athleteRequests">'));
   ok('the old combined list is gone', !fs.existsSync(path.join(ROOT, 'app/online-competition/admin/_components/AthletesList.tsx')));

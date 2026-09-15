@@ -55,6 +55,8 @@ const {
   rankRoster,
   eventHasAverage,
   attemptsFor,
+  publicRosterName,
+  UNVERIFIED_NAME,
 } = require(path.join(OUT, 'roster-view.js'));
 
 let pass = 0;
@@ -109,6 +111,14 @@ console.log('\n  -- the name published --');
   eq('  ...then the uid, so a row is never nameless', rosterName({}, 'u1'), 'u1');
   eq('one name only is still a name', rosterName({ firstName: 'Сараа' }, 'u1'), 'Сараа');
   eq('blank strings do not count as a name', rosterName({ firstName: '   ', displayName: 'G' }, 'u1'), 'G');
+}
+{
+  const verified = { approvedLastName: 'Батаа', approvedFirstName: 'Эрдэнэ', approvedPhotoUrl: 'https://x/a.jpg', profileStatus: 'approved' };
+  const unverified = { lastName: 'Өөрөө', firstName: 'Бичсэн', profileStatus: 'pending' };
+  eq('a verified athlete is named publicly', publicRosterName(verified, 'u1', null), 'Батаа Эрдэнэ');
+  eq('an UNVERIFIED athlete is not', publicRosterName(unverified, 'u2', null), UNVERIFIED_NAME);
+  eq('  ...except to themselves', publicRosterName(unverified, 'u2', 'u2'), 'Өөрөө Бичсэн');
+  eq('  ...not to another signed-in viewer', publicRosterName(unverified, 'u2', 'u1'), UNVERIFIED_NAME);
 }
 eq('initials from two names', initialsFor('Батаа Эрдэнэ'), 'БЭ');
 eq('  ...from one', initialsFor('Сараа'), 'СА');
@@ -271,6 +281,7 @@ console.log('\n  -- the route publishes through this module --');
   ok('  ...and the admin listing is NOT reused',
     !route.includes('RegistrationAdminView') && !route.includes('listCompetitionRegistrations'));
   ok('approved registrations only (D7)', route.includes('isCompetingRegistration(d.data().status)'));
+  ok('  ...of VERIFIED athletes only', route.includes('.filter((d) => isPubliclyVerified(profileByUid.get(d.ref.parent.parent!.id)))'));
   ok('a draft competition has no public roster', route.includes("=== 'draft'"));
   ok('the response is cached at the edge',
     route.includes("'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300'"));

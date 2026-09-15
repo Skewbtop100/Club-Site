@@ -430,7 +430,9 @@ export type OnlineParticipantProfileStatus = 'incomplete' | 'pending' | 'approve
  *  app/online-competition/admin/athletes. `photoUrl`/`photoPublicId` are
  *  the athlete's latest *submitted* photo (pending review);
  *  `approvedPhotoUrl` is only ever set once an admin approves, and is the
- *  one other UI (e.g. a future public roster) should treat as "official". */
+ *  one other UI (e.g. a future public roster) should treat as "official".
+ *  Verification is two parts, details and photo, each decided separately —
+ *  see verification.ts. */
 /** Per-event rollup written by the admin recompute (see
  *  lib/online-competition/athleteStats.ts). Absent until a recompute has
  *  run for a competition the athlete had approved submissions in. */
@@ -482,7 +484,19 @@ export interface OnlineParticipant {
   wcaId?: string;
   photoUrl?: string | null;
   photoPublicId?: string | null;
+  /** DERIVED from detailsStatus + photoStatus and kept in step with them
+   *  (verification.ts). Records decided under the old single approval carry
+   *  only this, and are read as both parts having this status. */
   profileStatus?: OnlineParticipantProfileStatus;
+  /** The two parts of verification, each with its own decision — see
+   *  verification.ts. Absent on records decided under the single approval.
+   *  An athlete may set a part to 'pending' (a resubmission); only the admin
+   *  route approves or rejects one. */
+  detailsStatus?: 'pending' | 'approved' | 'rejected';
+  photoStatus?: 'pending' | 'approved' | 'rejected';
+  /** The admin's reason for each rejected part. Admin-written only. */
+  detailsRejectionReason?: string | null;
+  photoRejectionReason?: string | null;
   /** Snapshot of the identity an admin actually reviewed, written only by
    *  the Admin SDK at approval time and locked against client writes by
    *  firestore.rules. The live fields above may move on when an athlete
@@ -539,6 +553,12 @@ export interface OnlineParticipantAdminView {
   wcaId?: string;
   photoUrl: string | null;
   profileStatus: OnlineParticipantProfileStatus;
+  /** Each part's resolved status ('incomplete' when nothing was submitted),
+   *  and its reason while rejected — verification.ts resolveVerification. */
+  detailsStatus: OnlineParticipantProfileStatus;
+  photoStatus: OnlineParticipantProfileStatus;
+  detailsRejectionReason: string | null;
+  photoRejectionReason: string | null;
   approvedPhotoUrl: string | null;
   /** The identity an admin last approved — see the approved* fields on
    *  OnlineParticipant. The detail panel shows where the live value differs. */
@@ -814,8 +834,11 @@ export const ONLINE_NOTIFICATIONS = 'onlineNotifications';
  *  'round_advanced' — same, plus you made the cut into the next round.
  *  An athlete gets exactly ONE of these per round, never both. (The
  *  earlier per-judge-decision kinds are gone: they fired five times for
- *  one round.) */
-export type OnlineNotificationType = 'round_result' | 'round_advanced';
+ *  one round.)
+ *  'profile_verification' — an admin decided the athlete's verification:
+ *  which part was approved, which rejected and why (verification.ts
+ *  verificationNotice). One per decision; no competitionId. */
+export type OnlineNotificationType = 'round_result' | 'round_advanced' | 'profile_verification';
 
 export interface OnlineNotification {
   id?: string;

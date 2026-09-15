@@ -9,7 +9,7 @@ import { fetchRoundStates } from '@/lib/online-competition/round-results';
 import { resolveRoundAccess } from '@/lib/online-competition/round-access';
 import { roundKey } from '@/lib/online-competition/scrambles';
 import { planResume, runShapeFor, type FiledAttempt, type ResumeKind } from '@/lib/online-competition/run-resume';
-import { rosterName } from '@/lib/online-competition/roster-view';
+import { publicRosterName } from '@/lib/online-competition/roster-view';
 import { roundLabel } from '@/lib/online-competition/detail-view';
 import {
   attemptSlots,
@@ -117,11 +117,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         : null;
 
     // Names for everyone on a board, with the roster's rule so the two tabs
-    // never name the same athlete differently.
+    // never name the same athlete differently. An athlete an admin has not
+    // verified keeps their row — the result stands, and the placings must
+    // match the cut — but under a neutral label instead of their name;
+    // the viewer always sees their own.
     const boardUids = [...new Set(judged.map((s) => s.uid))];
     const profiles =
       boardUids.length > 0 ? await db.getAll(...boardUids.map((u) => db.collection('onlineParticipants').doc(u))) : [];
-    const nameByUid = new Map(profiles.map((p) => [p.id, rosterName((p.data() ?? {}) as Record<string, unknown>, p.id)]));
+    const nameByUid = new Map(
+      profiles.map((p) => [p.id, publicRosterName((p.data() ?? {}) as Record<string, unknown>, p.id, uid)]),
+    );
     const nameOf = (u: string) => nameByUid.get(u) ?? u.slice(0, 10);
 
     // The athlete's qualification INTO each round 2..N: who advanced out of

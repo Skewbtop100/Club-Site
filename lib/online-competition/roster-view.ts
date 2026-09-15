@@ -13,6 +13,7 @@
 // competition has started, which is the point of it.
 
 import { attemptsForFormat, resolveResultFormat, type ResultFormat } from './ao5';
+import { isPubliclyVerified } from './verification';
 
 /** The per-event rollup, as stored. Only the two fields this reads. */
 export interface RosterStats {
@@ -101,6 +102,17 @@ export function rosterName(profile: {
   const last = str(profile.approvedLastName) ?? str(profile.lastName);
   const first = str(profile.approvedFirstName) ?? str(profile.firstName);
   return last && first ? `${last} ${first}` : (first ?? last ?? displayName);
+}
+
+/** What a public screen calls an athlete an admin has not verified. */
+export const UNVERIFIED_NAME = 'Баталгаажаагүй тамирчин';
+
+/** The name a PUBLIC screen may show: the roster's name once an admin has
+ *  verified the athlete (verification.ts isPubliclyVerified), otherwise a
+ *  neutral label. The viewer's own row keeps their name — it is their own
+ *  data, on a response sent only to them. */
+export function publicRosterName(profile: Record<string, unknown>, uid: string, viewerUid: string | null): string {
+  return isPubliclyVerified(profile) || uid === viewerUid ? rosterName(profile, uid) : UNVERIFIED_NAME;
 }
 
 /** Up to two letters, uppercased — the avatar, since no photo is
