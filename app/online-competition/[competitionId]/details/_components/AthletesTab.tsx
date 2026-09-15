@@ -73,7 +73,7 @@ export default function AthletesTab({ roster }: { roster: CompetitionRoster | nu
                 <th scope="col" className="oc-ro-col-num">SINGLE</th>
                 {/* No column of dashes for a bo-N event, which has no
                     average at all. */}
-                {showAverage && <th scope="col" className="oc-ro-col-num">ДУНДАЖ</th>}
+                {showAverage && <th scope="col" className="oc-ro-col-num">AVERAGE</th>}
               </tr>
             </thead>
             <tbody>
@@ -82,7 +82,21 @@ export default function AthletesTab({ roster }: { roster: CompetitionRoster | nu
                   <td className="oc-ro-col-rank">{r.rank ?? '—'}</td>
                   <td className="oc-ro-col-avatar">
                     <span className="oc-ro-avatar" aria-hidden>
-                      {r.athlete.initials}
+                      {/* The approved photo of a verified athlete, or the
+                          initials — roster-view.ts publicPhotoUrl decides,
+                          server-side, and sends null otherwise. */}
+                      {r.athlete.photoUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element -- a Cloudinary
+                        // thumbnail, already sized by its URL.
+                        <img
+                          src={r.athlete.photoUrl}
+                          alt=""
+                          loading="lazy"
+                          style={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }}
+                        />
+                      ) : (
+                        r.athlete.initials
+                      )}
                     </span>
                   </td>
                   <td className="oc-ro-col-name">{r.athlete.name}</td>
@@ -100,10 +114,6 @@ export default function AthletesTab({ roster }: { roster: CompetitionRoster | nu
           </table>
         </div>
       )}
-
-      <p className="oc-ro-note">
-        Хувийн дээд амжилтаар эрэмбэлэв — энэ тэмцээний дүн биш.
-      </p>
     </div>
   );
 }

@@ -47,6 +47,9 @@ type TabKey = string;
 interface Fact {
   label: string;
   value: string;
+  /** One of a pair that shares a row on a phone (opening beside closing,
+   *  start beside end). Every other fact takes the row to itself there. */
+  paired?: boolean;
 }
 
 /** "2026.03.25 · 10:00" split into its two halves, or "—" for an unset
@@ -236,10 +239,10 @@ export default function CompetitionDetailPage() {
     .join(', ');
 
   const facts: Fact[] = [
-    { label: 'БҮРТГЭЛ НЭЭГДЭХ', value: fmtMoment(toMillisOrNull(competition.registrationOpensAt)) },
-    { label: 'БҮРТГЭЛ ХААГДАХ', value: fmtMoment(deadlineMs) },
-    { label: 'ТЭМЦЭЭН ЭХЛЭХ', value: fmtMoment(startAtMs) },
-    { label: 'ТЭМЦЭЭН ДУУСАХ', value: fmtMoment(toMillisOrNull(competition.endAt)) },
+    { label: 'БҮРТГЭЛ НЭЭГДЭХ', value: fmtMoment(toMillisOrNull(competition.registrationOpensAt)), paired: true },
+    { label: 'БҮРТГЭЛ ХААГДАХ', value: fmtMoment(deadlineMs), paired: true },
+    { label: 'ТЭМЦЭЭН ЭХЛЭХ', value: fmtMoment(startAtMs), paired: true },
+    { label: 'ТЭМЦЭЭН ДУУСАХ', value: fmtMoment(toMillisOrNull(competition.endAt)), paired: true },
     { label: 'ФОРМАТ', value: competitionFormatLabel(competition.format) },
     { label: 'ТАМИРЧНЫ ХЯЗГААР', value: limit === null ? 'Хязгааргүй' : `${limit} тамирчин` },
     {
@@ -333,7 +336,13 @@ export default function CompetitionDetailPage() {
 
         <div className="oc-cd-layout">
           <nav className="oc-cd-side" aria-label="Хэсэг">
-            <SideItem active={side === 'general'} onClick={() => setSide('general')} label="Ерөнхий мэдээлэл" />
+            {/* "Ерөнхий" on a phone, where three tabs share one line. */}
+            <SideItem
+              active={side === 'general'}
+              onClick={() => setSide('general')}
+              label="Ерөнхий мэдээлэл"
+              shortLabel="Ерөнхий"
+            />
             <SideItem
               active={side === 'register'}
               onClick={() => setSide('register')}
@@ -398,7 +407,7 @@ export default function CompetitionDetailPage() {
                       )}
                       <div className="oc-cd-facts">
                         {facts.map((f) => (
-                          <div key={f.label} className="oc-cd-fact">
+                          <div key={f.label} className={`oc-cd-fact${f.paired ? '' : ' oc-cd-fact-wide'}`}>
                             <span className="oc-cd-fact-label">{f.label}</span>
                             <span className="oc-cd-fact-value">{f.value}</span>
                           </div>
@@ -451,10 +460,7 @@ export default function CompetitionDetailPage() {
                 </div>
               </>
             ) : (
-              <>
-                <h2 className="oc-cd-section-label">Тамирчид</h2>
-                <AthletesTab roster={roster} />
-              </>
+              <AthletesTab roster={roster} />
             )}
           </div>
         </div>
@@ -467,11 +473,15 @@ function SideItem({
   active,
   onClick,
   label,
+  shortLabel,
   count,
 }: {
   active: boolean;
   onClick: () => void;
   label: string;
+  /** Shown instead of `label` below 640px (theme.css). Only one of the two
+   *  is ever displayed, so a screen reader hears one. */
+  shortLabel?: string;
   count?: React.ReactNode;
 }) {
   return (
@@ -481,7 +491,16 @@ function SideItem({
       className={`oc-cd-side-item${active ? ' oc-cd-side-item-active' : ''}`}
       onClick={onClick}
     >
-      <span className="oc-cd-side-label">{label}</span>
+      <span className="oc-cd-side-label">
+        {shortLabel ? (
+          <>
+            <span className="oc-cd-side-label-full">{label}</span>
+            <span className="oc-cd-side-label-short">{shortLabel}</span>
+          </>
+        ) : (
+          label
+        )}
+      </span>
       {count && <span className="oc-cd-side-count">{count}</span>}
     </button>
   );

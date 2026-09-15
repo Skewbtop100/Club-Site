@@ -13,7 +13,7 @@
 // competition has started, which is the point of it.
 
 import { attemptsForFormat, resolveResultFormat, type ResultFormat } from './ao5';
-import { isPubliclyVerified } from './verification';
+import { isPubliclyVerified, resolveVerification } from './verification';
 
 /** The per-event rollup, as stored. Only the two fields this reads. */
 export interface RosterStats {
@@ -29,14 +29,19 @@ export interface RosterStats {
  *  Deliberately absent, all of which the ADMIN listing carries and this
  *  must not: note (its placeholder asks for a phone number), statusNote,
  *  email, dateOfBirth, citizenship, wcaId, registeredAt, updatedAt,
- *  results, status, and any photo — the mockup uses initials, so no image
- *  url crosses the boundary at all. */
+ *  results, status, the SUBMITTED photo (photoUrl) and the Google avatar
+ *  (photoURL). The one photo that may cross is `photoUrl` below — see
+ *  publicPhotoUrl for exactly when. */
 export interface RosterAthlete {
   uid: string;
   /** The approved identity where there is one — see rosterName. */
   name: string;
   /** Precomputed so no client has to re-derive it from the name. */
   initials: string;
+  /** A small thumbnail of the admin-APPROVED verification photo, only
+   *  while the athlete is verified; null otherwise, and the list shows the
+   *  initials. See publicPhotoUrl. */
+  photoUrl: string | null;
   /** eventId -> best single, centiseconds. Only events this athlete is
    *  registered for, and only where a result exists. */
   prByEvent: Record<string, number>;
@@ -53,7 +58,7 @@ export interface RosterAthlete {
  *  `ao5` and `mo3` are separate stored fields on purpose — a mean of 3
  *  with no dropped attempt is systematically slower than an Ao5, so they
  *  are not comparable — and a bo-N round produces no average at all.
- *  Reading `ao5` unconditionally would leave the ДУНДАЖ column
+ *  Reading `ao5` unconditionally would leave the AVERAGE column
  *  permanently empty for an Mo3 event and silently mix two different
  *  numbers if it ever were populated.
  *
@@ -115,8 +120,45 @@ export function publicRosterName(profile: Record<string, unknown>, uid: string, 
   return isPubliclyVerified(profile) || uid === viewerUid ? rosterName(profile, uid) : UNVERIFIED_NAME;
 }
 
-/** Up to two letters, uppercased — the avatar, since no photo is
- *  published. */
+// ── The one public photo ────────────────────────────────────────────────
+// A deliberate reversal of "no photo is published": the athletes list shows
+// the athlete's photo. There is ONE photo field involved — the verification
+// photo, which is also the athlete's avatar on their own profile. There is
+// no separate profile photo, and the Google avatar (photoURL) is never used.
+
+/** An image delivered from Cloudinary's public upload path: cloud name,
+ *  then everything after /image/upload/ (version and public id). */
+const CLOUDINARY_IMAGE = /^https:\/\/res\.cloudinary\.com\/([A-Za-z0-9_-]+)\/image\/upload\/([^?#]+)$/;
+
+/** Square, face-centred, 64px — two and a half times the 26px avatar, for
+ *  sharp high-density screens — re-encoded. Keeps a list of athletes from
+ *  downloading full-size photographs. It is not a privacy boundary: the
+ *  original is the same URL without this segment. */
+export const ROSTER_PHOTO_TRANSFORM = 'c_fill,g_face,w_64,h_64,q_auto,f_auto';
+
+/** The photo a public screen may show, or null.
+ *
+ *  ONLY `approvedPhotoUrl` — the snapshot an admin approved — and ONLY
+ *  while the athlete is VERIFIED right now (details and photo both
+ *  approved; verification.ts resolveVerification). So:
+ *    · the submitted photo (`photoUrl`) is never read, pending or rejected;
+ *    · an athlete whose photo or details are pending or rejected shows
+ *      initials, even if an earlier approved photo is on record — including
+ *      while an edit is re-reviewed, when their approved NAME stays public;
+ *    · anything that is not a Cloudinary image URL is refused, so a hand-
+ *      edited value can never make every visitor's browser fetch from some
+ *      other host. */
+export function publicPhotoUrl(profile: Record<string, unknown>): string | null {
+  if (!resolveVerification(profile).verified) return null;
+  const url = profile.approvedPhotoUrl;
+  if (typeof url !== 'string') return null;
+  const m = CLOUDINARY_IMAGE.exec(url);
+  if (!m) return null;
+  return `https://res.cloudinary.com/${m[1]}/image/upload/${ROSTER_PHOTO_TRANSFORM}/${m[2]}`;
+}
+
+/** Up to two letters, uppercased — the avatar when there is no public
+ *  photo. */
 export function initialsFor(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return '—';
@@ -151,7 +193,15 @@ export function toRosterAthlete(input: {
     if (avg !== null) avgByEvent[eventId] = avg;
   }
 
-  return { uid: input.uid, name, initials: initialsFor(name), prByEvent, avgByEvent, events: input.events };
+  return {
+    uid: input.uid,
+    name,
+    initials: initialsFor(name),
+    photoUrl: publicPhotoUrl(input.profile),
+    prByEvent,
+    avgByEvent,
+    events: input.events,
+  };
 }
 
 export interface RosterRow {

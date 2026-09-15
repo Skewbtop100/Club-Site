@@ -128,8 +128,11 @@ const src = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
   ok('  ...and the hook reports it', hook.includes('return { registration, loading, error, refresh };'));
   const regPanel = src('app/online-competition/[competitionId]/details/_components/RegistrationPanel.tsx');
   ok('the registration panel shows the failure BEFORE "closed" or the form',
+    // The closed/not-yet-open wording now lives in registration-view.ts
+    // (registrationClosedCopy); the panel branches on the window itself.
     regPanel.indexOf('if (registrationError)') > -1 &&
-      regPanel.indexOf('if (registrationError)') < regPanel.indexOf('Бүртгэл хаагдсан') &&
+      regPanel.indexOf('if (!regWindow.open)') > -1 &&
+      regPanel.indexOf('if (registrationError)') < regPanel.indexOf('if (!regWindow.open)') &&
       regPanel.includes('энэ нь та бүртгүүлээгүй гэсэн үг биш'));
   ok('the start panel says it could not load, instead of vanishing',
     panel.includes('if (!registrationFailed || loading) return null;') && panel.includes('Таны бүртгэлийг ачаалж чадсангүй'));

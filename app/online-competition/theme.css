@@ -3407,11 +3407,8 @@
   color: #9A958A;
   font: 600 9px var(--oc-font-mono), monospace;
   letter-spacing: 0.04em;
-}
-.oc-ro-note {
-  margin-top: 12px;
-  font: 400 11px var(--oc-font-heading), sans-serif;
-  color: #6E6A62;
+  /* Clips the approved photo to the square when there is one. */
+  overflow: hidden;
 }
 
 .oc-cd-layout {
@@ -3456,6 +3453,11 @@
   letter-spacing: .12em;
   color: #4A4740;
   white-space: nowrap;
+}
+/* A tab's phone-width label (page.tsx SideItem shortLabel): hidden until
+   the 640px rules swap it in for the full one. */
+.oc-cd-side-label-short {
+  display: none;
 }
 .oc-cd-side-item:hover .oc-cd-side-label {
   color: #F4F1EA;
@@ -4528,14 +4530,84 @@
   .oc-cd-poster {
     max-width: 200px;
   }
+  /* Two columns still, so the paired dates share a row — opening beside
+     closing, start beside end. Every other fact spans both. A date wraps
+     at its " · " when the half-width cell is too narrow for it. */
   .oc-cd-facts {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .oc-cd-fact-wide {
+    grid-column: 1 / -1;
+  }
+  .oc-cd-fact {
+    padding: 12px;
+  }
+  .oc-cd-fact-value {
+    font-size: 13px;
+  }
+
+  /* ── the section tabs: three on one line ──
+     They were 128px minimum each, holding the label AND a grey count
+     ("3 төрөл", or the registration status). Squeezed that small, the
+     label — allowed to shrink to nothing — ran underneath the count, and
+     "Ерөнхий мэдээлэл" wrapped to a second line. Now each tab is an equal
+     third with no minimum, carries its label only (short for Ерөнхий, 12px,
+     never wrapping), and the count is not shown at this width: the
+     registration status is inside the Бүртгүүлэх panel itself. */
   .oc-cd-side-item {
     min-height: 44px;
+    flex: 1 1 0;
+    min-width: 0;
+    justify-content: center;
+    padding: 12px 8px;
+  }
+  .oc-cd-side-label {
+    flex: none;
+    font-size: 12px;
+    white-space: nowrap;
+    text-align: center;
+  }
+  .oc-cd-side-count,
+  .oc-cd-side-label-full {
+    display: none;
+  }
+  .oc-cd-side-label-short {
+    display: inline;
   }
   .oc-cd-tab {
     min-height: 44px;
+  }
+
+  /* ── the athletes list: both times on screen ──
+     No minimum width: the name column takes what the others leave and wraps,
+     so the table only overflows its scrolling frame (.oc-cd-table-wrap) when
+     a TIME cannot fit. The rank sizes to its own digits with 4px to the
+     avatar; the times size to their own text. */
+  .oc-ro-table {
+    min-width: 0;
+  }
+  .oc-ro-table th.oc-ro-col-rank,
+  .oc-ro-table td.oc-ro-col-rank {
+    width: 1%;
+    white-space: nowrap;
+    padding-left: 10px;
+    padding-right: 4px;
+    font-size: 11px;
+  }
+  .oc-ro-table td.oc-ro-col-avatar {
+    width: 1%;
+    padding-left: 0;
+  }
+  .oc-ro-table td.oc-ro-col-name {
+    padding-left: 8px;
+    padding-right: 6px;
+    overflow-wrap: anywhere;
+  }
+  .oc-ro-table th.oc-ro-col-num,
+  .oc-ro-table td.oc-ro-col-num {
+    width: 1%;
+    padding-left: 8px;
+    padding-right: 10px;
   }
 }
 

@@ -56,6 +56,7 @@ const {
   eventHasAverage,
   attemptsFor,
   publicRosterName,
+  publicPhotoUrl,
   UNVERIFIED_NAME,
 } = require(path.join(OUT, 'roster-view.js'));
 
@@ -138,8 +139,8 @@ console.log('\n  -- THE WHITELIST: what reaches the public payload --');
     dateOfBirth: '2003-04-12', approvedDateOfBirth: '2003-04-12',
     citizenship: 'mn', approvedCitizenship: 'mn',
     wcaId: '2019BATA01',
-    photoUrl: 'https://example.com/pending.jpg',
-    approvedPhotoUrl: 'https://example.com/approved.jpg',
+    photoUrl: 'https://res.cloudinary.com/demo/image/upload/v2/pending.jpg',
+    approvedPhotoUrl: 'https://res.cloudinary.com/demo/image/upload/v1/approved.jpg',
     photoURL: 'https://lh3.googleusercontent.com/a/x',
     profileStatus: 'approved',
     rejectionReason: null,
@@ -154,20 +155,23 @@ console.log('\n  -- THE WHITELIST: what reaches the public payload --');
   });
 
   eq('EXACTLY these keys are published',
-    keys(row), 'avgByEvent,events,initials,name,prByEvent,uid');
+    keys(row), 'avgByEvent,events,initials,name,photoUrl,prByEvent,uid');
   // Named individually as well as by the key list: a reader of this test
   // should be able to see WHICH fields were the danger.
   for (const leaked of [
     'email', 'phone', 'dateOfBirth', 'approvedDateOfBirth', 'citizenship', 'approvedCitizenship',
-    'wcaId', 'photoUrl', 'approvedPhotoUrl', 'photoURL', 'profileStatus', 'rejectionReason',
+    'wcaId', 'approvedPhotoUrl', 'photoURL', 'profileStatus', 'rejectionReason',
     'note', 'statusNote', 'registeredAt', 'status', 'results', 'stats', 'displayName', 'solveCount',
   ]) {
     ok(`  ...and NOT ${leaked}`, !(leaked in row));
   }
-  // No photo at all: the mockup uses initials, so no image url crosses the
-  // boundary even though an approved one exists on the profile.
-  ok('no value in the payload is a url',
-    !JSON.stringify(row).includes('http'), JSON.stringify(row));
+  // The one url: a thumbnail of the APPROVED photo of this verified athlete.
+  eq('the photo is a thumbnail of the APPROVED photo',
+    row.photoUrl, 'https://res.cloudinary.com/demo/image/upload/c_fill,g_face,w_64,h_64,q_auto,f_auto/v1/approved.jpg');
+  ok('  ...never the submitted one', !JSON.stringify(row).includes('pending.jpg'));
+  ok('  ...never the Google avatar', !JSON.stringify(row).includes('googleusercontent'));
+  ok('no other value in the payload is a url',
+    !JSON.stringify({ ...row, photoUrl: null }).includes('http'), JSON.stringify(row));
   eq('the name is the approved identity', row.name, 'Батаа Эрдэнэ');
   eq('  ...with initials precomputed', row.initials, 'БЭ');
   eq('the personal best is published', row.prByEvent['333'], 900);
@@ -201,8 +205,44 @@ console.log('\n  -- THE WHITELIST: what reaches the public payload --');
 {
   const row = toRosterAthlete({ uid: 'u4', profile: {}, events: [], formatByEvent: {} });
   eq('an athlete with no profile still produces the same keys',
-    keys(row), 'avgByEvent,events,initials,name,prByEvent,uid');
+    keys(row), 'avgByEvent,events,initials,name,photoUrl,prByEvent,uid');
   eq('  ...named by uid', row.name, 'u4');
+  eq('  ...and has no photo', row.photoUrl, null);
+}
+
+console.log('\n  -- the public photo: only the approved photo of a verified athlete --');
+{
+  const APPROVED = 'https://res.cloudinary.com/demo/image/upload/v1/approved.jpg';
+  const NEW = 'https://res.cloudinary.com/demo/image/upload/v2/new.jpg';
+  const THUMB = 'https://res.cloudinary.com/demo/image/upload/c_fill,g_face,w_64,h_64,q_auto,f_auto/v1/approved.jpg';
+  const snapshot = { approvedLastName: 'Бат', approvedFirstName: 'Эрдэнэ', approvedPhotoUrl: APPROVED };
+  eq('verified (two parts approved): the approved photo',
+    publicPhotoUrl({ ...snapshot, photoUrl: APPROVED, detailsStatus: 'approved', photoStatus: 'approved' }), THUMB);
+  eq('verified under the old single approval: the approved photo',
+    publicPhotoUrl({ ...snapshot, photoUrl: APPROVED, profileStatus: 'approved' }), THUMB);
+  eq('waiting for a first review: initials',
+    publicPhotoUrl({ photoUrl: NEW, detailsStatus: 'pending', photoStatus: 'pending', profileStatus: 'pending' }), null);
+  eq('photo REJECTED: initials, and the rejected photo is never used',
+    publicPhotoUrl({ photoUrl: NEW, detailsStatus: 'approved', photoStatus: 'rejected', profileStatus: 'rejected' }), null);
+  eq('details rejected, an old approved photo on record: initials',
+    publicPhotoUrl({ ...snapshot, photoUrl: APPROVED, detailsStatus: 'rejected', photoStatus: 'approved', profileStatus: 'rejected' }), null);
+  eq('a new photo under re-review: initials, though the name stays public',
+    publicPhotoUrl({ ...snapshot, photoUrl: NEW, detailsStatus: 'approved', photoStatus: 'pending', profileStatus: 'pending' }), null);
+  eq('old record, re-review after an edit: initials',
+    publicPhotoUrl({ ...snapshot, photoUrl: NEW, profileStatus: 'pending' }), null);
+  eq('verified with NO approved photo on record: initials, never the submitted one',
+    publicPhotoUrl({ photoUrl: NEW, detailsStatus: 'approved', photoStatus: 'approved' }), null);
+  const verified = (approvedPhotoUrl) => publicPhotoUrl({ approvedPhotoUrl, detailsStatus: 'approved', photoStatus: 'approved' });
+  eq('a url on another host is refused', verified('https://evil.example/tracker.gif'), null);
+  eq('plain http is refused', verified('http://res.cloudinary.com/demo/image/upload/v1/a.jpg'), null);
+  eq('a Cloudinary VIDEO url is refused', verified('https://res.cloudinary.com/demo/video/upload/v1/a.mp4'), null);
+  eq('a look-alike host is refused', verified('https://res.cloudinary.com.evil.example/demo/image/upload/v1/a.jpg'), null);
+  eq('a url with a query string is refused', verified('https://res.cloudinary.com/demo/image/upload/v1/a.jpg?x=1'), null);
+}
+{
+  const src = fs.readFileSync(path.join(ROOT, 'app/online-competition/[competitionId]/details/_components/AthletesTab.tsx'), 'utf8');
+  ok('the list shows the photo when there is one, the initials otherwise',
+    /r\.athlete\.photoUrl \? \([\s\S]{0,200}<img[\s\S]{0,120}src=\{r\.athlete\.photoUrl\}[\s\S]{0,300}\) : \(\s*r\.athlete\.initials\s*\)/.test(src));
 }
 
 console.log('\n  -- the ranking --');
@@ -210,6 +250,7 @@ const athlete = (uid, name, pr, avg, events = ['333']) => ({
   uid,
   name,
   initials: 'XX',
+  photoUrl: null,
   prByEvent: pr === null ? {} : { 333: pr },
   avgByEvent: avg === null ? {} : { 333: avg },
   events,

@@ -17,10 +17,11 @@ import { collection, doc, getDoc, getDocs, runTransaction, setDoc, updateDoc, de
 // account, and athletes by anyone — email, date of birth, citizenship and
 // verification photos, minors' included.
 //
-// The online athlete's PUBLIC half (name and results) is not a Firestore
+// The online athlete's PUBLIC half (name, results, and — for a verified
+// athlete only — a thumbnail of the admin-approved photo) is not a Firestore
 // read at all: the roster and live routes project it with the Admin SDK, and
 // tests/competition-fields/roster-view.test.cjs pins exactly which keys
-// leave (no email, date of birth, citizenship or photo).
+// leave (no email, date of birth, citizenship or submitted photo).
 const RULES = process.env.RULES_PATH ?? 'firestore.rules';
 const ADMIN = 'admin1';
 const MEMBER = 'member1'; // owns club athlete athA, and is online athlete member1
