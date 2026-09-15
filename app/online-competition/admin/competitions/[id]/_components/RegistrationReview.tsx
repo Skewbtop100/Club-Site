@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { EVENT_STATE_WORD, type EventDecision } from '@/lib/online-competition/event-requests';
 import type { OnlineCompetitionAdminView, OnlineRegistrationStatus } from '@/lib/online-competition/types';
 import { REGISTRATION_STATUS_NOTE_MAX } from '@/lib/online-competition/types';
 import type { RegistrationAdminView } from '@/lib/online-competition/admin-registrations';
@@ -190,6 +191,37 @@ export default function RegistrationReview({ competition }: { competition: Onlin
     // given.
   }
 
+  /** One added event, one decision — see event-requests.ts. */
+  async function decideEvent(uid: string, eventId: string, decision: EventDecision) {
+    setBusy(true);
+    setActionError('');
+    try {
+      const res = await fetch(
+        `/api/online-competition/admin-competitions/${competition.id}/registrations/${encodeURIComponent(uid)}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ eventId, decision }) },
+      );
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        // 409: the registration changed since it was loaded (the athlete
+        // edited it). Said as-is, with the current rows.
+        if (res.status === 409 && data.error) {
+          setActionError(data.error);
+          await load();
+          return;
+        }
+        throw new Error(data.error ?? `HTTP ${res.status}`);
+      }
+      await load();
+    } catch (err) {
+      console.error('RegistrationReview: deciding an added event failed:', err);
+      setActionError(`Хадгалж чадсангүй — өөрчлөлт хийгдээгүй. ${err instanceof Error ? err.message : ''}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const labelOf = (eventId: string) => competition.events.find((e) => e.eventId === eventId)?.label ?? eventId;
+
   async function saveNote(uid: string, text: string) {
     return patch(`/api/online-competition/admin-competitions/${competition.id}/registrations/${encodeURIComponent(uid)}`, {
       statusNote: text.trim() ? text.trim() : null,
@@ -317,8 +349,8 @@ export default function RegistrationReview({ competition }: { competition: Onlin
                   <p className="oc-rr-empty">Хайлтад тохирох тамирчин алга.</p>
                 ) : (
                   visible.map((r) => (
+                    <Fragment key={r.uid}>
                     <div
-                      key={r.uid}
                       className={`oc-rr-row${selected.has(r.uid) ? ' oc-rr-row-on' : ''}`}
                       style={{ gridTemplateColumns: gridColumns }}
                     >
@@ -363,6 +395,13 @@ export default function RegistrationReview({ competition }: { competition: Onlin
                       {columns.registeredAt && <span className="oc-rr-mono">{fmtMoment(r.registeredAt)}</span>}
                       <StatusNoteCell value={r.statusNote} disabled={busy} onSave={(text) => saveNote(r.uid, text)} />
                     </div>
+                    <EventChanges
+                      row={r}
+                      labelOf={labelOf}
+                      busy={busy}
+                      onDecide={(eventId, decision) => decideEvent(r.uid, eventId, decision)}
+                    />
+                    </Fragment>
                   ))
                 )}
 
@@ -372,6 +411,84 @@ export default function RegistrationReview({ competition }: { competition: Onlin
           </section>
         );
       })}
+    </div>
+  );
+}
+
+/** An approved athlete's event changes, in their own row, under it:
+ *
+ *    ТӨРЛИЙН ӨӨРЧЛӨЛТ  3x3x3 · БАТЛАГДСАН  2x2x2 · ХҮСЭЛТ [БАТЛАХ] [ТАТГАЛЗАХ]  4x4x4 · ХАССАН
+ *
+ *  Shown only while there is a change to see — a request waiting, or an
+ *  event withdrawn or declined — and whether or not the Төрлүүд column is
+ *  on. Each requested event carries its own two buttons: one decision per
+ *  event. */
+function EventChanges({
+  row,
+  labelOf,
+  busy,
+  onDecide,
+}: {
+  row: RegistrationAdminView;
+  labelOf: (eventId: string) => string;
+  busy: boolean;
+  onDecide: (eventId: string, decision: EventDecision) => void;
+}) {
+  if (row.status !== 'approved') return null;
+  if (row.requestedEvents.length === 0 && row.withdrawnEvents.length === 0 && row.declinedEvents.length === 0) return null;
+  const mono = 'var(--oc-font-mono), monospace';
+  const word = (eventId: string, text: string, color: string) => (
+    <span style={{ font: `600 9px/1.4 ${mono}`, letterSpacing: '.08em', color, whiteSpace: 'nowrap' }}>
+      {labelOf(eventId)} · {text}
+    </span>
+  );
+  return (
+    <div
+      role="group"
+      aria-label={`${row.name} — төрлийн өөрчлөлт`}
+      style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        gap: '8px 14px',
+        padding: '8px 12px 12px 40px',
+        borderBottom: '1px solid #16161B',
+        background: '#0A0A0C',
+      }}
+    >
+      <span style={{ font: `500 8px/1.4 ${mono}`, letterSpacing: '.14em', color: '#6E6A62' }}>ТӨРЛИЙН ӨӨРЧЛӨЛТ</span>
+      {row.events.map((id) => (
+        <Fragment key={`approved-${id}`}>{word(id, EVENT_STATE_WORD.approved, '#4FD07A')}</Fragment>
+      ))}
+      {row.requestedEvents.map((id) => (
+        <span key={`requested-${id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          {word(id, EVENT_STATE_WORD.requested, '#E0A020')}
+          <button
+            type="button"
+            className="oc-rr-action oc-rr-action-approved"
+            disabled={busy}
+            aria-label={`${labelOf(id)} төрлийг батлах`}
+            onClick={() => onDecide(id, 'approve')}
+          >
+            БАТЛАХ
+          </button>
+          <button
+            type="button"
+            className="oc-rr-action oc-rr-action-rejected"
+            disabled={busy}
+            aria-label={`${labelOf(id)} төрлийн хүсэлтээс татгалзах`}
+            onClick={() => onDecide(id, 'decline')}
+          >
+            ТАТГАЛЗАХ
+          </button>
+        </span>
+      ))}
+      {row.withdrawnEvents.map((id) => (
+        <Fragment key={`withdrawn-${id}`}>{word(id, EVENT_STATE_WORD.withdrawn, '#6E6A62')}</Fragment>
+      ))}
+      {row.declinedEvents.map((id) => (
+        <Fragment key={`declined-${id}`}>{word(id, EVENT_STATE_WORD.declined, '#E8543C')}</Fragment>
+      ))}
     </div>
   );
 }

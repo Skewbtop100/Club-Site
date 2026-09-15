@@ -428,6 +428,7 @@ async function saveRegistration(db, uid, competitionId, events, note) {
       snap.exists(),
       { competitionId, events, note },
       { now: serverTimestamp(), remove: deleteField() },
+      snap.exists() ? snap.data() : null,
     );
     if (write.kind === 'create') tx.set(ref, write.data);
     else tx.update(ref, write.data);
@@ -458,7 +459,9 @@ await scenario('RW2. an EDIT keeps registeredAt, status and results — and repl
   expect(d.status === 'approved', `the admin status was overwritten: ${d.status}`);
   expect(d.registeredAt.toMillis() === FIRST.toMillis(), 'registeredAt was rewritten');
   expect(d.results?.['333']?.ao5 === 1234, `results were erased: ${JSON.stringify(d.results)}`);
-  expect(d.events.join(',') === '333,444', `events: ${d.events}`);
+  // Approved: the added 444 is a REQUEST, not a competing event.
+  expect(d.events.join(',') === '333' && (d.requestedEvents ?? []).join(',') === '444',
+    `events: ${d.events} requested: ${d.requestedEvents}`);
   expect(d.updatedAt && d.updatedAt.toMillis() > FIRST.toMillis(), 'updatedAt not stamped');
   expect(d.competitionId === 'comp1', 'competitionId lost');
 });
@@ -552,7 +555,7 @@ await scenario('S9. an edit leaves an approved status approved (D4: edit never w
   const d = await readRaw(UID, 'comp1');
   expect(d.status === 'approved', `status became ${d.status}`);
   expect(d.statusNote === 'Төлбөр төлсөн', 'the admin note was lost');
-  expect(d.events.join(',') === '333,444', 'events not saved');
+  expect(d.events.join(',') === '333' && (d.requestedEvents ?? []).join(',') === '444', 'the added event was not saved as a request');
 });
 await scenario('S10. recordAo5Result can still write results onto the registration', async () => {
   await seedReg(UID, 'comp1', { ...STORED, status: 'approved' });

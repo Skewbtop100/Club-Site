@@ -105,14 +105,21 @@ export function countByStatus(regs: { status: OnlineRegistrationStatus }[]): Rec
   return out;
 }
 
-/** "БҮРТГЭЛ · 12 ХҮЛЭЭГДЭЖ · 40/64 БАТАЛГААЖСАН · 3 ЦУЦЛАГДСАН".
+/** "БҮРТГЭЛ · 12 ХҮЛЭЭГДЭЖ · 40/64 БАТАЛГААЖСАН · 3 ЦУЦЛАГДСАН", and
+ *  " · 2 ТӨРӨЛ НЭМЭХ ХҮСЭЛТ" while approved athletes have added events
+ *  waiting for a decision.
  *
  *  The limit is shown AGAINST the approved count because approved is who
  *  takes a place. It is not enforced yet (PR-4) — the figure can read
  *  "70/64", and that overrun is exactly what an admin needs to see. */
-export function reviewSummary(regs: { status: OnlineRegistrationStatus }[], limit: number | null): string {
+export function reviewSummary(
+  regs: { status: OnlineRegistrationStatus; requestedEvents?: readonly string[] }[],
+  limit: number | null,
+): string {
   const c = countByStatus(regs);
-  return `БҮРТГЭЛ · ${c.pending} ХҮЛЭЭГДЭЖ · ${c.approved}/${limit ?? '∞'} БАТАЛГААЖСАН · ${c.cancelled} ЦУЦЛАГДСАН`;
+  const base = `БҮРТГЭЛ · ${c.pending} ХҮЛЭЭГДЭЖ · ${c.approved}/${limit ?? '∞'} БАТАЛГААЖСАН · ${c.cancelled} ЦУЦЛАГДСАН`;
+  const requests = regs.reduce((n, r) => n + (r.requestedEvents?.length ?? 0), 0);
+  return requests > 0 ? `${base} · ${requests} ТӨРӨЛ НЭМЭХ ХҮСЭЛТ` : base;
 }
 
 /** "{N} тамирчин · {N} шинэ". */

@@ -196,6 +196,28 @@ export default function LiveCompetitionPage() {
         }));
     });
 
+    // An approved athlete's ADDED events still waiting for the admin: listed
+    // so the athlete sees them, never startable. They are not in the
+    // registration's `events`, so the gate refuses them and nothing above
+    // counts them; these rows carry no button (SchedulePanel `requested`).
+    const requestedItems: ScheduleItem[] =
+      view.registration?.status === 'approved'
+        ? view.events
+            .filter((e) => (view.registration?.requestedEvents ?? []).includes(e.eventId))
+            .map((e) => ({
+              key: `${e.eventId}_requested`,
+              eventId: e.eventId,
+              label: e.label,
+              round: 1,
+              status: 'closed' as const,
+              scheduledAt: null,
+              qualified: null,
+              state: 'notopen' as const,
+              viewNote: '',
+              requested: true,
+            }))
+        : [];
+
     const idle = currentState ? null : idleReason(view);
     return {
       currentEvent,
@@ -203,7 +225,7 @@ export default function LiveCompetitionPage() {
       currentState,
       stats,
       gate,
-      scheduleItems,
+      scheduleItems: [...scheduleItems, ...requestedItems],
       idle,
       // Before a round opens: the athlete's next round, only for the two
       // "waiting" reasons. Every other idle reason (finished, signed out,

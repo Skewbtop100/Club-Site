@@ -337,8 +337,10 @@ export interface LiveViewPayload {
   competitionId: string;
   status: OnlineCompetitionStatus;
   signedIn: boolean;
-  /** Status and events only — nothing else on the document crosses. */
-  registration: { status: OnlineRegistrationStatus; events: string[] } | null;
+  /** Status and events only — nothing else on the document crosses.
+   *  `requestedEvents`: an approved registration's added events still
+   *  waiting for the admin; not competed in, shown so the athlete sees them. */
+  registration: { status: OnlineRegistrationStatus; events: string[]; requestedEvents?: string[] } | null;
   events: LiveEventView[];
 }
 

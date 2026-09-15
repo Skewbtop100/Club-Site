@@ -609,8 +609,19 @@ export type OnlineRegistrationStatus = 'pending' | 'waitlisted' | 'approved' | '
  *  survive an edit. */
 export interface OnlineRegistration {
   competitionId: string;
-  /** eventIds the athlete selected, e.g. ["333", "222"]. */
+  /** eventIds, e.g. ["333", "222"]. For an APPROVED registration these are
+   *  the events it competes in — every approved one, and nothing still
+   *  waiting for the admin. Otherwise, the events the whole registration
+   *  asks for. See registration-shape.ts. */
   events: string[];
+  /** An approved registration's added events, waiting for the admin.
+   *  Written by the athlete; never competed in until approved. Absent when
+   *  there are none. */
+  requestedEvents?: string[];
+  /** Approved once, then removed by the athlete. Absent when none. */
+  withdrawnEvents?: string[];
+  /** Requested, and declined by the admin. Admin-written. Absent when none. */
+  declinedEvents?: string[];
   /** When the athlete FIRST registered. Set once, by the create, and never
    *  rewritten — a waitlist needs a fair order, and this is it.
    *

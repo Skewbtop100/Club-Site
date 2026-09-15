@@ -10,6 +10,7 @@ import type {
 } from '@/lib/online-competition/types';
 import { REGISTRATION_NOTE_MAX } from '@/lib/online-competition/types';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
+import { RegistrationEditRefused } from '@/lib/online-competition/registration-shape';
 import { onlineCompAuth } from '@/lib/online-competition/firebase';
 import { fetchParticipant, registerForCompetition } from '@/lib/online-competition/data';
 import { rejectionSummary, resolveVerification } from '@/lib/online-competition/verification';
@@ -62,6 +63,9 @@ interface Saved {
 const WINDOW_TICK_MS = 30_000;
 /** While counting down to the opening time. */
 const COUNTDOWN_TICK_MS = 1_000;
+
+const KEEP_ONE_APPROVED =
+  'Баталгаажсан төрлөөс дор хаяж нэгийг үлдээнэ үү. Шинэ төрөл батлагдсаны дараа хуучныг хасаж болно.';
 
 export default function RegistrationPanel({
   competition,
@@ -126,7 +130,9 @@ export default function RegistrationPanel({
     if (!registration || editing) return;
     const snapshot = { events: new Set(registration.events), note: registration.note ?? '' };
     setSaved(snapshot);
-    setSelected(new Set(snapshot.events));
+    // The form starts from everything the athlete has asked for: the events
+    // they compete in and any added ones still waiting for the admin.
+    setSelected(new Set([...snapshot.events, ...(registration.requestedEvents ?? [])]));
     setNote(snapshot.note);
     setState('summary');
   }, [registration, editing]);
@@ -136,6 +142,13 @@ export default function RegistrationPanel({
   // first save may write.
   const status: OnlineRegistrationStatus | null = registration?.status ?? (saved ? 'pending' : null);
   const statusCopy = status ? registrationStatusCopy(status) : null;
+  // An APPROVED registration's added events waiting for the admin, and the
+  // ones the admin declined. For any other status the whole registration is
+  // under review, and `events` is edited directly.
+  const approvedRegistration = status === 'approved';
+  const heldIds = registration?.events ?? [];
+  const requestedIds = approvedRegistration ? registration?.requestedEvents ?? [] : [];
+  const declinedIds = approvedRegistration ? registration?.declinedEvents ?? [] : [];
 
   async function handleRegisterClick() {
     // Anonymous (solve-page) sessions don't count — registering needs a
@@ -204,7 +217,7 @@ export default function RegistrationPanel({
     setSaveError('');
     setEditing(false);
     if (saved) {
-      setSelected(new Set(saved.events));
+      setSelected(new Set([...saved.events, ...requestedIds]));
       setNote(saved.note);
       setState('summary');
     } else {
@@ -242,12 +255,22 @@ export default function RegistrationPanel({
       return;
     }
 
+    // An approved registration must keep one of its approved events: added
+    // ones do not count until the admin approves them. The builder refuses
+    // the same (RegistrationEditRefused), and so do the rules.
+    if (approvedRegistration && !chosen.some((id) => heldIds.includes(id))) {
+      setSaveError(KEEP_ONE_APPROVED);
+      return;
+    }
+
     setSaveError('');
     setSaving(true);
     try {
       await registerForCompetition(user.uid, competitionId, chosen, note);
       const trimmed = note.trim().slice(0, REGISTRATION_NOTE_MAX);
-      setSaved({ events: new Set(chosen), note: trimmed });
+      // Approved: only the approved events still chosen are held; the rest
+      // are requests, which the refresh brings back.
+      setSaved({ events: new Set(approvedRegistration ? chosen.filter((id) => heldIds.includes(id)) : chosen), note: trimmed });
       setSelected(new Set(chosen));
       setNote(trimmed);
       setEditing(false);
@@ -259,7 +282,9 @@ export default function RegistrationPanel({
       // here, with the panel showing it open, is almost always this device's
       // clock disagreeing with the server's — retrying would not help.
       setSaveError(
-        (err as { code?: string } | null)?.code === 'permission-denied'
+        err instanceof RegistrationEditRefused
+          ? KEEP_ONE_APPROVED
+          : (err as { code?: string } | null)?.code === 'permission-denied'
           ? 'Бүртгэл одоогоор хүлээн авахгүй байна — бүртгэлийн хугацаа нээгдээгүй эсвэл хаагдсан байж магадгүй. Хуудсаа дахин ачаална уу.'
           : 'Бүртгэл хадгалахад алдаа гарлаа. Дахин оролдоно уу.',
       );
@@ -270,16 +295,18 @@ export default function RegistrationPanel({
 
   const selectedIds = useMemo(() => Array.from(selected), [selected]);
   const fee = feeView(competition.paid === true, competition.baseFeeMnt ?? null, events, selectedIds);
-  const savedIds = saved ? Array.from(saved.events) : [];
+  const savedIds = saved ? [...Array.from(saved.events), ...requestedIds] : [];
   const savedFee = feeView(competition.paid === true, competition.baseFeeMnt ?? null, events, savedIds);
 
   // "Changed?" for the edit form — the save button stays disabled until
   // there is something to save.
+  const savedChoice = saved ? new Set([...saved.events, ...requestedIds]) : null;
   const dirty =
     !saved ||
+    !savedChoice ||
     saved.note !== note.trim().slice(0, REGISTRATION_NOTE_MAX) ||
-    saved.events.size !== selected.size ||
-    [...selected].some((id) => !saved.events.has(id));
+    savedChoice.size !== selected.size ||
+    [...selected].some((id) => !savedChoice.has(id));
 
   if (loadingRegistration) {
     return <p className="oc-rp-muted">Ачааллаж байна...</p>;
@@ -334,6 +361,8 @@ export default function RegistrationPanel({
           fee={savedFee}
           status={status}
           statusNote={registration?.statusNote ?? null}
+          requested={requestedIds}
+          declined={declinedIds}
           footer={
             <div className="oc-rp-foot">
               <p className="oc-rp-muted">{copy.savedLine}</p>
@@ -434,7 +463,14 @@ export default function RegistrationPanel({
                   {hasWcaEventIcon(e.eventId) ? <WcaEventIcon eventId={e.eventId} size={16} /> : e.eventId.slice(0, 4).toUpperCase()}
                 </span>
                 <span className="oc-rp-name">{e.label}</span>
-                <span className="oc-rp-rounds">{e.rounds} раунд</span>
+                <span className="oc-rp-rounds">
+                  {/* Ticked but not yet approved: it will be a request. */}
+                  {approvedRegistration && checked && !heldIds.includes(e.eventId) ? (
+                    <span style={{ color: '#E0A020' }}>ХҮСЭЛТ</span>
+                  ) : (
+                    `${e.rounds} раунд`
+                  )}
+                </span>
               </label>
             );
           })}
@@ -467,7 +503,11 @@ export default function RegistrationPanel({
                 button, as in the mockup — changing events does not change
                 it (an edit never writes the status). */}
             {editing && status && <RegistrationStatusBadge status={status} withDetail />}
-            <p className="oc-rp-muted">Бүртгэл хаагдах хүртэл төрлөө сольж болно.</p>
+            <p className="oc-rp-muted">
+              {approvedRegistration
+                ? 'Нэмсэн төрөл зохион байгуулагч баталсны дараа нэмэгдэнэ — баталгаажсан төрлүүдэд нөлөөлөхгүй. Хассан төрөл шууд хасагдана. Бүртгэл хаагдах хүртэл өөрчилж болно.'
+                : 'Бүртгэл хаагдах хүртэл төрлөө сольж болно.'}
+            </p>
           </div>
           <div className="oc-rp-actions">
             {/* Only when editing. A first-time athlete who changes their
@@ -501,6 +541,8 @@ export default function RegistrationPanel({
       fee={savedFee}
       status={status}
       statusNote={registration?.statusNote ?? null}
+          requested={requestedIds}
+          declined={declinedIds}
       footer={
         <div className="oc-rp-foot">
           <div className="oc-rp-foot-left">
@@ -555,6 +597,8 @@ function RegisteredSummary({
   fee,
   status,
   statusNote,
+  requested,
+  declined,
   footer,
 }: {
   events: OnlineCompetition['events'];
@@ -562,6 +606,10 @@ function RegisteredSummary({
   fee: ReturnType<typeof feeView>;
   status: OnlineRegistrationStatus | null;
   statusNote: string | null;
+  /** Added events waiting for the admin. */
+  requested: string[];
+  /** Added events the admin declined. */
+  declined: string[];
   footer: React.ReactNode;
 }) {
   const chosen = events.filter((e) => saved.events.has(e.eventId));
@@ -607,6 +655,20 @@ function RegisteredSummary({
             <span className="oc-rp-rounds">{e.rounds} раунд</span>
           </div>
         ))}
+        {/* Added events: not competed in until the admin approves them. */}
+        {events
+          .filter((e) => requested.includes(e.eventId) || declined.includes(e.eventId))
+          .map((e) => (
+            <div key={`change-${e.eventId}`} className="oc-rp-row oc-rp-row-static">
+              <span className="oc-v3-ev-icon" aria-hidden>
+                {hasWcaEventIcon(e.eventId) ? <WcaEventIcon eventId={e.eventId} size={16} /> : e.eventId.slice(0, 4).toUpperCase()}
+              </span>
+              <span className="oc-rp-name">{e.label}</span>
+              <span className="oc-rp-rounds" style={{ color: requested.includes(e.eventId) ? '#E0A020' : '#E8543C' }}>
+                {requested.includes(e.eventId) ? 'ХҮСЭЛТ ИЛГЭЭСЭН' : 'ТАТГАЛЗСАН'}
+              </span>
+            </div>
+          ))}
       </div>
       {saved.note && (
         <div className="oc-rp-note">

@@ -105,7 +105,105 @@ export function normalizeStoredRegistration(raw: unknown, competitionIdFallback:
   if (typeof d.note === 'string' && d.note.trim()) out.note = d.note;
   // The admin's note, shown to the athlete. Same defensive read.
   if (typeof d.statusNote === 'string' && d.statusNote.trim()) out.statusNote = d.statusNote;
+  // An approved registration's pending, withdrawn and declined events —
+  // present only when there are some, like the note.
+  const changes = registrationEvents(d);
+  if (changes.requested.length > 0) out.requestedEvents = changes.requested;
+  if (changes.withdrawn.length > 0) out.withdrawnEvents = changes.withdrawn;
+  if (changes.declined.length > 0) out.declinedEvents = changes.declined;
   return out;
+}
+
+// ── an APPROVED registration's events ─────────────────────────────────
+// Once a registration is approved, `events` is what it COMPETES in — the
+// scramble gate, the public and scramble rosters, the round checks and the
+// live view all read it. So a later change by the athlete never adds to it:
+//   · an ADDED event goes to `requestedEvents` and waits for the admin, who
+//     approves it (it moves into `events`) or declines it (`declinedEvents`,
+//     admin-written) — see event-requests.ts;
+//   · a REMOVED event leaves `events` at once — withdrawing needs nobody's
+//     permission — and is recorded in `withdrawnEvents`, so the admin sees
+//     it in the athlete's row.
+// firestore.rules enforces exactly this (approvedEventsChangeOk). A
+// registration that is NOT approved keeps editing `events` directly: the
+// whole registration is still under review, and nothing competes yet.
+//
+// Every registration written before these lists existed has none of them,
+// and reads as exactly what it was: its events approved, nothing pending.
+
+/** A stored event list: strings only, no blanks, no repeats, order kept. */
+export function storedEventList(v: unknown): string[] {
+  return Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === 'string' && x.length > 0))] : [];
+}
+
+export interface StoredRegistrationEvents {
+  status?: unknown;
+  events?: unknown;
+  requestedEvents?: unknown;
+  withdrawnEvents?: unknown;
+  declinedEvents?: unknown;
+}
+
+export interface RegistrationEvents {
+  /** The registration itself is approved (the legacy spellings included). */
+  competing: boolean;
+  /** What it competes in — `events`. Empty when not approved. */
+  approved: string[];
+  /** Added by the athlete, waiting for the admin. */
+  requested: string[];
+  /** Approved once, then removed by the athlete. */
+  withdrawn: string[];
+  /** Requested, and declined by the admin. */
+  declined: string[];
+}
+
+/** The event lists of one stored registration. An event is only ever in
+ *  ONE list, in this precedence: approved, requested, then withdrawn or
+ *  declined — so re-requesting a declined event reads as a request. */
+export function registrationEvents(raw: StoredRegistrationEvents | null | undefined): RegistrationEvents {
+  if (!raw || !isCompetingRegistration(raw.status)) {
+    return { competing: false, approved: [], requested: [], withdrawn: [], declined: [] };
+  }
+  const approved = storedEventList(raw.events);
+  const requested = storedEventList(raw.requestedEvents).filter((e) => !approved.includes(e));
+  const settled = (e: string) => !approved.includes(e) && !requested.includes(e);
+  return {
+    competing: true,
+    approved,
+    requested,
+    withdrawn: storedEventList(raw.withdrawnEvents).filter(settled),
+    declined: storedEventList(raw.declinedEvents).filter(settled),
+  };
+}
+
+export type ApprovedEventEdit =
+  | { ok: true; events: string[]; requestedEvents: string[]; withdrawnEvents: string[] }
+  /** Every approved event deselected. The registration must keep one: an
+   *  approved registration competing in nothing, with its only events
+   *  waiting for review, is not a state anything downstream expects. */
+  | { ok: false; reason: 'keep-one-approved' };
+
+/** What an approved athlete's new selection means, event by event. */
+export function splitApprovedEdit(prior: StoredRegistrationEvents, chosen: readonly string[]): ApprovedEventEdit {
+  const held = storedEventList(prior.events);
+  const wanted = storedEventList(chosen);
+  const events = held.filter((e) => wanted.includes(e));
+  if (events.length === 0) return { ok: false, reason: 'keep-one-approved' };
+  return {
+    ok: true,
+    events,
+    requestedEvents: wanted.filter((e) => !held.includes(e)),
+    withdrawnEvents: [...new Set([...storedEventList(prior.withdrawnEvents), ...held.filter((e) => !wanted.includes(e))])],
+  };
+}
+
+/** A save the builder refused before it reached Firestore. */
+export class RegistrationEditRefused extends Error {
+  readonly reason: 'keep-one-approved';
+  constructor(reason: 'keep-one-approved') {
+    super(reason);
+    this.reason = reason;
+  }
 }
 
 // ── what a save writes ─────────────────────────────────────────────────
@@ -125,7 +223,8 @@ export interface WriteSentinels<T> {
 
 export type RegistrationWrite<T> =
   | { kind: 'create'; data: Record<string, unknown> }
-  | { kind: 'update'; data: Record<string, T | string | string[]> };
+  | { kind: 'update'; data: Record<string, T | string | string[]> }
+  | { kind: 'refused'; reason: 'keep-one-approved' };
 
 /** Exactly which fields a save writes.
  *
@@ -143,12 +242,23 @@ export type RegistrationWrite<T> =
  *    in any future waitlist order), and not `results` (recordAo5Result's
  *    map, which the old whole-document replace erased on every edit).
  *
+ *  UPDATE OF AN APPROVED REGISTRATION (`prior` given, and approved):
+ *    events           — only the approved events still chosen;
+ *    requestedEvents  — the chosen events not yet approved;
+ *    withdrawnEvents  — every approved event deselected, now or before;
+ *    note, updatedAt  — as above.
+ *  An added event therefore never reaches `events`; the admin moves it
+ *  there. Deselecting every approved event is refused ('refused').
+ *
  *  The note is trimmed and capped here so a paste one character over the
  *  limit never reaches firestore.rules as a refused write. */
 export function buildRegistrationWrite<T>(
   exists: boolean,
   input: RegistrationInput,
   sentinels: WriteSentinels<T>,
+  /** The stored document, when there is one. Without it an update behaves
+   *  as for a registration that is not approved. */
+  prior?: StoredRegistrationEvents | null,
 ): RegistrationWrite<T> {
   const note = input.note.trim().slice(0, REGISTRATION_NOTE_MAX);
   if (!exists) {
@@ -161,6 +271,20 @@ export function buildRegistrationWrite<T>(
         registeredAt: sentinels.now,
         updatedAt: sentinels.now,
         ...(note ? { note } : {}),
+      },
+    };
+  }
+  if (prior && isCompetingRegistration(prior.status)) {
+    const split = splitApprovedEdit(prior, input.events);
+    if (!split.ok) return { kind: 'refused', reason: split.reason };
+    return {
+      kind: 'update',
+      data: {
+        events: split.events,
+        requestedEvents: split.requestedEvents,
+        withdrawnEvents: split.withdrawnEvents,
+        updatedAt: sentinels.now,
+        note: note ? note : sentinels.remove,
       },
     };
   }

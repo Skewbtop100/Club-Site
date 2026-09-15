@@ -18,7 +18,7 @@ import {
   normalizeStoredSchedule,
   normalizeStoredSections,
 } from './competition-shape';
-import { buildRegistrationWrite, normalizeStoredRegistration } from './registration-shape';
+import { RegistrationEditRefused, buildRegistrationWrite, normalizeStoredRegistration } from './registration-shape';
 import { submissionDocId } from './submission-id';
 import type { FiledAttempt } from './run-resume';
 import type {
@@ -341,7 +341,11 @@ export async function registerForCompetition(
       snap.exists(),
       { competitionId, events: eventIds, note },
       { now: serverTimestamp(), remove: deleteField() },
+      // The stored document: for an approved registration, an added event
+      // becomes a request instead of joining `events`.
+      snap.exists() ? snap.data() : null,
     );
+    if (write.kind === 'refused') throw new RegistrationEditRefused(write.reason);
     if (write.kind === 'create') tx.set(ref, write.data);
     else tx.update(ref, write.data);
   });

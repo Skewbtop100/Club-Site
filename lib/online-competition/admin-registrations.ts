@@ -1,5 +1,6 @@
 import { FieldValue, type Firestore } from 'firebase-admin/firestore';
-import { isCompetingRegistration, normalizeRegistrationStatus } from './registration-shape';
+import { isCompetingRegistration, normalizeRegistrationStatus, registrationEvents } from './registration-shape';
+import { planEventDecision, type EventDecision } from './event-requests';
 import { checkApprovalLimit, limitRefusalMessage } from './participant-limit';
 import type { StatusPatch } from './registration-review';
 import type { OnlineRegistrationStatus } from './types';
@@ -21,7 +22,15 @@ export interface RegistrationAdminView {
   /** The best name to review by: the admin-APPROVED identity if the
    *  profile has been verified, else the submitted one, else displayName. */
   name: string;
+  /** For an approved registration, the events it COMPETES in (approved);
+   *  otherwise the events the whole registration asks for. */
   events: string[];
+  /** An approved registration's added events, waiting for a decision. */
+  requestedEvents: string[];
+  /** Approved once, then removed by the athlete. */
+  withdrawnEvents: string[];
+  /** Requested, and declined. */
+  declinedEvents: string[];
   /** The ATHLETE's note to the organiser, or null. */
   note: string | null;
   /** Always a current value — the legacy 'registered' is converted. */
@@ -83,11 +92,15 @@ export async function listCompetitionRegistrations(db: Firestore, competitionId:
     const displayName = str(p.displayName) ?? uid;
     const last = str(p.approvedLastName) ?? str(p.lastName);
     const first = str(p.approvedFirstName) ?? str(p.firstName);
+    const changes = registrationEvents(data);
     return {
       uid,
       displayName,
       name: last && first ? `${last} ${first}` : first ?? last ?? displayName,
       events: Array.isArray(data.events) ? data.events.filter((e: unknown): e is string => typeof e === 'string') : [],
+      requestedEvents: changes.requested,
+      withdrawnEvents: changes.withdrawn,
+      declinedEvents: changes.declined,
       note: str(data.note),
       status: normalizeRegistrationStatus(data.status),
       statusNote: str(data.statusNote),
@@ -104,6 +117,32 @@ export async function listCompetitionRegistrations(db: Firestore, competitionId:
   return rows.sort(
     (a, b) => (a.registeredAt ?? Number.MAX_SAFE_INTEGER) - (b.registeredAt ?? Number.MAX_SAFE_INTEGER) || (a.uid < b.uid ? -1 : 1),
   );
+}
+
+/** Approves or declines ONE added event on an approved registration — see
+ *  event-requests.ts. A transaction: the registration and the competition's
+ *  configured events are read inside it, so an athlete's edit landing at the
+ *  same moment makes this retry against the new document rather than
+ *  approve an event they have just removed. The status is never written. */
+export async function decideEventRequest(
+  db: Firestore,
+  competitionId: string,
+  uid: string,
+  eventId: string,
+  decision: EventDecision,
+): Promise<void> {
+  const regRef = db.collection('onlineParticipants').doc(uid).collection('registrations').doc(competitionId);
+  const compRef = db.collection('onlineCompetitions').doc(competitionId);
+  await db.runTransaction(async (tx) => {
+    const [regSnap, compSnap] = await tx.getAll(regRef, compRef);
+    const rawEvents = compSnap.get('events');
+    const configured = (Array.isArray(rawEvents) ? rawEvents : [])
+      .map((e: { eventId?: unknown } | null) => e?.eventId)
+      .filter((e): e is string => typeof e === 'string');
+    const plan = planEventDecision(regSnap.exists ? regSnap.data() : null, eventId, decision, configured);
+    if (!plan.ok) throw new RegistrationPatchError(plan.error, plan.status);
+    tx.update(regRef, plan.update);
+  });
 }
 
 /** Thrown when a patch cannot be applied; the routes turn it into this

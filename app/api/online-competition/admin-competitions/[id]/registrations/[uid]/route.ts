@@ -1,8 +1,13 @@
 import { NextResponse } from 'next/server';
 import { isOnlineCompAdmin } from '@/lib/online-competition/admin-auth';
 import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
-import { RegistrationPatchError, applyRegistrationPatch } from '@/lib/online-competition/admin-registrations';
+import {
+  RegistrationPatchError,
+  applyRegistrationPatch,
+  decideEventRequest,
+} from '@/lib/online-competition/admin-registrations';
 import { parseStatusPatch } from '@/lib/online-competition/registration-review';
+import { parseEventDecision } from '@/lib/online-competition/event-requests';
 
 /** One registration: `{ status?, statusNote? }`. A blank or null
  *  statusNote clears it. The same transaction as the bulk route, with a
@@ -22,6 +27,28 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   } catch (err) {
     if (err instanceof RegistrationPatchError) {
       return NextResponse.json({ error: err.message, missing: err.missing }, { status: err.status });
+    }
+    throw err;
+  }
+}
+
+/** One ADDED event on an approved registration: `{ eventId, decision:
+ *  'approve' | 'decline' }` — one event per call (event-requests.ts says
+ *  why). The registration's status and its approved events are untouched. */
+export async function POST(req: Request, { params }: { params: Promise<{ id: string; uid: string }> }) {
+  if (!(await isOnlineCompAdmin())) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  const { id, uid } = await params;
+  const parsed = parseEventDecision(await req.json().catch(() => null));
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
+
+  try {
+    await decideEventRequest(getOnlineCompAdminDb(), id, uid, parsed.eventId, parsed.decision);
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    if (err instanceof RegistrationPatchError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
     }
     throw err;
   }

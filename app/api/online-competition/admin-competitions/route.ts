@@ -15,7 +15,7 @@ import {
   normalizeStoredSchedule,
   normalizeStoredSections,
 } from '@/lib/online-competition/competition-shape';
-import { isCompetingRegistration } from '@/lib/online-competition/registration-shape';
+import { isCompetingRegistration, registrationEvents } from '@/lib/online-competition/registration-shape';
 import { resolveEventLiveRounds } from '@/lib/online-competition/round-access';
 import { DEFAULT_COMPETITION_FORMAT } from '@/lib/online-competition/types';
 import type { OnlineCompetitionAdminView } from '@/lib/online-competition/types';
@@ -53,17 +53,24 @@ async function countDistinctParticipants(db: Firestore, competitionId: string): 
  *  The grandparent guard is load-bearing: the club site has an unrelated
  *  top-level `registrations` collection that a bare collectionGroup query
  *  also matches (see the same guard in scramble-roster.ts). */
-async function countApprovedByCompetition(db: Firestore): Promise<Map<string, number>> {
+async function countRegistrationsByCompetition(
+  db: Firestore,
+): Promise<{ approved: Map<string, number>; eventRequests: Map<string, number> }> {
   const snap = await db.collectionGroup('registrations').get();
-  const counts = new Map<string, number>();
+  const approved = new Map<string, number>();
+  // Added events waiting for a decision, from the same read — the БҮРТГЭЛ
+  // button's badge on the competitions list.
+  const eventRequests = new Map<string, number>();
   for (const d of snap.docs) {
     if (d.ref.parent.parent?.parent.id !== 'onlineParticipants') continue;
     const competitionId = d.get('competitionId');
     if (typeof competitionId !== 'string') continue;
     if (!isCompetingRegistration(d.get('status'))) continue;
-    counts.set(competitionId, (counts.get(competitionId) ?? 0) + 1);
+    approved.set(competitionId, (approved.get(competitionId) ?? 0) + 1);
+    const requested = registrationEvents(d.data()).requested.length;
+    if (requested > 0) eventRequests.set(competitionId, (eventRequests.get(competitionId) ?? 0) + requested);
   }
-  return counts;
+  return { approved, eventRequests };
 }
 
 export async function GET() {
@@ -77,7 +84,7 @@ export async function GET() {
   // orderBy field from the results — sorting in JS (nulls last) keeps it
   // visible in the admin list instead of vanishing.
   const snap = await db.collection('onlineCompetitions').get();
-  const approvedByCompetition = await countApprovedByCompetition(db);
+  const { approved: approvedByCompetition, eventRequests } = await countRegistrationsByCompetition(db);
 
   const competitions: OnlineCompetitionAdminView[] = await Promise.all(
     snap.docs.map(async (d) => {
@@ -135,7 +142,7 @@ export async function GET() {
 
   competitions.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
 
-  return NextResponse.json({ competitions });
+  return NextResponse.json({ competitions, eventRequests: Object.fromEntries(eventRequests) });
 }
 
 export async function POST(req: Request) {

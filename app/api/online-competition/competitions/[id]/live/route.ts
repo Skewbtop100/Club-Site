@@ -3,7 +3,7 @@ import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
 import { AthleteAuthError, bearerToken, requireAthlete } from '@/lib/online-competition/athlete-auth';
 import { normalizeCompetitionStatus } from '@/lib/online-competition/admin-competitions';
 import { normalizeStoredEvents, normalizeStoredSchedule } from '@/lib/online-competition/competition-shape';
-import { normalizeRegistrationStatus } from '@/lib/online-competition/registration-shape';
+import { normalizeRegistrationStatus, registrationEvents } from '@/lib/online-competition/registration-shape';
 import { attemptsForFormat, resolveResultFormat } from '@/lib/online-competition/ao5';
 import { fetchRoundStates } from '@/lib/online-competition/round-results';
 import { resolveRoundAccess } from '@/lib/online-competition/round-access';
@@ -115,6 +115,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       regSnap && regSnap.exists
         ? {
             status: normalizeRegistrationStatus(regSnap.get('status')),
+            requestedEvents: registrationEvents(regSnap.data()).requested,
             events: (Array.isArray(regSnap.get('events')) ? (regSnap.get('events') as unknown[]) : []).filter(
               (e): e is string => typeof e === 'string',
             ),

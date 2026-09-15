@@ -28,6 +28,9 @@ export interface ScheduleItem {
   state: RoundRowState;
   /** For an open round that is not this viewer's to solve: why. */
   viewNote: string;
+  /** An added event waiting for the admin's approval. Listed, never
+   *  startable: no button, whatever the round's state. */
+  requested?: boolean;
 }
 
 /** The athlete's other rounds: events they registered for, rounds they
@@ -68,6 +71,7 @@ export default function SchedulePanel({
 }
 
 function timeLabel(item: ScheduleItem): string {
+  if (item.requested) return 'ХҮСЭЛТ';
   if (item.status === 'live') return 'ЯВАГДАЖ БУЙ';
   if (item.status === 'done') return 'ДУУССАН';
   return item.scheduledAt ? `${item.scheduledAt}-Д` : 'НЭЭГДЭЭГҮЙ';
@@ -82,7 +86,7 @@ function Row({
   competitionId: string;
   onSelect: (eventId: string) => void;
 }) {
-  const selectable = item.state === 'open' || item.state === 'open-done';
+  const selectable = !item.requested && (item.state === 'open' || item.state === 'open-done');
   const headStyle: CSSProperties = {
     border: 'none',
     background: 'transparent',
@@ -141,6 +145,16 @@ function Row({
 }
 
 function RowBody({ item, competitionId }: { item: ScheduleItem; competitionId: string }) {
+  // Before anything else: an event waiting for approval shows no button.
+  if (item.requested) {
+    return (
+      <DashedBox
+        label="ТӨРӨЛ НЭМЭХ ХҮСЭЛТ ХЯНАГДАЖ БАЙНА"
+        note="Зохион байгуулагч батлахаас өмнө эхлэх боломжгүй."
+        center
+      />
+    );
+  }
   switch (item.state) {
     case 'finished':
       return <DoneBox label="ДУУССАН" />;

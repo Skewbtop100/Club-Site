@@ -57,6 +57,8 @@ export default function CompetitionsList() {
   const [recomputeMsg, setRecomputeMsg] = useState<{ id: string; text: string; isError: boolean } | null>(null);
   /** The competition whose УСТГАХ dialog is open. */
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  /** competitionId -> added events waiting for a decision. */
+  const [eventRequests, setEventRequests] = useState<Record<string, number>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -67,8 +69,12 @@ export default function CompetitionsList() {
       // Every competition, drafts included. This list reads through the
       // Admin SDK route, which bypasses the rules that hide drafts from
       // the public site — so no status filter belongs here.
-      const data = (await res.json()) as { competitions: OnlineCompetitionAdminView[] };
+      const data = (await res.json()) as {
+        competitions: OnlineCompetitionAdminView[];
+        eventRequests?: Record<string, number>;
+      };
       setCompetitions(data.competitions);
+      setEventRequests(data.eventRequests ?? {});
     } catch (err) {
       console.error('CompetitionsList: loading competitions failed:', err);
       setError('Тэмцээнүүдийг ачааллаж чадсангүй');
@@ -191,8 +197,15 @@ export default function CompetitionsList() {
                       tab. No badge yet: the review statuses exist in the
                       type, but nothing writes 'pending' until registration
                       review lands, so there is no pending count to show. */}
-                  <Link className="oc-adm-comp-btn" href={detail}>
+                  {/* Volt count: approved athletes' added events waiting
+                      for a decision, which the review table resolves. */}
+                  <Link
+                    className="oc-adm-comp-btn"
+                    href={detail}
+                    title={eventRequests[c.id] ? `${eventRequests[c.id]} төрөл нэмэх хүсэлт` : undefined}
+                  >
                     БҮРТГЭЛ
+                    {(eventRequests[c.id] ?? 0) > 0 && <span style={{ color: '#DFFF4F' }}>{eventRequests[c.id]}</span>}
                   </Link>
 
                   <Badge {...badge} padding="5px 7px">

@@ -619,12 +619,48 @@ service cloud.firestore {
         // болно" is now true on the server as well. `results` alone (the
         // solve page's recordAo5Result) does not: a round is solved after
         // registration has closed.
+        //
+        // ── AN APPROVED REGISTRATION'S EVENTS ──
+        // Once approved, `events` is what the registration COMPETES in — the
+        // scramble gate, the rosters and the round checks read it — so the
+        // athlete may never add to it. An added event goes into
+        // `requestedEvents` and waits for the admin (who moves it into
+        // `events` through the Admin SDK); a removed one leaves `events` at
+        // once and must be recorded in `withdrawnEvents`, so the admin sees
+        // it. `declinedEvents` is the admin's alone. A registration that is
+        // not approved edits `events` directly, and may not write the lists.
+        // The legacy 'registered' and an absent status are approved, as
+        // everywhere else (normalizeRegistrationStatus).
+        function wasApproved() {
+          return resource.data.get('status', null) == null ||
+                 resource.data.status in ['approved', 'registered'];
+        }
+
+        function approvedEventsChangeOk() {
+          let before = resource.data.events.toSet();
+          let after = request.resource.data.events.toSet();
+          let requested = request.resource.data.get('requestedEvents', []);
+          let withdrawn = request.resource.data.get('withdrawnEvents', []);
+          let expectedWithdrawn = resource.data.get('withdrawnEvents', []).toSet().union(before.difference(after));
+          return before.hasAll(after) &&
+                 requested is list &&
+                 requested.size() <= 30 &&
+                 !requested.toSet().hasAny(after) &&
+                 withdrawn is list &&
+                 withdrawn.toSet().hasAll(expectedWithdrawn) &&
+                 expectedWithdrawn.hasAll(withdrawn.toSet());
+        }
+
         allow update: if isSignedIn() &&
                          request.auth.uid == uid &&
                          registrationShapeOk() &&
                          request.resource.data.diff(resource.data).affectedKeys()
-                           .hasOnly(['events', 'note', 'updatedAt', 'results']) &&
-                         (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['events', 'note']) ||
+                           .hasOnly(['events', 'note', 'updatedAt', 'results', 'requestedEvents', 'withdrawnEvents']) &&
+                         (wasApproved()
+                           ? approvedEventsChangeOk()
+                           : !request.resource.data.diff(resource.data).affectedKeys().hasAny(['requestedEvents', 'withdrawnEvents'])) &&
+                         (!request.resource.data.diff(resource.data).affectedKeys()
+                             .hasAny(['events', 'note', 'requestedEvents', 'withdrawnEvents']) ||
                           registrationWindowOpen());
         allow delete: if false;
       }

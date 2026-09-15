@@ -86,6 +86,12 @@ export default function StartRoundPanel({
   // Approved only (D7) — the same gate the dashboard uses, and the same
   // wording, so the two cannot tell the athlete different things.
   const gate = competeGateCopy(registration.status);
+  // An approved athlete's added events still waiting for the admin: listed
+  // under their approved ones, with no start button.
+  const requested =
+    registration.status === 'approved'
+      ? events.filter((e) => (registration.requestedEvents ?? []).includes(e.eventId))
+      : [];
   const icon = (eventId: string) => (
     <span className="oc-v3-ev-icon" aria-hidden>
       {hasWcaEventIcon(eventId) ? <WcaEventIcon eventId={eventId} size={16} /> : eventId.slice(0, 4).toUpperCase()}
@@ -145,6 +151,15 @@ export default function StartRoundPanel({
               </div>
             );
           })}
+          {requested.map((e) => (
+            <div key={`requested-${e.eventId}`} className="oc-cd-start-row">
+              {icon(e.eventId)}
+              <span className="oc-cd-start-name">{e.label}</span>
+              <span className="oc-cd-start-state" style={{ color: '#E0A020' }}>
+                ХҮСЭЛТ ХЯНАГДАЖ БАЙНА
+              </span>
+            </div>
+          ))}
           {failed && !loading && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 10 }}>
               <p className="oc-cd-start-note" role="alert" style={{ margin: 0 }}>

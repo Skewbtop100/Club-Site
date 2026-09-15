@@ -66,6 +66,7 @@ async function register(db, events = ['333'], note = '') {
       snap.exists(),
       { competitionId: 'comp1', events, note },
       { now: serverTimestamp(), remove: deleteField() },
+      snap.exists() ? snap.data() : null,
     );
     if (write.kind === 'create') tx.set(ref, write.data);
     else tx.update(ref, write.data);
