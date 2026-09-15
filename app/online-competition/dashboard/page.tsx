@@ -135,7 +135,7 @@ export default function DashboardPage() {
 
           {live.length === 0 && upcoming.length === 0 ? (
             <EmptyBlock
-              text="Бүртгүүлсэн тэмцээн алга."
+              text="Бүртгэлийн хүсэлт илгээсэн тэмцээн алга."
               hint={<Link href={COMPETITIONS}>БҮХ ТЭМЦЭЭН ҮЗЭХ →</Link>}
             />
           ) : (

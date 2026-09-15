@@ -32,7 +32,10 @@ const STATUS: Record<OnlineCompetitionStatus, { dot: string; text: string; label
   // appear it reads as "not a real fixture yet" rather than as a live row.
   draft: { dot: '#4A4740', text: '#6E6A62', label: 'НООРОГ' },
   live: { dot: '#DFFF4F', text: '#DFFF4F', label: 'ЯВАГДАЖ БАЙНА' },
-  upcoming: { dot: '#4FD07A', text: '#4FD07A', label: 'БҮРТГҮҮЛСЭН' },
+  // The competition's own state, like the other three. This read
+  // БҮРТГҮҮЛСЭН for an approved athlete — a second, different word for the
+  // registration state the badge under the name already gives.
+  upcoming: { dot: '#4A4740', text: '#6E6A62', label: 'УДАХГҮЙ' },
   finished: { dot: '#4A4740', text: '#6E6A62', label: 'ДУУССАН' },
 };
 
@@ -60,12 +63,14 @@ export default function MyCompetitions({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div className="oc-v3-card">
         <div className="oc-v3-card-head">
-          <span className="oc-v3-label">Бүртгүүлсэн тэмцээн</span>
+          {/* Not "Бүртгүүлсэн тэмцээн": the list holds requests still under
+              review, and that heading read as if every one were accepted. */}
+          <span className="oc-v3-label">Миний тэмцээнүүд</span>
           <span className="oc-v3-count-badge">{active.length}</span>
         </div>
         {active.length === 0 ? (
           <EmptyBlock
-            text="Бүртгүүлсэн тэмцээн алга."
+            text="Бүртгэлийн хүсэлт илгээсэн тэмцээн алга."
             hint={
               <>
                 {account && <span>{account} хаягаар нэвтэрсэн</span>}
@@ -104,16 +109,13 @@ function ms(v: RegisteredView): number {
 
 function Row({ view }: { view: RegisteredView }) {
   const { competition, registration } = view;
-  // Approved only (D7). Two of this row's elements speak for the ATHLETE
-  // rather than the competition: the upcoming label БҮРТГҮҮЛСЭН ("you are
-  // registered") and the live action ОРОХ ("go in"). Neither is true of a
-  // pending or rejected registration, so they fall back to the
-  // competition's own state — the badge below the name says the rest.
+  // Approved only (D7). The live action ОРОХ ("go in") speaks for the
+  // ATHLETE rather than the competition, and is not true of a pending or
+  // rejected registration — so it falls back to ДЭЛГЭРЭНГҮЙ. The status
+  // column is always the competition's own state; the badge below the name
+  // is the only place this row words the registration.
   const gate = competeGateCopy(registration.status);
-  const tone =
-    gate && competition.status === 'upcoming'
-      ? { dot: '#4A4740', text: '#6E6A62', label: 'УДАХГҮЙ' }
-      : STATUS[competition.status];
+  const tone = STATUS[competition.status];
   // The events the athlete actually signed up for, not the competition's
   // full event list.
   const events = registration.events;

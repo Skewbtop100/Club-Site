@@ -4,7 +4,7 @@ import Link from 'next/link';
 import type { OnlineCompetitionEventConfig, OnlineRegistration } from '@/lib/online-competition/types';
 import type { RoundAccess } from '@/lib/online-competition/round-access';
 import { deriveEventState } from '@/lib/online-competition/event-state';
-import { competeGateCopy } from '@/lib/online-competition/registration-view';
+import { competeGateCopy, registrationStatusCopy } from '@/lib/online-competition/registration-view';
 import { WcaEventIcon, hasWcaEventIcon } from '@/lib/wca-event-icon';
 
 const RETRY_BUTTON = {
@@ -86,12 +86,34 @@ export default function StartRoundPanel({
   // Approved only (D7) — the same gate the dashboard uses, and the same
   // wording, so the two cannot tell the athlete different things.
   const gate = competeGateCopy(registration.status);
+  const icon = (eventId: string) => (
+    <span className="oc-v3-ev-icon" aria-hidden>
+      {hasWcaEventIcon(eventId) ? <WcaEventIcon eventId={eventId} size={16} /> : eventId.slice(0, 4).toUpperCase()}
+    </span>
+  );
 
   return (
     <section className="oc-cd-start">
-      <p className="oc-cd-start-label">ТА ОРОЛЦОЖ БАЙНА</p>
+      {/* The registration's own headline — "ТА БҮРТГҮҮЛЭХ ХҮСЭЛТ ИЛГЭЭСЭН",
+          "БҮРТГЭЛ БАТАЛГААЖСАН" — the same words as the Бүртгүүлэх panel.
+          It said "ТА ОРОЛЦОЖ БАЙНА" for every status, a pending request
+          included. */}
+      <p className="oc-cd-start-label">{registrationStatusCopy(registration.status).headline}</p>
 
-      {gate ? (
+      {registration.status === 'pending' ? (
+        // PENDING: the events requested, and nothing about starting — the
+        // headline says it is a request, and no round can be started until
+        // it is approved, so there is no button or state to show per row.
+        <div className="oc-cd-start-rows">
+          {mine.map((e) => (
+            <div key={e.eventId} className="oc-cd-start-row">
+              {icon(e.eventId)}
+              <span className="oc-cd-start-name">{e.label}</span>
+              <span className="oc-cd-start-round">{e.rounds} раунд</span>
+            </div>
+          ))}
+        </div>
+      ) : gate ? (
         <p className="oc-cd-start-note">{gate.message}</p>
       ) : (
         <div className="oc-cd-start-rows">
@@ -100,13 +122,7 @@ export default function StartRoundPanel({
             const liveRound = access?.[e.eventId]?.liveRound ?? null;
             return (
               <div key={e.eventId} className="oc-cd-start-row">
-                <span className="oc-v3-ev-icon" aria-hidden>
-                  {hasWcaEventIcon(e.eventId) ? (
-                    <WcaEventIcon eventId={e.eventId} size={16} />
-                  ) : (
-                    e.eventId.slice(0, 4).toUpperCase()
-                  )}
-                </span>
+                {icon(e.eventId)}
                 <span className="oc-cd-start-name">{e.label}</span>
                 <span className="oc-cd-start-round">
                   {liveRound !== null ? `РАУНД ${liveRound}` : `${e.rounds} раунд`}

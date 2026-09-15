@@ -3427,7 +3427,11 @@
 .oc-cd-side-item {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  /* The Бүртгүүлэх count is the registration badge, and "БҮРТГЭЛ
+     БАТАЛГААЖСАН" does not fit beside the label in the 210px sidebar: it
+     drops to its own line rather than running over the label. */
+  flex-wrap: wrap;
+  gap: 6px 10px;
   width: 100%;
   /* The active state's 2px volt edge lives in this border so the label
      never shifts by 2px when the item is selected. */
@@ -3442,8 +3446,9 @@
   border-top: 1px solid #16161B;
 }
 .oc-cd-side-label {
-  flex: 1;
-  min-width: 0;
+  /* Its own width, never less — so a count that does not fit wraps below
+     instead of covering it. */
+  flex: 1 0 auto;
   font: 500 13px/1.3 var(--oc-font-heading), sans-serif;
   color: #9A958A;
 }

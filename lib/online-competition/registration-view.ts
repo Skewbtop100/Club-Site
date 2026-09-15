@@ -217,8 +217,13 @@ export function profileGateCopy(
 export type StatusTone = 'amber' | 'green' | 'muted' | 'red';
 
 export interface RegistrationStatusCopy {
-  /** The badge word(s), uppercase. */
+  /** The badge word(s), uppercase — the short form, for chips with no room
+   *  for a sentence (the sidebar, the hub row, the dashboard lock chip). */
   label: string;
+  /** The same state said in full, uppercase — the Бүртгүүлэх panel's heading
+   *  and the banner at the top of the details page. A pending registration
+   *  is a REQUEST, and neither form may read as if it were complete. */
+  headline: string;
   /** A short line after the label, or null. */
   detail: string | null;
   tone: StatusTone;
@@ -238,19 +243,27 @@ export interface RegistrationStatusCopy {
 export function registrationStatusCopy(status: OnlineRegistrationStatus): RegistrationStatusCopy {
   switch (status) {
     case 'pending':
-      return { label: 'ХҮЛЭЭГДЭЖ БУЙ', detail: 'Зохион байгуулагч хянаж байна', tone: 'amber', canEdit: true };
+      return {
+        label: 'ХҮСЭЛТ ИЛГЭЭСЭН',
+        headline: 'ТА БҮРТГҮҮЛЭХ ХҮСЭЛТ ИЛГЭЭСЭН',
+        detail: 'Зохион байгуулагч хянаж байна',
+        tone: 'amber',
+        canEdit: true,
+      };
     case 'waitlisted':
       return {
         label: 'ХҮЛЭЭЛГИЙН ЖАГСААЛТАД',
+        headline: 'ТА ХҮЛЭЭЛГИЙН ЖАГСААЛТАД БАЙНА',
         detail: 'Орон тоо гарвал зохион байгуулагч баталгаажуулна',
         tone: 'amber',
         canEdit: true,
       };
     case 'approved':
-      return { label: 'БАТАЛГААЖСАН', detail: null, tone: 'green', canEdit: true };
+      return { label: 'БҮРТГЭЛ БАТАЛГААЖСАН', headline: 'БҮРТГЭЛ БАТАЛГААЖСАН', detail: null, tone: 'green', canEdit: true };
     case 'cancelled':
       return {
         label: 'ЦУЦЛАГДСАН',
+        headline: 'БҮРТГЭЛ ЦУЦЛАГДСАН',
         detail: 'Асуух зүйл байвал зохион байгуулагчтай холбогдоно уу',
         tone: 'muted',
         canEdit: false,
@@ -258,12 +271,22 @@ export function registrationStatusCopy(status: OnlineRegistrationStatus): Regist
     case 'rejected':
       return {
         label: 'ТАТГАЛЗСАН',
+        headline: 'БҮРТГЭЛЭЭС ТАТГАЛЗСАН',
         detail: 'Асуух зүйл байвал зохион байгуулагчтай холбогдоно уу',
         tone: 'red',
         canEdit: false,
       };
   }
 }
+
+/** Each tone's ink — the same values as theme.css's .oc-rs-* badge rules,
+ *  for text that is not a badge (the panel heading). */
+export const STATUS_TONE_COLOR: Record<StatusTone, string> = {
+  amber: '#E0A020',
+  green: '#4FD07A',
+  muted: '#6E6A62',
+  red: '#E8543C',
+};
 
 
 /** Why this athlete cannot start solving, or null when they can.

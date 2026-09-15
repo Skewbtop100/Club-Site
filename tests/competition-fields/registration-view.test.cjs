@@ -179,10 +179,12 @@ eq('rejected with a blank reason does not print "Шалтгаан: ."',
 console.log('\n  -- registrationStatusCopy: what the athlete is told --');
 {
   const pending = registrationStatusCopy('pending');
-  eq('pending: the mockup copy', `${pending.label} · ${pending.detail}`, 'ХҮЛЭЭГДЭЖ БУЙ · Зохион байгуулагч хянаж байна');
+  eq('pending, in full: a REQUEST was sent', pending.headline, 'ТА БҮРТГҮҮЛЭХ ХҮСЭЛТ ИЛГЭЭСЭН');
+  eq('  ...its badge, the short form', `${pending.label} · ${pending.detail}`, 'ХҮСЭЛТ ИЛГЭЭСЭН · Зохион байгуулагч хянаж байна');
   eq('pending: amber', pending.tone, 'amber');
-  eq('approved: green БАТАЛГААЖСАН, no detail', `${registrationStatusCopy('approved').label}|${registrationStatusCopy('approved').detail}|${registrationStatusCopy('approved').tone}`,
-    'БАТАЛГААЖСАН|null|green');
+  const approved = registrationStatusCopy('approved');
+  eq('approved, in full', approved.headline, 'БҮРТГЭЛ БАТАЛГААЖСАН');
+  eq('  ...and on the badge, green, no detail', `${approved.label}|${approved.detail}|${approved.tone}`, 'БҮРТГЭЛ БАТАЛГААЖСАН|null|green');
   eq('waitlisted: amber', registrationStatusCopy('waitlisted').tone, 'amber');
   // No notification mechanism exists, so the copy must not promise one.
   ok('waitlisted copy promises no notification', !/мэдэгдэ/.test(registrationStatusCopy('waitlisted').detail));
@@ -197,8 +199,40 @@ console.log('\n  -- registrationStatusCopy: what the athlete is told --');
   eq('cancelled and rejected cannot', [can('cancelled'), can('rejected')].join(','), 'false,false');
 }
 {
-  const labels = ['pending', 'waitlisted', 'approved', 'cancelled', 'rejected'].map((s) => registrationStatusCopy(s).label);
+  const all = ['pending', 'waitlisted', 'approved', 'cancelled', 'rejected'];
+  const labels = all.map((s) => registrationStatusCopy(s).label);
   ok('all five labels are distinct', new Set(labels).size === 5, labels.join(' / '));
+  const headlines = all.map((s) => registrationStatusCopy(s).headline);
+  ok('all five headlines are distinct', new Set(headlines).size === 5, headlines.join(' / '));
+  ok('no status is worded "ТА БҮРТГҮҮЛСЭН" or "ТА ОРОЛЦОЖ БАЙНА"',
+    [...labels, ...headlines].every((w) => w !== 'ТА БҮРТГҮҮЛСЭН' && w !== 'ТА ОРОЛЦОЖ БАЙНА' && w !== 'БҮРТГҮҮЛСЭН'));
+  ok('only APPROVED says БАТАЛГААЖСАН', all.every((s) => /БАТАЛГААЖСАН/.test(registrationStatusCopy(s).headline) === (s === 'approved')));
+}
+
+console.log('\n  -- the wording on screen --');
+{
+  const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8').replace(/\r\n/g, '\n');
+  const panel = read('app/online-competition/[competitionId]/details/_components/RegistrationPanel.tsx');
+  const banner = read('app/online-competition/[competitionId]/details/_components/StartRoundPanel.tsx');
+  const hub = read('app/online-competition/_components/hub/v3/MyCompetitions.tsx');
+  ok('the event picker reads ОРОЛЦОХ ТӨРӨЛ', panel.includes('<span className="oc-rp-label">ОРОЛЦОХ ТӨРӨЛ</span>') && !panel.includes('ЯМАР ТӨРӨЛД ОРОХ'));
+  ok('the note is headed ТАЙЛБАР alone', /htmlFor="oc-rp-note">\s*ТАЙЛБАР\s*<\/label>/.test(panel) && !panel.includes('СОНГОЛТТОЙ'));
+  ok('  ...and its textarea has no placeholder', !/<textarea[^>]*placeholder=/.test(panel) && !panel.includes('Зохион байгуулагчид хүргэх'));
+  // Code, not prose: the comments quote the old wording to say why it went.
+  const code = (s) => s.replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  ok('the panel heading is the status headline, ticked only when approved',
+    panel.includes('{heading.headline}') && panel.includes("{status === 'approved' && <span aria-hidden>✓ </span>}") &&
+      !code(panel).includes('ТА БҮРТГҮҮЛСЭН'));
+  ok('the panel says nothing about starting while pending', panel.includes("{status !== 'pending' && ("));
+  ok('the banner heading is the status headline',
+    banner.includes('{registrationStatusCopy(registration.status).headline}') && !code(banner).includes('ТА ОРОЛЦОЖ БАЙНА'));
+  ok('  ...pending: the requested events, not the "cannot start" message',
+    /registration\.status === 'pending' \? \([\s\S]{0,700}mine\.map[\s\S]{0,400}\) : gate \? \(\s*<p className="oc-cd-start-note">\{gate\.message\}<\/p>/.test(banner));
+  ok('the hub row no longer says БҮРТГҮҮЛСЭН; its heading is Миний тэмцээнүүд',
+    !hub.includes("label: 'БҮРТГҮҮЛСЭН'") && hub.includes('<span className="oc-v3-label">Миний тэмцээнүүд</span>'));
+  const css = read('app/online-competition/theme.css');
+  ok('a long status badge wraps below the sidebar label instead of covering it',
+    /\.oc-cd-side-item \{[^}]*flex-wrap: wrap;/.test(css) && /\.oc-cd-side-label \{[^}]*flex: 1 0 auto;/.test(css));
 }
 
 console.log('\n  -- competeGateCopy: who may start solving (D7) --');

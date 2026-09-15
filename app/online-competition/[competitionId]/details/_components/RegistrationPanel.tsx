@@ -19,6 +19,7 @@ import {
   opensInLabel,
   profileGateCopy,
   registrationClosedCopy,
+  STATUS_TONE_COLOR,
   registrationStatusCopy,
   registrationWindow,
 } from '@/lib/online-competition/registration-view';
@@ -404,7 +405,7 @@ export default function RegistrationPanel({
     return (
       <div className="oc-rp">
         <div className="oc-rp-head">
-          <span className="oc-rp-label">ЯМАР ТӨРӨЛД ОРОХ</span>
+          <span className="oc-rp-label">ОРОЛЦОХ ТӨРӨЛ</span>
           <span className="oc-rp-count">{selected.size} сонгогдсон</span>
         </div>
 
@@ -441,14 +442,13 @@ export default function RegistrationPanel({
 
         <div className="oc-rp-note">
           <label className="oc-rp-label" htmlFor="oc-rp-note">
-            ТАЙЛБАР · СОНГОЛТТОЙ
+            ТАЙЛБАР
           </label>
           <textarea
             id="oc-rp-note"
             className="oc-rp-textarea"
             rows={3}
             maxLength={REGISTRATION_NOTE_MAX}
-            placeholder="Зохион байгуулагчид хүргэх тайлбар. Жишээ нь: хамт ирэх хүн, тусгай шаардлага, холбоо барих дугаар."
             value={note}
             onChange={(e) => setNote(e.target.value.slice(0, REGISTRATION_NOTE_MAX))}
           />
@@ -566,14 +566,24 @@ function RegisteredSummary({
 }) {
   const chosen = events.filter((e) => saved.events.has(e.eventId));
   const tone = status ? registrationStatusCopy(status).tone : 'muted';
+  // A save not yet re-read is 'pending' by construction — the only status
+  // a first save may write — so it is worded as the request it is.
+  const heading = registrationStatusCopy(status ?? 'pending');
   // null while the status is still unknown (a save that has not re-read
   // yet): say nothing rather than guess.
   const gate = status ? competeGateCopy(status) : null;
   return (
     <div className="oc-rp">
       <div className="oc-rp-head">
-        <span className="oc-rp-done">
-          <span aria-hidden>✓</span> ТА БҮРТГҮҮЛСЭН
+        {/* Not "ТА БҮРТГҮҮЛСЭН", which read as complete while it was only a
+            request: the status's own headline, in its own colour, with the
+            tick only once the registration is approved. */}
+        <span
+          className="oc-rp-done"
+          style={{ color: STATUS_TONE_COLOR[heading.tone], lineHeight: 1.4, minWidth: 0 }}
+        >
+          {status === 'approved' && <span aria-hidden>✓ </span>}
+          {heading.headline}
         </span>
         <span className="oc-rp-count">{chosen.length} төрөл</span>
       </div>
@@ -608,20 +618,24 @@ function RegisteredSummary({
       {/* This line PROMISES a button. Only an approved registration gets
           one (D7), so for every other status it says what actually
           happens instead — a pending athlete told to wait for Эхлүүлэх
-          would wait for something that is not coming. */}
-      <p className="oc-rp-muted" style={{ padding: '14px 16px 0' }}>
-        {gate ? (
-          gate.message
-        ) : (
-          <>
-            Раунд нээгдэхэд «Эхлүүлэх» товч энэ хуудасны дээд талд болон{' '}
-            <Link href="/online-competition/dashboard" className="oc-rp-link">
-              «Миний тэмцээнүүд»
-            </Link>{' '}
-            дээр гарна.
-          </>
-        )}
-      </p>
+          would wait for something that is not coming.
+          PENDING gets no line: the heading already says the request was
+          sent, and the badge below says the organiser is reviewing it. */}
+      {status !== 'pending' && (
+        <p className="oc-rp-muted" style={{ padding: '14px 16px 0' }}>
+          {gate ? (
+            gate.message
+          ) : (
+            <>
+              Раунд нээгдэхэд «Эхлүүлэх» товч энэ хуудасны дээд талд болон{' '}
+              <Link href="/online-competition/dashboard" className="oc-rp-link">
+                «Миний тэмцээнүүд»
+              </Link>{' '}
+              дээр гарна.
+            </>
+          )}
+        </p>
+      )}
       {footer}
     </div>
   );

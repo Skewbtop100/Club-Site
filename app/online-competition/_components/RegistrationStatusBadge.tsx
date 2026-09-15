@@ -9,7 +9,9 @@ import { registrationStatusCopy } from '@/lib/online-competition/registration-vi
  *  so no two of them can describe the same registration differently.
  *
  *  `withDetail` adds the short explanation after the label
- *  ("ХҮЛЭЭГДЭЖ БУЙ · Зохион байгуулагч хянаж байна") where there is room. */
+ *  ("ХҮСЭЛТ ИЛГЭЭСЭН · Зохион байгуулагч хянаж байна") where there is room.
+ *  The badge carries the SHORT label; the panel heading and the page banner
+ *  say the same state in full (registrationStatusCopy's `headline`). */
 export default function RegistrationStatusBadge({
   status,
   withDetail = false,
