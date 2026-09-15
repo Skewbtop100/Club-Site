@@ -327,6 +327,8 @@ export default function CompetitionDetailPage() {
           loading={accessLoading || myRegistration.loading}
           failed={accessFailed}
           onRetry={() => setAccessAttempt((n) => n + 1)}
+          registrationFailed={myRegistration.error && !myRegistration.registration}
+          onRetryRegistration={myRegistration.refresh}
         />
 
         <div className="oc-cd-layout">
@@ -342,6 +344,10 @@ export default function CompetitionDetailPage() {
               count={
                 myRegistration.registration ? (
                   <RegistrationStatusBadge status={myRegistration.registration.status} />
+                ) : myRegistration.error ? (
+                  // Unknown, not "not registered": the event count here is
+                  // what an UNREGISTERED athlete sees.
+                  '—'
                 ) : (
                   `${competition.events.length} төрөл`
                 )
@@ -438,6 +444,8 @@ export default function CompetitionDetailPage() {
                     competition={competition}
                     registration={myRegistration.registration}
                     loadingRegistration={myRegistration.loading}
+                    registrationError={myRegistration.error && !myRegistration.registration}
+                    onRetryRegistration={myRegistration.refresh}
                     onSaved={myRegistration.refresh}
                   />
                 </div>

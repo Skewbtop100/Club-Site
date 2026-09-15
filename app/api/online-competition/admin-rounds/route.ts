@@ -141,7 +141,9 @@ export async function POST(req: Request) {
   const eventId = typeof body?.eventId === 'string' ? body.eventId : '';
   const round = typeof body?.round === 'number' ? body.round : NaN;
   const action =
-    body?.action === 'open' || body?.action === 'close' || body?.action === 'reset' ? body.action : null;
+    body?.action === 'open' || body?.action === 'close' || body?.action === 'reset' || body?.action === 'notify'
+      ? body.action
+      : null;
   if (!competitionId || !eventId || !Number.isInteger(round) || round < 1 || !action) {
     return NextResponse.json({ error: 'Буруу хүсэлт.' }, { status: 400 });
   }
@@ -176,6 +178,27 @@ export async function POST(req: Request) {
     }
   }
 
+  if (action === 'notify') {
+    // МЭДЭГДЭЛ ДАХИН ИЛГЭЭХ — the retry for a close or cut whose
+    // announcement failed. The same notifyRoundFinalised the transition
+    // called, with the same inputs it had: the stored cut, if this round was
+    // cut. Its markers make it send only what is still owed, so pressing it
+    // twice, or after a success, sends nothing more. A FINISHED round only:
+    // announcing a live round would publish partial results.
+    const stateSnap = await compRef.collection('roundState').doc(key).get();
+    if (stateSnap.get('status') !== 'done') {
+      return NextResponse.json(
+        { error: 'Зөвхөн дууссан раундын мэдэгдлийг дахин илгээх боломжтой.' },
+        { status: 400 },
+      );
+    }
+    const qualSnap = await compRef.collection('qualifiers').doc(key).get();
+    const stored = qualSnap.exists ? qualSnap.get('uids') : null;
+    const qualifiedUids = Array.isArray(stored) ? stored.filter((u): u is string => typeof u === 'string') : [];
+    const { ok } = await notifyRoundFinalised({ competitionId, eventId, round, qualifiedUids });
+    return NextResponse.json({ notified: ok }, { status: ok ? 200 : 503 });
+  }
+
   if (action === 'reset') {
     // БУЦААХ — the way to redo a cut once the next round has started: close
     // that round, then reset it. Refused while live, while the round after
@@ -206,7 +229,8 @@ export async function POST(req: Request) {
   // round send nothing. Awaited rather than fired-and-forgotten: this is a
   // serverless handler, and work left running past the response is not
   // guaranteed to finish.
-  await notifyRoundFinalised({ competitionId, eventId, round });
+  const { ok: notified } = await notifyRoundFinalised({ competitionId, eventId, round });
 
-  return NextResponse.json({ status: 'done' });
+  // `notified: false` — the round IS closed, but the athletes were not told.
+  return NextResponse.json({ status: 'done', notified });
 }

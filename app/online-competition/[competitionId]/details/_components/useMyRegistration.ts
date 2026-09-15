@@ -15,13 +15,21 @@ import { fetchRegistration } from '@/lib/online-competition/data';
  *  `refresh()` re-reads after a save WITHOUT flipping `loading` back on:
  *  the panel keeps showing what it has until the new copy lands, rather
  *  than flashing "Ачааллаж байна..." after every save. `loading` is only
- *  true for the first read, and again when the signed-in account changes. */
+ *  true for the first read, and again when the signed-in account changes.
+ *
+ *  `error` — THE LATEST READ FAILED. It used to be swallowed, leaving
+ *  `registration` null, which every consumer reads as "not registered": on
+ *  competition day an approved athlete whose read hit a Firestore hiccup was
+ *  shown "Бүртгэл хаагдсан" and no start panel — "you are not in". A
+ *  consumer holding `error && !registration` must show a load failure with
+ *  `refresh` as its retry, never the unregistered state. */
 export function useMyRegistration(competitionId: string) {
   const { user } = useOnlineAuth();
   const uid = user && !user.isAnonymous ? user.uid : null;
 
   const [registration, setRegistration] = useState<OnlineRegistration | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [version, setVersion] = useState(0);
   const loadedFor = useRef<string | null>(null);
 
@@ -29,16 +37,19 @@ export function useMyRegistration(competitionId: string) {
     if (!uid) {
       setRegistration(null);
       setLoading(false);
+      setError(false);
       loadedFor.current = null;
       return;
     }
     let cancelled = false;
-    // A different account (or the first read) starts from nothing, so a
-    // previous athlete's registration can never stay on screen.
+    // A different account (or the first read, or a retry after a failed
+    // first read) starts from nothing, so a previous athlete's registration
+    // can never stay on screen.
     if (loadedFor.current !== uid) {
       setRegistration(null);
       setLoading(true);
     }
+    setError(false);
     fetchRegistration(uid, competitionId)
       .then((reg) => {
         if (cancelled) return;
@@ -46,9 +57,8 @@ export function useMyRegistration(competitionId: string) {
         loadedFor.current = uid;
       })
       .catch((err) => {
-        // Best-effort, as the panel's own read always was: on failure the
-        // athlete sees the unregistered state and can register normally.
         console.error('useMyRegistration: loading the registration failed:', err);
+        if (!cancelled) setError(true);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -59,5 +69,5 @@ export function useMyRegistration(competitionId: string) {
   }, [uid, competitionId, version]);
 
   const refresh = useCallback(() => setVersion((v) => v + 1), []);
-  return { registration, loading, refresh };
+  return { registration, loading, error, refresh };
 }

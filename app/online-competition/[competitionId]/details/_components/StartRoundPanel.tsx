@@ -7,6 +7,16 @@ import { deriveEventState } from '@/lib/online-competition/event-state';
 import { competeGateCopy } from '@/lib/online-competition/registration-view';
 import { WcaEventIcon, hasWcaEventIcon } from '@/lib/wca-event-icon';
 
+const RETRY_BUTTON = {
+  border: '1px solid #DFFF4F',
+  background: 'transparent',
+  color: '#DFFF4F',
+  padding: '8px 14px',
+  font: '600 9px var(--oc-font-mono), monospace',
+  letterSpacing: '.1em',
+  cursor: 'pointer',
+} as const;
+
 /** The athlete's way into their own live round, on the page they actually
  *  navigate to.
  *
@@ -30,6 +40,8 @@ export default function StartRoundPanel({
   loading,
   failed = false,
   onRetry,
+  registrationFailed = false,
+  onRetryRegistration,
 }: {
   competitionId: string;
   /** The competition's configured events, in configured order. */
@@ -43,8 +55,30 @@ export default function StartRoundPanel({
    *  a closed round. */
   failed?: boolean;
   onRetry?: () => void;
+  /** The athlete's registration could not be READ. Without this the panel
+   *  simply vanished, exactly as it does for someone never registered —
+   *  on competition day that reads as "you are not in". */
+  registrationFailed?: boolean;
+  onRetryRegistration?: () => void;
 }) {
-  if (!registration) return null;
+  if (!registration) {
+    if (!registrationFailed || loading) return null;
+    return (
+      <section className="oc-cd-start" role="alert">
+        <p className="oc-cd-start-label">ТАНЫ БҮРТГЭЛ</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <p className="oc-cd-start-note" style={{ margin: 0 }}>
+            Таны бүртгэлийг ачаалж чадсангүй — энэ нь та бүртгүүлээгүй гэсэн үг биш. Дахин оролдоно уу.
+          </p>
+          {onRetryRegistration && (
+            <button type="button" onClick={onRetryRegistration} style={RETRY_BUTTON}>
+              ДАХИН АЧААЛАХ
+            </button>
+          )}
+        </div>
+      </section>
+    );
+  }
 
   const mine = events.filter((e) => registration.events.includes(e.eventId));
   if (mine.length === 0) return null;
@@ -101,19 +135,7 @@ export default function StartRoundPanel({
                 Раунд нээлттэй эсэхийг шалгаж чадсангүй — энэ нь раунд хаагдсан гэсэн үг биш.
               </p>
               {onRetry && (
-                <button
-                  type="button"
-                  onClick={onRetry}
-                  style={{
-                    border: '1px solid #DFFF4F',
-                    background: 'transparent',
-                    color: '#DFFF4F',
-                    padding: '8px 14px',
-                    font: '600 9px var(--oc-font-mono), monospace',
-                    letterSpacing: '.1em',
-                    cursor: 'pointer',
-                  }}
-                >
+                <button type="button" onClick={onRetry} style={RETRY_BUTTON}>
                   ДАХИН ШАЛГАХ
                 </button>
               )}

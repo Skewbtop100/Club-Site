@@ -19,6 +19,10 @@ import RoundGapWarning, { type RoundGapEvent } from './RoundGapWarning';
 // `.oc-*` classes from theme.css, no runtime-assembled Tailwind, and no
 // margin/padding utility that globals.css's unlayered reset would zero.
 
+/** The round transition went through; the announcement did not. */
+const NOTIFY_FAILED_TEXT =
+  'Раунд шинэчлэгдсэн, гэхдээ тамирчдад дүн / шалгаралтын мэдэгдэл ИЛГЭЭГДСЭНГҮЙ.';
+
 const STATUS_LABEL = {
   closed: 'ХААЛТТАЙ',
   live: 'ЯВАГДАЖ БУЙ',
@@ -61,6 +65,9 @@ export default function RoundsManager() {
     unassigned?: { uid: string; displayName: string }[];
   } | null>(null);
   const [qualifyKey, setQualifyKey] = useState<string | null>(null);
+  /** A close or cut went through but its athlete notifications did not —
+   *  or the resend's outcome. Keyed by round so it sits under that row. */
+  const [notifyNote, setNotifyNote] = useState<{ key: string; ok: boolean; message: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -117,6 +124,7 @@ export default function RoundsManager() {
     setGaps([]);
     setQualifyKey(null);
     setRowError(null);
+    setNotifyNote(null);
     load();
   }, [load]);
 
@@ -148,6 +156,7 @@ export default function RoundsManager() {
     setBusyKey(key);
     setRowError(null);
     setAnnounced('');
+    setNotifyNote(null);
     try {
       const res = await fetch('/api/online-competition/admin-rounds', {
         method: 'POST',
@@ -157,6 +166,7 @@ export default function RoundsManager() {
       const data = (await res.json().catch(() => ({}))) as {
         error?: string;
         announcedLive?: boolean;
+        notified?: boolean;
         unassigned?: { uid: string; displayName: string }[];
       };
       if (!res.ok) {
@@ -170,10 +180,38 @@ export default function RoundsManager() {
       if (data.announcedLive) {
         setAnnounced('Тэмцээн ЯВАГДАЖ БУЙ болж, нийтэд харагдаж эхэллээ.');
       }
+      if (action === 'close' && data.notified === false) {
+        setNotifyNote({ key, ok: false, message: NOTIFY_FAILED_TEXT });
+      }
       await load();
     } catch (err) {
       console.error('RoundsManager: the round open/close action failed:', err);
       setRowError({ key, message: 'Үйлдэл амжилтгүй боллоо. Дахин оролдоно уу.' });
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  /** МЭДЭГДЭЛ ДАХИН ИЛГЭЭХ — the same idempotent send the close or cut
+   *  made, which only sends what is still owed. */
+  async function resendNotifications(row: RoundAdminView) {
+    const key = roundKey(row.eventId, row.round);
+    setBusyKey(key);
+    try {
+      const res = await fetch('/api/online-competition/admin-rounds', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ competitionId, eventId: row.eventId, round: row.round, action: 'notify' }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { notified?: boolean; error?: string };
+      if (res.ok && data.notified) {
+        setNotifyNote({ key, ok: true, message: 'Мэдэгдэл тамирчдад илгээгдлээ.' });
+      } else {
+        setNotifyNote({ key, ok: false, message: data.error ?? `${NOTIFY_FAILED_TEXT} Дахин оролдлого ч амжилтгүй боллоо.` });
+      }
+    } catch (err) {
+      console.error('RoundsManager: resending notifications failed:', err);
+      setNotifyNote({ key, ok: false, message: `${NOTIFY_FAILED_TEXT} Сервертэй холбогдож чадсангүй.` });
     } finally {
       setBusyKey(null);
     }
@@ -388,13 +426,36 @@ export default function RoundsManager() {
                   </div>
                 )}
 
+                {notifyNote?.key === key && (
+                  <div style={{ padding: '0 14px 12px' }}>
+                    {notifyNote.ok ? (
+                      <p role="status" style={{ font: '500 11px var(--oc-font-heading), sans-serif', color: '#4FD07A' }}>
+                        {notifyNote.message}
+                      </p>
+                    ) : (
+                      <div className="oc-sc-warn" role="alert" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                        <span>{notifyNote.message}</span>
+                        <button
+                          type="button"
+                          className="oc-sc-btn"
+                          disabled={busyKey === key}
+                          onClick={() => resendNotifications(row)}
+                        >
+                          МЭДЭГДЭЛ ДАХИН ИЛГЭЭХ
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {qualifyKey === key && competitionId && (
                   <div style={{ padding: '0 14px 14px' }}>
                     <QualifyForm
                       competitionId={competitionId}
                       row={row}
-                      onDone={async () => {
+                      onDone={async (notified) => {
                         setQualifyKey(null);
+                        if (!notified) setNotifyNote({ key, ok: false, message: NOTIFY_FAILED_TEXT });
                         await load();
                       }}
                       onCancel={() => setQualifyKey(null)}
@@ -422,7 +483,9 @@ function QualifyForm({
 }: {
   competitionId: string;
   row: RoundAdminView;
-  onDone: () => Promise<void>;
+  /** After a commit; `notified` false means the cut is in but athletes
+   *  were not told. */
+  onDone: (notified: boolean) => Promise<void>;
   onCancel: () => void;
 }) {
   // Prefill precedence: what this round was LAST CUT TO wins over the
@@ -468,7 +531,7 @@ function QualifyForm({
         return;
       }
       if (mode === 'commit') {
-        await onDone();
+        await onDone(data.notified !== false);
         return;
       }
       setPreview(data);

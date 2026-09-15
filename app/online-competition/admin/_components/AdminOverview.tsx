@@ -24,6 +24,20 @@ const STATUS_BADGE = {
 } as const;
 const STATUS_LABEL = { pending: 'ХҮЛЭЭГДЭЖ', approved: 'БАТЛАГДСАН', rejected: 'ТАТГАЛЗСАН' } as const;
 
+/** Which of the overview's loads FAILED. A failed load used to be caught
+ *  into [] — so the queue read "Хянах илгээмж алга." with a 0 beside it,
+ *  and a failed competition list read "Явагдаж буй тэмцээн алга." — during
+ *  a live event the admin concluded nothing was waiting. Now each card
+ *  knows the difference between empty and unknown. */
+interface Failures {
+  pending: boolean;
+  athletes: boolean;
+  names: boolean;
+  competitions: boolean;
+  progress: boolean;
+}
+const NO_FAILURES: Failures = { pending: false, athletes: false, names: false, competitions: false, progress: false };
+
 function CardHead({ label, action }: { label: string; action?: React.ReactNode }) {
   return (
     <div
@@ -49,54 +63,88 @@ export default function AdminOverview() {
   const [live, setLive] = useState<OnlineCompetitionAdminView | null>(null);
   const [registrations, setRegistrations] = useState<RegistrationAdminView[] | null>(null);
   const [liveSubs, setLiveSubs] = useState<OnlineSubmissionAdminView[] | null>(null);
+  const [failed, setFailed] = useState<Failures>(NO_FAILURES);
+  /** Bumped by ДАХИН АЧААЛАХ to run every load again. */
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+    setPending(null);
+    setAthletes(null);
+    setLive(null);
+    setRegistrations(null);
+    setLiveSubs(null);
+    setFailed(NO_FAILURES);
+
+    const markFailed = (which: keyof Failures, err: unknown) => {
+      console.error(`AdminOverview: loading ${which} failed:`, err);
+      if (!cancelled) setFailed((f) => ({ ...f, [which]: true }));
+    };
+    // REJECTS on failure — deliberately no catch here. Each caller decides
+    // what its card shows, and "nothing" is never the answer to "failed".
     const j = <T,>(url: string, key: string): Promise<T[]> =>
       fetch(url)
-        .then((r) => (r.ok ? r.json() : Promise.reject(new Error('failed'))))
-        .then((d: Record<string, T[]>) => d[key] ?? [])
-        .catch(() => []);
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`${url} answered ${r.status}`))))
+        .then((d: Record<string, T[]>) => d[key] ?? []);
 
     // Cross-competition pending queue — same scope as the sidebar's
     // "Шүүлт" badge and the /admin/review route. The API already orders
     // by createdAt ascending, so this is oldest-first.
-    j<OnlineSubmissionAdminView>('/api/online-competition/submissions?status=pending', 'submissions').then((v) => {
-      if (!cancelled) setPending(v);
-    });
-    j<OnlineParticipantAdminView>('/api/online-competition/admin-athletes?status=pending', 'athletes').then((v) => {
-      if (!cancelled) setAthletes(v);
-    });
+    j<OnlineSubmissionAdminView>('/api/online-competition/submissions?status=pending', 'submissions').then(
+      (v) => {
+        if (!cancelled) setPending(v);
+      },
+      (err) => markFailed('pending', err),
+    );
+    j<OnlineParticipantAdminView>('/api/online-competition/admin-athletes?status=pending', 'athletes').then(
+      (v) => {
+        if (!cancelled) setAthletes(v);
+      },
+      (err) => markFailed('athletes', err),
+    );
     // Approved roster doubles as the uid -> display name map for the queue
     // rows; submissions carry only a uid.
-    j<OnlineParticipantAdminView>('/api/online-competition/admin-athletes?status=approved', 'athletes').then((v) => {
-      if (!cancelled) {
-        setNames(Object.fromEntries(v.map((a) => [a.uid, `${a.lastName} ${a.firstName}`.trim() || a.displayName])));
-      }
-    });
+    j<OnlineParticipantAdminView>('/api/online-competition/admin-athletes?status=approved', 'athletes').then(
+      (v) => {
+        if (!cancelled) {
+          setNames(Object.fromEntries(v.map((a) => [a.uid, `${a.lastName} ${a.firstName}`.trim() || a.displayName])));
+        }
+      },
+      (err) => markFailed('names', err),
+    );
 
-    j<OnlineCompetitionAdminView>('/api/online-competition/admin-competitions', 'competitions').then(async (list) => {
-      const current = list.find((c) => c.status === 'live') ?? null;
-      if (cancelled) return;
-      setLive(current);
-      if (!current) {
-        setRegistrations([]);
-        setLiveSubs([]);
-        return;
-      }
-      const [regs, subs] = await Promise.all([
-        j<RegistrationAdminView>(`/api/online-competition/admin-competitions/${current.id}/registrations`, 'registrations'),
-        j<OnlineSubmissionAdminView>(`/api/online-competition/submissions?status=all&competitionId=${current.id}`, 'submissions'),
-      ]);
-      if (cancelled) return;
-      setRegistrations(regs);
-      setLiveSubs(subs);
-    });
+    j<OnlineCompetitionAdminView>('/api/online-competition/admin-competitions', 'competitions').then(
+      async (list) => {
+        const current = list.find((c) => c.status === 'live') ?? null;
+        if (cancelled) return;
+        setLive(current);
+        if (!current) {
+          setRegistrations([]);
+          setLiveSubs([]);
+          return;
+        }
+        try {
+          const [regs, subs] = await Promise.all([
+            j<RegistrationAdminView>(`/api/online-competition/admin-competitions/${current.id}/registrations`, 'registrations'),
+            j<OnlineSubmissionAdminView>(`/api/online-competition/submissions?status=all&competitionId=${current.id}`, 'submissions'),
+          ]);
+          if (cancelled) return;
+          setRegistrations(regs);
+          setLiveSubs(subs);
+        } catch (err) {
+          markFailed('progress', err);
+        }
+      },
+      (err) => markFailed('competitions', err),
+    );
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [attempt]);
+
+  const retry = () => setAttempt((n) => n + 1);
+  const anyFailed = Object.values(failed).some(Boolean);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -104,6 +152,15 @@ export default function AdminOverview() {
         <p className="oc-v3-eyebrow">Админ</p>
         <h1 className="oc-v3-title" style={{ marginTop: 8 }}>Хяналтын самбар</h1>
       </div>
+
+      {anyFailed && (
+        <div className="oc-sc-warn" role="alert" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <span>Зарим мэдээллийг ачаалж чадсангүй — доорх «—» нь тэг гэсэн үг биш.</span>
+          <button type="button" className="oc-sc-btn" onClick={retry}>
+            ДАХИН АЧААЛАХ
+          </button>
+        </div>
+      )}
 
       {/* Only the two stats the data model actually supports. The mockup's
           "ӨНӨӨДӨР БАТАЛСАН" needs a reviewedAt timestamp on submissions
@@ -115,12 +172,14 @@ export default function AdminOverview() {
         <StatCell
           label="Хянах дараалал"
           value={pending === null ? null : pending.length}
+          failed={failed.pending}
           accent
           note="шүүгчийн шийдвэр хүлээж байна"
         />
         <StatCell
           label="Тамирчны хүсэлт"
           value={athletes === null ? null : athletes.length}
+          failed={failed.athletes}
           note="баталгаажуулалт хүлээж байна"
         />
       </div>
@@ -136,8 +195,17 @@ export default function AdminOverview() {
               </Link>
             }
           />
+          {failed.names && pending !== null && pending.length > 0 && (
+            <p style={{ padding: '10px 16px 0', font: '400 11px var(--oc-font-heading), sans-serif', color: '#E0A020' }}>
+              Тамирчдын нэрийг ачаалж чадсангүй — дугаараар нь харуулж байна.
+            </p>
+          )}
           {pending === null ? (
-            <p className="oc-v3-status">Ачааллаж байна...</p>
+            failed.pending ? (
+              <ErrorRow text="Хянах дарааллыг ачаалж чадсангүй — энэ нь хянах илгээмж байхгүй гэсэн үг биш." onRetry={retry} />
+            ) : (
+              <p className="oc-v3-status">Ачааллаж байна...</p>
+            )
           ) : pending.length === 0 ? (
             <EmptyRow text="Хянах илгээмж алга." />
           ) : (
@@ -202,7 +270,14 @@ export default function AdminOverview() {
           {/* The admin lands here first — a live competition with no round
               open must not read as "just no submissions yet". */}
           {live && <RoundGapWarning events={live.eventsWithoutLiveRound ?? []} />}
-          {liveSubs === null || registrations === null ? (
+          {failed.competitions ? (
+            <ErrorRow
+              text="Тэмцээний жагсаалтыг ачаалж чадсангүй — энэ нь явагдаж буй тэмцээн байхгүй гэсэн үг биш."
+              onRetry={retry}
+            />
+          ) : failed.progress ? (
+            <ErrorRow text="Раундын явцыг ачаалж чадсангүй." onRetry={retry} />
+          ) : liveSubs === null || registrations === null ? (
             <p className="oc-v3-status">Ачааллаж байна...</p>
           ) : !live ? (
             <EmptyRow text="Явагдаж буй тэмцээн алга." />
@@ -220,19 +295,29 @@ function StatCell({
   value,
   note,
   accent,
+  failed,
 }: {
   label: string;
   value: number | null;
   note: string;
   accent?: boolean;
+  failed?: boolean;
 }) {
   return (
     <div className="oc-adm-statcell">
       <span className="oc-v3-stat-label">{label}</span>
-      <span className="oc-adm-statvalue" style={{ color: accent ? '#DFFF4F' : '#F4F1EA' }}>
+      <span className="oc-adm-statvalue" style={{ color: failed ? '#E8543C' : accent ? '#DFFF4F' : '#F4F1EA' }}>
         {value === null ? '—' : value}
       </span>
-      <p style={{ marginTop: 8, font: '400 10px var(--oc-font-mono), monospace', color: '#6E6A62' }}>{note}</p>
+      <p
+        style={{
+          marginTop: 8,
+          font: '400 10px var(--oc-font-mono), monospace',
+          color: failed ? '#E8543C' : '#6E6A62',
+        }}
+      >
+        {failed ? 'ачаалж чадсангүй' : note}
+      </p>
     </div>
   );
 }
@@ -242,6 +327,18 @@ function EmptyRow({ text }: { text: string }) {
     <p style={{ padding: '28px 16px', font: '500 13px var(--oc-font-heading), sans-serif', color: '#6E6A62' }}>
       {text}
     </p>
+  );
+}
+
+/** A card whose data could not be loaded — never styled like EmptyRow. */
+function ErrorRow({ text, onRetry }: { text: string; onRetry: () => void }) {
+  return (
+    <div role="alert" style={{ padding: '22px 16px', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 10 }}>
+      <p style={{ font: '500 13px var(--oc-font-heading), sans-serif', color: '#E8543C' }}>{text}</p>
+      <button type="button" className="oc-sc-btn" onClick={onRetry}>
+        ДАХИН АЧААЛАХ
+      </button>
+    </div>
   );
 }
 

@@ -121,6 +121,58 @@ const src = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
   ok('  ...and the start panel shows it as its own state with a retry',
     panel.includes("'ШАЛГАЖ ЧАДСАНГҮЙ'") && panel.includes('ДАХИН ШАЛГАХ'));
 
+  // ══ Second set ═══════════════════════════════════════════════════════
+  console.log('\n  -- 4. the athlete\'s own registration --');
+  const hook = src('app/online-competition/[competitionId]/details/_components/useMyRegistration.ts');
+  ok('THE BUG: a failed read is no longer swallowed', /\.catch\(\(err\) => \{[\s\S]{0,160}setError\(true\)/.test(hook));
+  ok('  ...and the hook reports it', hook.includes('return { registration, loading, error, refresh };'));
+  const regPanel = src('app/online-competition/[competitionId]/details/_components/RegistrationPanel.tsx');
+  ok('the registration panel shows the failure BEFORE "closed" or the form',
+    regPanel.indexOf('if (registrationError)') > -1 &&
+      regPanel.indexOf('if (registrationError)') < regPanel.indexOf('Бүртгэл хаагдсан') &&
+      regPanel.includes('энэ нь та бүртгүүлээгүй гэсэн үг биш'));
+  ok('the start panel says it could not load, instead of vanishing',
+    panel.includes('if (!registrationFailed || loading) return null;') && panel.includes('Таны бүртгэлийг ачаалж чадсангүй'));
+  ok('the details page wires both, and the sidebar shows "—", not an event count',
+    details.includes('registrationFailed={myRegistration.error && !myRegistration.registration}') &&
+      details.includes('registrationError={myRegistration.error && !myRegistration.registration}') &&
+      /myRegistration\.error \? \(/.test(details));
+
+  console.log('\n  -- 5. round notifications --');
+  const notify = src('lib/online-competition/notifications-server.ts');
+  ok('notifyRoundFinalised reports failure instead of only logging it',
+    notify.includes('}): Promise<{ ok: boolean }> {') && /catch \(err\) \{[\s\S]{0,300}return \{ ok: false \};/.test(notify));
+  ok('  ...and still never throws (no rethrow in the catch)', !/catch \(err\) \{[\s\S]{0,300}throw /.test(notify));
+  const roundsRoute = src('app/api/online-competition/admin-rounds/route.ts');
+  const qualifyRoute = src('app/api/online-competition/admin-rounds/qualify/route.ts');
+  ok('closing a round tells the admin whether athletes were notified', roundsRoute.includes("NextResponse.json({ status: 'done', notified })"));
+  ok('committing a cut does too', qualifyRoute.includes('committed: true, notified }'));
+  ok('a failed send can be retried, for a finished round only',
+    roundsRoute.includes("if (action === 'notify')") && roundsRoute.includes("stateSnap.get('status') !== 'done'"));
+  const roundsUi = src('app/online-competition/admin/_components/RoundsManager.tsx');
+  ok('the rounds screen shows the failure with a resend button',
+    roundsUi.includes('МЭДЭГДЭЛ ДАХИН ИЛГЭЭХ') && roundsUi.includes("action === 'close' && data.notified === false") &&
+      roundsUi.includes('if (!notified) setNotifyNote('));
+
+  console.log('\n  -- 6. the judge\'s video --');
+  const judge = src('app/online-competition/admin/_components/SubmissionDetailPanel.tsx');
+  ok('a video that fails to load is caught', judge.includes('onError={() => setVideoFailedFor(submission.id)}'));
+  ok('each cause gets its own message',
+    judge.includes("'БИЧЛЭГ ХАВСАРГААГҮЙ'") && judge.includes("'БИЧЛЭГ ХАРУУЛАХ БОЛОМЖГҮЙ'") && judge.includes("'БИЧЛЭГ АЧААЛАГДСАНГҮЙ'"));
+  ok('  ...a load failure offers a reload', /videoProblem === 'failed' && \([\s\S]{0,300}videoRef\.current\?\.load\(\)/.test(judge));
+  ok('the decision buttons are NOT disabled by a video problem (judging unchanged)', !/disabled=\{[^}]*video/i.test(judge));
+  ok('  ...but a warning sits beside them', /\{videoProblem && \(\s*<p\s+role="note"/.test(judge));
+
+  console.log('\n  -- 7. the admin overview --');
+  const overview = src('app/online-competition/admin/_components/AdminOverview.tsx');
+  ok('THE BUG: no load is caught into an empty list', !/\.catch\(\(\) => \[\]\)/.test(overview));
+  ok('every card has its own failure state',
+    ['pending', 'athletes', 'names', 'competitions', 'progress'].every((k) => overview.includes(`markFailed('${k}'`)));
+  ok('a failed queue is not "Хянах илгээмж алга."', /failed\.pending \? \(\s*<ErrorRow/.test(overview));
+  ok('a failed competition list is not "Явагдаж буй тэмцээн алга."', /failed\.competitions \? \(\s*<ErrorRow/.test(overview));
+  ok('the counts show "—" marked as failed, not 0', overview.includes("{failed ? 'ачаалж чадсангүй' : note}"));
+  ok('one retry reloads everything', overview.includes('}, [attempt]);') && overview.includes('ДАХИН АЧААЛАХ'));
+
   console.log(`\n  ${pass} passed, ${fail} failed\n`);
   fs.rmSync(OUT, { recursive: true, force: true });
   process.exit(fail === 0 ? 0 : 1);

@@ -58,10 +58,16 @@ function eventName(events: OnlineCompetitionEventConfig[], eventId: string): str
  *  (admin-rounds) and committing qualifiers (admin-rounds/qualify) —
  *  because either can be the moment a round actually ends.
  *
- *  NEVER THROWS. A notification is a courtesy; the round transition that
- *  triggered it has already committed, and a Firestore hiccup here must
- *  not turn a successful close or advance into a failure the admin sees.
- *  Failures are logged and swallowed.
+ *  NEVER THROWS — but REPORTS. A notification is a courtesy; the round
+ *  transition that triggered it has already committed, and a Firestore
+ *  hiccup here must not turn a successful close or advance into a failed
+ *  one. It used to be only logged, though, so the admin was told the round
+ *  closed and believed athletes had been told too. It now resolves
+ *  `{ ok: false }` on failure: the routes pass that on as `notified`, the
+ *  rounds screen says the announcement did not go out, and the admin can
+ *  send it again (admin-rounds action 'notify') — safe, because a failed
+ *  attempt claims no marker and a successful one cannot send twice.
+ *  `{ ok: true }` also covers "nothing was owed".
  *
  *  ── What each path sends ─────────────────────────────────────────────
  *  ШАЛГАРУУЛАХ with no prior close: one notification each — qualifiers
@@ -96,7 +102,7 @@ export async function notifyRoundFinalised(params: {
   /** Athletes advancing to the next round. Empty when the round was merely
    *  closed — closing deliberately computes no cut. */
   qualifiedUids?: string[];
-}): Promise<void> {
+}): Promise<{ ok: boolean }> {
   const { competitionId, eventId, round } = params;
   // Deduplicated, order preserved — the short advancement notices are
   // written in the order the qualifier list gives them.
@@ -117,7 +123,7 @@ export async function notifyRoundFinalised(params: {
     const pre = await roundRef.get();
     const preResults = !!pre.get(RESULTS_MARKER);
     const preAdvanced = !!pre.get(ADVANCED_MARKER);
-    if (preResults && (preAdvanced || qualified.size === 0)) return;
+    if (preResults && (preAdvanced || qualified.size === 0)) return { ok: true };
 
     const compSnap = await db.collection('onlineCompetitions').doc(competitionId).get();
     const comp = compSnap.data();
@@ -193,11 +199,13 @@ export async function notifyRoundFinalised(params: {
       if (Object.keys(marker).length === 0) return;
       tx.set(roundRef, marker, { merge: true });
     });
+    return { ok: true };
   } catch (err) {
     console.error(
       `[online-competition] round-finalised notification failed for ` +
         `${competitionId}/${eventId} round ${round} — the round transition itself is unaffected:`,
       err,
     );
+    return { ok: false };
   }
 }

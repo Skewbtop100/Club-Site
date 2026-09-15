@@ -61,6 +61,8 @@ export default function RegistrationPanel({
   competition,
   registration,
   loadingRegistration,
+  registrationError = false,
+  onRetryRegistration,
   onSaved,
 }: {
   competition: OnlineCompetition;
@@ -68,6 +70,11 @@ export default function RegistrationPanel({
    *  same copy the page's sidebar reads, so the two never disagree. */
   registration: OnlineRegistration | null;
   loadingRegistration: boolean;
+  /** The registration could not be READ (and none is held). Shown as a load
+   *  failure with a retry — never as "closed" or the sign-up form, which is
+   *  what an unregistered athlete sees. */
+  registrationError?: boolean;
+  onRetryRegistration?: () => void;
   /** Called after a successful save, so the page re-reads the stored
    *  document (its review status included). */
   onSaved: () => void;
@@ -254,6 +261,40 @@ export default function RegistrationPanel({
 
   if (loadingRegistration) {
     return <p className="oc-rp-muted">Ачааллаж байна...</p>;
+  }
+
+  // ── registration could not be read ───────────────────────────────────
+  // Before "closed" and every other state: each of those is a statement
+  // about an athlete with NO registration, and this athlete may well have
+  // one. Nothing is offered but a retry.
+  if (registrationError) {
+    return (
+      <div className="oc-rp oc-rp-message" role="alert">
+        <p className="oc-rp-title">Бүртгэлийг ачаалж чадсангүй</p>
+        <p className="oc-rp-body">
+          Таны бүртгэлийн мэдээллийг уншиж чадсангүй — энэ нь та бүртгүүлээгүй гэсэн үг биш. Холболтоо шалгаад дахин
+          оролдоно уу.
+        </p>
+        {onRetryRegistration && (
+          <button
+            type="button"
+            onClick={onRetryRegistration}
+            style={{
+              marginTop: 12,
+              border: '1px solid #DFFF4F',
+              background: 'transparent',
+              color: '#DFFF4F',
+              padding: '10px 16px',
+              font: '600 9px var(--oc-font-mono), monospace',
+              letterSpacing: '.1em',
+              cursor: 'pointer',
+            }}
+          >
+            ДАХИН АЧААЛАХ
+          </button>
+        )}
+      </div>
+    );
   }
 
   // ── registration closed ──────────────────────────────────────────────

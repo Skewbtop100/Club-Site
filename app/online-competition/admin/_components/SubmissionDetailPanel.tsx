@@ -248,6 +248,10 @@ export default function SubmissionDetailPanel({
   const [error, setError] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  /** The submission whose video failed to load, if any. Keyed by id rather
+   *  than a boolean so moving to the next attempt clears it without an
+   *  effect. */
+  const [videoFailedFor, setVideoFailedFor] = useState<string | null>(null);
   /** The still opened at full size, or null. A public id rather than a
    *  boolean + index, so the overlay cannot outlive the row it came from
    *  when the panel switches to another submission. */
@@ -267,6 +271,28 @@ export default function SubmissionDetailPanel({
   // R2 key or legacy Cloudinary URL — decided in resolveVideoSrc and
   // nowhere else.
   const videoSrc = resolveVideoSrc(submission);
+
+  // ── WHY THERE IS NO VIDEO, when there is none ──
+  // A blank player used to be all a judge got, for three different causes
+  // that call for three different responses — and "the athlete sent no
+  // recording" is the one a judge could DNF on. So each is named:
+  //   none-stored    — the record carries no video reference at all;
+  //   not-configured — a video IS stored, but the site cannot build its
+  //                    address (the public video base is not configured —
+  //                    see video-source.ts);
+  //   failed         — the player could not load it (network, 404, codec).
+  const storedRef = submission as { videoKey?: unknown; videoUrl?: unknown };
+  const hasStoredVideo =
+    (typeof storedRef.videoKey === 'string' && storedRef.videoKey.trim() !== '') ||
+    (typeof storedRef.videoUrl === 'string' && storedRef.videoUrl.trim() !== '');
+  const videoProblem: 'none-stored' | 'not-configured' | 'failed' | null =
+    videoSrc === null
+      ? hasStoredVideo
+        ? 'not-configured'
+        : 'none-stored'
+      : videoFailedFor === submission.id
+        ? 'failed'
+        : null;
 
   /** Where this button should land, in MILLISECONDS, or null when what it
    *  depends on was never recorded. */
@@ -456,8 +482,62 @@ export default function SubmissionDetailPanel({
             onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
             onTimeUpdate={(e) => setPos(e.currentTarget.currentTime)}
             onSeeked={(e) => setPos(e.currentTarget.currentTime)}
+            onError={() => setVideoFailedFor(submission.id)}
             style={{ width: '100%', height: '100%', background: '#000', objectFit: 'contain' }}
           />
+          {videoProblem && (
+            <div
+              role="alert"
+              style={{
+                position: 'absolute',
+                inset: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 10,
+                padding: 24,
+                textAlign: 'center',
+                background: '#08080AF2',
+                zIndex: 2,
+              }}
+            >
+              <p style={{ font: '600 10px var(--oc-font-mono), monospace', letterSpacing: '.14em', color: '#E8543C' }}>
+                {videoProblem === 'none-stored'
+                  ? 'БИЧЛЭГ ХАВСАРГААГҮЙ'
+                  : videoProblem === 'not-configured'
+                    ? 'БИЧЛЭГ ХАРУУЛАХ БОЛОМЖГҮЙ'
+                    : 'БИЧЛЭГ АЧААЛАГДСАНГҮЙ'}
+              </p>
+              <p style={{ maxWidth: 340, font: '400 12px/1.6 var(--oc-font-heading), sans-serif', color: '#F4F1EA' }}>
+                {videoProblem === 'none-stored'
+                  ? 'Энэ илгээмжид бичлэгийн холбоос хадгалагдаагүй байна.'
+                  : videoProblem === 'not-configured'
+                    ? 'Бичлэг хадгалагдсан боловч сайтын бичлэгийн хаяг тохируулагдаагүй байна. Энэ нь бичлэг байхгүй гэсэн үг биш — техникийн админд хандана уу.'
+                    : 'Бичлэгийг ачаалж чадсангүй — энэ нь бичлэг байхгүй гэсэн үг биш. Холболтоо шалгаад дахин ачаална уу.'}
+              </p>
+              {videoProblem === 'failed' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setVideoFailedFor(null);
+                    videoRef.current?.load();
+                  }}
+                  style={{
+                    border: '1px solid #DFFF4F',
+                    background: 'transparent',
+                    color: '#DFFF4F',
+                    padding: '9px 14px',
+                    font: '600 9px var(--oc-font-mono), monospace',
+                    letterSpacing: '.1em',
+                    cursor: 'pointer',
+                  }}
+                >
+                  ДАХИН АЧААЛАХ
+                </button>
+              )}
+            </div>
+          )}
           {/* Position and the selected phase, over the frame, as the
               mockup has them. pointerEvents none so they never take a
               click meant for the video's own controls. */}
@@ -977,6 +1057,27 @@ export default function SubmissionDetailPanel({
         {error && (
           <p style={{ flex: 'none', font: '400 11px/1.4 var(--oc-font-heading), sans-serif', color: '#E8543C' }}>
             {error}
+          </p>
+        )}
+        {/* The decisions stay available — deciding whether an attempt with
+            no watchable video can stand is the judge's call, and disabling
+            them would change judging. What changes is that the judge is
+            told WHY there is nothing to watch, beside the buttons. */}
+        {videoProblem && (
+          <p
+            role="note"
+            style={{
+              flex: 'none',
+              border: '1px solid #3A3018',
+              background: '#14100A',
+              padding: '8px 10px',
+              font: '400 11px/1.5 var(--oc-font-heading), sans-serif',
+              color: '#E0A020',
+            }}
+          >
+            {videoProblem === 'none-stored'
+              ? 'Бичлэг хавсаргаагүй илгээмж. Шийдвэр гаргахаасаа өмнө нягтална уу.'
+              : 'Бичлэг харагдахгүй байгаа нь тамирчин бичлэг илгээгээгүй гэсэн үг биш. Бичлэг ачаалагдахаас өмнө DNF өгөхгүй байхыг анхаарна уу.'}
           </p>
         )}
 

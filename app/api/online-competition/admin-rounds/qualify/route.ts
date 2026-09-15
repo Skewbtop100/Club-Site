@@ -26,6 +26,10 @@ export interface QualifyResponse {
   ranked: RoundRanking[];
   qualifiers: RoundRanking[];
   committed: boolean;
+  /** Commit only: whether the athletes' result / "шалгарлаа" notifications
+   *  went out. False means the cut IS committed but nobody was told — the
+   *  rounds screen offers МЭДЭГДЭЛ ДАХИН ИЛГЭЭХ. */
+  notified?: boolean;
 }
 
 export async function POST(req: Request) {
@@ -105,13 +109,13 @@ export async function POST(req: Request) {
   // cut get the "шалгарлаа" wording instead of a plain result (one
   // notification either way, never two). Never throws, and its marker
   // makes a re-run of ШАЛГАРУУЛАХ send nothing a second time.
-  await notifyRoundFinalised({
+  const { ok: notified } = await notifyRoundFinalised({
     competitionId,
     eventId,
     round,
     qualifiedUids: qualifiers.map((q) => q.uid),
   });
 
-  const payload: QualifyResponse = { ranked, qualifiers, committed: true };
+  const payload: QualifyResponse = { ranked, qualifiers, committed: true, notified };
   return NextResponse.json(payload);
 }
