@@ -53,9 +53,28 @@ const testEnv = await initializeTestEnvironment({
   firestore: { rules: fs.readFileSync(RULES, 'utf8'), host: '127.0.0.1', port: 8080 },
 });
 
+/** The competitions these tests register for, each with registration OPEN
+ *  (a day either side of now). A registration is refused unless its
+ *  competition is public and inside its window — that rule has its own
+ *  suite, tests/firestore-rules/registration-window.test.mjs. */
+async function seedOpenCompetitions() {
+  const { Timestamp } = await import('firebase/firestore');
+  const open = {
+    status: 'upcoming',
+    registrationOpensAt: Timestamp.fromMillis(Date.now() - 86_400_000),
+    registrationDeadline: Timestamp.fromMillis(Date.now() + 86_400_000),
+  };
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    for (const id of ['comp1', 'comp2', 'jbb6']) {
+      await setDoc(doc(ctx.firestore(), 'onlineCompetitions', id), { name: id, ...open });
+    }
+  });
+}
+
 /** Seed a participant doc bypassing rules, then run `fn` as that athlete. */
 async function withDoc(seed, fn) {
   await testEnv.clearFirestore();
+  await seedOpenCompetitions();
   if (seed) {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
       await setDoc(doc(ctx.firestore(), 'onlineParticipants', UID), seed);
@@ -321,6 +340,13 @@ await check('R11. deleting a registration is refused', 'DENY', APPROVED, async (
   return deleteDoc(reg(ref));
 });
 
+// ── CLOSED: GAP-2 ────────────────────────────────────────────────────
+// The rule now reads the competition: its status and registration window
+// are enforced (full coverage in registration-window.test.mjs).
+await check('R12. a registration for a competition id that does not exist is REFUSED', 'DENY', APPROVED, (ref) =>
+  setDoc(reg(ref, 'no-such-comp'), { ...REG, competitionId: 'no-such-comp' }),
+);
+
 // ── KNOWN GAPS — these document what the rules do NOT enforce today ──
 // Each is a gate the registration panel applies CLIENT-SIDE only. They are
 // asserted as ALLOW so that hardening the rules makes these fail loudly
@@ -329,14 +355,10 @@ await check('R11. deleting a registration is refused', 'DENY', APPROVED, async (
 await check('GAP-1. an UNAPPROVED athlete can write a registration directly', 'ALLOW', null, (ref) =>
   setDoc(reg(ref), REG),
 );
-await check('GAP-2. a registration for a competition id that does not exist is accepted', 'ALLOW', APPROVED, (ref) =>
-  setDoc(reg(ref, 'no-such-comp'), { ...REG, competitionId: 'no-such-comp' }),
-);
 await check('GAP-3. event ids are not checked against the competition', 'ALLOW', APPROVED, (ref) =>
   setDoc(reg(ref), { ...REG, events: ['not-an-event'] }),
 );
-// The deadline, status and participant limit are not checked either — the
-// rule never reads the competition document at all, so GAP-2 covers them.
+// The participant limit is not checked either.
 
 // ── Registration READS: owner only ──────────────────────────────────
 // The rule was `isSignedIn()`: any account could read any athlete's
@@ -348,6 +370,7 @@ async function scenario(name, fn) {
   let detail;
   try {
     await testEnv.clearFirestore();
+    await seedOpenCompetitions();
     await fn();
   } catch (e) {
     ok = false;

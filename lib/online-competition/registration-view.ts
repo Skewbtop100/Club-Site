@@ -4,13 +4,13 @@
 // no Firestore, no clock of its own (callers pass `nowMs`) — and unit-
 // tested in tests/competition-fields/registration-view.test.cjs.
 //
-// EVERY GATE HERE IS CLIENT-SIDE. firestore.rules for
-// onlineParticipants/{uid}/registrations checks ownership, the fields an
-// athlete may write, that a new registration is 'pending', and that the
-// review status and admin note are untouched. It does NOT check the
-// deadline, the competition's status, the athlete's profile status, or
-// the participant limit. These functions make the panel honest; they do
-// not make the data safe from a hand-crafted write.
+// THE WINDOW IS ALSO ENFORCED ON THE SERVER. firestore.rules for
+// onlineParticipants/{uid}/registrations refuses a registration (or a
+// change of events or note) unless the competition is public and the
+// server's clock is inside its registration window — the same rule
+// registrationWindow applies below, so the panel shows what the server
+// will accept. The rules still do NOT check the athlete's profile status
+// or the participant limit; those gates remain client-side.
 
 import { athleteFeeMnt, formatMnt, surchargeOf } from './fees';
 import type {
@@ -24,30 +24,103 @@ import type {
 
 export type RegistrationWindow =
   | { open: true }
-  | { open: false; reason: 'finished' | 'deadline-passed' };
+  | { open: false; reason: 'not-yet-open'; opensAtMs: number }
+  | { open: false; reason: 'finished' | 'deadline-passed' | 'not-public' | 'no-window' };
 
-/** Open unless the competition has finished or its deadline has passed.
+/** Open only while the competition is public and the clock is inside
+ *  [registrationOpensAt, registrationDeadline) — exactly what
+ *  firestore.rules accepts (windowOpenFor), and failing closed the same way:
  *
- *  'live' is not closed by status alone: a competition's deadline must be
- *  on or before its start (validateCompetitionInput refuses otherwise), so
- *  a live competition is past its deadline in practice and the deadline
- *  rule closes it. Only when an admin left the deadline UNSET does a live
- *  competition stay open — and in that case "no closing time" is what the
- *  admin configured, so that is what the panel honours.
+ *    finished                          -> 'finished'
+ *    any status but upcoming or live   -> 'not-public'
+ *    either time unset                 -> 'no-window'
+ *    at or after the deadline          -> 'deadline-passed'
+ *    before the opening time           -> 'not-yet-open' (with when)
  *
- *  A draft never reaches this panel: fetchCompetition returns null for
- *  one. The deadline is "passed" from the exact millisecond it names, the
- *  same instant the header's countdown reaches БҮРТГЭЛ ХААГДСАН, so the
- *  two can never disagree about whether it is open. */
+ *  An unset time used to mean "no limit". It no longer does: a competition
+ *  whose admin has not set the window has not opened registration.
+ *
+ *  Both boundaries are the millisecond named: open FROM registrationOpensAt,
+ *  closed FROM registrationDeadline — the same instant the header's
+ *  countdown reaches БҮРТГЭЛ ХААГДСАН. The panel's clock is the athlete's,
+ *  the rules' is the server's; if the two differ, the server wins and the
+ *  panel says so when a save is refused. */
 export function registrationWindow(
-  competition: { status: OnlineCompetitionStatus; registrationDeadlineMs: number | null },
+  competition: {
+    status: OnlineCompetitionStatus;
+    registrationOpensAtMs: number | null;
+    registrationDeadlineMs: number | null;
+  },
   nowMs: number,
 ): RegistrationWindow {
   if (competition.status === 'finished') return { open: false, reason: 'finished' };
-  if (competition.registrationDeadlineMs !== null && nowMs >= competition.registrationDeadlineMs) {
-    return { open: false, reason: 'deadline-passed' };
-  }
+  if (competition.status !== 'upcoming' && competition.status !== 'live') return { open: false, reason: 'not-public' };
+  const opens = competition.registrationOpensAtMs;
+  const closes = competition.registrationDeadlineMs;
+  if (opens === null || closes === null) return { open: false, reason: 'no-window' };
+  if (nowMs >= closes) return { open: false, reason: 'deadline-passed' };
+  if (nowMs < opens) return { open: false, reason: 'not-yet-open', opensAtMs: opens };
   return { open: true };
+}
+
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/** "2026.09.16 23:00", in the viewer's own time zone. */
+export function fmtRegistrationMoment(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getFullYear()}.${pad2(d.getMonth() + 1)}.${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+/** The countdown on the disabled button: "2 ӨДӨР 03:14:09", or "03:14:09"
+ *  inside the last day. Rounded UP to the second, so it reads 00:00:01 —
+ *  never 00:00:00 — while registration is still closed. */
+export function opensInLabel(msLeft: number): string {
+  const total = Math.max(0, Math.ceil(msLeft / 1000));
+  const days = Math.floor(total / 86_400);
+  const clock = `${pad2(Math.floor((total % 86_400) / 3600))}:${pad2(Math.floor((total % 3600) / 60))}:${pad2(total % 60)}`;
+  return days > 0 ? `${days} ӨДӨР ${clock}` : clock;
+}
+
+/** What a panel that cannot register says. `savedLine` is for an athlete
+ *  who already holds a registration: their summary stays, read-only. The
+ *  finished and deadline wording is the closed state as it already was. */
+export function registrationClosedCopy(
+  w: Exclude<RegistrationWindow, { open: true }>,
+): { title: string; body: string; savedLine: string } {
+  switch (w.reason) {
+    case 'not-yet-open': {
+      const at = fmtRegistrationMoment(w.opensAtMs);
+      return {
+        title: 'Бүртгэл нээгдээгүй',
+        body: `Бүртгэл ${at}-д нээгдэнэ.`,
+        savedLine: `Бүртгэл ${at}-д нээгдэнэ. Сонголтоо тэр үеэс өөрчилж болно.`,
+      };
+    }
+    case 'finished':
+      return {
+        title: 'Бүртгэл хаагдсан',
+        body: 'Тэмцээн дууссан тул бүртгэл хаагдсан.',
+        savedLine: 'Тэмцээн дууссан тул бүртгэл хаагдсан. Сонголтоо өөрчлөх боломжгүй.',
+      };
+    case 'deadline-passed':
+      return {
+        title: 'Бүртгэл хаагдсан',
+        body: 'Бүртгэлийн хугацаа дууссан.',
+        savedLine: 'Бүртгэлийн хугацаа дууссан. Сонголтоо өөрчлөх боломжгүй.',
+      };
+    case 'no-window':
+      return {
+        title: 'Бүртгэл нээгдээгүй',
+        body: 'Зохион байгуулагч бүртгэлийн хугацааг хараахан зарлаагүй байна.',
+        savedLine: 'Бүртгэлийн хугацаа зарлагдаагүй тул сонголтоо одоогоор өөрчлөх боломжгүй.',
+      };
+    case 'not-public':
+      return {
+        title: 'Бүртгэл хаагдсан',
+        body: 'Энэ тэмцээнд одоогоор бүртгүүлэх боломжгүй.',
+        savedLine: 'Энэ тэмцээнд одоогоор сонголтоо өөрчлөх боломжгүй.',
+      };
+  }
 }
 
 // ── the fee for a selection ────────────────────────────────────────────

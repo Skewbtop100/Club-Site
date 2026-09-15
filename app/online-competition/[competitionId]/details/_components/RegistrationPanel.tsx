@@ -16,7 +16,9 @@ import { rejectionSummary, resolveVerification } from '@/lib/online-competition/
 import {
   competeGateCopy,
   feeView,
+  opensInLabel,
   profileGateCopy,
+  registrationClosedCopy,
   registrationStatusCopy,
   registrationWindow,
 } from '@/lib/online-competition/registration-view';
@@ -57,6 +59,8 @@ interface Saved {
 /** Re-evaluated on this cadence so a panel left open across the deadline
  *  closes itself. The submit handler checks the clock again anyway. */
 const WINDOW_TICK_MS = 30_000;
+/** While counting down to the opening time. */
+const COUNTDOWN_TICK_MS = 1_000;
 
 export default function RegistrationPanel({
   competition,
@@ -97,13 +101,19 @@ export default function RegistrationPanel({
   const [saveError, setSaveError] = useState('');
   const [now, setNow] = useState(() => Date.now());
 
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), WINDOW_TICK_MS);
-    return () => clearInterval(id);
-  }, []);
-
+  const opensAtMs = competition.registrationOpensAt ? competition.registrationOpensAt.toMillis() : null;
   const deadlineMs = competition.registrationDeadline ? competition.registrationDeadline.toMillis() : null;
-  const regWindow = registrationWindow({ status: competition.status, registrationDeadlineMs: deadlineMs }, now);
+  const windowInput = { status: competition.status, registrationOpensAtMs: opensAtMs, registrationDeadlineMs: deadlineMs };
+  const regWindow = registrationWindow(windowInput, now);
+  // Every second while counting down to the opening, so the countdown runs
+  // and the button enables itself at the moment registration opens; the
+  // slower tick otherwise, which is enough to notice the deadline.
+  const countingDown = !regWindow.open && regWindow.reason === 'not-yet-open';
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), countingDown ? COUNTDOWN_TICK_MS : WINDOW_TICK_MS);
+    return () => clearInterval(id);
+  }, [countingDown]);
 
   // Adopt the stored registration whenever it (re)loads — on mount, after
   // a sign-in, and after every save's refresh. The one exception is an
@@ -208,15 +218,16 @@ export default function RegistrationPanel({
       setSaveError('Та нэвтрээгүй байна. Дахин нэвтэрнэ үү.');
       return;
     }
-    // The deadline is re-checked against the clock NOW, not the last tick:
+    // The window is re-checked against the clock NOW, not the last tick:
     // a form opened at 17:59 must not save at 18:01.
-    const liveWindow = registrationWindow(
-      { status: competition.status, registrationDeadlineMs: deadlineMs },
-      Date.now(),
-    );
+    const liveWindow = registrationWindow(windowInput, Date.now());
     if (!liveWindow.open) {
       setNow(Date.now());
-      setSaveError('Бүртгэлийн хугацаа дууссан тул хадгалах боломжгүй.');
+      setSaveError(
+        liveWindow.reason === 'not-yet-open'
+          ? 'Бүртгэл хараахан нээгдээгүй тул хадгалах боломжгүй.'
+          : 'Бүртгэлийн хугацаа дууссан тул хадгалах боломжгүй.',
+      );
       return;
     }
     // Only events the competition still has — an event the admin removed
@@ -243,7 +254,14 @@ export default function RegistrationPanel({
       onSaved();
     } catch (err) {
       console.error('RegistrationPanel: saving the registration failed:', err);
-      setSaveError('Бүртгэл хадгалахад алдаа гарлаа. Дахин оролдоно уу.');
+      // firestore.rules judge the window on the SERVER's clock. A refusal
+      // here, with the panel showing it open, is almost always this device's
+      // clock disagreeing with the server's — retrying would not help.
+      setSaveError(
+        (err as { code?: string } | null)?.code === 'permission-denied'
+          ? 'Бүртгэл одоогоор хүлээн авахгүй байна — бүртгэлийн хугацаа нээгдээгүй эсвэл хаагдсан байж магадгүй. Хуудсаа дахин ачаална уу.'
+          : 'Бүртгэл хадгалахад алдаа гарлаа. Дахин оролдоно уу.',
+      );
     } finally {
       setSaving(false);
     }
@@ -300,13 +318,13 @@ export default function RegistrationPanel({
     );
   }
 
-  // ── registration closed ──────────────────────────────────────────────
+  // ── registration not open: not yet, or no longer ─────────────────────
   // Before every other state: there is no point signing in to, or
-  // filling in, a registration that cannot be saved. A registered athlete
-  // still sees what they registered for — read-only.
+  // filling in, a registration that cannot be saved — firestore.rules
+  // refuse it. A registered athlete still sees what they registered for,
+  // read-only.
   if (!regWindow.open) {
-    const closedLine =
-      regWindow.reason === 'finished' ? 'Тэмцээн дууссан тул бүртгэл хаагдсан.' : 'Бүртгэлийн хугацаа дууссан.';
+    const copy = registrationClosedCopy(regWindow);
     if (saved) {
       return (
         <RegisteredSummary
@@ -317,16 +335,37 @@ export default function RegistrationPanel({
           statusNote={registration?.statusNote ?? null}
           footer={
             <div className="oc-rp-foot">
-              <p className="oc-rp-muted">{closedLine} Сонголтоо өөрчлөх боломжгүй.</p>
+              <p className="oc-rp-muted">{copy.savedLine}</p>
             </div>
           }
         />
       );
     }
+    // Before the opening time: the register button, disabled, counting down.
+    // It re-renders every second (COUNTDOWN_TICK_MS) and becomes the live
+    // БҮРТГҮҮЛЭХ button on its own when the time comes.
+    if (regWindow.reason === 'not-yet-open') {
+      return (
+        <div className="oc-rp oc-rp-intro">
+          <div>
+            <p className="oc-rp-body">{copy.body}</p>
+          </div>
+          <button
+            type="button"
+            className="oc-rp-submit"
+            disabled
+            aria-label={copy.body}
+            style={{ fontVariantNumeric: 'tabular-nums' }}
+          >
+            НЭЭГДЭХЭД {opensInLabel(regWindow.opensAtMs - now)}
+          </button>
+        </div>
+      );
+    }
     return (
       <div className="oc-rp oc-rp-message">
-        <p className="oc-rp-title">Бүртгэл хаагдсан</p>
-        <p className="oc-rp-body">{closedLine}</p>
+        <p className="oc-rp-title">{copy.title}</p>
+        <p className="oc-rp-body">{copy.body}</p>
       </div>
     );
   }

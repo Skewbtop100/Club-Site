@@ -311,8 +311,10 @@ export interface OnlineCompetition {
   events: OnlineCompetitionEventConfig[];
   status: OnlineCompetitionStatus;
   /** When registration OPENS. Optional for the same legacy-doc reason as
-   *  the fields above; absent means "no declared opening", not "open now"
-   *  — nothing gates on it yet. */
+   *  the fields above; absent means "no declared opening", not "open now".
+   *  REQUIRED for registration: firestore.rules refuse a registration
+   *  unless the server's clock is inside [registrationOpensAt,
+   *  registrationDeadline), and refuse it outright when either is absent. */
   registrationOpensAt?: Timestamp;
   /** When the competition ends. Optional, same reason. */
   endAt?: Timestamp;

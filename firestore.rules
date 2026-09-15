@@ -545,6 +545,41 @@ service cloud.firestore {
                    request.resource.data.note.size() <= 300));
         }
 
+        // ── THE REGISTRATION WINDOW ─────────────────────────────────────
+        // A registration may be sent only while its competition is PUBLIC
+        // ('upcoming' or 'live', no deletion under way) and the server's
+        // clock is inside [registrationOpensAt, registrationDeadline).
+        //
+        // FAILS CLOSED: a competition that does not exist, has any other
+        // status (a draft, a finished one, an unrecognised or legacy
+        // spelling), or lacks either time — or stores one as anything but a
+        // Timestamp — refuses. The panel (registration-view.ts
+        // registrationWindow) applies the same rule to decide what to show.
+        //
+        // WHAT THE TIME CHECK IS: request.time is the moment the write
+        // reaches Firestore, on Google's clock. The athlete's own clock plays
+        // no part, so a device set a day ahead gains nothing, and a write
+        // queued offline is judged when it arrives. What it CANNOT do: judge
+        // a document already written (a window edited later changes nothing
+        // stored), tell whether the admin typed the times in the timezone
+        // they meant, or constrain the Admin SDK, which bypasses rules.
+        function competitionPath() {
+          return /databases/$(database)/documents/onlineCompetitions/$(competitionId);
+        }
+
+        function windowOpenFor(comp) {
+          return comp.get('status', null) in ['upcoming', 'live'] &&
+                 comp.get('deletion', null) == null &&
+                 comp.get('registrationOpensAt', null) is timestamp &&
+                 comp.get('registrationDeadline', null) is timestamp &&
+                 request.time >= comp.registrationOpensAt &&
+                 request.time < comp.registrationDeadline;
+        }
+
+        function registrationWindowOpen() {
+          return exists(competitionPath()) && windowOpenFor(get(competitionPath()).data);
+        }
+
         // CREATE — exactly the fields registerForCompetition's first save
         // writes (buildRegistrationWrite), and nothing else: so no
         // statusNote, and no admin field of any kind. The status must be
@@ -558,7 +593,8 @@ service cloud.firestore {
                          request.resource.data.keys().hasOnly(
                            ['competitionId', 'events', 'status', 'registeredAt', 'updatedAt', 'note']) &&
                          request.resource.data.status == 'pending' &&
-                         request.resource.data.registeredAt == request.time;
+                         request.resource.data.registeredAt == request.time &&
+                         registrationWindowOpen();
 
         // UPDATE — the athlete may change ONLY these four fields:
         //   events, note, updatedAt  — an edit (buildRegistrationWrite)
@@ -577,11 +613,19 @@ service cloud.firestore {
         // which is now fixed. Reloading the page fixes it. That breakage is
         // the minimum: allowing it would mean letting an athlete move their
         // own place in the waitlist.
+        //
+        // Changing the EVENTS or the NOTE is registering, so it needs the
+        // window too — the panel's "Бүртгэл хаагдах хүртэл төрлөө сольж
+        // болно" is now true on the server as well. `results` alone (the
+        // solve page's recordAo5Result) does not: a round is solved after
+        // registration has closed.
         allow update: if isSignedIn() &&
                          request.auth.uid == uid &&
                          registrationShapeOk() &&
                          request.resource.data.diff(resource.data).affectedKeys()
-                           .hasOnly(['events', 'note', 'updatedAt', 'results']);
+                           .hasOnly(['events', 'note', 'updatedAt', 'results']) &&
+                         (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['events', 'note']) ||
+                          registrationWindowOpen());
         allow delete: if false;
       }
     }

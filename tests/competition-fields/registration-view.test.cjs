@@ -43,6 +43,9 @@ const {
   profileGateCopy,
   registrationStatusCopy,
   competeGateCopy,
+  opensInLabel,
+  fmtRegistrationMoment,
+  registrationClosedCopy,
 } = require(path.join(OUT, 'registration-view.js'));
 
 let pass = 0;
@@ -62,22 +65,55 @@ const j = (v) => JSON.stringify(v);
 
 const NOW = Date.UTC(2026, 2, 20, 12, 0);
 const HOUR = 3_600_000;
-const win = (status, deadline, now = NOW) => registrationWindow({ status, registrationDeadlineMs: deadline }, now);
+const DAY = 24 * HOUR;
+const win = (status, opens, deadline, now = NOW) =>
+  registrationWindow({ status, registrationOpensAtMs: opens, registrationDeadlineMs: deadline }, now);
 
-console.log('\n  -- registrationWindow --');
-eq('upcoming, deadline ahead: OPEN', j(win('upcoming', NOW + HOUR)), j({ open: true }));
-eq('upcoming, deadline passed: CLOSED', j(win('upcoming', NOW - HOUR)), j({ open: false, reason: 'deadline-passed' }));
+console.log('\n  -- registrationWindow: the same rule firestore.rules enforce --');
+eq('upcoming, inside the window: OPEN', j(win('upcoming', NOW - HOUR, NOW + HOUR)), j({ open: true }));
+eq('live, inside the window: OPEN', win('live', NOW - HOUR, NOW + HOUR).open, true);
+eq('BEFORE the opening time: not yet open, with when',
+  j(win('upcoming', NOW + HOUR, NOW + DAY)), j({ open: false, reason: 'not-yet-open', opensAtMs: NOW + HOUR }));
+eq('the opening millisecond itself is OPEN', win('upcoming', NOW, NOW + DAY).open, true);
+eq('one millisecond before opening is still closed', win('upcoming', NOW + 1, NOW + DAY).open, false);
+eq('AFTER the deadline: CLOSED', j(win('upcoming', NOW - DAY, NOW - HOUR)), j({ open: false, reason: 'deadline-passed' }));
 // The boundary matches the header countdown, which reads БҮРТГЭЛ ХААГДСАН
 // from remaining <= 0 — so the two can never disagree.
-eq('the deadline millisecond itself is CLOSED', win('upcoming', NOW).open, false);
-eq('one millisecond before is still OPEN', win('upcoming', NOW + 1).open, true);
-eq('finished: CLOSED even with a deadline ahead', j(win('finished', NOW + HOUR)), j({ open: false, reason: 'finished' }));
-eq('finished with no deadline: CLOSED', win('finished', null).open, false);
-eq('live, deadline passed (the normal case): CLOSED', win('live', NOW - HOUR).open, false);
-// A deadline left unset is what the admin configured: no closing time.
-eq('no deadline set, upcoming: OPEN', win('upcoming', null).open, true);
-eq('no deadline set, live: OPEN', win('live', null).open, true);
-eq('the same competition closes as the passed clock moves', win('upcoming', NOW + HOUR, NOW + 2 * HOUR).open, false);
+eq('the deadline millisecond itself is CLOSED', win('upcoming', NOW - DAY, NOW).open, false);
+eq('one millisecond before the deadline is still OPEN', win('upcoming', NOW - DAY, NOW + 1).open, true);
+eq('finished: CLOSED even inside the window', j(win('finished', NOW - HOUR, NOW + HOUR)), j({ open: false, reason: 'finished' }));
+eq('draft: CLOSED even inside the window', j(win('draft', NOW - HOUR, NOW + HOUR)), j({ open: false, reason: 'not-public' }));
+// Fail closed: an unset time is no longer "no limit".
+eq('no opening time: CLOSED', j(win('upcoming', null, NOW + DAY)), j({ open: false, reason: 'no-window' }));
+eq('no deadline: CLOSED', j(win('upcoming', NOW - DAY, null)), j({ open: false, reason: 'no-window' }));
+eq('neither: CLOSED', win('live', null, null).open, false);
+eq('opening after the deadline (misconfigured): CLOSED as passed', win('upcoming', NOW + HOUR, NOW - HOUR).open, false);
+eq('the same competition opens as the passed clock moves', win('upcoming', NOW + HOUR, NOW + DAY, NOW + 2 * HOUR).open, true);
+
+console.log('\n  -- the countdown and the closed copy --');
+eq('countdown inside the last day', opensInLabel(3 * HOUR + 14 * 60_000 + 9_000), '03:14:09');
+eq('countdown with days', opensInLabel(2 * DAY + 3 * HOUR + 14 * 60_000 + 9_000), '2 ӨДӨР 03:14:09');
+eq('rounded UP: never 00:00:00 while still closed', opensInLabel(1), '00:00:01');
+eq('nothing left', opensInLabel(-5), '00:00:00');
+{
+  const at = new Date(2026, 8, 16, 23, 0).getTime();
+  eq('the opening moment, in the viewer\'s zone', fmtRegistrationMoment(at), '2026.09.16 23:00');
+  const c = registrationClosedCopy({ open: false, reason: 'not-yet-open', opensAtMs: at });
+  eq('not yet open: when it opens', c.body, 'Бүртгэл 2026.09.16 23:00-д нээгдэнэ.');
+  eq('  ...title', c.title, 'Бүртгэл нээгдээгүй');
+}
+eq('after the deadline: the existing closed wording',
+  j(registrationClosedCopy({ open: false, reason: 'deadline-passed' })),
+  j({ title: 'Бүртгэл хаагдсан', body: 'Бүртгэлийн хугацаа дууссан.', savedLine: 'Бүртгэлийн хугацаа дууссан. Сонголтоо өөрчлөх боломжгүй.' }));
+eq('finished: the existing closed wording', registrationClosedCopy({ open: false, reason: 'finished' }).body, 'Тэмцээн дууссан тул бүртгэл хаагдсан.');
+{
+  const panel = fs.readFileSync(path.join(ROOT, 'app/online-competition/[competitionId]/details/_components/RegistrationPanel.tsx'), 'utf8');
+  ok('the panel passes the opening time into the window', panel.includes('registrationOpensAtMs: opensAtMs'));
+  ok('  ...ticks every second while counting down', panel.includes('countingDown ? COUNTDOWN_TICK_MS : WINDOW_TICK_MS') && panel.includes('const COUNTDOWN_TICK_MS = 1_000;'));
+  ok('  ...shows a DISABLED register button with the countdown',
+    /disabled\s+aria-label=\{copy\.body\}[\s\S]{0,120}НЭЭГДЭХЭД \{opensInLabel\(regWindow\.opensAtMs - now\)\}/.test(panel));
+  ok('  ...re-checks the window against the clock at save', panel.includes('registrationWindow(windowInput, Date.now())'));
+}
 
 console.log('\n  -- feeView: free competitions show NOTHING --');
 const EVENTS = [
