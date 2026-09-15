@@ -295,6 +295,9 @@ export default function SolvePage() {
   // refusal that arrives mid-run goes to scrambleError below, which the
   // athlete can retry from without losing them.
   const [blockedMessage, setBlockedMessage] = useState('');
+  // True when the block is a FAILED LOOKUP rather than a real answer (a
+  // closed round, a refused attempt): the screen then offers a retry.
+  const [blockedRetry, setBlockedRetry] = useState(false);
   /** Why this attempt's scramble did not arrive, or '' while it is in
    *  flight / once it has. Rendered by ScrambleWaitStage, which is the
    *  only screen a mid-run failure is allowed to reach. */
@@ -542,17 +545,28 @@ export default function SolvePage() {
       // for is the round it would be admitted to.
       let liveRound: number | null = null;
       let filed: FiledAttempt[] = [];
+      // Which of the two lookups failed — they get different messages.
+      let accessUnavailable = false;
       try {
         const [accessRes, mine] = await Promise.all([
           // The uid comes from the verified token now, not from the URL.
           authedFetchWithRetry(
             `/api/online-competition/round-access?competitionId=${encodeURIComponent(competitionId)}`,
-          ),
+          ).catch((err) => {
+            accessUnavailable = true;
+            throw err;
+          }),
           fetchMyFiledAttempts(solverUid, competitionId, eventId),
         ]);
-        const accessBody = accessRes.ok
-          ? ((await accessRes.json()) as { events?: Record<string, { liveRound: number | null }> })
-          : { events: {} };
+        // A FAILED LOOKUP IS NOT "NO ROUND OPEN". A non-ok answer used to be
+        // read as { events: {} }, which planned a closed round and told the
+        // athlete so while their round was open. It fails closed below
+        // instead, with a message that says it could not check.
+        if (!accessRes.ok) {
+          accessUnavailable = true;
+          throw new Error(`round-access answered ${accessRes.status}`);
+        }
+        const accessBody = (await accessRes.json()) as { events?: Record<string, { liveRound: number | null }> };
         liveRound = accessBody.events?.[eventId]?.liveRound ?? null;
         filed = mine;
       } catch (e) {
@@ -565,8 +579,12 @@ export default function SolvePage() {
         // here in a way it is not mid-run.
         console.error('Resume lookup failed:', e);
         if (!cancelled) {
+          setBlockedRetry(true);
           setBlockedMessage(
-            'Өмнөх оролдлогуудыг уншиж чадсангүй. Холболтоо шалгаад хуудсаа сэргээнэ үү.',
+            accessUnavailable
+              ? 'Раунд нээлттэй эсэхийг шалгаж чадсангүй — энэ нь раунд хаагдсан гэсэн үг биш. ' +
+                  'Холболтоо шалгаад дахин оролдоно уу.'
+              : 'Өмнөх оролдлогуудыг уншиж чадсангүй. Холболтоо шалгаад хуудсаа сэргээнэ үү.',
           );
         }
         return;
@@ -1195,6 +1213,25 @@ export default function SolvePage() {
           >
             {blockedMessage}
           </p>
+          {/* Only for a failed lookup, which is set before anything has been
+              recorded — so reloading loses nothing and simply asks again. */}
+          {blockedRetry && (
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              style={{
+                border: '1px solid #DFFF4F',
+                background: 'transparent',
+                color: '#DFFF4F',
+                padding: '11px 18px',
+                font: '600 9px var(--oc-font-mono), monospace',
+                letterSpacing: '.1em',
+                cursor: 'pointer',
+              }}
+            >
+              ДАХИН ОРОЛДОХ
+            </button>
+          )}
           <Link
             href={`/online-competition/${competitionId}/live`}
             /* Only rendered when the FIRST attempt was refused, so there

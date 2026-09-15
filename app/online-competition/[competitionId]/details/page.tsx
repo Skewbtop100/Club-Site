@@ -114,25 +114,34 @@ export default function CompetitionDetailPage() {
   const solverUid = user && !user.isAnonymous ? user.uid : null;
   const [access, setAccess] = useState<Record<string, RoundAccess> | null>(null);
   const [accessLoading, setAccessLoading] = useState(false);
+  // A lookup that FAILED, as distinct from one that answered "nothing is
+  // open". Bumping accessAttempt asks again.
+  const [accessFailed, setAccessFailed] = useState(false);
+  const [accessAttempt, setAccessAttempt] = useState(0);
 
   useEffect(() => {
     if (!solverUid) {
       setAccess(null);
+      setAccessFailed(false);
       return;
     }
     let cancelled = false;
     setAccessLoading(true);
+    setAccessFailed(false);
     // The uid comes from the verified token now, not from the URL.
     authedFetchWithRetry(`/api/online-competition/round-access?competitionId=${encodeURIComponent(competitionId)}`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('failed'))))
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`round-access answered ${r.status}`))))
       .then((d: { events: Record<string, RoundAccess> }) => {
         if (!cancelled) setAccess(d.events ?? {});
       })
-      .catch(() => {
-        // A failed lookup leaves `access` null: the panel then says no
-        // round is open rather than offering a button it cannot stand
-        // behind.
-        if (!cancelled) setAccess(null);
+      .catch((err) => {
+        // No button it cannot stand behind — but not "no round open"
+        // either: the panel says it could not check, and offers a retry.
+        console.error('CompetitionDetailPage: the round-access lookup failed:', err);
+        if (!cancelled) {
+          setAccess(null);
+          setAccessFailed(true);
+        }
       })
       .finally(() => {
         if (!cancelled) setAccessLoading(false);
@@ -140,7 +149,7 @@ export default function CompetitionDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [solverUid, competitionId]);
+  }, [solverUid, competitionId, accessAttempt]);
 
   useEffect(() => {
     let cancelled = false;
@@ -316,6 +325,8 @@ export default function CompetitionDetailPage() {
           registration={myRegistration.registration}
           access={access}
           loading={accessLoading || myRegistration.loading}
+          failed={accessFailed}
+          onRetry={() => setAccessAttempt((n) => n + 1)}
         />
 
         <div className="oc-cd-layout">

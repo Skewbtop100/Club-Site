@@ -10,6 +10,7 @@ import type {
 import type { RegistrationAdminView } from '@/lib/online-competition/admin-registrations';
 import type { ScramblesOverview } from '@/app/api/online-competition/admin-scrambles/route';
 import { roundKey } from '@/lib/online-competition/scrambles';
+import { runBulkReview } from '@/lib/online-competition/bulk-review';
 import {
   attemptsForFormat,
   computeResult,
@@ -113,6 +114,20 @@ export default function ReviewGrid() {
   // armed against the athlete the admin just navigated away from.
   const [resetting, setResetting] = useState<string | null>(null);
   const [resetNote, setResetNote] = useState<string | null>(null);
+  // The grid could not be loaded — distinct from "loaded, and empty". While
+  // set, `submissions` stays null and the grid shows the error, not rows.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Scrambles are only labels for the detail panel, so their failure is a
+  // warning beside a working grid rather than a failed load.
+  const [scramblesError, setScramblesError] = useState(false);
+  // What the last bulk approve actually did: how many went through, and
+  // which attempts did not — kept so the judge can retry the remainder.
+  const [bulkNote, setBulkNote] = useState<{
+    row: AthleteRow;
+    total: number;
+    succeeded: number;
+    failedLabels: string[];
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -165,26 +180,54 @@ export default function ReviewGrid() {
   useEffect(() => {
     setResetting(null);
     setResetNote(null);
+    setBulkNote(null);
   }, [competitionId, eventId, round]);
 
   const load = useCallback(async () => {
     if (!competitionId) return;
-    const [regs, subs, scr] = await Promise.all([
-      fetch(`/api/online-competition/admin-competitions/${competitionId}/registrations`)
-        .then((r) => (r.ok ? r.json() : { registrations: [] }))
-        .then((d: { registrations: RegistrationAdminView[] }) => d.registrations ?? [])
-        .catch(() => []),
-      fetch(`/api/online-competition/submissions?status=all&competitionId=${competitionId}`)
-        .then((r) => (r.ok ? r.json() : { submissions: [] }))
-        .then((d: { submissions: OnlineSubmissionAdminView[] }) => d.submissions ?? [])
-        .catch(() => []),
-      fetch(`/api/online-competition/admin-scrambles?competitionId=${competitionId}`)
-        .then((r) => (r.ok ? (r.json() as Promise<ScramblesOverview>) : null))
-        .catch(() => null),
+    // A FAILED REQUEST IS NOT AN EMPTY ONE. Each of these used to turn a
+    // failure into [] / null, so during a Firestore hiccup the judge saw an
+    // empty grid and concluded nothing had been submitted. Now each rejects
+    // on failure, and the grid shows "could not load" with a retry.
+    const getJson = async <T,>(url: string): Promise<T> => {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`${url} answered ${r.status}`);
+      return (await r.json()) as T;
+    };
+    setLoadError(null);
+    setScramblesError(false);
+    const [regs, subs, scr] = await Promise.allSettled([
+      getJson<{ registrations?: RegistrationAdminView[] }>(
+        `/api/online-competition/admin-competitions/${competitionId}/registrations`,
+      ),
+      getJson<{ submissions?: OnlineSubmissionAdminView[] }>(
+        `/api/online-competition/submissions?status=all&competitionId=${competitionId}`,
+      ),
+      getJson<ScramblesOverview>(`/api/online-competition/admin-scrambles?competitionId=${competitionId}`),
     ]);
-    setRegistrations(regs);
-    setSubmissions(subs);
-    setScrambles(scr);
+    // Registrations and submissions stand or fall TOGETHER: rows are built
+    // from both, and a grid with the submissions but not the registrations
+    // would silently drop every athlete who has not filed yet.
+    if (regs.status === 'fulfilled' && subs.status === 'fulfilled') {
+      setRegistrations(regs.value.registrations ?? []);
+      setSubmissions(subs.value.submissions ?? []);
+    } else {
+      console.error(
+        'ReviewGrid: loading the grid failed:',
+        regs.status === 'rejected' ? regs.reason : '',
+        subs.status === 'rejected' ? subs.reason : '',
+      );
+      setLoadError(
+        'Бичлэгүүдийг ачаалж чадсангүй — энэ нь илгээсэн бичлэг байхгүй гэсэн үг биш. Дахин ачаална уу.',
+      );
+    }
+    if (scr.status === 'fulfilled') {
+      setScrambles(scr.value);
+    } else {
+      console.error('ReviewGrid: loading scrambles failed:', scr.reason);
+      setScrambles(null);
+      setScramblesError(true);
+    }
   }, [competitionId]);
 
   useEffect(() => {
@@ -437,6 +480,7 @@ export default function ReviewGrid() {
   const bulkApprove = useCallback(
     async (row: AthleteRow) => {
       setBusy(true);
+      setBulkNote(null);
       try {
         // Every still-pending submission this athlete has for the selected
         // event — including the duplicates hidden behind a cell — so the
@@ -445,9 +489,23 @@ export default function ReviewGrid() {
         const mine = (submissions ?? []).filter(
           (s) => s.uid === row.uid && s.event === eventId && s.status === 'pending',
         );
-        for (const s of mine) {
-          await review(s.id, 'approve');
+        // NO LONGER STOPS AT THE FIRST FAILURE, AND NO LONGER SILENT: every
+        // attempt is tried, and the note below says how many went through
+        // and which did not. A retry re-runs this, which only picks up what
+        // is still pending — the approved ones were patched locally.
+        const { succeeded, failed } = await runBulkReview(mine, (s) => review(s.id, 'approve'));
+        if (failed.length > 0) {
+          console.error(
+            'ReviewGrid: bulk approve left attempts pending:',
+            failed.map((f) => `${f.item.id}: ${f.error}`),
+          );
         }
+        setBulkNote({
+          row,
+          total: mine.length,
+          succeeded: succeeded.length,
+          failedLabels: failed.map((f) => `${f.item.competitionRound}-р раунд · ${f.item.attempt}-р оролдлого`),
+        });
       } finally {
         setBusy(false);
       }
@@ -591,7 +649,23 @@ export default function ReviewGrid() {
         </div>
 
         {submissions === null ? (
-          <p className="oc-v3-status">Ачааллаж байна...</p>
+          loadError ? (
+            // COULD NOT LOAD — not an empty queue. No rows are drawn at all,
+            // so nothing here can be mistaken for "nothing was submitted".
+            <div
+              role="alert"
+              style={{ padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 12 }}
+            >
+              <p className="oc-sc-msg-err" style={{ fontSize: 13 }}>
+                {loadError}
+              </p>
+              <button type="button" className="oc-sc-btn" onClick={() => load()}>
+                ДАХИН АЧААЛАХ
+              </button>
+            </div>
+          ) : (
+            <p className="oc-v3-status">Ачааллаж байна...</p>
+          )
         ) : rows.length === 0 ? (
           <p className="oc-v3-status">Энэ төрөлд тамирчин алга.</p>
         ) : (
@@ -654,10 +728,52 @@ export default function ReviewGrid() {
         )}
       </div>
 
+      {scramblesError && (
+        <div className="oc-sc-warn" role="status" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <span>
+            Эвлүүлэлт, группийн мэдээлэл ачаалагдсангүй — дэлгэрэнгүй хэсэгт харагдахгүй. Бичлэгүүд бүрэн ачаалагдсан.
+          </span>
+          <button type="button" className="oc-sc-btn" onClick={() => load()}>
+            ДАХИН АЧААЛАХ
+          </button>
+        </div>
+      )}
+
       {resetNote && (
         <p className="oc-rv-reset-note" role="status">
           {resetNote}
         </p>
+      )}
+
+      {bulkNote && (
+        <div
+          className="oc-rv-reset-note"
+          role={bulkNote.failedLabels.length > 0 ? 'alert' : 'status'}
+          style={bulkNote.failedLabels.length > 0 ? { borderLeftColor: '#E8543C', color: '#F4F1EA' } : undefined}
+        >
+          {bulkNote.total === 0 ? (
+            `${bulkNote.row.name}: зөвшөөрөх хүлээгдэж буй оролдлого алга.`
+          ) : bulkNote.failedLabels.length === 0 ? (
+            `${bulkNote.row.name}: ${bulkNote.succeeded} оролдлого бүгд зөвшөөрөгдлөө.`
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 10 }}>
+              <span>
+                <strong>{bulkNote.row.name}</strong>: {bulkNote.succeeded}/{bulkNote.total} оролдлого зөвшөөрөгдлөө.{' '}
+                <strong style={{ color: '#E8543C' }}>{bulkNote.failedLabels.length} нь амжилтгүй</strong>:{' '}
+                {bulkNote.failedLabels.join(', ')}. Тамирчин бүрэн зөвшөөрөгдөөгүй — хүлээгдэж буй оролдлого нь
+                дүн, шалгаруулалтад орохгүй.
+              </span>
+              <button
+                type="button"
+                className="oc-sc-btn"
+                disabled={busy}
+                onClick={() => bulkApprove(bulkNote.row)}
+              >
+                ҮЛДСЭНИЙГ ДАХИН ЗӨВШӨӨРӨХ
+              </button>
+            </div>
+          )}
+        </div>
       )}
 
       {/* ── Inline detail panel ────────────────────────────────────── */}

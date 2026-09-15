@@ -28,6 +28,8 @@ export default function StartRoundPanel({
   registration,
   access,
   loading,
+  failed = false,
+  onRetry,
 }: {
   competitionId: string;
   /** The competition's configured events, in configured order. */
@@ -37,6 +39,10 @@ export default function StartRoundPanel({
    *  failed / has not resolved. */
   access: Record<string, RoundAccess> | null;
   loading: boolean;
+  /** The lookup FAILED — shown as "could not check", with a retry, never as
+   *  a closed round. */
+  failed?: boolean;
+  onRetry?: () => void;
 }) {
   if (!registration) return null;
 
@@ -79,14 +85,40 @@ export default function StartRoundPanel({
                   <span className="oc-cd-start-state">
                     {loading
                       ? '...'
-                      : state === 'notqualified'
-                        ? 'ШАЛГАРААГҮЙ'
-                        : 'РАУНД НЭЭГЭЭГҮЙ'}
+                      : failed
+                        ? 'ШАЛГАЖ ЧАДСАНГҮЙ'
+                        : state === 'notqualified'
+                          ? 'ШАЛГАРААГҮЙ'
+                          : 'РАУНД НЭЭГЭЭГҮЙ'}
                   </span>
                 )}
               </div>
             );
           })}
+          {failed && !loading && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 10 }}>
+              <p className="oc-cd-start-note" role="alert" style={{ margin: 0 }}>
+                Раунд нээлттэй эсэхийг шалгаж чадсангүй — энэ нь раунд хаагдсан гэсэн үг биш.
+              </p>
+              {onRetry && (
+                <button
+                  type="button"
+                  onClick={onRetry}
+                  style={{
+                    border: '1px solid #DFFF4F',
+                    background: 'transparent',
+                    color: '#DFFF4F',
+                    padding: '8px 14px',
+                    font: '600 9px var(--oc-font-mono), monospace',
+                    letterSpacing: '.1em',
+                    cursor: 'pointer',
+                  }}
+                >
+                  ДАХИН ШАЛГАХ
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
     </section>

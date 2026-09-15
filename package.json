@@ -28,6 +28,7 @@
     "test:eventstate": "node tests/competition-fields/event-state.test.cjs",
     "test:live": "node tests/competition-fields/live-view.test.cjs",
     "test:roster": "node tests/competition-fields/roster-view.test.cjs",
+    "test:failures": "node tests/competition-fields/failure-surfacing.test.cjs",
     "test:athleteadmin": "node tests/competition-fields/athlete-admin-view.test.cjs",
     "test:athleteauth": "node tests/competition-fields/athlete-auth.test.cjs",
     "test:limit": "node tests/competition-fields/participant-limit.test.cjs",

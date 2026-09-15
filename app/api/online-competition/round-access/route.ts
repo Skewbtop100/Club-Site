@@ -51,9 +51,19 @@ export async function GET(req: Request) {
     );
     return NextResponse.json({ events });
   } catch (e) {
-    // The dashboard falls back to its previous behaviour when this fails,
-    // so a lookup problem degrades the badge rather than the page.
+    // AN ERROR IS AN ERROR. This used to answer 200 with { events: {} } —
+    // which every caller reads as "no round is open" — so during a
+    // Firestore hiccup athletes were told their open round was closed, and
+    // the solve page's fail-closed handling never fired. 503: the lookup is
+    // temporarily unavailable and worth retrying. Callers show that as its
+    // own state with a retry, never as a closed round.
     console.error('round-access lookup failed:', e);
-    return NextResponse.json({ events: {} });
+    return NextResponse.json(
+      {
+        error: 'round-access-unavailable',
+        message: 'Раундын мэдээллийг шалгаж чадсангүй. Түр хүлээгээд дахин оролдоно уу.',
+      },
+      { status: 503 },
+    );
   }
 }
