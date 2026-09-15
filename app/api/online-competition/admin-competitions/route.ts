@@ -126,6 +126,9 @@ export async function GET() {
         eventsWithoutLiveRound: liveRounds
           .filter((e) => e.liveRounds.length === 0)
           .map((e) => ({ eventId: e.eventId, label: e.label })),
+        deletion: data.deletion
+          ? { startedAtMs: typeof data.deletion.startedAtMs === 'number' ? data.deletion.startedAtMs : null }
+          : null,
       };
     }),
   );

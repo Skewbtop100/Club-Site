@@ -758,6 +758,14 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // The record of a competition deletion — what was removed, what could
+    // not be, and which admin session started it
+    // (lib/online-competition/competition-delete.ts). Admin SDK only; it
+    // outlives the competition, and no client may read or rewrite it.
+    match /onlineCompetitionDeletions/{competitionId} {
+      allow read, write: if false;
+    }
+
     // Season points were REMOVED. The stored documents are kept (a later
     // rebuild may want them), but nothing reads or writes this collection
     // any more — so no client may. It was publicly readable.

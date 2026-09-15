@@ -821,6 +821,10 @@ export interface OnlineNotification {
   id?: string;
   /** Recipient's Firebase Auth uid. */
   uid: string;
+  /** The competition it is about. Absent on notifications written before
+   *  the field existed — which is why deleting a competition cannot find
+   *  those (competition-delete.ts). */
+  competitionId?: string;
   type: OnlineNotificationType;
   /** Final Mongolian display text, composed at write time. */
   title: string;
@@ -1004,6 +1008,10 @@ export interface OnlineCompetitionAdminView {
    *  the check costs a query per competition. Same "empty means not
    *  computed here" caveat as eventsWithoutLiveRound above. */
   lockedEventIds: string[];
+  /** Set while a deletion has started but not finished — the competition is
+   *  hidden (status 'draft') and the admin list offers ҮРГЭЛЖЛҮҮЛЭХ. See
+   *  competition-delete.ts. */
+  deletion: { startedAtMs: number | null } | null;
 }
 
 /** Payload for POST/PUT admin-competitions — what the create/edit form

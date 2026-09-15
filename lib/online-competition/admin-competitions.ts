@@ -933,6 +933,12 @@ export async function writeCompetitionDoc(
     // submission can reference an id that did not exist.
     if (!isCreate) {
       const snap = await tx.get(ref);
+      // A competition being DELETED is hidden as a draft; an edit saving it
+      // back to upcoming/live would put a half-deleted competition in front
+      // of athletes. See competition-delete.ts.
+      if (snap.exists && snap.get('deletion')) {
+        throw new CompetitionWriteError('Энэ тэмцээнийг устгаж байна — засах боломжгүй.');
+      }
       const storedEvents = snap.exists ? snap.get('events') : [];
       const changing = snap.exists ? eventsChangingScoringRules(storedEvents, input.events) : [];
       // REMOVING a locked event is refused too, and that is not belt-and-

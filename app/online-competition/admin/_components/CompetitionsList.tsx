@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Badge, Button, EmptyState, type BadgeSpec } from '../../_components/ui';
 import type { OnlineCompetitionAdminView, OnlineCompetitionStatus } from '@/lib/online-competition/types';
 import RoundGapWarning from './RoundGapWarning';
+import DeleteCompetitionDialog from './DeleteCompetitionDialog';
 
 const LIST_BASE = '/online-competition/admin/competitions';
 
@@ -54,6 +55,8 @@ export default function CompetitionsList() {
   const [error, setError] = useState('');
   const [recomputingId, setRecomputingId] = useState<string | null>(null);
   const [recomputeMsg, setRecomputeMsg] = useState<{ id: string; text: string; isError: boolean } | null>(null);
+  /** The competition whose УСТГАХ dialog is open. */
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -214,7 +217,32 @@ export default function CompetitionsList() {
                   <Link className="oc-adm-comp-btn" href={edit}>
                     ЗАСАХ
                   </Link>
+                  {/* Opens the preview first; nothing is removed until the
+                      exact name is typed and confirmed. */}
+                  <button
+                    type="button"
+                    className="oc-adm-comp-btn"
+                    style={{ color: '#E8543C' }}
+                    onClick={() => setDeletingId(c.id)}
+                  >
+                    УСТГАХ
+                  </button>
                 </div>
+
+                {/* A deletion that started but has not finished. The
+                    competition is already hidden from athletes. */}
+                {c.deletion && (
+                  <div
+                    className="oc-sc-warn"
+                    role="alert"
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', borderTop: 'none' }}
+                  >
+                    <span>Устгал дуусаагүй — тэмцээн тамирчдаас нуугдсан.</span>
+                    <button type="button" className="oc-sc-btn" onClick={() => setDeletingId(c.id)}>
+                      ҮРГЭЛЖЛҮҮЛЭХ
+                    </button>
+                  </div>
+                )}
 
                 {/* A live competition with no round open silently refuses
                     every solve attempt. Still a full-width strip directly
@@ -266,6 +294,17 @@ export default function CompetitionsList() {
             );
           })}
         </div>
+      )}
+
+      {deletingId && (
+        <DeleteCompetitionDialog
+          competitionId={deletingId}
+          onClose={() => {
+            setDeletingId(null);
+            load();
+          }}
+          onChanged={load}
+        />
       )}
     </div>
   );

@@ -21,3 +21,17 @@ export async function isOnlineCompAdmin(): Promise<boolean> {
   const store = await cookies();
   return verifyAdminSession(store.get(ADMIN_COOKIE_NAME)?.value, config, Date.now());
 }
+
+/** The current admin SESSION's id — the random nonce minted at login — for
+ *  audit records. Null when there is no valid session.
+ *
+ *  It identifies a login, not a person: every admin shares one password, so
+ *  "who" can never be narrower than "whoever signed in on that session". */
+export async function adminSessionId(): Promise<string | null> {
+  const config = adminSessionConfig();
+  if (!config) return null;
+  const token = (await cookies()).get(ADMIN_COOKIE_NAME)?.value;
+  if (!verifyAdminSession(token, config, Date.now()) || typeof token !== 'string') return null;
+  // v1.<expiresAt>.<nonce>.<signature>
+  return token.split('.')[2] ?? null;
+}

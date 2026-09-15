@@ -79,6 +79,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     eventsWithoutLiveRound: liveRounds
       .filter((e) => e.liveRounds.length === 0)
       .map((e) => ({ eventId: e.eventId, label: e.label })),
+    deletion: data.deletion
+      ? { startedAtMs: typeof data.deletion.startedAtMs === 'number' ? data.deletion.startedAtMs : null }
+      : null,
   };
 
   return NextResponse.json({ competition });

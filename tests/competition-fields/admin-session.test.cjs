@@ -175,9 +175,10 @@ console.log('\n  -- the wiring --');
   const guarded = walk(apiRoot)
     .map((f) => ({ rel: path.relative(ROOT, f).replace(/\\/g, '/'), text: fs.readFileSync(f, 'utf8') }))
     .filter((f) => f.text.includes('isOnlineCompAdmin'));
-  // 17 API route files today. A new admin route raises this; a route that
-  // silently stops importing the check lowers it and fails here.
-  ok('all 17 admin API routes are found', guarded.length === 17, `${guarded.length} found`);
+  // 18 API route files today (the competition delete route was the 18th). A
+  // new admin route raises this; a route that silently stops importing the
+  // check lowers it and fails here.
+  ok('all 18 admin API routes are found', guarded.length === 18, `${guarded.length} found`);
   for (const f of guarded) {
     const handlers = (f.text.match(/export async function (GET|POST|PUT|PATCH|DELETE)\b/g) ?? []).length;
     const checks = (f.text.match(/if \(!\(await isOnlineCompAdmin\(\)\)\) \{/g) ?? []).length;

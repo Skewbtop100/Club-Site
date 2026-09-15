@@ -160,6 +160,8 @@ export async function notifyRoundFinalised(params: {
 
           tx.create(db.collection(ONLINE_NOTIFICATIONS).doc(), {
             uid: r.uid,
+            // So deleting the competition can find this notification.
+            competitionId,
             type: advanced ? 'round_advanced' : 'round_result',
             title: advanced ? `${body} — дараагийн раундад шалгарлаа` : body,
             contextLabel,
@@ -180,6 +182,7 @@ export async function notifyRoundFinalised(params: {
         for (const uid of qualifiedUids) {
           tx.create(db.collection(ONLINE_NOTIFICATIONS).doc(), {
             uid,
+            competitionId,
             type: 'round_advanced',
             title: `${label} · ${roundLabel} — дараагийн раундад шалгарлаа`,
             contextLabel,
