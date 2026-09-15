@@ -6,9 +6,11 @@ import {
   addAthlete,
   updateAthlete,
   deleteAthlete,
+  getAthletePrivate,
+  legacyPrivateFields,
 } from '@/lib/firebase/services/athletes';
 import { useLang } from '@/lib/i18n';
-import type { Athlete } from '@/lib/types';
+import type { Athlete, AthletePrivate } from '@/lib/types';
 
 const emptyForm = { wcaId: '', lastName: '', name: '', birthDate: '', imageUrl: '' };
 
@@ -16,6 +18,9 @@ export default function AthletesTab() {
   const { t } = useLang();
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [loading, setLoading] = useState(true);
+  // Date of birth lives in each athlete's private document (admin-readable
+  // only), not on the public one the subscription delivers.
+  const [privates, setPrivates] = useState<Record<string, AthletePrivate>>({});
   const [form, setForm] = useState({ ...emptyForm });
   const [editId, setEditId] = useState<string | null>(null);
   const [msg, setMsg] = useState(''); const [msgType, setMsgType] = useState('');
@@ -27,6 +32,34 @@ export default function AthletesTab() {
     return unsub;
   }, []);
 
+  // One read per athlete, re-run only when the set of athletes changes.
+  const idsKey = athletes.map(a => a.id).sort().join(',');
+  useEffect(() => {
+    if (!idsKey) return;
+    let cancelled = false;
+    Promise.all(idsKey.split(',').map(async id => [id, await getAthletePrivate(id).catch(() => null)] as const))
+      .then(pairs => {
+        if (cancelled) return;
+        const next: Record<string, AthletePrivate> = {};
+        for (const [id, p] of pairs) if (p) next[id] = p;
+        setPrivates(next);
+      });
+    return () => { cancelled = true; };
+  }, [idsKey]);
+
+  async function refreshPrivate(id: string) {
+    const p = await getAthletePrivate(id).catch(() => null);
+    setPrivates(prev => {
+      const next = { ...prev };
+      if (p) next[id] = p; else delete next[id];
+      return next;
+    });
+  }
+
+  // Falls back to a value still on the public document, for an athlete the
+  // migration has not moved yet.
+  const birthDateOf = (a: Athlete) => privates[a.id]?.birthDate ?? legacyPrivateFields(a).birthDate ?? '';
+
   function showMsg(type: string, text: string) {
     setMsgType(type); setMsg(text);
     setTimeout(() => setMsg(''), 5000);
@@ -34,7 +67,7 @@ export default function AthletesTab() {
 
   function startEdit(a: Athlete) {
     setEditId(a.id);
-    setForm({ wcaId: a.wcaId || '', lastName: a.lastName || '', name: a.name, birthDate: a.birthDate || '', imageUrl: a.imageUrl || '' });
+    setForm({ wcaId: a.wcaId || '', lastName: a.lastName || '', name: a.name, birthDate: birthDateOf(a), imageUrl: a.imageUrl || '' });
   }
 
   function cancelEdit() { setEditId(null); setForm({ ...emptyForm }); }
@@ -44,9 +77,11 @@ export default function AthletesTab() {
     try {
       if (editId) {
         await updateAthlete(editId, form);
+        await refreshPrivate(editId);
         showMsg('success', t('admin.ath.msg.updated'));
       } else {
-        await addAthlete(form);
+        const id = await addAthlete(form);
+        await refreshPrivate(id);
         showMsg('success', t('admin.ath.msg.added'));
       }
       cancelEdit();
@@ -131,7 +166,7 @@ export default function AthletesTab() {
                           <td style={{ fontWeight: 600 }}>{`${a.name || ''}${a.lastName ? ' ' + a.lastName : ''}`}</td>
                           <td className="td-muted">{a.lastName || '—'}</td>
                           <td><code style={{ fontSize: '0.82rem', color: '#a78bfa' }}>{a.wcaId || '—'}</code></td>
-                          <td className="td-muted">{a.birthDate || '—'}</td>
+                          <td className="td-muted">{birthDateOf(a) || '—'}</td>
                           <td>
                             <div style={{ display: 'flex', gap: '0.35rem' }}>
                               <button className="btn-edit" onClick={() => startEdit(a)}>{t('admin.btn.edit')}</button>

@@ -1,5 +1,4 @@
 import {
-  doc,
   getDoc,
   limit as fsLimit,
   onSnapshot,
@@ -10,7 +9,6 @@ import {
   Timestamp,
   where,
 } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 import { matchHistoryCol, matchHistoryDoc } from '@/lib/firebase/collections';
 import type {
   MatchHistory,
@@ -50,8 +48,9 @@ export interface SaveMatchHistoryInput {
   matchStartedAtMs: number;
   totalRounds: number;
   // Final-round membership snapshot (for finalRank + totalPoints). The
-  // per-round membership lives inside each `pastRounds` entry.
-  finalMembers: Record<string, { name: string; totalPoints?: number }>;
+  // per-round membership lives inside each `pastRounds` entry. photoURL and
+  // athleteId are what each member wrote about themselves on joining.
+  finalMembers: Record<string, { name: string; totalPoints?: number; photoURL?: string | null; athleteId?: string | null }>;
   pastRounds: RoundSnapshotInput[];
 }
 
@@ -131,19 +130,20 @@ export async function saveMatchHistory(input: SaveMatchHistoryInput): Promise<st
   // (matches what the Results screen shows). Members who left mid-match
   // appear in their per-round results but won't show up in the summary.
   const finalUids = Object.keys(input.finalMembers);
-  const userSummaries = await fetchUserSummaries(finalUids);
 
   const players: MatchPlayerSummary[] = finalUids.map(uid => {
     const m = input.finalMembers[uid];
     const ao5s = rounds.map(r => r.results.find(rr => rr.uid === uid)?.ao5 ?? null);
     const roundsWon = rounds.filter(r => r.results.find(rr => rr.uid === uid)?.rank === 1).length;
     const bestSingle = computeBestSingle(rounds, uid);
-    const profile = userSummaries.get(uid) ?? { photoURL: null, athleteId: null };
     return {
       uid,
       name: m.name,
-      photoURL: profile.photoURL,
-      athleteId: profile.athleteId,
+      // From the room, not users/{uid}: the host cannot read another
+      // player's account document. A member who joined before members
+      // carried these gets null, which renders as initials.
+      photoURL: typeof m.photoURL === 'string' ? m.photoURL : null,
+      athleteId: typeof m.athleteId === 'string' ? m.athleteId : null,
       finalRank: 0, // assigned below after sort
       totalPoints: typeof m.totalPoints === 'number' ? m.totalPoints : 0,
       roundsWon,
@@ -260,26 +260,4 @@ function computeBestSingle(rounds: MatchRound[], uid: string): number | null {
     }
   }
   return best;
-}
-
-// Fetch each player's photoURL + athleteId in parallel. Misses (no users
-// doc, or read failure) are silently treated as null fields so a single
-// flaky read doesn't block the whole save.
-async function fetchUserSummaries(
-  uids: string[],
-): Promise<Map<string, { photoURL: string | null; athleteId: string | null }>> {
-  const pairs = await Promise.all(uids.map(async uid => {
-    try {
-      const snap = await getDoc(doc(db, 'users', uid));
-      if (!snap.exists()) return [uid, { photoURL: null, athleteId: null }] as const;
-      const data = snap.data() as Record<string, unknown>;
-      return [uid, {
-        photoURL: typeof data.photoURL === 'string' ? data.photoURL : null,
-        athleteId: typeof data.athleteId === 'string' ? data.athleteId : null,
-      }] as const;
-    } catch {
-      return [uid, { photoURL: null, athleteId: null }] as const;
-    }
-  }));
-  return new Map(pairs);
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { getAthlete } from '@/lib/firebase/services/athletes';
+import { getAthlete, getAthletePrivate, legacyPrivateFields } from '@/lib/firebase/services/athletes';
 import { getResultsByAthlete } from '@/lib/firebase/services/results';
 import { fmtTime } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
@@ -18,6 +18,7 @@ interface CompHistoryEntry {
 
 export default function AthleteView({ session, onLogout }: { session: Session; onLogout: () => void; }) {
   const [athlete, setAthlete] = useState<Athlete | null>(null);
+  const [birthDate, setBirthDate] = useState<string | null>(null);
   const [results, setResults] = useState<Result[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -28,6 +29,10 @@ export default function AthleteView({ session, onLogout }: { session: Session; o
       const athData = await getAthlete(session.athleteId);
       if (!athData) { setError('Athlete profile not found.'); setLoading(false); return; }
       setAthlete(athData);
+      // Private: readable only by the linked account (or an admin). Anyone
+      // else is refused, which just means the line is not shown.
+      const priv = await getAthletePrivate(session.athleteId).catch(() => null);
+      setBirthDate(priv?.birthDate ?? legacyPrivateFields(athData).birthDate ?? null);
 
       const rData = await getResultsByAthlete(session.athleteId);
       setResults(rData);
@@ -97,8 +102,8 @@ export default function AthleteView({ session, onLogout }: { session: Session; o
             {athlete.wcaId && (
               <span className="profile-meta-item">WCA ID: <b>{athlete.wcaId}</b></span>
             )}
-            {athlete.birthDate && (
-              <span className="profile-meta-item">Born: <b>{athlete.birthDate}</b></span>
+            {birthDate && (
+              <span className="profile-meta-item">Born: <b>{birthDate}</b></span>
             )}
             {athlete.lastName && (
               <span className="profile-meta-item">Last name: <b>{athlete.lastName}</b></span>

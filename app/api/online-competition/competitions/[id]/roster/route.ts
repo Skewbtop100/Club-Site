@@ -11,7 +11,7 @@ import { toRosterAthlete, type RosterAthlete } from '@/lib/online-competition/ro
 //
 // PUBLIC, no auth — and it has to be a route rather than a client read,
 // because neither half of what it joins is publicly readable:
-//   onlineParticipants/{uid}          read: if isSignedIn()
+//   onlineParticipants/{uid}          read: the athlete or an admin
 //   onlineParticipants/{uid}/registrations/{id}  read: OWNER ONLY
 // and Firestore rules cannot project fields, so "let anyone read
 // registrations" would publish the free-text `note` whose placeholder asks

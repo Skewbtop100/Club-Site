@@ -360,6 +360,12 @@ interface MemberData {
    * top of the next round (`nextRound` clears this flag).
    */
   queued?: boolean;
+  /** The member's own avatar and linked club athlete, written by the member
+   *  when they join. Match history reads them from here: another account's
+   *  users document is no longer readable (firestore.rules). Absent on a
+   *  member who joined before this was written. */
+  photoURL?: string | null;
+  athleteId?: string | null;
   /** Number of extra-scramble requests this member has used in the
    *  current round. Reset to 0 (cleared) on startRace / nextRound /
    *  rematch. Capped client-side by EXTRA_SCRAMBLES_PER_ROUND. */
@@ -1588,13 +1594,15 @@ function MultiplayerPageInner() {
       connected: true,
       joinedAt: existingMember?.joinedAt ?? Date.now(),
       lastHeartbeat: 0,
+      photoURL: authUser?.photoURL ?? null,
+      athleteId: authUser?.athleteId ?? null,
       ...(queued ? { queued: true } : {}),
     };
     await set(memberRef, memberData);
     try { localStorage.setItem(LAST_ROOM_KEY, code); } catch {}
     setRoomCode(code);
     setView('room');
-  }, []);
+  }, [authUser?.photoURL, authUser?.athleteId]);
 
   const joinRoom = useCallback(async (overrideCode?: string) => {
     setErrorMsg('');

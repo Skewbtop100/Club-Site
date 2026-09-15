@@ -415,8 +415,11 @@ export type OnlineParticipantGender = 'male' | 'female' | 'other';
  *  in data.ts — rather than writing 'incomplete' onto every doc up front. */
 export type OnlineParticipantProfileStatus = 'incomplete' | 'pending' | 'approved' | 'rejected';
 
-/** onlineParticipants/{uid} — public participant profile, deliberately NOT
- *  linked to the club's `athletes` collection. `photoURL`/`email` are
+/** onlineParticipants/{uid} — the athlete's FULL record, deliberately NOT
+ *  linked to the club's `athletes` collection. NOT public: firestore.rules
+ *  lets only the athlete and an admin read it. Other athletes see only what
+ *  the server routes project from it (name, initials, results — see
+ *  roster-view.ts). `photoURL`/`email` are
  *  populated from the Google profile on Google sign-in (see
  *  useOnlineAuth.tsx); the anonymous-auth nickname flow on the solve page
  *  only ever sets `displayName`, so both are optional.

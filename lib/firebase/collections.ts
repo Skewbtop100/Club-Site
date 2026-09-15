@@ -88,6 +88,12 @@ export function athleteDoc(id: string): DocumentReference<Athlete> {
   return doc(db, COL.ATHLETES, id).withConverter(makeConverter<Athlete>()) as DocumentReference<Athlete>;
 }
 
+/** athletes/{id}/private/identity — date of birth and phone, admin and
+ *  linked-owner only. See AthletePrivate. */
+export function athletePrivateDoc(id: string) {
+  return doc(db, COL.ATHLETES, id, 'private', 'identity');
+}
+
 export function competitionDoc(id: string): DocumentReference<Competition> {
   return doc(db, COL.COMPETITIONS, id).withConverter(makeConverter<Competition>()) as DocumentReference<Competition>;
 }

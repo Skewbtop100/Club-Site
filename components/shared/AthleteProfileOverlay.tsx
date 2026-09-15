@@ -736,7 +736,6 @@ export default function AthleteProfileOverlay({ athlete, athletes, onClose }: Pr
           <div className="apo-meta">
             {athlete.wcaId && <span className="apo-meta-item apo-wca">{athlete.wcaId}</span>}
             <span className="apo-meta-item">Mongolia</span>
-            {athlete.birthDate && <span className="apo-meta-item">{athlete.birthDate}</span>}
           </div>
 
           {/* Stats: activity + medals side-by-side on desktop */}

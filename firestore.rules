@@ -24,9 +24,40 @@ service cloud.firestore {
 
     // ─── Existing collections ─────────────────────────────────────────────────
 
-    match /athletes/{doc} {
+    // ── athletes/{athleteId} — the club's PUBLIC athlete profile ──────────
+    // Readable by anyone, signed out included: the club site's athletes,
+    // rankings, records and competition pages read it directly. So it may
+    // hold only what a WCA-style public profile shows — name, photo
+    // (imageUrl), WCA id — plus the ownerId link the profile page's claim
+    // picker filters on.
+    //
+    // Date of birth and phone live in athletes/{athleteId}/private/identity
+    // (lib/firebase/services/athletes.ts). Rules cannot hide one field of a
+    // readable document, so a split is the only way to keep them private.
+    // The public write rule refuses both keys, so no client — an old tab
+    // included — can put one back. scripts/move-athlete-private-fields.mjs
+    // moves the existing values across; it must run BEFORE these rules are
+    // deployed, or an admin edit of an unmoved athlete is refused.
+    match /athletes/{athleteId} {
+      function athletePrivateKeys() {
+        return ['birthDate', 'phone'];
+      }
+
       allow read: if true;
-      allow write: if isAdmin();
+      allow create, update: if isAdmin() &&
+                               !request.resource.data.keys().hasAny(athletePrivateKeys());
+      allow delete: if isAdmin();
+
+      // Admins, and the signed-in account this athlete is linked to (ownerId,
+      // set by the admin link or an approved claim). Nobody else — not even
+      // an account that owns a DIFFERENT athlete. A missing parent makes
+      // get() an error, which denies.
+      match /private/{docId} {
+        allow read: if isAdmin() ||
+                       (isSignedIn() &&
+                        get(/databases/$(database)/documents/athletes/$(athleteId)).data.get('ownerId', null) == request.auth.uid);
+        allow write: if isAdmin();
+      }
     }
 
     match /competitions/{doc} {
@@ -55,8 +86,15 @@ service cloud.firestore {
     //            club admin's UsersTab: role change, points, athlete link).
     //   delete — your own document, or any as an admin. Deleting your own
     //            and re-creating it can only land you back on 'member'.
+    //
+    // READ — your own document, or any as an admin. This was isSignedIn():
+    // every account's email was readable by every other account. Nothing
+    // legitimate reads someone else's: auth-context, the timer profile and
+    // points.ts read their own; UsersTab, the admin dashboard and a claim
+    // approval (awardAthleteLinked) run as an admin; match history takes each
+    // player's avatar from the multiplayer room instead.
     match /users/{uid} {
-      allow read: if isSignedIn();
+      allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
       allow create: if isSignedIn() &&
                        request.auth.uid == uid &&
                        (!('role' in request.resource.data) || request.resource.data.role == 'member');
@@ -345,7 +383,19 @@ service cloud.firestore {
              request.resource.data.get('stats', null) == resource.data.get('stats', null));
       }
 
-      allow read: if isSignedIn();
+      // READ — the athlete themselves, or an admin. This was isSignedIn():
+      // any account could read every athlete's email, date of birth,
+      // citizenship and verification photo, minors' included.
+      //
+      // Every client read is the athlete's OWN document (fetchParticipant in
+      // useOnlineAuth, the profile form, the solve page, RegistrationPanel).
+      // Everything that shows OTHER athletes — the roster, live standings,
+      // round results, group seeding, the review and athletes admin — reads
+      // through server routes with the Admin SDK, which choose field by field
+      // what leaves: name, initials and results (roster-view.ts, whose test
+      // pins the exact keys). So the public half of an athlete needs no
+      // client-readable copy.
+      allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
       allow create, update: if isSignedIn() &&
                                 request.auth.uid == uid &&
                                 (!('email' in request.resource.data) || request.resource.data.email == request.auth.token.email) &&

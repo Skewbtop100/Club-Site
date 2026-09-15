@@ -4,13 +4,20 @@ export interface Athlete {
   name: string;
   lastName?: string;
   wcaId?: string;
-  birthDate?: string;
   imageUrl?: string;
   // Set when an authenticated user has been linked to this athlete
   // (via /admin/users manual link or by approving an athleteRequest).
   // Cleared back to null on unlink. Drives the "available for claim"
   // filter in the Profile page selection modal.
   ownerId?: string | null;
+}
+
+/** athletes/{id}/private/identity — what a public profile must not show.
+ *  Readable only by an admin and by the account the athlete is linked to
+ *  (firestore.rules); the public Athlete document may not carry these. */
+export interface AthletePrivate {
+  birthDate?: string;
+  phone?: string;
 }
 
 // ── Multiplayer match history ────────────────────────────────────────────
