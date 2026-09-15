@@ -207,10 +207,12 @@ export default function AthleteRequests() {
                 >
                   <Thumb athlete={a} size={40} />
                   <span style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
-                    <span style={{ font: `500 13px/1.2 ${HEADING}`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {/* Line-height 1.4: these clip for the ellipsis, and a
+                        shorter line box cuts Cyrillic descenders. */}
+                    <span style={{ font: `500 13px/1.4 ${HEADING}`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {`${a.lastName} ${a.firstName}`.trim() || a.displayName || '—'}
                     </span>
-                    <span style={{ font: `400 10px/1 ${MONO}`, color: '#6E6A62', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <span style={{ font: `400 10px/1.4 ${MONO}`, color: '#6E6A62', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {a.email || '—'}
                     </span>
                   </span>

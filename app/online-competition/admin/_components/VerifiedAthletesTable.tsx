@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import EmailChangeDialog from './EmailChangeDialog';
 import AthleteDetailPanel from './AthleteDetailPanel';
 import { countryName, flagUrl } from '@/lib/online-competition/countries';
+import { filterAthletes } from '@/lib/online-competition/athlete-search';
 import { resolveParticipantPhoto } from '@/lib/online-competition/data';
 import type { OnlineParticipantAdminView, OnlineParticipantGender } from '@/lib/online-competition/types';
 
@@ -72,11 +73,16 @@ const TD: React.CSSProperties = {
   verticalAlign: 'middle',
 };
 const MUTED_MONO: React.CSSProperties = { font: `500 11px/1 ${MONO}`, color: '#9A958A', fontVariantNumeric: 'tabular-nums' };
+// LINE-HEIGHT 1.4, NOT 1. These cells clip (overflow: hidden, for the
+// ellipsis), and a clipped box is exactly as tall as its line box: at 13px/1
+// that is 13px, and Cyrillic descenders — р, у, ц — hang below it and were
+// cut off. 1.4 gives them the room. Every other cell uses line-height 1 but
+// clips nothing, so its descenders simply overflow and stay visible.
 const NAME: React.CSSProperties = {
   display: 'block',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
-  font: `500 13px/1 ${HEADING}`,
+  font: `500 13px/1.4 ${HEADING}`,
   color: '#F4F1EA',
 };
 
@@ -93,6 +99,15 @@ export default function VerifiedAthletesTable() {
   const [viewingUid, setViewingUid] = useState<string | null>(null);
   // The БАТАЛГААЖСАН cell whose dates popup is open, and where to draw it.
   const [dates, setDates] = useState<{ uid: string; anchor: DOMRect } | null>(null);
+  // The search box. Filters the rows already loaded — see athlete-search.ts.
+  const [query, setQuery] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  const clearSearch = () => {
+    setQuery('');
+    setDates(null);
+    searchRef.current?.focus();
+  };
 
   const load = useCallback(async () => {
     setError('');
@@ -111,10 +126,100 @@ export default function VerifiedAthletesTable() {
     load();
   }, [load]);
 
-  const viewingIndex = athletes && viewingUid ? athletes.findIndex((a) => a.uid === viewingUid) : -1;
+  const visible = useMemo(() => (athletes ? filterAthletes(athletes, query) : null), [athletes, query]);
+  const searching = query.trim() !== '';
+  // The panel steps through what is on screen, so a search narrows it too.
+  const viewingIndex = visible && viewingUid ? visible.findIndex((a) => a.uid === viewingUid) : -1;
   const datesFor = athletes && dates ? athletes.find((a) => a.uid === dates.uid) ?? null : null;
 
   return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+    {athletes && athletes.length > 0 && !error && (
+      <div
+        role="search"
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 12,
+          alignItems: 'center',
+          border: '1px solid #1C1C21',
+          background: '#0D0D10',
+          padding: '14px 16px',
+        }}
+      >
+        <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
+          {/* The mockup's search field. Line-height 1.4 for the same reason
+              as the name cells: an input clips its text box. */}
+          <input
+            ref={searchRef}
+            type="text"
+            role="searchbox"
+            aria-label="Тамирчин хайх"
+            placeholder="Овог, нэр, и-мэйл эсвэл WCA ID"
+            autoComplete="off"
+            spellCheck={false}
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setDates(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape' && query) {
+                e.preventDefault();
+                clearSearch();
+              }
+            }}
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => setSearchFocused(false)}
+            style={{
+              width: '100%',
+              border: `1px solid ${searchFocused ? '#DFFF4F' : '#2A2A31'}`,
+              background: '#08080A',
+              padding: query ? '11px 40px 11px 11px' : 11,
+              font: `400 13px/1.4 ${HEADING}`,
+              color: '#F4F1EA',
+              outline: 'none',
+            }}
+          />
+          {query && (
+            <button
+              type="button"
+              aria-label="Хайлт цэвэрлэх"
+              title="Цэвэрлэх (Esc)"
+              onClick={clearSearch}
+              style={{
+                position: 'absolute',
+                right: 6,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                width: 28,
+                height: 28,
+                border: 'none',
+                background: 'transparent',
+                color: '#9A958A',
+                cursor: 'pointer',
+                font: `500 16px/1 ${MONO}`,
+              }}
+            >
+              ×
+            </button>
+          )}
+        </div>
+        <span
+          role="status"
+          style={{
+            font: `500 9px/1.4 ${MONO}`,
+            letterSpacing: '.12em',
+            color: searching ? '#DFFF4F' : '#6E6A62',
+            whiteSpace: 'nowrap',
+            flex: 'none',
+          }}
+        >
+          {searching && visible ? `${visible.length} / ${athletes.length} ТАМИРЧИН` : `${athletes.length} ТАМИРЧИН`}
+        </span>
+      </div>
+    )}
+
     <div style={{ border: '1px solid #1C1C21', background: '#0D0D10' }}>
       <div
         style={{
@@ -128,11 +233,6 @@ export default function VerifiedAthletesTable() {
         }}
       >
         <span style={{ font: `500 9px/1 ${MONO}`, letterSpacing: '.18em', color: '#6E6A62' }}>БАТАЛГААЖСАН ТАМИРЧИД</span>
-        {athletes && (
-          <span style={{ font: `500 9px/1 ${MONO}`, letterSpacing: '.12em', color: '#9A958A', whiteSpace: 'nowrap' }}>
-            {athletes.length} ТАМИРЧИН
-          </span>
-        )}
       </div>
 
       {error ? (
@@ -148,6 +248,17 @@ export default function VerifiedAthletesTable() {
         <p style={{ padding: '56px 16px', textAlign: 'center', font: `500 13px/1 ${HEADING}`, color: '#6E6A62' }}>
           Баталгаажсан тамирчин алга.
         </p>
+      ) : visible && visible.length === 0 ? (
+        // Nothing matches THE SEARCH — worded differently from the empty
+        // list above, and the way out is right here.
+        <div style={{ padding: '48px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+          <p style={{ font: `500 13px/1.4 ${HEADING}`, color: '#6E6A62', textAlign: 'center', overflowWrap: 'anywhere' }}>
+            «{query.trim()}» — тохирох тамирчин алга.
+          </p>
+          <button type="button" className="oc-sc-btn" onClick={clearSearch}>
+            ХАЙЛТ ЦЭВЭРЛЭХ
+          </button>
+        </div>
       ) : (
         <div style={{ overflowX: 'auto' }} onScroll={() => setDates(null)}>
           <table style={{ width: '100%', minWidth: 1120, borderCollapse: 'separate', borderSpacing: 0 }}>
@@ -176,7 +287,7 @@ export default function VerifiedAthletesTable() {
               </tr>
             </thead>
             <tbody>
-              {athletes.map((a) => {
+              {(visible ?? []).map((a) => {
                 const photo = resolveParticipantPhoto(a);
                 const age = ageFrom(a.dateOfBirth);
                 const datesOpen = dates?.uid === a.uid;
@@ -331,12 +442,12 @@ export default function VerifiedAthletesTable() {
 
       {dates && datesFor && <DatesPopup athlete={datesFor} anchor={dates.anchor} onClose={() => setDates(null)} />}
 
-      {athletes && viewingIndex !== -1 && (
+      {visible && viewingIndex !== -1 && (
         <AthleteDetailPanel
-          athlete={athletes[viewingIndex]}
-          position={{ index: viewingIndex, total: athletes.length }}
-          onPrev={viewingIndex > 0 ? () => setViewingUid(athletes[viewingIndex - 1].uid) : null}
-          onNext={viewingIndex < athletes.length - 1 ? () => setViewingUid(athletes[viewingIndex + 1].uid) : null}
+          athlete={visible[viewingIndex]}
+          position={{ index: viewingIndex, total: visible.length }}
+          onPrev={viewingIndex > 0 ? () => setViewingUid(visible[viewingIndex - 1].uid) : null}
+          onNext={viewingIndex < visible.length - 1 ? () => setViewingUid(visible[viewingIndex + 1].uid) : null}
           onClose={() => setViewingUid(null)}
         />
       )}
@@ -351,6 +462,7 @@ export default function VerifiedAthletesTable() {
           }}
         />
       )}
+    </div>
     </div>
   );
 }

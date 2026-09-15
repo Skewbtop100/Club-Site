@@ -31,6 +31,7 @@
     "test:failures": "node tests/competition-fields/failure-surfacing.test.cjs",
     "test:bottomnav": "node tests/competition-fields/bottom-nav.test.cjs",
     "test:adminnav": "node tests/competition-fields/admin-nav.test.cjs",
+    "test:athletesearch": "node tests/competition-fields/athlete-search.test.cjs",
     "test:athleteadmin": "node tests/competition-fields/athlete-admin-view.test.cjs",
     "test:athleteauth": "node tests/competition-fields/athlete-auth.test.cjs",
     "test:limit": "node tests/competition-fields/participant-limit.test.cjs",
