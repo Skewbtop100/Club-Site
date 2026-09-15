@@ -80,19 +80,19 @@ const components = fs
 // were written for. The mark leading is pinned deliberately too — a mark
 // is meant to name the press, and anything run ahead of it puts its own
 // duration into the number.
-// Each now also schedules that stage's stills (captureBurst) — a
-// fire-and-forget setTimeout trio, nothing the run waits on. The handler
-// is still pinned whole, and stopRecording/finishRecording still cannot
-// appear in it, which is the property being guarded.
+// They briefly also scheduled that stage's stills (captureBurst). The
+// stills are gone, so the handlers are back to mark-then-setStage and
+// nothing else — still pinned whole, so a stopRecording or a revived
+// capture call in either one fails here.
 const ENDS_SOLVE_AT_FINISH_HOLD =
-  /onFinish=\{\(\) => \{\s*recorder\.mark\('solveEnd'\);\s*recorder\.captureBurst\('timer'\);\s*setStage\('finishHold'\);\s*\}\}/;
+  /onFinish=\{\(\) => \{\s*recorder\.mark\('solveEnd'\);\s*setStage\('finishHold'\);\s*\}\}/;
 const READY_STRAIGHT_TO_REC =
   /<ReadyPromptStage\s*\n\s*onDone=\{\(\) => \{\s*recorder\.mark\('solveStart'\);\s*setStage\('rec'\);\s*\}\}\s*\n\s*\/>/;
 /** Source of the closing hold's onDone, for embedding in the larger
  *  label-to-handler regexes below. */
 const TO_CUBE_CHECK_SRC =
   "onDone=\\{\\(\\) => \\{\\s*recorder\\.mark\\('cubeShown'\\);\\s*" +
-  "recorder\\.captureBurst\\('cube'\\);\\s*setStage\\('cubeCheck'\\);\\s*\\}\\}";
+  "setStage\\('cubeCheck'\\);\\s*\\}\\}";
 
 let pass = 0;
 let fail = 0;
@@ -1206,19 +1206,38 @@ console.log('\n  -- 9. the lobby and the between screen --');
   ok('  ...and the draw loop stops on stop, release and unmount',
     (recorderCode.match(/stopDrawLoop\(\)/g) ?? []).length >= 3 &&
       /clearInterval\(drawTimerRef\.current\)/.test(recorderCode));
-  // grabStill READS THE ORIGINAL TRACK, never the canvas. The whole point
-  // of the stills is resolution the clip does not have; sourcing them
-  // from the downscaled canvas would quietly make them worthless.
-  ok('  ...while the stills still read the full-size camera track',
+  // ── NO STILL CAPTURE ──
+  // The stills existed because the clip used to be 480p and a judge could
+  // not read the timer off it. At 405x720 the digits are legible in the
+  // recording itself, so the capture, its scheduling and its upload are
+  // gone. Asserted absent so they cannot drift back piecemeal: a
+  // captureBurst revived without its upload would quietly fill the run's
+  // memory with JPEGs nothing ever sends.
+  ok('  ...and no still is captured, scheduled or uploaded any more',
+    ['grabStill', 'captureBurst', 'readShots', 'toBlob', 'STILL_OFFSETS_MS', 'STILL_JPEG_QUALITY']
+      .every((word) => !recorderCode.includes(word)) &&
+      ['captureBurst', 'readShots', 'uploadStills', 'uploadImageToCloudinary']
+        .every((word) => !stripComments(page).includes(word)));
+  // ONE CANVAS, AND IT IS THE RECORDING'S. With the stills gone, the only
+  // canvas the recorder creates is the one startCanvasPipeline draws the
+  // clip into. A second one appearing is either a still coming back or
+  // something drawing frames that nothing records.
+  ok('  ...with exactly one canvas, created and drawn only by the recording pipeline',
     (() => {
-      const grab = recorderCode.slice(
-        recorderCode.indexOf('const grabStill'),
-        recorderCode.indexOf('const clearStillTimers'),
+      const pipe = recorderCode.slice(
+        recorderCode.indexOf('const startCanvasPipeline'),
+        recorderCode.indexOf('const requestCamera'),
       );
-      return /streamRef\.current\?\.getVideoTracks\(\)\[0\]/.test(grab) &&
-        !/canvasRef/.test(grab) &&
-        !/captureStream/.test(grab);
+      const count = (text, word) => text.split(word).length - 1;
+      return count(recorderCode, "createElement('canvas')") === 1 &&
+        count(pipe, "createElement('canvas')") === 1 &&
+        count(recorderCode, 'drawImage(') === 1 &&
+        count(pipe, 'drawImage(') === 1;
     })());
+  // The pipeline is confirmed working; the temporary diagnostics that
+  // proved it are gone, and must not ship again by accident.
+  ok('  ...and no temporary diagnostic logging is left in the recorder',
+    !recorder.includes('khorom-diag') && !recorderCode.includes('diag('));
   // `ideal`/`max`, never `exact`: a camera that cannot manage these must
   // hand back what it has, not fail and end the run before it starts.
   ok('  ...and nothing about the camera is demanded exactly',
@@ -1494,8 +1513,8 @@ console.log('\n  -- 10. the mockup restyle --');
       // the only way a draw can crop. So: the destination is the entire
       // canvas, and there is no source rectangle anywhere.
       //
-      // EVERY draw in the file is checked, not just the recording one:
-      // grabStill uses the same call and must not start cropping either.
+      // EVERY draw in the file is checked, not just the recording one, so a
+      // draw added anywhere later cannot start cropping either.
       const draws = rec.match(/ctx\.drawImage\([^)]*\)/g) ?? [];
       const noSourceRect =
         draws.length > 0 && draws.every((d) => d.split(',').length <= 5);

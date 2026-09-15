@@ -375,7 +375,7 @@ const authError = (status, reason) => Object.assign(new Error(reason), { status,
     ok('38. the solve page sends the video to R2', /await uploadVideoToR2\(/.test(page) && !/uploadVideoToCloudinary/.test(page));
     ok('  ...and files the key rather than a Cloudinary id',
       /^\s*videoKey,\s*$/m.test(page) && !/cloudinaryPublicId: publicId/.test(page));
-    ok('  ...while the stills still go to Cloudinary, untouched', /uploadImageToCloudinary/.test(page));
+    ok('  ...and no stills are uploaded to Cloudinary any more', !/uploadImageToCloudinary|uploadStills/.test(page));
   }
 
   fs.rmSync(OUT, { recursive: true, force: true });
