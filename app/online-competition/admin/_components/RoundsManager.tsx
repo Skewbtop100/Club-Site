@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import type { OnlineCompetitionAdminView } from '@/lib/online-competition/types';
-import type { RoundAdminView } from '@/app/api/online-competition/admin-rounds/route';
+import type { RoundAdminView, RoundsSummary } from '@/app/api/online-competition/admin-rounds/route';
 import type { QualifyResponse } from '@/app/api/online-competition/admin-rounds/qualify/route';
 import type { QualifierMethod, RoundRanking } from '@/lib/online-competition/rounds';
 import { roundKey } from '@/lib/online-competition/scrambles';
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
 import RoundGapWarning, { type RoundGapEvent } from './RoundGapWarning';
+import RoundStatusHeader, { fmtWindow } from './RoundStatusHeader';
+import RoundAthleteTable from './RoundAthleteTable';
 
 // ── Раунд удирдах ────────────────────────────────────────────────────────
 // Open / close / advance each event's rounds. Every write goes through the
@@ -44,6 +46,13 @@ export default function RoundsManager() {
   const [competitionId, setCompetitionId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [rounds, setRounds] = useState<RoundAdminView[] | null>(null);
+  /** What is running now and what is next, from the same response as the
+   *  rows — see RoundStatusHeader, which reads the numbers off `rounds`
+   *  rather than fetching its own. */
+  const [summary, setSummary] = useState<RoundsSummary | null>(null);
+  /** The round whose athlete table is open, as `event_round`. One at a
+   *  time: two open tables is two payloads for a question about one round. */
+  const [detailKey, setDetailKey] = useState<string | null>(null);
   // Events with no round open at all, straight from the API (computed
   // there with the solve gate's own liveRoundsForEvent) — never derived
   // from `rounds` here, which would be a second copy of that rule.
@@ -104,15 +113,18 @@ export default function RoundsManager() {
       if (!res.ok) throw new Error('failed');
       const d = (await res.json()) as {
         rounds: RoundAdminView[];
+        summary?: RoundsSummary;
         eventsWithoutLiveRound?: RoundGapEvent[];
         eventsWithConflictingLiveRounds?: { eventId: string; label: string; rounds: number[] }[];
       };
       setRounds(d.rounds ?? []);
+      setSummary(d.summary ?? null);
       setGaps(d.eventsWithoutLiveRound ?? []);
       setConflicts(d.eventsWithConflictingLiveRounds ?? []);
     } catch (err) {
       console.error('RoundsManager: loading rounds failed:', err);
       setRounds(null);
+      setSummary(null);
       setGaps([]);
       setConflicts([]);
       setLoadError('Раундын мэдээллийг ачааллаж чадсангүй');
@@ -121,6 +133,8 @@ export default function RoundsManager() {
 
   useEffect(() => {
     setRounds(null);
+    setSummary(null);
+    setDetailKey(null);
     setGaps([]);
     setQualifyKey(null);
     setRowError(null);
@@ -136,6 +150,35 @@ export default function RoundsManager() {
       const ok = window.confirm(
         `${row.label} · ${row.round}-р раундыг НЭЭГЭЭГҮЙ төлөвт буцаах уу? ` +
           `Энэ раундын шалгаруулалт устна. Оролдлого бүртгэгдсэн бол буцаахгүй.`,
+      );
+      if (!ok) return;
+    }
+    // ── CLOSING GUARD ──
+    // Closing stops new attempts, so an athlete part-way through a round
+    // loses the rest of it. The numbers are the row's own — the same ones
+    // the header and the athlete table show — so this warning can never
+    // name a different figure from the screen behind it.
+    //
+    // It names BOTH, because they are different problems with different
+    // fixes: unfinished athletes need more time, unjudged submissions need
+    // a judge, and closing does not block either from being resolved
+    // afterwards. Only asked when there is something to say; a round
+    // everyone has finished closes on one click, as it did before.
+    if (action === 'close' && (row.incomplete > 0 || row.pendingSubmissions > 0)) {
+      const parts: string[] = [];
+      if (row.incomplete > 0) {
+        parts.push(
+          `${row.incomplete} тамирчин оролдлогоо дуусгаагүй` +
+            (row.notStarted > 0 ? ` (${row.notStarted} нь огт эхлээгүй)` : ''),
+        );
+      }
+      if (row.pendingSubmissions > 0) {
+        parts.push(`${row.pendingSubmissions} тайлалт шүүгдээгүй`);
+      }
+      const ok = window.confirm(
+        `${row.label} · ${row.round}-р раунд:\n${parts.join('\n')}\n\n` +
+          `Хаавал тамирчид шинэ оролдлого хийж чадахгүй. ` +
+          `Шүүгдээгүй тайлалтыг дараа шүүх боломжтой. Хаах уу?`,
       );
       if (!ok) return;
     }
@@ -309,6 +352,12 @@ export default function RoundsManager() {
         </div>
       )}
 
+      {/* WHAT IS RUNNING NOW — above everything, because it is the answer
+          to the question an admin opens this page with. */}
+      {rounds !== null && rounds.length > 0 && (
+        <RoundStatusHeader summary={summary} rounds={rounds} onOpenDetail={setDetailKey} />
+      )}
+
       {rounds === null && !loadError ? (
         <p className="oc-v3-status">Ачааллаж байна...</p>
       ) : rounds && rounds.length === 0 ? (
@@ -338,7 +387,33 @@ export default function RoundsManager() {
                     </span>
                   </div>
 
-                  <span className="oc-rd-time">{fmtTime(row.openedAt)}</span>
+                  {/* THE PROGRAMME'S SLOT, not when it was opened —
+                      openedAt is below, as the smaller of the two. What an
+                      admin checks against the clock is the schedule. */}
+                  <span className="oc-rd-time" title="Хуваарийн цаг">
+                    {row.scheduledStartMs !== null
+                      ? fmtWindow(row.scheduledStartMs, row.scheduledEndMs)
+                      : '—'}
+                  </span>
+
+                  {/* PARTICIPANTS AND THE THREE NUMBERS. complete +
+                      incomplete is always participants; the pending count
+                      is submissions, so it is labelled apart. */}
+                  <span className="oc-rd-nums" title="Тамирчин · дуусгасан / дуусгаагүй · шүүгдээгүй тайлалт">
+                    <span style={{ color: '#F4F1EA' }}>{row.participants}</span>
+                    <span style={{ color: '#2A2A31' }}>|</span>
+                    <span style={{ color: '#4FD07A' }}>{row.complete}</span>
+                    <span style={{ color: '#2A2A31' }}>/</span>
+                    <span style={{ color: row.incomplete > 0 ? '#F4F1EA' : '#4A4740' }}>
+                      {row.incomplete}
+                    </span>
+                    {row.pendingSubmissions > 0 && (
+                      <>
+                        <span style={{ color: '#2A2A31' }}>|</span>
+                        <span style={{ color: '#DFFF4F' }}>▲{row.pendingSubmissions}</span>
+                      </>
+                    )}
+                  </span>
 
                   <span
                     className={`oc-rd-badge${row.status === 'live' ? ' oc-rd-badge-live' : row.status === 'done' ? ' oc-rd-badge-done' : ''}`}
@@ -381,6 +456,14 @@ export default function RoundsManager() {
                     <button
                       type="button"
                       className="oc-sc-btn"
+                      aria-expanded={detailKey === key}
+                      onClick={() => setDetailKey(detailKey === key ? null : key)}
+                    >
+                      ТАМИРЧИД
+                    </button>
+                    <button
+                      type="button"
+                      className="oc-sc-btn"
                       disabled={busyKey === key}
                       onClick={() => setQualifyKey(qualifyKey === key ? null : key)}
                     >
@@ -388,6 +471,14 @@ export default function RoundsManager() {
                     </button>
                   </div>
                 </div>
+
+                {detailKey === key && (
+                  <RoundAthleteTable
+                    competitionId={competitionId as string}
+                    eventId={row.eventId}
+                    round={row.round}
+                  />
+                )}
 
                 {rowError?.key === key && (
                   <div style={{ padding: '0 14px 12px' }}>

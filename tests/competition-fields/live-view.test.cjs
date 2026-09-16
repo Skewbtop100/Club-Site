@@ -239,6 +239,41 @@ console.log('\n  -- round states --');
   const upcoming = payload({ status: 'upcoming' });
   upcoming.events.forEach((e) => e.rounds.forEach((r) => { r.status = 'closed'; }));
   eq('idle: nothing opened on an upcoming competition', lv.idleReason(upcoming), 'not-started');
+
+  // ── NOTHING OPEN: two different things, two messages ──
+  // A closed round whose CUT IS COMMITTED is over; a closed round without
+  // one may still reopen. Telling an athlete whose round has finished to
+  // wait for the organiser to open it is how a finished competition reads
+  // as a stuck one. Decided off `advanced`, the same fact the admin round
+  // list calls qualifierCount — and off statsRound's own "last round they
+  // filed in", so the header's numbers and this message describe the same
+  // round.
+  const shut = () => {
+    const p = payload({ status: 'live' });
+    p.events.forEach((e) => e.rounds.forEach((r) => { r.status = 'closed'; }));
+    // statsRound reads slotsByRound, not planKind: the last round with a
+    // non-empty attempt slot is the one the athlete filed in. Give 333
+    // round 1 one filed slot and leave 222 empty, so the round under test
+    // is unambiguous.
+    p.events[0].me.slotsByRound = { '1': [{ state: 'approved' }] };
+    p.events[1].me.slotsByRound = {};
+    return p;
+  };
+  const notAdvanced = shut();
+  eq('idle: closed with no cut committed is "not open right now"', lv.idleReason(notAdvanced), 'no-open-round');
+  const advanced = shut();
+  advanced.events[0].rounds[0].advanced = true;
+  eq('idle: closed WITH the cut committed is "round finished"', lv.idleReason(advanced), 'round-finished');
+  // The cut on a round the athlete never filed in says nothing about them.
+  const otherAdvanced = shut();
+  otherAdvanced.events[1].rounds[0].advanced = true;
+  eq('idle: a cut on another round does not finish theirs', lv.idleReason(otherAdvanced), 'no-open-round');
+  // A round with no `advanced` field at all (an older payload) reads as
+  // not-advanced rather than throwing.
+  const legacy = shut();
+  legacy.events.forEach((e) => e.rounds.forEach((r) => { delete r.advanced; }));
+  eq('idle: a payload without `advanced` falls back to "not open right now"',
+    lv.idleReason(legacy), 'no-open-round');
 }
 
 console.log('\n  -- the athlete’s own rounds --');

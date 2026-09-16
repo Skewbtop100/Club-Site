@@ -298,6 +298,18 @@ export interface LiveRoundView {
    *  once the previous round's qualifier list exists, null for round 1,
    *  for a signed-out viewer, and while the cut has not been made. */
   qualified: boolean | null;
+  /** Whether THIS round's cut has been committed — its qualifiers document
+   *  exists. Public, unlike `qualified`: it says that a round has been
+   *  finalised, not who came out of it, and the standings and the next
+   *  round opening already say as much.
+   *
+   *  It exists to tell two closed rounds apart. A closed round that has
+   *  been advanced is OVER; a closed round that has not may still reopen,
+   *  and telling an athlete "the organiser will open the next round" about
+   *  a round that is finished is how a finished competition reads as a
+   *  stuck one. Nothing gates on it — round access is decided by `status`
+   *  alone, exactly as before. */
+  advanced: boolean;
   /** "13:00" from the announced programme, or null. Display only.
    *  Computed on the server, in the SERVER's timezone — the live view now
    *  formats `scheduledAtMs` in the browser instead (fmtScheduledClock). */
@@ -554,6 +566,10 @@ export type IdleReason =
   | 'gate'
   | 'not-qualified'
   | 'not-started'
+  /** The athlete's round is OVER: they filed in it and its cut has been
+   *  committed. Distinct from 'no-open-round', which is the same screen
+   *  for a round that is merely shut at the moment. */
+  | 'round-finished'
   | 'no-open-round';
 
 export function idleReason(payload: LiveViewPayload): IdleReason {
@@ -568,6 +584,25 @@ export function idleReason(payload: LiveViewPayload): IdleReason {
   });
   if (anyNotQualified) return 'not-qualified';
   if (!anyLive && payload.status === 'upcoming') return 'not-started';
+  // NOTHING IS OPEN. Two different things, one screen until now:
+  //
+  //   the athlete's round has FINISHED  — they filed in it and its cut is
+  //     committed, so it is not coming back and their result stands;
+  //   nothing is open RIGHT NOW         — a round is shut between rounds,
+  //     or the organiser has closed one to sort something out, and it may
+  //     well open again.
+  //
+  // Decided off the committed cut (`advanced`), which is the same fact the
+  // admin's round list calls qualifierCount. The round asked about is the
+  // last one the athlete filed anything in — statsRound's own rule, so the
+  // header's numbers and this message describe the same round.
+  const lastFiled = statsRound(payload, null);
+  if (lastFiled) {
+    const round = payload.events
+      .find((e) => e.eventId === lastFiled.eventId)
+      ?.rounds.find((r) => r.round === lastFiled.round);
+    if (round?.advanced === true) return 'round-finished';
+  }
   return 'no-open-round';
 }
 

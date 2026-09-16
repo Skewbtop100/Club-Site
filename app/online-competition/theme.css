@@ -8442,6 +8442,139 @@ button.oc-rv-cell:hover {
    message primitives from the Холилт ба групп page rather than defining a
    parallel set — only the row layout and the status badges are new. */
 
+/* ── Раунд удирдах: the control centre ────────────────────────────────
+   The status header, the numbers on a round's row, and the athlete table a
+   round opens. Admin section, so these are the v2 paper/ink admin values
+   (#0D0D10 grounds, #1C1C21 edges) that .oc-sc-* and .oc-rd-* already use,
+   not the public v3 palette. */
+
+/* ── The status header ────────────────────────────────────────────────
+   One panel, three bands: the competition, the round running now, and what
+   comes next. A panel rather than a row of cards, because the three are one
+   answer read top to bottom. */
+.oc-rd-header {
+  border: 1px solid #1C1C21;
+  background: #0D0D10;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 15px 16px;
+  margin-bottom: 14px;
+}
+.oc-rd-header-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+/* The running round and its numbers. Wraps rather than compressing: the
+   three figures are the point of the header and must never be the thing
+   that shrinks. */
+.oc-rd-header-now {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  border-top: 1px solid #16161B;
+  border-bottom: 1px solid #16161B;
+  padding: 13px 0;
+}
+.oc-rd-header-stats {
+  display: flex;
+  align-items: flex-start;
+  gap: 22px;
+  flex: 1 1 auto;
+}
+.oc-rd-header-next {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* ── The three numbers on a round's row ───────────────────────────────
+   Bare figures with separators rather than labelled pairs: the row already
+   has five other things on it, and the header above carries the labels. The
+   title attribute is what names them on hover. */
+.oc-rd-nums {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  font: 600 11px/1 var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ── The athlete table's filter tabs ──────────────────────────────────
+   Each carries its own count, so the admin can see there is nothing under
+   ХҮЛЭЭГДЭЖ БУЙ without opening it. */
+.oc-rd-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  border-bottom: 1px solid #1C1C21;
+}
+.oc-rd-tab {
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #6E6A62;
+  padding: 9px 11px;
+  font: 600 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+.oc-rd-tab:hover {
+  color: #9A958A;
+}
+.oc-rd-tab-on {
+  border-bottom-color: #DFFF4F;
+  color: #F4F1EA;
+}
+
+/* ── The athlete table ────────────────────────────────────────────────
+   One row per athlete, one column per attempt. Wrapped in
+   .oc-cd-table-wrap (overflow-x: auto) by the component, which is what
+   keeps a five-attempt table from widening the page on a narrow window —
+   a table is one of the three things allowed to scroll sideways. */
+.oc-rd-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.oc-rd-table th {
+  text-align: left;
+  padding: 7px 9px;
+  border-bottom: 1px solid #1C1C21;
+  font: 500 8px var(--oc-font-mono), monospace;
+  letter-spacing: 0.14em;
+  color: #6E6A62;
+  white-space: nowrap;
+}
+.oc-rd-table td {
+  padding: 8px 9px;
+  border-bottom: 1px solid #131318;
+  font: 500 11px var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.oc-rd-table tr:last-child td {
+  border-bottom: none;
+}
+.oc-rd-th-num,
+.oc-rd-td-num {
+  text-align: right;
+}
+.oc-rd-td-name {
+  font: 500 12px var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .oc-rd-note {
   font: 400 9px var(--oc-font-mono), monospace;
   letter-spacing: 0.14em;

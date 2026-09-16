@@ -295,7 +295,28 @@ function IdleFooter({
       ) : (
         <DashedBox label="РАУНД НЭЭГДЭЭГҮЙ" note="Зохион байгуулагч раунд нээхэд энд идэвхжинэ." />
       );
+    // THE ROUND IS OVER — its cut is committed, so it is not reopening and
+    // the athlete's result stands. This used to share the wording below,
+    // which told an athlete whose round had finished to wait for the
+    // organiser to open it.
+    case 'round-finished':
+      return (
+        <>
+          <DoneBox label="РАУНД ДУУССАН" />
+          <p style={bodyTextStyle}>
+            Таны оролдлого хүлээн авагдсан. Шүүгдсэн дүнг ШУУД ҮЗҮҮЛЭЛТ хэсгээс харна уу.
+          </p>
+        </>
+      );
+    // NOT ACCEPTING RIGHT NOW — closed between rounds, or closed by the
+    // organiser to sort something out. It may open again, so this one does
+    // point at them.
     default:
-      return <DashedBox label="РАУНД НЭЭГДЭЭГҮЙ" note="Зохион байгуулагч дараагийн раундыг нээхэд энд идэвхжинэ." />;
+      return (
+        <DashedBox
+          label="РАУНД ОДООГООР ХААЛТТАЙ"
+          note="Одоогоор шинэ оролдлого хийх боломжгүй. Зохион байгуулагч раунд нээхэд энд идэвхжинэ."
+        />
+      );
   }
 }

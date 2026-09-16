@@ -139,16 +139,26 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     // the round before. Only the athlete's own membership leaves this
     // route; the lists themselves stay server-side, as firestore.rules
     // intends.
-    const qualifierKeys = uid
-      ? events.flatMap((e) => Array.from({ length: Math.max(0, e.rounds - 1) }, (_, i) => roundKey(e.eventId, i + 1)))
-      : [];
+    // EVERY round, and no longer gated on `uid`: the athlete's own
+    // membership still needs a signed-in identity, but whether a round's
+    // cut has been COMMITTED is public — the standings and the next round
+    // opening already announce it — and the closed-round wording needs it
+    // for a signed-out viewer too. The uid lists themselves still stay
+    // server-side; only the two booleans below leave.
+    const qualifierKeys = events.flatMap((e) =>
+      Array.from({ length: Math.max(1, e.rounds) }, (_, i) => roundKey(e.eventId, i + 1)),
+    );
     const qualifierDocs =
       qualifierKeys.length > 0
         ? await db.getAll(...qualifierKeys.map((k) => db.collection('onlineCompetitions').doc(id).collection('qualifiers').doc(k)))
         : [];
     const advancedOut = new Map<string, boolean>();
+    /** Which rounds have a committed cut, by key. Existence only — never
+     *  the list. */
+    const advancedRounds = new Set<string>();
     for (const d of qualifierDocs) {
       if (!d.exists) continue;
+      advancedRounds.add(d.id);
       const uids = d.get('uids');
       advancedOut.set(d.id, Array.isArray(uids) && uid !== null && uids.includes(uid));
     }
@@ -173,6 +183,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
           label: roundLabel(round, total),
           status: states.get(roundKey(e.eventId, round))?.status ?? 'closed',
           qualified: uid && round > 1 && advancedOut.has(prevKey) ? advancedOut.get(prevKey)! : null,
+          advanced: advancedRounds.has(roundKey(e.eventId, round)),
           scheduledAt: starts.get(`${e.eventId}_${round}`) ?? null,
           scheduledAtMs: startsMs.get(`${e.eventId}_${round}`) ?? null,
           standings: rankJudgedStandings(
