@@ -32,6 +32,18 @@ function stripComments(src) {
 const ROOT = path.join(__dirname, '..', '..');
 const SOLVE = 'app/online-competition/[competitionId]/solve/[eventId]';
 const page = fs.readFileSync(path.join(ROOT, SOLVE, 'page.tsx'), 'utf8');
+// ── THE STAGE MACHINE MOVED, AND SO DID THESE ASSERTIONS ──────────────
+// The Stage union, every transition, the recording boundary and the leave
+// guards now live in _lib/useSolveRun.ts; the page composes it. So an
+// assertion about the RUN reads `hook`, and one about how the page renders
+// or composes it reads `page`.
+//
+// `run` is both files, and every NEGATIVE assertion reads it. That is not
+// a convenience: `!page.includes(x)` would be satisfiable by moving x into
+// the hook, which is exactly the move that just happened. Forbidding it
+// across both files is strictly stronger than forbidding it in one.
+const hook = fs.readFileSync(path.join(ROOT, SOLVE, '_lib/useSolveRun.ts'), 'utf8');
+const run = page + '\n' + hook;
 
 /** THE RECORDING BOUNDARY, expressed once and asserted from six places.
  *
@@ -113,39 +125,39 @@ console.log('\n  -- 1. leaving a run in progress --');
   // reached the server yet. Leaving with nothing in flight costs nothing,
   // so it no longer asks.
   ok('a run is "at risk" only while an attempt is unfiled',
-    page.includes("const runAtRisk = unfiledCount > 0 && stage !== 'sent';"));
+    hook.includes("const runAtRisk = unfiledCount > 0 && stage !== 'sent';"));
   ok('the guard is installed only while it is at risk',
-    /if \(!runAtRisk\) return;/.test(page) && /\}, \[runAtRisk\]\);/.test(page));
+    /if \(!runAtRisk\) return;/.test(hook) && /\}, \[runAtRisk\]\);/.test(hook));
   // Reload, tab close, hard navigation.
-  ok('beforeunload is registered', page.includes("window.addEventListener('beforeunload', onBeforeUnload)"));
+  ok('beforeunload is registered', hook.includes("window.addEventListener('beforeunload', onBeforeUnload)"));
   ok('  ...and preventDefault + returnValue are both set (browsers differ)',
-    /e\.preventDefault\(\);\s*\n\s*e\.returnValue = '';/.test(page));
+    /e\.preventDefault\(\);\s*\n\s*e\.returnValue = '';/.test(hook));
   ok('  ...and removed again when the run is no longer at risk',
-    page.includes("window.removeEventListener('beforeunload', onBeforeUnload)"));
+    hook.includes("window.removeEventListener('beforeunload', onBeforeUnload)"));
   // Back, which in a Next app is a client-side navigation: beforeunload
   // never fires for it, so it needs its own guard.
-  ok('popstate is guarded too', page.includes("window.addEventListener('popstate', onPopState)"));
+  ok('popstate is guarded too', hook.includes("window.addEventListener('popstate', onPopState)"));
   ok('  ...with a spare history entry to absorb the first Back',
-    page.includes("window.history.pushState(window.history.state, '', window.location.href)"));
+    hook.includes("window.history.pushState(window.history.state, '', window.location.href)"));
   // Popping an entry whose state the Next router does not recognise can
   // make it fall back to a full page load — which would destroy the run
   // this is protecting.
   ok('  ...carrying the router’s own state, never null',
-    !/pushState\(\s*(null|\{)/.test(page));
-  ok('  ...and declining re-arms it', (page.match(/pushState\(window\.history\.state/g) ?? []).length === 2);
+    !/pushState\(\s*(null|\{)/.test(run));
+  ok('  ...and declining re-arms it', (hook.match(/pushState\(window\.history\.state/g) ?? []).length === 2);
   ok('confirming leaves without asking twice',
-    page.includes('leaving = true') && page.includes('window.history.back()'));
+    hook.includes('leaving = true') && hook.includes('window.history.back()'));
   // Our own wording, in Mongolian, for the one dialog we control. It has
   // two truths to tell apart now: the unfiled attempt is lost, and the
   // round cannot be continued either way (resume is PR-3).
   ok('the confirm counts the UNFILED attempts, not every attempt',
-    /function leaveConfirmMessage\(unfiledAttempts: number\)/.test(page) &&
-      page.includes('${unfiledAttempts} оролдлого'));
+    /function leaveConfirmMessage\(unfiledAttempts: number\)/.test(hook) &&
+      hook.includes('${unfiledAttempts} оролдлого'));
   ok('  ...says the unfiled recording is lost and must be redone',
-    page.includes('тэр бичлэг устаж') && page.includes('дахин хийх шаардлагатай болно'));
-  ok('  ...while saying the filed ones survive', page.includes('хэвээр үлдэнэ'));
+    hook.includes('тэр бичлэг устаж') && hook.includes('дахин хийх шаардлагатай болно'));
+  ok('  ...while saying the filed ones survive', hook.includes('хэвээр үлдэнэ'));
   // The round CAN be continued now — the old copy said it could not.
-  ok('  ...and no longer claims the round is over', !page.includes('үргэлжлүүлэх боломжгүй. Гарах уу?'));
+  ok('  ...and no longer claims the round is over', !run.includes('үргэлжлүүлэх боломжгүй. Гарах уу?'));
   ok('the in-app link on this page is guarded by the same confirm',
     page.includes('if (runAtRisk && !window.confirm(leaveConfirmMessage(unfiledCount))) e.preventDefault();'));
   // beforeunload does not fire for a client-side <Link>, so a new one
@@ -166,17 +178,17 @@ console.log('\n  -- 2. an empty recording is not accepted --');
   // fires, which would turn this failure branch into dead code without a
   // single type error.
   ok('startRecording’s return value decides whether the attempt proceeds',
-    /const started = await recorder\.startRecording\(\);/.test(page) &&
-      /if \(!cancelled && !started\) setRecordingFailure\('start'\);/.test(page));
+    /const started = await recorder\.startRecording\(\);/.test(hook) &&
+      /if \(!cancelled && !started\) setRecordingFailure\('start'\);/.test(hook));
   ok('a failure moves the run to its own stage, not onward',
-    page.includes("if (recordingFailure !== null) setStage('recordingFailed');"));
+    hook.includes("if (recordingFailure !== null) setStage('recordingFailed');"));
   // Started, ran, and produced an empty container anyway. The check moved
   // with the stop (changeset 2) and lives in finishRecording now.
   ok('the finished blob is checked before the attempt is accepted',
-    /if \(blob\.size < MIN_RECORDING_BYTES\) \{\s*\n\s*setRecordingFailure\('empty'\);\s*\n\s*return;/.test(page));
+    /if \(blob\.size < MIN_RECORDING_BYTES\) \{\s*\n\s*setRecordingFailure\('empty'\);\s*\n\s*return;/.test(hook));
   ok('  ...and the blob is only kept when it passes',
-    page.indexOf("setRecordingFailure('empty')") < page.indexOf('setPendingBlob(blob);'));
-  ok('the threshold is 1KB', /const MIN_RECORDING_BYTES = 1024;/.test(page));
+    hook.indexOf("setRecordingFailure('empty')") < hook.indexOf('setPendingBlob(blob);'));
+  ok('the threshold is 1KB', /const MIN_RECORDING_BYTES = 1024;/.test(hook));
   ok('the stage is rendered', page.includes("{stage === 'recordingFailed' && recordingFailure !== null && ("));
   // The stream that just failed is still an object, so requestCamera
   // would no-op on it.
@@ -200,7 +212,7 @@ console.log('\n  -- 3. each attempt is filed as it is recorded --');
   // does not wait for it.
   ok('a solved attempt goes straight into the filing queue', confirm.includes('enqueueFiling(index, {'));
   ok('  ...unawaited — the athlete moves on to the next attempt',
-    !/await enqueueFiling|await pumpFiling/.test(page));
+    !/await enqueueFiling|await pumpFiling/.test(run));
   ok('  ...and the run ends at the between stage, never straight at the summary',
     confirm.includes("setStage('between')") && !confirm.includes("setStage('summary')"));
 
@@ -217,7 +229,7 @@ console.log('\n  -- 3. each attempt is filed as it is recorded --');
     worker.indexOf('await createSubmission(') < worker.indexOf('pendingUploadsRef.current.delete(index);'));
   ok('  ...and what is kept is the time, the DNF flag and the id',
     /fileState: 'filed', uploadPercent: 100, submissionId, fileError: null/.test(worker));
-  ok('the recording is never held in React state', !/videoBlob/.test(page));
+  ok('the recording is never held in React state', !/videoBlob/.test(run));
 
   // Retry: once on its own, then it asks.
   ok('one automatic retry, then the athlete decides', page.includes('const FILING_AUTO_RETRIES = 1;'));
@@ -232,7 +244,7 @@ console.log('\n  -- 3. each attempt is filed as it is recorded --');
 
   // The run stops before it can pile up unfiled recordings.
   ok('a filing that gave up blocks the next attempt before it records',
-    /if \(filingFailed\) \{\s*\n\s*setStage\('between'\);/.test(page));
+    /if \(filingFailed\) \{\s*\n\s*setStage\('between'\);/.test(hook));
   // The effect that used to hold the run on the filing screen is gone --
   // between is left by pressing a button, not by a counter reaching zero.
   // The same guarantee is now that button's own disabled state.
@@ -249,7 +261,7 @@ console.log('\n  -- 3. each attempt is filed as it is recorded --');
     finish.includes("attempts.some((a) => a.fileState !== 'filed')"));
 
   // Redo is gone, everywhere.
-  ok('no redo in the page', !page.includes('handleRedo') && !page.includes('onRedo'));
+  ok('no redo in the page', !run.includes('handleRedo') && !run.includes('onRedo'));
   // Code, not prose: the comment that replaced the button explains what
   // it was, and would otherwise fail its own assertion.
   ok('  ...none in the summary screen either',
@@ -257,7 +269,7 @@ console.log('\n  -- 3. each attempt is filed as it is recorded --');
   ok('  ...and the confirm that used to offer it is gone',
     !summary.includes('Бүх бичлэгийг устгаад дахин эхлэх үү?'));
   ok('the aggregate upload progress went with the end-of-run loop',
-    !page.includes('submitProgress') && !summary.includes('submitProgress'));
+    !run.includes('submitProgress') && !summary.includes('submitProgress'));
 }
 
 console.log('\n  -- 4. resuming a run --');
@@ -297,7 +309,7 @@ console.log('\n  -- 4. resuming a run --');
   ok('the live run evaluates the cutoff with the same shared function',
     page.includes('const failedCutoff = cutoffFailed('));
   ok('  ...and the page keeps no second copy of the attempt-time rule',
-    !page.includes('function attemptTime(') && page.includes('resolveAttemptTime('));
+    !run.includes('function attemptTime(') && page.includes('resolveAttemptTime('));
 
   // Resuming looks identical to starting without this. It is still
   // built and still said — but by the LOBBY, as its own overlay band,
@@ -307,7 +319,7 @@ console.log('\n  -- 4. resuming a run --');
     page.includes('setResumeMessage(resumeNotice(plan))') &&
       page.includes('const lobbyNote = resumeMessage ??'));
   ok('  ...once, by the lobby, and never repeated downstream',
-    page.includes('note={lobbyNote}') && !page.includes('{resumeMessage}'));
+    page.includes('note={lobbyNote}') && !run.includes('{resumeMessage}'));
   ok('  ...and the notice clears once they solve something',
     page.includes('setResumeMessage(null);'));
 }
@@ -361,7 +373,7 @@ console.log('\n  -- 5. the camera hold is ONE component --');
   // It no longer has that name: `cover` took over its eight seconds AND
   // its job, and added the hiding that makes the inspection measurable.
   ok('the orientation hold became the cover stage',
-    !page.includes("'orientationHold'") && page.includes("{stage === 'cover' && ("));
+    !run.includes("'orientationHold'") && page.includes("{stage === 'cover' && ("));
   ok('  ...at its own, longer duration', /<CoverStage\s*\n\s*seconds=\{COVER_SECONDS\}/.test(page));
   // All three holds — the timer at zero, the cube's orientation, the timer
   // at the finish — are the same component with the same clock.
@@ -556,7 +568,7 @@ console.log('\n  -- 7. durations and markers --');
       /<CoverStage\s*\n\s*seconds=\{COVER_SECONDS\}/.test(page));
   ok('  ...imported by the page rather than redeclared in it',
     /import \{ COVER_SECONDS \} from '@\/lib\/online-competition\/solve-stage-timing'/.test(page) &&
-      !page.includes('const COVER_SECONDS ='));
+      !run.includes('const COVER_SECONDS ='));
   const revealSrc = fs.readFileSync(path.join(ROOT, SOLVE, '_components/RevealStage.tsx'), 'utf8');
   // The reveal's chunk clock is shared for the same reason: the cover
   // stage starts when the reveal ends, so the review flow needs this to
@@ -569,7 +581,7 @@ console.log('\n  -- 7. durations and markers --');
   ok('  ...with the reveal length derived from the scramble, never assumed',
     /splitScrambleIntoChunks\(scramble\)\.length \* GROUP_DISPLAY_MS/.test(timing));
   ok('  ...with no bare number at any call site',
-    !/seconds=\{\d/.test(page));
+    !/seconds=\{\d/.test(run));
   // THE DRIFT THE REFACTOR DID NOT FIX: the sentence names the duration,
   // so it is built from the same number rather than written beside it.
   ok('the instruction is a function of seconds, not a literal',
@@ -582,7 +594,7 @@ console.log('\n  -- 7. durations and markers --');
   // the clock — and the absolute rule is unchanged: NO call site may
   // write a literal number of seconds into its sentence.
   ok('  ...and no call site writes the number into the sentence itself',
-    (page.match(/instruction=\{\(sec\) =>/g) ?? []).length === 0 && !/\d+ секунд/.test(page));
+    (page.match(/instruction=\{\(sec\) =>/g) ?? []).length === 0 && !/\d+ секунд/.test(run));
 
   // THE OPENING HOLD is now the athlete's own timer, held to the camera —
   // with a preview to aim at, which the on-screen "0.00" never gave them.
@@ -596,7 +608,7 @@ console.log('\n  -- 7. durations and markers --');
   // Beginning an attempt no longer consults the scramble at all — see
   // scramble-wait.test.cjs, which owns that invariant.
   ok('  ...under the SAME stage name, so every transition still lands',
-    page.includes("{stage === 'zeroDisplay' && (") && (page.match(/setStage\([^)]*zeroDisplay/g) ?? []).length === 2);
+    page.includes("{stage === 'zeroDisplay' && (") && (run.match(/setStage\([^)]*zeroDisplay/g) ?? []).length === 2);
   ok('  ...showing the athlete their own timer at 0.00',
     /Цагийг 0\.00 болгож, хугацаа дуустал камерт харуулна уу\./.test(page));
 
@@ -612,7 +624,7 @@ console.log('\n  -- 7. durations and markers --');
       !theme.includes('transition: border-color 800ms ease;'));
   ok('  ...and nothing else referenced them',
     !fs.readFileSync(path.join(ROOT, SOLVE, '_lib/useSolveRecorder.ts'), 'utf8').includes('marker') &&
-      !page.includes('marker') && !theme.includes('oc-solve-mark'));
+      !run.includes('marker') && !theme.includes('oc-solve-mark'));
   // ON THE DIGITS, not the frame. The border is the edge of what is
   // being recorded — the one thing on this screen that already means
   // something specific — and a border is a large peripheral change that
@@ -637,11 +649,11 @@ console.log('\n  -- 7. durations and markers --');
 
   // NOT IN THIS DIFF.
   ok('the recording boundary is untouched: starts at zeroDisplay',
-    STARTS_AT_ZERO_DISPLAY.test(page));
+    STARTS_AT_ZERO_DISPLAY.test(hook));
   ok('  ...and still stops after the closing hold, not at the solve',
     ENDS_SOLVE_AT_FINISH_HOLD.test(page) &&
-      page.includes('async function finishRecording'));
-  ok('no instructions stage was added', !page.includes("'instructions'"));
+      hook.includes('async function finishRecording'));
+  ok('no instructions stage was added', !run.includes("'instructions'"));
   ok('resume is untouched: a complete run still lands on the summary',
     /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page));
 }
@@ -672,7 +684,7 @@ console.log('\n  -- 6. the recording stops AFTER the cube check --');
   // or DNF (more than that). Until now nothing on the video showed it:
   // the time was evidenced and the solve was not.
   ok('a cube check follows the closing hold',
-    page.includes("| 'cubeCheck'") &&
+    hook.includes("| 'cubeCheck'") &&
       new RegExp(
         // 900, matching its sibling below: the span from the label to the
         // handler grew when the handler picked up its capture burst.
@@ -704,12 +716,16 @@ console.log('\n  -- 6. the recording stops AFTER the cube check --');
     (page.match(/onDone=\{finishRecording\}/g) ?? []).length === 1 &&
       /label="ШООГОО ХАРУУЛ · ЭЦСИЙН БАЙДАЛ"[\s\S]{0,2400}?onDone=\{finishRecording\}/.test(page));
   ok('  ...so the closing hold no longer ends it',
-    !/label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"[\s\S]{0,500}?onDone=\{finishRecording\}/.test(page));
+    !/label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"[\s\S]{0,500}?onDone=\{finishRecording\}/.test(run));
 
   // THE INVARIANT THAT MATTERS MOST: the stop, the size check and the
   // handoff are one function, in one order. Splitting them is how an
   // attempt gets filed with no video.
-  const finish = page.slice(page.indexOf('async function finishRecording'), page.indexOf('function handleEntryConfirm'));
+  // Sliced from the HOOK: finishRecording moved there with the rest of
+  // the recording boundary. Its end marker moved with it — the return
+  // statement that closes the hook — so the slice still ends where the
+  // function does.
+  const finish = hook.slice(hook.indexOf('async function finishRecording'), hook.indexOf('  return {'));
   ok('stopRecording, the size check and the handoff are ONE function',
     finish.includes('await recorder.stopRecording()') &&
       finish.includes('blob.size < MIN_RECORDING_BYTES') &&
@@ -731,15 +747,15 @@ console.log('\n  -- 6. the recording stops AFTER the cube check --');
   // the ref that could be read as null.
   const code = page.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
   ok('the `?? new Blob` fallback is gone', !code.includes('new Blob('));
-  ok('  ...and so is the ref it guarded', !page.includes('pendingBlobRef'));
+  ok('  ...and so is the ref it guarded', !run.includes('pendingBlobRef'));
   ok('the blob is cleared with the attempt it belonged to', page.includes('setPendingBlob(null);'));
 
   // NOT IN THIS DIFF. Each is its own changeset; a short video afterwards
   // must have exactly one suspect.
-  ok('the recording still starts at the opening hold', STARTS_AT_ZERO_DISPLAY.test(page));
-  ok('no instructions stage was added', !page.includes("'instructions'"));
+  ok('the recording still starts at the opening hold', STARTS_AT_ZERO_DISPLAY.test(hook));
+  ok('no instructions stage was added', !run.includes("'instructions'"));
   ok('resume is untouched: a complete run still lands on the summary',
-    /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page) && !/plan[\s\S]{0,400}finishHold/.test(page));
+    /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page) && !/plan[\s\S]{0,400}finishHold/.test(run));
 }
 
 console.log('\n  -- 8. the competition environment --');
@@ -757,7 +773,7 @@ console.log('\n  -- 8. the competition environment --');
   ok('  ...sized to what the phone actually shows',
     /\.oc-solve-takeover \{[^}]*height: 100dvh;/.test(theme));
   ok('  ...and every screen of the run wears it',
-    !page.includes('className="oc-solve-page"') &&
+    !run.includes('className="oc-solve-page"') &&
       (page.match(/className="oc-solve-takeover"/g) ?? []).length === 6);
   ok('the body scrolls, the bar does not',
     /\.oc-solve-body \{[\s\S]{0,220}?overflow-y: auto;/.test(theme) &&
@@ -765,12 +781,12 @@ console.log('\n  -- 8. the competition environment --');
 
   // THE BAR IS UNCONDITIONAL. It used to appear on ten stages of thirteen.
   ok('the bar renders once, outside every stage condition',
-    (page.match(/<SolveHeader/g) ?? []).length === 1 && !page.includes('ATTEMPT_STAGES.includes(stage) && (\n        <SolveHeader'.replace('\n', String.fromCharCode(10))));
+    (page.match(/<SolveHeader/g) ?? []).length === 1 && !run.includes('ATTEMPT_STAGES.includes(stage) && (\n        <SolveHeader'.replace('\n', String.fromCharCode(10))));
   // ...but the claim about an attempt is not.
   ok('the attempt label and pips only appear inside an attempt',
     page.includes('ATTEMPT_STAGES.includes(stage)') && bar.includes('{attempt && ('));
   ok('  ...so the summary and the sent screen make no claim about one',
-    !page.includes("'summary',") && !page.includes("'sent',"));
+    !run.includes("'summary',") && !run.includes("'sent',"));
 
   // ГАРАХ is the leave guard with a button on it.
   ok('ГАРАХ asks the same question a browser Back does',
@@ -803,11 +819,11 @@ console.log('\n  -- 8. the competition environment --');
   ok('  ...but never the two buttons', !/@media[\s\S]*?\.oc-solve-bar-btn \{[\s\S]{0,60}?display: none/.test(theme));
 
   // NOT IN THIS DIFF: layout only.
-  ok('the run has fifteen stages', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 15);
+  ok('the run has fifteen stages', (hook.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 15);
   ok('the recording boundary is untouched',
-    STARTS_AT_ZERO_DISPLAY.test(page) &&
+    STARTS_AT_ZERO_DISPLAY.test(hook) &&
       ENDS_SOLVE_AT_FINISH_HOLD.test(page) &&
-      page.includes('async function finishRecording'));
+      hook.includes('async function finishRecording'));
   ok('the 8-second holds are untouched: three of them, all 8',
     page.includes('const HOLD_SECONDS = 8;') &&
       (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3);
@@ -826,14 +842,14 @@ console.log('\n  -- 9. the lobby and the between screen --');
   ok('filing is gone, file and all',
     !fs.existsSync(path.join(ROOT, SOLVE, '_components/FilingStage.tsx')));
   ok('  ...and neither stage name survives anywhere in the page',
-    !page.includes("'cameraSetup'") && !page.includes("'filing'"));
+    !run.includes("'cameraSetup'") && !run.includes("'filing'"));
   ok('  ...nor as a render branch',
-    !page.includes("stage === 'cameraSetup'") && !page.includes("stage === 'filing'"));
-  ok('the run still has every stage it had, plus the cube check', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 15);
-  ok('  ...two of them new', page.includes("| 'lobby'") && page.includes("| 'between'"));
+    !run.includes("stage === 'cameraSetup'") && !run.includes("stage === 'filing'"));
+  ok('the run still has every stage it had, plus the cube check', (hook.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 15);
+  ok('  ...two of them new', hook.includes("| 'lobby'") && hook.includes("| 'between'"));
 
   // ── LOBBY ──
-  ok('the run opens on the lobby', page.includes("useState<Stage>('lobby')"));
+  ok('the run opens on the lobby', hook.includes("useState<Stage>('lobby')"));
   ok('  ...which asks for the camera itself', lobby.includes('void onRequestCamera();'));
   ok("  ...keeps cameraSetup's gate: no stream, no start",
     lobby.includes('className="oc-solve-lobby-go" disabled={!hasCamera}'));
@@ -842,7 +858,11 @@ console.log('\n  -- 9. the lobby and the between screen --');
   // Neither lobby nor between is inside an attempt, so the bar makes no
   // claim about one on either.
   ok('  ...and the bar claims no attempt on it', (() => {
-    const list = page.slice(page.indexOf('const ATTEMPT_STAGES'), page.indexOf('/** Below this, the file is not'));
+    // ATTEMPT_STAGES is still on the page — the bar reads it. Its old end
+    // marker (the MIN_RECORDING_BYTES comment) went to the hook with the
+    // size check, so the slice now ends at the holds constant, which is
+    // the next thing after the list on this page.
+    const list = page.slice(page.indexOf('const ATTEMPT_STAGES'), page.indexOf('/** THE TWO TIMER HOLDS'));
     return !list.includes("'lobby'") && !list.includes("'between'");
   })());
 
@@ -933,7 +953,7 @@ console.log('\n  -- 9. the lobby and the between screen --');
       page.includes('setResumeMessage(resumeNotice(plan))') &&
       page.includes('note={lobbyNote}'));
   ok('  ...and has no page-level banner of its own left at all',
-    !page.includes('{resumeMessage &&'));
+    !run.includes('{resumeMessage &&'));
 
   // ── A FAILURE THAT FADES IS A FAILURE NOBODY SEES ──
   // The saving line is not a lobby ornament: during the run it reports
@@ -953,12 +973,12 @@ console.log('\n  -- 9. the lobby and the between screen --');
   ok('only a saving line that is NOT reassurance reaches the page banner',
     page.includes('const savingIsReassurance = !filingFailed && !uploading;') &&
       page.includes("{savingLabel && !savingIsReassurance && stage !== 'between' && (") &&
-      !page.includes('instructingStage'));
+      !run.includes('instructingStage'));
   ok('  ...so a failure and an upload in progress stay a permanent row everywhere',
     // The only stage-based suppression left is `between`, which predates
     // this and has its own per-attempt slot cards instead.
     (page.match(/stage !== 'between'/g) ?? []).length === 1 &&
-      !/savingLabel && stage === 'lobby'/.test(page));
+      !/savingLabel && stage === 'lobby'/.test(run));
   ok('  ...and the lobby overlay is only ever fed the reassuring one',
     page.includes('const lobbyNote = resumeMessage ?? (savingIsReassurance ? savingLabel : null);'));
   // ONE note, not a stack of two: the resume notice already contains the
@@ -1249,7 +1269,7 @@ console.log('\n  -- 9. the lobby and the between screen --');
       /onElapsed=\{recorder\.playBeep\}[\s\S]{0,300}?onDone=\{finishRecording\}/.test(page));
 
   ok('the recording boundary did not move',
-    ENDS_SOLVE_AT_FINISH_HOLD.test(page) && page.includes('async function finishRecording'));
+    ENDS_SOLVE_AT_FINISH_HOLD.test(page) && hook.includes('async function finishRecording'));
   ok('the 8-second holds did not move',
     page.includes('const HOLD_SECONDS = 8;') && (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3);
   ok('  ...and the cover now runs longer, on its own constant',
@@ -1472,7 +1492,7 @@ console.log('\n  -- 10. the mockup restyle --');
   // WHICH LEAVES ONLY THE INSTRUCTION ABOVE THE PREVIEW, so `layout`
   // had nothing left to choose and went with it.
   ok('  ...leaving no layout prop to pick between them',
-    !stripComments(hold).includes('layout') && !page.includes('layout="'));
+    !stripComments(hold).includes('layout') && !run.includes('layout="'));
   // AND SO DO THE OTHER TWO, because there is only one layout left.
   // The count is rendered in exactly one place in the component now, and
   // the instruction is the only thing above the preview.
@@ -1483,7 +1503,7 @@ console.log('\n  -- 10. the mockup restyle --');
   // the `-tall` modifier one of them opted into has no one left to
   // contrast with and folded into the box itself.
   ok('  ...and the preview keeps the height the count gave up',
-    !theme.includes('.oc-solve-hold-cam-tall') && !page.includes('hold-cam-tall') &&
+    !theme.includes('.oc-solve-hold-cam-tall') && !run.includes('hold-cam-tall') &&
       /\.oc-solve-hold-cam \{[\s\S]{0,1400}?aspect-ratio: 1 \/ 1;[\s\S]{0,80}?max-height: 52vh;/.test(theme));
   // THE PREVIEW MAY CROP HERE — different job from the lobby's. The
   // athlete is centring one object, so the centre of the frame is the
@@ -1530,7 +1550,7 @@ console.log('\n  -- 10. the mockup restyle --');
 
   // ── READY: a stage after the hold, never a way to cut it short ──
   ok('ready is reached only when the hold has run out',
-    page.includes("onDone={() => setStage('readyPrompt')}") && !page.includes('skipZero'));
+    page.includes("onDone={() => setStage('readyPrompt')}") && !run.includes('skipZero'));
   ok('  ...and cannot end a hold itself', !readyCode.includes('seconds') && !readyCode.includes('setTimeout'));
   ok('  ...it is the mockup’s full-bleed confirmation',
     ready.includes('className="oc-solve-ready"') &&
@@ -1685,9 +1705,9 @@ console.log('\n  -- 10. the mockup restyle --');
 
   // ── WHAT MUST NOT MOVE ──
   ok('the recording boundary did not move',
-    STARTS_AT_ZERO_DISPLAY.test(page) &&
+    STARTS_AT_ZERO_DISPLAY.test(hook) &&
       ENDS_SOLVE_AT_FINISH_HOLD.test(page) &&
-      page.includes('async function finishRecording'));
+      hook.includes('async function finishRecording'));
   ok('the hold durations did not move',
     page.includes('const HOLD_SECONDS = 8;') && (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3);
   ok('the markers are gone and stayed gone', !rec.includes('MARKER_TIMES_MS'));
@@ -1702,13 +1722,13 @@ console.log('\n  -- 10. the mockup restyle --');
     between.includes('className="oc-solve-between"') &&
       /\.oc-solve-between \{[\s\S]{0,200}?max-width: 520px;[\s\S]{0,120}?gap: 22px;/.test(theme));
   ok('  ...and the lobby is still the lobby', lobby.includes('className="oc-solve-lobby"'));
-  ok('the stage list is fifteen long', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 15);
+  ok('the stage list is fifteen long', (hook.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 15);
   // count and go were merged into rec; verify was never built, because
   // it merges the closing hold with the keypad and that moves the
   // recording boundary.
   ok('  ...cover stayed, count and go merged away, verify never arrived',
-    page.includes("| 'cover'") && !page.includes("| 'count'") &&
-      !page.includes("| 'go'") && !page.includes("'verify'"));
+    hook.includes("| 'cover'") && !run.includes("| 'count'") &&
+      !run.includes("| 'go'") && !run.includes("'verify'"));
 
   // ── ONE ROW PER CHUNK, AT EVERY WIDTH ──
   // A grid with one column per move cannot wrap: there is no second row
@@ -1750,7 +1770,7 @@ console.log('\n  -- 11. the inspection --');
     /<RevealStage[\s\S]{0,900}?onDone=\{\(\) => \{\s*recorder\.mark\('coverStart'\);\s*setStage\('cover'\);\s*\}\}/.test(page));
   ok('  ...and the prep screen is gone, file and all',
     !fs.existsSync(path.join(ROOT, SOLVE, '_components/CoverPrepStage.tsx')) &&
-      !page.includes('coverPrep') && !page.includes('CoverPrepStage') &&
+      !run.includes('coverPrep') && !run.includes('CoverPrepStage') &&
       !theme.includes('oc-solve-prep'));
   ok('  ...cover to ready', /<CoverStage[\s\S]{0,300}?onDone=\{\(\) => setStage\('readyPrompt'\)\}/.test(page));
   // STRAIGHT TO THE SOLVE SCREEN. `count` and `go` sat between these
@@ -1760,18 +1780,18 @@ console.log('\n  -- 11. the inspection --');
   ok('  ...with both merged stages gone, files and all',
     !fs.existsSync(path.join(ROOT, SOLVE, '_components/CountStage.tsx')) &&
       !fs.existsSync(path.join(ROOT, SOLVE, '_components/GoStage.tsx')) &&
-      !page.includes('CountStage') && !page.includes('GoStage') &&
-      !page.includes("'count'") && !page.includes("'go'"));
+      !run.includes('CountStage') && !run.includes('GoStage') &&
+      !run.includes("'count'") && !run.includes("'go'"));
   ok('  ...and their constants with them',
-    !page.includes('const INSPECTION_SECONDS') && !page.includes('GO_FLASH_MS'));
+    !run.includes('const INSPECTION_SECONDS') && !run.includes('GO_FLASH_MS'));
   ok('  ...and their CSS',
     !theme.includes('oc-solve-count') && !theme.includes('oc-solve-goflash'));
 
   // ── ALL THREE ARE INSIDE THE RECORDING ──
-  ok('the recording still starts at the opening hold', STARTS_AT_ZERO_DISPLAY.test(page));
+  ok('the recording still starts at the opening hold', STARTS_AT_ZERO_DISPLAY.test(hook));
   ok('  ...and still stops after the closing hold, nowhere else',
     ENDS_SOLVE_AT_FINISH_HOLD.test(page) &&
-      /async function finishRecording[\s\S]{0,200}?await recorder\.stopRecording\(\)/.test(page));
+      /async function finishRecording[\s\S]{0,200}?await recorder\.stopRecording\(\)/.test(hook));
   // THE MERGE MOVED NEITHER END OF THE CLIP. It already ran across all
   // three of the screens folded together here, so folding them changes
   // nothing about where it starts or stops — and the merged screen
@@ -1782,9 +1802,11 @@ console.log('\n  -- 11. the inspection --');
   // EVERY stage of an attempt must be in ATTEMPT_STAGES, or the bar drops
   // its attempt label part-way through one.
   {
-    const list = page.slice(page.indexOf('const ATTEMPT_STAGES'), page.indexOf('/** Below this, the file is not'));
+    // Same slice as above, and the same reason its end marker moved: the
+    // MIN_RECORDING_BYTES comment went to the hook with the size check.
+    const list = page.slice(page.indexOf('const ATTEMPT_STAGES'), page.indexOf('/** THE TWO TIMER HOLDS'));
     const inList = (list.match(/'[a-zA-Z]+'/g) ?? []).map((x) => x.slice(1, -1));
-    const union = (page.match(/^  \| '([a-zA-Z]+)'/gm) ?? []).map((m) => m.slice(5, -1));
+    const union = (hook.match(/^  \| '([a-zA-Z]+)'/gm) ?? []).map((m) => m.slice(5, -1));
     const notAnAttempt = ['lobby', 'between', 'summary', 'sent'];
     ok('every stage of an attempt is in ATTEMPT_STAGES',
       union.filter((u) => !notAnAttempt.includes(u)).every((u) => inList.includes(u)),
@@ -2019,7 +2041,7 @@ console.log('\n  -- 12. the attestation --');
   // gates a button in one tab. Making it evidence needs a field.
   ok('the attestation is local to the screen and not persisted',
     summary.includes('const [attested, setAttested] = useState(false);') &&
-      !page.includes('attested') &&
+      !run.includes('attested') &&
       !fs.readFileSync(path.join(ROOT, 'lib/online-competition/data.ts'), 'utf8').includes('attested'));
 
   // THE LABEL is neither the mockup's nor the old one. Every attempt is
@@ -2030,13 +2052,13 @@ console.log('\n  -- 12. the attestation --');
   // ...and the run's result really is all that is left to write.
   ok('  ...which is all handleFinish writes',
     /async function handleFinish\(\)[\s\S]{0,2600}?await recordAo5Result\(/.test(page) &&
-      !/async function handleFinish\(\)[\s\S]{0,2600}?uploadVideoToCloudinary/.test(page));
+      !/async function handleFinish\(\)[\s\S]{0,2600}?uploadVideoToCloudinary/.test(run));
 
   // ── WHAT MUST NOT MOVE ──
   ok('the recording boundary did not move',
-    STARTS_AT_ZERO_DISPLAY.test(page) &&
+    STARTS_AT_ZERO_DISPLAY.test(hook) &&
       ENDS_SOLVE_AT_FINISH_HOLD.test(page) &&
-      /async function finishRecording[\s\S]{0,200}?await recorder\.stopRecording\(\)/.test(page));
+      /async function finishRecording[\s\S]{0,200}?await recorder\.stopRecording\(\)/.test(hook));
   ok('the hold durations did not move',
     page.includes('const HOLD_SECONDS = 8;') && (page.match(/seconds=\{HOLD_SECONDS\}/g) ?? []).length === 3);
   // THE INSPECTION IS STILL FIFTEEN SECONDS, but it is no longer a stage
@@ -2045,14 +2067,14 @@ console.log('\n  -- 12. the attestation --');
   // for it. The number lives with the counter that shows it.
   ok('the inspection window is still fifteen seconds',
     rec.includes('const INSPECTION_WINDOW_SECONDS = 15;') &&
-      !page.includes('INSPECTION_SECONDS') && !page.includes('GO_FLASH_MS'));
+      !run.includes('INSPECTION_SECONDS') && !run.includes('GO_FLASH_MS'));
   ok('  ...and one thing still owns it — the solve screen’s counter',
     !stripComments(rec).includes('АЖИГЛАХ') &&
       theme.includes('.oc-solve-insp {') && !theme.includes('.oc-solve-count-label'));
   ok('resume did not move',
     /plan\.kind === 'complete'[\s\S]{0,200}setStage\('summary'\)/.test(page) &&
       page.includes('setResumeMessage(resumeNotice(plan))'));
-  ok('the stage list did not move', (page.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 15);
+  ok('the stage list did not move', (hook.match(/^  \| '[a-zA-Z]+'/gm) ?? []).length === 15);
 
   // ── THE NARROW-PHONE BREAKPOINT IS STILL LAST ──
   // A MEDIA QUERY ADDS NO SPECIFICITY. An equally-specific base rule

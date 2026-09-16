@@ -26,6 +26,18 @@ const path = require('node:path');
 const ROOT = path.join(__dirname, '..', '..');
 const SOLVE = 'app/online-competition/[competitionId]/solve/[eventId]';
 const page = fs.readFileSync(path.join(ROOT, SOLVE, 'page.tsx'), 'utf8');
+// ── THE STAGE MACHINE MOVED, AND SO DID THESE ASSERTIONS ──────────────
+// The Stage union, every transition, the recording boundary and the leave
+// guards now live in _lib/useSolveRun.ts; the page composes it. So an
+// assertion about the RUN reads `hook`, and one about how the page renders
+// or composes it reads `page`.
+//
+// `run` is both files, and every NEGATIVE assertion reads it. That is not
+// a convenience: `!page.includes(x)` would be satisfiable by moving x into
+// the hook, which is exactly the move that just happened. Forbidding it
+// across both files is strictly stronger than forbidding it in one.
+const hook = fs.readFileSync(path.join(ROOT, SOLVE, '_lib/useSolveRun.ts'), 'utf8');
+const run = page + '\n' + hook;
 const wait = fs.readFileSync(path.join(ROOT, SOLVE, '_components/ScrambleWaitStage.tsx'), 'utf8');
 
 let pass = 0;
@@ -75,19 +87,23 @@ console.log('\n  -- the run cannot start recording without a scramble --');
   const intoIntro = page.match(/setStage\([^)]*attemptIntro/g) ?? [];
   ok('exactly three transitions into attemptIntro', intoIntro.length === 3, intoIntro.join(' | '));
   ok('  ...none of which asks whether the scramble has arrived',
-    !/setStage\(scramble \? 'attemptIntro'/.test(page));
+    !/setStage\(scramble \? 'attemptIntro'/.test(run));
   // THE RECORDING BOUNDARY. Two transitions reach it now — the intro's
   // exit and the wait's promotion — and BOTH are conditional on the
   // scramble. The start effect is still keyed on that stage alone, so
   // the intro itself is not recorded.
-  const intoZero = page.match(/setStage\([^)]*zeroDisplay/g) ?? [];
+  // BOTH FILES. One transition is the page's (the intro's guarded exit,
+  // in the render) and the other is the hook's (the wait's promotion), so
+  // a count over either alone would be 1 and would pass for the wrong
+  // reason. Each is still named individually below.
+  const intoZero = run.match(/setStage\([^)]*zeroDisplay/g) ?? [];
   // Both of them, named exactly: the intro's guarded exit, and the wait's
   // promotion — which is itself inside `if (scramble)`, checked below.
   ok('  ...and exactly two transitions into zeroDisplay, both guarded',
     intoZero.length === 2 &&
       intoZero.includes("setStage(scramble ? 'zeroDisplay") &&
       intoZero.includes("setStage('zeroDisplay") &&
-      /if \(scramble\) setStage\('zeroDisplay'\);/.test(page),
+      /if \(scramble\) setStage\('zeroDisplay'\);/.test(hook),
     intoZero.join(' | '));
   ok('  ...one being the intro finishing WITH a scramble in hand',
     /<AttemptIntroStage[\s\S]{0,200}?onDone=\{\(\) => setStage\(scramble \? 'zeroDisplay' : 'scrambleWait'\)\}/.test(page));
@@ -95,8 +111,8 @@ console.log('\n  -- the run cannot start recording without a scramble --');
   // when startRecording turned async — so long as zeroDisplay is what
   // starts the clip and the intro never is.
   ok('  ...and the clip still begins on zeroDisplay, not on the intro',
-    /useEffect\(\(\) => \{[\s\S]{0,240}?stage (===|!==) 'zeroDisplay'[\s\S]{0,1200}?startRecording\(\)/.test(page) &&
-      !/stage === 'attemptIntro'[\s\S]{0,200}?startRecording/.test(page));
+    /useEffect\(\(\) => \{[\s\S]{0,240}?stage (===|!==) 'zeroDisplay'[\s\S]{0,1200}?startRecording\(\)/.test(hook) &&
+      !/stage === 'attemptIntro'[\s\S]{0,200}?startRecording/.test(run));
   // AWAITED, NOT MERELY CALLED. startRecording returns a promise now, and
   // a promise is truthy — `if (!recorder.startRecording())` still
   // compiles and silently never fires, turning the recording-failure
@@ -106,7 +122,7 @@ console.log('\n  -- the run cannot start recording without a scramble --');
       // Code only. The effect carries a comment quoting the discarded-
       // promise form precisely to warn against it, and a raw scan would
       // be tripped by the warning rather than by the mistake.
-      const code = page.replace(/^[ \t]*\/\/.*$/gm, '');
+      const code = hook.replace(/^[ \t]*\/\/.*$/gm, '');
       return /const started = await recorder\.startRecording\(\);/.test(code) &&
         !/if \(!recorder\.startRecording\(\)\)/.test(code);
     })());
@@ -115,7 +131,7 @@ console.log('\n  -- the run cannot start recording without a scramble --');
   // already been spent, so a second beat would be one the athlete has
   // had.
   ok('  ...the promotion effect, which requires a scramble',
-    /if \(stage !== 'scrambleWait'\) return;[\s\S]{0,800}?if \(scramble\) setStage\('zeroDisplay'\);/.test(page));
+    /if \(stage !== 'scrambleWait'\) return;[\s\S]{0,800}?if \(scramble\) setStage\('zeroDisplay'\);/.test(hook));
   // A FETCH THAT RESOLVES QUICKLY NEVER PAINTS. The wait screen is only
   // reachable from the end of the intro, so it cannot appear until the
   // fetch has had the intro's full five seconds to land — except when
@@ -153,12 +169,12 @@ console.log('\n  -- the run cannot start recording without a scramble --');
   // The third route in is the recording-failure restart; the run has no
   // other way to re-enter an attempt now that redo is gone.
   ok('there is no redo to re-enter the run through',
-    !page.includes('handleRedo') && !page.includes('onRedo'));
+    !run.includes('handleRedo') && !run.includes('onRedo'));
   ok('the wait stage is rendered', page.includes("{stage === 'scrambleWait' && ("));
   // An empty scramble is the whole of every wait stage; blanking the page
   // on it would hide the failure and the retry both.
   ok('the render guard no longer blanks the page on an empty scramble',
-    page.includes('if (!competition || !runShape) {') && !page.includes('!competition || !scramble'));
+    page.includes('if (!competition || !runShape) {') && !run.includes('!competition || !scramble'));
 }
 
 console.log('\n  -- a mid-run failure must not unmount the run --');
