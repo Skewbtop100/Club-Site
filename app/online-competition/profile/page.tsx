@@ -38,7 +38,7 @@ const GENDER_LABEL: Record<OnlineParticipantGender, string> = {
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="oc-v3-page">
-      <HubNav live={null} section={null} />
+      <HubNav live={null} section={null} suppressVerificationNotice />
       <main className="oc-v3-main" style={{ maxWidth: 1080, margin: '0 auto', width: '100%' }}>
         {children}
       </main>

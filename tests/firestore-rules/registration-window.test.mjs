@@ -53,6 +53,12 @@ async function seed(competition, registration) {
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
     const db = ctx.firestore();
     if (competition) await setDoc(doc(db, 'onlineCompetitions', 'comp1'), { name: 'Тэмцээн', ...competition });
+    // Registering also needs a VERIFIED profile now (see the
+    // registration-verification suite, which is where that gate is tested).
+    // Seeded here so this suite keeps testing only the window.
+    await setDoc(doc(db, 'onlineParticipants', UID), {
+      detailsStatus: 'approved', photoStatus: 'approved', profileStatus: 'approved',
+    });
     if (registration) await setDoc(doc(db, 'onlineParticipants', UID, 'registrations', 'comp1'), registration);
   });
 }

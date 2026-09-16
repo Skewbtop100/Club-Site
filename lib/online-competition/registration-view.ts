@@ -192,7 +192,12 @@ export function profileGateCopy(
     return {
       title: 'Профайл хянагдаж байна',
       body: 'Таны профайлыг админ шалгаж байна. Баталгаажсаны дараа энэ тэмцээнд бүртгүүлэх боломжтой болно.',
-      action: null,
+      // A LINK, where this used to be null. There is still nothing for the
+      // athlete to FIX — the label reads харах, not засах — but leaving the
+      // gate with no way out at all is part of what made this read as a
+      // broken page: the athlete saw the refusal and had nowhere to go to
+      // see what they had actually submitted.
+      action: 'Профайл харах →',
     };
   }
   if (status === 'rejected') {
@@ -208,6 +213,57 @@ export function profileGateCopy(
   return {
     title: 'Профайл бөглөөгүй байна',
     body: 'Тэмцээнд бүртгүүлэхийн тулд эхлээд профайлаа бөглөж, админаар баталгаажуулах шаардлагатай.',
+    action: 'Профайл бөглөх →',
+  };
+}
+
+// ── the standing notice, before anything is attempted ──────────────────
+
+export interface VerificationNoticeCopy {
+  /** Uppercase chip word — which of the three states this is. */
+  label: string;
+  /** One line: what is true now, AND what it prevents. */
+  body: string;
+  action: string;
+}
+
+/** The notice an unverified athlete carries on every hub page, so the rule
+ *  arrives BEFORE they try to register rather than as the reason a button
+ *  refused them.
+ *
+ *  Same three states as profileGateCopy, deliberately in the same module so
+ *  the standing notice and the one at the point of failure cannot drift
+ *  apart. The difference is placement and scope: this one is general ("you
+ *  cannot enter competitions"), profileGateCopy's is about the one
+ *  competition in front of the athlete.
+ *
+ *  EVERY state names the consequence. That was the omission this exists to
+ *  fix — an athlete could read "хянагдаж байна" and still have no idea it
+ *  was what stopped them registering. */
+export function verificationNoticeCopy(
+  status: Exclude<OnlineParticipantProfileStatus, 'approved'>,
+  rejectionReason: string | null,
+): VerificationNoticeCopy {
+  if (status === 'pending') {
+    return {
+      label: 'ХЯНАГДАЖ БАЙНА',
+      body: 'Админ таны профайлыг шалгаж байна. Баталгаажих хүртэл тэмцээнд бүртгүүлэх боломжгүй.',
+      action: 'Профайл харах →',
+    };
+  }
+  if (status === 'rejected') {
+    const reason = typeof rejectionReason === 'string' && rejectionReason.trim() ? rejectionReason.trim() : null;
+    return {
+      label: 'БАТАЛГААЖААГҮЙ',
+      body: reason
+        ? `Профайл баталгаажсангүй. Шалтгаан: ${reason}. Засаад дахин илгээнэ үү — баталгаажих хүртэл тэмцээнд бүртгүүлэх боломжгүй.`
+        : 'Профайл баталгаажсангүй. Засаад дахин илгээнэ үү — баталгаажих хүртэл тэмцээнд бүртгүүлэх боломжгүй.',
+      action: 'Профайл засах →',
+    };
+  }
+  return {
+    label: 'ПРОФАЙЛ БӨГЛӨӨГҮЙ',
+    body: 'Тэмцээнд бүртгүүлэхийн тулд профайлаа бөглөж, админаар баталгаажуулна. Баталгаажих хүртэл тэмцээнд бүртгүүлэх боломжгүй.',
     action: 'Профайл бөглөх →',
   };
 }

@@ -10,6 +10,7 @@ import { resolveParticipantPhoto } from '@/lib/online-competition/data';
 import NotificationBell, { useNotifications } from './NotificationBell';
 import AuthModal from './AuthModal';
 import BottomNav, { type BottomSection } from './BottomNav';
+import VerificationNotice from './VerificationNotice';
 
 // Canonical in-app paths. The comp.* subdomain rewrite (middleware.ts)
 // maps "/" -> "/online-competition" and passes anything already under
@@ -37,6 +38,7 @@ export default function HubNav({
   live,
   active = 'home',
   section,
+  suppressVerificationNotice = false,
 }: {
   live: OnlineCompetition | null;
   /** Which top-level tab this page is. Passed explicitly rather than read
@@ -46,6 +48,10 @@ export default function HubNav({
    *  whose desktop tab and bar item differ (the live view, the dashboard,
    *  the profile) passes it. The desktop tabs never read this. */
   section?: BottomSection;
+  /** Hide the unverified-profile notice on THIS page. Only the profile page
+   *  passes it: that is where the notice sends the athlete, so showing it
+   *  there is a banner pointing at the screen it is already on. */
+  suppressVerificationNotice?: boolean;
 }) {
   const router = useRouter();
   const { user, participant, loading, signOut } = useOnlineAuth();
@@ -301,6 +307,13 @@ export default function HubNav({
         }}
       />
     </nav>
+
+    {/* An unverified athlete is told so here, on every page that has this
+        header — not only when a register button refuses them. Outside
+        <nav> so it is a band across the top of the content rather than
+        part of the sticky header. Renders nothing for a verified athlete,
+        a signed-out visitor, or before the participant read lands. */}
+    <VerificationNotice suppress={suppressVerificationNotice} />
 
     {/* Mobile only (theme.css hides it above 640px). Outside the header so
         its fixed positioning is relative to the viewport, not the sticky

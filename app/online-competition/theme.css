@@ -5205,6 +5205,53 @@
   color: #DFFF4F;
 }
 
+/* ── The unverified-profile notice (VerificationNotice.tsx) ────────────
+   A band across the top of the content on every page that has HubNav, for
+   an athlete whose profile is not verified. It is the explanation that used
+   to exist ONLY inside the registration panel, where an athlete reached it
+   by failing to register; firestore.rules is what actually refuses them.
+
+   Not a .oc-v3-card: it sits between the sticky header and the page's own
+   first element, and a bordered box there reads as content. One top and
+   bottom rule, the width of the viewport, does not. */
+.oc-v3-vnotice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 11px 22px;
+  background: #131318;
+  border-bottom: 1px solid #1C1C21;
+}
+.oc-v3-vnotice-label {
+  flex-shrink: 0;
+  /* color and border-color are set per state in the component: volt when it
+     is the athlete's move, muted while it is the admin's, red when the
+     review said no. */
+  border: 1px solid #2A2A31;
+  padding: 4px 8px;
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+}
+.oc-v3-vnotice-body {
+  flex: 1 1 260px;
+  min-width: 0;
+  font: 400 12px/17px var(--oc-font-heading), sans-serif;
+  color: #C9C4B8;
+}
+.oc-v3-vnotice-action {
+  flex-shrink: 0;
+  font: 600 10px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.08em;
+  color: #DFFF4F;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.oc-v3-vnotice-action:hover {
+  text-decoration: underline;
+}
+
 /* ── Competitions list (CompetitionList.tsx) ──────────────────────────
    Modelled on worldcubeassociation.org/competitions: a filter bar, then a
    section per state, each a heading line plus rows on 1px dividers. NO
@@ -6111,6 +6158,11 @@
   .oc-v3-main {
     padding: 14px;
     gap: 14px;
+  }
+  /* The band keeps to the same gutter as the content below it. */
+  .oc-v3-vnotice {
+    padding: 10px 14px;
+    gap: 7px 10px;
   }
 }
 

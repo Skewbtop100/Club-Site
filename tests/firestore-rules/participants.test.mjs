@@ -57,6 +57,22 @@ const testEnv = await initializeTestEnvironment({
  *  (a day either side of now). A registration is refused unless its
  *  competition is public and inside its window — that rule has its own
  *  suite, tests/firestore-rules/registration-window.test.mjs. */
+/** A VERIFIED profile for the athletes these scenarios register as.
+ *  Registering — and editing a registration's events or note — is refused
+ *  without one (firestore.rules athleteVerified; full coverage in
+ *  registration-verification.test.mjs). The RW/S scenarios below are about
+ *  the registration document's own shape, so they get a profile that
+ *  clears that gate and stays out of the way. */
+async function seedVerifiedProfiles(uids = [UID]) {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    for (const uid of uids) {
+      await setDoc(doc(ctx.firestore(), 'onlineParticipants', uid), {
+        detailsStatus: 'approved', photoStatus: 'approved', profileStatus: 'approved',
+      });
+    }
+  });
+}
+
 async function seedOpenCompetitions() {
   const { Timestamp } = await import('firebase/firestore');
   const open = {
@@ -347,18 +363,31 @@ await check('R12. a registration for a competition id that does not exist is REF
   setDoc(reg(ref, 'no-such-comp'), { ...REG, competitionId: 'no-such-comp' }),
 );
 
+// ── CLOSED: GAP-1 ────────────────────────────────────────────────────
+// This entry was `'ALLOW'` — it ASSERTED the gap, so that hardening the
+// rules would fail here and force the list to be updated. That is exactly
+// what happened: the rules now read the athlete's profile and refuse a
+// registration unless details and photo are both approved
+// (athleteVerified). Full coverage, including every record shape and the
+// legacy single status, is in registration-verification.test.mjs; this
+// stays as the one line in the gap list that records it is shut.
+//
+// `null` is the seed: NO participant document at all, which is both the
+// unverified case and the fail-closed one.
+await check('GAP-1 (CLOSED). an unverified athlete can NOT write a registration directly', 'DENY', null, (ref) =>
+  setDoc(reg(ref), REG),
+);
+
 // ── KNOWN GAPS — these document what the rules do NOT enforce today ──
 // Each is a gate the registration panel applies CLIENT-SIDE only. They are
 // asserted as ALLOW so that hardening the rules makes these fail loudly
 // and forces whoever hardened them to update this list, rather than the
 // gap being invisible.
-await check('GAP-1. an UNAPPROVED athlete can write a registration directly', 'ALLOW', null, (ref) =>
-  setDoc(reg(ref), REG),
-);
 await check('GAP-3. event ids are not checked against the competition', 'ALLOW', APPROVED, (ref) =>
   setDoc(reg(ref), { ...REG, events: ['not-an-event'] }),
 );
-// The participant limit is not checked either.
+// The participant limit is not checked either: counting sibling
+// registrations needs a collection-group query, and rules cannot query.
 
 // ── Registration READS: owner only ──────────────────────────────────
 // The rule was `isSignedIn()`: any account could read any athlete's
@@ -371,6 +400,7 @@ async function scenario(name, fn) {
   try {
     await testEnv.clearFirestore();
     await seedOpenCompetitions();
+    await seedVerifiedProfiles([UID, 'athlete2', 'other']);
     await fn();
   } catch (e) {
     ok = false;

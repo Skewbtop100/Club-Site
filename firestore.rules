@@ -580,6 +580,63 @@ service cloud.firestore {
           return exists(competitionPath()) && windowOpenFor(get(competitionPath()).data);
         }
 
+        // ── THE VERIFICATION GATE ───────────────────────────────────────
+        // A registration may be sent only by an athlete whose profile is
+        // VERIFIED — details AND photo both approved.
+        //
+        // Before this, the ONLY thing stopping an unverified athlete was
+        // RegistrationPanel's own check (it reads the profile and shows the
+        // gate copy instead of the form). That is a branch in the browser:
+        // devtools, a stale tab, or any script holding the athlete's own
+        // credentials wrote the registration straight past it, and the
+        // roster, the scramble gate and the round checks all then treat the
+        // document as a real entry. This is the server-side half.
+        //
+        // MIRRORS resolveVerification (lib/online-competition/
+        // verification.ts) and its hasPartFields, deliberately field for
+        // field: a record carrying BOTH part statuses is read from those,
+        // and one carrying neither (or only one, which that function also
+        // rejects) falls back to the single legacy profileStatus — the same
+        // mapping legacyPart() applies for profile writes above. Change the
+        // two together; rules cannot import.
+        //
+        // FAILS CLOSED, at every step: no participant document, an
+        // unreadable one, a part status stored as something other than the
+        // three words, a missing profileStatus on a legacy record — each
+        // denies. `get()` on a path that does not exist returns null and
+        // `.data` on it would error the rule out, which is also a denial,
+        // but exists() states the intent rather than relying on that.
+        //
+        // WHAT THESE RULES CANNOT CHECK HERE:
+        //   * whether the details an admin approved are TRUE — only that an
+        //     admin marked them approved;
+        //   * the participant LIMIT, or a waitlist position: counting
+        //     sibling registrations needs a collection-group query, and
+        //     rules cannot query. Still client-side only;
+        //   * whether the athlete's profile is verified FOR THIS
+        //     COMPETITION — verification is per athlete, not per entry;
+        //   * anything about a registration already stored. A profile
+        //     rejected after the fact does not retract the document; that
+        //     is the admin's registration review, and the report script
+        //     scripts/report-unverified-registrations.mjs is what finds
+        //     them;
+        //   * the Admin SDK, which bypasses rules entirely — every admin
+        //     route keeps its own checks.
+        function participantPath() {
+          return /databases/$(database)/documents/onlineParticipants/$(uid);
+        }
+
+        function verifiedProfile(p) {
+          return (p.get('detailsStatus', null) in ['pending', 'approved', 'rejected'] &&
+                  p.get('photoStatus', null) in ['pending', 'approved', 'rejected'])
+            ? (p.detailsStatus == 'approved' && p.photoStatus == 'approved')
+            : p.get('profileStatus', null) == 'approved';
+        }
+
+        function athleteVerified() {
+          return exists(participantPath()) && verifiedProfile(get(participantPath()).data);
+        }
+
         // CREATE — exactly the fields registerForCompetition's first save
         // writes (buildRegistrationWrite), and nothing else: so no
         // statusNote, and no admin field of any kind. The status must be
@@ -594,7 +651,8 @@ service cloud.firestore {
                            ['competitionId', 'events', 'status', 'registeredAt', 'updatedAt', 'note']) &&
                          request.resource.data.status == 'pending' &&
                          request.resource.data.registeredAt == request.time &&
-                         registrationWindowOpen();
+                         registrationWindowOpen() &&
+                         athleteVerified();
 
         // UPDATE — the athlete may change ONLY these four fields:
         //   events, note, updatedAt  — an edit (buildRegistrationWrite)
@@ -615,10 +673,14 @@ service cloud.firestore {
         // own place in the waitlist.
         //
         // Changing the EVENTS or the NOTE is registering, so it needs the
-        // window too — the panel's "Бүртгэл хаагдах хүртэл төрлөө сольж
-        // болно" is now true on the server as well. `results` alone (the
-        // solve page's recordAo5Result) does not: a round is solved after
-        // registration has closed.
+        // window AND the verification gate too — the panel's "Бүртгэл
+        // хаагдах хүртэл төрлөө сольж болно" is now true on the server as
+        // well. `results` alone (the solve page's recordAo5Result) needs
+        // NEITHER: a round is solved after registration has closed, and
+        // gating it on verification would let a profile edited mid-
+        // competition break the solve flow — which is exactly what must not
+        // happen. The two conditions therefore sit on the same clause, and
+        // a results-only update passes it untouched.
         //
         // ── AN APPROVED REGISTRATION'S EVENTS ──
         // Once approved, `events` is what the registration COMPETES in — the
@@ -661,7 +723,7 @@ service cloud.firestore {
                            : !request.resource.data.diff(resource.data).affectedKeys().hasAny(['requestedEvents', 'withdrawnEvents'])) &&
                          (!request.resource.data.diff(resource.data).affectedKeys()
                              .hasAny(['events', 'note', 'requestedEvents', 'withdrawnEvents']) ||
-                          registrationWindowOpen());
+                          (registrationWindowOpen() && athleteVerified()));
         allow delete: if false;
       }
     }

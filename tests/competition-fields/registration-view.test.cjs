@@ -41,6 +41,7 @@ const {
   registrationWindow,
   feeView,
   profileGateCopy,
+  verificationNoticeCopy,
   registrationStatusCopy,
   competeGateCopy,
   opensInLabel,
@@ -166,11 +167,43 @@ console.log('\n  -- profileGateCopy: three states, three messages --');
   const pen = profileGateCopy('pending', null);
   const rej = profileGateCopy('rejected', null);
   ok('the three titles are all different', new Set([inc.title, pen.title, rej.title]).size === 3);
+  ok('the three actions are all different', new Set([inc.action, pen.action, rej.action]).size === 3);
   eq('incomplete: sent to fill the profile', inc.action, 'Профайл бөглөх →');
-  // The old single message told a PENDING athlete to fill it in again.
-  eq('pending: nothing to do but wait — NO action', pen.action, null);
+  // This was `null` — "nothing to do but wait" — which left the gate with no
+  // way out and was part of why an unverified athlete read the page as
+  // broken. A pending athlete still has nothing to FIX, so the label is
+  // харах and not засах, but they can now reach what they submitted.
+  eq('pending: a way to SEE the submission, not to redo it', pen.action, 'Профайл харах →');
   ok('pending: says it is being reviewed', /шалгаж/.test(pen.body), pen.body);
   eq('rejected: sent to fix the profile', rej.action, 'Профайл засах →');
+  ok(
+    'rejected: carries the admin reason',
+    /Шалтгаан: Царай/.test(profileGateCopy('rejected', 'Царай харагдахгүй').body),
+    profileGateCopy('rejected', 'Царай харагдахгүй').body,
+  );
+}
+
+console.log('\n  -- verificationNoticeCopy: the standing notice --');
+{
+  const inc = verificationNoticeCopy('incomplete', null);
+  const pen = verificationNoticeCopy('pending', null);
+  const rej = verificationNoticeCopy('rejected', 'Царай харагдахгүй');
+  ok('the three labels are all different', new Set([inc.label, pen.label, rej.label]).size === 3);
+  ok('the three bodies are all different', new Set([inc.body, pen.body, rej.body]).size === 3);
+  // THE POINT OF THE NOTICE: every state says what it PREVENTS. An athlete
+  // reading "your profile is being reviewed" must not have to work out for
+  // themselves that it also means they cannot enter a competition yet.
+  const states = [['incomplete', inc], ['pending', pen], ['rejected', rej]];
+  for (const [name, c] of states) {
+    ok(`${name}: names the consequence`, /бүртгүүлэх боломжгүй/.test(c.body), c.body);
+    ok(`${name}: offers a route to the form`, typeof c.action === 'string' && c.action.length > 0, c.action);
+  }
+  ok('rejected: carries the admin reason', /Царай харагдахгүй/.test(rej.body), rej.body);
+  ok(
+    'rejected with no reason still says what to do',
+    /дахин илгээнэ үү/.test(verificationNoticeCopy('rejected', null).body),
+    verificationNoticeCopy('rejected', null).body,
+  );
 }
 ok('rejected WITH a reason shows it', /Зураг тод биш/.test(profileGateCopy('rejected', 'Зураг тод биш').body));
 eq('rejected with a blank reason does not print "Шалтгаан: ."',

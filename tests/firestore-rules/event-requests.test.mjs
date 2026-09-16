@@ -80,6 +80,12 @@ async function seed(registration, { closed = false } = {}) {
   for (const e of ['333', '222', '444']) {
     await c.collection('roundState').doc(`${e}_1`).set({ eventId: e, round: 1, status: 'live' });
   }
+  // Editing a registration's events also needs a VERIFIED profile now (see
+  // the registration-verification suite). Seeded so this suite keeps testing
+  // only the request/withdraw rules.
+  await adb.collection('onlineParticipants').doc(UID).set({
+    detailsStatus: 'approved', photoStatus: 'approved', profileStatus: 'approved',
+  });
   if (registration) {
     await adb.doc(regPath).set({ competitionId: COMP, registeredAt: Timestamp.fromMillis(Date.now() - DAY), ...registration });
   }

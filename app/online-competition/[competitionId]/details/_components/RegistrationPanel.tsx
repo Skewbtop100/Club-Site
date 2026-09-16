@@ -150,6 +150,27 @@ export default function RegistrationPanel({
   const requestedIds = approvedRegistration ? registration?.requestedEvents ?? [] : [];
   const declinedIds = approvedRegistration ? registration?.declinedEvents ?? [] : [];
 
+  /** Read the profile and, if it is not verified, hand the panel over to the
+   *  gate — which of the three messages appears is the profile's business
+   *  (profileGateCopy), not the caller's. Returns whether it took over.
+   *
+   *  Called from TWO places, deliberately: before the form opens, and again
+   *  when the server refuses a save. The second is not redundant — the
+   *  first check is this browser's, and between it and the save an admin can
+   *  reject the profile, or the athlete can have been unverified all along
+   *  in a tab that loaded before any of this existed. firestore.rules
+   *  (athleteVerified) is what actually refuses; this is how that refusal
+   *  gets a sentence instead of a shrug. */
+  async function showGateIfUnverified(uid: string): Promise<boolean> {
+    const verification = resolveVerification(await fetchParticipant(uid));
+    const status = verification.status;
+    if (status === 'approved') return false;
+    // Each rejected part with its own reason.
+    setGate({ status, reason: rejectionSummary(verification) });
+    setState('gated');
+    return true;
+  }
+
   async function handleRegisterClick() {
     // Anonymous (solve-page) sessions don't count — registering needs a
     // real, returning identity.
@@ -177,14 +198,7 @@ export default function RegistrationPanel({
     setAuthError('');
     setCheckingProfile(true);
     try {
-      const verification = resolveVerification(await fetchParticipant(uid));
-      const status = verification.status;
-      if (status !== 'approved') {
-        // Each rejected part with its own reason.
-        setGate({ status, reason: rejectionSummary(verification) });
-        setState('gated');
-        return;
-      }
+      if (await showGateIfUnverified(uid)) return;
     } catch (err) {
       console.error('RegistrationPanel: checking the profile failed:', err);
       setAuthError('Профайлын мэдээлэл шалгахад алдаа гарлаа, дахин оролдоно уу');
@@ -278,9 +292,22 @@ export default function RegistrationPanel({
       onSaved();
     } catch (err) {
       console.error('RegistrationPanel: saving the registration failed:', err);
-      // firestore.rules judge the window on the SERVER's clock. A refusal
-      // here, with the panel showing it open, is almost always this device's
-      // clock disagreeing with the server's — retrying would not help.
+      // A permission-denied now has TWO possible causes: the registration
+      // window (judged on the server's clock) and the verification gate. So
+      // before blaming the window, ask the profile — if it is not verified,
+      // THAT is the answer, and the gate says which of the three states it
+      // is and links to the form. Only if the profile is fine does the
+      // window wording stand.
+      //
+      // A failure of that re-read is not worth a second error message: fall
+      // through to the window wording, which is what this said before.
+      if ((err as { code?: string } | null)?.code === 'permission-denied' && !(err instanceof RegistrationEditRefused)) {
+        try {
+          if (await showGateIfUnverified(user.uid)) return;
+        } catch (checkErr) {
+          console.error('RegistrationPanel: re-checking the profile failed:', checkErr);
+        }
+      }
       setSaveError(
         err instanceof RegistrationEditRefused
           ? KEEP_ONE_APPROVED
