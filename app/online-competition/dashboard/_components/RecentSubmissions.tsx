@@ -12,9 +12,19 @@ const TONE: Record<OnlineSubmissionStatus, { border: string; color: string; labe
   rejected: { border: '#E8543C', color: '#E8543C', label: 'ТАТГАЛЗСАН' },
 };
 
+/** СҮҮЛИЙН ТАЙЛАЛТУУД — the athlete's own recent attempts and where each
+ *  one stands in review.
+ *
+ *  WIDE SCREENS ONLY. `.oc-v3-recent-subs` is display:none at 640px and
+ *  below: this page is where ОРОЛДЛОГО lands when the athlete has no live or
+ *  upcoming round to go to, and on a phone a list of past attempts was the
+ *  longest thing on a screen whose job is to say what to do next. It is
+ *  hidden rather than dropped from the render so the desktop dashboard keeps
+ *  it — it is the only place an athlete can see their own submissions at
+ *  all. */
 export default function RecentSubmissions({ submissions }: { submissions: OnlineSubmission[] }) {
   return (
-    <div className="oc-v3-card">
+    <div className="oc-v3-card oc-v3-recent-subs">
       <div className="oc-v3-card-head">
         <span className="oc-v3-label">Сүүлийн тайлалтууд</span>
         <span className="oc-v3-season">{submissions.length}</span>
