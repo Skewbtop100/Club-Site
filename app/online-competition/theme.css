@@ -9764,6 +9764,39 @@ button.oc-rv-cell:hover {
 
 /* ── The athlete's own list ───────────────────────────────────────────── */
 
+/* The tutorial line, above the button and quieter than it: it is a
+   signpost, so it must not compete with the action it points past. Its own
+   row with a bottom rule, so the card reads allowance / tutorial / button
+   rather than as two things floating in one box. */
+.oc-practice-tutorial {
+  padding: 13px 18px;
+  border-bottom: 1px solid #16161B;
+}
+.oc-practice-tutorial-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 36px;
+  color: #F4F1EA;
+  font: 500 12px var(--oc-font-heading), sans-serif;
+  text-decoration: none;
+}
+.oc-practice-tutorial-link:hover {
+  color: #DFFF4F;
+  text-decoration: underline;
+}
+.oc-practice-tutorial-where {
+  font: 500 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+  color: #4A4740;
+  white-space: nowrap;
+}
+.oc-practice-tutorial-note {
+  margin-top: 4px;
+  font: 400 11px/17px var(--oc-font-heading), sans-serif;
+  color: #6E6A62;
+}
+
 /* ONE button: 3x3x3. The grid of ten events that was here offered a choice
    that changes nothing about the sequence being practised, and turned the
    one action on the page into a decision. */
