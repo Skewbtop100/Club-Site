@@ -6051,28 +6051,36 @@
   }
 
   /* ── Competitions list: the filter bar on a phone ────────────────────
-     BOXES OFF, ROW CENTRED, SEARCH BEHIND A GLYPH.
+     BOXES ON, ROW CENTRED, SEARCH BEHIND A GLYPH.
 
-     The chips lose their 1px borders and become bare glyphs on 2px of gap
-     — seven 36px boxes side by side on a phone read as a toolbar, which is
-     more furniture than a filter deserves. Pressed is then volt plus a 2px
-     volt underline, so the state does not rest on colour alone; the
-     unpressed chip carries the same 2px as transparent, so nothing shifts
-     when it lights up.
+     The chips keep the wide layout's treatment ENTIRELY — 1px #2A2A31 box,
+     transparent ground, the same hover and the same volt-on-#16161B pressed
+     state. A pass that stripped the borders here left seven bare glyphs in a
+     row, which read as decoration rather than as seven things you can press.
+     So the only thing this block still says about a chip is its size.
+
+     34px, not the 36 of the wide layout, and that is a fit decision: at
+     360px CSS the bar has 312px to work with (360 - 28 for .oc-v3-main's
+     gutter - 20 for the bar's own padding), and seven 36px chips plus their
+     gaps and the search toggle come to 316px. At 34px the row is 300px and
+     fits with 12px over.
+
+     34px is BELOW the 44px touch floor this block applies to other
+     controls, and that is the trade being made rather than an oversight: it
+     was already 34px before this change, a chip is one of eight targets in
+     a strip a thumb sweeps rather than a single button to hit, and the only
+     way to hold 44px here is to wrap the strip onto two rows. The search
+     field, and every control on the rows below, keep the floor.
 
      The group is CENTRED rather than stretched to fill the row. Stretching
      divided the width between however many chips there happened to be, so
      adding an event silently re-laid out the whole strip; centring keeps
-     every chip 36px and lets the group grow symmetrically about the middle.
+     every chip 34px and lets the group grow symmetrically about the middle.
 
-     The search field stops owning a whole row of its own. It goes behind
-     the magnifier at the end of the chip row — which keeps its border
-     precisely so it does not read as an eighth event — and drops in full
-     width underneath when opened. Closing it clears the query, so the list
-     can never be narrowed by a field nobody can see.
-
-     36px targets are already past the touch minimum, so nothing here needs
-     the 44px floor this block applies elsewhere. */
+     The search field stops owning a whole row of its own. It goes behind the
+     magnifier at the end of the chip row and drops in full width underneath
+     when opened. Closing it clears the query, so the list can never be
+     narrowed by a field nobody can see. */
   .oc-v3-clist-bar {
     justify-content: center;
     gap: 6px;
@@ -6082,48 +6090,54 @@
     justify-content: center;
     gap: 2px;
   }
+  /* Size only. Everything else — border, ground, hover, pressed — is the
+     wide rule's, so the two widths cannot drift apart. */
   .oc-v3-evfilter {
     flex: 0 0 auto;
     width: 34px;
     height: 34px;
-    border: none;
-    border-bottom: 2px solid transparent;
-    background: transparent;
   }
-  /* border-BOTTOM-color, not border-color: the wide rule's
-     `.oc-v3-evfilter:hover { border-color }` is also 0-2-0 and would beat
-     the 0-1-0 pressed rule below, wiping the volt underline off a pressed
-     chip the moment a pointer touched it. Hence the explicit on+hover
-     pair, which is the only 0-2-0 rule after both. */
-  .oc-v3-evfilter:hover {
-    border-bottom-color: #3A3A42;
-    color: #9A958A;
-  }
-  .oc-v3-evfilter-on {
-    background: transparent;
-    border-bottom-color: #DFFF4F;
-    color: #DFFF4F;
-  }
-  .oc-v3-evfilter-on:hover {
-    border-bottom-color: #DFFF4F;
-    color: #DFFF4F;
-  }
-  /* Bordered, unlike the bare glyphs it sits beside — that border is the
-     whole of how it reads as a different kind of control. */
+
+  /* ── The search toggle, now that the chips have borders too ───────────
+     It was told apart by having the only border in the row; that no longer
+     works, so three things do it instead, none of which reuses a chip's
+     pressed treatment:
+
+       DISTANCE — 16px before it (the bar's 6px gap plus 10px of margin)
+         against 2px between chips. Eight times the gap, so it reads as the
+         end of the strip rather than an eighth event.
+       A DIVIDER — a hairline in that gap, the same #2A2A31 and the same
+         idiom as .oc-v3-divider-v in the detail hero. A pseudo-element, so
+         no markup carries a decoration.
+       INK — #9A958A at rest against the chips' #6E6A62, so it is the one
+         control in the strip that starts out bright.
+
+     Its pressed state stays volt-on-transparent, NOT the chips' volt-on-
+     #16161B, so even lit it is not a lit chip. */
   .oc-v3-clist-searchtoggle {
+    position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     flex: 0 0 auto;
     width: 34px;
     height: 34px;
-    /* Clear of the last chip, so it is the end of the row and not one more
-       thing in it. */
-    margin-left: 6px;
+    margin-left: 10px;
     border: 1px solid #2A2A31;
     background: transparent;
     color: #9A958A;
     cursor: pointer;
+  }
+  .oc-v3-clist-searchtoggle::before {
+    content: '';
+    position: absolute;
+    /* Centred in the 16px gap: 8px out from this box's edge. */
+    left: -8px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 1px;
+    height: 18px;
+    background: #2A2A31;
   }
   /* Open, or holding a query — the second case is what stops a collapsed
      field from being the invisible reason the list looks short. */
