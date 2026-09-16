@@ -36,6 +36,7 @@
     "test:jumps": "node tests/competition-fields/solve-jumps.test.cjs",
     "test:practice": "node tests/competition-fields/practice.test.cjs",
     "test:practiceverify": "firebase emulators:exec --only firestore \"node tests/competition-fields/practice-verification.test.mjs\"",
+    "test:practicerows": "node tests/competition-fields/practice-review-rows.test.cjs",
     "test:practicevideo": "node tests/competition-fields/practice-video.test.cjs",
     "test:progress": "node tests/competition-fields/round-progress.test.cjs",
     "test:eventstate": "node tests/competition-fields/event-state.test.cjs",

@@ -195,6 +195,50 @@ console.log('\n  -- an unreadable profile files nothing --');
   ok('readPracticeGate THROWS on an unreadable profile rather than answering', gateThrew);
 }
 
+// ── The admin's ХЯНАГДААГҮЙ load: whole histories ───────────────────
+console.log('\n  -- ХЯНАГДААГҮЙ loads every run of an athlete with one pending --');
+{
+  // A fresh, verified athlete with five runs: four refused, one waiting.
+  // And a second whose runs are all decided.
+  await db.collection('onlineParticipants').doc('five').set(APPROVED);
+  await db.collection('onlineParticipants').doc('settled').set(APPROVED);
+  const ids = [];
+  for (let i = 0; i < 5; i++) ids.push((await S.filePracticeRun(db, run('five'))).id);
+  for (const id of ids.slice(0, 4)) await S.reviewPracticeRun(db, id, 'incorrect', 'Холилт буруу');
+  const settled = (await S.filePracticeRun(db, run('settled'))).id;
+  await S.reviewPracticeRun(db, settled, 'correct', null);
+
+  const pending = await S.listPracticeScope(db, 'pending');
+  const fiveRuns = pending.runs.filter((r) => r.uid === 'five');
+  eq('all five of her runs come back, not only the pending one', fiveRuns.length, 5);
+  eq('  ...four of them decided', fiveRuns.filter((r) => r.status === 'incorrect').length, 4);
+  eq('  ...each carrying its reason', fiveRuns.filter((r) => r.reason === 'Холилт буруу').length, 4);
+  eq('an athlete with nothing pending is not loaded', pending.runs.some((r) => r.uid === 'settled'), false);
+  ok('`matched` is only what is waiting', pending.matched.every((r) => r.status === 'pending'));
+
+  // Her last pending run decided: she has left the scope the NEXT load sees.
+  // (The screen holds her row until the panel moves on — see
+  // practice-review-rows; this is the server half.)
+  await S.reviewPracticeRun(db, ids[4], 'incorrect', 'Холилт буруу');
+  const after = await S.listPracticeScope(db, 'pending');
+  eq('once all are decided, the next ХЯНАГДААГҮЙ load leaves her out',
+    after.runs.some((r) => r.uid === 'five'), false);
+
+  const all = await S.listPracticeScope(db, 'all');
+  eq('БҮГД still has all five', all.runs.filter((r) => r.uid === 'five').length, 5);
+  eq('  ...and the settled athlete', all.runs.some((r) => r.uid === 'settled'), true);
+
+  // A DECISION CAN BE CHANGED, and the reason goes with a refusal.
+  console.log('\n  -- a decision can be changed --');
+  const changed = await S.reviewPracticeRun(db, ids[0], 'correct', null);
+  eq('refused, then marked correct', changed.status, 'correct');
+  eq('  ...and the old refusal reason is cleared', changed.reason, null);
+  const again = await S.reviewPracticeRun(db, ids[0], 'redo', null);
+  eq('correct, then redo requested', again.status, 'redo');
+  const stored = (await db.collection('practiceRuns').doc(ids[0]).get()).data();
+  eq('  ...as stored', stored.status, 'redo');
+}
+
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 fs.rmSync(OUT, { recursive: true, force: true });
 process.exit(fail === 0 ? 0 : 1);

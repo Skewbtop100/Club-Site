@@ -4,8 +4,7 @@ import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
 import { PRACTICE_REASON_MAX } from '@/lib/online-competition/practice';
 import {
   PracticeError,
-  listPracticeQueue,
-  listRunsForUids,
+  listPracticeScope,
   practiceAthleteNames,
   reviewPracticeRun,
   type PracticeRunView,
@@ -47,12 +46,9 @@ export async function GET(req: Request) {
   }
   const want = new URL(req.url).searchParams.get('status') === 'all' ? 'all' : 'pending';
   const db = getOnlineCompAdminDb();
-  const matched = await listPracticeQueue(db, want);
-  // THE QUEUE NAMES THE ATHLETES; a second pass fetches the rest of their
-  // runs so each row is whole. Not done for 'all', which already is — that
-  // would be the same read twice.
-  const runs =
-    want === 'all' ? matched : await listRunsForUids(db, matched.map((r) => r.uid));
+  // THE QUEUE NAMES THE ATHLETES; their decided runs come with them, so a
+  // row on ХЯНАГДААГҮЙ is the athlete's whole history — see listPracticeScope.
+  const { runs, matched } = await listPracticeScope(db, want);
   // Names come from the participant documents, not from the run: a name
   // stored at file time goes stale, and the admin needs the athlete they
   // know.

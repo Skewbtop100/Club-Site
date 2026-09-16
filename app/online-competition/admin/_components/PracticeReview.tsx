@@ -4,13 +4,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
 import {
   PRACTICE_RUN_LIMIT,
-  practiceAllowance,
   practiceReviewValid,
   spendsAllowance,
   type PracticeDecision,
 } from '@/lib/online-competition/practice';
 import type { AdminPracticeResponse, AdminPracticeRow } from '@/app/api/online-competition/admin-practice/route';
 import PracticeRunPanel, { PRACTICE_STATUS_TONE } from './PracticeRunPanel';
+import { practicePendingCount, practiceReviewRows } from '@/lib/online-competition/practice-review-rows';
 
 // ── Туршилтын шүүлт ─────────────────────────────────────────────────────
 // ONE ROW PER ATHLETE, their runs laid out across it — the judging grid's
@@ -40,16 +40,6 @@ import PracticeRunPanel, { PRACTICE_STATUS_TONE } from './PracticeRunPanel';
 // THE QUESTION HERE IS STILL ONE QUESTION: did this athlete scramble and
 // solve correctly? There is no time entry, no +2 and no DNF. The athlete's
 // own typed time shows because it is theirs to see, and it decides nothing.
-
-interface PracticeAthleteRow {
-  uid: string;
-  name: string;
-  /** Oldest first, so the row reads left to right as the athlete's history
-   *  — the same direction attempt 1 to attempt 5 reads in. */
-  runs: AdminPracticeRow[];
-  pending: number;
-  used: number;
-}
 
 /** Initials, the same two-letter fallback the judging grid draws. */
 function initials(name: string): string {
@@ -112,42 +102,19 @@ export default function PracticeReview() {
     void load();
   }, [load]);
 
-  /** ONE ROW PER ATHLETE. The route sends every run of every athlete in
-   *  scope — including their decided ones in the pending scope, so a row is
-   *  never a partial history — and the ХЯНАГДААГҮЙ tab then shows only the
-   *  athletes who have something waiting. */
-  const rows: PracticeAthleteRow[] = useMemo(() => {
-    if (data === null) return [];
-    const byUid = new Map<string, PracticeAthleteRow>();
-    for (const run of data.runs) {
-      const row = byUid.get(run.uid) ?? {
-        uid: run.uid,
-        name: run.displayName,
-        runs: [],
-        pending: 0,
-        used: 0,
-      };
-      row.runs.push(run);
-      if (run.status === 'pending') row.pending += 1;
-      byUid.set(run.uid, row);
-    }
-    const all = [...byUid.values()].map((row) => ({
-      ...row,
-      runs: [...row.runs].sort((a, b) => (a.createdAtMs ?? 0) - (b.createdAtMs ?? 0)),
-      // The allowance from the same function the athlete's own page and the
-      // filing route use, so the three cannot disagree about what is spent.
-      used: practiceAllowance(row.runs.map((r) => r.status)).used,
-    }));
-    const shown = scope === 'pending' ? all.filter((r) => r.pending > 0) : all;
-    // Waiting first, and the longest wait at the top of that: a queue is
-    // worked from its head.
-    return shown.sort((a, b) => {
-      if ((b.pending > 0 ? 1 : 0) !== (a.pending > 0 ? 1 : 0)) return b.pending - a.pending;
-      const aOld = Math.min(...a.runs.map((r) => r.createdAtMs ?? Infinity));
-      const bOld = Math.min(...b.runs.map((r) => r.createdAtMs ?? Infinity));
-      return aOld - bOld;
-    });
-  }, [data, scope]);
+  /** The athlete whose run is open. Read from the runs rather than the
+   *  rows — the rows depend on it. */
+  const heldUid = useMemo(
+    () => (openId && data ? data.runs.find((r) => r.id === openId)?.uid ?? null : null),
+    [openId, data],
+  );
+
+  /** ONE ROW PER ATHLETE, every run of theirs across it — see
+   *  practice-review-rows for which athletes appear and when a row leaves. */
+  const rows = useMemo(
+    () => (data === null ? [] : practiceReviewRows(data.runs, scope, heldUid)),
+    [data, scope, heldUid],
+  );
 
   /** THE QUEUE THE PANEL'S ‹ › MOVE THROUGH: every run on the rows in view,
    *  in the order they are drawn, so moving on lands where the eye would. */
@@ -171,13 +138,39 @@ export default function PracticeReview() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ runId: run.id, decision, reason: reason.trim() || null }),
       });
+      const body = (await res.json().catch(() => null)) as
+        | { error?: string; run?: Partial<AdminPracticeRow> }
+        | null;
       if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { error?: string } | null;
         setRowError({ id: run.id, text: body?.error ?? 'Хадгалж чадсангүй' });
         return;
       }
-      setOpenId(null);
-      await load();
+      // THE COMPETITION GRID'S WAY: patch the one run in place, no reload,
+      // and leave the panel open on it. The cell recolours under the admin
+      // and the decision is seen to land — where a reload used to close the
+      // panel and, for an athlete's last pending run, take their whole row
+      // (and the history that explained the decision) off the screen in the
+      // same click. The route answers with the run as stored; the status and
+      // reason are taken from it, the name from what is already here.
+      const stored = body?.run;
+      setData((prev) =>
+        prev === null
+          ? prev
+          : {
+              ...prev,
+              runs: prev.runs.map((r) =>
+                r.id === run.id
+                  ? {
+                      ...r,
+                      status: stored?.status ?? decision,
+                      reason: stored?.reason ?? (decision === 'incorrect' ? reason.trim() : null),
+                      reviewedAtMs: stored?.reviewedAtMs ?? Date.now(),
+                      expiresAtMs: stored?.expiresAtMs ?? r.expiresAtMs,
+                    }
+                  : r,
+              ),
+            },
+      );
     } catch (err) {
       console.error('PracticeReview: the decision failed:', err);
       setRowError({ id: run.id, text: 'Хадгалж чадсангүй' });
@@ -203,7 +196,7 @@ export default function PracticeReview() {
           ХЯНАГДААГҮЙ
           {/* The number of runs WAITING, not the number of rows: a row can
               carry several. */}
-          {data && <span style={{ marginLeft: 6, color: '#6E6A62' }}>{data.pending}</span>}
+          {data && <span style={{ marginLeft: 6, color: '#6E6A62' }}>{practicePendingCount(data.runs)}</span>}
         </button>
         <button
           type="button"

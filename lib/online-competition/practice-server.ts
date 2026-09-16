@@ -145,6 +145,26 @@ export async function listRunsForUids(db: Firestore, uids: readonly string[]): P
     .sort((a, b) => (b.createdAtMs ?? 0) - (a.createdAtMs ?? 0));
 }
 
+/** What the admin screen loads for a tab.
+ *
+ *    'pending' — EVERY run of every athlete with at least one pending run.
+ *                The pending query names the athletes; their decided runs
+ *                come along, so a row is the athlete's whole history and
+ *                not only the part still waiting.
+ *    'all'     — every run.
+ *
+ *  `matched` is what the tab's query itself returned, for anything that
+ *  wants the count of runs waiting rather than runs sent. */
+export async function listPracticeScope(
+  db: Firestore,
+  scope: 'pending' | 'all',
+): Promise<{ runs: PracticeRunView[]; matched: PracticeRunView[] }> {
+  const matched = await listPracticeQueue(db, scope);
+  // Not repeated for 'all', which is already whole — the same read twice.
+  const runs = scope === 'all' ? matched : await listRunsForUids(db, matched.map((r) => r.uid));
+  return { runs, matched };
+}
+
 /** Files one run and spends one of the athlete's ten.
  *
  *  THE CAP IS ENFORCED IN A TRANSACTION, and that is the reason this is a
