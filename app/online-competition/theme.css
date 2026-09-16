@@ -5210,32 +5210,39 @@
    section per state, each a heading line plus rows on 1px dividers. NO
    PANEL — no .oc-v3-card around a group, no border or background on a row.
 
-   WIDTH-CONSTRAINED, which is the point of the 760px below. Left to fill
-   the viewport, the five columns spread until the athlete count sat a hand
-   apart from the name it describes on a wide monitor; WCA's columns sit
-   close together on the left and stop.
+   WIDTH-CONSTRAINED AND CENTRED. Left to fill the viewport, the columns
+   spread until the athlete count sat a hand apart from the name it
+   describes; constrained but flush left, the whole table hugged one edge of
+   a wide screen with everything else empty. So: 880px, centred.
 
-   Where 760 comes from: the four fixed columns and the gaps are
-   88 + 56 + 88 + 4x10 + 20px of row padding = 292, so 760 leaves ~470 for
-   the name and the event icons to share. That is past the longest name in
-   the data with room over, so the constraint costs no truncation that was
-   not already there, and every column below 1fr keeps its own width
-   whatever the viewport does.
+   880 and not the 760 this started at, because the register action shares
+   the row: the four fixed columns and the gaps and the row's own padding
+   come to 336px, leaving ~545 for the name and the event icons — the name
+   column reaches ~420px before it truncates, which is past the longest name
+   in the data with room over.
+
+   `margin-inline: auto` does the centring, not `align-self: center`: it
+   centres this whether .oc-v3-main stays a flex column or not, and every
+   child here — the filter bar, the group headings, the rows — shares the
+   same 10px side padding, so the bar's chips land on the table's own left
+   edge and the page reads as one column.
 
    EVERY vertical measurement is declared, not inherited: each cell sets
    line-height in its `font:` shorthand (which resets it to `normal`
    otherwise), so a row's height is arithmetic rather than a property of
-   whatever the font metrics happen to be. Desktop: 8 + 18 + 8 + 1px
-   divider = 35px.
+   whatever the font metrics happen to be. Desktop: 8 + 22 + 8 + 1px
+   divider = 39px.
 
-   18px and not 17: the name is `overflow: hidden` for its ellipsis, and a
-   line box only just taller than the glyph box clips descenders in a font
-   whose content area runs over 1.2em. */
+   22px line box for 16px type: the name is `overflow: hidden` for its
+   ellipsis, and a line box only just taller than the glyph box clips
+   descenders in a font whose content area runs over 1.2em. */
 .oc-v3-clist {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  max-width: 760px;
+  max-width: 880px;
+  margin-inline: auto;
+  width: 100%;
 }
 
 /* ── Filter bar: event chips + name search ──────────────────────────── */
@@ -5244,6 +5251,8 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
+  /* The rows' own side padding, so the first chip sits exactly on the
+     table's left edge. */
   padding: 0 10px;
 }
 .oc-v3-clist-filters {
@@ -5251,11 +5260,11 @@
   flex-wrap: wrap;
   gap: 4px;
 }
-/* Icon-only, as WCA's is. 34px so the glyph has room and the control
+/* Icon-only, as WCA's is. 36px so the glyph has room and the control
    clears the touch minimum without a separate mobile rule. */
 .oc-v3-evfilter {
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
@@ -5263,7 +5272,7 @@
   border: 1px solid #2A2A31;
   background: transparent;
   color: #6E6A62;
-  font: 600 9px/1 var(--oc-font-mono), monospace;
+  font: 600 10px/1 var(--oc-font-mono), monospace;
   cursor: pointer;
 }
 .oc-v3-evfilter:hover {
@@ -5278,18 +5287,20 @@
   background: #16161B;
   color: #DFFF4F;
 }
+/* Pushed to the table's RIGHT edge, so the bar spans exactly the width of
+   the rows under it and frames the column rather than trailing off. */
 .oc-v3-clist-search {
   position: relative;
-  flex: 1 1 190px;
+  flex: 0 1 260px;
   min-width: 0;
-  max-width: 260px;
+  margin-left: auto;
 }
-/* .oc-v3-input's box, at bar scale: its 12px padding and 13px text are
-   sized for a form field, not for a control sitting beside 34px chips.
-   The right padding is the clear button's lane. */
+/* .oc-v3-input's box, at bar scale: its 12px padding is sized for a form
+   field, not for a control sitting beside 36px chips. The right padding is
+   the clear button's lane. */
 .oc-v3-clist-searchinput {
-  padding: 8px 30px 8px 10px;
-  font-size: 12px;
+  padding: 9px 30px 9px 11px;
+  font-size: 13px;
 }
 /* The browser's own clear button would sit underneath ours. */
 .oc-v3-clist-searchinput::-webkit-search-cancel-button {
@@ -5319,7 +5330,7 @@
   background: transparent;
   color: #6E6A62;
   padding: 6px 2px;
-  font: 600 9px/1 var(--oc-font-mono), monospace;
+  font: 600 10px/1 var(--oc-font-mono), monospace;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   cursor: pointer;
@@ -5340,10 +5351,10 @@
   display: flex;
   align-items: baseline;
   gap: 8px;
-  padding: 0 10px 7px;
+  padding: 0 10px 8px;
 }
 .oc-v3-group-count {
-  font: 500 9px/14px var(--oc-font-mono), monospace;
+  font: 500 10px/15px var(--oc-font-mono), monospace;
   font-variant-numeric: tabular-nums;
   color: #4A4740;
 }
@@ -5352,12 +5363,12 @@
 .oc-v3-clist-head,
 .oc-v3-clist-row {
   display: grid;
-  grid-template-columns: 88px minmax(140px, 1fr) minmax(0, auto) 56px 88px;
-  gap: 10px;
+  grid-template-columns: 104px minmax(180px, 1fr) minmax(0, auto) 64px 96px;
+  gap: 12px;
   align-items: center;
 }
 .oc-v3-clist-head {
-  padding: 0 10px 6px;
+  padding: 0 10px 7px;
   border-bottom: 1px solid #1C1C21;
 }
 .oc-v3-clist-row {
@@ -5386,21 +5397,31 @@
   outline: 1px solid #DFFF4F;
   outline-offset: -1px;
 }
+/* THE DATE CARRIES WEIGHT. It was 11px #9A958A — the quietest thing in a
+   row whose reader is scanning for exactly it. Now 13px, 600, and full
+   #F4F1EA: second only to the 16px name, and the brightest of the three
+   facts beside it. */
 .oc-v3-clist-date {
-  font: 500 11px/18px var(--oc-font-mono), monospace;
+  font: 600 13px/22px var(--oc-font-mono), monospace;
   font-variant-numeric: tabular-nums;
-  color: #9A958A;
+  color: #F4F1EA;
   white-space: nowrap;
+}
+.oc-v3-clist-date-rail {
+  display: none;
 }
 .oc-v3-clist-name-cell {
   min-width: 0;
 }
 /* A span, not the link — .oc-v3-clist-rowlink is the anchor. Its own class
    rather than .oc-v3-row-name because that one is nowrap + ellipsis at
-   every width, and a stacked row must show the whole name. */
+   every width, and a stacked row must show the whole name.
+
+   16px, up a step from 14: it is the subject of the row and was reading at
+   the same size as the metadata around it. */
 .oc-v3-clist-name {
   display: block;
-  font: 500 14px/18px var(--oc-font-heading), sans-serif;
+  font: 500 16px/22px var(--oc-font-heading), sans-serif;
   color: #F4F1EA;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5417,23 +5438,23 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   min-width: 0;
 }
 /* The bare WCA glyph, no 28px bordered box (.oc-v3-ev-icon): a six-event
    competition would otherwise wrap into a second row of boxes and set the
-   height of every row in the section. 15px, so it fits the 18px line. */
+   height of every row in the section. 17px, so it fits the 22px line. */
 .oc-v3-clist-ev {
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
   color: #9A958A;
-  font: 600 9px/15px var(--oc-font-mono), monospace;
+  font: 600 10px/17px var(--oc-font-mono), monospace;
 }
 .oc-v3-clist-count {
-  font: 500 12px/18px var(--oc-font-mono), monospace;
+  font: 500 13px/22px var(--oc-font-mono), monospace;
   font-variant-numeric: tabular-nums;
-  color: #F4F1EA;
+  color: #9A958A;
   white-space: nowrap;
 }
 /* Desktop reads the unit off the ТАМИРЧИН column heading, so the inline
@@ -5450,7 +5471,7 @@
 .oc-v3-clist-action {
   position: relative;
   z-index: 1;
-  font: 600 9px/18px var(--oc-font-mono), monospace;
+  font: 600 10px/22px var(--oc-font-mono), monospace;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: #6E6A62;
@@ -5462,7 +5483,7 @@
   text-decoration: underline;
 }
 .oc-v3-th {
-  font: 500 8px var(--oc-font-mono), monospace;
+  font: 500 9px var(--oc-font-mono), monospace;
   letter-spacing: 0.14em;
   color: #6E6A62;
   text-transform: uppercase;
@@ -5558,72 +5579,107 @@
     row-gap: 10px;
   }
   /* ── Competitions list: the stacked row ─────────────────────────────
-     Five columns fold to a 2x2 grid: the name and the START DATE on line
-     one, then the events and the athlete count together on line two.
+     THE SHAPE: a date rail down the left, and the competition in the
+     column beside it.
 
-     The date takes the corner the БҮРТГҮҮЛЭХ action had, and takes its
-     weight with it — 13px and #F4F1EA against the name's own 15px. It is
-     what an athlete scans a list of competitions for, and the action it
-     replaced was a second trip to the page this whole row already opens.
+         ┌───────┬──────────────────────────────┐
+         │ 09-12 │ Хором Оупен                  │
+         │  2026 │ [icon] [icon]  4 тамирчин    │
+         └───────┴──────────────────────────────┘
+
+     The previous version put the name and the date on one line and then
+     dropped the events and the count on a second, full-width line under
+     both — three things in a stack with nothing saying which belonged to
+     which. Here the rail owns the left edge and the right column is the
+     competition: name, and under it, indented past the rail, the facts
+     about that name. Two blocks with a relationship, not four items in a
+     pile.
+
+     The rail is also what lets the date carry weight without competing
+     with the name for the same line: 15px/700 for the month-day, with the
+     year under it at 10px and #6E6A62 — present, and audibly secondary.
 
      STILL a grid, and every cell is placed explicitly: the DOM order is
-     the desktop one (date first, name second), and grid-area is the only
-     way to re-lay it out without wrapper elements that the desktop grid
-     would then have to see through. Flex could not: wrapping is decided
-     by base sizes, so which cells shared a line would depend on how long
-     a competition's name and event list happened to be.
+     the wide one (date first, name second), and grid-area is the only way
+     to re-lay it out without wrapper elements the wide grid would then
+     have to see through. Flex could not: wrapping is decided by base
+     sizes, so which cells shared a line would depend on how long a
+     competition's name and event list happened to be.
 
      Height is declared end to end, as on desktop:
-       9 + 20 (name/date) + 4 + 16 (events/count) + 9 + 1px divider = 59px.
-     No 44px floor on anything inside it any more: the ROW is the tap
-     target now, at 59px, so the name no longer needs 24px of padding to
-     reach the minimum on its own. */
+       9 + 21 (name) + 3 + 18 (events/count) + 9 + 1px divider = 61px,
+     with the rail's 18 + 12 = 30px shorter than the 42px it sits beside.
+     No 44px floor on anything inside: the ROW is the tap target, at 61px,
+     so the name needs no padding of its own to reach the minimum. */
   .oc-v3-clist-head {
     display: none;
   }
   .oc-v3-clist-row {
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 4px 10px;
+    /* 56px holds "09-12" at 15px mono with room over, so the rail can
+       never wrap mid-date. */
+    grid-template-columns: 56px minmax(0, 1fr);
+    gap: 3px 12px;
     padding: 9px 10px;
     align-items: center;
   }
+  /* The rail spans both rows of the right column and sits against the top
+     of them, so it reads as a label on the pair rather than floating
+     against the middle of a name that has wrapped. */
+  .oc-v3-clist-date {
+    grid-area: 1 / 1 / 3 / 2;
+    align-self: start;
+    white-space: normal;
+  }
+  .oc-v3-clist-date-wide {
+    display: none;
+  }
+  .oc-v3-clist-date-rail {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+  }
+  .oc-v3-clist-date-day {
+    font: 700 15px/18px var(--oc-font-mono), monospace;
+    white-space: nowrap;
+    /* Restated after the shorthand, which resets font-variant — the dates
+       still have to align rail to rail down the list. */
+    font-variant-numeric: tabular-nums;
+    color: #F4F1EA;
+  }
+  .oc-v3-clist-date-year {
+    font: 500 10px/12px var(--oc-font-mono), monospace;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    color: #6E6A62;
+  }
   .oc-v3-clist-name-cell {
-    grid-area: 1 / 1 / 2 / 2;
+    grid-area: 1 / 2 / 2 / 3;
   }
   /* The whole name, wrapped — a stacked row that truncates is the thing
      this breakpoint exists to avoid. */
   .oc-v3-clist-name {
-    font: 500 15px/20px var(--oc-font-heading), sans-serif;
+    font: 500 16px/21px var(--oc-font-heading), sans-serif;
     white-space: normal;
     overflow: visible;
     text-overflow: clip;
   }
-  .oc-v3-clist-date {
-    grid-area: 1 / 2 / 2 / 3;
-    justify-self: end;
-    /* Against the FIRST line of the name, not centred on a name that has
-       wrapped to two or three lines. */
-    align-self: start;
-    font: 600 13px/20px var(--oc-font-mono), monospace;
-    /* Restated after the shorthand, which resets font-variant — the dates
-       still have to align row to row when stacked. */
-    font-variant-numeric: tabular-nums;
-    color: #F4F1EA;
-  }
-  /* The wrapper becomes real here. Events and the count were a column
-     apart, which on a stacked row meant opposite edges of the screen with
-     the row's whole width between two facts about the same competition.
-     One flex box, 10px apart, under the name they belong to. */
+  /* The wrapper becomes real here, in the name's column and under it. */
   .oc-v3-clist-meta {
-    grid-area: 2 / 1 / 3 / 3;
+    grid-area: 2 / 2 / 3 / 3;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     min-width: 0;
   }
+  .oc-v3-clist-events {
+    gap: 9px;
+  }
+  .oc-v3-clist-ev {
+    font: 600 10px/18px var(--oc-font-mono), monospace;
+  }
   .oc-v3-clist-count {
-    font: 500 11px/16px var(--oc-font-mono), monospace;
+    font: 500 12px/18px var(--oc-font-mono), monospace;
     font-variant-numeric: tabular-nums;
     color: #9A958A;
   }
@@ -5859,16 +5915,43 @@
     grid-column: 1 / -1;
   }
 
-  /* The БҮХ ТЭМЦЭЭН / МИНИЙ ТЭМЦЭЭН pills stood here, as the phone-only
-     stand-in for the ТЭМЦЭЭНҮҮД dropdown that .oc-v3-tabs takes away at
-     this width. They are gone for good: "my competitions" is reached from
-     the avatar menu in .oc-v3-nav-auth, which this breakpoint keeps (it
-     sits outside the tab scroller), so the ТЭМЦЭЭН tab is now every
-     announced competition and nothing else. See competitions/page.tsx.
+  /* ── Competitions list: the filter bar, tightened ────────────────────
+     Above this width the chips and the search share one line, the search
+     pushed to the table's right edge. There is no room for that on a phone
+     — four 36px chips and a 260px field do not fit 350px — so the bar
+     wrapped, leaving a 10px trough between two rows and a short strip of
+     chips hanging off the left edge against nothing.
 
-     Nothing replaces them here — the list's own filter bar
-     (.oc-v3-clist-bar) is width-agnostic, and .oc-v3-evfilter is 34px,
-     already past the touch minimum. */
+     Both halves go full width and the gap closes to 6px: the chips stretch
+     to divide the row between them, so the strip reaches both edges of the
+     table instead of trailing off, and the field sits directly under it as
+     one block rather than a second thought. A fifth chip (announce a
+     Megaminx competition) wraps to a second stretched row, which still
+     reaches both edges.
+
+     36px chips are already past the touch minimum, so nothing here needs
+     the 44px floor this block applies elsewhere. */
+  .oc-v3-clist-bar {
+    gap: 6px;
+  }
+  .oc-v3-clist-filters {
+    width: 100%;
+    gap: 4px;
+  }
+  .oc-v3-evfilter {
+    flex: 1 1 36px;
+    width: auto;
+  }
+  .oc-v3-clist-search {
+    flex: 1 1 100%;
+    /* The right-edge push is a wide-layout move; here the field IS the
+       width. */
+    margin-left: 0;
+  }
+  /* Third line, right-aligned under the field it undoes. */
+  .oc-v3-clist-reset {
+    margin-left: auto;
+  }
 
   /* ── Competitions list: my-competitions row ──────────────────────────
      [name+season | date] / [event chips | status] / [action]. */

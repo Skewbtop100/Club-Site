@@ -6,7 +6,7 @@ import type { OnlineCompetition, OnlineCompetitionStatus } from '@/lib/online-co
 import { ONLINE_COMP_EVENTS, onlineCompEventLabel } from '@/lib/online-competition/events';
 import { registrationWindow } from '@/lib/online-competition/registration-view';
 import { WcaEventIcon, hasWcaEventIcon } from '@/lib/wca-event-icon';
-import { fmtDate } from './util';
+import { fmtDate, splitStartDate } from './util';
 import { useNow } from './CompetitionCells';
 import EmptyBlock from './EmptyBlock';
 
@@ -134,7 +134,7 @@ export default function CompetitionList({
                 onClick={() => toggle(eventId)}
               >
                 {hasWcaEventIcon(eventId) ? (
-                  <WcaEventIcon eventId={eventId} size={17} />
+                  <WcaEventIcon eventId={eventId} size={18} />
                 ) : (
                   eventId.toUpperCase()
                 )}
@@ -261,6 +261,8 @@ function Row({
       now,
     ).open;
 
+  const date = splitStartDate(c.startAt);
+
   return (
     <div className="oc-v3-clist-row">
       {/* The whole row is the link: one absolutely-positioned anchor over
@@ -276,17 +278,30 @@ function Row({
         aria-label={c.name}
       />
 
-      <span className="oc-v3-clist-date">{fmtDate(c.startAt)}</span>
+      {/* Two renderings of one date, one hidden per layout — the wide row
+          wants it on a single line in its own column, the stacked row wants
+          a two-line rail down the left edge, and a single element cannot be
+          both without fighting over which of the year and the month-day
+          comes first in the DOM. `display: none` keeps the hidden one out
+          of the accessibility tree too, so neither is read twice. */}
+      <span className="oc-v3-clist-date">
+        <span className="oc-v3-clist-date-wide">{fmtDate(c.startAt)}</span>
+        <span className="oc-v3-clist-date-rail">
+          <span className="oc-v3-clist-date-day">{date ? date.monthDay : '—'}</span>
+          {date && <span className="oc-v3-clist-date-year">{date.year}</span>}
+        </span>
+      </span>
 
       <div className="oc-v3-clist-name-cell">
         <span className="oc-v3-clist-name">{c.name}</span>
       </div>
 
-      {/* Events and the athlete count are ONE group, not two columns a
-          stacked row leaves at opposite edges. `display: contents` on
-          desktop dissolves this wrapper back into the row's grid, so the
-          two are still their own columns there — the alternative was
-          rendering them twice. */}
+      {/* Events and the athlete count are ONE group. Stacked, it sits in
+          the name's column directly under it — indented past the date rail,
+          so it reads as belonging to the name rather than as two more
+          things loose in the row. Wide, `display: contents` dissolves this
+          wrapper so the two are still their own grid columns; the
+          alternative was rendering them twice. */}
       <div className="oc-v3-clist-meta">
         <div className="oc-v3-clist-events">
           {c.events.length === 0 ? (
@@ -295,7 +310,7 @@ function Row({
             c.events.map((e) => (
               <span key={e.eventId} className="oc-v3-clist-ev" role="img" aria-label={e.label} title={e.label}>
                 {hasWcaEventIcon(e.eventId) ? (
-                  <WcaEventIcon eventId={e.eventId} size={15} />
+                  <WcaEventIcon eventId={e.eventId} size={17} />
                 ) : (
                   e.eventId.toUpperCase()
                 )}

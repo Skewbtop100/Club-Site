@@ -9,6 +9,24 @@ export function fmtDate(ts: Timestamp | undefined | null): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+/** A start date split for the stacked row's date rail: `{ monthDay:
+ *  "09-12", year: "2026" }`, null when there is no date at all. Same
+ *  numbers and same zero-padding as fmtDate above, which the wide layout
+ *  keeps using whole — this only changes where the pieces can be put, so
+ *  the year can sit on its own quiet line under the day.
+ *
+ *  Month-day, not day-month: it is the order fmtDate already reads in, and
+ *  two renderings of one date in one list that disagree on field order is
+ *  worse than either order. */
+export function splitStartDate(
+  ts: Timestamp | undefined | null,
+): { monthDay: string; year: string } | null {
+  if (!ts) return null;
+  const d = ts.toDate();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return { monthDay: `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`, year: String(d.getFullYear()) };
+}
+
 /** "18:00" */
 export function fmtTime(ts: Timestamp | undefined | null): string {
   if (!ts) return '—';
