@@ -9713,42 +9713,13 @@ button.oc-rv-cell:hover {
    bar, its closing screen, the athlete's list of runs, and the admin's
    review rows. */
 
-/* The run's bar. Not SolveHeader: that one carries an attempt count, a
-   round and a competition, none of which a practice run has. */
-.oc-practice-bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 11px 16px;
-  border-bottom: 1px solid #1C1C21;
-  background: #0D0D10;
-}
-.oc-practice-bar-tag {
-  border: 1px solid #DFFF4F;
-  color: #DFFF4F;
-  padding: 3px 7px;
-  font: 700 8px/1 var(--oc-font-mono), monospace;
-  letter-spacing: 0.14em;
-  white-space: nowrap;
-}
-.oc-practice-bar-event {
-  font: 500 12px var(--oc-font-heading), sans-serif;
-  color: #F4F1EA;
-}
-.oc-practice-bar-exit {
-  border: 1px solid #2A2A31;
-  background: transparent;
-  color: #9A958A;
-  padding: 7px 12px;
-  font: 600 9px/1 var(--oc-font-mono), monospace;
-  letter-spacing: 0.1em;
-  cursor: pointer;
-  min-height: 34px;
-}
-.oc-practice-bar-exit:hover {
-  border-color: #E8543C;
-  color: #E8543C;
-}
+/* The run's own bar lives in PracticeHeader and reuses .oc-solve-bar and
+   every one of its children, so it has NO styles of its own — that is what
+   makes the bar the same 56px with the same paddings and the same narrow
+   overrides as a competition's. The .oc-practice-bar* rules that were here
+   are gone with it, and so are .oc-practice-filing*: the saving line is now
+   a .oc-solve-banner at the top of the stage column, exactly where the
+   competition puts its own. */
 
 /* The closing screen. */
 .oc-practice-done {
@@ -9775,66 +9746,59 @@ button.oc-rv-cell:hover {
 
 /* The upload, over whatever stage is on screen — pinned to the bottom so it
    never covers a control. */
-.oc-practice-filing {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 40;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  padding: 11px 16px calc(11px + env(safe-area-inset-bottom, 0px));
-  background: #131318;
-  border-top: 1px solid #1C1C21;
-  font: 500 11px var(--oc-font-mono), monospace;
-  color: #9A958A;
-}
-.oc-practice-filing-err {
-  border-top-color: #E8543C;
-  color: #E8543C;
-}
+/* The retry button, now inline in the .oc-solve-banner the saving line
+   uses. Its own rules only — the fixed bar that used to hold it is gone. */
 .oc-practice-retry {
+  /* Inline in the banner's own line, so it inherits the banner's colour and
+     takes only the height its text needs — a 34px control would have made
+     the banner taller than the competition's. */
+  display: inline-block;
   border: 1px solid currentColor;
   background: transparent;
   color: inherit;
-  padding: 7px 11px;
-  font: 600 9px/1 var(--oc-font-mono), monospace;
+  padding: 2px 7px;
+  font: 600 9px/1.6 var(--oc-font-mono), monospace;
   letter-spacing: 0.1em;
   cursor: pointer;
-  min-height: 34px;
 }
 
 /* ── The athlete's own list ───────────────────────────────────────────── */
 
-/* Start-a-run buttons, one per event the platform runs. */
-.oc-practice-events {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+/* ONE button: 3x3x3. The grid of ten events that was here offered a choice
+   that changes nothing about the sequence being practised, and turned the
+   one action on the page into a decision. */
+.oc-practice-start {
   padding: 15px 18px;
 }
-.oc-practice-event {
+.oc-practice-start-btn {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
-  min-height: 44px;
-  border: 1px solid #2A2A31;
-  color: #F4F1EA;
-  padding: 0 14px;
-  font: 500 12px var(--oc-font-heading), sans-serif;
+  gap: 11px;
+  min-height: 48px;
+  border: 1px solid #DFFF4F;
+  background: #DFFF4F;
+  color: #08080A;
+  padding: 0 20px;
+  font: 700 11px var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
   text-decoration: none;
 }
-.oc-practice-event:hover {
-  border-color: #DFFF4F;
-  color: #DFFF4F;
+.oc-practice-start-btn:hover {
+  background: #E9FF7A;
+  border-color: #E9FF7A;
 }
-.oc-practice-event-icon {
+.oc-practice-start-icon {
   display: inline-flex;
   align-items: center;
-  color: #9A958A;
-  font: 600 9px/1 var(--oc-font-mono), monospace;
+}
+
+/* The retention rule, stated once, over the list of recordings it is
+   about. */
+.oc-practice-retention {
+  padding: 0 18px 13px;
+  border-bottom: 1px solid #16161B;
+  font: 400 11px/17px var(--oc-font-heading), sans-serif;
+  color: #6E6A62;
 }
 
 .oc-practice-row {

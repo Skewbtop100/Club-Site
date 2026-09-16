@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import { authedFetchWithRetry } from '@/lib/online-competition/authed-fetch';
-import { ONLINE_COMP_EVENTS } from '@/lib/online-competition/events';
 import { resolveVideoSrc } from '@/lib/online-competition/video-source';
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
 import { PRACTICE_RUN_LIMIT } from '@/lib/online-competition/practice';
@@ -16,13 +15,28 @@ import EmptyBlock from '../_components/hub/v3/EmptyBlock';
 
 // ── ТУРШИЛТ: the athlete's own practice area ────────────────────────────
 // Where an athlete goes to learn what a recorded solve asks of them,
-// without a competition attached. The point of the screen is the SECOND
-// half: their own runs, what an admin said about each, and the recording
-// itself — practising a sequence you cannot watch back is practising blind.
+// without a competition attached.
+//
+// THREE THINGS, IN THIS ORDER: what is left of the ten, one button, and
+// their own past runs. It carried a grid of ten event buttons and two
+// paragraphs of explanation above that button, which put the reading
+// between the athlete and the thing they came to do — and the explanation
+// was describing a sequence that the run itself then shows them anyway.
+//
+// 3x3x3 ONLY. The sequence being practised is the same whatever is in the
+// athlete's hands; ten buttons offered a choice that changes nothing about
+// what is being learned, and made the one button into a decision.
+//
+// THE RETENTION LINE MOVED rather than went — see the note on it below.
 //
 // The allowance is READ FROM THE SERVER, never computed here. It is counted
 // from the documents (practiceAllowance) because a counter an athlete could
 // write would not be a limit; this page just renders the answer.
+
+/** 3x3x3, and only 3x3x3. The sequence being practised does not change
+ *  with the puzzle, so offering ten made the one button a decision about
+ *  something that does not matter. */
+const PRACTICE_EVENT = '333';
 
 const STATUS_LABEL: Record<string, string> = {
   pending: 'ХЯНАГДАЖ БАЙНА',
@@ -80,30 +94,6 @@ export default function PracticePage() {
 
       <main className="oc-v3-main">
         <div className="oc-v3-clist">
-          <div className="oc-v3-card">
-            <div className="oc-v3-card-head">
-              <span className="oc-v3-label">Туршилтын бичлэг</span>
-              {/* The allowance, always visible — including before any run
-                  has been used, so the limit is known in advance rather
-                  than discovered at the tenth. */}
-              {data && (
-                <span className="oc-v3-season" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                  {data.remaining} / {data.limit} ҮЛДСЭН
-                </span>
-              )}
-            </div>
-
-            <div style={{ padding: '15px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <p style={{ font: '400 12px/18px var(--oc-font-heading), sans-serif', color: '#C9C4B8' }}>
-                Тэмцээний бичлэгтэй яг адил дараалал: цаг 0.00, холилт, ковер, эвлүүлэлт, цаг харуулах, шоо
-                харуулах, цаг бичих. Энд хийсэн бичлэг хаана ч тооцогдохгүй — зөвхөн дарааллыг сурахад.
-              </p>
-              <p style={{ font: '400 11px/17px var(--oc-font-heading), sans-serif', color: '#6E6A62' }}>
-                Админ бичлэг бүрийг шалгаж, холилтоо зөв хийсэн эсэхийг хэлнэ. Бичлэг шалгагдсанаас 7
-                хоногийн дараа, шалгагдаагүй бол хийснээс 30 хоногийн дараа автоматаар устна.
-              </p>
-            </div>
-          </div>
 
           {authLoading ? (
             <p className="oc-v3-status">Ачааллаж байна...</p>
@@ -123,10 +113,16 @@ export default function PracticePage() {
             <p className="oc-v3-status">Ачааллаж байна...</p>
           ) : (
             <>
-              {/* ── START ONE ── */}
+              {/* ── THE ALLOWANCE, AND ONE BUTTON ── */}
               <div className="oc-v3-card">
                 <div className="oc-v3-card-head">
-                  <span className="oc-v3-label">Шинэ туршилт</span>
+                  <span className="oc-v3-label">Туршилтын бичлэг</span>
+                  {/* Always visible, including before any run has been
+                      used, so the limit is known in advance rather than
+                      discovered at the tenth. */}
+                  <span className="oc-v3-season" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                    {data.remaining} / {data.limit} ҮЛДСЭН
+                  </span>
                 </div>
                 {data.remaining === 0 ? (
                   /* SAID PLAINLY, not hidden. A missing button is the thing
@@ -141,15 +137,17 @@ export default function PracticePage() {
                     </p>
                   </div>
                 ) : (
-                  <div className="oc-practice-events">
-                    {ONLINE_COMP_EVENTS.map((e) => (
-                      <Link key={e.id} href={`/online-competition/practice/${e.id}`} className="oc-practice-event">
-                        <span className="oc-practice-event-icon" aria-hidden>
-                          {hasWcaEventIcon(e.id) ? <WcaEventIcon eventId={e.id} size={18} /> : e.id.toUpperCase()}
-                        </span>
-                        {e.label}
-                      </Link>
-                    ))}
+                  <div className="oc-practice-start">
+                    <Link href={`/online-competition/practice/${PRACTICE_EVENT}`} className="oc-practice-start-btn">
+                      <span className="oc-practice-start-icon" aria-hidden>
+                        {hasWcaEventIcon(PRACTICE_EVENT) ? (
+                          <WcaEventIcon eventId={PRACTICE_EVENT} size={20} />
+                        ) : (
+                          PRACTICE_EVENT.toUpperCase()
+                        )}
+                      </span>
+                      3x3x3 ТУРШИЛТ ХИЙХ
+                    </Link>
                   </div>
                 )}
               </div>
@@ -160,6 +158,21 @@ export default function PracticePage() {
                   <span className="oc-v3-label">Миний туршилтууд</span>
                   <span className="oc-v3-count-badge">{data.runs.length}</span>
                 </div>
+                {/* ── THE RETENTION LINE, AND WHY IT IS HERE ──
+                    It was two lines above the start button, where it was
+                    reading an athlete had to get past to do the thing they
+                    came for — and it describes something that has not
+                    happened yet at that point. Here it sits over the list
+                    of recordings it is actually about, so an athlete
+                    reading "устна" is looking at the thing that will go.
+                    Each row also carries its own expiry date, so the rule
+                    is stated once and the date is per recording. */}
+                {data.runs.length > 0 && (
+                  <p className="oc-practice-retention">
+                    Бичлэг шалгагдсанаас 7 хоногийн дараа, шалгагдаагүй бол хийснээс 30 хоногийн дараа
+                    автоматаар устна.
+                  </p>
+                )}
 
                 {data.runs.length === 0 ? (
                   <EmptyBlock text="Одоогоор туршилтын бичлэг алга." />

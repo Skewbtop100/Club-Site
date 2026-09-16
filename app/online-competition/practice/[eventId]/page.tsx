@@ -24,6 +24,7 @@ import RecStage from '@/app/online-competition/[competitionId]/solve/[eventId]/_
 import EntryStage from '@/app/online-competition/[competitionId]/solve/[eventId]/_components/EntryStage';
 import RecordingFailedStage from '@/app/online-competition/[competitionId]/solve/[eventId]/_components/RecordingFailedStage';
 import AuthModal from '@/app/online-competition/_components/hub/v3/AuthModal';
+import PracticeHeader from '../_components/PracticeHeader';
 
 // ── ТУРШИЛТ: one recorded run, no competition ───────────────────────────
 // THE SAME SEQUENCE AS A COMPETITION ATTEMPT, and that is the entire point:
@@ -49,6 +50,36 @@ import AuthModal from '@/app/online-competition/_components/hub/v3/AuthModal';
 // The stages that exist in a competition and not here are `scrambleWait`
 // (the scramble is generated synchronously, so there is nothing to wait
 // for), `between` and `summary` (one run has no next attempt and no Ao5).
+//
+// ── THE LAYOUT IS THE COMPETITION'S, NOT A COPY OF IT ──
+// The DOM below is the competition page's, element for element and class
+// for class:
+//
+//     .oc-solve-takeover        fixed, 100dvh, flex column
+//       <bar>                   flex:none, 56px
+//       .oc-solve-body          flex:1, min-height:0, overflow-y:auto,
+//                               justify-content:center, padding 26px
+//                               (16px at <=460px), isolation:isolate
+//         .oc-solve-stage       the column every stage renders into
+//
+// .oc-solve-body IS LOAD-BEARING AND IS EASY TO MISS, which is exactly what
+// happened the first time this page was written. Without it:
+//   · `flex: 1` is absent, so the stage column takes its content height and
+//     sits at the top of the takeover with the background showing below —
+//     the reported symptom;
+//   · `overflow-y: auto` is absent, so a stage taller than the viewport
+//     cannot be scrolled to;
+//   · the 26px/16px padding is absent, so every stage sits flush to the
+//     bezel;
+//   · `isolation: isolate` is absent, and ScreenFill's z-index:-1 fill
+//     escapes to the takeover's background and becomes INVISIBLE — so the
+//     full-bleed screens (zeroDisplay, cover, rec) render differently, not
+//     merely off-position.
+//
+// Nothing here adds or overrides a single line of that CSS: the parity is
+// the DOM's, so it survives changes to theme.css instead of having to track
+// them. See the report on this changeset for why the layout still lives in
+// two places rather than in a shared shell.
 
 const HOLD_SECONDS = 8;
 const PRACTICE_HREF = '/online-competition/practice';
@@ -167,31 +198,51 @@ export default function PracticeRunPage() {
   }
 
   return (
-    /* The same full-screen takeover a competition attempt gets, and for the
-       same reason: the sequence being practised is one an athlete runs with
-       nothing else on screen. */
     <div className="oc-solve-takeover">
-      <div className="oc-practice-bar">
-        <span className="oc-practice-bar-tag">ТУРШИЛТ</span>
-        <span className="oc-practice-bar-event">{eventLabel}</span>
-        <span style={{ flex: 1 }} />
-        {/* The SAME confirm the competition run uses, from the same function
-            in the hook's module — so leaving mid-recording says the same
-            thing in both places. */}
-        <button
-          type="button"
-          className="oc-practice-bar-exit"
-          onClick={() => {
-            if (run.runAtRisk && !window.confirm(leaveConfirmMessage(1))) return;
-            recorder.releaseCamera();
-            router.push(PRACTICE_HREF);
-          }}
-        >
-          ГАРАХ
-        </button>
-      </div>
+      <PracticeHeader
+        eventLabel={eventLabel}
+        /* The two screens that are not inside the attempt, the same two the
+           competition bar drops its attempt block on. */
+        attempt={run.stage === 'lobby' || run.stage === 'sent' ? null : { index: 0, total: 1 }}
+        /* The SAME confirm the competition run uses, from the same function
+           in the hook's module — so leaving mid-recording says the same
+           thing in both places. */
+        onExit={() => {
+          if (run.runAtRisk && !window.confirm(leaveConfirmMessage(1))) return;
+          recorder.releaseCamera();
+          router.push(PRACTICE_HREF);
+        }}
+      />
 
-      <div className="oc-solve-stage">
+      <div className="oc-solve-body">
+        <div className="oc-solve-stage">
+          {/* THE SAVING LINE, in the same place and the same class as the
+              competition's: a banner at the top of the stage column, not a
+              bar pinned to the viewport. A fixed bar was the other layout
+              difference — it sat over whichever stage was on screen instead
+              of pushing it down, so the stage it covered was a different
+              height from the competition's. */}
+          {filing === 'uploading' && (
+            <p className="oc-solve-banner oc-solve-banner-quiet">
+              БИЧЛЭГ ХАДГАЛАГДАЖ БАЙНА · {uploadPercent}%
+            </p>
+          )}
+          {filing === 'failed' && (
+            <p className="oc-solve-banner oc-solve-banner-quiet oc-solve-banner-bad">
+              {fileError}{' '}
+              <button
+                type="button"
+                className="oc-practice-retry"
+                onClick={() => {
+                  const pending = pendingRef.current;
+                  if (pending) void file(pending);
+                }}
+              >
+                ДАХИН ОРОЛДОХ
+              </button>
+            </p>
+          )}
+
         {run.stage === 'lobby' && (
           <LobbyStage
             /* Nothing filed and nothing before it: a practice run is one
@@ -347,31 +398,8 @@ export default function PracticeRunPage() {
             </Link>
           </div>
         )}
+        </div>
       </div>
-
-      {/* Filing, over whatever stage is on screen — the upload runs while
-          the athlete reads the closing screen, exactly as a competition
-          attempt files behind the next one. */}
-      {filing === 'uploading' && (
-        <div className="oc-practice-filing" role="status">
-          <span>Бичлэгийг хадгалж байна… {uploadPercent}%</span>
-        </div>
-      )}
-      {filing === 'failed' && (
-        <div className="oc-practice-filing oc-practice-filing-err" role="alert">
-          <span>{fileError}</span>
-          <button
-            type="button"
-            className="oc-practice-retry"
-            onClick={() => {
-              const p = pendingRef.current;
-              if (p) void file(p);
-            }}
-          >
-            ДАХИН ОРОЛДОХ
-          </button>
-        </div>
-      )}
     </div>
   );
 }
