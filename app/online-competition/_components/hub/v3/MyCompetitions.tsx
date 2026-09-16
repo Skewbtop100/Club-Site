@@ -39,17 +39,17 @@ const STATUS: Record<OnlineCompetitionStatus, { dot: string; text: string; label
   finished: { dot: '#4A4740', text: '#6E6A62', label: 'ДУУССАН' },
 };
 
-/** NOT CURRENTLY RENDERED ANYWHERE. This was the "Миний тэмцээнүүд" half
- *  of the competitions page's toggle pills; those were removed as a
- *  duplicate of the header's ТЭМЦЭЭНҮҮД dropdown, whose own
- *  МИНИЙ ТЭМЦЭЭН item goes to /dashboard instead.
+/** The "Миний тэмцээнүүд" half of the competitions page's pill toggle —
+ *  so, PHONE ONLY (≤640px). Above that width the page has no pills and
+ *  this never renders: the header's ТЭМЦЭЭНҮҮД dropdown covers the same
+ *  ground there, and its МИНИЙ ТЭМЦЭЭН item goes to /dashboard.
  *
- *  Kept rather than deleted for ONE reason: the collapsible
- *  "Өмнө оролцсон" section below is the only implementation of a
- *  finished-registrations list, and the dashboard deliberately has none
- *  ("Skip finished for now" — there is no per-competition results model
- *  yet). If that list is wanted back, this is it; nothing else here is
- *  worth reviving. */
+ *  Which makes this and the dashboard two views of one thing, and they do
+ *  not agree: the collapsible "Өмнө оролцсон" section below is the only
+ *  finished-registrations list in the app — the dashboard deliberately has
+ *  none ("Skip finished for now" — there is no per-competition results
+ *  model yet). A phone therefore shows past registrations and a desktop
+ *  does not. Worth reconciling, and not by deleting this half. */
 export default function MyCompetitions({
   views,
   account,

@@ -5060,12 +5060,12 @@
    competitions) + the competition-detail hero. Continues the .oc-v3-*
    dark system introduced above; same exact-literal-port rules. */
 
-/* The БҮХ ТЭМЦЭЭН / МИНИЙ ТЭМЦЭЭН toggle pills (.oc-v3-pill-row,
-   .oc-v3-pill, .oc-v3-pill-active) stood here. They were the competitions
-   page's copy of the header's ТЭМЦЭЭНҮҮД dropdown — the same two labels,
-   on the one page the dropdown is certain to be on — and were removed with
-   that page's redesign. The dropdown is the survivor; see the note on
-   competitions/page.tsx. */
+/* The БҮХ ТЭМЦЭЭН / МИНИЙ ТЭМЦЭЭН toggle pills stood here, at every
+   width, where they duplicated the header's ТЭМЦЭЭНҮҮД dropdown. They now
+   live in the ≤640px block — below that width the dropdown does not exist
+   and they are the only way to that view — under .oc-v3-clist-tabs, which
+   is display:none by default. .oc-v3-pill-row is gone; its one job, the
+   2px gap, is that container's. */
 
 /* ── Collapsible section header (ӨМНӨ ОРОЛЦСОН) ───────────────────── */
 .oc-v3-section-toggle {
@@ -5205,13 +5205,40 @@
 }
 
 /* ── Competitions list (CompetitionList.tsx) ──────────────────────────
-   One .oc-v3-card per state, each headed by .oc-v3-card-head + a
-   .oc-v3-count-badge, then a .oc-v3-clist-head and its rows. Five columns:
-   date, name, events, athlete count, action.
+   Modelled on worldcubeassociation.org/competitions: a section is a
+   heading line plus rows on 1px dividers. NO PANEL — no .oc-v3-card
+   around a group, no border or background on a row. An earlier pass had
+   both, and a bordered box with 15px of head padding and 13px of row
+   padding cost more height per competition than the competition's own
+   content.
 
-   Replaced the six-column .oc-v3-all-row, whose capacity and action
-   columns were a 104px seat bar and a 168px volt block; the four content
-   columns here are all that is left. */
+   EVERY vertical measurement here is declared, not inherited: each cell
+   sets line-height in its `font:` shorthand (which resets it to `normal`
+   otherwise), so a row's height is arithmetic rather than a property of
+   whatever the font metrics happen to be. Desktop: 8 + 18 + 8 + 1px
+   divider = 35px. Five columns: date, name, events, athlete count,
+   action.
+
+   18px and not 17: the name is `overflow: hidden` for its ellipsis, and a
+   line box only just taller than the glyph box clips descenders in a font
+   whose content area runs over 1.2em. */
+.oc-v3-group {
+  display: block;
+}
+/* A line of text and a number. The 10px of side padding is shared with
+   the rows below so the heading, the column heads and the row text all
+   sit on one left edge; the rows use it as room for their hover band. */
+.oc-v3-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 10px 7px;
+}
+.oc-v3-group-count {
+  font: 500 9px/14px var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #4A4740;
+}
 .oc-v3-clist-head,
 .oc-v3-clist-row {
   display: grid;
@@ -5220,21 +5247,20 @@
   align-items: center;
 }
 .oc-v3-clist-head {
-  padding: 10px 18px;
+  padding: 0 10px 6px;
   border-bottom: 1px solid #1C1C21;
 }
 .oc-v3-clist-row {
-  padding: 13px 18px;
-  border-bottom: 1px solid #16161B;
-}
-.oc-v3-clist-row:last-child {
-  border-bottom: none;
+  padding: 8px 10px;
+  /* #1C1C21, not the #16161B a row used inside the card: the divider is
+     the only edge left, so it carries the structure the border did. */
+  border-bottom: 1px solid #1C1C21;
 }
 .oc-v3-clist-row:hover {
   background: #131318;
 }
 .oc-v3-clist-date {
-  font: 500 11px var(--oc-font-mono), monospace;
+  font: 500 11px/18px var(--oc-font-mono), monospace;
   font-variant-numeric: tabular-nums;
   color: #9A958A;
   white-space: nowrap;
@@ -5243,10 +5269,10 @@
   min-width: 0;
 }
 /* Its own class rather than .oc-v3-row-name: that one is nowrap +
-   ellipsis at every width, and a card must show the whole name. */
+   ellipsis at every width, and a stacked row must show the whole name. */
 .oc-v3-clist-name {
   display: block;
-  font: 500 14px var(--oc-font-heading), sans-serif;
+  font: 500 14px/18px var(--oc-font-heading), sans-serif;
   color: #F4F1EA;
   text-decoration: none;
   overflow: hidden;
@@ -5263,36 +5289,35 @@
   gap: 9px;
   min-width: 0;
 }
-/* The bare WCA glyph, no 28px bordered box (.oc-v3-ev-icon): a
-   six-event competition would otherwise wrap into a second row of boxes
-   and set the height of every row in the section. */
+/* The bare WCA glyph, no 28px bordered box (.oc-v3-ev-icon): a six-event
+   competition would otherwise wrap into a second row of boxes and set the
+   height of every row in the section. 15px, so it fits the 18px line. */
 .oc-v3-clist-ev {
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
   color: #9A958A;
-  font: 600 9px var(--oc-font-mono), monospace;
+  font: 600 9px/15px var(--oc-font-mono), monospace;
 }
 .oc-v3-clist-count {
-  font: 500 12px var(--oc-font-mono), monospace;
+  font: 500 12px/18px var(--oc-font-mono), monospace;
   font-variant-numeric: tabular-nums;
   color: #F4F1EA;
   white-space: nowrap;
 }
 /* Desktop reads the unit off the ТАМИРЧИН column heading, so the inline
-   one is redundant there and appears only on the cards. */
+   one is redundant there and appears only on the stacked rows. */
 .oc-v3-clist-count-unit {
   display: none;
 }
 .oc-v3-clist-action-cell {
   min-width: 0;
 }
-/* A plain text action. The block button this replaced was
-   .oc-v3-reg-btn — full width, solid #DFFF4F, 11px of padding — which
-   made registering the loudest thing in a row whose subject is the
-   competition. */
+/* A plain text action. The block button this replaced was .oc-v3-reg-btn
+   — full width, solid #DFFF4F, 11px of padding — which made registering
+   the loudest thing in a row whose subject is the competition. */
 .oc-v3-clist-action {
-  font: 600 9px var(--oc-font-mono), monospace;
+  font: 600 9px/18px var(--oc-font-mono), monospace;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: #6E6A62;
@@ -5302,6 +5327,13 @@
 .oc-v3-clist-action:hover {
   color: #DFFF4F;
   text-decoration: underline;
+}
+/* The БҮХ ТЭМЦЭЭН / МИНИЙ ТЭМЦЭЭН toggle. PHONE ONLY — see the ≤640px
+   block, which is the width at which .oc-v3-tabs (and with it the
+   ТЭМЦЭЭНҮҮД dropdown that carries the same two choices) is
+   display:none. Above that the dropdown is the one copy. */
+.oc-v3-clist-tabs {
+  display: none;
 }
 .oc-v3-th {
   font: 500 8px var(--oc-font-mono), monospace;
@@ -5399,44 +5431,75 @@
     grid-template-columns: minmax(0, 1fr) auto;
     row-gap: 10px;
   }
-  /* ── Competitions list: one card per competition ───────────────────
-     Below this breakpoint the five-column grid stops being a grid: each
-     row becomes a stacked card in WCA's shape — name, then date, then
-     events — so nothing truncates and nothing scrolls sideways. The name
-     is second in the DOM (the desktop grid reads date first); `order`
-     lifts it, which is why this is flex rather than a one-column grid. */
+  /* ── Competitions list: the stacked row ─────────────────────────────
+     Five columns fold to a 2x3 grid — name on the first line, then date,
+     then events — so nothing truncates and nothing scrolls sideways.
+     STILL a grid, and every cell is placed explicitly: the DOM order is
+     the desktop one (date first, name second), and grid-area is the only
+     way to re-lay it out without wrapper elements that the desktop grid
+     would then have to see through. Flex could not: wrapping is decided
+     by base sizes, so which cells shared a line would depend on how long
+     a competition's name and event list happened to be.
+
+     Height is declared end to end, as on desktop:
+       8 + 44 (name row) + 3 + 16 (date row) + 3 + 15 (events) + 8
+       + 1px divider = 98px.
+     The name row is 44px because the two links on it are 44px — the touch
+     minimum this file applies to every control at 640px — and pairing
+     them on one line is what keeps that floor from costing two rows. */
   .oc-v3-clist-head {
     display: none;
   }
   .oc-v3-clist-row {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 7px;
-    padding: 14px 16px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 3px 10px;
+    padding: 8px 10px;
+    align-items: center;
   }
   .oc-v3-clist-name-cell {
-    order: -1;
-    width: 100%;
+    grid-area: 1 / 1 / 2 / 2;
   }
+  .oc-v3-clist-action-cell {
+    grid-area: 1 / 2 / 2 / 3;
+    /* Beside the FIRST line of the name, not centred against a name that
+       has wrapped to two or three lines. */
+    align-self: start;
+  }
+  .oc-v3-clist-date {
+    grid-area: 2 / 1 / 3 / 2;
+    font: 500 12px/16px var(--oc-font-mono), monospace;
+    /* Restated after the shorthand, which resets font-variant — the dates
+       still have to align row to row when stacked. */
+    font-variant-numeric: tabular-nums;
+  }
+  .oc-v3-clist-count {
+    grid-area: 2 / 2 / 3 / 3;
+    justify-self: end;
+    font: 500 11px/16px var(--oc-font-mono), monospace;
+    font-variant-numeric: tabular-nums;
+    color: #9A958A;
+  }
+  /* No column heading to read the unit off any more. */
+  .oc-v3-clist-count-unit {
+    display: inline;
+  }
+  .oc-v3-clist-events {
+    grid-area: 3 / 1 / 4 / 3;
+  }
+  /* The whole name, wrapped — a card that truncates is the thing this
+     breakpoint exists to avoid. 44px via padding rather than min-height +
+     flex, because a wrapping block needs to stay a block. */
   .oc-v3-clist-name {
-    font-size: 15px;
-    line-height: 1.35;
+    font: 500 15px/20px var(--oc-font-heading), sans-serif;
+    padding: 12px 0;
     white-space: normal;
     overflow: visible;
     text-overflow: clip;
   }
-  .oc-v3-clist-date {
-    font-size: 12px;
-  }
-  /* Events sit above the count, and the count carries its own unit now
-     that the column heading is gone. */
-  .oc-v3-clist-count {
-    font-size: 11px;
-    color: #9A958A;
-  }
-  .oc-v3-clist-count-unit {
-    display: inline;
+  .oc-v3-clist-action {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
   }
   .oc-v3-statblock {
     grid-template-columns: minmax(0, 1fr);
@@ -5660,18 +5723,49 @@
     grid-column: 1 / -1;
   }
 
-  /* ── Competitions list: card tap targets ─────────────────────────────
-     The card shape itself lands at 899px (above). Here the two links on
-     a card get the 44px minimum. The name keeps its own padding rather
-     than min-height + flex, as .oc-v3-row-name does, because it is a
-     wrapping block. */
-  .oc-v3-clist-name {
-    padding: 8px 0;
+  /* ── Competitions list: the БҮХ ТЭМЦЭЭН / МИНИЙ ТЭМЦЭЭН toggle ───────
+     PHONE ONLY, and this is the width that makes it necessary: .oc-v3-tabs
+     is display:none below here, taking the ТЭМЦЭЭНҮҮД dropdown that
+     carries these same two choices with it, and the bottom bar that
+     replaces the strip has no "my competitions" item. Without these pills
+     that view is unreachable on a phone.
+
+     Above this width the dropdown is the only copy — which is the
+     duplication that was removed. competitions/page.tsx pins the same
+     640px in MOBILE_MAX_WIDTH, to drop the МИНИЙ ТЭМЦЭЭН view if the
+     viewport grows past it (a landscape rotation) and takes the toggle
+     away.
+
+     The pill itself is the pre-existing .oc-v3-pill treatment, verbatim:
+     the active (#16161B / #F4F1EA) vs. inactive (transparent / #9A958A)
+     pair and the ●/○ marker, matching the dropdown items it stands in
+     for. The 44px minimum is declared here rather than in the shared
+     touch-target list above, because at every other width these do not
+     exist. */
+  .oc-v3-clist-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
   }
-  .oc-v3-clist-action {
-    display: inline-flex;
+  .oc-v3-pill {
+    flex: 1 1 auto;
+    display: flex;
     align-items: center;
+    justify-content: center;
+    gap: 11px;
     min-height: 44px;
+    border: 1px solid #2A2A31;
+    background: transparent;
+    color: #9A958A;
+    padding: 10px 16px;
+    font: 500 12px var(--oc-font-heading), sans-serif;
+    text-decoration: none;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .oc-v3-pill-active {
+    background: #16161B;
+    color: #F4F1EA;
   }
 
   /* ── Competitions list: my-competitions row ──────────────────────────
