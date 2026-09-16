@@ -2,6 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SolveMarks } from '@/lib/online-competition/types';
+// TEMP-IOS-RECORDING-DIAG — logging only, to find why iOS Safari records an
+// empty clip. Remove with the fix; see recording-diagnostics.ts.
+import {
+  environmentInfo,
+  errorInfo,
+  mimeSupport,
+  recDiag,
+  trackInfo,
+} from '@/lib/online-competition/recording-diagnostics';
 
 // Ideal hint only, deliberately in the sensor's native landscape shape
 // (NOT width:480/height:640 portrait — that was tried and reverted: it
@@ -336,6 +345,13 @@ export function useSolveRecorder() {
       const calledAt = performance.now();
       const el = drawElRef.current;
       const size = sourceSize();
+      recDiag('pipeline:enter', {
+        hasDrawEl: !!el,
+        size,
+        drawEl: el
+          ? { readyState: el.readyState, paused: el.paused, videoWidth: el.videoWidth, videoHeight: el.videoHeight }
+          : null,
+      });
       if (!el || !size) return null;
 
       const scale = RECORDING_MAX_EDGE / Math.max(size.w, size.h);
@@ -343,9 +359,15 @@ export function useSolveRecorder() {
       canvasRef.current = canvas;
       canvas.width = Math.round(size.w * scale);
       canvas.height = Math.round(size.h * scale);
+      // isConnected: WebKit bug 240380 — a canvas outside the document can
+      // emit erratic or no frames from captureStream.
+      recDiag('pipeline:canvas', { width: canvas.width, height: canvas.height, scale, inDocument: canvas.isConnected });
 
       const ctx = canvas.getContext('2d');
-      if (!ctx) return null;
+      if (!ctx) {
+        recDiag('pipeline:no 2d context');
+        return null;
+      }
 
       /** One copy of the camera frame onto the canvas. Reports whether it
        *  actually drew, so the priming call below can tell a real frame
@@ -353,16 +375,52 @@ export function useSolveRecorder() {
        *  produced a frame yet; skipping leaves the previous contents in
        *  place, which captureStream re-emits — a repeated frame, never a
        *  black one. */
-      const drawOnce = (): boolean => {
-        if (el.readyState < 2) return false;
+      // TEMP-IOS-RECORDING-DIAG: tick counts, reported every 5s, measure
+      // whether the timer is throttled and whether the source ever decodes.
+      const loopStats = { calls: 0, drawn: 0, notReady: 0, threw: 0, since: performance.now() };
+      let lastDrawError: unknown = null;
+      let captureTrack: MediaStreamTrack | null = null;
+      const drawFrame = (): boolean => {
+        if (el.readyState < 2) {
+          loopStats.notReady++;
+          return false;
+        }
         try {
           ctx.drawImage(el, 0, 0, canvas.width, canvas.height);
           return true;
-        } catch {
+        } catch (e) {
           // A transient decode error must not kill the loop; the next
           // tick is 33ms away.
+          loopStats.threw++;
+          lastDrawError = errorInfo(e);
           return false;
         }
+      };
+      const drawOnce = (): boolean => {
+        const drawn = drawFrame();
+        loopStats.calls++;
+        if (drawn) loopStats.drawn++;
+        const now = performance.now();
+        if (now - loopStats.since >= 5000) {
+          recDiag('draw-loop', {
+            windowMs: Math.round(now - loopStats.since),
+            calls: loopStats.calls,
+            effectiveHz: Math.round((loopStats.calls * 10000) / (now - loopStats.since)) / 10,
+            drawn: loopStats.drawn,
+            notReady: loopStats.notReady,
+            threw: loopStats.threw,
+            lastDrawError,
+            source: { readyState: el.readyState, paused: el.paused, currentTime: el.currentTime, videoWidth: el.videoWidth },
+            captureTrack: trackInfo(captureTrack),
+            visibility: document.visibilityState,
+          });
+          loopStats.calls = 0;
+          loopStats.drawn = 0;
+          loopStats.notReady = 0;
+          loopStats.threw = 0;
+          loopStats.since = now;
+        }
+        return drawn;
       };
 
       // ── Wait for the source, bounded ──
@@ -391,6 +449,14 @@ export function useSolveRecorder() {
       }
 
       const stream = canvas.captureStream(DRAW_FPS);
+      captureTrack = stream.getVideoTracks()[0] ?? null;
+      recDiag('pipeline:captureStream', {
+        primed,
+        gapMs,
+        sourceReadyState: el.readyState,
+        videoTracks: stream.getVideoTracks().length,
+        track: trackInfo(captureTrack),
+      });
 
       stopDrawLoop();
       drawTimerRef.current = setInterval(drawOnce, 1000 / DRAW_FPS);
@@ -398,6 +464,7 @@ export function useSolveRecorder() {
       return stream;
     } catch (e) {
       console.warn('Could not start the canvas recording pipeline:', e);
+      recDiag('pipeline:threw', errorInfo(e));
       return null;
     }
   }, [sourceSize, stopDrawLoop]);
@@ -414,6 +481,11 @@ export function useSolveRecorder() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia(VIDEO_CONSTRAINTS);
         streamRef.current = stream;
+        recDiag('camera:granted', {
+          environment: environmentInfo(),
+          videoTracks: stream.getVideoTracks().length,
+          track: trackInfo(stream.getVideoTracks()[0]),
+        });
         if (videoElRef.current) videoElRef.current.srcObject = stream;
 
         // ── The frame source the recorder draws from ──
@@ -436,11 +508,20 @@ export function useSolveRecorder() {
         drawElRef.current = drawEl;
         // Autoplay is permitted because it is muted; a rejection here is
         // not fatal, the draw loop simply skips until frames arrive.
-        await drawEl.play().catch(() => {});
+        await drawEl.play().catch((e) => {
+          recDiag('camera:drawEl.play() rejected', errorInfo(e));
+        });
+        recDiag('camera:drawEl', {
+          readyState: drawEl.readyState,
+          paused: drawEl.paused,
+          videoWidth: drawEl.videoWidth,
+          videoHeight: drawEl.videoHeight,
+        });
 
         setHasCamera(true);
         return true;
       } catch (e) {
+        recDiag('camera:failed', errorInfo(e));
         setError(e instanceof Error ? e.message : 'Камерт хандах эрх олдсонгүй');
         setHasCamera(false);
         return false;
@@ -492,6 +573,11 @@ export function useSolveRecorder() {
     const canvasStream = await startCanvasPipeline();
     if (canvasStream) recordingStreamRef.current = canvasStream;
     const stream = canvasStream ?? streamRef.current;
+    recDiag('record:stream', {
+      source: canvasStream ? 'canvas' : streamRef.current ? 'camera (canvas fallback)' : 'none',
+      videoTracks: stream?.getVideoTracks().length ?? 0,
+      track: trackInfo(stream?.getVideoTracks()[0]),
+    });
     if (!stream) {
       setError('Камерын урсгал олдсонгүй');
       return false;
@@ -505,10 +591,50 @@ export function useSolveRecorder() {
     // no marks rather than with the last one's.
     marksRef.current = {};
     recordingT0.current = null;
-    const recorder = new MediaRecorder(stream, {
-      mimeType: pickMimeType(),
-      videoBitsPerSecond: VIDEO_BITS_PER_SECOND,
+    recDiag('record:mime', { chosen: pickMimeType(), isTypeSupported: mimeSupport() });
+    // TEMP-IOS-RECORDING-DIAG: caught only to be logged, then RETHROWN —
+    // the failure takes exactly the path it took before.
+    let recorder: MediaRecorder;
+    try {
+      recorder = new MediaRecorder(stream, {
+        mimeType: pickMimeType(),
+        videoBitsPerSecond: VIDEO_BITS_PER_SECOND,
+      });
+    } catch (e) {
+      recDiag('record:new MediaRecorder threw', errorInfo(e));
+      throw e;
+    }
+    recDiag('record:constructed', {
+      mimeType: recorder.mimeType,
+      videoBitsPerSecond: recorder.videoBitsPerSecond,
+      state: recorder.state,
     });
+    // Listeners ADDED, never assigned: the on* handlers below are untouched.
+    const diagStartedAt = performance.now();
+    recorder.addEventListener('dataavailable', (e) => {
+      recDiag('record:dataavailable', {
+        size: (e as BlobEvent).data.size,
+        type: (e as BlobEvent).data.type,
+        state: recorder.state,
+        msSinceStart: Math.round(performance.now() - diagStartedAt),
+      });
+    });
+    for (const type of ['start', 'stop', 'pause', 'resume'] as const) {
+      recorder.addEventListener(type, () => recDiag(`record:event ${type}`, { state: recorder.state }));
+    }
+    recorder.addEventListener('error', (e) => {
+      recDiag('record:event error', {
+        error: errorInfo((e as Event & { error?: unknown }).error ?? e),
+        state: recorder.state,
+      });
+    });
+    setTimeout(() => {
+      recDiag('record:+3s', {
+        state: recorder.state,
+        track: trackInfo(stream.getVideoTracks()[0]),
+        chunksSoFar: chunksRef.current.length,
+      });
+    }, 3000);
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) chunksRef.current.push(e.data);
     };
@@ -518,14 +644,28 @@ export function useSolveRecorder() {
       recordingT0.current = performance.now();
     };
     recorderRef.current = recorder;
-    recorder.start();
+    try {
+      recorder.start();
+    } catch (e) {
+      recDiag('record:start() threw', errorInfo(e));
+      throw e;
+    }
+    recDiag('record:start() returned', { state: recorder.state });
     return true;
   }, [startCanvasPipeline]);
 
   const stopRecording = useCallback((): Promise<Blob> => {
     return new Promise((resolve) => {
       const recorder = recorderRef.current;
+      recDiag('stop:requested', {
+        hasRecorder: !!recorder,
+        state: recorder?.state ?? null,
+        chunks: chunksRef.current.length,
+      });
       if (!recorder || recorder.state === 'inactive') {
+        recDiag('stop:no active recorder — resolving what was collected', {
+          bytes: chunksRef.current.reduce((n, c) => n + c.size, 0),
+        });
         resolve(new Blob(chunksRef.current, { type: 'video/webm' }));
         return;
       }
@@ -537,6 +677,12 @@ export function useSolveRecorder() {
         // — and therefore everything downstream that reads `marks` —
         // cannot observe the clip as ended without its last mark.
         mark('recordingEnd');
+        recDiag('stop:onstop', {
+          chunks: chunksRef.current.length,
+          chunkSizes: chunksRef.current.map((c) => c.size),
+          bytes: chunksRef.current.reduce((n, c) => n + c.size, 0),
+          recorderMimeType: recorder.mimeType,
+        });
         resolve(new Blob(chunksRef.current, { type: 'video/webm' }));
       };
       recorder.stop();
