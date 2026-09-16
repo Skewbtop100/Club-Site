@@ -39,17 +39,24 @@ const STATUS: Record<OnlineCompetitionStatus, { dot: string; text: string; label
   finished: { dot: '#4A4740', text: '#6E6A62', label: 'ДУУССАН' },
 };
 
-/** The "Миний тэмцээнүүд" half of the competitions page's pill toggle —
- *  so, PHONE ONLY (≤640px). Above that width the page has no pills and
- *  this never renders: the header's ТЭМЦЭЭНҮҮД dropdown covers the same
- *  ground there, and its МИНИЙ ТЭМЦЭЭН item goes to /dashboard.
+/** NOT RENDERED ANYWHERE. This was the МИНИЙ ТЭМЦЭЭН half of the
+ *  competitions page's pill toggle, and that toggle is gone at every width
+ *  — "my competitions" is the avatar menu's item, which goes to /dashboard.
  *
- *  Which makes this and the dashboard two views of one thing, and they do
- *  not agree: the collapsible "Өмнө оролцсон" section below is the only
- *  finished-registrations list in the app — the dashboard deliberately has
- *  none ("Skip finished for now" — there is no per-competition results
- *  model yet). A phone therefore shows past registrations and a desktop
- *  does not. Worth reconciling, and not by deleting this half. */
+ *  Kept, not deleted, for ONE thing: the collapsible "Өмнө оролцсон"
+ *  section below is the only finished-registrations list in the codebase.
+ *  The dashboard has none by explicit decision ("Skip finished for now" —
+ *  there is no per-competition results model yet), so deleting this file
+ *  deletes the feature rather than relocating it.
+ *
+ *  WHERE IT BELONGS: the dashboard, as a third section under its existing
+ *  Миний тэмцээнүүд card, beside the live and upcoming lists it already
+ *  splits out. That page is what МИНИЙ ТЭМЦЭЭН now points at, it already
+ *  runs the same fetchMyRegistrations -> fetchCompetition join this file
+ *  was given ready-made, and a "previously competed" list is the one part
+ *  of an athlete's own history that has nowhere else to live. The Row below
+ *  is close to reusable for it; the wrapper above it is not, since the
+ *  dashboard supplies its own card and heading. */
 export default function MyCompetitions({
   views,
   account,
