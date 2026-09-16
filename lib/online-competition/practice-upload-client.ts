@@ -38,6 +38,10 @@ async function requestPracticeGrant(blob: Blob, event: string): Promise<Practice
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ event, size: blob.size }),
   });
+  // A 403 here is the verification gate, and says so in words rather than
+  // a status code — the run page checks first, so this is a profile that
+  // changed mid-run or a tab that predates the gate.
+  if (res.status === 403) throw new Error('Профайл баталгаажаагүй тул туршилт хийх боломжгүй.');
   if (!res.ok) throw new Error(`Бичлэг хадгалах хаяг авч чадсангүй (${res.status})`);
   const data = (await res.json().catch(() => null)) as Partial<PracticeGrant> | null;
   if (

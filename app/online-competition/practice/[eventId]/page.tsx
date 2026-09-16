@@ -7,7 +7,8 @@ import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
 import { ONLINE_COMP_EVENTS, onlineCompEventLabel } from '@/lib/online-competition/events';
 import { generateScramble } from '@/lib/scramble';
 import { COVER_SECONDS } from '@/lib/online-competition/solve-stage-timing';
-import { uploadAndFilePracticeRun } from '@/lib/online-competition/practice-upload-client';
+import { PRACTICE_ROUTE, uploadAndFilePracticeRun } from '@/lib/online-competition/practice-upload-client';
+import { authedFetchWithRetry } from '@/lib/online-competition/authed-fetch';
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
 import {
   leaveConfirmMessage,
@@ -92,6 +93,12 @@ export default function PracticeRunPage() {
   const signedIn = !!user && !user.isAnonymous;
 
   const [authOpen, setAuthOpen] = useState(false);
+  /** THE SERVER'S ANSWER to "may this athlete practise", asked BEFORE the
+   *  run is shown. Without it an unverified athlete reached by a bookmark or
+   *  a stale tab would record a whole solve and be refused at the upload —
+   *  a run spent for nothing. `null` while asking; 'unavailable' when the
+   *  answer could not be had, which shows nothing to record either. */
+  const [mayPractise, setMayPractise] = useState<boolean | 'unavailable' | null>(null);
   const recorder = useSolveRecorder();
 
   /** Generated ONCE per run, client-side. Held in state rather than derived
@@ -150,6 +157,34 @@ export default function PracticeRunPage() {
     setUnfiledCount(atRisk ? 1 : 0);
   }, [run.pendingBlob, filing]);
 
+  useEffect(() => {
+    if (!signedIn) {
+      setMayPractise(null);
+      return;
+    }
+    let cancelled = false;
+    authedFetchWithRetry(PRACTICE_ROUTE)
+      .then(async (res) => {
+        if (!res.ok) throw new Error(String(res.status));
+        const body = (await res.json()) as { gate?: { allowed?: boolean } };
+        // FAIL CLOSED: anything but an explicit allowed:true is a no.
+        if (!cancelled) setMayPractise(body.gate?.allowed === true);
+      })
+      .catch((err) => {
+        console.error('PracticeRunPage: checking verification failed:', err);
+        if (!cancelled) setMayPractise('unavailable');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [signedIn]);
+
+  // NOT VERIFIED: back to the practice page, which is where the explanation
+  // and the route to the profile live — one place for that wording, not two.
+  useEffect(() => {
+    if (mayPractise === false) router.replace(PRACTICE_HREF);
+  }, [mayPractise, router]);
+
   const eventLabel = useMemo(() => onlineCompEventLabel(eventId), [eventId]);
   const known = useMemo(() => ONLINE_COMP_EVENTS.some((e) => e.id === eventId), [eventId]);
 
@@ -206,6 +241,19 @@ export default function PracticeRunPage() {
       </Shell>
     );
   }
+
+  // Nothing that could start a camera renders until the server has said yes.
+  if (mayPractise === 'unavailable') {
+    return (
+      <Shell>
+        <p className="oc-v3-status oc-v3-status-error">Профайлын мэдээлэл шалгахад алдаа гарлаа, дахин оролдоно уу.</p>
+        <Link href={PRACTICE_HREF} className="oc-rp-submit" style={{ alignSelf: 'flex-start' }}>
+          Буцах
+        </Link>
+      </Shell>
+    );
+  }
+  if (mayPractise !== true) return <Shell><p className="oc-v3-status">Ачааллаж байна...</p></Shell>;
 
   return (
     <div className="oc-solve-takeover">

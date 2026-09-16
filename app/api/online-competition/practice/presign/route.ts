@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireAthlete } from '@/lib/online-competition/athlete-auth';
+import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
+import { readPracticeGate } from '@/lib/online-competition/practice-server';
 import { handlePracticePresign } from '@/lib/online-competition/practice-video';
 import { presignVideoPut, r2Bucket, r2Client } from '@/lib/online-competition/r2-video';
 
@@ -18,6 +20,7 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   const { status, json } = await handlePracticePresign(body, {
     authorize: () => requireAthlete(req),
+    mayPractise: async (uid) => (await readPracticeGate(getOnlineCompAdminDb(), uid)).allowed,
     presign: (key, size) => presignVideoPut(r2Client(), r2Bucket(), key, size),
   });
   // A grant is a short-lived credential; nothing between here and the

@@ -121,6 +121,7 @@ console.log('\n  -- the handler: authorise, derive, sign --');
   const run = async (body, opts = {}) =>
     V.handlePracticePresign(body, {
       authorize: opts.authorize ?? (async () => 'uid-1'),
+      mayPractise: opts.mayPractise ?? (async () => true),
       presign: opts.presign ?? (async (key) => `https://r2.example/${key}?sig=1`),
       nonce: () => 'NONCE',
     });
@@ -158,6 +159,42 @@ console.log('\n  -- the handler: authorise, derive, sign --');
     });
     eq('a signing failure is 502', broken.status, 502);
     eq('  ...and does not leak the cause', broken.json.error, 'presign-failed');
+
+    // ── VERIFIED ATHLETES ONLY ──
+    // Refused before a URL is signed, so an unverified athlete never spends
+    // a recording's worth of bytes on a run the filing route will refuse.
+    let signed = 0;
+    const counting = async (key) => { signed++; return `https://r2.example/${key}`; };
+    const unverified = await run({ event: '333', size: 10 }, { mayPractise: async () => false, presign: counting });
+    eq('an unverified athlete is 403', unverified.status, 403);
+    eq('  ...saying not-verified', unverified.json.error, 'not-verified');
+    eq('  ...and nothing was signed', signed, 0);
+    // Checked BEFORE the body: a bad body from an unverified athlete is still
+    // the verification refusal, not a 400.
+    const unverifiedBad = await run({ videoKey: 'x' }, { mayPractise: async () => false });
+    eq('  ...even with a body that would also be refused', unverifiedBad.status, 403);
+    // FAIL CLOSED: an unreadable profile grants nothing.
+    const unreadable = await run({ event: '333', size: 10 }, {
+      mayPractise: async () => { throw new Error('firestore down'); },
+      presign: counting,
+    });
+    eq('an unreadable profile is 503', unreadable.status, 503);
+    eq('  ...and grants no URL', 'uploadUrl' in unreadable.json, false);
+    eq('  ...and nothing was signed', signed, 0);
+    // AUTHORISE STILL COMES FIRST: no identity, no profile lookup.
+    let looked = false;
+    const anonymous = await run({ event: '333', size: 10 }, {
+      authorize: async () => { throw new Error('no'); },
+      mayPractise: async () => { looked = true; return true; },
+    });
+    eq('no identity is still 401', anonymous.status, 401);
+    eq('  ...without reading any profile', looked, false);
+    // The uid checked is the AUTHORISED one.
+    let checkedUid = null;
+    await run({ event: '333', size: 10, uid: 'somebody-else' }, {
+      mayPractise: async (uid) => { checkedUid = uid; return true; },
+    });
+    eq('the profile checked is the token\'s, not the body\'s', checkedUid, 'uid-1');
 
     console.log(`\n  ${pass} passed, ${fail} failed\n`);
     fs.rmSync(OUT, { recursive: true, force: true });

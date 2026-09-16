@@ -96,6 +96,15 @@ export function parsePracticePresignBody(body: unknown): PracticePresignBodyResu
 export interface PracticePresignDeps {
   /** Resolves the VERIFIED uid, or throws. */
   authorize: () => Promise<string>;
+  /** Whether this athlete may practise — a verified profile. REQUIRED, so
+   *  no caller can forget it. Throwing (the profile could not be read) is a
+   *  refusal, not a pass.
+   *
+   *  The filing route checks the same thing and is the one that decides;
+   *  this one exists so an unverified athlete is not handed an upload URL
+   *  and made to spend a recording's worth of bytes on a run that will be
+   *  refused at the end. */
+  mayPractise: (uid: string) => Promise<boolean>;
   presign: (key: string, size: number) => Promise<string>;
   /** Injected for the test; the real one is newVideoNonce. */
   nonce?: () => string;
@@ -130,6 +139,17 @@ export async function handlePracticePresign(
   } catch {
     return { status: 401, json: { error: 'unauthorized' } };
   }
+
+  // SECOND, before the body is read: the same order as authorise — nothing
+  // about the request is looked at for someone who may not make it.
+  let allowed: boolean;
+  try {
+    allowed = await deps.mayPractise(uid);
+  } catch {
+    // FAIL CLOSED. An unreadable profile grants nothing.
+    return { status: 503, json: { error: 'verification-unavailable' } };
+  }
+  if (!allowed) return { status: 403, json: { error: 'not-verified' } };
 
   const parsed = parsePracticePresignBody(body);
   if (!parsed.ok) return { status: parsed.status, json: { error: parsed.error } };

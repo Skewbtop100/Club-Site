@@ -5,11 +5,13 @@ import {
   PRACTICE_RUN_LIMIT,
   practiceAllowance,
   readPracticeMarks,
+  type PracticeGate,
 } from '@/lib/online-competition/practice';
 import {
   PracticeError,
   filePracticeRun,
   listAthletePracticeRuns,
+  readPracticeGate,
   type PracticeRunView,
 } from '@/lib/online-competition/practice-server';
 import { PRACTICE_VIDEO_KEY_PREFIX } from '@/lib/online-competition/practice-video';
@@ -32,6 +34,11 @@ export const runtime = 'nodejs';
 // and this is its only writer — see the rules for practiceRuns.
 
 export interface PracticeListResponse {
+  /** THE SERVER'S ANSWER to "may this athlete practise", so the page renders
+   *  the state the filing route will enforce rather than guessing from its
+   *  own copy of the profile. The practice area is shown only when this is
+   *  allowed; the four other states are explained instead. */
+  gate: PracticeGate;
   runs: PracticeRunView[];
   used: number;
   remaining: number;
@@ -48,9 +55,14 @@ export async function GET(req: Request) {
   }
 
   const db = getOnlineCompAdminDb();
-  const runs = await listAthletePracticeRuns(db, uid);
+  // Both reads, or neither: an unreadable profile fails the whole request,
+  // so the page shows its load error rather than a practice area it may not
+  // be allowed. Runs are still listed for an unverified athlete — they are
+  // the athlete's own, and hiding them would look like deletion.
+  const [gate, runs] = await Promise.all([readPracticeGate(db, uid), listAthletePracticeRuns(db, uid)]);
   const allowance = practiceAllowance(runs.map((r) => r.status));
   const payload: PracticeListResponse = {
+    gate,
     runs,
     used: allowance.used,
     remaining: allowance.remaining,
@@ -114,7 +126,10 @@ export async function POST(req: Request) {
   } catch (err) {
     // The cap, and anything else the stored state knows.
     if (err instanceof PracticeError) {
-      return NextResponse.json({ error: err.message }, { status: err.status });
+      return NextResponse.json(
+        err.gate ? { error: err.message, gate: err.gate } : { error: err.message },
+        { status: err.status },
+      );
     }
     throw err;
   }

@@ -16,6 +16,7 @@
 // place in any ranking.
 
 import type { SolveMarks } from './types';
+import { rejectionSummary, resolveVerification } from './verification';
 
 /** How many runs an athlete may record, EVER — not per day.
  *
@@ -175,6 +176,47 @@ export function readPracticeMarks(raw: unknown): Partial<Record<PracticeMarkKey,
   }
   return out;
 }
+
+/** Whether this athlete may practise at all.
+ *
+ *  VERIFIED ONLY — details and photo both approved — which is exactly what
+ *  registration requires (firestore.rules athleteVerified, the client's
+ *  resolveVerification). The reasoning is the admin's time: a practice run
+ *  lands in a review queue, and reviewing one for an athlete who cannot
+ *  enter a competition anyway is review spent on nothing.
+ *
+ *  THE SAME READER registration uses. resolveVerification is the one reader
+ *  of the stored verification fields, legacy single-status records included,
+ *  so an athlete verified for registering is verified here and the two gates
+ *  cannot disagree about anyone.
+ *
+ *  FAILS CLOSED. No participant document is 'incomplete' — never submitted —
+ *  not "nothing known, let them through". A read that FAILS never reaches
+ *  this function: callers let the throw propagate, and a thrown read files
+ *  nothing (see practice-server).
+ *
+ *  `reason` is rejectionSummary's "Мэдээлэл: …; Зураг: …", the same string
+ *  the registration notice shows, and only ever set while rejected. */
+export type PracticeGate =
+  | { allowed: true }
+  | { allowed: false; status: 'incomplete' | 'pending' | 'rejected'; reason: string | null };
+
+export function practiceGate(participant: object | null | undefined): PracticeGate {
+  if (participant === null || participant === undefined) {
+    return { allowed: false, status: 'incomplete', reason: null };
+  }
+  const v = resolveVerification(participant);
+  if (v.verified) return { allowed: true };
+  // 'approved' without `verified` cannot happen — the two are derived
+  // together — but if it ever did, it is refused rather than let through.
+  const status = v.status === 'approved' ? 'pending' : v.status;
+  return { allowed: false, status, reason: status === 'rejected' ? rejectionSummary(v) : null };
+}
+
+/** The refusal's sentence, for a client that has no gate to render — an old
+ *  tab, or a direct request. The page itself renders verificationNoticeCopy
+ *  from the gate, the same copy the registration notice uses. */
+export const PRACTICE_UNVERIFIED_MESSAGE = 'Профайл баталгаажаагүй тул туршилт хийх боломжгүй.';
 
 export interface PracticeSweepCandidate {
   status: unknown;

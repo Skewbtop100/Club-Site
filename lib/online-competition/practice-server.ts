@@ -9,6 +9,9 @@
 import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore';
 import {
   PRACTICE_RUN_LIMIT,
+  PRACTICE_UNVERIFIED_MESSAGE,
+  practiceGate,
+  type PracticeGate,
   readPracticeMarks,
   type PracticeMarkKey,
   normalizePracticeStatus,
@@ -23,9 +26,27 @@ import {
 export const PRACTICE_COLLECTION = 'practiceRuns';
 
 export class PracticeError extends Error {
-  constructor(message: string, readonly status = 400) {
+  constructor(
+    message: string,
+    readonly status = 400,
+    /** Set on a verification refusal, so the route can hand the page the
+     *  state to explain rather than only a sentence. */
+    readonly gate: Exclude<PracticeGate, { allowed: true }> | null = null,
+  ) {
     super(message);
   }
+}
+
+const PARTICIPANTS = 'onlineParticipants';
+
+/** Where this athlete's verification stands, read from the server.
+ *
+ *  THROWS WHEN THE PROFILE CANNOT BE READ, deliberately. Every caller lets
+ *  that throw end the request, so an unreadable profile is a refusal, never
+ *  a pass. A missing document is readable and simply unverified. */
+export async function readPracticeGate(db: Firestore, uid: string): Promise<PracticeGate> {
+  const snap = await db.collection(PARTICIPANTS).doc(uid).get();
+  return practiceGate(snap.exists ? snap.data() : null);
 }
 
 /** One run, as the athlete and the admin both read it. */
@@ -151,8 +172,26 @@ export async function filePracticeRun(
   const col = db.collection(PRACTICE_COLLECTION);
   const ref = col.doc();
 
+  const participantRef = db.collection(PARTICIPANTS).doc(input.uid);
+
   const remaining = await db.runTransaction(async (tx) => {
     // ── every read first ──
+    //
+    // THE VERIFICATION GATE, AND WHY IT IS HERE. practiceRuns is closed to
+    // client writes, so firestore.rules never see a practice run being
+    // filed — this transaction is the only place the check can live. And
+    // it is INSIDE the transaction rather than before it: the profile is
+    // read as part of the same atomic step as the write, so an admin
+    // rejecting the profile while this runs makes the transaction retry
+    // against the new state instead of filing under the old one.
+    //
+    // A read that throws aborts the transaction, which files nothing.
+    const profile = await tx.get(participantRef);
+    const gate = practiceGate(profile.exists ? profile.data() : null);
+    if (!gate.allowed) {
+      throw new PracticeError(PRACTICE_UNVERIFIED_MESSAGE, 403, gate);
+    }
+
     const mine = await tx.get(col.where('uid', '==', input.uid));
     const statuses = mine.docs.map((d) => normalizePracticeStatus(d.get('status')));
     const allowance = practiceAllowance(statuses);

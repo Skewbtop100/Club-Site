@@ -7,6 +7,8 @@ import { authedFetchWithRetry } from '@/lib/online-competition/authed-fetch';
 import { resolveVideoSrc } from '@/lib/online-competition/video-source';
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
 import { PRACTICE_RUN_LIMIT } from '@/lib/online-competition/practice';
+import { PROFILE_HREF } from '@/lib/online-competition/verification';
+import { STATUS_TONE_COLOR, verificationNoticeCopy } from '@/lib/online-competition/registration-view';
 import type { PracticeListResponse } from '@/app/api/online-competition/practice/route';
 import { WcaEventIcon, hasWcaEventIcon } from '@/lib/wca-event-icon';
 import HubNav from '../_components/hub/v3/HubNav';
@@ -36,6 +38,29 @@ import EmptyBlock from '../_components/hub/v3/EmptyBlock';
 // what is being learned, and made the one button into a decision.
 //
 // THE RETENTION LINE MOVED rather than went — see the note on it below.
+//
+// ── WHO MAY PRACTISE: a verified athlete, and nobody else ──
+// Five states, each said in its own words with a way onward:
+//   signed out          — sign in (the AuthModal, as before);
+//   verified            — the page as it was;
+//   never submitted,
+//   awaiting review,
+//   rejected + reason   — verificationNoticeCopy, THE SAME FUNCTION the
+//                         standing notice on every hub page renders, so an
+//                         athlete blocked from registering and from
+//                         practising reads one sentence in both places. Each
+//                         links to the profile, which is the only place any
+//                         of the three can be changed.
+//
+// THE GATE IS THE SERVER'S ANSWER (PracticeListResponse.gate), not this
+// page's reading of its own copy of the profile: the auth context's
+// participant is null both while loading and when its read failed, and the
+// page must never mistake either for an answer. The filing route and the
+// presign route check the same thing again and are what actually refuse.
+//
+// HubNav's own notice is suppressed here: this page carries the same
+// sentence in the place the start button would be, and saying it twice on
+// one screen reads as two problems.
 //
 // The allowance is READ FROM THE SERVER, never computed here. It is counted
 // from the documents (practiceAllowance) because a counter an athlete could
@@ -122,7 +147,7 @@ export default function PracticePage() {
 
   return (
     <div className="oc-v3-page">
-      <HubNav live={null} section={null} />
+      <HubNav live={null} section={null} suppressVerificationNotice />
 
       <main className="oc-v3-main">
         <div className="oc-v3-clist">
@@ -145,7 +170,39 @@ export default function PracticePage() {
             <p className="oc-v3-status">Ачааллаж байна...</p>
           ) : (
             <>
-              {/* ── THE ALLOWANCE, AND ONE BUTTON ── */}
+              {!data.gate.allowed ? (
+                /* ── NOT VERIFIED: what is wrong, and where to fix it ──
+                   In place of the allowance and the button, not above them:
+                   there is nothing to start, and a disabled button beside
+                   an explanation reads as a fault in the button. */
+                (() => {
+                  const gate = data.gate;
+                  const copy = verificationNoticeCopy(gate.status, gate.reason);
+                  const tone =
+                    gate.status === 'rejected'
+                      ? STATUS_TONE_COLOR.red
+                      : gate.status === 'pending'
+                        ? STATUS_TONE_COLOR.muted
+                        : '#DFFF4F';
+                  return (
+                    <div className="oc-v3-card">
+                      <div className="oc-v3-card-head">
+                        <span className="oc-v3-label">Туршилтын бичлэг</span>
+                      </div>
+                      <div className="oc-v3-vnotice" role="status" style={{ border: 'none', margin: 0 }}>
+                        <span className="oc-v3-vnotice-label" style={{ color: tone, borderColor: tone }}>
+                          {copy.label}
+                        </span>
+                        <p className="oc-v3-vnotice-body">{copy.body}</p>
+                        <Link href={PROFILE_HREF} className="oc-v3-vnotice-action">
+                          {copy.action}
+                        </Link>
+                      </div>
+                    </div>
+                  );
+                })()
+              ) : (
+              /* ── THE ALLOWANCE, AND ONE BUTTON ── */
               <div className="oc-v3-card">
                 <div className="oc-v3-card-head">
                   <span className="oc-v3-label">Туршилтын бичлэг</span>
@@ -212,8 +269,14 @@ export default function PracticePage() {
                   </div>
                 )}
               </div>
+              )}
 
-              {/* ── THEIR OWN RUNS ── */}
+              {/* ── THEIR OWN RUNS ──
+                  Still listed for an athlete who is no longer allowed to
+                  record — they are the athlete's own, and hiding them would
+                  read as deletion. Only an unverified athlete with NO runs
+                  skips the card: an empty list under a refusal is noise. */}
+              {(data.gate.allowed || data.runs.length > 0) && (
               <div className="oc-v3-card">
                 <div className="oc-v3-card-head">
                   <span className="oc-v3-label">Миний туршилтууд</span>
@@ -307,6 +370,7 @@ export default function PracticePage() {
                   })
                 )}
               </div>
+              )}
             </>
           )}
         </div>

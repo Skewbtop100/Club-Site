@@ -196,6 +196,9 @@ console.log('\n  -- verificationNoticeCopy: the standing notice --');
   const states = [['incomplete', inc], ['pending', pen], ['rejected', rej]];
   for (const [name, c] of states) {
     ok(`${name}: names the consequence`, /бүртгүүлэх боломжгүй/.test(c.body), c.body);
+    // ONE SENTENCE FOR BOTH GATES: the practice page renders this same copy,
+    // so it has to name both things verification unlocks.
+    ok(`${name}: names practice too`, /туршилт хийх/.test(c.body), c.body);
     ok(`${name}: offers a route to the form`, typeof c.action === 'string' && c.action.length > 0, c.action);
   }
   ok('rejected: carries the admin reason', /Царай харагдахгүй/.test(rej.body), rej.body);

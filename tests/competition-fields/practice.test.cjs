@@ -162,6 +162,30 @@ console.log('\n  -- the stage marks, read defensively --');
     JSON.stringify({ solveStart: 1 }));
 }
 
+console.log('\n  -- practiceGate: verified athletes only --');
+{
+  const g = (profile) => P.practiceGate(profile);
+  const APPROVED = { detailsStatus: 'approved', photoStatus: 'approved' };
+  eq('verified is allowed', g(APPROVED).allowed, true);
+  eq('legacy approved is allowed', g({ profileStatus: 'approved' }).allowed, true);
+  // FAIL CLOSED on absence.
+  eq('no document is refused', g(null).allowed, false);
+  eq('  ...as never submitted', g(null).status, 'incomplete');
+  eq('undefined is refused', g(undefined).allowed, false);
+  eq('an empty profile is never submitted', g({}).status, 'incomplete');
+  eq('pending is refused as pending',
+    g({ detailsStatus: 'pending', photoStatus: 'pending' }).status, 'pending');
+  eq('half-approved is refused', g({ detailsStatus: 'approved', photoStatus: 'pending' }).allowed, false);
+  const rej = g({ detailsStatus: 'approved', photoStatus: 'rejected', photoRejectionReason: 'Бүдэг' });
+  eq('rejected is refused as rejected', rej.status, 'rejected');
+  eq('  ...carrying the SAME summary registration shows', rej.reason, 'Зураг: Бүдэг');
+  eq('a reason is only carried while rejected',
+    g({ detailsStatus: 'pending', photoStatus: 'pending', detailsRejectionReason: 'old' }).reason, null);
+  // Nothing an athlete could add to their own profile opens the gate: the
+  // participant rule has no keys().hasOnly, so extra fields are writable.
+  eq('an invented "verified" field does nothing', g({ verified: true, practiceAllowed: true }).allowed, false);
+}
+
 console.log('\n  -- retention: two clocks, whichever is first --');
 {
   eq('the review clock is 7 days', P.PRACTICE_REVIEWED_RETENTION_DAYS, 7);
