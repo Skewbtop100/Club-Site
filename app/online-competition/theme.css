@@ -5210,22 +5210,29 @@
    section per state, each a heading line plus rows on 1px dividers. NO
    PANEL — no .oc-v3-card around a group, no border or background on a row.
 
-   WIDTH-CONSTRAINED AND CENTRED. Left to fill the viewport, the columns
-   spread until the athlete count sat a hand apart from the name it
-   describes; constrained but flush left, the whole table hugged one edge of
-   a wide screen with everything else empty. So: 880px, centred.
+   WIDTH-CONSTRAINED AND CENTRED at 880px by `margin-inline: auto`, which
+   centres this whether .oc-v3-main stays a flex column or not. Every child
+   — the filter bar, the group headings, the rows — shares the same 10px
+   side padding, so the bar's first chip lands on the table's own left edge
+   and the page reads as one column.
 
-   880 and not the 760 this started at, because the register action shares
-   the row: the four fixed columns and the gaps and the row's own padding
-   come to 336px, leaving ~545 for the name and the event icons — the name
-   column reaches ~420px before it truncates, which is past the longest name
-   in the data with room over.
-
-   `margin-inline: auto` does the centring, not `align-self: center`: it
-   centres this whether .oc-v3-main stays a flex column or not, and every
-   child here — the filter bar, the group headings, the rows — shares the
-   same 10px side padding, so the bar's chips land on the table's own left
-   edge and the page reads as one column.
+   COLUMN SIZING. NOT ONE TRACK IS CONTENT-SIZED, and that is the whole
+   reason the headings line up with their columns. The heading row and each
+   body row are SEPARATE grids — separate elements — so an `auto` or
+   `max-content` track resolves against its own element's contents and the
+   two disagree: `minmax(0, auto)` on the events column sized to the 52px
+   word ТӨРЛҮҮД in the head and to a 27px icon in the rows, which is
+   exactly why the icons sat off under their heading. Every track here is a
+   length or an fr, so both grids resolve identically:
+     date   88         fits 2026-09-12 at 13px mono (~78px) with headroom
+     name   140..1fr   half the slack
+     events 120        fixed, contents centred, so the icons land in the
+                       same place in every row and under their heading
+     cap    78         "4 / 40"
+     (last) 1fr        the other half, in one place: between ТАМИРЧИН and
+                       the register action, which is exactly where the two
+                       needed separating. The action is justify-self:end,
+                       so it sits on the table's right edge.
 
    EVERY vertical measurement is declared, not inherited: each cell sets
    line-height in its `font:` shorthand (which resets it to `normal`
@@ -5279,13 +5286,17 @@
   border-color: #3A3A42;
   color: #9A958A;
 }
-/* Pressed reads as volt on a lifted ground — the same on/off pair the
-   .oc-v3-pill toggle used, at chip size. aria-pressed carries it for
+/* Pressed reads as volt on a lifted ground. aria-pressed carries it for
    anyone not seeing the color. */
 .oc-v3-evfilter-on {
   border-color: #DFFF4F;
   background: #16161B;
   color: #DFFF4F;
+}
+/* The phone's search toggle. Hidden here — at this width the field is
+   simply always open, so a control to reveal it would do nothing. */
+.oc-v3-clist-searchtoggle {
+  display: none;
 }
 /* Pushed to the table's RIGHT edge, so the bar spans exactly the width of
    the rows under it and frames the column rather than trailing off. */
@@ -5346,12 +5357,16 @@
 }
 /* A line of text and a number. The 10px of side padding is shared with the
    rows below so the heading, the column heads and the row text all sit on
-   one left edge; the rows use it as room for their hover band. */
+   one left edge; the rows use it as room for their hover band.
+
+   16px under the label, not the 8 it started at: the column headings were
+   reading as a second line of the group heading rather than as the top of
+   the table. */
 .oc-v3-group-head {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  padding: 0 10px 8px;
+  padding: 0 10px 16px;
 }
 .oc-v3-group-count {
   font: 500 10px/15px var(--oc-font-mono), monospace;
@@ -5363,13 +5378,19 @@
 .oc-v3-clist-head,
 .oc-v3-clist-row {
   display: grid;
-  grid-template-columns: 104px minmax(180px, 1fr) minmax(0, auto) 64px 96px;
+  grid-template-columns: 88px minmax(140px, 1fr) 120px 78px 1fr;
   gap: 12px;
   align-items: center;
 }
 .oc-v3-clist-head {
   padding: 0 10px 7px;
   border-bottom: 1px solid #1C1C21;
+}
+/* Each heading matches its column's own alignment. Only ТӨРЛҮҮД differs,
+   and it has to: its icons are centred in a fixed column, so a left-set
+   heading would sit off to one side of them. */
+.oc-v3-th-center {
+  text-align: center;
 }
 .oc-v3-clist-row {
   position: relative;
@@ -5398,16 +5419,17 @@
   outline-offset: -1px;
 }
 /* THE DATE CARRIES WEIGHT. It was 11px #9A958A — the quietest thing in a
-   row whose reader is scanning for exactly it. Now 13px, 600, and full
-   #F4F1EA: second only to the 16px name, and the brightest of the three
-   facts beside it. */
+   row whose reader is scanning for exactly it. 13px, 600, full #F4F1EA:
+   second only to the 16px name. Left-set in an 88px column that the date
+   very nearly fills, so ОГНОО above it starts on the same pixel. */
 .oc-v3-clist-date {
+  justify-self: start;
   font: 600 13px/22px var(--oc-font-mono), monospace;
   font-variant-numeric: tabular-nums;
   color: #F4F1EA;
   white-space: nowrap;
 }
-.oc-v3-clist-date-rail {
+.oc-v3-clist-date-tile {
   display: none;
 }
 .oc-v3-clist-name-cell {
@@ -5415,10 +5437,7 @@
 }
 /* A span, not the link — .oc-v3-clist-rowlink is the anchor. Its own class
    rather than .oc-v3-row-name because that one is nowrap + ellipsis at
-   every width, and a stacked row must show the whole name.
-
-   16px, up a step from 14: it is the subject of the row and was reading at
-   the same size as the metadata around it. */
+   every width, and a stacked row must show the whole name. */
 .oc-v3-clist-name {
   display: block;
   font: 500 16px/22px var(--oc-font-heading), sans-serif;
@@ -5427,17 +5446,21 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Events + athlete count are one group. Desktop dissolves the wrapper so
-   they are still their own grid columns; the stacked rule below makes it a
-   real flex box. `display: contents` is what keeps that from needing the
-   two rendered twice. */
+/* Events + capacity are one group. Desktop dissolves the wrapper so they
+   are still their own grid columns; the stacked rule below makes it a real
+   flex box. `display: contents` is what keeps that from needing the two
+   rendered twice. */
 .oc-v3-clist-meta {
   display: contents;
 }
+/* CENTRED in its fixed 120px column, so the icons occupy the same place in
+   every row and sit under the centred ТӨРЛҮҮД rather than drifting with
+   the length of the name beside them. */
 .oc-v3-clist-events {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: center;
   gap: 10px;
   min-width: 0;
 }
@@ -5451,19 +5474,42 @@
   color: #9A958A;
   font: 600 10px/17px var(--oc-font-mono), monospace;
 }
-.oc-v3-clist-count {
+/* CAPACITY, not a registered count: "4 / 40". The taken number is the
+   bright half because it is the one that moves. */
+.oc-v3-clist-cap {
   font: 500 13px/22px var(--oc-font-mono), monospace;
   font-variant-numeric: tabular-nums;
-  color: #9A958A;
+  color: #F4F1EA;
   white-space: nowrap;
 }
-/* Desktop reads the unit off the ТАМИРЧИН column heading, so the inline
-   one is redundant there and appears only on the stacked rows. */
-.oc-v3-clist-count-unit {
+.oc-v3-clist-cap-limit {
+  color: #6E6A62;
+}
+/* Full. Not red — a full competition is a successful one, and every other
+   volt thing on this page is also "something happened". */
+.oc-v3-clist-cap-full {
+  color: #DFFF4F;
+}
+/* No limit. A COLOURED MARKER, deliberately not the dash it used to share
+   with "the count has not loaded": one is a fact about the competition and
+   the other is a fact about the page. */
+.oc-v3-clist-cap-inf {
+  font-size: 15px;
+  color: #DFFF4F;
+}
+.oc-v3-clist-cap-none {
+  color: #4A4740;
+}
+/* The stacked layout's capacity ring, in place of the text above. */
+.oc-v3-clist-ringcell {
   display: none;
 }
 .oc-v3-clist-action-cell {
   min-width: 0;
+  /* On the table's right edge, with the row's whole 1fr between it and
+     ТАМИРЧИН — which is the separation, rather than a bigger gap value
+     that every other column would have paid for too. */
+  justify-self: end;
 }
 /* A plain text action, and the one thing in a row that is NOT the row's own
    link — hence the z-index, which lifts it back over
@@ -5579,79 +5625,77 @@
     row-gap: 10px;
   }
   /* ── Competitions list: the stacked row ─────────────────────────────
-     THE SHAPE: a date rail down the left, and the competition in the
-     column beside it.
+     THE SHAPE: a date tile down the left, the competition in the middle,
+     and a capacity ring on the right, level with the name.
 
-         ┌───────┬──────────────────────────────┐
-         │ 09-12 │ Хором Оупен                  │
-         │  2026 │ [icon] [icon]  4 тамирчин    │
-         └───────┴──────────────────────────────┘
+         ┌───────┬────────────────────────┬──────┐
+         │ 09-12 │ Хором Оупен            │ ( 4) │
+         │  2026 │ [icon] [icon]          │      │
+         └───────┴────────────────────────┴──────┘
 
-     The previous version put the name and the date on one line and then
-     dropped the events and the count on a second, full-width line under
-     both — three things in a stack with nothing saying which belonged to
-     which. Here the rail owns the left edge and the right column is the
-     competition: name, and under it, indented past the rail, the facts
-     about that name. Two blocks with a relationship, not four items in a
-     pile.
-
-     The rail is also what lets the date carry weight without competing
-     with the name for the same line: 15px/700 for the month-day, with the
-     year under it at 10px and #6E6A62 — present, and audibly secondary.
-
-     STILL a grid, and every cell is placed explicitly: the DOM order is
-     the wide one (date first, name second), and grid-area is the only way
-     to re-lay it out without wrapper elements the wide grid would then
-     have to see through. Flex could not: wrapping is decided by base
-     sizes, so which cells shared a line would depend on how long a
-     competition's name and event list happened to be.
+     Three anchored things instead of a pile: the tile owns the left edge,
+     the middle column is the competition (name, and under it the events
+     that belong to that name), and the ring is the one number worth a
+     glance. The "4 тамирчин" text this replaces was loose in the middle
+     column, reading as a third fact of equal weight to the event icons.
 
      Height is declared end to end, as on desktop:
-       9 + 21 (name) + 3 + 18 (events/count) + 9 + 1px divider = 61px,
-     with the rail's 18 + 12 = 30px shorter than the 42px it sits beside.
-     No 44px floor on anything inside: the ROW is the tap target, at 61px,
-     so the name needs no padding of its own to reach the minimum. */
+       9 + 21 (name) + 3 + 18 (events) + 9 + 1px divider = 61px.
+     The tile (40px) and the ring (34px) both sit inside the 42px the two
+     middle rows come to, so neither sets the row's height. No 44px floor
+     on anything inside: the ROW is the tap target, at 61px. */
   .oc-v3-clist-head {
     display: none;
   }
   .oc-v3-clist-row {
-    /* 56px holds "09-12" at 15px mono with room over, so the rail can
-       never wrap mid-date. */
-    grid-template-columns: 56px minmax(0, 1fr);
+    /* 52px tile, then the competition, then the ring. */
+    grid-template-columns: 52px minmax(0, 1fr) 34px;
     gap: 3px 12px;
     padding: 9px 10px;
     align-items: center;
   }
-  /* The rail spans both rows of the right column and sits against the top
-     of them, so it reads as a label on the pair rather than floating
-     against the middle of a name that has wrapped. */
+
+  /* ── The date, as a tile ─────────────────────────────────────────────
+     A bordered block on a lifted ground, not two lines of loose text: the
+     date is the thing a list of competitions is scanned by, so it gets to
+     be an object with an edge rather than the smallest type in the row.
+     Month-day large over the year small, centred, spanning both of the
+     middle column's lines so it labels the pair. */
   .oc-v3-clist-date {
     grid-area: 1 / 1 / 3 / 2;
     align-self: start;
+    /* Undoes the wide layout's `justify-self: start`, which would shrink
+       this cell to the tile's own content and leave the tile narrower than
+       the 52px column it is supposed to fill. */
+    justify-self: stretch;
     white-space: normal;
   }
   .oc-v3-clist-date-wide {
     display: none;
   }
-  .oc-v3-clist-date-rail {
+  .oc-v3-clist-date-tile {
     display: flex;
     flex-direction: column;
-    align-items: flex-end;
+    align-items: center;
+    border: 1px solid #1C1C21;
+    background: #131318;
+    padding: 4px 0 5px;
   }
   .oc-v3-clist-date-day {
-    font: 700 15px/18px var(--oc-font-mono), monospace;
-    white-space: nowrap;
+    font: 700 14px/17px var(--oc-font-mono), monospace;
     /* Restated after the shorthand, which resets font-variant — the dates
-       still have to align rail to rail down the list. */
+       still have to align tile to tile down the list. */
     font-variant-numeric: tabular-nums;
     color: #F4F1EA;
+    white-space: nowrap;
   }
   .oc-v3-clist-date-year {
-    font: 500 10px/12px var(--oc-font-mono), monospace;
-    white-space: nowrap;
+    font: 500 9px/11px var(--oc-font-mono), monospace;
     font-variant-numeric: tabular-nums;
     color: #6E6A62;
+    white-space: nowrap;
   }
+
   .oc-v3-clist-name-cell {
     grid-area: 1 / 2 / 2 / 3;
   }
@@ -5663,7 +5707,9 @@
     overflow: visible;
     text-overflow: clip;
   }
-  /* The wrapper becomes real here, in the name's column and under it. */
+
+  /* The wrapper becomes real here, in the name's column and under it. Only
+     the events are left in it — the capacity moved out to the ring. */
   .oc-v3-clist-meta {
     grid-area: 2 / 2 / 3 / 3;
     display: flex;
@@ -5673,19 +5719,26 @@
     min-width: 0;
   }
   .oc-v3-clist-events {
+    justify-content: flex-start;
     gap: 9px;
   }
   .oc-v3-clist-ev {
     font: 600 10px/18px var(--oc-font-mono), monospace;
   }
-  .oc-v3-clist-count {
-    font: 500 12px/18px var(--oc-font-mono), monospace;
-    font-variant-numeric: tabular-nums;
-    color: #9A958A;
+  /* The text readout is the wide layout's; here it is the ring. */
+  .oc-v3-clist-cap {
+    display: none;
   }
-  /* No column heading to read the unit off any more. */
-  .oc-v3-clist-count-unit {
-    display: inline;
+  .oc-v3-clist-ringcell {
+    grid-area: 1 / 3 / 3 / 4;
+    /* Level with the name's first line, not centred against a name that
+       has wrapped to two or three of them. */
+    align-self: start;
+    display: flex;
+  }
+  .oc-v3-clist-ring {
+    display: block;
+    flex-shrink: 0;
   }
   /* The row is the link to the competition page, and registering happens
      there — so the action is not hidden here to save space, it is hidden
@@ -5915,42 +5968,100 @@
     grid-column: 1 / -1;
   }
 
-  /* ── Competitions list: the filter bar, tightened ────────────────────
-     Above this width the chips and the search share one line, the search
-     pushed to the table's right edge. There is no room for that on a phone
-     — four 36px chips and a 260px field do not fit 350px — so the bar
-     wrapped, leaving a 10px trough between two rows and a short strip of
-     chips hanging off the left edge against nothing.
+  /* ── Competitions list: the filter bar on a phone ────────────────────
+     BOXES OFF, ROW CENTRED, SEARCH BEHIND A GLYPH.
 
-     Both halves go full width and the gap closes to 6px: the chips stretch
-     to divide the row between them, so the strip reaches both edges of the
-     table instead of trailing off, and the field sits directly under it as
-     one block rather than a second thought. A fifth chip (announce a
-     Megaminx competition) wraps to a second stretched row, which still
-     reaches both edges.
+     The chips lose their 1px borders and become bare glyphs on 2px of gap
+     — seven 36px boxes side by side on a phone read as a toolbar, which is
+     more furniture than a filter deserves. Pressed is then volt plus a 2px
+     volt underline, so the state does not rest on colour alone; the
+     unpressed chip carries the same 2px as transparent, so nothing shifts
+     when it lights up.
 
-     36px chips are already past the touch minimum, so nothing here needs
+     The group is CENTRED rather than stretched to fill the row. Stretching
+     divided the width between however many chips there happened to be, so
+     adding an event silently re-laid out the whole strip; centring keeps
+     every chip 36px and lets the group grow symmetrically about the middle.
+
+     The search field stops owning a whole row of its own. It goes behind
+     the magnifier at the end of the chip row — which keeps its border
+     precisely so it does not read as an eighth event — and drops in full
+     width underneath when opened. Closing it clears the query, so the list
+     can never be narrowed by a field nobody can see.
+
+     36px targets are already past the touch minimum, so nothing here needs
      the 44px floor this block applies elsewhere. */
   .oc-v3-clist-bar {
+    justify-content: center;
     gap: 6px;
   }
   .oc-v3-clist-filters {
-    width: 100%;
-    gap: 4px;
+    width: auto;
+    justify-content: center;
+    gap: 2px;
   }
   .oc-v3-evfilter {
-    flex: 1 1 36px;
-    width: auto;
+    flex: 0 0 auto;
+    width: 34px;
+    height: 34px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+  }
+  /* border-BOTTOM-color, not border-color: the wide rule's
+     `.oc-v3-evfilter:hover { border-color }` is also 0-2-0 and would beat
+     the 0-1-0 pressed rule below, wiping the volt underline off a pressed
+     chip the moment a pointer touched it. Hence the explicit on+hover
+     pair, which is the only 0-2-0 rule after both. */
+  .oc-v3-evfilter:hover {
+    border-bottom-color: #3A3A42;
+    color: #9A958A;
+  }
+  .oc-v3-evfilter-on {
+    background: transparent;
+    border-bottom-color: #DFFF4F;
+    color: #DFFF4F;
+  }
+  .oc-v3-evfilter-on:hover {
+    border-bottom-color: #DFFF4F;
+    color: #DFFF4F;
+  }
+  /* Bordered, unlike the bare glyphs it sits beside — that border is the
+     whole of how it reads as a different kind of control. */
+  .oc-v3-clist-searchtoggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 34px;
+    height: 34px;
+    /* Clear of the last chip, so it is the end of the row and not one more
+       thing in it. */
+    margin-left: 6px;
+    border: 1px solid #2A2A31;
+    background: transparent;
+    color: #9A958A;
+    cursor: pointer;
+  }
+  /* Open, or holding a query — the second case is what stops a collapsed
+     field from being the invisible reason the list looks short. */
+  .oc-v3-clist-searchtoggle-on {
+    border-color: #DFFF4F;
+    color: #DFFF4F;
   }
   .oc-v3-clist-search {
+    display: none;
     flex: 1 1 100%;
-    /* The right-edge push is a wide-layout move; here the field IS the
-       width. */
     margin-left: 0;
+    max-width: none;
   }
-  /* Third line, right-aligned under the field it undoes. */
+  .oc-v3-clist-search-open {
+    display: block;
+  }
+  /* Its own line, right-aligned under the controls it undoes. */
   .oc-v3-clist-reset {
-    margin-left: auto;
+    flex: 1 1 100%;
+    text-align: right;
   }
 
   /* ── Competitions list: my-competitions row ──────────────────────────

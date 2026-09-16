@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { OnlineCompetition, OnlineCompetitionStatus } from '@/lib/online-competition/types';
 import { ONLINE_COMP_EVENTS, onlineCompEventLabel } from '@/lib/online-competition/events';
@@ -19,14 +19,19 @@ const HUB = '/online-competition';
  *  It is a floor, not the whole list: filterEventIds below adds every event
  *  that appears in the loaded competitions, so announcing a Megaminx
  *  competition puts a Megaminx chip here with NO code change. Editing this
- *  array is only needed to pin an event that nothing uses yet. */
-const SEEDED_FILTER_EVENTS = ['333', '222', 'skewb', 'pyram'];
+ *  array is only needed to pin an event that nothing uses yet.
+ *
+ *  Every id here is a key of EVENT_ICON_MAP (lib/wca-event-icon.tsx), so
+ *  every chip carries a real WCA glyph rather than the uppercase-code
+ *  fallback — including the three added last: 444, 333oh and clock. */
+const SEEDED_FILTER_EVENTS = ['333', '222', '444', '333oh', 'pyram', 'skewb', 'clock'];
 
 /** Canonical display order — the platform's own event list, so the chips
  *  run in the same order as the admin form and the detail page. An id in no
  *  competition and not in ONLINE_COMP_EVENTS (a legacy doc) sorts last
- *  rather than being dropped. */
-/** string[], not the ScrambleableEventId[] the map infers: the ids being
+ *  rather than being dropped.
+ *
+ *  string[], not the ScrambleableEventId[] the map infers: the ids being
  *  ranked come out of stored competition documents, which are free to hold
  *  an event this build no longer offers. */
 const EVENT_ORDER: string[] = ONLINE_COMP_EVENTS.map((e) => e.id);
@@ -35,10 +40,8 @@ const EVENT_ORDER: string[] = ONLINE_COMP_EVENTS.map((e) => e.id);
  *  an event filter and a name search over sections grouped by state, each
  *  section a heading line plus rows on 1px dividers.
  *
- *  NO PANEL AROUND ANYTHING — not a group, not a row. And the table is
- *  width-CONSTRAINED (.oc-v3-clist), because five columns stretched across
- *  a 1600px monitor put the athlete count a hand's width from the name it
- *  belongs to; WCA's own columns sit close together on the left.
+ *  NO PANEL AROUND ANYTHING — not a group, not a row — and the table is
+ *  width-constrained and centred (.oc-v3-clist).
  *
  *  DISPLAY ONLY. Nothing here registers, opens or closes anything, and the
  *  filter and search are local state — no query, no URL, no refetch. */
@@ -48,8 +51,9 @@ export default function CompetitionList({
 }: {
   competitions: OnlineCompetition[];
   /** competitionId -> athlete count, from the athlete-counts route; null
-   *  while that request is in flight or after it failed, which renders as
-   *  "—" rather than a fabricated 0. */
+   *  while that request is in flight or after it failed. The capacity
+   *  readout then shows "—" rather than a fabricated 0 — except for a
+   *  competition with no limit, which needs no count to be described. */
   counts: Record<string, number> | null;
 }) {
   const now = useNow();
@@ -59,6 +63,15 @@ export default function CompetitionList({
    *  one". */
   const [selected, setSelected] = useState<string[]>([]);
   const [query, setQuery] = useState('');
+  /** Phone only: the field is behind a magnifier at the end of the chip
+   *  row. Above that breakpoint CSS shows the field unconditionally and
+   *  this stays false, so it never steals focus on a desktop. */
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (searchOpen) searchRef.current?.focus();
+  }, [searchOpen]);
 
   const filterEventIds = useMemo(() => {
     const ids = new Set(SEEDED_FILTER_EVENTS);
@@ -111,6 +124,7 @@ export default function CompetitionList({
   function clearAll() {
     setSelected([]);
     setQuery('');
+    setSearchOpen(false);
   }
 
   return (
@@ -143,8 +157,37 @@ export default function CompetitionList({
           })}
         </div>
 
-        <div className="oc-v3-clist-search">
+        {/* PHONE ONLY (display:none above the breakpoint, where the field is
+            simply always there). Kept OUTSIDE the event-filter group — it
+            does not filter by event — but immediately after it, so it reads
+            as the last item of the chip row. Its border is what tells it
+            apart from the bare event glyphs beside it.
+
+            Closing CLEARS: a search still narrowing the list from behind a
+            collapsed icon is a list lying about what it contains. */}
+        <button
+          type="button"
+          className={`oc-v3-clist-searchtoggle${
+            searchOpen || query !== '' ? ' oc-v3-clist-searchtoggle-on' : ''
+          }`}
+          aria-expanded={searchOpen}
+          aria-label="Тэмцээний нэрээр хайх"
+          title="Тэмцээний нэрээр хайх"
+          onClick={() => {
+            if (searchOpen) {
+              setQuery('');
+              setSearchOpen(false);
+            } else {
+              setSearchOpen(true);
+            }
+          }}
+        >
+          <MagnifierGlyph />
+        </button>
+
+        <div className={`oc-v3-clist-search${searchOpen ? ' oc-v3-clist-search-open' : ''}`}>
           <input
+            ref={searchRef}
             type="search"
             className="oc-v3-input oc-v3-clist-searchinput"
             value={query}
@@ -206,12 +249,16 @@ export default function CompetitionList({
               <span className="oc-v3-group-count">{group.rows.length}</span>
             </h2>
 
-            {/* Column headings, one set per section, as on WCA. Hidden below
-                the breakpoint, where a row becomes a stack. */}
+            {/* Column headings, one set per section, as on WCA. Each is
+                aligned the way its own column's content is — ОГНОО over a
+                left-aligned date, ТӨРЛҮҮД centred over centred icons —
+                because a heading that does not sit over its column is worse
+                than no heading. Hidden below the breakpoint, where a row
+                becomes a stack. */}
             <div className="oc-v3-clist-head">
               <span className="oc-v3-th">Огноо</span>
               <span className="oc-v3-th">Тэмцээн</span>
-              <span className="oc-v3-th">Төрлүүд</span>
+              <span className="oc-v3-th oc-v3-th-center">Төрлүүд</span>
               <span className="oc-v3-th">Тамирчин</span>
               <span />
             </div>
@@ -235,6 +282,31 @@ const GROUPS: { status: OnlineCompetitionStatus; label: string; newestFirst: boo
 function rank(eventId: string): number {
   const i = EVENT_ORDER.indexOf(eventId);
   return i < 0 ? EVENT_ORDER.length : i;
+}
+
+/** How full a competition is.
+ *
+ *  THE LIMIT IS NOT FROM THE COUNT ENDPOINT. participantLimit is a field on
+ *  the competition document, already in hand from fetchAllCompetitions the
+ *  moment the row renders; /athlete-counts returns only the taken numbers.
+ *  Nothing was added server-side for this.
+ *
+ *  Which is also why `unlimited` outranks `unknown`: a competition with no
+ *  cap is fully described by the document alone, so it must not sit behind
+ *  a "—" waiting for a count it does not need. */
+type Capacity =
+  | { kind: 'unknown' }
+  | { kind: 'unlimited' }
+  | { kind: 'limited'; taken: number; limit: number; fraction: number; full: boolean };
+
+function capacityOf(limit: number | null | undefined, taken: number | null): Capacity {
+  // null/absent is "unlimited" by the schema (see OnlineCompetition). A
+  // non-positive number is not a real cap either, and dividing by it below
+  // would not end well.
+  if (limit == null || limit <= 0) return { kind: 'unlimited' };
+  if (taken === null) return { kind: 'unknown' };
+  const fraction = Math.min(1, Math.max(0, taken / limit));
+  return { kind: 'limited', taken, limit, fraction, full: taken >= limit };
 }
 
 function Row({
@@ -262,6 +334,7 @@ function Row({
     ).open;
 
   const date = splitStartDate(c.startAt);
+  const capacity = capacityOf(c.participantLimit, count);
 
   return (
     <div className="oc-v3-clist-row">
@@ -280,13 +353,13 @@ function Row({
 
       {/* Two renderings of one date, one hidden per layout — the wide row
           wants it on a single line in its own column, the stacked row wants
-          a two-line rail down the left edge, and a single element cannot be
-          both without fighting over which of the year and the month-day
-          comes first in the DOM. `display: none` keeps the hidden one out
-          of the accessibility tree too, so neither is read twice. */}
+          a tile down the left edge, and a single element cannot be both
+          without fighting over which of the year and the month-day comes
+          first in the DOM. `display: none` keeps the hidden one out of the
+          accessibility tree too, so neither is read twice. */}
       <span className="oc-v3-clist-date">
         <span className="oc-v3-clist-date-wide">{fmtDate(c.startAt)}</span>
-        <span className="oc-v3-clist-date-rail">
+        <span className="oc-v3-clist-date-tile">
           <span className="oc-v3-clist-date-day">{date ? date.monthDay : '—'}</span>
           {date && <span className="oc-v3-clist-date-year">{date.year}</span>}
         </span>
@@ -296,12 +369,11 @@ function Row({
         <span className="oc-v3-clist-name">{c.name}</span>
       </div>
 
-      {/* Events and the athlete count are ONE group. Stacked, it sits in
-          the name's column directly under it — indented past the date rail,
-          so it reads as belonging to the name rather than as two more
-          things loose in the row. Wide, `display: contents` dissolves this
-          wrapper so the two are still their own grid columns; the
-          alternative was rendering them twice. */}
+      {/* Events and the capacity readout are ONE group. Stacked, it sits in
+          the name's column directly under it — indented past the date tile,
+          so it reads as belonging to the name. Wide, `display: contents`
+          dissolves this wrapper so the two are still their own grid
+          columns. */}
       <div className="oc-v3-clist-meta">
         <div className="oc-v3-clist-events">
           {c.events.length === 0 ? (
@@ -319,25 +391,39 @@ function Row({
           )}
         </div>
 
-        {/* Desktop reads the unit off the ТАМИРЧИН column heading. Stacked,
-            that heading is gone, so the unit comes with the number — but
-            never on the "—" a count that has not arrived renders as. */}
-        <span className="oc-v3-clist-count">
-          {count === null ? (
-            '—'
+        {/* WIDE ONLY — the stacked row shows the ring instead. TAKEN OF THE
+            LIMIT, not the bare registered count this column used to show: a
+            number on its own says nothing about whether there is room left,
+            which is the only reason to look at it. */}
+        <span className="oc-v3-clist-cap">
+          {capacity.kind === 'unlimited' ? (
+            /* A coloured marker, not a dash — "no limit" is a fact about
+               the competition, and the dash it used to share with "not
+               loaded yet" read as a failure. */
+            <span className="oc-v3-clist-cap-inf" title="Хязгааргүй">
+              ∞
+            </span>
+          ) : capacity.kind === 'unknown' ? (
+            <span className="oc-v3-clist-cap-none">—</span>
           ) : (
             <>
-              {count}
-              <span className="oc-v3-clist-count-unit"> тамирчин</span>
+              <span className={capacity.full ? 'oc-v3-clist-cap-full' : undefined}>
+                {capacity.taken}
+              </span>
+              <span className="oc-v3-clist-cap-limit"> / {capacity.limit}</span>
             </>
           )}
         </span>
       </div>
 
-      {/* DESKTOP ONLY (display:none below the breakpoint). A stacked row is
+      {/* STACKED ONLY. Level with the name, at the row's right end. */}
+      <span className="oc-v3-clist-ringcell">
+        <CapacityRing capacity={capacity} />
+      </span>
+
+      {/* WIDE ONLY (display:none below the breakpoint). A stacked row is
           itself the link to the page where registering happens, so a second
-          control repeating that trip is what it does not need; the start
-          date takes this corner there instead. */}
+          control repeating that trip is what it does not need. */}
       <div className="oc-v3-clist-action-cell">
         {open ? (
           <Link href={`${HUB}/${c.id}/details`} className="oc-v3-clist-action" style={{ color: '#DFFF4F' }}>
@@ -350,5 +436,103 @@ function Row({
         )}
       </div>
     </div>
+  );
+}
+
+// ── The capacity ring ───────────────────────────────────────────────────
+// A FACEIT-style badge: a track, an arc for how full the competition is,
+// and the taken count in the middle. SVG rather than a round div with a
+// conic-gradient background, because the arc has to stop on an exact
+// fraction — a dash offset is arithmetic where a gradient stop is a guess —
+// and because one <text> centres reliably where absolute positioning inside
+// a 34px circle does not.
+const RING_SIZE = 34;
+const RING_R = 14;
+const RING_C = 2 * Math.PI * RING_R;
+const RING_TRACK = '#2A2A31';
+const RING_ARC = '#DFFF4F';
+
+function CapacityRing({ capacity }: { capacity: Capacity }) {
+  // An unlimited competition gets the COMPLETE TRACK AND NO ARC: there is
+  // no fraction of "no limit" to fill, and a full volt ring would say the
+  // exact opposite of what is true. The ∞ inside carries the volt instead,
+  // so the badge still reads as a deliberate state and not a failed one.
+  const label =
+    capacity.kind === 'unlimited'
+      ? 'Хязгааргүй'
+      : capacity.kind === 'unknown'
+        ? 'Тамирчны тоо тодорхойгүй'
+        : `${capacity.taken} / ${capacity.limit} тамирчин`;
+  const center =
+    capacity.kind === 'unlimited' ? '∞' : capacity.kind === 'unknown' ? '—' : String(capacity.taken);
+  const centerColor =
+    capacity.kind === 'unlimited'
+      ? RING_ARC
+      : capacity.kind === 'unknown'
+        ? '#4A4740'
+        : capacity.full
+          ? RING_ARC
+          : '#F4F1EA';
+
+  return (
+    <svg
+      className="oc-v3-clist-ring"
+      width={RING_SIZE}
+      height={RING_SIZE}
+      viewBox={`0 0 ${RING_SIZE} ${RING_SIZE}`}
+      role="img"
+      aria-label={label}
+    >
+      <circle
+        cx={RING_SIZE / 2}
+        cy={RING_SIZE / 2}
+        r={RING_R}
+        fill="none"
+        stroke={RING_TRACK}
+        strokeWidth={3}
+      />
+      {capacity.kind === 'limited' && capacity.fraction > 0 && (
+        <circle
+          cx={RING_SIZE / 2}
+          cy={RING_SIZE / 2}
+          r={RING_R}
+          fill="none"
+          stroke={RING_ARC}
+          strokeWidth={3}
+          strokeLinecap="round"
+          strokeDasharray={RING_C}
+          strokeDashoffset={RING_C * (1 - capacity.fraction)}
+          // From twelve o'clock, clockwise — a dash starts at three o'clock
+          // otherwise.
+          transform={`rotate(-90 ${RING_SIZE / 2} ${RING_SIZE / 2})`}
+        />
+      )}
+      <text
+        x={RING_SIZE / 2}
+        y={RING_SIZE / 2}
+        textAnchor="middle"
+        dominantBaseline="central"
+        fill={centerColor}
+        style={{
+          font: `700 ${capacity.kind === 'unlimited' ? 14 : 12}px var(--oc-font-mono), monospace`,
+          fontVariantNumeric: 'tabular-nums',
+        }}
+      >
+        {center}
+      </text>
+    </svg>
+  );
+}
+
+/** The search toggle's glyph. Drawn rather than borrowed: @cubing/icons is
+ *  the only icon set in the project and it ships cube events, not UI
+ *  symbols, and the "⌕" character renders at wildly different weights
+ *  across platforms. */
+function MagnifierGlyph() {
+  return (
+    <svg width={15} height={15} viewBox="0 0 15 15" fill="none" aria-hidden focusable="false">
+      <circle cx={6.2} cy={6.2} r={4.4} stroke="currentColor" strokeWidth={1.6} />
+      <path d="M9.6 9.6 L13.2 13.2" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" />
+    </svg>
   );
 }
