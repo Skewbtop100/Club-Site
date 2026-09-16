@@ -5060,35 +5060,12 @@
    competitions) + the competition-detail hero. Continues the .oc-v3-*
    dark system introduced above; same exact-literal-port rules. */
 
-/* ── Toggle pills ("Бүх тэмцээн" / "Миний тэмцээнүүд") ─────────────────
-   The hub's Тэмцээнүүд dropdown item, promoted to a standing pill: same
-   active (#16161B / #F4F1EA) vs. inactive (transparent / #9A958A) pair
-   and the same ●/○ marker, just always visible and side by side. */
-.oc-v3-pill-row {
-  display: flex;
-  gap: 2px;
-}
-.oc-v3-pill {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  border: 1px solid #2A2A31;
-  background: transparent;
-  color: #9A958A;
-  padding: 12px 18px;
-  font: 500 12px var(--oc-font-heading), sans-serif;
-  text-decoration: none;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.oc-v3-pill:hover {
-  background: #16161B;
-  color: #F4F1EA;
-}
-.oc-v3-pill-active {
-  background: #16161B;
-  color: #F4F1EA;
-}
+/* The БҮХ ТЭМЦЭЭН / МИНИЙ ТЭМЦЭЭН toggle pills (.oc-v3-pill-row,
+   .oc-v3-pill, .oc-v3-pill-active) stood here. They were the competitions
+   page's copy of the header's ТЭМЦЭЭНҮҮД dropdown — the same two labels,
+   on the one page the dropdown is certain to be on — and were removed with
+   that page's redesign. The dropdown is the survivor; see the note on
+   competitions/page.tsx. */
 
 /* ── Collapsible section header (ӨМНӨ ОРОЛЦСОН) ───────────────────── */
 .oc-v3-section-toggle {
@@ -5227,24 +5204,104 @@
   color: #DFFF4F;
 }
 
-/* ── "Бүх тэмцээн" table ──────────────────────────────────────────── */
-.oc-v3-all-head,
-.oc-v3-all-row {
+/* ── Competitions list (CompetitionList.tsx) ──────────────────────────
+   One .oc-v3-card per state, each headed by .oc-v3-card-head + a
+   .oc-v3-count-badge, then a .oc-v3-clist-head and its rows. Five columns:
+   date, name, events, athlete count, action.
+
+   Replaced the six-column .oc-v3-all-row, whose capacity and action
+   columns were a 104px seat bar and a 168px volt block; the four content
+   columns here are all that is left. */
+.oc-v3-clist-head,
+.oc-v3-clist-row {
   display: grid;
-  grid-template-columns: 34px minmax(180px, 1.5fr) 150px minmax(110px, 1fr) 104px 168px;
+  grid-template-columns: 112px minmax(170px, 1.7fr) minmax(120px, 1fr) 76px 112px;
   gap: 14px;
   align-items: center;
 }
-.oc-v3-all-head {
-  padding: 11px 18px;
+.oc-v3-clist-head {
+  padding: 10px 18px;
   border-bottom: 1px solid #1C1C21;
 }
-.oc-v3-all-row {
+.oc-v3-clist-row {
   padding: 13px 18px;
   border-bottom: 1px solid #16161B;
 }
-.oc-v3-all-row:hover {
+.oc-v3-clist-row:last-child {
+  border-bottom: none;
+}
+.oc-v3-clist-row:hover {
   background: #131318;
+}
+.oc-v3-clist-date {
+  font: 500 11px var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #9A958A;
+  white-space: nowrap;
+}
+.oc-v3-clist-name-cell {
+  min-width: 0;
+}
+/* Its own class rather than .oc-v3-row-name: that one is nowrap +
+   ellipsis at every width, and a card must show the whole name. */
+.oc-v3-clist-name {
+  display: block;
+  font: 500 14px var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oc-v3-clist-name:hover {
+  color: #DFFF4F;
+}
+.oc-v3-clist-events {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+/* The bare WCA glyph, no 28px bordered box (.oc-v3-ev-icon): a
+   six-event competition would otherwise wrap into a second row of boxes
+   and set the height of every row in the section. */
+.oc-v3-clist-ev {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: #9A958A;
+  font: 600 9px var(--oc-font-mono), monospace;
+}
+.oc-v3-clist-count {
+  font: 500 12px var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #F4F1EA;
+  white-space: nowrap;
+}
+/* Desktop reads the unit off the ТАМИРЧИН column heading, so the inline
+   one is redundant there and appears only on the cards. */
+.oc-v3-clist-count-unit {
+  display: none;
+}
+.oc-v3-clist-action-cell {
+  min-width: 0;
+}
+/* A plain text action. The block button this replaced was
+   .oc-v3-reg-btn — full width, solid #DFFF4F, 11px of padding — which
+   made registering the loudest thing in a row whose subject is the
+   competition. */
+.oc-v3-clist-action {
+  font: 600 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #6E6A62;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.oc-v3-clist-action:hover {
+  color: #DFFF4F;
+  text-decoration: underline;
 }
 .oc-v3-th {
   font: 500 8px var(--oc-font-mono), monospace;
@@ -5252,16 +5309,6 @@
   color: #6E6A62;
   text-transform: uppercase;
   white-space: nowrap;
-}
-.oc-v3-icon-30 {
-  width: 30px;
-  height: 30px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #16161B;
-  color: #F4F1EA;
 }
 
 /* ── Competition detail hero ──────────────────────────────────────── */
@@ -5352,14 +5399,44 @@
     grid-template-columns: minmax(0, 1fr) auto;
     row-gap: 10px;
   }
-  .oc-v3-all-head {
+  /* ── Competitions list: one card per competition ───────────────────
+     Below this breakpoint the five-column grid stops being a grid: each
+     row becomes a stacked card in WCA's shape — name, then date, then
+     events — so nothing truncates and nothing scrolls sideways. The name
+     is second in the DOM (the desktop grid reads date first); `order`
+     lifts it, which is why this is flex rather than a one-column grid. */
+  .oc-v3-clist-head {
     display: none;
   }
-  .oc-v3-all-row {
-    grid-template-columns: 34px minmax(0, 1fr);
+  .oc-v3-clist-row {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 7px;
+    padding: 14px 16px;
   }
-  .oc-v3-all-row > *:nth-child(n + 3) {
-    grid-column: 2;
+  .oc-v3-clist-name-cell {
+    order: -1;
+    width: 100%;
+  }
+  .oc-v3-clist-name {
+    font-size: 15px;
+    line-height: 1.35;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+  .oc-v3-clist-date {
+    font-size: 12px;
+  }
+  /* Events sit above the count, and the count carries its own unit now
+     that the column heading is gone. */
+  .oc-v3-clist-count {
+    font-size: 11px;
+    color: #9A958A;
+  }
+  .oc-v3-clist-count-unit {
+    display: inline;
   }
   .oc-v3-statblock {
     grid-template-columns: minmax(0, 1fr);
@@ -5536,7 +5613,6 @@
   .oc-v3-menu-item,
   .oc-v3-userbtn,
   .oc-v3-signin,
-  .oc-v3-pill,
   .oc-v3-row-action,
   .oc-v3-reg-btn,
   .oc-v3-live-btn,
@@ -5584,32 +5660,18 @@
     grid-column: 1 / -1;
   }
 
-  /* ── Competitions list: all-competitions row ─────────────────────────
-     Six fixed-px columns fold to [icon | name | date] / [events] /
-     [capacity] / [action]. Placed by child index because the desktop
-     grid has no wrapper elements to target. */
-  .oc-v3-all-row {
-    grid-template-columns: 28px minmax(0, 1fr) auto;
-    gap: 10px;
-    row-gap: 12px;
+  /* ── Competitions list: card tap targets ─────────────────────────────
+     The card shape itself lands at 899px (above). Here the two links on
+     a card get the 44px minimum. The name keeps its own padding rather
+     than min-height + flex, as .oc-v3-row-name does, because it is a
+     wrapping block. */
+  .oc-v3-clist-name {
+    padding: 8px 0;
   }
-  .oc-v3-all-row > *:nth-child(1) {
-    grid-column: 1;
-  }
-  .oc-v3-all-row > *:nth-child(2) {
-    grid-column: 2;
-  }
-  .oc-v3-all-row > *:nth-child(3) {
-    grid-column: 3;
-    justify-self: end;
-    font-size: 10px;
-  }
-  .oc-v3-all-row > *:nth-child(n + 4) {
-    grid-column: 1 / -1;
-  }
-  .oc-v3-icon-30 {
-    width: 28px;
-    height: 28px;
+  .oc-v3-clist-action {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
   }
 
   /* ── Competitions list: my-competitions row ──────────────────────────
@@ -5659,13 +5721,6 @@
   .oc-v3-main {
     padding: 14px;
     gap: 14px;
-  }
-  .oc-v3-pill-row {
-    flex-wrap: wrap;
-  }
-  .oc-v3-pill {
-    flex: 1 1 auto;
-    justify-content: center;
   }
 }
 

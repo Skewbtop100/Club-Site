@@ -39,6 +39,17 @@ const STATUS: Record<OnlineCompetitionStatus, { dot: string; text: string; label
   finished: { dot: '#4A4740', text: '#6E6A62', label: 'ДУУССАН' },
 };
 
+/** NOT CURRENTLY RENDERED ANYWHERE. This was the "Миний тэмцээнүүд" half
+ *  of the competitions page's toggle pills; those were removed as a
+ *  duplicate of the header's ТЭМЦЭЭНҮҮД dropdown, whose own
+ *  МИНИЙ ТЭМЦЭЭН item goes to /dashboard instead.
+ *
+ *  Kept rather than deleted for ONE reason: the collapsible
+ *  "Өмнө оролцсон" section below is the only implementation of a
+ *  finished-registrations list, and the dashboard deliberately has none
+ *  ("Skip finished for now" — there is no per-competition results model
+ *  yet). If that list is wanted back, this is it; nothing else here is
+ *  worth reviving. */
 export default function MyCompetitions({
   views,
   account,
