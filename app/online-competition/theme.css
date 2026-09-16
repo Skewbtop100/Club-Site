@@ -4929,6 +4929,12 @@
 .oc-v3-reg-btn:hover {
   background: #E9FF7A;
 }
+/* UNREFERENCED since the hub adopted the competitions list's rows: these
+   three, and .oc-v3-row / -icon / -cap / -cta above, dressed UpcomingCard's
+   own row layout, which CompetitionRow replaced. Left in place rather than
+   deleted in the same pass that removed their markup; nothing renders them
+   today. (.oc-v3-row-action, -meta and -name ARE still used, by
+   MyCompetitions and the list's empty-events dash.) */
 .oc-v3-countdown {
   position: relative;
   overflow: hidden;
@@ -5575,6 +5581,29 @@
   color: #DFFF4F;
   text-decoration: underline;
 }
+
+/* ── The hub's teaser rows (UpcomingCard) ──────────────────────────────
+   The same .oc-v3-clist-row, minus the register action, inside a
+   .oc-v3-card that brings its own heading and border. Two differences from
+   the full list, both because of where it sits:
+
+   FOUR COLUMNS, not five. The action cell is not rendered at all in the
+   compact variant, so the grid drops it rather than leaving an empty track,
+   and the trailing 1fr that separated it from ТАМИРЧИН goes with it.
+
+   IT HAS TO FIT THE HUB'S LEFT COLUMN. While a competition is live the hub
+   is .oc-v3-grid — minmax(420px, 2.1fr) beside the live card — and the wide
+   row's own minimum is 88 + 140 + 120 + 78 + four 12px gaps = 474px, which
+   would have overflowed a 420px column. These four come to 366px, so they
+   fit with room over. Below 899px both stack identically, from one rule.
+
+   The card brings the outer border, so the last divider goes. */
+.oc-v3-clist-row-compact {
+  grid-template-columns: 88px minmax(110px, 1fr) minmax(0, auto) 68px;
+}
+.oc-v3-clist-rows > .oc-v3-clist-row:last-child {
+  border-bottom: none;
+}
 .oc-v3-th {
   font: 500 9px var(--oc-font-mono), monospace;
   letter-spacing: 0.14em;
@@ -5694,7 +5723,13 @@
   .oc-v3-clist-head {
     display: none;
   }
-  .oc-v3-clist-row {
+  /* .oc-v3-clist-row-compact is named too, and not because its layout
+     differs here: the compact rule outside this block is the same
+     specificity (0-1-0) and comes earlier, so without it the wide
+     four-column template would survive into the stacked layout on the home
+     page. The stacked shape is identical for both. */
+  .oc-v3-clist-row,
+  .oc-v3-clist-row-compact {
     /* 52px tile, then the competition, then the ring. */
     grid-template-columns: 52px minmax(0, 1fr) 34px;
     gap: 3px 12px;
@@ -6312,8 +6347,9 @@
   color: #08080A;
   border-color: #DFFF4F;
 }
-/* ОНЦЛОХ is inert until the featured flag exists — it must not
-   invite a click that does nothing. */
+/* ОНЦЛОХ is wired now (setCompetitionFeatured), so the only thing that
+   disables it is a save in flight. The rule stays for that, and for every
+   other admin button that goes quiet mid-request. */
 .oc-adm-comp-btn:disabled {
   cursor: default;
   opacity: 0.5;

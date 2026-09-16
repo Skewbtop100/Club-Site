@@ -35,7 +35,13 @@ export function fmtTime(ts: Timestamp | undefined | null): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/** Coarse Mongolian "time left" label for the registration countdown —
+/** NO LONGER CALLED. Its one caller was UpcomingCard's registration
+ *  countdown pill, which went when the hub adopted the competitions list's
+ *  rows (CompetitionRow shows no countdown — the detail page has a much
+ *  larger one). Kept because it is a correct, tested formatter and the next
+ *  countdown will want it; delete it if none appears.
+ *
+ *  Coarse Mongolian "time left" label for the registration countdown —
  *  the largest two units that are non-zero, so a two-week window reads
  *  "13 хоног 4 цаг" and the last hour reads "42 мин". */
 export function fmtRemaining(ms: number): string {

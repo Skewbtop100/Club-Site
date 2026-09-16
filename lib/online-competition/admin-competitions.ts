@@ -899,6 +899,60 @@ export async function countRegistrationsFor(db: Firestore, competitionId: string
   ).length;
 }
 
+/** Set or clear `featured` on ONE competition, and nothing else.
+ *
+ *  Exists so the admin list's ★ can be a one-click toggle. The alternative
+ *  was reading the competition and sending it back through PUT, which
+ *  round-trips every field of a document to change one boolean — and
+ *  anything the admin view does not return verbatim would be clobbered on
+ *  the way.
+ *
+ *  SAME EXCLUSIVITY RULE as writeCompetitionDoc, in the same shape: at most
+ *  one competition is featured, so setting the flag clears it everywhere
+ *  else, in a transaction. Two callers now enforce it; if a third appears,
+ *  it goes through one of these two rather than writing the field itself.
+ *
+ *  A DRAFT CANNOT BE FEATURED. The public hub reads its list through
+ *  fetchAllCompetitions, which queries `status != 'draft'`, so a featured
+ *  draft would never reach pickFeatured and the star would be a button that
+ *  reports success and changes nothing on the page it is about — which is
+ *  the exact class of bug this toggle is being written to fix. Refused with
+ *  a reason instead. Clearing the flag on a draft is always allowed, so a
+ *  competition moved back to draft can still be un-starred.
+ *
+ *  Throws CompetitionWriteError for anything the caller should turn into a
+ *  400 with a message. */
+export async function setCompetitionFeatured(
+  db: Firestore,
+  competitionId: string,
+  featured: boolean,
+): Promise<void> {
+  const col = db.collection('onlineCompetitions');
+  const ref = col.doc(competitionId);
+
+  await db.runTransaction(async (tx) => {
+    // ── every read first: a transaction refuses a read after a write ──
+    const snap = await tx.get(ref);
+    // The `featured` index read is skipped entirely when clearing — there
+    // is nothing to make exclusive.
+    const others = featured
+      ? (await tx.get(col.where('featured', '==', true))).docs.filter((d) => d.id !== ref.id)
+      : [];
+
+    if (!snap.exists) throw new CompetitionWriteError('Тэмцээн олдсонгүй.');
+    if (featured && normalizeCompetitionStatus(snap.get('status')) === 'draft') {
+      throw new CompetitionWriteError('Ноорог тэмцээнийг онцолж болохгүй — эхлээд нийтэд гаргана уу.');
+    }
+
+    // update, not set+merge: this writer owns exactly one field, and an
+    // update on a document proven to exist cannot create a partial one.
+    tx.update(ref, { featured });
+    for (const other of others) {
+      tx.update(other.ref, { featured: false });
+    }
+  });
+}
+
 export async function writeCompetitionDoc(
   db: Firestore,
   competitionId: string | null,

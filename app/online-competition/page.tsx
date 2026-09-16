@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { fetchAllCompetitions } from '@/lib/online-competition/data';
 import { pickFeatured } from '@/lib/online-competition/featured';
+import type { CompetitionAthleteCounts } from '@/app/api/online-competition/competitions/athlete-counts/route';
 import type { OnlineCompetition } from '@/lib/online-competition/types';
 import { toMillisOrNull } from './_components/hub/format';
 import FeaturedBanner from './_components/hub/v3/FeaturedBanner';
@@ -14,6 +15,10 @@ import LiveMiniCard from './_components/hub/v3/LiveMiniCard';
 export default function OnlineCompetitionHubPage() {
   const [competitions, setCompetitions] = useState<OnlineCompetition[] | null>(null);
   const [error, setError] = useState('');
+  /** The upcoming rows' capacity readout. Same endpoint and same edge cache
+   *  the competitions list uses, so opening one after the other costs one
+   *  request between them. */
+  const [counts, setCounts] = useState<Record<string, number> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -23,6 +28,23 @@ export default function OnlineCompetitionHubPage() {
       })
       .catch(() => {
         if (!cancelled) setError('Тэмцээнүүдийг ачааллаж чадсангүй');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Independent of the list above: a slow count must not hold up the page,
+  // and a failed one leaves `counts` null, which the rows render as "—".
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/online-competition/competitions/athlete-counts')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: CompetitionAthleteCounts | null) => {
+        if (!cancelled && data) setCounts(data.counts);
+      })
+      .catch(() => {
+        /* The rows show "—"; a missing count is not a page error. */
       });
     return () => {
       cancelled = true;
@@ -69,7 +91,10 @@ export default function OnlineCompetitionHubPage() {
       ) : (
         <main className="oc-v3-main">
           {/* Above everything, including the live hero — a featured
-              competition is the one the admin chose to lead with. */}
+              competition is the one the admin chose to lead with, by the ★
+              in the admin list (or the editor's ОНЦЛОХ tick). With none
+              featured this renders nothing and the page opens on the live
+              hero, or straight on the list. */}
           {featured && <FeaturedBanner competition={featured} />}
 
           {live[0] && <LiveHero competition={live[0]} />}
@@ -81,14 +106,14 @@ export default function OnlineCompetitionHubPage() {
           {live[0] ? (
             <div className="oc-v3-grid">
               <div className="oc-v3-col">
-                <UpcomingCard competitions={upcoming} />
+                <UpcomingCard competitions={upcoming} counts={counts} />
               </div>
               <div className="oc-v3-col">
                 <LiveMiniCard competition={live[0]} />
               </div>
             </div>
           ) : (
-            <UpcomingCard competitions={upcoming} />
+            <UpcomingCard competitions={upcoming} counts={counts} />
           )}
         </main>
       )}

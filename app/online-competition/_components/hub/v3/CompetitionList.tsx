@@ -264,7 +264,7 @@ export default function CompetitionList({
             </div>
 
             {group.rows.map((c) => (
-              <Row key={c.id} competition={c} count={counts ? counts[c.id] ?? 0 : null} now={now} />
+              <CompetitionRow key={c.id} competition={c} count={counts ? counts[c.id] ?? 0 : null} now={now} />
             ))}
           </section>
         ))
@@ -309,14 +309,30 @@ function capacityOf(limit: number | null | undefined, taken: number | null): Cap
   return { kind: 'limited', taken, limit, fraction, full: taken >= limit };
 }
 
-function Row({
+/** ONE row of the competitions list — date, name, events, capacity, and
+ *  (wide only) the register action.
+ *
+ *  EXPORTED because the hub's УДАХГҮЙ БОЛОХ ТЭМЦЭЭН section renders the same
+ *  rows. It is the row that is reusable, not CompetitionList: that component
+ *  also owns the filter bar, the search, the state grouping and the section
+ *  headings, none of which a three-row teaser on the home page wants. Three
+ *  suppression props would have left a component whose behaviour depended on
+ *  a combination nobody reads.
+ *
+ *  `compact` is the home page's variant: no register action (the row is
+ *  already a link to the competition, and БҮГД → leads to the full list) and
+ *  a narrower grid, so the rows fit the hub's left column beside a live card
+ *  without overflowing it. */
+export function CompetitionRow({
   competition: c,
   count,
   now,
+  compact = false,
 }: {
   competition: OnlineCompetition;
   count: number | null;
   now: number | null;
+  compact?: boolean;
 }) {
   // The SAME check the registration panel makes — status, opening time and
   // deadline — so a row cannot offer БҮРТГҮҮЛЭХ for a competition whose
@@ -337,7 +353,7 @@ function Row({
   const capacity = capacityOf(c.participantLimit, count);
 
   return (
-    <div className="oc-v3-clist-row">
+    <div className={`oc-v3-clist-row${compact ? ' oc-v3-clist-row-compact' : ''}`}>
       {/* The whole row is the link: one absolutely-positioned anchor over
           it, so a tap anywhere opens the competition and a screen reader
           hears ONE link named after it — not an anchor per cell.
@@ -421,9 +437,13 @@ function Row({
         <CapacityRing capacity={capacity} />
       </span>
 
-      {/* WIDE ONLY (display:none below the breakpoint). A stacked row is
-          itself the link to the page where registering happens, so a second
-          control repeating that trip is what it does not need. */}
+      {/* WIDE ONLY (display:none below the breakpoint), and never in the
+          compact variant. A stacked row is itself the link to the page where
+          registering happens, so a second control repeating that trip is
+          what it does not need — and on the home page neither is a teaser's
+          job. Not rendered rather than hidden, so it occupies no grid cell
+          at any width. */}
+      {!compact && (
       <div className="oc-v3-clist-action-cell">
         {open ? (
           <Link href={`${HUB}/${c.id}/details`} className="oc-v3-clist-action" style={{ color: '#DFFF4F' }}>
@@ -435,6 +455,7 @@ function Row({
           </Link>
         )}
       </div>
+      )}
     </div>
   );
 }

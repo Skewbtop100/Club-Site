@@ -59,6 +59,45 @@ export default function CompetitionsList() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   /** competitionId -> added events waiting for a decision. */
   const [eventRequests, setEventRequests] = useState<Record<string, number>>({});
+  /** The competition whose ★ is mid-flight, so its button can say so and
+   *  no second click races the first. */
+  const [featuringId, setFeaturingId] = useState<string | null>(null);
+  const [featureError, setFeatureError] = useState<{ id: string; text: string } | null>(null);
+
+  /** ★ — set or clear the featured flag.
+   *
+   *  Exclusivity is the SERVER's job (setCompetitionFeatured does it in a
+   *  transaction), so this does not try to clear the other stars itself: it
+   *  reloads the list afterwards and shows whatever the server decided. A
+   *  local guess would be wrong the moment two admins star different
+   *  competitions at once, and would look right until a refresh.
+   *
+   *  `load()` is declared below and used here — both live for the lifetime
+   *  of the component, and this only runs from a click. */
+  async function toggleFeatured(id: string, next: boolean) {
+    setFeatureError(null);
+    setFeaturingId(id);
+    try {
+      const res = await fetch(`/api/online-competition/admin-competitions/${encodeURIComponent(id)}/featured`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ featured: next }),
+      });
+      if (!res.ok) {
+        // The route's own reason where it has one — a draft cannot be
+        // featured, and that is worth saying rather than "failed".
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        setFeatureError({ id, text: data?.error ?? 'Онцлохыг хадгалж чадсангүй' });
+        return;
+      }
+      await load();
+    } catch (err) {
+      console.error('CompetitionsList: toggling featured failed:', err);
+      setFeatureError({ id, text: 'Онцлохыг хадгалж чадсангүй' });
+    } finally {
+      setFeaturingId(null);
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -171,19 +210,42 @@ export default function CompetitionsList() {
                     </p>
                   </div>
 
-                  {/* ОНЦЛОХ — TODO: not wired. Featuring a competition needs
-                      a schema field on onlineCompetitions plus a public-page
-                      change to read it; neither exists yet, so this renders
-                      inert rather than pretending to toggle something. */}
+                  {/* ОНЦЛОХ — the home page's hero.
+                      The TODO that stood here said featuring "needs a schema
+                      field on onlineCompetitions plus a public-page change to
+                      read it; neither exists yet". Both had since been built
+                      — `featured` on the document, and pickFeatured +
+                      FeaturedBanner on the hub — and the comment outlived
+                      them, leaving the one-click path disabled while the flag
+                      was reachable only through the full editor form.
+
+                      A FILLED star is the featured one; at most one is, and
+                      the server clears the others in the same transaction.
+                      aria-pressed carries the state for anyone not seeing the
+                      glyph. */}
                   <button
                     type="button"
-                    className="oc-adm-comp-btn oc-adm-comp-star"
-                    disabled
-                    title="Онцлох — удахгүй"
-                    aria-label="Онцлох"
+                    className={`oc-adm-comp-btn oc-adm-comp-star${c.featured ? ' oc-adm-comp-star-on' : ''}`}
+                    disabled={featuringId === c.id}
+                    aria-pressed={c.featured}
+                    title={
+                      c.featured
+                        ? 'Онцлохоос хасах — нүүр хуудасны баннер алга болно'
+                        : 'Онцлох — нүүр хуудасны баннераар гарна'
+                    }
+                    aria-label={c.featured ? 'Онцлохоос хасах' : 'Онцлох'}
+                    onClick={() => toggleFeatured(c.id, !c.featured)}
                   >
-                    ★
+                    {c.featured ? '★' : '☆'}
                   </button>
+                  {/* The route's reason, beside the star it belongs to —
+                      "a draft cannot be featured" is actionable, and a
+                      toast somewhere else would not say which row. */}
+                  {featureError && featureError.id === c.id && (
+                    <span className="text-xs" style={{ color: '#E8543C' }}>
+                      {featureError.text}
+                    </span>
+                  )}
 
                   {/* Both of these pre-select the competition: RoundsManager
                       and ReviewGrid each read ?competitionId= on mount. */}
