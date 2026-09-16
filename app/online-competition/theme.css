@@ -9704,3 +9704,290 @@ button.oc-rv-cell:hover {
     display: none;
   }
 }
+
+/* ── ТУРШИЛТ: the practice area ────────────────────────────────────────
+   The run itself borrows the solve flow's own takeover and stage classes
+   unchanged (.oc-solve-takeover, .oc-solve-stage) — it is the same sequence
+   on the same screen, and a second set of stage styles would be a second
+   thing to keep in step. What is here is only what practice adds: its own
+   bar, its closing screen, the athlete's list of runs, and the admin's
+   review rows. */
+
+/* The run's bar. Not SolveHeader: that one carries an attempt count, a
+   round and a competition, none of which a practice run has. */
+.oc-practice-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 16px;
+  border-bottom: 1px solid #1C1C21;
+  background: #0D0D10;
+}
+.oc-practice-bar-tag {
+  border: 1px solid #DFFF4F;
+  color: #DFFF4F;
+  padding: 3px 7px;
+  font: 700 8px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.14em;
+  white-space: nowrap;
+}
+.oc-practice-bar-event {
+  font: 500 12px var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+}
+.oc-practice-bar-exit {
+  border: 1px solid #2A2A31;
+  background: transparent;
+  color: #9A958A;
+  padding: 7px 12px;
+  font: 600 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  min-height: 34px;
+}
+.oc-practice-bar-exit:hover {
+  border-color: #E8543C;
+  color: #E8543C;
+}
+
+/* The closing screen. */
+.oc-practice-done {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 28px 22px;
+  max-width: 520px;
+}
+.oc-practice-done-title {
+  font: 700 13px var(--oc-font-mono), monospace;
+  letter-spacing: 0.14em;
+  color: #4FD07A;
+}
+.oc-practice-done-body {
+  font: 400 13px/20px var(--oc-font-heading), sans-serif;
+  color: #C9C4B8;
+}
+.oc-practice-done-left {
+  font: 500 11px var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #6E6A62;
+}
+
+/* The upload, over whatever stage is on screen — pinned to the bottom so it
+   never covers a control. */
+.oc-practice-filing {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 16px calc(11px + env(safe-area-inset-bottom, 0px));
+  background: #131318;
+  border-top: 1px solid #1C1C21;
+  font: 500 11px var(--oc-font-mono), monospace;
+  color: #9A958A;
+}
+.oc-practice-filing-err {
+  border-top-color: #E8543C;
+  color: #E8543C;
+}
+.oc-practice-retry {
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  padding: 7px 11px;
+  font: 600 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  min-height: 34px;
+}
+
+/* ── The athlete's own list ───────────────────────────────────────────── */
+
+/* Start-a-run buttons, one per event the platform runs. */
+.oc-practice-events {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 15px 18px;
+}
+.oc-practice-event {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 44px;
+  border: 1px solid #2A2A31;
+  color: #F4F1EA;
+  padding: 0 14px;
+  font: 500 12px var(--oc-font-heading), sans-serif;
+  text-decoration: none;
+}
+.oc-practice-event:hover {
+  border-color: #DFFF4F;
+  color: #DFFF4F;
+}
+.oc-practice-event-icon {
+  display: inline-flex;
+  align-items: center;
+  color: #9A958A;
+  font: 600 9px/1 var(--oc-font-mono), monospace;
+}
+
+.oc-practice-row {
+  border-bottom: 1px solid #16161B;
+  padding: 13px 18px;
+}
+.oc-practice-row:last-child {
+  border-bottom: none;
+}
+.oc-practice-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+}
+.oc-practice-row-event {
+  font: 600 10px var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+  color: #9A958A;
+}
+.oc-practice-row-time {
+  font: 700 14px var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #F4F1EA;
+}
+.oc-practice-row-date {
+  font: 500 10px var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #4A4740;
+}
+.oc-practice-row-status {
+  font: 600 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+/* The reason an admin gave. The athlete cannot fix what they are not told,
+   so it reads as prose rather than as a code. */
+.oc-practice-row-reason {
+  margin-top: 8px;
+  font: 400 12px/18px var(--oc-font-heading), sans-serif;
+  color: #C9C4B8;
+}
+.oc-practice-row-foot {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.oc-practice-watch {
+  border: 1px solid #2A2A31;
+  background: transparent;
+  color: #9A958A;
+  padding: 8px 12px;
+  font: 600 9px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  min-height: 36px;
+}
+.oc-practice-watch:hover {
+  border-color: #DFFF4F;
+  color: #DFFF4F;
+}
+.oc-practice-row-expiry,
+.oc-practice-row-gone {
+  font: 500 10px var(--oc-font-mono), monospace;
+  color: #4A4740;
+}
+.oc-practice-video {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  margin-top: 12px;
+  background: #08080A;
+  border: 1px solid #1C1C21;
+}
+
+/* ── The admin's review rows ──────────────────────────────────────────── */
+
+.oc-practice-adm-row {
+  border-bottom: 1px solid #16161B;
+  padding: 13px 14px;
+}
+.oc-practice-adm-row:last-child {
+  border-bottom: none;
+}
+.oc-practice-adm-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 11px;
+}
+.oc-practice-adm-name {
+  font: 500 13px var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+}
+.oc-practice-adm-meta,
+.oc-practice-adm-status {
+  font: 500 10px var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #6E6A62;
+  letter-spacing: 0.06em;
+}
+.oc-practice-adm-reason {
+  margin-top: 7px;
+  font: 400 11px/17px var(--oc-font-heading), sans-serif;
+  color: #9A958A;
+}
+.oc-practice-adm-body {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* THE SCRAMBLE THE ATHLETE WAS SHOWN, and the reason this panel exists:
+   "did they apply this scramble" is unanswerable without it. Monospace and
+   wrapping, because a scramble is a sequence and must not be truncated. */
+.oc-practice-adm-scramble {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border: 1px solid #1C1C21;
+  background: #08080A;
+  padding: 9px 11px;
+}
+.oc-practice-adm-scramble code {
+  font: 500 12px/19px var(--oc-font-mono), monospace;
+  color: #F4F1EA;
+  word-break: break-word;
+}
+.oc-practice-adm-video {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  background: #08080A;
+  border: 1px solid #1C1C21;
+}
+.oc-practice-adm-reasons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.oc-practice-adm-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.oc-practice-adm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.oc-practice-adm-note {
+  font: 400 10px/16px var(--oc-font-heading), sans-serif;
+  color: #6E6A62;
+}

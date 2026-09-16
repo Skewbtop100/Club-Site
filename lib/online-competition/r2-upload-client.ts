@@ -76,8 +76,13 @@ async function requestUploadGrant(blob: Blob, target: VideoUploadTarget): Promis
 }
 
 /** XMLHttpRequest, not fetch: fetch has no upload-progress event, and the
- *  athlete is shown a progress bar exactly as before. */
-function putToR2(
+ *  athlete is shown a progress bar exactly as before.
+ *
+ *  EXPORTED so the practice area's upload uses this one rather than a second
+ *  copy. The bytes go to R2 the same way whatever they are of; what differs
+ *  between a competition attempt and a practice run is only which route
+ *  grants the signature and what key it derives. */
+export function putToR2(
   url: string,
   blob: Blob,
   contentType: string,

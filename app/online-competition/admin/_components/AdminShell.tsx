@@ -13,6 +13,7 @@ export type AdminSection =
   | 'review'
   | 'scrambles'
   | 'rounds'
+  | 'practice'
   | 'settings';
 
 const ADMIN = '/online-competition/admin';
@@ -38,6 +39,8 @@ interface Counts {
   /** Pending verification requests — Бүртгэлийн хүсэлт. */
   athletes: number | null;
   review: number | null;
+  /** Practice runs awaiting a decision — Туршилтын шүүлт. */
+  practice: number | null;
 }
 
 // ── The two groups ───────────────────────────────────────────────────────
@@ -55,6 +58,7 @@ const GROUP_OF: Partial<Record<AdminSection, GroupKey>> = {
   review: 'competitions',
   athletes: 'athletes',
   athleteRequests: 'athletes',
+  practice: 'athletes',
 };
 
 /** Which groups the admin has opened, for this browser tab. */
@@ -77,7 +81,13 @@ export default function AdminShell({
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [counts, setCounts] = useState<Counts>({ competitions: null, approvedAthletes: null, athletes: null, review: null });
+  const [counts, setCounts] = useState<Counts>({
+    competitions: null,
+    approvedAthletes: null,
+    athletes: null,
+    review: null,
+    practice: null,
+  });
 
   // ── Group open state ──
   // The group holding the current page is ALWAYS open on load. Any other
@@ -127,8 +137,13 @@ export default function AdminShell({
       fetch(`/api/online-competition/admin-athletes?status=approved`).then((r) => num(r, 'athletes')).catch(() => null),
       fetch(`/api/online-competition/admin-athletes?status=pending`).then((r) => num(r, 'athletes')).catch(() => null),
       fetch(`/api/online-competition/submissions?status=pending`).then((r) => num(r, 'submissions')).catch(() => null),
-    ]).then(([competitions, approvedAthletes, athletes, review]) => {
-      if (!cancelled) setCounts({ competitions, approvedAthletes, athletes, review });
+      // The practice queue's own count. Its route reports `pending`
+      // directly rather than a list length, so it needs no array key.
+      fetch(`/api/online-competition/admin-practice?status=pending`)
+        .then(async (r) => (r.ok ? ((await r.json()) as { pending?: number }).pending ?? null : null))
+        .catch(() => null),
+    ]).then(([competitions, approvedAthletes, athletes, review, practice]) => {
+      if (!cancelled) setCounts({ competitions, approvedAthletes, athletes, review, practice });
     });
     return () => {
       cancelled = true;
@@ -208,6 +223,17 @@ export default function AdminShell({
               label="Бүртгэлийн хүсэлт"
               active={current === 'athleteRequests'}
               count={counts.athletes}
+              urgent
+            />
+            {/* UNDER ТАМИРЧИД, not ТЭМЦЭЭН. A practice run belongs to an
+                athlete learning the recorded-solve sequence and to no
+                competition at all — filing it beside Шүүлт is exactly the
+                confusion the separate screen exists to avoid. */}
+            <NavChild
+              href={`${ADMIN}/practice`}
+              label="Туршилтын шүүлт"
+              active={current === 'practice'}
+              count={counts.practice}
               urgent
             />
           </NavGroup>

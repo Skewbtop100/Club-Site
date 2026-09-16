@@ -27,6 +27,7 @@ const LOGO_PATTERN = ['ink', 'ink', 'volt', 'ink', 'volt', 'ink', 'volt', 'ink',
 const LOGO_COLOR = { ink: '#F4F1EA', volt: '#DFFF4F' } as const;
 const DASHBOARD = '/online-competition/dashboard';
 const PROFILE = '/online-competition/profile';
+const PRACTICE = '/online-competition/practice';
 
 /** The hub's dark header (v3). Deliberately a separate component from
  *  ../NavBar.tsx rather than a restyle of it: NavBar is also rendered by
@@ -257,6 +258,20 @@ export default function HubNav({
               <button type="button" className="oc-v3-menu-item oc-v3-menu-item-split" onClick={goToDashboard}>
                 Миний тэмцээнүүд
               </button>
+              {/* ТУРШИЛТ — the practice area, beside the athlete's own
+                  competitions rather than in the ТЭМЦЭЭНҮҮД dropdown. It is
+                  not a competition and belongs to nobody but this athlete,
+                  and this menu is the one place that is true of everything
+                  in it. Present at every width: the menu sits in
+                  .oc-v3-nav-auth, outside the tab strip that the mobile
+                  breakpoint hides. */}
+              <Link
+                href={PRACTICE}
+                className="oc-v3-menu-item oc-v3-menu-item-split"
+                onClick={() => setUserOpen(false)}
+              >
+                Туршилт
+              </Link>
               <button
                 type="button"
                 className="oc-v3-menu-item oc-v3-menu-item-split"

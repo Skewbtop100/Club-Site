@@ -1,0 +1,385 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useParams, useRouter } from 'next/navigation';
+import { useOnlineAuth } from '@/lib/online-competition/useOnlineAuth';
+import { ONLINE_COMP_EVENTS, onlineCompEventLabel } from '@/lib/online-competition/events';
+import { generateScramble } from '@/lib/scramble';
+import { COVER_SECONDS } from '@/lib/online-competition/solve-stage-timing';
+import { uploadAndFilePracticeRun } from '@/lib/online-competition/practice-upload-client';
+import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
+import {
+  leaveConfirmMessage,
+  useSolveRun,
+} from '@/app/online-competition/[competitionId]/solve/[eventId]/_lib/useSolveRun';
+import { useSolveRecorder } from '@/app/online-competition/[competitionId]/solve/[eventId]/_lib/useSolveRecorder';
+import LobbyStage from '@/app/online-competition/[competitionId]/solve/[eventId]/_components/LobbyStage';
+import AttemptIntroStage from '@/app/online-competition/[competitionId]/solve/[eventId]/_components/AttemptIntroStage';
+import CameraHoldStage from '@/app/online-competition/[competitionId]/solve/[eventId]/_components/CameraHoldStage';
+import RevealStage from '@/app/online-competition/[competitionId]/solve/[eventId]/_components/RevealStage';
+import CoverStage from '@/app/online-competition/[competitionId]/solve/[eventId]/_components/CoverStage';
+import ReadyPromptStage from '@/app/online-competition/[competitionId]/solve/[eventId]/_components/ReadyPromptStage';
+import RecStage from '@/app/online-competition/[competitionId]/solve/[eventId]/_components/RecStage';
+import EntryStage from '@/app/online-competition/[competitionId]/solve/[eventId]/_components/EntryStage';
+import RecordingFailedStage from '@/app/online-competition/[competitionId]/solve/[eventId]/_components/RecordingFailedStage';
+import AuthModal from '@/app/online-competition/_components/hub/v3/AuthModal';
+
+// ── ТУРШИЛТ: one recorded run, no competition ───────────────────────────
+// THE SAME SEQUENCE AS A COMPETITION ATTEMPT, and that is the entire point:
+// an athlete who has been through this once knows what a recorded solve
+// asks of them, so finding out does not cost them a round of DNFs.
+//
+// IT COMPOSES useSolveRun. The Stage union, every transition, the recording
+// boundary and the leave guards are that hook's, unmodified — this file
+// supplies what a run needs that the machine has no opinion about, and for
+// practice those are all different from a competition's:
+//
+//   THE SCRAMBLE is generated here, client-side, by generateScramble — the
+//     same function the timer page uses. No admin import, no group, no
+//     scramble route, so THE SCRAMBLE GATE IS NOT INVOLVED AT ALL. That is
+//     deliberate: the gate exists to hand an athlete the official scramble
+//     for their assigned group in a live round, and a practice run has
+//     none of those things.
+//   THERE IS NO ROUND, no attempt number and no resume. One run, one clip.
+//   FILING goes to practiceRuns through the practice route, never to
+//     onlineSubmissions. Nothing here can reach the review queue, the
+//     standings, the qualifier or the athlete stats rollup.
+//
+// The stages that exist in a competition and not here are `scrambleWait`
+// (the scramble is generated synchronously, so there is nothing to wait
+// for), `between` and `summary` (one run has no next attempt and no Ao5).
+
+const HOLD_SECONDS = 8;
+const PRACTICE_HREF = '/online-competition/practice';
+
+export default function PracticeRunPage() {
+  const router = useRouter();
+  const params = useParams<{ eventId: string }>();
+  const eventId = params.eventId;
+  const { user, loading: authLoading } = useOnlineAuth();
+  const signedIn = !!user && !user.isAnonymous;
+
+  const [authOpen, setAuthOpen] = useState(false);
+  const recorder = useSolveRecorder();
+
+  /** Generated ONCE per run, client-side. Held in state rather than derived
+   *  per render so a re-render cannot hand the athlete a different scramble
+   *  half-way through the reveal. */
+  const [scramble, setScramble] = useState('');
+  useEffect(() => {
+    setScramble(generateScramble(eventId));
+  }, [eventId]);
+
+  /** Where the recording stands after the keypad. `uploading` is the window
+   *  in which the clip exists only in this tab — which is what the hook's
+   *  leave guards protect, so it is what `unfiledCount` reports. */
+  const [filing, setFiling] = useState<'idle' | 'uploading' | 'filed' | 'failed'>('idle');
+  const [uploadPercent, setUploadPercent] = useState(0);
+  const [fileError, setFileError] = useState('');
+  const [remaining, setRemaining] = useState<number | null>(null);
+  /** The athlete's own result, kept for the closing screen. Nothing scores
+   *  it; it is theirs to read. */
+  const [result, setResult] = useState<{ timeCs: number | null; isDnf: boolean } | null>(null);
+  /** Held across the upload so a retry does not need the keypad again. */
+  const pendingRef = useRef<{ blob: Blob; timeCs: number | null; isDnf: boolean } | null>(null);
+
+  /** How many recordings exist only in this tab: 0 or 1, because a practice
+   *  run is one clip.
+   *
+   *  HELD IN STATE AND SYNCED BY AN EFFECT, not computed inline, because the
+   *  honest answer depends on the hook's own `pendingBlob` — and the hook
+   *  cannot be handed a value derived from its own return. The effect below
+   *  closes that loop, which leaves the guard one render behind the blob
+   *  appearing. That window is a single commit in the same tick, during
+   *  which the athlete cannot navigate; every way OUT of this page (the bar,
+   *  Back, a reload) is reachable only after it has closed. */
+  const [unfiledCount, setUnfiledCount] = useState(0);
+
+  const run = useSolveRun({
+    recorder,
+    scramble,
+    unfiledCount,
+    // A failed filing is the athlete's to retry. In a one-run flow the hook
+    // uses this only to keep a broken upload from being followed by another
+    // recording, which here means it keeps them on the retry.
+    filingFailed: filing === 'failed',
+  });
+
+  useEffect(() => {
+    // The clip exists nowhere else while it is in the keypad's hands
+    // (`pendingBlob`), while it is uploading, and while it waits on a retry.
+    // Once filed it is on the server and leaving costs nothing.
+    const atRisk = run.pendingBlob !== null || filing === 'uploading' || filing === 'failed';
+    setUnfiledCount(atRisk ? 1 : 0);
+  }, [run.pendingBlob, filing]);
+
+  const eventLabel = useMemo(() => onlineCompEventLabel(eventId), [eventId]);
+  const known = useMemo(() => ONLINE_COMP_EVENTS.some((e) => e.id === eventId), [eventId]);
+
+  const file = useCallback(
+    async (payload: { blob: Blob; timeCs: number | null; isDnf: boolean }) => {
+      setFiling('uploading');
+      setFileError('');
+      setUploadPercent(0);
+      try {
+        const res = await uploadAndFilePracticeRun(
+          payload.blob,
+          { event: eventId, scramble, timeCs: payload.timeCs, isDnf: payload.isDnf },
+          setUploadPercent,
+        );
+        setRemaining(res.remaining);
+        pendingRef.current = null;
+        setFiling('filed');
+        run.setStage('sent');
+      } catch (err) {
+        console.error('PracticeRunPage: filing the run failed:', err);
+        setFileError(err instanceof Error ? err.message : 'Бичлэгийг хадгалж чадсангүй');
+        setFiling('failed');
+      }
+    },
+    [eventId, scramble, run],
+  );
+
+  if (!known) {
+    return (
+      <Shell>
+        <p className="oc-v3-status oc-v3-status-error">Ийм төрөл байхгүй.</p>
+        <Link href={PRACTICE_HREF} className="oc-rp-submit" style={{ alignSelf: 'flex-start' }}>
+          Буцах
+        </Link>
+      </Shell>
+    );
+  }
+
+  if (authLoading) return <Shell><p className="oc-v3-status">Ачааллаж байна...</p></Shell>;
+
+  if (!signedIn) {
+    return (
+      <Shell>
+        <p className="oc-v3-status">Туршилтын бичлэг хийхийн тулд нэвтэрнэ үү.</p>
+        <button type="button" className="oc-v3-signin" onClick={() => setAuthOpen(true)}>
+          Нэвтрэх
+        </button>
+        <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
+      </Shell>
+    );
+  }
+
+  return (
+    /* The same full-screen takeover a competition attempt gets, and for the
+       same reason: the sequence being practised is one an athlete runs with
+       nothing else on screen. */
+    <div className="oc-solve-takeover">
+      <div className="oc-practice-bar">
+        <span className="oc-practice-bar-tag">ТУРШИЛТ</span>
+        <span className="oc-practice-bar-event">{eventLabel}</span>
+        <span style={{ flex: 1 }} />
+        {/* The SAME confirm the competition run uses, from the same function
+            in the hook's module — so leaving mid-recording says the same
+            thing in both places. */}
+        <button
+          type="button"
+          className="oc-practice-bar-exit"
+          onClick={() => {
+            if (run.runAtRisk && !window.confirm(leaveConfirmMessage(1))) return;
+            recorder.releaseCamera();
+            router.push(PRACTICE_HREF);
+          }}
+        >
+          ГАРАХ
+        </button>
+      </div>
+
+      <div className="oc-solve-stage">
+        {run.stage === 'lobby' && (
+          <LobbyStage
+            /* Nothing filed and nothing before it: a practice run is one
+               attempt, numbered 1, every time. */
+            filedAttempts={0}
+            nextAttempt={1}
+            hasCamera={recorder.hasCamera}
+            cameraError={recorder.error}
+            videoRef={recorder.videoRef}
+            onRequestCamera={recorder.requestCamera}
+            note="Энэ бичлэг тэмцээнд тооцогдохгүй. Дарааллыг сурахад зориулсан."
+            onStart={() => run.setStage('attemptIntro')}
+          />
+        )}
+
+        {run.stage === 'recordingFailed' && run.recordingFailure !== null && (
+          <RecordingFailedStage
+            reason={run.recordingFailure}
+            attemptNumber={1}
+            cameraError={recorder.error}
+            hasCamera={recorder.hasCamera}
+            /* Nothing is lost by restarting: a practice run has no earlier
+               attempts to protect. */
+            recordedAttempts={0}
+            videoRef={recorder.videoRef}
+            onReconnectCamera={() => {
+              recorder.releaseCamera();
+              void recorder.requestCamera();
+            }}
+            onRestartAttempt={() => {
+              run.setRecordingFailure(null);
+              run.setPendingBlob(null);
+              run.setStage('attemptIntro');
+            }}
+          />
+        )}
+
+        {run.stage === 'attemptIntro' && (
+          <AttemptIntroStage onDone={() => run.setStage('zeroDisplay')} />
+        )}
+
+        {run.stage === 'zeroDisplay' && (
+          <CameraHoldStage
+            seconds={HOLD_SECONDS}
+            label="ЦАГАА ХАРУУЛАХ ХЭСЭГ"
+            instruction={() => 'Цагийг 0.00 болгож, хугацаа дуустал камерт харуулна уу.'}
+            footnote={null}
+            endLabel="ХОЛИЛТ ХАРАХ"
+            videoRef={recorder.videoRef}
+            onDone={() => {
+              recorder.mark('scrambleShown');
+              run.setStage('scrambleReveal');
+            }}
+          />
+        )}
+
+        {run.stage === 'scrambleReveal' && (
+          <RevealStage
+            scramble={scramble}
+            videoRef={recorder.videoRef}
+            onDone={() => {
+              recorder.mark('coverStart');
+              run.setStage('cover');
+            }}
+          />
+        )}
+
+        {run.stage === 'cover' && (
+          <CoverStage seconds={COVER_SECONDS} videoRef={recorder.videoRef} onDone={() => run.setStage('readyPrompt')} />
+        )}
+
+        {run.stage === 'readyPrompt' && (
+          <ReadyPromptStage
+            onDone={() => {
+              recorder.mark('solveStart');
+              run.setStage('rec');
+            }}
+          />
+        )}
+
+        {run.stage === 'rec' && (
+          <RecStage
+            videoRef={recorder.videoRef}
+            onFinish={() => {
+              recorder.mark('solveEnd');
+              run.setStage('finishHold');
+            }}
+          />
+        )}
+
+        {run.stage === 'finishHold' && (
+          <CameraHoldStage
+            seconds={HOLD_SECONDS}
+            label="ЦАГАА ХАРУУЛ · ЭВЛҮҮЛЭЛТИЙН ДАРАА"
+            instruction={() => 'Цагийг хугацаа дуустал камерт харуулна уу.'}
+            footnote={null}
+            endLabel="ШООГОО ХАРУУЛАХ"
+            videoRef={recorder.videoRef}
+            onDone={() => {
+              recorder.mark('cubeShown');
+              run.setStage('cubeCheck');
+            }}
+          />
+        )}
+
+        {run.stage === 'cubeCheck' && (
+          <CameraHoldStage
+            seconds={HOLD_SECONDS}
+            label="ШООГОО ХАРУУЛ · ЭЦСИЙН БАЙДАЛ"
+            instruction={() =>
+              'Шоонд гар хүрэлгүйгээр, камераар дохио дуугартал шоог тойруулан бүх талыг харуулна уу.'
+            }
+            footnote={null}
+            endLabel="ҮЗҮҮЛЭЛТ БИЧИХ"
+            onElapsed={recorder.playBeep}
+            videoRef={recorder.videoRef}
+            /* THE RECORDING BOUNDARY, and it is the hook's: finishRecording
+               stops the clip, checks it is not empty and hands the blob on.
+               Nothing about it is re-implemented here. */
+            onDone={run.finishRecording}
+          />
+        )}
+
+        {/* The same gate the competition run has: no blob, no keypad. */}
+        {run.stage === 'entry' && run.pendingBlob && (
+          <EntryStage
+            onConfirm={(entered) => {
+              const blob = run.pendingBlob!;
+              setResult(entered);
+              pendingRef.current = { blob, ...entered };
+              run.setPendingBlob(null);
+              void file({ blob, ...entered });
+            }}
+          />
+        )}
+
+        {run.stage === 'sent' && (
+          <div className="oc-practice-done">
+            <p className="oc-practice-done-title">БИЧЛЭГ ХАДГАЛАГДЛАА</p>
+            <p className="oc-practice-done-body">
+              {result && !result.isDnf && result.timeCs !== null
+                ? `Таны цаг: ${fmtCentiseconds(result.timeCs)}. `
+                : result?.isDnf
+                  ? 'DNF. '
+                  : ''}
+              Админ бичлэгийг шалгаж, холилтоо зөв хийсэн эсэхийг хэлнэ. Энэ цаг хаана ч тооцогдохгүй.
+            </p>
+            {remaining !== null && (
+              <p className="oc-practice-done-left">{remaining} бичлэг үлдсэн</p>
+            )}
+            <Link href={PRACTICE_HREF} className="oc-rp-submit" style={{ alignSelf: 'flex-start' }}>
+              Миний туршилтууд
+            </Link>
+          </div>
+        )}
+      </div>
+
+      {/* Filing, over whatever stage is on screen — the upload runs while
+          the athlete reads the closing screen, exactly as a competition
+          attempt files behind the next one. */}
+      {filing === 'uploading' && (
+        <div className="oc-practice-filing" role="status">
+          <span>Бичлэгийг хадгалж байна… {uploadPercent}%</span>
+        </div>
+      )}
+      {filing === 'failed' && (
+        <div className="oc-practice-filing oc-practice-filing-err" role="alert">
+          <span>{fileError}</span>
+          <button
+            type="button"
+            className="oc-practice-retry"
+            onClick={() => {
+              const p = pendingRef.current;
+              if (p) void file(p);
+            }}
+          >
+            ДАХИН ОРОЛДОХ
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Shell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="oc-v3-page">
+      <main className="oc-v3-main">{children}</main>
+    </div>
+  );
+}

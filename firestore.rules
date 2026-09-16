@@ -728,6 +728,48 @@ service cloud.firestore {
       }
     }
 
+    // ── Practice runs ───────────────────────────────────────────────────
+    // A recorded solve with no competition attached: the practice area's
+    // documents. DELIBERATELY NOT onlineSubmissions — nothing that reads
+    // that collection (the review queue, the standings, the qualifier, the
+    // athlete stats rollup) may ever see one, and a separate collection is
+    // the only way to guarantee that rather than remember it.
+    //
+    // READ: the owner, or an admin. The same rule onlineSubmissions uses,
+    // for the same reason — a practice video is the athlete's own attempt
+    // at learning, and the only other party with business in it is the
+    // person reviewing it.
+    //
+    // WRITE: NOBODY. This is less rules surface than a submission needs,
+    // not more, and it is deliberate:
+    //
+    //   THE TEN-RUN CAP CANNOT BE EXPRESSED HERE. Rules cannot count, so a
+    //   cap written here would be a cap enforced nowhere. Counting the
+    //   athlete's existing runs and writing the new one has to be one
+    //   atomic step, which is a transaction, which is a server route —
+    //   /api/online-competition/practice, the only writer of this
+    //   collection. It authorises with the athlete's own verified token and
+    //   attributes the run to that uid, never to one in the body.
+    //
+    //   A CLIENT-WRITABLE COUNTER WOULD BE FORGEABLE. The obvious
+    //   alternative — a `practiceRunsUsed` field on the athlete's profile —
+    //   fails because the onlineParticipants rule above validates named
+    //   fields but has no keys().hasOnly(), so an athlete may add any field
+    //   to their own document. The allowance is therefore COUNTED from
+    //   these documents and never stored.
+    //
+    //   THE REVIEW IS AN ADMIN ACTION, and the admin routes use the Admin
+    //   SDK, which bypasses these rules entirely. So `allow write: if
+    //   false` costs the admin nothing.
+    //
+    // No index is needed for any of it: every query is a single-field
+    // equality on `uid` or `status`, or a full read by the retention sweep.
+    match /practiceRuns/{runId} {
+      allow read: if isSignedIn() &&
+                     (resource.data.uid == request.auth.uid || isAdmin());
+      allow write: if false;
+    }
+
     // ── One attempt of one run ──────────────────────────────────────────
     // The ONLY thing an athlete may write here is a fresh, unjudged
     // attempt of their own. Before this, `create` checked nothing but the
