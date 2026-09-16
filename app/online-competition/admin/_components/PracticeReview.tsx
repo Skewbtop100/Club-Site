@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { resolveVideoSrc } from '@/lib/online-competition/video-source';
+import ScramblePreview from '@/components/shared/ScramblePreview';
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
 import {
   PRACTICE_REFUSAL_REASONS,
@@ -22,6 +23,24 @@ import type { AdminPracticeResponse, AdminPracticeRow } from '@/app/api/online-c
 // THE QUESTION HERE IS ONE QUESTION: did this athlete scramble and solve
 // correctly? So there is no time entry, no +2 and no DNF. The athlete's own
 // typed time is shown because it is theirs to see, and it decides nothing.
+//
+// ── THE EVIDENCE: THE VIDEO AND THE SCRAMBLE, SIDE BY SIDE ──
+// The 2D diagram is what makes the one question quick: comparing a cube on
+// video against a picture of the state the scramble should produce is a
+// glance, and comparing it against twenty moves of notation is not.
+//
+// It is the SAME component the competition review panel uses —
+// components/shared/ScramblePreview, unmodified, at visualization="2D" —
+// and it needs exactly the two things a practice run already stores: the
+// scramble text and the event. Nothing was added to the document for it.
+//
+// The arrangement follows that panel's: side by side, stacking into one
+// column at the SAME 1100px it stacks at, so an admin moving between the
+// two screens meets the same break.
+//
+// THERE ARE NO JUMP BUTTONS, and they are not omitted for want of screen
+// space: a practice run stores no marks. See the report on this changeset —
+// adding the recorder fields is its own change.
 
 const DECISIONS: { key: PracticeDecision; label: string; tone: string }[] = [
   { key: 'correct', label: 'ЗӨВ', tone: '#4FD07A' },
@@ -170,19 +189,45 @@ export default function PracticeReview() {
 
                 {open && (
                   <div className="oc-practice-adm-body">
-                    {/* THE SCRAMBLE THE ATHLETE WAS SHOWN. Without it the
-                        review question is unanswerable — "did they apply
-                        this scramble" needs the scramble. */}
-                    <div className="oc-practice-adm-scramble">
-                      <span className="oc-adm-sublabel">ХОЛИЛТ</span>
-                      <code>{run.scramble || '—'}</code>
-                    </div>
+                    {/* THE VIDEO AND THE SCRAMBLE, SIDE BY SIDE. The
+                        comparison IS the review, so the two things being
+                        compared are next to each other rather than one
+                        above the other. */}
+                    <div className="oc-practice-adm-evidence">
+                      <div className="oc-practice-adm-videobox">
+                        {src === null ? (
+                          <p className="oc-sc-msg-err">Бичлэг байхгүй (устсан эсвэл тохируулаагүй).</p>
+                        ) : (
+                          <video
+                            className="oc-practice-adm-video"
+                            src={src}
+                            controls
+                            playsInline
+                            preload="metadata"
+                          />
+                        )}
+                      </div>
 
-                    {src === null ? (
-                      <p className="oc-sc-msg-err">Бичлэг байхгүй (устсан эсвэл тохируулаагүй).</p>
-                    ) : (
-                      <video className="oc-practice-adm-video" src={src} controls playsInline preload="metadata" />
-                    )}
+                      {/* THE SCRAMBLE THE ATHLETE WAS SHOWN, as notation AND
+                          as the state it produces. Without it the review
+                          question is unanswerable — "did they apply this
+                          scramble" needs the scramble; without the diagram
+                          it is answerable but slow. */}
+                      <div className="oc-practice-adm-scramble">
+                        <span className="oc-adm-sublabel">ХОЛИЛТ</span>
+                        <code>{run.scramble || '—'}</code>
+                        {/* Definite width AND height, as the competition
+                            panel's own comment says: ScramblePreview sizes
+                            its player to 100% of the container, so an
+                            auto-height box gives it nothing to resolve
+                            against. */}
+                        {run.scramble && (
+                          <div className="oc-practice-adm-diagram">
+                            <ScramblePreview eventId={run.event} scramble={run.scramble} visualization="2D" />
+                          </div>
+                        )}
+                      </div>
+                    </div>
 
                     <div className="oc-practice-adm-reasons">
                       <span className="oc-adm-sublabel">ТАТГАЛЗАХ ШАЛТГААН</span>

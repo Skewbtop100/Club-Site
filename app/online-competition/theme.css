@@ -9913,6 +9913,20 @@ button.oc-rv-cell:hover {
   flex-direction: column;
   gap: 12px;
 }
+/* THE EVIDENCE: the video and the scramble, side by side.
+   Two columns, collapsing to one at the SAME 1100px the competition review
+   panel (.oc-rv-panel) collapses at — an admin moving between the two
+   screens should meet the same break, not two. */
+.oc-practice-adm-evidence {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+.oc-practice-adm-videobox {
+  min-width: 0;
+}
+
 /* THE SCRAMBLE THE ATHLETE WAS SHOWN, and the reason this panel exists:
    "did they apply this scramble" is unanswerable without it. Monospace and
    wrapping, because a scramble is a sequence and must not be truncated. */
@@ -9920,9 +9934,19 @@ button.oc-rv-cell:hover {
   display: flex;
   flex-direction: column;
   gap: 5px;
+  min-width: 0;
   border: 1px solid #1C1C21;
   background: #08080A;
   padding: 9px 11px;
+}
+/* 150px, the competition panel's own height for the same component — the
+   2D net's bounding box is what the number is fitted to, so matching it is
+   what makes the diagram the same size on both screens. */
+.oc-practice-adm-diagram {
+  display: flex;
+  width: 100%;
+  height: 150px;
+  align-self: center;
 }
 .oc-practice-adm-scramble code {
   font: 500 12px/19px var(--oc-font-mono), monospace;
@@ -9954,4 +9978,14 @@ button.oc-rv-cell:hover {
 .oc-practice-adm-note {
   font: 400 10px/16px var(--oc-font-heading), sans-serif;
   color: #6E6A62;
+}
+
+/* Stacked, at the competition review panel's own breakpoint. The video goes
+   first: on a narrow screen the admin scrubs it and then looks down at the
+   diagram, rather than scrolling past a picture to reach the thing that
+   plays. */
+@media (max-width: 1100px) {
+  .oc-practice-adm-evidence {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
