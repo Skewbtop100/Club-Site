@@ -123,6 +123,45 @@ console.log('\n  -- a refusal needs a reason --');
     Array.isArray(P.PRACTICE_REFUSAL_REASONS) && P.PRACTICE_REFUSAL_REASONS.length >= 3);
 }
 
+console.log('\n  -- the stage marks, read defensively --');
+{
+  // THE ROUTE IS THE ONLY PLACE THIS CAN BE CHECKED: practiceRuns is closed
+  // to clients, so there are no firestore.rules validating the shape the way
+  // they do for a submission's marks.
+  const all = {
+    scrambleShown: 1000, coverStart: 2000, solveStart: 3000,
+    solveEnd: 4000, cubeShown: 5000, recordingEnd: 6000,
+  };
+  eq('six keys, and only these six', P.PRACTICE_MARK_KEYS.length, 6);
+  eq('a full set survives', JSON.stringify(P.readPracticeMarks(all)), JSON.stringify(all));
+  // HALF-FILLED IS LEGAL AND NORMAL. A run that cannot be filed is a video
+  // thrown away; a jump with nothing to aim at just disables itself.
+  eq('a partial set survives as a partial set',
+    JSON.stringify(P.readPracticeMarks({ solveStart: 1, solveEnd: 2 })),
+    JSON.stringify({ solveStart: 1, solveEnd: 2 }));
+  eq('nothing at all is {}', JSON.stringify(P.readPracticeMarks(undefined)), '{}');
+  eq('null is {}', JSON.stringify(P.readPracticeMarks(null)), '{}');
+  eq('an array is {}', JSON.stringify(P.readPracticeMarks([1, 2])), '{}');
+  eq('a string is {}', JSON.stringify(P.readPracticeMarks('x')), '{}');
+  // A RUN FILED BEFORE MARKS EXISTED reads back as {}, never undefined, so
+  // the panel never has to guard for the field's absence.
+  eq('a document with no marks field reads back as {}', JSON.stringify(P.readPracticeMarks({})), '{}');
+  // The guards that keep a malformed mark from becoming a NaN seek.
+  eq('a numeric string is dropped', JSON.stringify(P.readPracticeMarks({ solveStart: '5' })), '{}');
+  eq('NaN is dropped', JSON.stringify(P.readPracticeMarks({ solveStart: NaN })), '{}');
+  eq('Infinity is dropped', JSON.stringify(P.readPracticeMarks({ solveStart: Infinity })), '{}');
+  eq('a negative offset is dropped', JSON.stringify(P.readPracticeMarks({ solveStart: -1 })), '{}');
+  eq('zero survives - it is a real point in a clip',
+    JSON.stringify(P.readPracticeMarks({ solveStart: 0 })), JSON.stringify({ solveStart: 0 }));
+  // Anything the client invents is ignored rather than stored.
+  eq('an unknown key is dropped',
+    JSON.stringify(P.readPracticeMarks({ solveStart: 1, nonsense: 2 })),
+    JSON.stringify({ solveStart: 1 }));
+  eq('one bad key does not take the good ones with it',
+    JSON.stringify(P.readPracticeMarks({ solveStart: 1, solveEnd: NaN })),
+    JSON.stringify({ solveStart: 1 }));
+}
+
 console.log('\n  -- retention: two clocks, whichever is first --');
 {
   eq('the review clock is 7 days', P.PRACTICE_REVIEWED_RETENTION_DAYS, 7);

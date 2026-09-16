@@ -9,6 +9,8 @@
 import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore';
 import {
   PRACTICE_RUN_LIMIT,
+  readPracticeMarks,
+  type PracticeMarkKey,
   normalizePracticeStatus,
   practiceAllowance,
   practiceExpiryMs,
@@ -42,6 +44,9 @@ export interface PracticeRunView {
   timeCs: number | null;
   isDnf: boolean;
   videoKey: string;
+  /** Stage offsets into the clip, for the review panel's jump buttons.
+   *  Half-filled or absent is legal and normal — see readPracticeMarks. */
+  marks: Partial<Record<PracticeMarkKey, number>>;
   status: PracticeRunStatus;
   /** Why it was refused. Only ever set with status 'incorrect'. */
   reason: string | null;
@@ -64,6 +69,10 @@ function toView(id: string, d: Record<string, unknown>): PracticeRunView {
     timeCs: typeof d.timeCs === 'number' ? d.timeCs : null,
     isDnf: d.isDnf === true,
     videoKey: typeof d.videoKey === 'string' ? d.videoKey : '',
+    // Read through the same function that validated them on the way in, so
+    // a document written before marks existed reads back as {} rather than
+    // as undefined the panel has to guard.
+    marks: readPracticeMarks(d.marks),
     status,
     reason: typeof d.reason === 'string' && d.reason.trim() ? d.reason.trim() : null,
     createdAtMs,
@@ -85,6 +94,36 @@ export async function listAthletePracticeRuns(db: Firestore, uid: string): Promi
     .sort((a, b) => (b.createdAtMs ?? 0) - (a.createdAtMs ?? 0));
 }
 
+/** Every run belonging to any of these athletes, newest first.
+ *
+ *  WHY IT EXISTS: the admin screen is one ROW PER ATHLETE with their runs
+ *  laid out across it, and the pending queue alone cannot fill such a row.
+ *  An athlete whose fourth run is waiting has three decided ones the admin
+ *  needs to see next to it — "this one was already refused for the same
+ *  thing" is most of the judgement — and a row showing only the pending run
+ *  would also have to lie about how many of the ten are gone.
+ *
+ *  `uid in [...]`, chunked. An equality-family filter on one field, so it
+ *  uses the automatic single-field index and needs no composite — the same
+ *  index the per-athlete query already uses. CHUNKED AT TEN because that is
+ *  the smallest documented ceiling for `in`; the number of athletes in a
+ *  review queue is small, so a handful of round trips is cheaper than the
+ *  whole collection.
+ *
+ *  An empty list is no query at all, not a query matching everything. */
+export async function listRunsForUids(db: Firestore, uids: readonly string[]): Promise<PracticeRunView[]> {
+  const unique = [...new Set(uids)].filter(Boolean);
+  if (unique.length === 0) return [];
+  const chunks: string[][] = [];
+  for (let i = 0; i < unique.length; i += 10) chunks.push(unique.slice(i, i + 10));
+  const snaps = await Promise.all(
+    chunks.map((chunk) => db.collection(PRACTICE_COLLECTION).where('uid', 'in', chunk).get()),
+  );
+  return snaps
+    .flatMap((snap) => snap.docs.map((d) => toView(d.id, d.data())))
+    .sort((a, b) => (b.createdAtMs ?? 0) - (a.createdAtMs ?? 0));
+}
+
 /** Files one run and spends one of the athlete's ten.
  *
  *  THE CAP IS ENFORCED IN A TRANSACTION, and that is the reason this is a
@@ -99,7 +138,15 @@ export async function listAthletePracticeRuns(db: Firestore, uid: string): Promi
  *  things early. */
 export async function filePracticeRun(
   db: Firestore,
-  input: { uid: string; event: string; scramble: string; timeCs: number | null; isDnf: boolean; videoKey: string },
+  input: {
+    uid: string;
+    event: string;
+    scramble: string;
+    timeCs: number | null;
+    isDnf: boolean;
+    videoKey: string;
+    marks: Partial<Record<PracticeMarkKey, number>>;
+  },
 ): Promise<{ id: string; remaining: number }> {
   const col = db.collection(PRACTICE_COLLECTION);
   const ref = col.doc();
@@ -123,6 +170,7 @@ export async function filePracticeRun(
       timeCs: input.timeCs,
       isDnf: input.isDnf,
       videoKey: input.videoKey,
+      marks: input.marks,
       status: 'pending' satisfies PracticeRunStatus,
       reason: null,
       createdAt: FieldValue.serverTimestamp(),

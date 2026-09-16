@@ -243,8 +243,15 @@ export default function PracticePage() {
                     const open = playing === r.id;
                     return (
                       <div key={r.id} className="oc-practice-row">
+                        {/* THREE THINGS: the time, the status, the
+                            recording. The event chip went — this page
+                            starts 3x3x3 runs and nothing else, so it said
+                            the same word on every row — and so did the
+                            per-row expiry date, which repeated the rule
+                            stated once above the list. The date stays as
+                            the quietest thing in the row: it is the only
+                            way to tell two runs of a similar time apart. */}
                         <div className="oc-practice-row-head">
-                          <span className="oc-practice-row-event">{r.event.toUpperCase()}</span>
                           <span className="oc-practice-row-time">
                             {r.isDnf ? 'DNF' : r.timeCs !== null ? fmtCentiseconds(r.timeCs) : 'цаг бичээгүй'}
                           </span>
@@ -281,9 +288,6 @@ export default function PracticePage() {
                             >
                               {open ? 'ХААХ' : 'БИЧЛЭГ ҮЗЭХ'}
                             </button>
-                          )}
-                          {r.expiresAtMs !== null && (
-                            <span className="oc-practice-row-expiry">{fmtDay(r.expiresAtMs)}-нд устна</span>
                           )}
                         </div>
 

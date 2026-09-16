@@ -1,65 +1,88 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { resolveVideoSrc } from '@/lib/online-competition/video-source';
-import ScramblePreview from '@/components/shared/ScramblePreview';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fmtCentiseconds } from '@/lib/online-competition/time-utils';
 import {
-  PRACTICE_REFUSAL_REASONS,
+  PRACTICE_RUN_LIMIT,
+  practiceAllowance,
   practiceReviewValid,
+  spendsAllowance,
   type PracticeDecision,
 } from '@/lib/online-competition/practice';
 import type { AdminPracticeResponse, AdminPracticeRow } from '@/app/api/online-competition/admin-practice/route';
+import PracticeRunPanel, { PRACTICE_STATUS_TONE } from './PracticeRunPanel';
 
 // ── Туршилтын шүүлт ─────────────────────────────────────────────────────
-// ITS OWN SCREEN, not a tab of Шүүлт, and the difference is not cosmetic.
-// That queue is built around a competition: it preselects one, fetches its
-// registrations, its submissions and its scrambles overview, groups rows by
-// event and round, and bulk-approves a round at a time. A practice run has
-// no competition, no round, no roster and no ranking — it would be a row
-// with every one of those columns empty, and "bulk approve this round" over
-// unrelated athletes' practice runs is not an operation that means anything.
+// ONE ROW PER ATHLETE, their runs laid out across it — the judging grid's
+// shape, because the unit an admin works in is an athlete and not a file.
+// Ten runs as ten rows put the same person in ten places, so "this one was
+// already refused for exactly this" took ten rows of reading to notice.
 //
-// THE QUESTION HERE IS ONE QUESTION: did this athlete scramble and solve
-// correctly? So there is no time entry, no +2 and no DNF. The athlete's own
-// typed time is shown because it is theirs to see, and it decides nothing.
+// WHAT REUSES FROM ReviewGrid, AND WHAT COULD NOT:
+//   · THE INTERACTION reuses whole: a grid of cells, one cell per attempt,
+//     clicking a cell opens the detail panel below the grid, the open cell
+//     outlined. Same states, same colours, same place.
+//   · THE CELL AND HEADING CLASSES reuse literally — .oc-rv-cell and its
+//     -pending/-dnf/-selected variants, .oc-rv-initials, .oc-rv-th,
+//     .oc-rv-avg — so a cell means the same thing on both screens.
+//   · THE ROW TEMPLATE COULD NOT. `.oc-rv-row` is
+//     `minmax(180px,1.4fr) repeat(5,78px) 92px 92px 132px`: five fixed
+//     attempt columns, an average and a single. A practice athlete has
+//     between zero and ten runs (more, counting redos, which do not spend
+//     one of the ten) and no average, no single and no ranking at all. So
+//     the runs sit in ONE flexible track that wraps, and the row keeps the
+//     name column and a used-of-ten column on either side of it.
+//   · GridRow ITSELF COULD NOT BE REUSED: ReviewGrid exports AthleteRow but
+//     not GridRow, and exporting it would mean editing the competition
+//     review path — which is not authorised (only the JUMPS extraction
+//     was). It is reported rather than done.
 //
-// ── THE EVIDENCE: THE VIDEO AND THE SCRAMBLE, SIDE BY SIDE ──
-// The 2D diagram is what makes the one question quick: comparing a cube on
-// video against a picture of the state the scramble should produce is a
-// glance, and comparing it against twenty moves of notation is not.
-//
-// It is the SAME component the competition review panel uses —
-// components/shared/ScramblePreview, unmodified, at visualization="2D" —
-// and it needs exactly the two things a practice run already stores: the
-// scramble text and the event. Nothing was added to the document for it.
-//
-// The arrangement follows that panel's: side by side, stacking into one
-// column at the SAME 1100px it stacks at, so an admin moving between the
-// two screens meets the same break.
-//
-// THERE ARE NO JUMP BUTTONS, and they are not omitted for want of screen
-// space: a practice run stores no marks. See the report on this changeset —
-// adding the recorder fields is its own change.
+// THE QUESTION HERE IS STILL ONE QUESTION: did this athlete scramble and
+// solve correctly? There is no time entry, no +2 and no DNF. The athlete's
+// own typed time shows because it is theirs to see, and it decides nothing.
 
-const DECISIONS: { key: PracticeDecision; label: string; tone: string }[] = [
-  { key: 'correct', label: 'ЗӨВ', tone: '#4FD07A' },
-  { key: 'incorrect', label: 'БУРУУ', tone: '#E8543C' },
-  { key: 'redo', label: 'ДАХИН ИЛГЭЭХ', tone: '#E0A020' },
-];
+interface PracticeAthleteRow {
+  uid: string;
+  name: string;
+  /** Oldest first, so the row reads left to right as the athlete's history
+   *  — the same direction attempt 1 to attempt 5 reads in. */
+  runs: AdminPracticeRow[];
+  pending: number;
+  used: number;
+}
 
-const STATUS_LABEL: Record<string, string> = {
-  pending: 'ХЯНАГДААГҮЙ',
-  correct: 'ЗӨВ',
-  incorrect: 'БУРУУ',
-  redo: 'ДАХИН ИЛГЭЭХ',
-};
+/** Initials, the same two-letter fallback the judging grid draws. */
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '—';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
 
-function fmtWhen(ms: number | null): string {
-  if (ms === null) return '—';
-  const d = new Date(ms);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+/** What a cell shows. A run with no typed time is a real run with a real
+ *  video — it files deliberately — so it gets a dash rather than being
+ *  drawn as empty. */
+function cellLabel(run: AdminPracticeRow): string {
+  if (run.isDnf) return 'DNF';
+  return run.timeCs !== null ? fmtCentiseconds(run.timeCs) : '—:—';
+}
+
+/** THE CELL'S STATE, mapped onto the judging grid's own classes where they
+ *  mean the same thing: `pending` is amber there and here, and a refusal is
+ *  the red a DNF is. `correct` and `redo` have no counterpart there, so they
+ *  are practice's own — .oc-rv-cell keeps the geometry either way. */
+function cellClass(run: AdminPracticeRow, selected: string | null): string {
+  const state =
+    run.status === 'pending'
+      ? 'oc-rv-cell-pending'
+      : run.status === 'incorrect'
+        ? 'oc-rv-cell-dnf'
+        : run.status === 'correct'
+          ? 'oc-pg-cell-ok'
+          : 'oc-pg-cell-redo';
+  return ['oc-rv-cell', 'oc-pg-cell', state, run.id === selected ? 'oc-rv-cell-selected' : '']
+    .filter(Boolean)
+    .join(' ');
 }
 
 export default function PracticeReview() {
@@ -68,7 +91,7 @@ export default function PracticeReview() {
   const [error, setError] = useState('');
   /** Which run is open. One at a time: each carries a video file. */
   const [openId, setOpenId] = useState<string | null>(null);
-  /** Per-run draft reason, so switching between rows does not lose typing. */
+  /** Per-run draft reason, so moving between runs does not lose typing. */
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
   const [rowError, setRowError] = useState<{ id: string; text: string } | null>(null);
@@ -88,6 +111,49 @@ export default function PracticeReview() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  /** ONE ROW PER ATHLETE. The route sends every run of every athlete in
+   *  scope — including their decided ones in the pending scope, so a row is
+   *  never a partial history — and the ХЯНАГДААГҮЙ tab then shows only the
+   *  athletes who have something waiting. */
+  const rows: PracticeAthleteRow[] = useMemo(() => {
+    if (data === null) return [];
+    const byUid = new Map<string, PracticeAthleteRow>();
+    for (const run of data.runs) {
+      const row = byUid.get(run.uid) ?? {
+        uid: run.uid,
+        name: run.displayName,
+        runs: [],
+        pending: 0,
+        used: 0,
+      };
+      row.runs.push(run);
+      if (run.status === 'pending') row.pending += 1;
+      byUid.set(run.uid, row);
+    }
+    const all = [...byUid.values()].map((row) => ({
+      ...row,
+      runs: [...row.runs].sort((a, b) => (a.createdAtMs ?? 0) - (b.createdAtMs ?? 0)),
+      // The allowance from the same function the athlete's own page and the
+      // filing route use, so the three cannot disagree about what is spent.
+      used: practiceAllowance(row.runs.map((r) => r.status)).used,
+    }));
+    const shown = scope === 'pending' ? all.filter((r) => r.pending > 0) : all;
+    // Waiting first, and the longest wait at the top of that: a queue is
+    // worked from its head.
+    return shown.sort((a, b) => {
+      if ((b.pending > 0 ? 1 : 0) !== (a.pending > 0 ? 1 : 0)) return b.pending - a.pending;
+      const aOld = Math.min(...a.runs.map((r) => r.createdAtMs ?? Infinity));
+      const bOld = Math.min(...b.runs.map((r) => r.createdAtMs ?? Infinity));
+      return aOld - bOld;
+    });
+  }, [data, scope]);
+
+  /** THE QUEUE THE PANEL'S ‹ › MOVE THROUGH: every run on the rows in view,
+   *  in the order they are drawn, so moving on lands where the eye would. */
+  const queue = useMemo(() => rows.flatMap((r) => r.runs), [rows]);
+  const queueIndex = openId ? queue.findIndex((r) => r.id === openId) : -1;
+  const openRun = queueIndex >= 0 ? queue[queueIndex] : null;
 
   async function decide(run: AdminPracticeRow, decision: PracticeDecision) {
     const reason = reasons[run.id] ?? '';
@@ -128,19 +194,26 @@ export default function PracticeReview() {
           role="tab"
           aria-selected={scope === 'pending'}
           className={`oc-rd-tab${scope === 'pending' ? ' oc-rd-tab-on' : ''}`}
-          onClick={() => setScope('pending')}
+          onClick={() => {
+            setScope('pending');
+            // The open panel belongs to the scope being left.
+            setOpenId(null);
+          }}
         >
           ХЯНАГДААГҮЙ
-          {data && scope === 'pending' && (
-            <span style={{ marginLeft: 6, color: '#6E6A62' }}>{data.runs.length}</span>
-          )}
+          {/* The number of runs WAITING, not the number of rows: a row can
+              carry several. */}
+          {data && <span style={{ marginLeft: 6, color: '#6E6A62' }}>{data.pending}</span>}
         </button>
         <button
           type="button"
           role="tab"
           aria-selected={scope === 'all'}
           className={`oc-rd-tab${scope === 'all' ? ' oc-rd-tab-on' : ''}`}
-          onClick={() => setScope('all')}
+          onClick={() => {
+            setScope('all');
+            setOpenId(null);
+          }}
         >
           БҮГД
         </button>
@@ -150,138 +223,86 @@ export default function PracticeReview() {
         <p className="oc-sc-msg-err">{error}</p>
       ) : data === null ? (
         <p className="oc-v3-status">Ачааллаж байна...</p>
-      ) : data.runs.length === 0 ? (
+      ) : rows.length === 0 ? (
         <p className="oc-sc-empty">
           {scope === 'pending' ? 'Хянах бичлэг алга.' : 'Туршилтын бичлэг алга.'}
         </p>
       ) : (
-        <div className="oc-sc-card">
-          {data.runs.map((run) => {
-            const src = resolveVideoSrc({ videoKey: run.videoKey });
-            const open = openId === run.id;
-            const reason = reasons[run.id] ?? '';
-            return (
-              <div key={run.id} className="oc-practice-adm-row">
-                <div className="oc-practice-adm-head">
-                  <span className="oc-practice-adm-name">{run.displayName}</span>
-                  <span className="oc-practice-adm-meta">
-                    {run.event.toUpperCase()} ·{' '}
-                    {run.isDnf ? 'DNF' : run.timeCs !== null ? fmtCentiseconds(run.timeCs) : 'цаг бичээгүй'} ·{' '}
-                    {fmtWhen(run.createdAtMs)}
-                  </span>
-                  <span style={{ flex: 1 }} />
-                  <span className="oc-practice-adm-status">
-                    {STATUS_LABEL[run.status] ?? run.status}
-                  </span>
-                  <button
-                    type="button"
-                    className="oc-sc-btn"
-                    aria-expanded={open}
-                    onClick={() => setOpenId(open ? null : run.id)}
-                  >
-                    {open ? 'ХААХ' : 'ҮЗЭХ'}
-                  </button>
-                </div>
+        <div className="oc-pg-grid">
+          <div className="oc-pg-head">
+            <span className="oc-rv-th">Нэр</span>
+            <span className="oc-rv-th">Бичлэгүүд</span>
+            <span className="oc-rv-th" style={{ textAlign: 'center' }}>
+              Ашигласан
+            </span>
+          </div>
 
-                {run.status === 'incorrect' && run.reason && (
-                  <p className="oc-practice-adm-reason">Шалтгаан: {run.reason}</p>
-                )}
-
-                {open && (
-                  <div className="oc-practice-adm-body">
-                    {/* THE VIDEO AND THE SCRAMBLE, SIDE BY SIDE. The
-                        comparison IS the review, so the two things being
-                        compared are next to each other rather than one
-                        above the other. */}
-                    <div className="oc-practice-adm-evidence">
-                      <div className="oc-practice-adm-videobox">
-                        {src === null ? (
-                          <p className="oc-sc-msg-err">Бичлэг байхгүй (устсан эсвэл тохируулаагүй).</p>
-                        ) : (
-                          <video
-                            className="oc-practice-adm-video"
-                            src={src}
-                            controls
-                            playsInline
-                            preload="metadata"
-                          />
-                        )}
-                      </div>
-
-                      {/* THE SCRAMBLE THE ATHLETE WAS SHOWN, as notation AND
-                          as the state it produces. Without it the review
-                          question is unanswerable — "did they apply this
-                          scramble" needs the scramble; without the diagram
-                          it is answerable but slow. */}
-                      <div className="oc-practice-adm-scramble">
-                        <span className="oc-adm-sublabel">ХОЛИЛТ</span>
-                        <code>{run.scramble || '—'}</code>
-                        {/* Definite width AND height, as the competition
-                            panel's own comment says: ScramblePreview sizes
-                            its player to 100% of the container, so an
-                            auto-height box gives it nothing to resolve
-                            against. */}
-                        {run.scramble && (
-                          <div className="oc-practice-adm-diagram">
-                            <ScramblePreview eventId={run.event} scramble={run.scramble} visualization="2D" />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="oc-practice-adm-reasons">
-                      <span className="oc-adm-sublabel">ТАТГАЛЗАХ ШАЛТГААН</span>
-                      <div className="oc-practice-adm-chips">
-                        {PRACTICE_REFUSAL_REASONS.map((r) => (
-                          <button
-                            key={r}
-                            type="button"
-                            className="oc-sc-btn"
-                            onClick={() => setReasons((p) => ({ ...p, [run.id]: r }))}
-                          >
-                            {r}
-                          </button>
-                        ))}
-                      </div>
-                      <textarea
-                        className="oc-v3-input"
-                        rows={2}
-                        maxLength={data.reasonMax}
-                        value={reason}
-                        placeholder="Эсвэл өөрөө бичнэ үү"
-                        onChange={(e) => setReasons((p) => ({ ...p, [run.id]: e.target.value }))}
-                      />
-                    </div>
-
-                    <div className="oc-practice-adm-actions">
-                      {DECISIONS.map((d) => (
-                        <button
-                          key={d.key}
-                          type="button"
-                          className="oc-sc-btn"
-                          style={{ borderColor: d.tone, color: d.tone }}
-                          disabled={busyId === run.id || !practiceReviewValid(d.key, reason)}
-                          title={
-                            practiceReviewValid(d.key, reason)
-                              ? undefined
-                              : 'Татгалзахын тулд шалтгаан бичнэ үү'
-                          }
-                          onClick={() => decide(run, d.key)}
-                        >
-                          {d.label}
-                        </button>
-                      ))}
-                    </div>
-                    <p className="oc-practice-adm-note">
-                      ДАХИН ИЛГЭЭХ нь тамирчны 10 бичлэгт тооцогдохгүй — өөр бичлэг хийх боломж нэмэгдэнэ.
-                    </p>
-
-                    {rowError?.id === run.id && <p className="oc-sc-msg-err">{rowError.text}</p>}
-                  </div>
-                )}
+          {rows.map((row) => (
+            <div key={row.uid} className="oc-pg-row">
+              <div className="oc-pg-who">
+                <span className="oc-rv-initials" aria-hidden>
+                  {initials(row.name)}
+                </span>
+                <span className="oc-pg-name">{row.name}</span>
               </div>
-            );
-          })}
+
+              {/* THE RUNS, ACROSS THE ROW, oldest first. A wrapping track
+                  rather than fixed columns: there is no fixed number of
+                  them, and a redo does not spend one of the ten, so an
+                  athlete can hold more documents than the limit. */}
+              <div className="oc-pg-runs">
+                {row.runs.map((run, i) => (
+                  <button
+                    key={run.id}
+                    type="button"
+                    className={cellClass(run, openId)}
+                    onClick={() => setOpenId(openId === run.id ? null : run.id)}
+                    title={`#${i + 1} · ${run.event.toUpperCase()}${spendsAllowance(run.status) ? '' : ' · 10-д тооцогдохгүй'}`}
+                  >
+                    {cellLabel(run)}
+                  </button>
+                ))}
+              </div>
+
+              <span className="oc-rv-avg" style={{ color: row.used >= PRACTICE_RUN_LIMIT ? '#E8543C' : undefined }}>
+                {row.used} / {PRACTICE_RUN_LIMIT}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── The panel, under the grid, as the judging panel sits under
+          its own ─────────────────────────────────────────────────────── */}
+      {openRun && data && (
+        <PracticeRunPanel
+          run={openRun}
+          reason={reasons[openRun.id] ?? ''}
+          onReason={(text) => setReasons((p) => ({ ...p, [openRun.id]: text }))}
+          busy={busyId === openRun.id}
+          error={rowError?.id === openRun.id ? rowError.text : null}
+          reasonMax={data.reasonMax}
+          hasPrev={queueIndex > 0}
+          hasNext={queueIndex >= 0 && queueIndex < queue.length - 1}
+          onPrev={() => queueIndex > 0 && setOpenId(queue[queueIndex - 1].id)}
+          onNext={() =>
+            queueIndex >= 0 && queueIndex < queue.length - 1 && setOpenId(queue[queueIndex + 1].id)
+          }
+          onClose={() => setOpenId(null)}
+          onDecide={(decision) => void decide(openRun, decision)}
+        />
+      )}
+
+      {/* The legend, because four statuses in one colour language is one
+          more than a colour alone can carry. */}
+      {rows.length > 0 && (
+        <div className="oc-pg-legend">
+          {(['pending', 'correct', 'incorrect', 'redo'] as const).map((s) => (
+            <span key={s} className="oc-pg-legend-item">
+              <span className="oc-pg-legend-dot" style={{ background: PRACTICE_STATUS_TONE[s] }} aria-hidden />
+              {s === 'pending' ? 'ХЯНАГДААГҮЙ' : s === 'correct' ? 'ЗӨВ' : s === 'incorrect' ? 'БУРУУ' : 'ДАХИН ИЛГЭЭХ'}
+            </span>
+          ))}
         </div>
       )}
     </div>

@@ -113,7 +113,12 @@ export default function PracticeRunPage() {
    *  it; it is theirs to read. */
   const [result, setResult] = useState<{ timeCs: number | null; isDnf: boolean } | null>(null);
   /** Held across the upload so a retry does not need the keypad again. */
-  const pendingRef = useRef<{ blob: Blob; timeCs: number | null; isDnf: boolean } | null>(null);
+  const pendingRef = useRef<{
+    blob: Blob;
+    timeCs: number | null;
+    isDnf: boolean;
+    marks: Partial<Record<string, number>>;
+  } | null>(null);
 
   /** How many recordings exist only in this tab: 0 or 1, because a practice
    *  run is one clip.
@@ -149,14 +154,19 @@ export default function PracticeRunPage() {
   const known = useMemo(() => ONLINE_COMP_EVENTS.some((e) => e.id === eventId), [eventId]);
 
   const file = useCallback(
-    async (payload: { blob: Blob; timeCs: number | null; isDnf: boolean }) => {
+    async (payload: {
+      blob: Blob;
+      timeCs: number | null;
+      isDnf: boolean;
+      marks: Partial<Record<string, number>>;
+    }) => {
       setFiling('uploading');
       setFileError('');
       setUploadPercent(0);
       try {
         const res = await uploadAndFilePracticeRun(
           payload.blob,
-          { event: eventId, scramble, timeCs: payload.timeCs, isDnf: payload.isDnf },
+          { event: eventId, scramble, timeCs: payload.timeCs, isDnf: payload.isDnf, marks: payload.marks },
           setUploadPercent,
         );
         setRemaining(res.remaining);
@@ -372,9 +382,15 @@ export default function PracticeRunPage() {
             onConfirm={(entered) => {
               const blob = run.pendingBlob!;
               setResult(entered);
-              pendingRef.current = { blob, ...entered };
+              // READ HERE, where the attempt is closed: the recording
+              // stopped in the hook's finishRecording (which set the last
+              // mark) and nothing else will be recorded. Taken as a value,
+              // the same way the competition run takes it, so a retry files
+              // the marks of the clip it is retrying.
+              const marks = recorder.readMarks();
+              pendingRef.current = { blob, ...entered, marks };
               run.setPendingBlob(null);
-              void file({ blob, ...entered });
+              void file({ blob, ...entered, marks });
             }}
           />
         )}

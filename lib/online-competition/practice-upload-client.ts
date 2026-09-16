@@ -64,7 +64,16 @@ export interface PracticeFileResult {
  *  admin will still look at it. */
 export async function uploadAndFilePracticeRun(
   blob: Blob,
-  run: { event: string; scramble: string; timeCs: number | null; isDnf: boolean },
+  run: {
+    event: string;
+    scramble: string;
+    timeCs: number | null;
+    isDnf: boolean;
+    /** recorder.readMarks() — stage offsets into the clip, for the review
+     *  panel's jump buttons. The recorder has always produced these; the
+     *  practice path used to drop them. */
+    marks: Partial<Record<string, number>>;
+  },
   onProgress: (percent: number) => void,
 ): Promise<PracticeFileResult> {
   const grant = await requestPracticeGrant(blob, run.event);

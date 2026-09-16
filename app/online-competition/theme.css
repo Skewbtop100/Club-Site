@@ -9847,11 +9847,6 @@ button.oc-rv-cell:hover {
   align-items: baseline;
   gap: 10px;
 }
-.oc-practice-row-event {
-  font: 600 10px var(--oc-font-mono), monospace;
-  letter-spacing: 0.1em;
-  color: #9A958A;
-}
 .oc-practice-row-time {
   font: 700 14px var(--oc-font-mono), monospace;
   font-variant-numeric: tabular-nums;
@@ -9895,7 +9890,6 @@ button.oc-rv-cell:hover {
   border-color: #DFFF4F;
   color: #DFFF4F;
 }
-.oc-practice-row-expiry,
 .oc-practice-row-gone {
   font: 500 10px var(--oc-font-mono), monospace;
   color: #4A4740;
@@ -9909,61 +9903,311 @@ button.oc-rv-cell:hover {
   border: 1px solid #1C1C21;
 }
 
-/* ── The admin's review rows ──────────────────────────────────────────── */
+/* ── The admin's practice grid ─────────────────────────────────────────
+   THE JUDGING GRID'S SHAPE, one row per athlete, with a variable number of
+   runs across it. The cell classes themselves are that grid's own
+   (.oc-rv-cell and friends), so a cell means the same thing on both
+   screens; only the row TEMPLATE differs, and it has to:
 
-.oc-practice-adm-row {
-  border-bottom: 1px solid #16161B;
-  padding: 13px 14px;
+     .oc-rv-row  →  minmax(180px,1.4fr) repeat(5,78px) 92px 92px 132px
+                    five fixed attempt columns, an average, a single.
+
+   A practice athlete has between zero and ten runs — more once redos are
+   counted, since a redo does not spend one of the ten — and no average, no
+   single and no ranking at all. So the runs live in ONE flexible track that
+   wraps, with the name on one side and used-of-ten on the other. */
+
+.oc-pg-grid {
+  border: 1px solid #1C1C21;
+  background: #0D0D10;
+  overflow-x: auto;
+  min-width: 0;
+  max-width: 100%;
 }
-.oc-practice-adm-row:last-child {
+.oc-pg-head,
+.oc-pg-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 220px) minmax(0, 1fr) 92px;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  /* Narrower than the judging grid's 900px: three tracks, not nine. */
+  min-width: 560px;
+}
+.oc-pg-head {
+  border-bottom: 1px solid #1C1C21;
+}
+.oc-pg-row {
+  border-bottom: 1px solid #16161B;
+}
+.oc-pg-row:last-child {
   border-bottom: none;
 }
-.oc-practice-adm-head {
+.oc-pg-row:hover {
+  background: #131318;
+}
+.oc-pg-who {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 11px;
-}
-.oc-practice-adm-name {
-  font: 500 13px var(--oc-font-heading), sans-serif;
-  color: #F4F1EA;
-}
-.oc-practice-adm-meta,
-.oc-practice-adm-status {
-  font: 500 10px var(--oc-font-mono), monospace;
-  font-variant-numeric: tabular-nums;
-  color: #6E6A62;
-  letter-spacing: 0.06em;
-}
-.oc-practice-adm-reason {
-  margin-top: 7px;
-  font: 400 11px/17px var(--oc-font-heading), sans-serif;
-  color: #9A958A;
-}
-.oc-practice-adm-body {
-  margin-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-/* THE EVIDENCE: the video and the scramble, side by side.
-   Two columns, collapsing to one at the SAME 1100px the competition review
-   panel (.oc-rv-panel) collapses at — an admin moving between the two
-   screens should meet the same break, not two. */
-.oc-practice-adm-evidence {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 12px;
-  align-items: start;
-}
-.oc-practice-adm-videobox {
+  gap: 10px;
   min-width: 0;
 }
+.oc-pg-name {
+  font: 500 13px var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oc-pg-runs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+/* One run. The judging cell is a grid track and gets `width: 100%`; these
+   are flex items in a wrapping track, so they carry their own width — the
+   same 78px that grid's attempt columns are. */
+.oc-pg-cell {
+  flex: 0 0 auto;
+  width: 78px;
+}
+/* The two states the judging grid has no counterpart for. A refusal reuses
+   its DNF red and a pending run its amber fill, so the only colours added
+   here are the ones practice invented. `redo` is amber like pending but
+   UNFILLED: it is decided, and the fill is what says "look at me". */
+.oc-pg-cell-ok {
+  border-color: #2F5E3C;
+  color: #4FD07A;
+}
+.oc-pg-cell-redo {
+  border-color: #E0A020;
+  color: #E0A020;
+}
+/* Four statuses is one more than colour alone carries. */
+.oc-pg-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 0 2px;
+}
+.oc-pg-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: 500 8px var(--oc-font-mono), monospace;
+  letter-spacing: 0.12em;
+  color: #6E6A62;
+}
+.oc-pg-legend-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+}
 
+/* ── The practice review panel ─────────────────────────────────────────
+   THE COMPETITION DETAIL PANEL'S ARRANGEMENT (.oc-rv-panel): the evidence
+   on the left with the decision it feeds under it, everything describing
+   the run on the right, and the SAME 1100px break, so an admin moving
+   between the two screens meets one breakpoint rather than two.
+
+   TWO COLUMNS, NOT THREE. That panel's middle column is a frames panel and
+   a round-queue navigator; practice has no stills and no round, so a third
+   column would be an empty one.
+
+   NO DEFINITE HEIGHT, unlike .oc-rv-panel. That one is `height:
+   min(78vh,760px)` because its video and frames panel fill stretched grid
+   rows with `flex: 1`, which resolves to nothing against an auto row.
+   Nothing here stretches: the video is capped in vh directly, so the panel
+   can grow to its content and never nests scroll areas. */
+
+.oc-prv-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  border: 1px solid #1C1C21;
+  background: #0D0D10;
+  align-items: start;
+}
+.oc-prv-media {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.oc-prv-side {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-left: 1px solid #1C1C21;
+}
+.oc-prv-videobox {
+  background: #08080A;
+  border-bottom: 1px solid #1C1C21;
+  min-width: 0;
+}
+.oc-prv-video {
+  display: block;
+  width: 100%;
+  max-height: 58vh;
+  background: #08080A;
+}
+.oc-prv-decide {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+}
+.oc-prv-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* The offered reasons are a shortcut, not the vocabulary — free text sits
+   right under them. The picked one stays lit, so an admin can see which of
+   the four the textarea now holds. */
+.oc-prv-chip {
+  border: 1px solid #2A2A31;
+  background: transparent;
+  color: #9A958A;
+  padding: 7px 9px;
+  font: 500 10px/1.3 var(--oc-font-heading), sans-serif;
+  text-align: left;
+  cursor: pointer;
+  min-height: 32px;
+}
+.oc-prv-chip:hover {
+  border-color: #DFFF4F;
+  color: #DFFF4F;
+}
+.oc-prv-chip-on {
+  border-color: #DFFF4F;
+  background: #14170A;
+  color: #DFFF4F;
+}
+.oc-prv-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+}
+.oc-prv-verdict {
+  border: 1px solid #2A2A31;
+  background: #0A0A0C;
+  padding: 10px 14px;
+  font: 600 10px/1 var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  min-height: 38px;
+}
+.oc-prv-verdict:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.oc-prv-note {
+  font: 400 10px/16px var(--oc-font-heading), sans-serif;
+  color: #6E6A62;
+}
+.oc-prv-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.oc-prv-name {
+  font: 500 14px var(--oc-font-heading), sans-serif;
+  color: #F4F1EA;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oc-prv-meta {
+  margin-top: 3px;
+  font: 500 10px var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  color: #6E6A62;
+}
+.oc-prv-nav {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #2A2A31;
+  background: transparent;
+  color: #9A958A;
+  font: 500 13px/1 var(--oc-font-mono), monospace;
+  cursor: pointer;
+}
+.oc-prv-nav:hover:not(:disabled) {
+  border-color: #DFFF4F;
+  color: #DFFF4F;
+}
+.oc-prv-nav:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.oc-prv-status {
+  font: 600 9px var(--oc-font-mono), monospace;
+  letter-spacing: 0.12em;
+}
+/* The reason a previous refusal gave, read as prose: it is a sentence to an
+   athlete, not a code. */
+.oc-prv-oldreason {
+  font: 400 11px var(--oc-font-heading), sans-serif;
+  letter-spacing: 0;
+  color: #9A958A;
+}
+/* ── THE JUMP BUTTONS ──
+   The six targets of lib/online-competition/solve-jumps, the one table this
+   panel and the judging panel both read. Laid out as that panel's phase
+   cards are — auto-fit, label above the target clock — so the same six
+   moments are found the same way on both screens. A button whose mark was
+   never recorded is dimmed and inert rather than seeking to a guess. */
+.oc-prv-jumps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 6px;
+}
+.oc-prv-jump {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  text-align: left;
+  border: 1px solid #1C1C21;
+  background: #0A0A0C;
+  padding: 8px 9px;
+  cursor: pointer;
+}
+.oc-prv-jump:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.oc-prv-jump-on {
+  border-color: #DFFF4F;
+  background: #14170A;
+}
+.oc-prv-jump-label {
+  font: 600 10px/1 var(--oc-font-heading), sans-serif;
+  letter-spacing: 0.06em;
+  color: #F4F1EA;
+}
+.oc-prv-jump-at {
+  font: 500 9px/1 var(--oc-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  color: #6E6A62;
+}
+.oc-prv-jump-on .oc-prv-jump-label,
+.oc-prv-jump-on .oc-prv-jump-at {
+  color: #DFFF4F;
+}
+.oc-prv-nomarks {
+  font: 500 8px/1.5 var(--oc-font-mono), monospace;
+  letter-spacing: 0.1em;
+  color: #6E6A62;
+}
 /* THE SCRAMBLE THE ATHLETE WAS SHOWN, and the reason this panel exists:
    "did they apply this scramble" is unanswerable without it. Monospace and
    wrapping, because a scramble is a sequence and must not be truncated. */
-.oc-practice-adm-scramble {
+.oc-prv-scr {
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -9972,53 +10216,35 @@ button.oc-rv-cell:hover {
   background: #08080A;
   padding: 9px 11px;
 }
-/* 150px, the competition panel's own height for the same component — the
-   2D net's bounding box is what the number is fitted to, so matching it is
+.oc-prv-scr code {
+  font: 500 12px/19px var(--oc-font-mono), monospace;
+  color: #F4F1EA;
+  word-break: break-word;
+}
+/* 150px, the judging panel's own height for the same component — the 2D
+   net's bounding box is what the number is fitted to, so matching it is
    what makes the diagram the same size on both screens. */
-.oc-practice-adm-diagram {
+.oc-prv-diagram {
   display: flex;
   width: 100%;
   height: 150px;
   align-self: center;
 }
-.oc-practice-adm-scramble code {
-  font: 500 12px/19px var(--oc-font-mono), monospace;
-  color: #F4F1EA;
-  word-break: break-word;
-}
-.oc-practice-adm-video {
-  display: block;
-  width: 100%;
-  max-width: 420px;
-  background: #08080A;
-  border: 1px solid #1C1C21;
-}
-.oc-practice-adm-reasons {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.oc-practice-adm-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.oc-practice-adm-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.oc-practice-adm-note {
-  font: 400 10px/16px var(--oc-font-heading), sans-serif;
-  color: #6E6A62;
-}
 
-/* Stacked, at the competition review panel's own breakpoint. The video goes
-   first: on a narrow screen the admin scrubs it and then looks down at the
+/* ONE COLUMN, at the judging panel's own breakpoint. The video stays first:
+   on a narrow screen the admin scrubs it and then looks down at the
    diagram, rather than scrolling past a picture to reach the thing that
-   plays. */
+   plays. Source order is already video → decision → jumps → scramble, so
+   the stack needs no reordering to be the order it is worked in. */
 @media (max-width: 1100px) {
-  .oc-practice-adm-evidence {
+  .oc-prv-panel {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .oc-prv-side {
+    border-left: none;
+    border-top: 1px solid #1C1C21;
+  }
+  .oc-prv-video {
+    max-height: 56vh;
   }
 }

@@ -15,6 +15,8 @@
 // can ever see one. A practice run has no competitionId, no round, and no
 // place in any ranking.
 
+import type { SolveMarks } from './types';
+
 /** How many runs an athlete may record, EVER — not per day.
  *
  *  Ten because the point is learning the sequence, and an athlete who needs
@@ -125,6 +127,53 @@ export function practiceAllowance(statuses: readonly PracticeRunStatus[]): Pract
   const used = statuses.filter(spendsAllowance).length;
   const remaining = Math.max(0, PRACTICE_RUN_LIMIT - used);
   return { used, remaining, atLimit: remaining === 0 };
+}
+
+/** The stage marks a run may carry, read defensively.
+ *
+ *  WHY THIS IS NEEDED AT ALL: a practice run is filed through a server
+ *  route, so the marks arrive as whatever the client sent. The competition
+ *  path has firestore.rules validating the shape of a submission's marks;
+ *  this collection is closed to clients entirely, so the route is the only
+ *  place the check can live and this is it.
+ *
+ *  EVERY KEY IS OPTIONAL and a bad one is DROPPED, not refused. Marks are a
+ *  convenience for review and never evidence in their own right — the same
+ *  reasoning types them `Partial<SolveMarks>` on a submission. A run whose
+ *  marks are half-filled must still file, because the alternative is
+ *  throwing away the video they describe; a jump button with nothing to aim
+ *  at simply disables itself (see solve-jumps `needsMarks`).
+ *
+ *  Only finite numbers survive, which is the guard that keeps a malformed
+ *  mark from becoming a NaN seek in the review panel.
+ *
+ *  THE KEYS ARE SolveMarks' OWN, asserted by the `satisfies` below rather
+ *  than trusted to stay in step by hand. The review panel's jump table
+ *  (solve-jumps) reads a competition attempt's marks and a practice run's
+ *  through the same functions, so a key that drifted apart here would be a
+ *  jump button that silently stopped finding its moment on one screen. The
+ *  import is type-only and erases. */
+export const PRACTICE_MARK_KEYS = [
+  'scrambleShown',
+  'coverStart',
+  'solveStart',
+  'solveEnd',
+  'cubeShown',
+  'recordingEnd',
+] as const satisfies readonly (keyof SolveMarks)[];
+
+export type PracticeMarkKey = (typeof PRACTICE_MARK_KEYS)[number];
+
+export function readPracticeMarks(raw: unknown): Partial<Record<PracticeMarkKey, number>> {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {};
+  const src = raw as Record<string, unknown>;
+  const out: Partial<Record<PracticeMarkKey, number>> = {};
+  for (const key of PRACTICE_MARK_KEYS) {
+    const v = src[key];
+    // Finite only. A negative offset is not a point in a clip either.
+    if (typeof v === 'number' && Number.isFinite(v) && v >= 0) out[key] = v;
+  }
+  return out;
 }
 
 export interface PracticeSweepCandidate {

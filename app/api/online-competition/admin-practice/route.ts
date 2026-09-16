@@ -5,6 +5,7 @@ import { PRACTICE_REASON_MAX } from '@/lib/online-competition/practice';
 import {
   PracticeError,
   listPracticeQueue,
+  listRunsForUids,
   practiceAthleteNames,
   reviewPracticeRun,
   type PracticeRunView,
@@ -28,6 +29,13 @@ export interface AdminPracticeRow extends PracticeRunView {
 }
 
 export interface AdminPracticeResponse {
+  /** EVERY RUN OF EVERY ATHLETE IN SCOPE — not only the runs that matched
+   *  the scope. With status=pending the scope is "athletes with something
+   *  waiting", and each of those athletes arrives complete: the screen is
+   *  one row per athlete with their runs across it, and a row built from
+   *  pending runs alone would hide the refusals that explain the one being
+   *  judged and miscount the ten. The client decides which rows to show
+   *  (see PracticeReview) — it cannot decide what it was not sent. */
   runs: AdminPracticeRow[];
   pending: number;
   reasonMax: number;
@@ -39,14 +47,21 @@ export async function GET(req: Request) {
   }
   const want = new URL(req.url).searchParams.get('status') === 'all' ? 'all' : 'pending';
   const db = getOnlineCompAdminDb();
-  const runs = await listPracticeQueue(db, want);
+  const matched = await listPracticeQueue(db, want);
+  // THE QUEUE NAMES THE ATHLETES; a second pass fetches the rest of their
+  // runs so each row is whole. Not done for 'all', which already is — that
+  // would be the same read twice.
+  const runs =
+    want === 'all' ? matched : await listRunsForUids(db, matched.map((r) => r.uid));
   // Names come from the participant documents, not from the run: a name
   // stored at file time goes stale, and the admin needs the athlete they
   // know.
   const names = await practiceAthleteNames(db, runs.map((r) => r.uid));
   const payload: AdminPracticeResponse = {
     runs: runs.map((r) => ({ ...r, displayName: names.get(r.uid) ?? r.uid.slice(0, 10) })),
-    pending: runs.filter((r) => r.status === 'pending').length,
+    // Counted off the queue, so it is the number of runs WAITING however
+    // many decided ones came along for the row.
+    pending: matched.filter((r) => r.status === 'pending').length,
     reasonMax: PRACTICE_REASON_MAX,
   };
   return NextResponse.json(payload, { headers: { 'Cache-Control': 'no-store' } });

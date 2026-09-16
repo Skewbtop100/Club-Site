@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
 import { AthleteAuthError, requireAthlete } from '@/lib/online-competition/athlete-auth';
 import { getOnlineCompAdminDb } from '@/lib/online-competition/firebase-admin';
-import { PRACTICE_RUN_LIMIT, practiceAllowance } from '@/lib/online-competition/practice';
+import {
+  PRACTICE_RUN_LIMIT,
+  practiceAllowance,
+  readPracticeMarks,
+} from '@/lib/online-competition/practice';
 import {
   PracticeError,
   filePracticeRun,
@@ -79,6 +83,12 @@ export async function POST(req: Request) {
         ? body.timeCs
         : undefined;
   const isDnf = body?.isDnf === true;
+  // THE STAGE MARKS, validated here because this collection is closed to
+  // clients and the route is therefore the only place a check can live.
+  // readPracticeMarks DROPS anything malformed rather than refusing the
+  // run: marks are a convenience for review, and a run that cannot be
+  // filed is a video thrown away.
+  const marks = readPracticeMarks(body?.marks);
 
   if (!event || !scramble || !videoKey || timeCs === undefined) {
     return NextResponse.json({ error: 'Буруу хүсэлт.' }, { status: 400 });
@@ -98,6 +108,7 @@ export async function POST(req: Request) {
       timeCs,
       isDnf,
       videoKey,
+      marks,
     });
     return NextResponse.json({ ok: true, id, remaining }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err) {

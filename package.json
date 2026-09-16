@@ -33,6 +33,7 @@
     "test:subid": "node tests/competition-fields/submission-id.test.cjs",
     "test:resume": "node tests/competition-fields/run-resume.test.cjs",
     "test:rosterprogress": "node tests/competition-fields/round-roster-progress.test.cjs",
+    "test:jumps": "node tests/competition-fields/solve-jumps.test.cjs",
     "test:practice": "node tests/competition-fields/practice.test.cjs",
     "test:practicevideo": "node tests/competition-fields/practice-video.test.cjs",
     "test:progress": "node tests/competition-fields/round-progress.test.cjs",
