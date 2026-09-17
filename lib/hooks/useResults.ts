@@ -16,16 +16,22 @@ import type { Result } from '@/lib/types';
  * (`subscribeResultsByComp`), which bypasses this hook.
  *
  * Imported and unpublished results are also excluded.
+ *
+ * ONE SUBSCRIPTION PER MOUNT. The listener covers the whole results
+ * collection, so a subscribe is the most expensive read on the page. It waits
+ * for `competitionsLoading` to settle — `competitions` starts as [] — and
+ * never restarts when the visible set changes: that is a re-filter of the
+ * documents already in hand (the useMemo below), not a new read.
  */
 export function useResults(
   competitions: { id: string; status?: 'upcoming' | 'live' | 'finished'; isDailyPractice?: boolean }[],
+  competitionsLoading: boolean,
 ) {
-  const [results, setResults] = useState<Result[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [allResults, setAllResults] = useState<Result[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Build a stable key encoding both the comp ids AND which are visible, so
-  // the effect re-runs when a competition flips to finished.
+  // the filter re-runs when a competition flips to finished.
   const visibleIdsKey = useMemo(
     () =>
       competitions
@@ -37,18 +43,20 @@ export function useResults(
   );
 
   useEffect(() => {
+    if (competitionsLoading) return;
     const unsub = subscribeResults(
-      (all) => {
-        const published = all.filter((r) => r.status === 'published' && r.source !== 'imported');
-        const visibleIds = visibleIdsKey ? new Set(visibleIdsKey.split(',')) : new Set<string>();
-        setResults(published.filter((r) => r.competitionId && visibleIds.has(r.competitionId)));
-        setLoading(false);
-      },
-      () => { setError('Failed to load results.'); setLoading(false); },
+      (all) => setAllResults(all),
+      () => { setError('Failed to load results.'); setAllResults((prev) => prev ?? []); },
     );
     return unsub;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleIdsKey]);
+  }, [competitionsLoading]);
 
-  return { results, loading, error };
+  const results = useMemo(() => {
+    if (!allResults) return [];
+    const published = allResults.filter((r) => r.status === 'published' && r.source !== 'imported');
+    const visibleIds = visibleIdsKey ? new Set(visibleIdsKey.split(',')) : new Set<string>();
+    return published.filter((r) => r.competitionId && visibleIds.has(r.competitionId));
+  }, [allResults, visibleIdsKey]);
+
+  return { results, loading: allResults === null, error };
 }

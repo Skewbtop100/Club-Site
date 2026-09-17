@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { subscribeCompetitions } from '@/lib/firebase/services/competitions';
 import { getAthletes } from '@/lib/firebase/services/athletes';
-import { subscribeResults, subscribeResultsByComp, saveResult } from '@/lib/firebase/services/results';
+import { subscribeResultsByComp, saveResult } from '@/lib/firebase/services/results';
 import { getAssignmentsByComp } from '@/lib/firebase/services/assignments';
 import type { Competition, Athlete, Result } from '@/lib/types';
 import type { Assignment } from '@/lib/firebase/services/assignments';
@@ -47,7 +47,6 @@ export default function ResultsEntryView({ session }: { session: Session }) {
   const [athletes, setAthletes]     = useState<Athlete[]>([]);
   const [panels, setPanels]         = useState<PanelState[]>([emptyPanel(0)]);
   const [entryCompId, setEntryCompId] = useState('');
-  const [allResults, setAllResults] = useState<Result[]>([]);
 
   // Competition Results state
   const [crCompId, setCrCompId]     = useState('');
@@ -65,8 +64,7 @@ export default function ResultsEntryView({ session }: { session: Session }) {
   useEffect(() => {
     getAthletes().then(setAthletes);
     const unsubComps = subscribeCompetitions(setComps);
-    const unsubResults = subscribeResults(setAllResults);
-    return () => { unsubComps(); unsubResults(); };
+    return () => { unsubComps(); };
   }, []);
 
   // Competition Results feed
@@ -155,8 +153,11 @@ export default function ResultsEntryView({ session }: { session: Session }) {
   const crEvents = crComp?.events
     ? WCA_EVENTS.filter(e => (crComp.events as Record<string,boolean>)?.[e.id])
     : [];
+  // From the per-competition feed, not a listener on the whole results
+  // collection. The competitionId check stays: crResults still holds the
+  // previous competition's rows until the new subscription's first snapshot.
   const crRoundsForEvent = crEvId
-    ? [...new Set(allResults.filter(r => r.competitionId === crCompId && r.eventId === crEvId).map(r => r.round || 1))].sort()
+    ? [...new Set(crResults.filter(r => r.competitionId === crCompId && r.eventId === crEvId).map(r => r.round || 1))].sort()
     : [];
   const crTableResults = crResults
     .filter(r => r.eventId === crEvId && (r.round || 1) === crRound)

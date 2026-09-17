@@ -18,7 +18,7 @@ export default function CompetitionPage() {
   console.log('Competition page rendering');
   const { competitions, loading: compsLoading } = useCompetitions();
   console.log('competitions:', competitions);
-  const { results, loading: resultsLoading } = useResults(competitions);
+  const { results, loading: resultsLoading } = useResults(competitions, compsLoading);
   console.log('results:', results);
   const { athletes, loading: athletesLoading } = useAthletes();
   console.log('athletes:', athletes);
