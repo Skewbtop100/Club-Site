@@ -1,13 +1,3 @@
 {
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "crons": [
-    {
-      "path": "/api/online-competition/cron/sweep-videos",
-      "schedule": "0 3 * * *"
-    },
-    {
-      "path": "/api/online-competition/cron/sweep-practice",
-      "schedule": "20 3 * * *"
-    }
-  ]
+  "$schema": "https://openapi.vercel.sh/vercel.json"
 }
