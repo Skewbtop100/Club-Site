@@ -10,8 +10,9 @@ import { deleteField, doc, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp
 //
 // THE HOLE THESE CLOSE: `allow write: if request.auth.uid == uid` let any
 // signed-in user write role: 'admin' on their own document. isAdmin() reads
-// exactly that field, and it gates onlineSubmissions update/delete, draft
-// competitions, and more — so one write made anyone a judge.
+// exactly that field, and it gates draft virtual competitions, club
+// competition writes, athletes' private identity, and more — so one write
+// made anyone an admin.
 //
 // Also pinned: every legitimate client write to a users document still
 // works (auth-context's upsert, the profile edit, points.ts), a club admin
@@ -53,8 +54,6 @@ async function check(name, expect, fn) {
   if (!ok) console.log(`          -> ${detail}`);
 }
 
-const SUBMISSION = 'member1__comp1__333__r1__a1';
-
 async function seed() {
   await testEnv.clearFirestore();
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
@@ -63,11 +62,12 @@ async function seed() {
     await setDoc(doc(db, 'users', MEMBER), { uid: MEMBER, role: 'member', displayName: 'M', points: 10, athleteId: null });
     await setDoc(doc(db, 'users', NO_ROLE), { uid: NO_ROLE, displayName: 'No role' });
     await setDoc(doc(db, 'users', WRONG_CASE), { uid: WRONG_CASE, role: 'Admin' });
-    await setDoc(doc(db, 'onlineCompetitions', 'draft1'), { name: 'Draft', status: 'draft' });
-    await setDoc(doc(db, 'onlineSubmissions', SUBMISSION), {
-      uid: MEMBER, competitionId: 'comp1', event: '333', round: 1, competitionRound: 1,
-      reportedTime: 1234, isDnf: false, penalty: null, status: 'pending',
-    });
+    // Club documents only an admin may read or write: isAdmin() is exercised
+    // through them.
+    await setDoc(doc(db, 'virtualCompetitions', 'draft1'), { name: 'Draft', status: 'draft' });
+    await setDoc(doc(db, 'competitions', 'comp1'), { name: 'Club competition' });
+    await setDoc(doc(db, 'athletes', 'ath1'), { name: 'Athlete' });
+    await setDoc(doc(db, 'athletes', 'ath1', 'private', 'identity'), { birthDate: '2011-04-12' });
   });
 }
 
@@ -115,12 +115,12 @@ await check('U15. create a doc for someone else', 'DENY', () =>
   setDoc(doc(as(MEMBER), 'users', 'someone-else'), { uid: 'someone-else', role: 'member' }));
 
 // ── ...so the escalation it enabled is gone ─────────────────────────────
-await check('E1. the member still cannot approve their own submission', 'DENY', () =>
-  updateDoc(doc(as(MEMBER), 'onlineSubmissions', SUBMISSION), { status: 'approved' }));
-await check('E2. ...cannot read a draft competition', 'DENY', () =>
-  getDoc(doc(as(MEMBER), 'onlineCompetitions', 'draft1')));
-await check('E3. ...cannot delete a submission', 'DENY', () =>
-  deleteDoc(doc(as(MEMBER), 'onlineSubmissions', SUBMISSION)));
+await check('E1. the member still cannot edit a club competition', 'DENY', () =>
+  updateDoc(doc(as(MEMBER), 'competitions', 'comp1'), { name: 'hijacked' }));
+await check('E2. ...cannot read a draft virtual competition', 'DENY', () =>
+  getDoc(doc(as(MEMBER), 'virtualCompetitions', 'draft1')));
+await check("E3. ...cannot read an athlete's private identity", 'DENY', () =>
+  getDoc(doc(as(MEMBER), 'athletes', 'ath1', 'private', 'identity')));
 
 // ── an admin can still do admin things ─────────────────────────────────
 await seed();
@@ -128,31 +128,25 @@ await check('A1. an admin changes another user\'s role (UsersTab)', 'ALLOW', () 
   updateDoc(doc(as(ADMIN), 'users', MEMBER), { role: 'athlete' }));
 await check('A2. an admin adjusts points and links an athlete (UsersTab)', 'ALLOW', () =>
   updateDoc(doc(as(ADMIN), 'users', MEMBER), { points: 110, athleteId: 'ath1', role: 'athlete' }));
-await check('A3. an admin reads a draft competition', 'ALLOW', () =>
-  getDoc(doc(as(ADMIN), 'onlineCompetitions', 'draft1')));
-await check('A4. an admin updates a submission', 'ALLOW', () =>
-  updateDoc(doc(as(ADMIN), 'onlineSubmissions', SUBMISSION), { status: 'approved' }));
-await check('A5. an admin deletes a submission', 'ALLOW', () =>
-  deleteDoc(doc(as(ADMIN), 'onlineSubmissions', SUBMISSION)));
+await check('A3. an admin reads a draft virtual competition', 'ALLOW', () =>
+  getDoc(doc(as(ADMIN), 'virtualCompetitions', 'draft1')));
+await check('A4. an admin edits a club competition', 'ALLOW', () =>
+  updateDoc(doc(as(ADMIN), 'competitions', 'comp1'), { name: 'Renamed' }));
+await check("A5. an admin reads an athlete's private identity", 'ALLOW', () =>
+  getDoc(doc(as(ADMIN), 'athletes', 'ath1', 'private', 'identity')));
 await check('A6. an admin can still edit their own doc', 'ALLOW', () =>
   updateDoc(doc(as(ADMIN), 'users', ADMIN), { displayName: 'Admin' }));
 
 // ── isAdmin() fails closed ─────────────────────────────────────────────
 await seed();
 await check('F1. no users document: not an admin', 'DENY', () =>
-  getDoc(doc(as(NO_DOC), 'onlineCompetitions', 'draft1')));
+  getDoc(doc(as(NO_DOC), 'virtualCompetitions', 'draft1')));
 await check('F2. a users document with no role: not an admin', 'DENY', () =>
-  getDoc(doc(as(NO_ROLE), 'onlineCompetitions', 'draft1')));
+  getDoc(doc(as(NO_ROLE), 'virtualCompetitions', 'draft1')));
 await check('F3. role "Admin" (wrong case): not an admin', 'DENY', () =>
-  getDoc(doc(as(WRONG_CASE), 'onlineCompetitions', 'draft1')));
+  getDoc(doc(as(WRONG_CASE), 'virtualCompetitions', 'draft1')));
 await check('F4. signed out: not an admin', 'DENY', () =>
-  getDoc(doc(testEnv.unauthenticatedContext().firestore(), 'onlineCompetitions', 'draft1')));
-
-// ── the judges' login counters are server-only ──────────────────────────
-await check('L1. a client cannot read a login counter, even an admin', 'DENY', () =>
-  getDoc(doc(as(ADMIN), 'onlineAdminLoginAttempts', 'abc')));
-await check('L2. a client cannot reset a login counter', 'DENY', () =>
-  setDoc(doc(as(MEMBER), 'onlineAdminLoginAttempts', 'abc'), { count: 0, windowStartMs: 0 }));
+  getDoc(doc(testEnv.unauthenticatedContext().firestore(), 'virtualCompetitions', 'draft1')));
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 await testEnv.cleanup();

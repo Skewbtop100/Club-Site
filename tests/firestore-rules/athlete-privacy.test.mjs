@@ -6,26 +6,17 @@ import {
 } from '@firebase/rules-unit-testing';
 import { collection, doc, getDoc, getDocs, runTransaction, setDoc, updateDoc, deleteDoc, deleteField } from 'firebase/firestore';
 
-// Rules tests for what an athlete's data exposes, in all three places it
-// lives:
+// Rules tests for what an athlete's data exposes, in the places it lives:
 //   athletes/{id}                  the club's PUBLIC profile (anyone)
 //   athletes/{id}/private/identity date of birth + phone (admin, linked owner)
-//   onlineParticipants/{uid}       the online athlete's full record (self, admin)
 //   users/{uid}                    the account, with its email (self, admin)
 //
-// THE HOLE: onlineParticipants and users were readable by any signed-in
-// account, and athletes by anyone — email, date of birth, citizenship and
-// verification photos, minors' included.
-//
-// The online athlete's PUBLIC half (name, results, and — for a verified
-// athlete only — a thumbnail of the admin-approved photo) is not a Firestore
-// read at all: the roster and live routes project it with the Admin SDK, and
-// tests/competition-fields/roster-view.test.cjs pins exactly which keys
-// leave (no email, date of birth, citizenship or submitted photo).
+// THE HOLE: users was readable by any signed-in account, and athletes by
+// anyone — email, date of birth and phone, minors' included.
 const RULES = process.env.RULES_PATH ?? 'firestore.rules';
 const ADMIN = 'admin1';
-const MEMBER = 'member1'; // owns club athlete athA, and is online athlete member1
-const OTHER = 'other1';   // owns club athlete athB, and is online athlete other1
+const MEMBER = 'member1'; // owns club athlete athA
+const OTHER = 'other1';   // owns club athlete athB
 const STRANGER = 'stranger1'; // signed in, owns nothing
 
 let pass = 0;
@@ -64,20 +55,6 @@ async function readHas(ref, want, never = []) {
   return snap;
 }
 
-const ONLINE_FULL = (uid) => ({
-  uid,
-  displayName: 'Google Name',
-  email: `${uid}@example.com`,
-  firstName: 'Эрдэнэ', lastName: 'Бат',
-  approvedFirstName: 'Эрдэнэ', approvedLastName: 'Бат',
-  dateOfBirth: '2011-04-12', approvedDateOfBirth: '2011-04-12',
-  gender: 'male', approvedGender: 'male',
-  citizenship: 'mn', approvedCitizenship: 'mn',
-  photoUrl: 'https://res.cloudinary.com/x/id.jpg', approvedPhotoUrl: 'https://res.cloudinary.com/x/id.jpg',
-  profileStatus: 'approved',
-  stats: { 333: { pr: 900, ao5: 1100, solveCount: 12 } },
-});
-
 async function seed() {
   await testEnv.clearFirestore();
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
@@ -96,15 +73,11 @@ async function seed() {
 
     await setDoc(doc(db, 'results', 'r1'), { athleteId: 'athA', eventId: '333', single: 900, average: 1100 });
     await setDoc(doc(db, 'wcaRecords', 'rec1'), { eventId: '333', single: 300 });
-
-    await setDoc(doc(db, 'onlineParticipants', MEMBER), ONLINE_FULL(MEMBER));
-    await setDoc(doc(db, 'onlineParticipants', OTHER), ONLINE_FULL(OTHER));
   });
 }
 
 const as = (uid) => testEnv.authenticatedContext(uid).firestore();
 const anon = () => testEnv.unauthenticatedContext().firestore();
-const PRIVATE_ONLINE = ['email', 'dateOfBirth', 'approvedDateOfBirth', 'citizenship', 'approvedCitizenship', 'photoUrl'];
 
 await seed();
 
@@ -164,24 +137,6 @@ await check('A8. an admin deletes an athlete and its private identity', 'ALLOW',
 });
 
 await seed();
-console.log('\n=== online athletes: onlineParticipants ===\n');
-await check('N1. a signed-in non-admin cannot read another athlete\'s record (email, DOB, citizenship)', 'DENY', () =>
-  getDoc(doc(as(STRANGER), 'onlineParticipants', MEMBER)));
-await check('N2. ...even as an athlete themselves (other athlete reading this one)', 'DENY', () =>
-  getDoc(doc(as(OTHER), 'onlineParticipants', MEMBER)));
-await check('N3. ...nor list the collection', 'DENY', () =>
-  getDocs(collection(as(OTHER), 'onlineParticipants')));
-await check('N4. a signed-out visitor cannot read one', 'DENY', () =>
-  getDoc(doc(anon(), 'onlineParticipants', MEMBER)));
-await check('N5. an athlete still reads their OWN full record', 'ALLOW', () =>
-  readHas(doc(as(MEMBER), 'onlineParticipants', MEMBER), ['displayName', 'stats', ...PRIVATE_ONLINE]));
-await check('N6. an admin reads any athlete\'s full record', 'ALLOW', () =>
-  readHas(doc(as(ADMIN), 'onlineParticipants', OTHER), PRIVATE_ONLINE));
-await check('N7. an admin lists the collection', 'ALLOW', () =>
-  getDocs(collection(as(ADMIN), 'onlineParticipants')));
-await check('N8. the athlete\'s own registrations are still readable', 'ALLOW', () =>
-  getDocs(collection(as(MEMBER), 'onlineParticipants', MEMBER, 'registrations')));
-
 console.log('\n=== accounts: users ===\n');
 await check('U1. a signed-in non-admin cannot read another account (its email)', 'DENY', () =>
   getDoc(doc(as(STRANGER), 'users', MEMBER)));
