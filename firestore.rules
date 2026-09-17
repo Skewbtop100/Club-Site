@@ -192,6 +192,13 @@ service cloud.firestore {
 
     // ─── Online Competition (public, isolated) ─────────────────────────────
 
+    // FROZEN FOR THE ХОРОМ SEPARATION. ХОРОМ now lives in its own Firebase
+    // project (khorom-5b0ba). Every client write to its collections below is
+    // denied (`if false`, or `false &&` ahead of the old conditions), so
+    // nothing new lands here after the data was copied. Reads are unchanged.
+    // The Admin SDK ignores these rules, so the old deployment's server
+    // routes are not stopped by this.
+
     match /onlineCompetitions/{competitionId} {
       // Drafts are private: a competition is created as a draft and must
       // not be reachable — by list OR by direct id — until an admin moves
@@ -237,12 +244,12 @@ service cloud.firestore {
       // PROVES it excludes drafts, e.g. where('status', '!=', 'draft')
       // (what fetchAllCompetitions issues). An unfiltered getDocs() fails.
       allow read: if isAdmin() || resource.data.status != 'draft';
-      allow write: if isAdmin();
+      allow write: if false; // FROZEN (was: isAdmin())
 
       match /scrambles/{scrambleId} {
         allow read: if isSignedIn();
-        allow create: if isSignedIn();
-        allow update, delete: if isAdmin();
+        allow create: if false; // FROZEN (was: isSignedIn())
+        allow update, delete: if false; // FROZEN (was: isAdmin())
       }
 
       // Official imported scrambles + snake-seeded group assignments
@@ -493,7 +500,8 @@ service cloud.firestore {
       // pins the exact keys). So the public half of an athlete needs no
       // client-readable copy.
       allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
-      allow create, update: if isSignedIn() &&
+      allow create, update: if false && // FROZEN: the conditions below no longer apply
+                                isSignedIn() &&
                                 request.auth.uid == uid &&
                                 (!('email' in request.resource.data) || request.resource.data.email == request.auth.token.email) &&
                                 (!('photoURL' in request.resource.data) || request.resource.data.photoURL == null || request.resource.data.photoURL is string) &&
@@ -644,7 +652,8 @@ service cloud.firestore {
         // registeredAt must be the server's own clock: it orders a future
         // waitlist, and a client-supplied time would let an athlete date
         // their registration earlier than everyone else's.
-        allow create: if isSignedIn() &&
+        allow create: if false && // FROZEN: the conditions below no longer apply
+                         isSignedIn() &&
                          request.auth.uid == uid &&
                          registrationShapeOk() &&
                          request.resource.data.keys().hasOnly(
@@ -713,7 +722,8 @@ service cloud.firestore {
                  expectedWithdrawn.hasAll(withdrawn.toSet());
         }
 
-        allow update: if isSignedIn() &&
+        allow update: if false && // FROZEN: the conditions below no longer apply
+                         isSignedIn() &&
                          request.auth.uid == uid &&
                          registrationShapeOk() &&
                          request.resource.data.diff(resource.data).affectedKeys()
@@ -989,7 +999,8 @@ service cloud.firestore {
       // verdict is not the athlete's to write: status and penalty are
       // pinned here and may only move later, through the review route,
       // which uses the Admin SDK and bypasses these rules entirely.
-      allow create: if isSignedIn() &&
+      allow create: if false && // FROZEN: the conditions below no longer apply
+                       isSignedIn() &&
                        request.resource.data.uid == request.auth.uid &&
                        submissionKeysOk() &&
                        submissionTypesOk() &&
@@ -1012,8 +1023,8 @@ service cloud.firestore {
       //
       // The judge's route does not come through here (Admin SDK), so this
       // leaves only the club-site admin, who could already write anything.
-      allow update: if isAdmin();
-      allow delete: if isAdmin();
+      allow update: if false; // FROZEN (was: isAdmin())
+      allow delete: if false; // FROZEN (was: isAdmin())
     }
 
     // Per-athlete notification feed for the online-competition platform.
@@ -1025,7 +1036,8 @@ service cloud.firestore {
     match /onlineNotifications/{notificationId} {
       allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
       allow create: if false;
-      allow update: if isSignedIn() &&
+      allow update: if false && // FROZEN: the conditions below no longer apply
+                       isSignedIn() &&
                        resource.data.uid == request.auth.uid &&
                        request.resource.data.diff(resource.data)
                          .affectedKeys().hasOnly(['read']);
