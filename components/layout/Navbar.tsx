@@ -13,7 +13,7 @@ import {
 import ThemeToggle from './ThemeToggle';
 import LangToggle from './LangToggle';
 
-type SessionRole = 'admin' | 'athlete' | 'results_entry' | null;
+type SessionRole = 'admin' | 'athlete' | null;
 
 function getSessionRole(): SessionRole {
   try {
@@ -21,7 +21,6 @@ function getSessionRole(): SessionRole {
       JSON.parse(localStorage.getItem('cubeAthleteUser') || 'null') ??
       JSON.parse(localStorage.getItem('currentUser') || 'null');
     if (user?.role === 'admin') return 'admin';
-    if (user?.role === 'results_entry') return 'results_entry';
     if (user?.athleteId) return 'athlete';
   } catch {}
   return null;
@@ -161,7 +160,7 @@ export default function Navbar() {
               <span>
                 {role === 'admin'
                   ? t('nav.admin')
-                  : role === 'athlete' || role === 'results_entry'
+                  : role === 'athlete'
                   ? t('nav.my-profile-short')
                   : t('nav.sign-in')}
               </span>
@@ -312,7 +311,7 @@ export default function Navbar() {
                   </>
                 )}
 
-                {!user && (role === 'athlete' || role === 'results_entry') && (
+                {!user && role === 'athlete' && (
                   <>
                     <a
                       href="/dashboard"

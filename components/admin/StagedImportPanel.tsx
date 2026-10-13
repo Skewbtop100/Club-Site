@@ -77,8 +77,8 @@ export default function StagedImportPanel({ comp, athletes, stagedEvents }: {
       let revealedNow = 0;
       // One private document per event, so one save per event in the paste.
       for (const eventId of [...new Set(rounds.map(r => r.eventId))]) {
-        const plan = await saveStagedImport(comp, eventId, rounds.filter(r => r.eventId === eventId), athletes);
-        revealedNow += plan?.reveals.length ?? 0;
+        const outcome = await saveStagedImport(comp, eventId, rounds.filter(r => r.eventId === eventId), athletes);
+        revealedNow += outcome.revealed;
       }
       setText(''); setParsed(null);
       setMsgType('success');
@@ -93,9 +93,9 @@ export default function StagedImportPanel({ comp, athletes, stagedEvents }: {
   async function revealAll(eventId: string, round: number) {
     setBusy(true);
     try {
-      const plan = await syncStagedEvent({ comp, eventId, forceRounds: [round] });
+      const outcome = await syncStagedEvent(comp.id, eventId, [round]);
       setMsgType('success');
-      setMsg(`${eventShort(eventId)} · ${roundLabel(eventId, String(round))}: ${plan?.reveals.length ?? 0} ${t('admin.results.staged.msg.revealed-now')}.`);
+      setMsg(`${eventShort(eventId)} · ${roundLabel(eventId, String(round))}: ${outcome.revealed} ${t('admin.results.staged.msg.revealed-now')}.`);
     } catch (e: unknown) {
       fail(e);
     } finally {

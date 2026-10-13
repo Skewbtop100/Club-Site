@@ -6,6 +6,7 @@ import { subscribeResultsByComp, getResultsByComp, saveResult, deleteResult as d
 import { syncStagedEvent } from '@/lib/firebase/services/staged-results';
 import { compareRoundResults } from '@/lib/results-entry-helpers';
 import WcaResultChip from '@/components/shared/WcaResultChip';
+import JudgedBy from '@/components/shared/JudgedBy';
 import { getAthletes } from '@/lib/firebase/services/athletes';
 import type { Competition, Result, AdvancementConfig, Athlete } from '@/lib/types';
 import { fmtTime, parseTime } from '@/lib/time-utils';
@@ -222,32 +223,25 @@ export default function CompResultsTab() {
       // THEN auto-create next-round placeholders — advancement ranks club and
       // imported results together, so it has to see all of them.
       if (newStatus === 'complete') {
-        const current = await syncStaged(ev, undefined, updated);
+        const current = await syncStaged(ev);
         await applyAdvancement(ev, r, current);
       }
     } catch { /* ignore */ } finally { setStatusWorking(false); }
   }
 
-  /** Sync an event's staged import (lib/firebase/services/staged-results.ts)
-   *  and return the competition's results as they stand afterwards — the
-   *  given/live ones when the event has no staged import (nothing is fetched
-   *  then, so behaviour for ordinary competitions is unchanged).
-   *  `currentResults` undefined = fetch them fresh; `roundStatus` = the
-   *  status map just written, since `selComp` hasn't caught up yet. */
-  async function syncStaged(
-    eventId: string,
-    currentResults?: Result[],
-    roundStatus?: Record<string, 'complete' | 'ongoing'>,
-  ): Promise<Result[]> {
+  /** Sync an event's staged import (server-side, see
+   *  lib/firebase/services/staged-results.ts) and return the competition's
+   *  results as they stand afterwards — the given/live ones when the event
+   *  has no staged import (nothing is fetched then, so behaviour for ordinary
+   *  competitions is unchanged). The server reads round status and results
+   *  itself, so it sees a status change written just before this call. */
+  async function syncStaged(eventId: string, currentResults?: Result[]): Promise<Result[]> {
     const fallback = currentResults ?? results;
     if (!selComp) return fallback;
     try {
-      const plan = await syncStagedEvent({
-        comp: roundStatus ? { ...selComp, roundStatus } : selComp,
-        eventId, results: currentResults,
-      });
-      if (!plan) return fallback;
-      return plan.reveals.length > 0 || !currentResults ? await getResultsByComp(selComp.id) : currentResults;
+      const outcome = await syncStagedEvent(selComp.id, eventId);
+      if (!outcome.staged) return fallback;
+      return outcome.revealed > 0 || !currentResults ? await getResultsByComp(selComp.id) : currentResults;
     } catch (e) {
       console.error('[CompResultsTab] staged import sync failed', e);
       return fallback;
@@ -766,6 +760,7 @@ export default function CompResultsTab() {
                                 {athleteNameMap[r.athleteId] || r.athleteName || r.athleteId}
                                 <WcaResultChip result={r} />
                               </div>
+                              {!isPlaceholder && <JudgedBy name={r.judgeName || athleteNameMap[r.judgeAthleteId || '']} />}
                             </td>
 
                             {/* Country */}

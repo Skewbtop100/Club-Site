@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import ThemeToggle from '@/components/layout/ThemeToggle';
 import LangToggle from '@/components/layout/LangToggle';
 import AthleteView from '@/components/dashboard/AthleteView';
-import ResultsEntryView from '@/components/dashboard/ResultsEntryView';
 
 interface Session {
   uid: string; username: string; athleteId: string | null; role: string;
@@ -20,7 +19,7 @@ export default function DashboardPage() {
     try {
       const raw = localStorage.getItem('cubeAthleteUser');
       const s: Session | null = raw ? JSON.parse(raw) : null;
-      if (!s || (!s.athleteId && s.role !== 'results_entry')) {
+      if (!s || !s.athleteId) {
         router.replace('/login');
         return;
       }
@@ -37,8 +36,6 @@ export default function DashboardPage() {
   }
 
   if (!session) return null;
-
-  const isResultsEntry = session.role === 'results_entry';
 
   return (
     <div style={{ background: 'var(--bg)', color: 'var(--text)', minHeight: '100vh', fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
@@ -117,10 +114,7 @@ export default function DashboardPage() {
 
       {/* Content */}
       <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '2.5rem 1.5rem 4rem' }}>
-        {isResultsEntry
-          ? <ResultsEntryView session={session} />
-          : <AthleteView session={session} onLogout={doLogout} />
-        }
+        <AthleteView session={session} onLogout={doLogout} />
       </div>
 
       {/* Background glow */}

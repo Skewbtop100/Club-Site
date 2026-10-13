@@ -14,6 +14,10 @@ emulator. Nothing here touches the real database.
 - `competition-staged-results.test.mjs` — the staged import of a past
   competition's results (`competitions/{id}/private/importedResults_{eventId}`):
   admin-only until a row is revealed as an ordinary public result.
+- `judge-access.test.mjs` — the per-competition judge (PIN login → custom
+  token): what a judge may read and write, when that access ends (expiry, PIN
+  regenerated or disabled, competition finished), and `results` writes being
+  admin + judge only.
 
 ## Running
 

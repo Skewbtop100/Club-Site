@@ -184,6 +184,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLoading(false);
         return;
       }
+      // A judge session (PIN login on /judge → custom token) is not a club
+      // account: no users document, no login bonus, and `user` stays null so
+      // nothing that keys off a signed-in member — least of all the admin
+      // gate — treats it as one. The /judge page reads the token itself.
+      try {
+        if ((await fbUser.getIdTokenResult()).claims.role === 'judge') {
+          inFlightRef.current = null;
+          setUser(null);
+          setLoading(false);
+          return;
+        }
+      } catch (err) {
+        console.warn('[auth] could not read token claims', err);
+      }
       inFlightRef.current = fbUser.uid;
       try {
         const appUser = await upsertUserDoc(fbUser);

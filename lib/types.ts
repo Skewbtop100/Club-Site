@@ -220,6 +220,14 @@ export interface Result {
    *  was entered against imported scrambles; `group` is saved alongside it so
    *  the exact scramble can be looked up again. */
   scrambleSources?: ScrambleSource[];
+  /** The club athlete who judged this result, chosen in the entry panel
+   *  (required for a judge session, optional for an admin). Entered club
+   *  results only — imported results have no judge. Besides attribution
+   *  ("Шүүсэн: …"), this with `group` drives the conflict rule in
+   *  lib/judge-conflict.ts: whoever judged a group can't then compete in it. */
+  judgeAthleteId?: string;
+  /** The judge's full name as it was when the result was saved. */
+  judgeName?: string;
   /** Set on imported results revealed from a staged import
    *  (lib/staged-reveal.ts): the id of the staged row this was revealed from.
    *  Such rows get no next-round placeholder — their later rounds only ever

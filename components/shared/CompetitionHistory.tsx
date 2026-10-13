@@ -8,6 +8,7 @@ import { fmtTime, formatDate } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { compareRoundResults } from '@/lib/results-entry-helpers';
 import WcaResultChip from '@/components/shared/WcaResultChip';
+import JudgedBy from '@/components/shared/JudgedBy';
 import AthleteProfileOverlay from '@/components/shared/AthleteProfileOverlay';
 import type { Competition, Result, Athlete, AdvancementConfig } from '@/lib/types';
 
@@ -68,7 +69,7 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
   const [eventsExpanded, setEventsExpanded] = useState(false);
   const [medalOpen, setMedalOpen] = useState<'gold' | 'silver' | 'bronze' | null>(null);
   const [athleteProfile, setAthleteProfile] = useState<Athlete | null>(null);
-  const [solvesPopup, setSolvesPopup] = useState<{ solves: (number | null)[]; x: number; y: number } | null>(null);
+  const [solvesPopup, setSolvesPopup] = useState<{ solves: (number | null)[]; judgeName?: string; x: number; y: number } | null>(null);
   const wcaRecords = useWcaRecords();
 
   // Subscribe to results
@@ -265,6 +266,7 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
   interface MedalDetail {
     athleteId: string; name: string; eventId: string; eventName: string;
     roundLabel: string; time: number | null; solves: (number | null)[];
+    judgeName?: string;
   }
   const medalDetails = useMemo(() => {
     const gold: MedalDetail[] = [];
@@ -289,6 +291,7 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
           eventId, eventName: evName, roundLabel: rLabel,
           time: r.average != null && r.average > 0 ? r.average : r.single,
           solves: r.solves ? [...r.solves] : [],
+          judgeName: r.judgeName || athleteNameMap[r.judgeAthleteId || ''],
         };
         if (i === 0) gold.push(detail);
         else if (i === 1) silver.push(detail);
@@ -302,6 +305,7 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
   interface RecordDetail {
     badge: string; athleteId: string; name: string; eventName: string;
     type: string; time: number; solves: (number | null)[];
+    judgeName?: string;
   }
   const recordDetails = useMemo(() => {
     const list: RecordDetail[] = [];
@@ -323,6 +327,7 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
             name: athleteNameMap[r.athleteId] || r.athleteName || r.athleteId,
             eventName: evName, type, time: val,
             solves: r.solves ? [...r.solves] : [],
+            judgeName: r.judgeName || athleteNameMap[r.judgeAthleteId || ''],
           });
         });
       });
@@ -362,11 +367,11 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
   }, [section, participatingClubAthletes.length, startStripAutoScroll]);
 
   // Helper: open solves popup relative to click position
-  const openSolves = (e: React.MouseEvent, solves: (number | null)[]) => {
+  const openSolves = (e: React.MouseEvent, solves: (number | null)[], judgeName?: string) => {
     if (!solves || solves.length === 0) return;
     e.stopPropagation();
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setSolvesPopup({ solves, x: rect.left + rect.width / 2, y: rect.bottom + 4 });
+    setSolvesPopup({ solves, judgeName, x: rect.left + rect.width / 2, y: rect.bottom + 4 });
   };
 
   // ── render ──────────────────────────────────────────────────────────────────
@@ -544,7 +549,7 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
                                     </div>
                                     <div
                                       className={`ch-me-time${m.solves.length > 0 ? ' ch-clickable-time' : ''}`}
-                                      onClick={m.solves.length > 0 ? (e) => openSolves(e, m.solves) : undefined}
+                                      onClick={m.solves.length > 0 ? (e) => openSolves(e, m.solves, m.judgeName) : undefined}
                                     >{fmtTime(m.time)}</div>
                                   </div>
                                 ))}
@@ -572,7 +577,7 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
                             </div>
                             <div
                               className={`ch-re-time${rd.type === 'average' && rd.solves.length > 0 ? ' ch-clickable-time' : ''}`}
-                              onClick={rd.type === 'average' && rd.solves.length > 0 ? (e) => openSolves(e, rd.solves) : undefined}
+                              onClick={rd.type === 'average' && rd.solves.length > 0 ? (e) => openSolves(e, rd.solves, rd.judgeName) : undefined}
                             >{fmtTime(rd.time)}</div>
                           </div>
                         ))}
@@ -758,6 +763,7 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
                                   </td>
                                   <td className="wca-td-name">
                                     <div className={`wca-name${isClub ? ' ch-club-name' : ''}`}>{displayName}<WcaResultChip result={r} /></div>
+                                    <JudgedBy name={r.judgeName || athleteNameMap[r.judgeAthleteId || '']} />
                                   </td>
                                   <td className="wca-td-country">{displayCountry}</td>
                                   {([0, 1, 2, 3, 4] as const).map(si => {
@@ -932,6 +938,7 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
               );
             })}
           </div>
+          <JudgedBy name={solvesPopup.judgeName} style={{ marginTop: '0.35rem', textAlign: 'center' }} />
         </div>
       )}
 

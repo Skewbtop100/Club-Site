@@ -22,6 +22,34 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin';
     }
 
+    // A competition judge: signed in with the custom token app/api/judge/login
+    // issues after checking the competition's PIN on the server. The claims
+    //   { role: 'judge', competitionId, pinVersion, validUntil }
+    // are set by the server only — a client cannot mint or alter them.
+    //
+    // FAILS CLOSED, and every condition is re-checked on every request, so
+    // access ends by itself, with no sign-out needed, the moment any of
+    // these stops holding:
+    //   - the token names THIS competition (never any other);
+    //   - it is not older than its 24 h (validUntil, epoch ms);
+    //   - the competition is not finished;
+    //   - the PIN it was issued for is still the current, enabled one
+    //     (private/judgeAccess.version — regenerating or disabling the PIN
+    //     changes it, which revokes every session issued before).
+    // A judge is NOT an admin: isAdmin() reads users/{uid}.role, and a judge
+    // session has no users document (and may not create one — see /users).
+    function isJudgeOf(compId) {
+      let comp = /databases/$(database)/documents/competitions/$(compId);
+      let access = /databases/$(database)/documents/competitions/$(compId)/private/judgeAccess;
+      return isSignedIn() &&
+        request.auth.token.get('role', '') == 'judge' &&
+        request.auth.token.get('competitionId', '') == compId &&
+        request.time.toMillis() < request.auth.token.get('validUntil', 0) &&
+        exists(comp) && get(comp).data.get('status', '') != 'finished' &&
+        exists(access) && get(access).data.get('enabled', false) == true &&
+        get(access).data.get('version', '') == request.auth.token.get('pinVersion', '-');
+    }
+
     // ─── Existing collections ─────────────────────────────────────────────────
 
     // ── athletes/{athleteId} — the club's PUBLIC athlete profile ──────────
@@ -62,23 +90,61 @@ service cloud.firestore {
 
     // The competition document itself is public (every public page reads it).
     // Anything that must not be seen before a round is held lives in
-    // competitions/{id}/private/* — today the imported WCA scrambles at
-    // private/scrambles (lib/firebase/services/competitions.ts). Admin-only,
-    // read and write: an athlete who could read it would know the scrambles
-    // in advance. Rules don't cascade, so the parent's `allow read: if true`
-    // grants nothing here.
+    // competitions/{id}/private/* — the imported WCA scrambles
+    // (private/scrambles), the staged imported results
+    // (private/importedResults_{eventId}) and the judge PIN hash
+    // (private/judgeAccess). Rules don't cascade, so the parent's
+    // `allow read: if true` grants nothing here.
     match /competitions/{doc} {
       allow read: if true;
       allow write: if isAdmin();
 
+      // Admin: everything. A judge of this competition: a single-document
+      // read of private/scrambles ONLY (the panel shows the scramble being
+      // judged) — no listing, no write, and none of the other private
+      // documents: not judgeAccess (the PIN hash), not importedResults_*
+      // (every imported result not yet revealed; the reveal runs on the
+      // server, app/api/staged/sync, precisely so judges need no access).
       match /private/{docId} {
         allow read, write: if isAdmin();
+        allow get: if docId == 'scrambles' && isJudgeOf(doc);
       }
     }
 
-    match /results/{doc} {
+    // ── results/{docId} ───────────────────────────────────────────────────
+    // Public to read. WRITES ARE ADMIN-ONLY, plus the narrow judge case
+    // below. This used to be `allow write: if isSignedIn()`: any Google
+    // account could create, overwrite or delete any result.
+    //
+    // A judge of the result's competition may:
+    //   create — an entered ('entry'), published club result, with a judge
+    //            named on it who is not the athlete, under the one
+    //            deterministic id for that competition+event+round+athlete.
+    //            The fixed id is what stops a second result for the same
+    //            athlete and round.
+    //   update — the same, but only over a next-round PLACEHOLDER (the row
+    //            advancement creates for a qualified athlete). A result that
+    //            already holds solves cannot be changed by a judge.
+    // and may never delete, write an imported result (reveals are written by
+    // the server), or touch another competition's results.
+    match /results/{docId} {
+      function judgeEntry() {
+        let d = request.resource.data;
+        return d.get('competitionId', '') is string && isJudgeOf(d.get('competitionId', '')) &&
+          d.get('source', '') == 'entry' &&
+          d.get('status', '') == 'published' &&
+          d.get('isPlaceholder', false) == false &&
+          d.get('athleteId', '') is string && d.get('athleteId', '') != '' &&
+          d.get('eventId', '') is string && d.get('round', 0) is int &&
+          d.get('judgeAthleteId', '') is string && d.get('judgeAthleteId', '') != '' &&
+          d.judgeAthleteId != d.athleteId &&
+          docId == d.competitionId + '_' + d.eventId + '_r' + string(d.round) + '_' + d.athleteId;
+      }
+
       allow read: if true;
-      allow write: if isSignedIn();
+      allow write: if isAdmin();
+      allow create: if judgeEntry();
+      allow update: if judgeEntry() && resource.data.get('isPlaceholder', false) == true;
     }
 
     // ── users/{uid} — the club account ───────────────────────────────────
@@ -106,8 +172,11 @@ service cloud.firestore {
     // player's avatar from the multiplayer room instead.
     match /users/{uid} {
       allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      // A judge session (PIN login) is not a club account and gets no
+      // users document — nothing for a role to ever be attached to.
       allow create: if isSignedIn() &&
                        request.auth.uid == uid &&
+                       request.auth.token.get('role', '') != 'judge' &&
                        (!('role' in request.resource.data) || request.resource.data.role == 'member');
       allow update: if isSignedIn() &&
                        ((request.auth.uid == uid &&

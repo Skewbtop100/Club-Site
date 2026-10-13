@@ -11,12 +11,17 @@ import type { StagedEvent } from '@/lib/staged-reveal';
 import StagedImportPanel from '@/components/admin/StagedImportPanel';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { groupLetter, groupOptions, scrambleFor, nextExtraSource } from '@/lib/scramble-import';
+import { isSelfJudging, groupAvailability } from '@/lib/judge-conflict';
 import ScramblePreview from '@/components/shared/ScramblePreview';
 import { useLang, type TranslationKey } from '@/lib/i18n';
 import type { Athlete, Competition, Result, ScrambleSets, ScrambleSource } from '@/lib/types';
 
 interface PanelState {
   id: number; athleteId: string; eventId: string; round: number; group: number;
+  /** Club athlete judging at this panel ('' = none chosen). Kept when the
+   *  athlete/event changes or the panel is cleared — a judge sits at one
+   *  station for many athletes — and remembered per panel on this device. */
+  judgeId: string;
   solves: string[]; penalties: ('none' | '+2' | 'dnf')[];
   currentSolveIdx: number; rawInput: string;
   selectedChip: number | null;   // which prior-solve chip is showing Edit button (during entry)
@@ -96,7 +101,7 @@ function freshScrambleSources(): ScrambleSource[] {
  *  reset when the admin starts a fresh attempt (a new panel, or an existing
  *  panel's athlete/event changing mid-flow). Athlete/event/round/group are
  *  deliberately excluded: callers decide what to do with those separately. */
-function freshSolveState(): Omit<PanelState, 'id' | 'athleteId' | 'eventId' | 'round' | 'group'> {
+function freshSolveState(): Omit<PanelState, 'id' | 'athleteId' | 'eventId' | 'round' | 'group' | 'judgeId'> {
   return {
     solves: ['', '', '', '', ''], penalties: ['none', 'none', 'none', 'none', 'none'],
     currentSolveIdx: 0, rawInput: '',
@@ -108,8 +113,28 @@ function freshSolveState(): Omit<PanelState, 'id' | 'athleteId' | 'eventId' | 'r
   };
 }
 
-function emptyPanel(id: number): PanelState {
-  return { id, athleteId: '', eventId: '', round: 1, group: 1, ...freshSolveState() };
+function emptyPanel(id: number, judgeId = ''): PanelState {
+  return { id, athleteId: '', eventId: '', round: 1, group: 1, judgeId, ...freshSolveState() };
+}
+
+// The judge chosen at each panel, remembered on this device per competition
+// (panel id → athlete id), so reopening the page or clearing a panel doesn't
+// make the judge pick themselves again. Best-effort: storage may be blocked.
+const judgeMemoryKey = (compId: string) => `resultsEntryJudge:${compId}`;
+
+function readJudgeMemory(compId: string): Record<string, string> {
+  if (!compId || typeof window === 'undefined') return {};
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(judgeMemoryKey(compId)) || '{}');
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, string> : {};
+  } catch { return {}; }
+}
+
+function writeJudgeMemory(compId: string, panelId: number, judgeId: string) {
+  if (!compId || typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(judgeMemoryKey(compId), JSON.stringify({ ...readJudgeMemory(compId), [panelId]: judgeId }));
+  } catch { /* storage unavailable */ }
 }
 
 /** True once the admin has entered at least one solve (or is mid-edit on
@@ -125,12 +150,24 @@ function getRoundNames(totalRounds: number, t: (k: TranslationKey) => string): s
   return [t('admin.round.first'), t('admin.round.second'), t('admin.round.semi'), t('admin.round.final')];
 }
 
-export default function ResultsEntryTab() {
+/**
+ * The results-entry panel. Two ways in:
+ *  - the admin tab (no props): any live competition or Daily Practice, plus
+ *    the import section;
+ *  - the judge page (`judgeCompetitionId`, app/judge): the same entry panels
+ *    locked to the one competition the judge's PIN was for, with a judge
+ *    required on every result and nothing admin-only shown — no Daily
+ *    Practice, no imports, no staged-import data (a judge can't read it).
+ */
+export default function ResultsEntryTab({ judgeCompetitionId }: { judgeCompetitionId?: string } = {}) {
   const { t } = useLang();
+  const isJudge = !!judgeCompetitionId;
   const [athletes, setAthletes]   = useState<Athlete[]>([]);
   const [comps, setComps]         = useState<Competition[]>([]);
-  const [compId, setCompId]       = useState('');
-  const [panels, setPanels]       = useState<PanelState[]>([emptyPanel(0)]);
+  const [compId, setCompId]       = useState(judgeCompetitionId ?? '');
+  const [panels, setPanels]       = useState<PanelState[]>(
+    () => [emptyPanel(0, readJudgeMemory(judgeCompetitionId ?? '')[0])],
+  );
   // Panel 0 already exists at mount, so the next fresh id starts at 1. A
   // counter (not panels.length) so ids stay unique even after removing a
   // panel from the middle of the array — reusing .length could collide with
@@ -169,10 +206,11 @@ export default function ResultsEntryTab() {
 
   useEffect(() => {
     getAthletes().then(setAthletes);
-    ensureDailyPracticeCompetition().catch(() => {});
+    // Admin only: a judge can't write competitions (and has no use for it).
+    if (!isJudge) ensureDailyPracticeCompetition().catch(() => {});
     const unsub = subscribeCompetitions((data) => setComps(data));
     return unsub;
-  }, []);
+  }, [isJudge]);
 
   useEffect(() => {
     if (!compId) { setCompResults([]); return; }
@@ -203,12 +241,13 @@ export default function ResultsEntryTab() {
   const [stagedEvents, setStagedEvents] = useState<Record<string, StagedEvent>>({});
   useEffect(() => {
     setStagedEvents({});
-    if (!compId || compId === DAILY_PRACTICE_COMPETITION_ID) return;
+    // Not for a judge: the staged rows are admin-only, the rules refuse them.
+    if (isJudge || !compId || compId === DAILY_PRACTICE_COMPETITION_ID) return;
     return subscribeStagedEvents(compId, setStagedEvents, (err) => {
       console.error('[ResultsEntryTab] staged imports unavailable', err);
       setStagedEvents({});
     });
-  }, [compId]);
+  }, [compId, isJudge]);
 
   // Daily Practice: generate a WCA-quality scramble for whichever solve slot
   // is currently active, per panel. Fetched from /api/scramble (server-side,
@@ -273,7 +312,7 @@ export default function ResultsEntryTab() {
       if (key.startsWith(`${panelId}:`)) scrambleAttemptedRef.current.delete(key);
     }
     resetTimer(panelId);
-    updatePanel(panelId, { ...emptyPanel(panelId) });
+    updatePanel(panelId, { ...emptyPanel(panelId, panels.find(p => p.id === panelId)?.judgeId) });
   }
 
   function doRemovePanel(panelId: number) {
@@ -351,6 +390,21 @@ export default function ResultsEntryTab() {
     const isDailyPractice = compId === DAILY_PRACTICE_COMPETITION_ID;
     const today = todayDateStr();
 
+    // Judge rules, re-checked at save (the panel already blocks entry, but
+    // results may have changed since): a judge session must name a judge;
+    // nobody judges themselves; and an athlete can't compete in a group
+    // they judged in this event+round (lib/judge-conflict.ts).
+    if (!isDailyPractice) {
+      const fail = (key: TranslationKey) => updatePanel(panelId, { msg: t(key), msgType: 'error', needsConfirm: false });
+      if (isJudge && !panel.judgeId) return fail('admin.results.judge.required');
+      if (isSelfJudging(panel.judgeId, panel.athleteId)) return fail('admin.results.judge.self');
+      const cfg = comps.find(c => c.id === compId)?.eventConfig?.[panel.eventId];
+      const offered = groupOptions(cfg?.groups ?? 1, scrambleSets[panel.eventId]?.[String(panel.round)]);
+      const avail = groupAvailability(offered, compResults, panel.athleteId, panel.eventId, panel.round);
+      if (avail.roundBlocked) return fail('admin.results.judge.round-blocked');
+      if (avail.blocked.has(panel.group)) return fail('admin.results.judge.group-blocked-hint');
+    }
+
     // Daily Practice: a second same-day Ao5 for this athlete+event is a hard
     // block, not a silent overwrite. Corrections now happen only through the
     // Daily Practice management tab's Edit flow — re-submitting here used to
@@ -412,6 +466,13 @@ export default function ResultsEntryTab() {
       !r.isPlaceholder &&
       (!isDailyPractice || r.practiceDate === today),
     );
+    // A judge may record a result once; corrections are the admin's (the
+    // rules refuse a judge's overwrite anyway — this is the readable message).
+    if (isJudge && existing) {
+      updatePanel(panelId, { msg: t('admin.results.judge.already-recorded'), msgType: 'error', needsConfirm: false });
+      return;
+    }
+    const judge = isDailyPractice ? undefined : athletes.find(a => a.id === panel.judgeId);
 
     // Daily Practice's competition doc has one generic name ("Daily Practice")
     // shared across every day — the result itself gets a date-stamped name
@@ -431,7 +492,14 @@ export default function ResultsEntryTab() {
         solves: parsed, status: 'published', source: 'entry',
         penalties: panel.penalties,
         ...(isDailyPractice ? { practiceDate: today, scrambles: panel.scrambles } : {}),
-        ...(usedImportedScrambles ? { group: panel.group, scrambleSources: panel.scrambleSources } : {}),
+        // Group is always recorded for a real competition: it is what the
+        // judge conflict rule looks at ("judged group G → can't compete in G").
+        ...(!isDailyPractice ? { group: panel.group } : {}),
+        ...(usedImportedScrambles ? { scrambleSources: panel.scrambleSources } : {}),
+        ...(judge ? {
+          judgeAthleteId: judge.id,
+          judgeName: `${judge.name || ''}${judge.lastName ? ' ' + judge.lastName : ''}`.trim(),
+        } : {}),
       });
       const fullName = `${ath?.name || ''}${ath?.lastName ? ' ' + ath.lastName : ''}`.trim() || panel.athleteId;
       const msg = existing
@@ -439,19 +507,15 @@ export default function ResultsEntryTab() {
         : `✓ ${t('result.saved')}! ${t('admin.results.single')}: ${fmtTime(single)} Ao5: ${fmtTime(average)}`;
       updatePanel(panelId, { msg, msgType: 'success', needsConfirm: false });
 
-      // A club athlete just finished this round: reveal the share of the
-      // event's staged imported results that calls for. Only for events that
-      // have a staged import; failing here must not look like a failed save
-      // (the result IS saved) — the next save or Mark Round Complete catches up.
-      if (comp && !isDailyPractice && stagedEvents[panel.eventId]) {
-        const saved: Result = {
-          id: docId, athleteId: panel.athleteId, competitionId: compId, eventId: panel.eventId,
-          round: panel.round, single, average, status: 'published', source: 'entry',
-        };
-        syncStagedEvent({
-          comp, eventId: panel.eventId,
-          results: [...compResults.filter(r => r.id !== docId), saved],
-        }).catch(err => console.error('[ResultsEntryTab] staged import reveal failed', err));
+      // A club athlete just finished this round: have the server reveal the
+      // share of the event's staged imported results that calls for. An
+      // admin knows which events have a staged import and skips the rest; a
+      // judge can't see that, so always asks (a no-op when there is none).
+      // Failing here must not look like a failed save (the result IS saved)
+      // — the next save or Mark Round Complete catches up.
+      if (!isDailyPractice && (isJudge || stagedEvents[panel.eventId])) {
+        syncStagedEvent(compId, panel.eventId)
+          .catch(err => console.error('[ResultsEntryTab] staged import reveal failed', err));
       }
     } catch (e: unknown) {
       updatePanel(panelId, { msg: t('admin.msg.error-prefix') + (e instanceof Error ? e.message : String(e)), msgType: 'error', needsConfirm: false });
@@ -750,6 +814,14 @@ export default function ResultsEntryTab() {
     updatePanel(panelId, patch);
   }
 
+  function switchCompetition(nextCompId: string) {
+    setCompId(nextCompId);
+    setPanels([emptyPanel(0, readJudgeMemory(nextCompId)[0])]);
+    nextPanelIdRef.current = 1;
+    resetAllTimers();
+    setShowTimer(false);
+  }
+
   function resolvePendingConfirm() {
     if (!pendingConfirm) return;
     const { kind, panelId, nextValue } = pendingConfirm;
@@ -765,13 +837,15 @@ export default function ResultsEntryTab() {
 
   return (
     <div className="card">
-      <div className="card-title"><span className="title-accent" />{t('admin.results.title')}</div>
+      <div className="card-title"><span className="title-accent" />{t('admin.results.title')}{isJudge && selComp ? ` — ${selComp.name}` : ''}</div>
 
       {/* Competition selector + controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.8rem', flexWrap: 'wrap' }}>
+        {/* A judge's competition is fixed by their PIN — nothing to choose. */}
+        {!isJudge && (
         <div className="form-group" style={{ maxWidth: '340px', marginBottom: 0, flex: 1, minWidth: '200px' }}>
           <label>{t('admin.results.competition')}</label>
-          <select value={compId} onChange={e => { setCompId(e.target.value); setPanels([emptyPanel(0)]); nextPanelIdRef.current = 1; resetAllTimers(); setShowTimer(false); }}>
+          <select value={compId} onChange={e => switchCompetition(e.target.value)}>
             <option value="">{t('admin.results.select-comp')}</option>
             {liveComps.map(c => (
               <option key={c.id} value={c.id}>
@@ -780,10 +854,11 @@ export default function ResultsEntryTab() {
             ))}
           </select>
         </div>
+        )}
         {compId && (
-          <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', paddingTop: '1.5rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', paddingTop: isJudge ? 0 : '1.5rem', flexWrap: 'wrap' }}>
             <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>{t('admin.results.panels')} <strong>{panels.length}</strong></span>
-            <button className="btn-xs" onClick={() => setPanels(p => [...p, emptyPanel(nextPanelIdRef.current++)])}>{t('admin.results.add-panel')}</button>
+            <button className="btn-xs" onClick={() => { const id = nextPanelIdRef.current++; setPanels(p => [...p, emptyPanel(id, readJudgeMemory(compId)[id])]); }}>{t('admin.results.add-panel')}</button>
             <button className="btn-xs" onClick={() => {
               if (panels.length <= 1) return;
               const last = panels[panels.length - 1];
@@ -878,8 +953,27 @@ export default function ResultsEntryTab() {
             const curIdx     = panel.currentSolveIdx;
             const curPenalty = curIdx < 5 ? panel.penalties[curIdx] : 'none';
             const preview    = curIdx < 5 && curPenalty !== 'dnf' ? formatRawDigits(panel.rawInput) : '';
-            const canAdvance = curPenalty === 'dnf' || panel.rawInput.length > 0;
             const isEditMode = panel.editReturnIdx !== null;
+
+            // Judge rules (lib/judge-conflict.ts), real competitions only.
+            // Whoever judged a group of this event+round can't compete in it.
+            const avail = groupAvailability(
+              isDailyPracticeSelected ? [] : groupList, compResults, panel.athleteId, panel.eventId, panel.round,
+            );
+            // Who can be chosen as judge: the competition's club athletes.
+            const judgeOptions = compAthletes
+              ? athletes.filter(a => compAthletes.some(x => x.id === a.id))
+              : athletes;
+            // Why times can't be entered right now ('' = they can).
+            const blockReason: TranslationKey | '' =
+              isDailyPracticeSelected ? ''
+              : isJudge && !panel.judgeId ? 'admin.results.judge.required'
+              : isSelfJudging(panel.judgeId, panel.athleteId) ? 'admin.results.judge.self'
+              : !panel.athleteId || !panel.eventId ? ''
+              : avail.roundBlocked ? 'admin.results.judge.round-blocked'
+              : avail.blocked.has(panel.group) ? 'admin.results.judge.group-blocked-hint'
+              : '';
+            const canAdvance = !blockReason && (curPenalty === 'dnf' || panel.rawInput.length > 0);
 
             // Imported WCA scrambles for this athlete's event/round/group, if
             // the competition has any. When it doesn't, nothing below changes:
@@ -924,6 +1018,25 @@ export default function ResultsEntryTab() {
                   </div>
                 </div>
 
+                {/* Judge — required in a judge session, optional for the admin.
+                    Not for Daily Practice (no judges there). The athlete being
+                    entered can't be picked: nobody judges themselves. */}
+                {!isDailyPracticeSelected && (
+                  <div style={{ marginBottom: '0.3rem' }}>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.2rem', paddingLeft: '0.1rem' }}>{t('admin.results.judge.label')}</div>
+                    <select className="compact-select" value={panel.judgeId} style={{ marginBottom: 0 }}
+                      onChange={e => {
+                        updatePanel(panel.id, { judgeId: e.target.value, msg: '', msgType: '' });
+                        writeJudgeMemory(compId, panel.id, e.target.value);
+                      }}>
+                      <option value="">{t('admin.results.judge.select')}</option>
+                      {[...judgeOptions].sort((a,b) => a.name.localeCompare(b.name)).map(a => (
+                        <option key={a.id} value={a.id} disabled={a.id === panel.athleteId}>{`${a.name || ''}${a.lastName ? ' ' + a.lastName : ''}`}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
                 {/* Athlete — switching mid-entry (progress made, not all 5 solves
                     done) discards those solves, so it's gated the same as the
                     Event dropdown below; switching after a completed entry (or
@@ -939,7 +1052,9 @@ export default function ResultsEntryTab() {
                   }}>
                   <option value="">{t('admin.results.select-athlete')}</option>
                   {[...panelAthletes].sort((a,b) => a.name.localeCompare(b.name)).map(a => (
-                    <option key={a.id} value={a.id}>{`${a.name || ''}${a.lastName ? ' ' + a.lastName : ''}`}</option>
+                    <option key={a.id} value={a.id} disabled={!isDailyPracticeSelected && a.id === panel.judgeId}>
+                      {`${a.name || ''}${a.lastName ? ' ' + a.lastName : ''}`}{!isDailyPracticeSelected && a.id === panel.judgeId ? ` (${t('admin.results.judge.label')})` : ''}
+                    </option>
                   ))}
                 </select>
 
@@ -997,10 +1112,23 @@ export default function ResultsEntryTab() {
                       <select className="compact-select" value={panel.group} style={{ marginBottom: 0 }}
                         onChange={e => updatePanel(panel.id, { group: Number(e.target.value), scrambleSources: freshScrambleSources() })}>
                         {groupList.map(g => (
-                          <option key={g} value={g}>{t('admin.results.group')} {groupLetter(g)}</option>
+                          <option key={g} value={g} disabled={avail.blocked.has(g)}
+                            title={avail.blocked.has(g) ? t('admin.results.judge.group-blocked') : undefined}
+                            style={avail.blocked.has(g) ? { color: 'var(--muted)' } : undefined}>
+                            {t('admin.results.group')} {groupLetter(g)}{avail.blocked.has(g) ? ' 🚫' : ''}
+                          </option>
                         ))}
                       </select>
                     </div>
+                  </div>
+                )}
+
+                {/* Why entry is blocked: no judge yet, self-judging, or the
+                    athlete judged this group (option tooltips don't show on
+                    phones, so the reason is spelled out here). */}
+                {blockReason && (
+                  <div className="msg warn" style={{ display: 'block', marginTop: '0.3rem', marginBottom: '0.3rem' }}>
+                    {t(blockReason)}
                   </div>
                 )}
 
@@ -1140,6 +1268,7 @@ export default function ResultsEntryTab() {
                       value={curPenalty === 'dnf' ? '' : panel.rawInput}
                       placeholder={curPenalty === 'dnf' ? 'DNF' : '0'}
                       readOnly={curPenalty === 'dnf'}
+                      disabled={!!blockReason}
                       onChange={e => {
                         const raw = e.target.value.replace(/\D/g, '').slice(0, 6);
                         updatePanel(panel.id, { rawInput: raw });
@@ -1445,7 +1574,8 @@ export default function ResultsEntryTab() {
         </div>
       )}
 
-      {/* ── Import External Results ─────────────────────────────────────────── */}
+      {/* ── Import External Results (admin only) ─────────────────────────────── */}
+      {!isJudge && (
       <div style={{ marginTop: '1.5rem', borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: '1rem' }}>
         <button
           onClick={() => setImportOpen(v => !v)}
@@ -1486,7 +1616,7 @@ export default function ResultsEntryTab() {
               <>
                 <div className="form-group" style={{ maxWidth: '340px' }}>
                   <label>{t('admin.results.competition')}</label>
-                  <select value={compId} onChange={e => { setCompId(e.target.value); setPanels([emptyPanel(0)]); nextPanelIdRef.current = 1; resetAllTimers(); setShowTimer(false); }}>
+                  <select value={compId} onChange={e => switchCompetition(e.target.value)}>
                     <option value="">{t('admin.results.select-comp')}</option>
                     {importableComps.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
@@ -1502,7 +1632,7 @@ export default function ResultsEntryTab() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: '0.5rem', marginBottom: '1rem' }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label>{t('admin.results.competition')}</label>
-                <select value={compId} onChange={e => { setCompId(e.target.value); setPanels([emptyPanel(0)]); nextPanelIdRef.current = 1; resetAllTimers(); setShowTimer(false); }}>
+                <select value={compId} onChange={e => switchCompetition(e.target.value)}>
                   <option value="">{t('admin.results.select-comp')}</option>
                   {importableComps.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
@@ -1762,6 +1892,7 @@ export default function ResultsEntryTab() {
           </div>
         )}
       </div>
+      )}
 
       {/* Discard/switch confirmation — shared by "Clear", the per-panel "×",
           the top toolbar's "Remove", and switching Athlete/Event mid-entry. */}

@@ -8,6 +8,7 @@ import { useWcaRecords } from '@/lib/hooks/useWcaRecords';
 import { fmtTime, formatDate } from '@/lib/time-utils';
 import { fmtMs } from '@/lib/timer-engine';
 import { WCA_EVENTS } from '@/lib/wca-events';
+import JudgedBy from '@/components/shared/JudgedBy';
 import type { Athlete, Result, Competition } from '@/lib/types';
 import type { RecordBadge } from '@/lib/record-badges';
 
@@ -95,7 +96,7 @@ export default function AthleteProfileOverlay({ athlete, athletes, onClose }: Pr
   const [loading, setLoading] = useState(true);
   const [historyEvent, setHistoryEvent] = useState<string | null>(null);
   const [practiceEvent, setPracticeEvent] = useState<string | null>(null);
-  const [solvesPopup, setSolvesPopup] = useState<{ solves: (number | null)[]; x: number; y: number } | null>(null);
+  const [solvesPopup, setSolvesPopup] = useState<{ solves: (number | null)[]; judgeName?: string; x: number; y: number } | null>(null);
   const [badgePopup, setBadgePopup] = useState<string | null>(null);
   const [highlightResultId, setHighlightResultId] = useState<string | null>(null);
   const wcaRecords = useWcaRecords();
@@ -373,8 +374,8 @@ export default function AthleteProfileOverlay({ athlete, athletes, onClose }: Pr
   // Compute medals from the full field (imported competitors included —
   // see the comment on allPublishedResults above for why).
   const medalData = useMemo(() => {
-    if (!allPublishedResults) return { items: [] as { type: 'gold' | 'silver' | 'bronze'; eventId: string; eventName: string; compId: string; compName: string; compDate: unknown; roundLabel: string; time: number | null; solves: (number | null)[] }[], gold: 0, silver: 0, bronze: 0 };
-    type MedalItem = { type: 'gold' | 'silver' | 'bronze'; eventId: string; eventName: string; compId: string; compName: string; compDate: unknown; roundLabel: string; time: number | null; solves: (number | null)[] };
+    if (!allPublishedResults) return { items: [] as { type: 'gold' | 'silver' | 'bronze'; eventId: string; eventName: string; compId: string; compName: string; compDate: unknown; roundLabel: string; time: number | null; solves: (number | null)[]; judgeName?: string }[], gold: 0, silver: 0, bronze: 0 };
+    type MedalItem = { type: 'gold' | 'silver' | 'bronze'; eventId: string; eventName: string; compId: string; compName: string; compDate: unknown; roundLabel: string; time: number | null; solves: (number | null)[]; judgeName?: string };
     const items: MedalItem[] = [];
     // Get all competitions this athlete participated in
     const myCompIds = new Set(allResults.map(r => r.competitionId));
@@ -400,6 +401,7 @@ export default function AthleteProfileOverlay({ athlete, athletes, onClose }: Pr
             roundLabel: rLabel,
             time: r.average != null && r.average > 0 ? r.average : r.single,
             solves: r.solves ? [...r.solves] : [],
+            judgeName: r.judgeName,
           });
         });
       });
@@ -419,6 +421,7 @@ export default function AthleteProfileOverlay({ athlete, athletes, onClose }: Pr
       eventId: string; eventName: string; type: 'single' | 'average';
       badge: RecordBadge; time: number; compName: string; roundLabel: string;
       solves: (number | null)[];
+      judgeName?: string;
     }
     const items: RecItem[] = [];
     if (!globalResults) return items;
@@ -443,6 +446,7 @@ export default function AthleteProfileOverlay({ athlete, athletes, onClose }: Pr
           compName: comp?.name || r.competitionName || r.competitionId || '—',
           roundLabel: getRoundLabel(r.round || 1, totalRounds),
           solves: r.solves ? [...r.solves] : [],
+          judgeName: r.judgeName,
         });
       });
     });
@@ -710,11 +714,11 @@ export default function AthleteProfileOverlay({ athlete, athletes, onClose }: Pr
     [sortedPracticeResults, practiceEvent],
   );
 
-  const openSolves = (e: React.MouseEvent, solves: (number | null)[]) => {
+  const openSolves = (e: React.MouseEvent, solves: (number | null)[], judgeName?: string) => {
     if (!solves || solves.length === 0) return;
     e.stopPropagation();
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setSolvesPopup({ solves, x: rect.left + rect.width / 2, y: rect.bottom + 4 });
+    setSolvesPopup({ solves, judgeName, x: rect.left + rect.width / 2, y: rect.bottom + 4 });
   };
 
   // ── render ────────────────────────────────────────────────────────────────
@@ -1053,7 +1057,7 @@ export default function AthleteProfileOverlay({ athlete, athletes, onClose }: Pr
                                 {rd.type === 'average' && rd.solves.length > 0 && (
                                   <span
                                     className="apo-rec-solves-btn"
-                                    onClick={e => openSolves(e, rd.solves)}
+                                    onClick={e => openSolves(e, rd.solves, rd.judgeName)}
                                   >solves</span>
                                 )}
                               </div>
@@ -1108,7 +1112,7 @@ export default function AthleteProfileOverlay({ athlete, athletes, onClose }: Pr
                                 <span className="apo-medal-round">{m.roundLabel}</span>
                                 <span
                                   className={`apo-medal-time mono bold${m.solves.length > 0 ? ' apo-clickable' : ''}`}
-                                  onClick={m.solves.length > 0 ? e => openSolves(e, m.solves) : undefined}
+                                  onClick={m.solves.length > 0 ? e => openSolves(e, m.solves, m.judgeName) : undefined}
                                 >{fmtTime(m.time)}</span>
                               </div>
                             ))}
@@ -1216,6 +1220,7 @@ export default function AthleteProfileOverlay({ athlete, athletes, onClose }: Pr
               );
             })}
           </div>
+          <JudgedBy name={solvesPopup.judgeName} style={{ marginTop: '0.35rem', textAlign: 'center' }} />
         </div>
       )}
 

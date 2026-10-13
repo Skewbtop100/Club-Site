@@ -8,6 +8,7 @@ import { fmtTime } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { compareRoundResults } from '@/lib/results-entry-helpers';
 import WcaResultChip from '@/components/shared/WcaResultChip';
+import JudgedBy from '@/components/shared/JudgedBy';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -340,6 +341,7 @@ export default function CompetitionResultsViewer({ comp, onClose, isLive }: Prop
                                   {athleteNameMap[r.athleteId] || r.athleteName || r.athleteId}
                                   <WcaResultChip result={r} />
                                 </div>
+                                {!isPlaceholder && <JudgedBy name={r.judgeName || athleteNameMap[r.judgeAthleteId || '']} />}
                               </td>
 
                               {/* Country */}

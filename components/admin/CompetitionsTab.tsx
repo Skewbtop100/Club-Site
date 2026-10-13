@@ -13,6 +13,7 @@ import { getAthletes } from '@/lib/firebase/services/athletes';
 import type { Athlete, Competition, CompetitionAthlete, EventConfig, AdvancementConfig, ScrambleGroup, ScrambleSets } from '@/lib/types';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { parseWcaScrambles, mergeScrambleSets, type ParsedRound } from '@/lib/scramble-import';
+import JudgePinSection from '@/components/admin/JudgePinSection';
 import { useLang } from '@/lib/i18n';
 import COUNTRIES from '@/lib/countries';
 
@@ -488,6 +489,9 @@ export default function CompetitionsTab() {
             ))}
           </div>
         </div>
+
+        {/* Judge PIN — keyed so a shown PIN never carries over to another competition */}
+        <JudgePinSection key={editId ?? 'new'} competitionId={editId} />
 
         {/* WCA scramble import */}
         <div className="form-group">
