@@ -339,6 +339,7 @@ const en = {
   'celebrate.level.CR': 'Continental record',
   'celebrate.level.WR': 'World record',
   'celebrate.prev-label': 'Previous',
+  'celebrate.club-previous': 'Previous club record',
   'celebrate.new-label': 'New',
   'celebrate.today': 'today',
   'celebrate.seconds': 'sec',
@@ -505,6 +506,12 @@ const en = {
   'admin.users.confirm-delete': 'Delete this user?',
 
   // ADMIN — WCA RECORDS
+  'admin.wca.holders.found': 'holders found for {n} of {total} records',
+  'admin.wca.holders.add': 'Add holders (values unchanged)',
+  'admin.wca.holders.need-fetch': 'Record holders are not loaded yet — press "Refresh records" first.',
+  'admin.wca.holders.added': 'Holder, competition and date added to {n} stored records; no value was changed.',
+  'admin.wca.holders.stale': '{m} stored values differ from the current WCA records and were left without a holder — "Save all to Firebase" updates those values.',
+  'admin.wca.holders.failed': 'record holders could not be fetched — values can still be saved',
   'admin.wca.bests.recalc': 'Recalculate PR/TR bests',
   'admin.wca.bests.working': 'Calculating…',
   'admin.wca.bests.updated': 'Last calculated:',

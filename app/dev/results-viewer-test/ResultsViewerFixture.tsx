@@ -105,7 +105,10 @@ const CLUB_BESTS: ClubBests = {
 //   own    the athlete improving their own record
 //   tie    equalling the record
 //   first  first record ever in the event
-//   nr     national record from the WCA thresholds — no holder, no date
+//   nr     national record with its holder, date and competition, plus the club record line
+//   nr-old national record saved before holders were stored — value only
+//   cr     continental record (same layout, blue)
+//   wr     world record (gold), the athlete's own
 //   today  the record already broken earlier the same day
 //   both   single + average at once, with the longest names (stress test)
 const NEW = (value: string, name = 'Tergel Batzorig') => ({ label: 'Шинэ', value, name, when: 'өнөөдөр' });
@@ -130,8 +133,26 @@ const CELEBRATIONS: Record<string, CelebrationText> = {
     level: 'TR', type: 'average', chip: 'Клубын рекорд · дундаж', next: NEW('1:12.45'), first: 'Энэ төрлийн анхны рекорд',
   }] },
   nr: { title: 'Шинэ үндэсний рекорд!', eventName: '3x3x3', items: [{
-    level: 'NR', type: 'single', chip: 'Үндэсний рекорд · нэг', next: NEW('5.41', 'Gegeenbileg Naranchimeg'),
-    previous: { label: 'Өмнөх', value: '5.83' }, improvement: '−0.42 сек',
+    level: 'NR', type: 'single', chip: 'Үндэсний рекорд · нэг', next: NEW('4.55', 'Gegeenbileg Naranchimeg'),
+    previous: { label: 'Өмнөх', value: '4.84', name: 'Myagmardorj Ulziijargal', date: '2025.11.02', competition: 'Ulaanbaatar Open 2025' },
+    improvement: '−0.29 сек', stat: { days: 345, unit: 'хоног', caption: 'хадгалагдсан рекорд шинэчлэгдлээ' },
+    clubPrevious: { label: 'Клубын өмнөх рекорд', value: '5.83', name: 'Gegeenbileg Naranchimeg', date: '2026.01.18', days: 268, unit: 'хоног' },
+  }] },
+  'nr-old': { title: 'Шинэ үндэсний рекорд!', eventName: '3x3x3', items: [{
+    level: 'NR', type: 'single', chip: 'Үндэсний рекорд · нэг', next: NEW('4.55', 'Gegeenbileg Naranchimeg'),
+    previous: { label: 'Өмнөх', value: '4.84' }, improvement: '−0.29 сек',
+    clubPrevious: { label: 'Клубын өмнөх рекорд', value: '5.83' },
+  }] },
+  cr: { title: 'Шинэ тивийн рекорд!', eventName: 'Skewb', items: [{
+    level: 'CR', type: 'average', chip: 'Тивийн рекорд · дундаж', next: NEW('1.31', 'Uuganbayar Bayalagnasan'),
+    previous: { label: 'Өмнөх', value: '1.42', name: 'Zayn Khanani-Abdulrahman bin Mohammed', date: '2024.03.09', competition: 'Asian Championship Qualifier Kuala Lumpur 2024' },
+    improvement: '−0.11 сек', stat: { days: 948, unit: 'хоног', caption: 'хадгалагдсан рекорд шинэчлэгдлээ' },
+    clubPrevious: { label: 'Клубын өмнөх рекорд', value: '3.74', name: 'Uuganbayar Bayalagnasan', date: 'өнөөдөр' },
+  }] },
+  wr: { title: 'Шинэ дэлхийн рекорд!', eventName: '2x2x2', items: [{
+    level: 'WR', type: 'single', chip: 'Дэлхийн рекорд · нэг', next: NEW('0.37', 'Mandakh Davaasuren'),
+    previous: { label: 'Өмнөх', value: '0.39', name: 'Mandakh Davaasuren', date: '2026.02.22', competition: 'Dębica Cubing Winter 2026' },
+    improvement: '−0.02 сек', stat: { days: 233, unit: 'хоног', caption: 'Өөрийн рекордыг ахиуллаа' },
   }] },
   today: { title: 'Шинэ клубын рекорд!', eventName: '2x2x2', items: [{
     level: 'TR', type: 'average', chip: 'Клубын рекорд · дундаж', next: NEW('2.63'),

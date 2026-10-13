@@ -33,6 +33,7 @@ const MN: CelebrationStrings = {
   daysUnit: 'хоног', daysCaption: 'хадгалагдсан рекорд шинэчлэгдлээ',
   sameDay: 'Өнөөдөр {n} дахь удаагаа шинэчлэгдлээ', ownRecord: 'Өөрийн рекордыг ахиуллаа',
   tied: 'Рекордтой тэнцлээ', first: 'Энэ төрлийн анхны рекорд',
+  clubPrevious: 'Клубын өмнөх рекорд',
 };
 
 const at = (y: number, m: number, d: number, h = 12) => new Date(y, m - 1, d, h).getTime(); // local time
@@ -189,6 +190,53 @@ const noEmpty = (o: unknown): boolean => o === null || typeof o !== 'object'
     text(input(res('T', 400, 280))), text(input(res('C', 4000, 4500, { eventId: '555' }))),
   ];
   check('nothing the card renders is ever an empty string or undefined (no empty labels)', everything.every(noEmpty), everything.filter(x => !noEmpty(x)));
+}
+
+// ═══ NR / CR / WR with a known holder, and the club record line ═════════════
+
+{
+  const saved = res('T', 240, 263);
+  // The national average record: 2.70 by someone outside the club, at a dated competition.
+  const NR = { level: 'NR' as const, previousValue: 270, holderName: 'Myagmardorj Ulziijargal', holderWcaId: '2019ULZI01', competitionName: 'Ulaanbaatar Open 2025', at: at(2025, 11, 2) };
+  const t = text(input(saved, [], { wca: { average: NR } }))?.items[0];
+  eq('NR with holder: the Өмнөх panel is filled exactly like a club record', t?.previous,
+    { label: 'Өмнөх', value: '2.70', name: 'Myagmardorj Ulziijargal', date: '2025.11.02', competition: 'Ulaanbaatar Open 2025' });
+  eq('NR with holder: improvement and the "N хоног" highlight', [t?.improvement, t?.stat], ['−0.07 сек', { days: 345, unit: 'хоног', caption: 'хадгалагдсан рекорд шинэчлэгдлээ' }]);
+  eq('NR: the club record that fell with it rides along as a second line — holder, date, days',
+    t?.clubPrevious, { label: 'Клубын өмнөх рекорд', value: '2.80', name: 'Bold Dorj', date: '2026.06.07', days: 128, unit: 'хоног' });
+  eq('CR and WR get the same treatment',
+    (['CR', 'WR'] as const).map(level => { const i = text(input(saved, [], { wca: { average: { ...NR, level } } }))?.items[0]; return [i?.chip, i?.previous?.name, i?.stat?.days, i?.clubPrevious?.value]; }),
+    [['Тивийн рекорд · дундаж', 'Myagmardorj Ulziijargal', 345, '2.80'], ['Дэлхийн рекорд · дундаж', 'Myagmardorj Ulziijargal', 345, '2.80']]);
+
+  // The athlete's own national record, recognised by WCA ID.
+  const own = text(input(saved, [], { athleteWcaId: '2019ULZI01', wca: { average: NR } }))?.items[0];
+  eq('own NR (same WCA ID): "own record" caption with the day count', own?.stat, { days: 345, unit: 'хоног', caption: 'Өөрийн рекордыг ахиуллаа' });
+  eq('a different or missing WCA ID is not "own record"',
+    [text(input(saved, [], { athleteWcaId: '2020OTHR01', wca: { average: NR } }))?.items[0].stat?.caption, text(input(saved, [], { wca: { average: NR } }))?.items[0].stat?.caption],
+    ['хадгалагдсан рекорд шинэчлэгдлээ', 'хадгалагдсан рекорд шинэчлэгдлээ']);
+
+  // A club athlete held the national record: club record == national record → no duplicate line.
+  const clubHeld = text(input(saved, [], { wca: { average: { ...NR, previousValue: 280, holderName: 'Bold Dorj' } } }))?.items[0];
+  eq('club record and national record are the same record → no second line', [clubHeld?.previous?.value, clubHeld?.clubPrevious], ['2.80', undefined]);
+
+  // The club record was set earlier today in this competition.
+  const earlier = res('C', 300, 268, { submittedAt: at(2026, 10, 13, 10) });
+  const today = text(input(saved, [earlier], { wca: { average: NR } }))?.items[0];
+  eq('club line when the club record was set earlier today: today, no day count',
+    today?.clubPrevious, { label: 'Клубын өмнөх рекорд', value: '2.68', name: 'Chimeg Enkh', date: 'өнөөдөр' });
+
+  // What is still unknown stays hidden.
+  const bare = text(input(saved, [], { wca: { average: { level: 'NR', previousValue: 270 } } }))?.items[0];
+  eq('NR saved before holders were stored: value only above, club line still complete',
+    [bare?.previous, bare?.stat, bare?.clubPrevious?.name], [{ label: 'Өмнөх', value: '2.70' }, undefined, 'Bold Dorj']);
+  const noSummaryHolders: ClubBests = { athletes: BESTS.athletes, club: BESTS.club };
+  eq('club line with a summary that has no holders: just the value',
+    text(input(saved, [], { bests: noSummaryHolders, wca: { average: NR } }))?.items[0].clubPrevious, { label: 'Клубын өмнөх рекорд', value: '2.80' });
+  eq('no club record at all (first club result in the event): no club line',
+    text(input(res('C', 4000, 4500, { eventId: '555' }), [], { eventName: '5x5x5', wca: { average: { ...NR, previousValue: 4600 } } }))?.items[0].clubPrevious, undefined);
+  eq('a TR-level record never has a club line (its previous record IS the club record)', text(input(saved))?.items[0].clubPrevious, undefined);
+  eq('NR tie: club line still shown', text(input(res('T', 400, 270), [], { wca: { average: NR } }))?.items[0].clubPrevious?.value, '2.80');
+  check('nothing rendered is empty in any of these', [t, own, clubHeld, today, bare].every(noEmpty));
 }
 
 // ═══ Edges ═══════════════════════════════════════════════════════════════════

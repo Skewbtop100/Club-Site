@@ -17,9 +17,14 @@ const LEVELS: RecordLevel[] = ['TR', 'NR', 'CR', 'WR'];
 export interface PreviousRecord {
   /** Centiseconds. */
   value: number;
-  /** Who held it — both absent when unknown (a WCA threshold, an old summary). */
+  /** Who held it — both absent when unknown (a record saved before holders
+   *  were stored). `holderId` is a club athlete id; WCA record holders are
+   *  identified by `sameAthlete` instead. */
   holderId?: string;
   holderName?: string;
+  /** The previous holder is the athlete who just broke it (for WCA records,
+   *  matched by WCA ID). */
+  sameAthlete?: boolean;
   /** When it was set, epoch ms — absent when unknown. */
   at?: number;
   /** Where it was set — absent when unknown. */
@@ -33,6 +38,11 @@ export interface RecordBreak {
   value: number;
   /** What it replaced; absent when this is the first result of its kind. */
   previous?: PreviousRecord;
+  /** NR / CR / WR only: the CLUB record this result also replaced — shown as
+   *  a second, smaller line, since `previous` is then the national (or
+   *  higher) record. Absent when there was no club record, or when it is the
+   *  very same record as `previous`. */
+  clubPrevious?: PreviousRecord;
   /** When (epoch ms) this record was already lowered earlier in THIS
    *  competition, oldest first — for "2nd time today". Unknown times are 0. */
   earlierBreaks?: number[];
@@ -48,10 +58,19 @@ export interface Celebration {
   breaks: RecordBreak[];
 }
 
-/** A national-or-higher record a value reaches, from the stored WCA record
- *  thresholds; the threshold itself is the previous record's value (its
- *  holder isn't stored). */
-export interface WcaLevel { level: 'NR' | 'CR' | 'WR'; previousValue?: number }
+/** A national-or-higher record a value reaches, from the stored WCA records
+ *  (wcaRecords/{eventId}): the stored record is the one being replaced, with
+ *  its holder, competition and date when those were saved with it. */
+export interface WcaLevel {
+  level: 'NR' | 'CR' | 'WR';
+  /** Centiseconds. */
+  previousValue?: number;
+  holderName?: string;
+  holderWcaId?: string;
+  competitionName?: string;
+  /** When it was set, epoch ms. */
+  at?: number;
+}
 
 export interface CelebrationInput {
   /** The result just saved. */
@@ -66,6 +85,8 @@ export interface CelebrationInput {
   eventName: string;
   /** This competition's name — shown when the previous record was set in it. */
   competitionName?: string;
+  /** The saved athlete's WCA ID — to recognise their own NR/CR/WR. */
+  athleteWcaId?: string;
   wca?: { single?: WcaLevel | null; average?: WcaLevel | null };
 }
 
@@ -91,14 +112,6 @@ export function findCelebration(input: CelebrationInput): Celebration | null {
     const value = saved[type];
     const wca = input.wca?.[type] ?? null;
     if (!countable(value, saved.eventId) || (!badges?.[type].tr && !wca)) continue;
-
-    if (wca) {
-      breaks.push({
-        type, value, level: wca.level,
-        ...(wca.previousValue !== undefined ? { previous: { value: wca.previousValue } } : {}),
-      });
-      continue;
-    }
 
     const k = type === 'single' ? 's' : 'a';
     const before = bests?.club[saved.eventId]?.[k];
@@ -140,10 +153,31 @@ export function findCelebration(input: CelebrationInput): Celebration | null {
         ...(holder?.competitionName ? { competitionName: holder.competitionName } : {}),
       };
     }
+    if (!wca) {
+      breaks.push({
+        type, value, level: 'TR',
+        ...(previous ? { previous } : {}),
+        ...(earlierBreaks.length > 0 ? { earlierBreaks } : {}),
+      });
+      continue;
+    }
+
+    // National or higher: the record replaced is the stored WCA record, with
+    // whatever is known about its holder. The club record it also replaced
+    // (`previous` above — always known) rides along as a second line, unless
+    // it is that same record (a club athlete held the national record).
+    const wcaPrevious: PreviousRecord | undefined = wca.previousValue === undefined ? undefined : {
+      value: wca.previousValue,
+      ...(wca.holderName ? { holderName: wca.holderName } : {}),
+      ...(wca.at ? { at: wca.at } : {}),
+      ...(wca.competitionName ? { competitionName: wca.competitionName } : {}),
+      ...(wca.holderWcaId && input.athleteWcaId && wca.holderWcaId === input.athleteWcaId ? { sameAthlete: true } : {}),
+    };
+    const sameRecord = !!previous && !!wcaPrevious && previous.value === wcaPrevious.value;
     breaks.push({
-      type, value, level: 'TR',
-      ...(previous ? { previous } : {}),
-      ...(earlierBreaks.length > 0 ? { earlierBreaks } : {}),
+      type, value, level: wca.level,
+      ...(wcaPrevious ? { previous: wcaPrevious } : {}),
+      ...(previous && !sameRecord ? { clubPrevious: previous } : {}),
     });
   }
 
@@ -186,6 +220,8 @@ export interface CelebrationStrings {
   tied: string;
   /** "Энэ төрлийн анхны рекорд" */
   first: string;
+  /** "Клубын өмнөх рекорд" */
+  clubPrevious: string;
 }
 
 export interface CelebrationItem {
@@ -207,6 +243,10 @@ export interface CelebrationItem {
   stat?: { days?: number; unit?: string; caption: string };
   /** "Энэ төрлийн анхны рекорд" — in place of the whole comparison. */
   first?: string;
+  /** NR / CR / WR only — the club record also replaced, as one compact line:
+   *  "Клубын өмнөх рекорд: 5.83 — Name, 2026.01.18 (268 хоног)". Parts that
+   *  aren't known are absent. */
+  clubPrevious?: { label: string; value: string; name?: string; date?: string; days?: number; unit?: string };
 }
 
 export interface CelebrationText {
@@ -248,8 +288,19 @@ export function buildCelebrationText(c: Celebration, strings: CelebrationStrings
         chip: `${strings.levelName[b.level]} · ${b.type === 'single' ? strings.single : strings.average}`,
         next: { label: strings.newLabel, value: fmtTime(b.value), name: c.athleteName, when: strings.today },
       };
+      // The club record also replaced by an NR / CR / WR.
+      const club = b.clubPrevious;
+      const clubDays = club?.at ? Math.max(0, daysBetween(club.at, now)) : null;
+      const clubPrevious = !club ? {} : { clubPrevious: {
+        label: strings.clubPrevious,
+        value: fmtTime(club.value),
+        ...(club.holderName ? { name: club.holderName } : {}),
+        ...(clubDays !== null ? { date: clubDays === 0 ? strings.today : dotDay(club.at!) } : {}),
+        ...(clubDays !== null && clubDays >= 1 ? { days: clubDays, unit: strings.daysUnit } : {}),
+      } };
+
       const prev = b.previous;
-      if (!prev) return { ...base, first: strings.first };
+      if (!prev) return { ...base, first: strings.first, ...clubPrevious };
 
       const days = prev.at ? Math.max(0, daysBetween(prev.at, now)) : null;
       const previous = {
@@ -261,9 +312,9 @@ export function buildCelebrationText(c: Celebration, strings: CelebrationStrings
       };
 
       const diff = prev.value - b.value;
-      if (diff <= 0) return { ...base, previous, tied: strings.tied };
+      if (diff <= 0) return { ...base, previous, tied: strings.tied, ...clubPrevious };
 
-      const own = !!prev.holderId && prev.holderId === c.athleteId;
+      const own = !!prev.sameAthlete || (!!prev.holderId && prev.holderId === c.athleteId);
       // Times the record was lowered today, this one included.
       const timesToday = (b.earlierBreaks ?? []).filter(t => t > 0 && daysBetween(t, now) === 0).length + 1;
       const stat =
@@ -277,6 +328,7 @@ export function buildCelebrationText(c: Celebration, strings: CelebrationStrings
         // Under a minute it is plainly seconds; a longer gap is already "m:ss.xx".
         improvement: `−${fmtTime(diff)}${diff < 6000 ? ` ${strings.seconds}` : ''}`,
         ...(stat ? { stat } : {}),
+        ...clubPrevious,
       };
     }),
   };

@@ -15,7 +15,7 @@ import { isSelfJudging, groupAvailability } from '@/lib/judge-conflict';
 import { getClubBests } from '@/lib/firebase/services/club-bests';
 import { useWcaRecords } from '@/lib/hooks/useWcaRecords';
 import { getResultBadgesPair } from '@/lib/record-badges';
-import type { ClubBests } from '@/lib/club-bests';
+import { toMillis, type ClubBests } from '@/lib/club-bests';
 import { findCelebration, buildCelebrationText, type CelebrationText, type WcaLevel } from '@/lib/record-celebration';
 import RecordCelebration from '@/components/admin/RecordCelebration';
 import ScramblePreview from '@/components/shared/ScramblePreview';
@@ -536,9 +536,19 @@ export default function ResultsEntryTab({ judgeCompetitionId }: { judgeCompetiti
         const wcaLevel = (type: 'single' | 'average'): WcaLevel | null => {
           const level = (['WR', 'CR', 'NR'] as const).find(b => wcaPair[type].includes(b));
           if (!level) return null;
-          const threshold = wcaRecords[panel.eventId]?.[type]?.[level]?.value;
-          // Thresholds are stored in seconds; back to whole centiseconds.
-          return { level, ...(typeof threshold === 'number' ? { previousValue: Math.round(threshold * 100) } : {}) };
+          const record = wcaRecords[panel.eventId]?.[type]?.[level];
+          const at = toMillis(record?.date);
+          // Values are stored in seconds; back to whole centiseconds. The
+          // holder, competition and date are there once the WCA records have
+          // been refreshed and saved with holders (WCA Records tab).
+          return {
+            level,
+            ...(typeof record?.value === 'number' ? { previousValue: Math.round(record.value * 100) } : {}),
+            ...(record?.holderName ? { holderName: record.holderName } : {}),
+            ...(record?.holderWcaId ? { holderWcaId: record.holderWcaId } : {}),
+            ...(record?.competitionName ? { competitionName: record.competitionName } : {}),
+            ...(at > 0 ? { at } : {}),
+          };
         };
         const found = findCelebration({
           saved, competitionResults: compResults, bests: clubBests,
@@ -546,6 +556,7 @@ export default function ResultsEntryTab({ judgeCompetitionId }: { judgeCompetiti
           athleteNames: Object.fromEntries(athletes.map(a => [a.id, `${a.name || ''}${a.lastName ? ' ' + a.lastName : ''}`.trim()])),
           eventName: (WCA_EVENTS.find(e => e.id === panel.eventId)?.name || panel.eventId).replace(/ Cube$/, ''),
           competitionName: comp?.name,
+          athleteWcaId: ath?.wcaId || undefined,
           wca: { single: wcaLevel('single'), average: wcaLevel('average') },
         });
         if (found) {
@@ -558,6 +569,7 @@ export default function ResultsEntryTab({ judgeCompetitionId }: { judgeCompetiti
             daysUnit: t('celebrate.days-unit'), daysCaption: t('celebrate.days-caption'),
             sameDay: t('celebrate.same-day'), ownRecord: t('celebrate.own-record'),
             tied: t('celebrate.tied'), first: t('celebrate.first'),
+            clubPrevious: t('celebrate.club-previous'),
           }, Date.now()));
         }
       }

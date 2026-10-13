@@ -400,6 +400,7 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'celebrate.level.CR': 'Тивийн рекорд',
   'celebrate.level.WR': 'Дэлхийн рекорд',
   'celebrate.prev-label': 'Өмнөх',
+  'celebrate.club-previous': 'Клубын өмнөх рекорд',
   'celebrate.new-label': 'Шинэ',
   'celebrate.today': 'өнөөдөр',
   'celebrate.seconds': 'сек',
@@ -566,6 +567,12 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'admin.users.confirm-delete': 'Энэ хэрэглэгчийг устгах уу?',
 
   // ADMIN — WCA RECORDS
+  'admin.wca.holders.found': '{total} рекордын {n}-д эзэмшигч олдлоо',
+  'admin.wca.holders.add': 'Эзэмшигч нэмэх (утга өөрчлөгдөхгүй)',
+  'admin.wca.holders.need-fetch': 'Рекорд эзэмшигчид ачаалагдаагүй байна — эхлээд "Рекорд шинэчлэх" товчийг дарна уу.',
+  'admin.wca.holders.added': 'Хадгалагдсан {n} рекордод эзэмшигч, тэмцээн, огноо нэмлээ; ямар ч утга өөрчлөгдөөгүй.',
+  'admin.wca.holders.stale': 'Хадгалагдсан {m} утга WCA-ийн одоогийн рекордоос зөрж байгаа тул эзэмшигчгүй үлдлээ — "Бүгдийг Firebase-д хадгалах" дарвал тэдгээр утга шинэчлэгдэнэ.',
+  'admin.wca.holders.failed': 'рекорд эзэмшигчдийг татаж чадсангүй — утгуудыг хадгалах боломжтой хэвээр',
   'admin.wca.bests.recalc': 'PR/TR дүнг дахин тооцоолох',
   'admin.wca.bests.working': 'Тооцоолж байна…',
   'admin.wca.bests.updated': 'Сүүлд тооцоолсон:',

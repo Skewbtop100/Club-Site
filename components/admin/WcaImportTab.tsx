@@ -1,13 +1,15 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { doc, setDoc, Timestamp } from 'firebase/firestore';
+import { doc, getDocs, setDoc, updateDoc, FieldPath, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { COL } from '@/lib/firebase/collections';
+import { COL, wcaRecordsCol } from '@/lib/firebase/collections';
 import { getAllResults } from '@/lib/firebase/services/results';
 import { getAthletes } from '@/lib/firebase/services/athletes';
 import { getCompetitions } from '@/lib/firebase/services/competitions';
 import { getClubBests, recomputeClubBests } from '@/lib/firebase/services/club-bests';
+import { fetchWcaRecordHolders } from '@/lib/wca-api';
+import { holderFor, attachHoldersToStored, type WcaHolderMap, type WcaRecordHolder } from '@/lib/wca-record-holders';
 import { fmtTime, getMinPlausibleSolveCs } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { useLang } from '@/lib/i18n';
@@ -44,6 +46,11 @@ export default function WcaImportTab() {
   const [wcaData, setWcaData] = useState<Record<RecordLevel, RecordRow[]>>({ WR: [], CR: [], NR: [] });
   const [fetching, setFetching] = useState(false);
   const [lastFetched, setLastFetched] = useState<Date | null>(null);
+  // Who holds each WR / CR / NR, and where and when it was set — fetched
+  // along with the values and saved next to them, for the record-break
+  // card's "previous record" panel. null = not fetched (or the fetch failed:
+  // the values still save, just without holders).
+  const [holders, setHolders] = useState<Record<RecordLevel, WcaHolderMap> | null>(null);
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<TabKey>('WR');
   const [msg, setMsg] = useState('');
@@ -144,7 +151,7 @@ export default function WcaImportTab() {
 
   function showMsg(type: string, text: string) {
     setMsgType(type); setMsg(text);
-    setTimeout(() => setMsg(''), 6000);
+    setTimeout(() => setMsg(''), 12000);
   }
 
   function parseApiRecords(data: Record<string, { single?: number; average?: number }>): RecordRow[] {
@@ -169,7 +176,26 @@ export default function WcaImportTab() {
       const nr = parseApiRecords((json.national_records || {})['Mongolia'] || {});
       setWcaData({ WR: wr, CR: cr, NR: nr });
       setLastFetched(new Date());
-      showMsg('success', `Fetched ${wr.length} WR, ${cr.length} CR, ${nr.length} NR events`);
+      // Holders are a separate set of requests; if they fail the values above
+      // are still good and can be saved as before.
+      let holdersNote = '';
+      try {
+        const fetched = await fetchWcaRecordHolders(ACTIVE_EVENTS);
+        setHolders(fetched);
+        const rows: [RecordLevel, RecordRow[]][] = [['WR', wr], ['CR', cr], ['NR', nr]];
+        let total = 0, withHolder = 0;
+        rows.forEach(([level, list]) => list.forEach(row => (['single', 'average'] as const).forEach(type => {
+          const cs = type === 'single' ? row.singleCs : row.averageCs;
+          if (cs == null) return;
+          total++;
+          if (holderFor(fetched[level], row.eventId, type, cs)) withHolder++;
+        })));
+        holdersNote = ` · ${t('admin.wca.holders.found').replace('{n}', String(withHolder)).replace('{total}', String(total))}`;
+      } catch (err) {
+        setHolders(null);
+        holdersNote = ` · ${t('admin.wca.holders.failed')} (${err instanceof Error ? err.message : 'error'})`;
+      }
+      showMsg('success', `Fetched ${wr.length} WR, ${cr.length} CR, ${nr.length} NR events${holdersNote}`);
     } catch (err) {
       showMsg('error', `Fetch failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
@@ -181,18 +207,20 @@ export default function WcaImportTab() {
     setSaving(true);
     try {
       // Build per-event documents: { single: { WR: {value}, CR: {value}, NR: {value} }, average: {...} }
-      const eventMap: Record<string, Record<string, Record<string, { value: number }>>> = {};
+      const eventMap: Record<string, Record<string, Record<string, { value: number } & Partial<WcaRecordHolder>>>> = {};
 
+      // The value is exactly what it always was (cs / 100); the holder is
+      // added beside it only when it is the holder of that very value.
       function addWcaRecord(level: RecordLevel, rows: RecordRow[]) {
         rows.forEach(row => {
           if (!eventMap[row.eventId]) eventMap[row.eventId] = {};
           if (row.singleCs != null) {
             if (!eventMap[row.eventId].single) eventMap[row.eventId].single = {};
-            eventMap[row.eventId].single[level] = { value: row.singleCs / 100 };
+            eventMap[row.eventId].single[level] = { value: row.singleCs / 100, ...holderFor(holders?.[level], row.eventId, 'single', row.singleCs) };
           }
           if (row.averageCs != null) {
             if (!eventMap[row.eventId].average) eventMap[row.eventId].average = {};
-            eventMap[row.eventId].average[level] = { value: row.averageCs / 100 };
+            eventMap[row.eventId].average[level] = { value: row.averageCs / 100, ...holderFor(holders?.[level], row.eventId, 'average', row.averageCs) };
           }
         });
       }
@@ -227,6 +255,42 @@ export default function WcaImportTab() {
       showMsg('error', `Save failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
     setSaving(false);
+  }
+
+  // Holders only: add holder / competition / date to the WR, CR and NR
+  // values ALREADY stored, without changing any stored value. For bringing
+  // existing records up to date with holders when the values themselves
+  // must stay as they are. A stored value that the WCA has since moved on
+  // from can't be given a holder (the API lists holders of the current
+  // records only) — those are counted and left untouched; "save all" above
+  // is what refreshes values.
+  const [addingHolders, setAddingHolders] = useState(false);
+  async function addHoldersOnly() {
+    if (!holders) { showMsg('warn', t('admin.wca.holders.need-fetch')); return; }
+    setAddingHolders(true);
+    try {
+      const snap = await getDocs(wcaRecordsCol);
+      let attached = 0, stale = 0;
+      for (const d of snap.docs) {
+        const result = attachHoldersToStored(d.id, d.data(), holders);
+        stale += result.stale.length;
+        if (result.updates.length === 0) continue;
+        const [first, ...rest] = result.updates;
+        await updateDoc(
+          doc(db, COL.WCA_RECORDS, d.id),
+          new FieldPath(first.type, first.level), first.entry,
+          ...rest.flatMap(u => [new FieldPath(u.type, u.level), u.entry]),
+        );
+        attached += result.updates.length;
+      }
+      showMsg(stale > 0 ? 'warn' : 'success',
+        t('admin.wca.holders.added').replace('{n}', String(attached))
+        + (stale > 0 ? ` ${t('admin.wca.holders.stale').replace('{m}', String(stale))}` : ''));
+    } catch (err) {
+      showMsg('error', t('admin.msg.error-prefix') + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setAddingHolders(false);
+    }
   }
 
   useEffect(() => { fetchRecords(); }, []);
@@ -268,6 +332,9 @@ export default function WcaImportTab() {
         <button className="btn-sm-primary" onClick={saveToFirebase} disabled={saving || (wcaData.WR.length === 0 && trRows.length === 0)}
           style={{ background: 'rgba(74,222,128,0.15)', border: '1px solid rgba(74,222,128,0.4)', color: '#4ade80' }}>
           {saving ? t('admin.wca.btn.saving') : t('admin.wca.btn.save-all')}
+        </button>
+        <button className="btn-sm-secondary" onClick={addHoldersOnly} disabled={addingHolders || fetching || !holders}>
+          {addingHolders ? t('admin.wca.btn.saving') : t('admin.wca.holders.add')}
         </button>
         {lastFetched && (
           <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>

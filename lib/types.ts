@@ -239,7 +239,19 @@ export interface Result {
 }
 
 export interface WcaRecordEntry {
+  /** Seconds. */
   value: number;
+  // Who holds this record, and where and when it was set — from the official
+  // WCA API (lib/wca-record-holders.ts). All optional: absent on records
+  // saved before holders were stored, and on TR (the club's own record,
+  // whose holder lives in settings/clubBests).
+  holderName?: string;
+  holderLocalName?: string;
+  holderWcaId?: string;
+  competitionId?: string;
+  competitionName?: string;
+  /** The competition's start date, "YYYY-MM-DD". */
+  date?: string;
 }
 
 export interface WcaRecordType {

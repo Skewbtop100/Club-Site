@@ -134,6 +134,15 @@ export default function RecordCelebration({ text, onClose }: { text: Celebration
         .rc-stat-solo { justify-content: center; text-align: center; }
         .rc-stat-solo .rc-stat-caption { font-size: 13.5px; font-weight: 700; color: #4ade80; }
 
+        /* The club record that fell along with a national-or-higher one */
+        .rc-club {
+          margin-top: 8px; padding: 6px 9px; border-radius: 9px; font-size: 12px; line-height: 1.4;
+          color: var(--text); background: rgba(124,58,237,0.1); border: 1px solid rgba(124,58,237,0.28);
+          overflow-wrap: anywhere; font-variant-numeric: tabular-nums;
+        }
+        .rc-club-label { color: #a78bfa; font-weight: 700; }
+        .rc-club-value { font-weight: 800; text-decoration: line-through; text-decoration-color: rgba(244,63,94,0.75); }
+
         .rc-close {
           flex-shrink: 0; width: 100%; min-height: 46px; margin: 2px 0 0; border-radius: 12px; cursor: pointer;
           font-family: inherit; font-size: 15px; font-weight: 700; color: #fff; border: none;
@@ -198,6 +207,18 @@ function Item({ item }: { item: CelebrationItem }) {
             <div className="rc-name">{item.next.name}</div>
             <div className="rc-meta">{item.next.when}</div>
           </div>
+        </div>
+      )}
+
+      {/* NR / CR / WR: the club record that fell with it — smaller, one line */}
+      {item.clubPrevious && (
+        <div className="rc-club">
+          <span className="rc-club-label">{item.clubPrevious.label}:</span>{' '}
+          <span className="rc-club-value">{item.clubPrevious.value}</span>
+          {(item.clubPrevious.name || item.clubPrevious.date) && (
+            <> — {[item.clubPrevious.name, item.clubPrevious.date].filter(Boolean).join(', ')}</>
+          )}
+          {item.clubPrevious.days !== undefined && <> ({item.clubPrevious.days} {item.clubPrevious.unit})</>}
         </div>
       )}
 
