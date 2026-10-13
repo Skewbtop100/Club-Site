@@ -412,6 +412,8 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'admin.comp.judge-pin.disabled-msg': 'Шүүгчийн эрх идэвхгүй боллоо.',
   'judge.title': 'Шүүгчийн нэвтрэлт',
   'judge.panel-title': 'Шүүгчийн самбар',
+  'judge.tab.entry': 'Үр дүн оруулах',
+  'judge.tab.live': 'Шууд үр дүн',
   'judge.competition': 'Тэмцээн',
   'judge.select-comp': '— Тэмцээн сонгох —',
   'judge.no-live': 'Одоогоор явагдаж буй тэмцээн алга.',

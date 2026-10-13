@@ -351,6 +351,8 @@ const en = {
   'admin.comp.judge-pin.disabled-msg': 'Judge access disabled.',
   'judge.title': 'Judge sign-in',
   'judge.panel-title': 'Judge panel',
+  'judge.tab.entry': 'Enter results',
+  'judge.tab.live': 'Live results',
   'judge.competition': 'Competition',
   'judge.select-comp': '— Select competition —',
   'judge.no-live': 'No competition is live right now.',

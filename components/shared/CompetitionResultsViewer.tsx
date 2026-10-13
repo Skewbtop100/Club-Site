@@ -44,11 +44,16 @@ function wcaSort(a: Result, b: Result) {
 
 interface Props {
   comp: Competition;
-  onClose: () => void;
+  /** Required for the overlay; unused when `embedded`. */
+  onClose?: () => void;
   isLive?: boolean;
+  /** Render in the page flow instead of as a full-screen overlay: no close
+   *  button, no Escape handler, no body scroll lock (the /judge page's
+   *  "live results" tab). The data shown is identical either way. */
+  embedded?: boolean;
 }
 
-export default function CompetitionResultsViewer({ comp, onClose, isLive }: Props) {
+export default function CompetitionResultsViewer({ comp, onClose, isLive, embedded }: Props) {
   const [evId, setEvId]       = useState('');
   const [round, setRound]     = useState(1);
   const [results, setResults] = useState<Result[]>([]);
@@ -84,16 +89,17 @@ export default function CompetitionResultsViewer({ comp, onClose, isLive }: Prop
     return unsub;
   }, [comp.id, isFinishedComp]);
 
-  // Escape key + body scroll lock
+  // Escape key + body scroll lock (overlay only)
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    if (embedded) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose?.(); };
     document.addEventListener('keydown', handler);
     document.body.style.overflow = 'hidden';
     return () => {
       document.removeEventListener('keydown', handler);
       document.body.style.overflow = '';
     };
-  }, [onClose]);
+  }, [onClose, embedded]);
 
   // ── derived data ─────────────────────────────────────────────────────────────
 
@@ -129,7 +135,10 @@ export default function CompetitionResultsViewer({ comp, onClose, isLive }: Prop
   // ── render ────────────────────────────────────────────────────────────────────
 
   return (
-    <div style={{
+    <div style={embedded ? {
+      background: 'var(--bg)', display: 'flex', flexDirection: 'column', minHeight: '60vh',
+      borderRadius: '14px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.07)',
+    } : {
       position: 'fixed', top: 0, left: 0, width: '100%', height: '100%',
       zIndex: 9999, background: 'var(--bg)', display: 'flex', flexDirection: 'column',
     }}>
@@ -159,6 +168,7 @@ export default function CompetitionResultsViewer({ comp, onClose, isLive }: Prop
             {comp.name}
           </span>
         </div>
+        {!embedded && (
         <button
           onClick={onClose}
           aria-label="Close"
@@ -173,6 +183,7 @@ export default function CompetitionResultsViewer({ comp, onClose, isLive }: Prop
         >
           ✕
         </button>
+        )}
       </div>
 
       {/* Body */}

@@ -11,6 +11,15 @@ import type { Competition } from '@/lib/types';
 
 // The same entry panel the admin uses, locked to the judge's competition.
 const ResultsEntryTab = dynamic(() => import('@/components/admin/ResultsEntryTab'), { ssr: false });
+// The public live-results viewer, embedded: exactly what any visitor sees.
+const CompetitionResultsViewer = dynamic(() => import('@/components/shared/CompetitionResultsViewer'), { ssr: false });
+
+type JudgeTab = 'entry' | 'live';
+const TAB_KEY = 'judgeTab';
+
+function readSavedTab(): JudgeTab {
+  try { return window.localStorage.getItem(TAB_KEY) === 'live' ? 'live' : 'entry'; } catch { return 'entry'; }
+}
 
 // ── /judge ────────────────────────────────────────────────────────────────
 //
@@ -32,6 +41,22 @@ export default function JudgePage() {
   const [pin, setPin] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+  // Which tab is showing, remembered on this device. The entry panel stays
+  // mounted (just hidden) on the other tab, so half-entered solves survive a
+  // look at the results; the viewer mounts on first visit and then stays, so
+  // going back and forth doesn't re-read the whole competition each time.
+  const [tab, setTab] = useState<JudgeTab>('entry');
+  const [liveVisited, setLiveVisited] = useState(false);
+  useEffect(() => {
+    const saved = readSavedTab();
+    setTab(saved);
+    if (saved === 'live') setLiveVisited(true);
+  }, []);
+  function selectTab(next: JudgeTab) {
+    setTab(next);
+    if (next === 'live') setLiveVisited(true);
+    try { window.localStorage.setItem(TAB_KEY, next); } catch { /* storage unavailable */ }
+  }
 
   useEffect(() => subscribeCompetitions(setComps), []);
 
@@ -117,7 +142,34 @@ export default function JudgePage() {
             </div>
             <button className="btn-sm-secondary" onClick={() => { setMsg(''); judgeSignOut().catch(() => {}); }}>{t('judge.signout')}</button>
           </div>
-          <ResultsEntryTab key={session.competitionId} judgeCompetitionId={session.competitionId} />
+          {/* Two equal tabs — full width, thumb-sized on a phone. */}
+          <div role="tablist" style={{ display: 'flex', gap: '0.4rem', marginBottom: '1rem' }}>
+            {(['entry', 'live'] as const).map(id => (
+              <button
+                key={id}
+                role="tab"
+                aria-selected={tab === id}
+                onClick={() => selectTab(id)}
+                style={{
+                  flex: 1, minHeight: '46px', padding: '0.5rem 0.6rem', borderRadius: '10px',
+                  fontFamily: 'inherit', fontSize: '0.9rem', fontWeight: 700, cursor: 'pointer',
+                  background: tab === id ? 'linear-gradient(135deg, var(--accent), var(--accent2))' : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${tab === id ? 'transparent' : 'rgba(255,255,255,0.1)'}`,
+                  color: tab === id ? '#fff' : 'var(--muted)',
+                }}
+              >
+                {t(id === 'entry' ? 'judge.tab.entry' : 'judge.tab.live')}
+              </button>
+            ))}
+          </div>
+          <div role="tabpanel" style={{ display: tab === 'entry' ? 'block' : 'none' }}>
+            <ResultsEntryTab key={session.competitionId} judgeCompetitionId={session.competitionId} />
+          </div>
+          {liveVisited && (
+            <div role="tabpanel" style={{ display: tab === 'live' ? 'block' : 'none' }}>
+              <CompetitionResultsViewer key={session.competitionId} comp={sessionComp} isLive embedded />
+            </div>
+          )}
         </div>
       </div>
     );
