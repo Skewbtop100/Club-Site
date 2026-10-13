@@ -6,9 +6,11 @@
 //     --outDir .tmp-test-build --module commonjs --target es2020 --esModuleInterop --skipLibCheck
 //   node .tmp-test-build/scripts/test-judge.js
 
+import { randomBytes } from 'node:crypto';
 import { isSelfJudging, judgedGroups, groupAvailability } from '../lib/judge-conflict';
 import {
   generatePin, generateSalt, generateVersion, isPinFormat, hashPin, verifyPin,
+  parseEncKey, encryptPin, decryptPin, pinContext,
   lockRemainingMs, registerFailure, type LockState,
   CLIENT_MAX_FAILURES, COMPETITION_MAX_FAILURES, LOCK_WINDOW_MS, JUDGE_SESSION_MS,
 } from '../lib/judge-pin';
@@ -115,6 +117,45 @@ function eq(label: string, actual: unknown, expected: unknown) {
   const salt2 = generateSalt();
   const hash2 = hashPin('771204', salt2, pepper);
   eq('regenerate: old PIN fails against the new hash, new PIN passes', [verifyPin('482913', salt2, pepper, hash2), verifyPin('771204', salt2, pepper, hash2)], [false, true]);
+}
+
+// ═══ Encrypted copy of the PIN ═══════════════════════════════════════════════
+
+{
+  const keyB64 = randomBytes(32).toString('base64');
+  const key = parseEncKey(keyB64)!;
+  check('enc key: 32 random bytes in base64 are accepted', key !== null && key.length === 32);
+  eq('enc key: missing / empty / wrong length / not base64-of-32 are rejected',
+    [parseEncKey(undefined), parseEncKey(''), parseEncKey(randomBytes(16).toString('base64')), parseEncKey(randomBytes(33).toString('base64')), parseEncKey('not a key')],
+    [null, null, null, null, null]);
+  check('enc key: surrounding whitespace (a pasted env value) is tolerated', parseEncKey(`  ${keyB64}\n`)?.equals(key) === true);
+
+  const ctx = pinContext('comp1', 'v2');
+  const enc = encryptPin('482913', key, ctx);
+  eq('round trip: decrypt(encrypt(pin)) is the pin', decryptPin(enc, key, ctx), '482913');
+  eq('round trip: leading zeros survive', decryptPin(encryptPin('004217', key, ctx), key, ctx), '004217');
+  check('ciphertext: versioned 4-part value that does not contain the PIN', /^v1\.[^.]+\.[^.]+\.[^.]+$/.test(enc) && !enc.includes('482913') && !Buffer.from(enc.split('.')[3], 'base64').toString('utf8').includes('482913'), enc);
+  check('ciphertext: a fresh IV every time (same PIN encrypts differently)', encryptPin('482913', key, ctx) !== enc);
+
+  const otherKey = parseEncKey(randomBytes(32).toString('base64'))!;
+  eq('wrong key: decrypt fails (null), never a wrong PIN, never a throw', decryptPin(enc, otherKey, ctx), null);
+  eq('wrong context: a ciphertext moved to another competition does not decrypt', decryptPin(enc, key, pinContext('comp2', 'v2')), null);
+  eq('wrong context: a ciphertext left from a previous PIN version does not decrypt', decryptPin(enc, key, pinContext('comp1', 'v1')), null);
+
+  const parts = enc.split('.');
+  const flip = (b64: string) => { const b = Buffer.from(b64, 'base64'); b[0] ^= 1; return b.toString('base64'); };
+  eq('tampering: altered ciphertext, tag or IV all fail',
+    [[parts[0], parts[1], parts[2], flip(parts[3])], [parts[0], parts[1], flip(parts[2]), parts[3]], [parts[0], flip(parts[1]), parts[2], parts[3]]]
+      .map(p => decryptPin(p.join('.'), key, ctx)), [null, null, null]);
+  eq('garbage: missing, non-string, malformed and unknown-version values fail without throwing',
+    [undefined, null, 42, '', 'abc', 'v1.a.b', `v2.${parts.slice(1).join('.')}`, `${enc}.extra`, '482913'].map(v => decryptPin(v, key, ctx)),
+    [null, null, null, null, null, null, null, null, null]);
+  eq('decrypt only ever returns a 6-digit PIN (something else encrypted under the key is refused)',
+    decryptPin(encryptPin('not-a-pin', key, ctx), key, ctx), null);
+
+  // The hash is unaffected by any of this: login keeps verifying as before.
+  const salt = generateSalt();
+  eq('hash still verifies independently of the encrypted copy', verifyPin('482913', salt, 'pepper', hashPin('482913', salt, 'pepper')), true);
 }
 
 // ═══ Lockout ═════════════════════════════════════════════════════════════════

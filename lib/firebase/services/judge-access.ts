@@ -9,10 +9,17 @@ import { COL } from '@/lib/firebase/collections';
 // custom token a correct PIN earns.
 
 /** What the admin's PIN section shows. The stored document also holds the
- *  hash and salt (admin-readable only) — never surfaced. */
+ *  hash, salt and encrypted PIN (admin-readable only) — never surfaced; the
+ *  PIN itself only ever comes back from the server (revealJudgePin). */
 export interface JudgeAccessStatus {
   enabled: boolean;
+  /** When the active PIN was generated (or access disabled). */
   updatedAt: Date | null;
+  /** Whether the active PIN can be shown again:
+   *  'yes'    — an encrypted copy is stored;
+   *  'no-key' — it was generated while the server had no JUDGE_PIN_ENC_KEY;
+   *  'legacy' — it predates the encrypted copy. */
+  revealable: 'yes' | 'no-key' | 'legacy';
 }
 
 /** Live status of a competition's judge PIN. Admin only (firestore.rules). */
@@ -25,7 +32,11 @@ export function subscribeJudgeAccess(
     doc(db, COL.COMPETITIONS, competitionId, 'private', 'judgeAccess'),
     (snap) => {
       const updatedAt = snap.data()?.updatedAt as { toDate?: () => Date } | undefined;
-      onData({ enabled: snap.data()?.enabled === true, updatedAt: updatedAt?.toDate?.() ?? null });
+      onData({
+        enabled: snap.data()?.enabled === true,
+        updatedAt: updatedAt?.toDate?.() ?? null,
+        revealable: snap.data()?.pinEnc ? 'yes' : snap.data()?.pinEncKeyMissing === true ? 'no-key' : 'legacy',
+      });
     },
     (err) => onError?.(err),
   );
@@ -42,18 +53,44 @@ async function post(path: string, body: unknown, idToken?: string) {
 }
 
 /**
- * Admin: generate a new PIN (returned ONCE — only its hash is stored) or
- * disable judge access. Either way every judge session issued for the
- * previous PIN stops working immediately.
+ * Admin: generate a new PIN (returned in the response) or disable judge
+ * access. Either way every judge session issued for the previous PIN stops
+ * working immediately.
  */
 export async function setJudgePin(
   competitionId: string, action: 'generate' | 'disable',
-): Promise<{ enabled: boolean; pin?: string }> {
+): Promise<{ enabled: boolean; pin?: string; updatedAt?: number }> {
   const user = auth.currentUser;
   if (!user) throw new Error('Not signed in');
   const { ok, data } = await post('/api/judge/pin', { competitionId, action }, await user.getIdToken());
   if (!ok) throw new Error(String(data.detail || data.error || 'request failed'));
-  return { enabled: data.enabled === true, pin: typeof data.pin === 'string' ? data.pin : undefined };
+  return {
+    enabled: data.enabled === true,
+    pin: typeof data.pin === 'string' ? data.pin : undefined,
+    updatedAt: typeof data.updatedAt === 'number' ? data.updatedAt : undefined,
+  };
+}
+
+/** Why the active PIN can't be shown. */
+export type PinRevealFailure = 'disabled' | 'legacy' | 'no-key' | 'undecryptable' | 'error';
+
+/**
+ * Admin: fetch the active PIN, decrypted on the server from its encrypted
+ * copy. The server checks the caller is an admin; the browser never holds
+ * the key.
+ */
+export async function revealJudgePin(
+  competitionId: string,
+): Promise<{ pin: string } | { pin: null; reason: PinRevealFailure }> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Not signed in');
+  const { ok, data } = await post('/api/judge/pin', { competitionId, action: 'reveal' }, await user.getIdToken());
+  if (ok && typeof data.pin === 'string') return { pin: data.pin };
+  const reason = data.reason;
+  return {
+    pin: null,
+    reason: reason === 'disabled' || reason === 'legacy' || reason === 'no-key' || reason === 'undecryptable' ? reason : 'error',
+  };
 }
 
 export type JudgeLoginResult =

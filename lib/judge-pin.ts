@@ -3,7 +3,7 @@
 // Pure apart from the random source, and imported relatively so
 // scripts/test-judge.ts can compile it standalone.
 
-import { randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto';
 
 export const PIN_LENGTH = 6;
 
@@ -55,6 +55,60 @@ export function verifyPin(pin: string, salt: string, pepper: string, expectedHas
   const actual = Buffer.from(hashPin(pin, salt, pepper), 'hex');
   const expected = Buffer.from(expectedHash, 'hex');
   return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+// ── encrypted copy (so the admin can see the active PIN again) ───────────────
+//
+// The hash above is what login verifies against and cannot be turned back
+// into the PIN. To let an admin look the active PIN up later, a second,
+// ENCRYPTED copy is stored next to it: AES-256-GCM under a key that exists
+// only in the server environment (JUDGE_PIN_ENC_KEY). The database never
+// holds the plaintext, and the ciphertext is useless without that key.
+
+/** The AES-256 key from JUDGE_PIN_ENC_KEY: 32 random bytes, base64. null
+ *  when the variable is missing or isn't exactly 32 bytes once decoded. */
+export function parseEncKey(value: string | undefined): Buffer | null {
+  if (!value) return null;
+  const key = Buffer.from(value.trim(), 'base64');
+  return key.length === 32 ? key : null;
+}
+
+/**
+ * Encrypt a PIN. `context` (competition id + PIN version) is bound in as
+ * additional authenticated data, so a ciphertext copied onto another
+ * competition's document — or left behind from a previous PIN — fails to
+ * decrypt instead of revealing a PIN that isn't the active one.
+ * Output: "v1.<iv>.<tag>.<ciphertext>", each part base64.
+ */
+export function encryptPin(pin: string, key: Buffer, context: string): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  cipher.setAAD(Buffer.from(context, 'utf8'));
+  const ciphertext = Buffer.concat([cipher.update(pin, 'utf8'), cipher.final()]);
+  return ['v1', iv.toString('base64'), cipher.getAuthTag().toString('base64'), ciphertext.toString('base64')].join('.');
+}
+
+/** Decrypt what encryptPin produced. null — never a throw, never a wrong
+ *  PIN — for a wrong key, a wrong context, or a damaged/foreign value. */
+export function decryptPin(encrypted: unknown, key: Buffer, context: string): string | null {
+  if (typeof encrypted !== 'string') return null;
+  const [version, iv, tag, ciphertext, ...rest] = encrypted.split('.');
+  if (version !== 'v1' || !iv || !tag || !ciphertext || rest.length > 0) return null;
+  try {
+    const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64'));
+    decipher.setAAD(Buffer.from(context, 'utf8'));
+    decipher.setAuthTag(Buffer.from(tag, 'base64'));
+    const pin = Buffer.concat([decipher.update(Buffer.from(ciphertext, 'base64')), decipher.final()]).toString('utf8');
+    return isPinFormat(pin) ? pin : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The AAD for a competition's PIN: ties the ciphertext to that competition
+ *  and to that PIN version. */
+export function pinContext(competitionId: string, version: string): string {
+  return `${competitionId}:${version}`;
 }
 
 // ── lockout ──────────────────────────────────────────────────────────────────

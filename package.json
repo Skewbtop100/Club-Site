@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test:routes": "next build && firebase emulators:exec --only firestore,auth \"node tests/server-routes/judge-routes.test.mjs\"",
     "test:rules": "firebase emulators:exec --only firestore \"node tests/firestore-rules/users.test.mjs && node tests/firestore-rules/athlete-privacy.test.mjs && node tests/firestore-rules/competition-scrambles.test.mjs && node tests/firestore-rules/competition-staged-results.test.mjs && node tests/firestore-rules/judge-access.test.mjs\""
   },
   "dependencies": {
