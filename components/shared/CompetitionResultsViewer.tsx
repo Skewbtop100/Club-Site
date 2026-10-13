@@ -12,7 +12,8 @@ import { WCA_EVENTS } from '@/lib/wca-events';
 import { WcaEventIcon, hasWcaEventIcon } from '@/lib/wca-event-icon';
 import { compareRoundResults } from '@/lib/results-entry-helpers';
 import { getResultBadgesPair, BADGE_STYLES, type RecordBadge } from '@/lib/record-badges';
-import WcaResultChip from '@/components/shared/WcaResultChip';
+import PrevResultChip from '@/components/shared/PrevResultChip';
+import { clubNameMatcher } from '@/lib/staged-reveal';
 import JudgedBy from '@/components/shared/JudgedBy';
 import { useLang, type TranslationKey } from '@/lib/i18n';
 
@@ -163,6 +164,10 @@ export function CompetitionResultsView({ comp, results, athletes, wcaRecords, cl
   }, [athletes]);
   // Club athletes = full club roster from the athletes collection.
   const clubAthleteIds = useMemo(() => new Set(athletes.map(a => a.id)), [athletes]);
+  const matchClub = useMemo(
+    () => clubNameMatcher((comp.athletes || []).map(a => a.id), athletes),
+    [comp.athletes, athletes],
+  );
   // PR / TR per result, chronologically across this competition's rounds.
   const localBadges = useMemo(
     () => computeLocalBadges(results, clubBests, clubAthleteIds),
@@ -232,7 +237,9 @@ export function CompetitionResultsView({ comp, results, athletes, wcaRecords, cl
 
   const isClub = (r: Result) => clubAthleteIds.has(r.athleteId);
   const displayName = (r: Result) => athleteNameMap[r.athleteId] || r.athleteName || r.athleteId;
-  const isMatchedImport = (r: Result) => r.source === 'imported' && !!r.matchedClubAthleteId;
+  // An imported row whose athlete shares a name with one of this
+  // competition's club athletes — judged against who is registered NOW.
+  const isMatchedImport = (r: Result) => !!matchClub(r);
   // Highest badge only, as everywhere else: WR > CR > NR > TR > PR.
   const badgeOf = (r: Result, type: 'single' | 'average'): RecordBadge | null => {
     if (!isClub(r)) return null;
@@ -432,7 +439,7 @@ export function CompetitionResultsView({ comp, results, athletes, wcaRecords, cl
               </div>
               <JudgedBy name={judge} style={{ fontSize: '0.8rem', marginTop: '0.6rem' }} />
               {isMatchedImport(r) && (
-                <div className="crv-pop-wca"><WcaResultChip result={r} /><span>{t('results.wca-chip-title')}</span></div>
+                <div className="crv-pop-wca"><PrevResultChip show /><span>{t('results.wca-chip-title')}</span></div>
               )}
             </div>
           </div>

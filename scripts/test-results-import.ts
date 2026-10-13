@@ -9,7 +9,7 @@
 import { parseWcaResults, parseResultTime, importedAverage } from '../lib/results-import';
 import { calcMo3, compareRoundResults } from '../lib/results-entry-helpers';
 import {
-  normalizeName, nameKey, matchClubAthlete, stagedRowId, stagedResultDocId, stagedRowToResult,
+  normalizeName, nameKey, matchClubAthlete, clubNameMatcher, stagedRowId, stagedResultDocId, stagedRowToResult,
   buildStagedEvent, revealTarget, computeAdvancing, planStagedSync, stagedRoundStatus,
   type StagedEvent, type StagedRow, type RoundResultLite, type StagedSyncInput,
 } from '../lib/staged-reveal';
@@ -127,6 +127,24 @@ const SAMPLE = [
   eq('match: no partial matches', [matchClubAthlete({ name: 'Orgil' }, club), matchClubAthlete({ name: 'Orgil Otgonbayar Jr' }, club)], [undefined, undefined]);
   eq('match: nobody', matchClubAthlete({ name: 'Max Park' }, club), undefined);
 
+  // The "Өмнөх" chip: matched against the competition's CURRENT athletes at
+  // display time — nothing about it is stored on the staged row or result.
+  const roster = [...club, { id: 'athT', name: 'Tergel', lastName: 'Batzorig' }, { id: 'athOut', name: 'Luke', lastName: 'Garrett' }];
+  const imported = (athleteName: string, localName?: string) => ({ source: 'imported', athleteName, ...(localName ? { localName } : {}) });
+  const tergel = imported('Tergel Batzorig', 'Батзориг Тэргэл');
+  const beforeAdd = clubNameMatcher(['athA', 'athB'], roster);
+  const afterAdd = clubNameMatcher(['athA', 'athB', 'athT'], roster);
+  eq('chip: an athlete not (yet) in the competition is not matched', beforeAdd(tergel), undefined);
+  eq('chip: once ADDED to the competition — after import, after reveal — the same result matches', afterAdd(tergel), 'athT');
+  eq('chip: Latin name, any order/case/spacing', afterAdd(imported('  batzorig   TERGEL ')), 'athT');
+  eq('chip: matched by the local-script name when the Latin one differs', afterAdd(imported('Temuulen Tserendagva', 'Цэрэндагва Тэмүүлэн')), 'athB');
+  eq('chip: a club athlete on the roster but not in THIS competition does not match', afterAdd(imported('Luke Garrett')), undefined);
+  eq('chip: no partial / extra-word matches', [afterAdd(imported('Tergel')), afterAdd(imported('Tergel Batzorig Jr'))], [undefined, undefined]);
+  eq('chip: only imported results can match — never the club athlete\'s own entered result',
+    [afterAdd({ source: 'entry', athleteName: 'Tergel Batzorig' }), afterAdd({ athleteName: 'Tergel Batzorig' })], [undefined, undefined]);
+  eq('chip: removed from the competition again → no longer matched', clubNameMatcher(['athA'], roster)(tergel), undefined);
+  eq('chip: empty names / empty competition never match', [afterAdd(imported('')), clubNameMatcher([], roster)(tergel)], [undefined, undefined]);
+
   eq('row id: stable across spelling/case/order of the same name', stagedRowId('333', '1', 'Orgil Otgonbayar') === stagedRowId('333', '1', ' otgonbayar  ORGIL '), true);
   check('row id: differs by round, event and person',
     new Set([stagedRowId('333', '1', 'A B'), stagedRowId('333', '2', 'A B'), stagedRowId('222', '1', 'A B'), stagedRowId('333', '1', 'A C')]).size === 4);
@@ -144,17 +162,18 @@ const parsedRound = (roundId: string, names: [string, number][]) =>
 {
   const names: [string, number][] = Array.from({ length: 30 }, (_, i) => [`Imp ${String.fromCharCode(65 + (i % 26))}${i}`, 1000 + i * 10]);
   const club = [{ id: 'athA', name: 'Imp', lastName: 'A0' }];
-  const a = buildStagedEvent(undefined, '333', [parsedRound('1', names)], club, () => 0.42);
+  const a = buildStagedEvent(undefined, '333', [parsedRound('1', names)], () => 0.42);
   const rows = a.rounds['1'];
   eq('import: every row staged', rows.length, 30);
   eq('import: reveal order is a permutation 0..29', [...rows.map(r => r.order)].sort((x, y) => x - y), Array.from({ length: 30 }, (_, i) => i));
   check('import: order is not simply the pasted order', rows.some((r, i) => r.order !== i));
   eq('import: unique ids', new Set(rows.map(r => r.id)).size, 30);
   eq('import: nothing revealed or eliminated yet', rows.filter(r => r.revealed || r.eliminated).length, 0);
-  eq('import: club-name match recorded on the imported row only', rows.filter(r => r.matchedClubAthleteId).map(r => [r.name, r.matchedClubAthleteId]), [['Imp A0', 'athA']]);
+  check('import: no club-name match is frozen onto the staged rows', rows.every(r => !('matchedClubAthleteId' in r)));
+  eq('import: …the match is computed from the current roster instead', clubNameMatcher(['athA'], club)({ source: 'imported', athleteName: 'Imp A0' }), 'athA');
   check('import: no undefined fields (Firestore would refuse them)', rows.every(r => Object.values(r).every(v => v !== undefined)));
 
-  const dup = buildStagedEvent(undefined, '333', [parsedRound('1', [['Same Name', 900], ['Same Name', 950]])], []);
+  const dup = buildStagedEvent(undefined, '333', [parsedRound('1', [['Same Name', 900], ['Same Name', 950]])]);
   eq('import: two rows with one name in a round are both kept', [dup.rounds['1'].length, new Set(dup.rounds['1'].map(r => r.id)).size], [2, 2]);
 
   // Re-import: revealed rows are frozen, unrevealed ones replaced, other rounds untouched.
@@ -169,7 +188,7 @@ const parsedRound = (roundId: string, names: [string, number][]) =>
     },
   };
   const snapshot = JSON.stringify(before);
-  const re = buildStagedEvent(before, '333', [parsedRound('1', [['Keep Me', 5000], ['New One', 1200], ['New Two', 1300]])], []);
+  const re = buildStagedEvent(before, '333', [parsedRound('1', [['Keep Me', 5000], ['New One', 1200], ['New Two', 1300]])]);
   const r1 = re.rounds['1'];
   eq('re-import: revealed row untouched (old values, still revealed)', r1.find(r => r.name === 'Keep Me'), before.rounds['1'][0]);
   eq('re-import: the revealed athlete is not staged a second time', r1.filter(r => r.name === 'Keep Me').length, 1);
@@ -177,7 +196,7 @@ const parsedRound = (roundId: string, names: [string, number][]) =>
   check('re-import: new rows are ordered after the revealed ones', r1.filter(r => !r.revealed).every(r => r.order >= 1));
   eq('re-import: a round not in the paste is untouched', re.rounds['2'], before.rounds['2']);
   eq('re-import: input not mutated', JSON.stringify(before), snapshot);
-  const other = buildStagedEvent(before, '333', [{ ...parsedRound('1', [['X Y', 1]]), eventId: '222' }], []);
+  const other = buildStagedEvent(before, '333', [{ ...parsedRound('1', [['X Y', 1]]), eventId: '222' }]);
   eq('re-import: another event\'s rounds are ignored', other.rounds, before.rounds);
 }
 
@@ -200,7 +219,7 @@ const club = (id: string, round: number, average: number, extra: Partial<RoundRe
   single: average - 20, average, status: 'published', source: 'entry', ...extra,
 });
 const stage = (rounds: Record<string, [string, number][]>): StagedEvent =>
-  buildStagedEvent(undefined, '333', Object.entries(rounds).map(([r, n]) => parsedRound(r, n)), []);
+  buildStagedEvent(undefined, '333', Object.entries(rounds).map(([r, n]) => parsedRound(r, n)));
 const names30: [string, number][] = Array.from({ length: 30 }, (_, i) => [`Imp ${String.fromCharCode(65 + (i % 26))}${i}`, 1000 + i * 10]);
 const REGISTERED = ['c1', 'c2', 'c3', 'c4', 'c5'];
 const input = (over: Partial<StagedSyncInput>): StagedSyncInput => ({
@@ -241,9 +260,10 @@ const apply = (inp: StagedSyncInput): StagedSyncInput => {
     ['', 'imported', 'published', 'comp1', 'Club Open', '333', 1, 5]);
   eq('result doc: deterministic id from the row', doc.id, stagedResultDocId('comp1', doc.importRowId!));
   check('result doc: no undefined fields', Object.values(doc).every(v => v !== undefined));
-  const matchedRow: StagedRow = { ...st.rounds['1'][0], matchedClubAthleteId: 'c1', localName: 'Нэр' };
-  const matchedDoc = stagedRowToResult(COMP, '333', 1, matchedRow);
-  eq('result doc: club-name match + local name carried, athleteId still empty', [matchedDoc.matchedClubAthleteId, matchedDoc.localName, matchedDoc.athleteId], ['c1', 'Нэр', '']);
+  const localRow: StagedRow = { ...st.rounds['1'][0], localName: 'Нэр' };
+  const localDoc = stagedRowToResult(COMP, '333', 1, localRow);
+  eq('result doc: local name carried (the chip can match on it), athleteId still empty, no stored match',
+    [localDoc.localName, localDoc.athleteId, 'matchedClubAthleteId' in localDoc], ['Нэр', '', false]);
 }
 
 {

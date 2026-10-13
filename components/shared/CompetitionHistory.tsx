@@ -7,7 +7,8 @@ import { getResultRecordBadges } from '@/lib/record-badges';
 import { fmtTime, formatDate } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { compareRoundResults } from '@/lib/results-entry-helpers';
-import WcaResultChip from '@/components/shared/WcaResultChip';
+import PrevResultChip from '@/components/shared/PrevResultChip';
+import { clubNameMatcher } from '@/lib/staged-reveal';
 import JudgedBy from '@/components/shared/JudgedBy';
 import AthleteProfileOverlay from '@/components/shared/AthleteProfileOverlay';
 import type { Competition, Result, Athlete, AdvancementConfig } from '@/lib/types';
@@ -115,6 +116,13 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
     athletes.forEach(a => { if (a.imageUrl) m[a.id] = a.imageUrl; });
     return m;
   }, [athletes]);
+
+  // Imported rows that share a name with one of this competition's club
+  // athletes get the "Өмнөх" chip — worked out from the current roster.
+  const matchClub = useMemo(
+    () => clubNameMatcher((comp.athletes || []).map(a => a.id), athletes),
+    [comp.athletes, athletes],
+  );
 
   const compEvents = useMemo(
     () => comp.events ? WCA_EVENTS.filter(e => (comp.events as Record<string, boolean>)?.[e.id]) : [],
@@ -762,7 +770,7 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
                                     {i + 1}
                                   </td>
                                   <td className="wca-td-name">
-                                    <div className={`wca-name${isClub ? ' ch-club-name' : ''}`}>{displayName}<WcaResultChip result={r} /></div>
+                                    <div className={`wca-name${isClub ? ' ch-club-name' : ''}`}>{displayName}<PrevResultChip show={!!matchClub(r)} /></div>
                                     <JudgedBy name={r.judgeName || athleteNameMap[r.judgeAthleteId || '']} />
                                   </td>
                                   <td className="wca-td-country">{displayCountry}</td>

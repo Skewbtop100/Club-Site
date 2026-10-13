@@ -21,8 +21,6 @@ export interface StagedRow {
   average: number | null;
   /** Fixed random reveal order, assigned once at import. Lower reveals first. */
   order: number;
-  /** Club athlete of this competition with the same name (display hint only). */
-  matchedClubAthleteId?: string;
   /** Written as a public result. Never reset. */
   revealed?: boolean;
   /** Did not advance to this round in the combined (club + imported) ranking
@@ -67,6 +65,37 @@ export function matchClubAthlete(
   })?.id;
 }
 
+/**
+ * "Is this imported result a namesake of one of the competition's club
+ * athletes?" — for the "Өмнөх" chip. Returns a function giving the matched
+ * club athlete's id (or undefined) for a result.
+ *
+ * Deliberately computed from the competition's CURRENT athletes each time it
+ * is shown, never stored on the staged row or the result: a club athlete
+ * registered after the import (or after the row was revealed) must be
+ * matched too, and a stored answer would be frozen at whatever the roster
+ * was back then.
+ *
+ * `competitionAthleteIds` = competition.athletes ids; `roster` = the club's
+ * athlete documents (for their names). Only imported results can match.
+ */
+export function clubNameMatcher(
+  competitionAthleteIds: string[],
+  roster: { id: string; name: string; lastName?: string }[],
+): (result: { source?: string; athleteName?: string; localName?: string }) => string | undefined {
+  const inCompetition = new Set(competitionAthleteIds);
+  const byKey = new Map<string, string>();
+  for (const a of roster) {
+    if (!inCompetition.has(a.id)) continue;
+    const key = nameKey(`${a.name || ''} ${a.lastName || ''}`);
+    if (key && !byKey.has(key)) byKey.set(key, a.id);
+  }
+  return (result) => {
+    if (result.source !== 'imported') return undefined;
+    return byKey.get(nameKey(result.athleteName || '')) ?? (result.localName ? byKey.get(nameKey(result.localName)) : undefined);
+  };
+}
+
 // ── ids ──────────────────────────────────────────────────────────────────────
 
 function fnv1a(s: string): string {
@@ -104,7 +133,6 @@ export function stagedRowToResult(
     status: 'published', source: 'imported',
     importRowId: row.id,
     ...(row.localName ? { localName: row.localName } : {}),
-    ...(row.matchedClubAthleteId ? { matchedClubAthleteId: row.matchedClubAthleteId } : {}),
   };
 }
 
@@ -122,7 +150,6 @@ export function buildStagedEvent(
   existing: StagedEvent | undefined,
   eventId: string,
   parsed: ParsedResultRound[],
-  clubAthletes: { id: string; name: string; lastName?: string }[],
   random: () => number = Math.random,
 ): StagedEvent {
   const rounds: Record<string, StagedRow[]> = { ...(existing?.rounds || {}) };
@@ -139,12 +166,10 @@ export function buildStagedEvent(
       let id = base;
       for (let n = 2; taken.has(id); n++) id = `${base}_${n}`;
       taken.add(id);
-      const matched = matchClubAthlete(row, clubAthletes);
       fresh.push({
         id, name: row.name, solves: row.solves, single: row.single, average: row.average,
         ...(row.localName ? { localName: row.localName } : {}),
         ...(row.country ? { country: row.country } : {}),
-        ...(matched ? { matchedClubAthleteId: matched } : {}),
       });
     }
     // Fisher–Yates: a fixed random permutation, stored so it never changes.

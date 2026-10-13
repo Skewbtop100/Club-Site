@@ -236,10 +236,6 @@ export interface Result {
   /** Imported results only: the athlete's name in local script, when the
    *  pasted name carried one in parentheses. */
   localName?: string;
-  /** Imported results only: the club athlete of this competition whose name
-   *  this imported athlete shares. Purely a display hint (the "WCA" chip) —
-   *  the row is NOT that athlete's result and never links to their profile. */
-  matchedClubAthleteId?: string;
 }
 
 export interface WcaRecordEntry {

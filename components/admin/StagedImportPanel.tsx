@@ -5,7 +5,7 @@ import { saveStagedImport, syncStagedEvent } from '@/lib/firebase/services/stage
 import { parseWcaResults, type ParsedResultRound } from '@/lib/results-import';
 import { matchClubAthlete, stagedRoundStatus, type StagedEvent } from '@/lib/staged-reveal';
 import { WCA_EVENTS } from '@/lib/wca-events';
-import WcaResultChip from '@/components/shared/WcaResultChip';
+import PrevResultChip from '@/components/shared/PrevResultChip';
 import { useLang } from '@/lib/i18n';
 import type { Athlete, Competition } from '@/lib/types';
 
@@ -31,8 +31,10 @@ export default function StagedImportPanel({ comp, athletes, stagedEvents }: {
   const [msgType, setMsgType] = useState('');
   const [busy, setBusy]       = useState(false);
 
-  // Club athletes registered for this competition — the pool imported names
-  // are matched against (same pool saveStagedImport uses).
+  // Club athletes registered for this competition right now — the pool the
+  // preview matches imported names against. Nothing about the match is
+  // stored: wherever results are shown it is worked out again from whoever
+  // is registered then (clubNameMatcher), so athletes added later count too.
   const compAthleteIds = new Set((comp.athletes || []).map(a => a.id));
   const clubAthletes = athletes.filter(a => compAthleteIds.has(a.id));
 
@@ -77,7 +79,7 @@ export default function StagedImportPanel({ comp, athletes, stagedEvents }: {
       let revealedNow = 0;
       // One private document per event, so one save per event in the paste.
       for (const eventId of [...new Set(rounds.map(r => r.eventId))]) {
-        const outcome = await saveStagedImport(comp, eventId, rounds.filter(r => r.eventId === eventId), athletes);
+        const outcome = await saveStagedImport(comp, eventId, rounds.filter(r => r.eventId === eventId));
         revealedNow += outcome.revealed;
       }
       setText(''); setParsed(null);
@@ -165,7 +167,7 @@ export default function StagedImportPanel({ comp, athletes, stagedEvents }: {
                     {matched.map((row, i) => (
                       <span key={i} style={{ color: 'var(--text)', marginRight: '0.6rem', whiteSpace: 'nowrap' }}>
                         {row.name}{row.localName ? ` (${row.localName})` : ''}
-                        <WcaResultChip result={{ source: 'imported', matchedClubAthleteId: 'preview' }} />
+                        <PrevResultChip show />
                       </span>
                     ))}
                   </div>

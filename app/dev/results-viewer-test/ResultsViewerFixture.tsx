@@ -31,6 +31,7 @@ const COMP: Competition = {
     '333bf': { rounds: 1, groups: 1 },
   },
   roundStatus: { '333_r1': 'complete', '333_r2': 'ongoing' },
+  athletes: ATHLETES.map(a => ({ id: a.id, name: a.name, events: ['333', '666'] })),
 };
 
 const IMPORTED: [string, string, string][] = [
@@ -72,7 +73,6 @@ const RESULTS: Result[] = [
   // 3x3 round 1 — imported
   ...IMPORTED.map(([name, localName, country], i): Result => row(`r1i${i}`, {
     source: 'imported', athleteName: name, ...(localName ? { localName } : {}), country,
-    ...(name === 'Orgil Otgonbayar' ? { matchedClubAthleteId: 'c2' } : {}),
     solves: i === 12 ? [-1, -1, -1, -2, -2] : [686 + i * 47, 672 + i * 51, 577 + i * 44, 914 + i * 39, 608 + i * 55],
   })),
   // 3x3 round 2 — two results, the rest qualified but not competed yet

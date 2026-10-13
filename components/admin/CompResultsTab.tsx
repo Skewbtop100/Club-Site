@@ -6,7 +6,8 @@ import { subscribeResultsByComp, getResultsByComp, saveResult, deleteResult as d
 import { syncStagedEvent } from '@/lib/firebase/services/staged-results';
 import { recomputeClubBests } from '@/lib/firebase/services/club-bests';
 import { compareRoundResults } from '@/lib/results-entry-helpers';
-import WcaResultChip from '@/components/shared/WcaResultChip';
+import PrevResultChip from '@/components/shared/PrevResultChip';
+import { clubNameMatcher } from '@/lib/staged-reveal';
 import JudgedBy from '@/components/shared/JudgedBy';
 import { getAthletes } from '@/lib/firebase/services/athletes';
 import type { Competition, Result, AdvancementConfig, Athlete } from '@/lib/types';
@@ -80,6 +81,13 @@ export default function CompResultsTab() {
     });
     return m;
   }, [allAthletes]);
+
+  // Imported rows that share a name with one of the selected competition's
+  // club athletes get the "Өмнөх" chip — worked out from the current roster.
+  const matchClub = useMemo(
+    () => clubNameMatcher((comps.find(c => c.id === compId)?.athletes || []).map(a => a.id), allAthletes),
+    [comps, compId, allAthletes],
+  );
 
   // Sidebar: which events are expanded
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -771,7 +779,7 @@ export default function CompResultsTab() {
                             <td className="wca-td-name">
                               <div className="wca-name">
                                 {athleteNameMap[r.athleteId] || r.athleteName || r.athleteId}
-                                <WcaResultChip result={r} />
+                                <PrevResultChip show={!!matchClub(r)} />
                               </div>
                               {!isPlaceholder && <JudgedBy name={r.judgeName || athleteNameMap[r.judgeAthleteId || '']} />}
                             </td>

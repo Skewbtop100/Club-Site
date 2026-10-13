@@ -9,7 +9,7 @@ import { auth, db } from '@/lib/firebase';
 import { competitionPrivateCol, competitionStagedResultsDoc } from '@/lib/firebase/collections';
 import { buildStagedEvent, type StagedEvent } from '@/lib/staged-reveal';
 import type { ParsedResultRound } from '@/lib/results-import';
-import type { Athlete, Competition } from '@/lib/types';
+import type { Competition } from '@/lib/types';
 
 // Staged import of a past competition's results —
 // competitions/{id}/private/importedResults_{eventId}, admin-only
@@ -42,13 +42,6 @@ export function subscribeStagedEvents(
     },
     (err) => onError?.(err),
   );
-}
-
-/** Club athletes registered for this competition (any event) — the pool an
- *  imported name is matched against. */
-function competitionClubAthletes(comp: Competition, athletes: Athlete[]): Athlete[] {
-  const ids = new Set((comp.athletes || []).map(a => a.id));
-  return athletes.filter(a => ids.has(a.id));
 }
 
 export interface StagedSyncOutcome {
@@ -92,16 +85,14 @@ export async function saveStagedImport(
   comp: Competition,
   eventId: string,
   parsed: ParsedResultRound[],
-  athletes: Athlete[],
 ): Promise<StagedSyncOutcome> {
   const ref = competitionStagedResultsDoc(comp.id, eventId);
-  const clubAthletes = competitionClubAthletes(comp, athletes);
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
     const existing = snap.exists()
       ? { eventId, rounds: (snap.data().rounds as StagedEvent['rounds']) || {} }
       : undefined;
-    const next = buildStagedEvent(existing, eventId, parsed, clubAthletes);
+    const next = buildStagedEvent(existing, eventId, parsed);
     tx.set(ref, { kind: KIND, eventId, rounds: next.rounds, updatedAt: Timestamp.now() });
   });
   return syncStagedEvent(comp.id, eventId);
