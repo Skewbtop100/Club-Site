@@ -71,6 +71,18 @@ function Badge({ badge }: { badge: RecordBadge | null }) {
   return <sup className="crv-badge" style={BADGE_STYLES[badge]}>{badge}</sup>;
 }
 
+/** A time in a table cell, followed by a FIXED-width badge slot that is
+ *  there whether or not the row has a badge — so every time in the column
+ *  ends at the same x and the digits line up, badge or no badge. */
+function TimeCell({ value, badge }: { value: string; badge: RecordBadge | null }) {
+  return (
+    <>
+      <span className="crv-val">{value}</span>
+      <span className="crv-bslot"><Badge badge={badge} /></span>
+    </>
+  );
+}
+
 // ── data container ────────────────────────────────────────────────────────────
 
 interface Props {
@@ -357,10 +369,10 @@ export function CompetitionResultsView({ comp, results, athletes, wcaRecords, cl
                             {r.localName && <span className="crv-local"> {r.localName}</span>}
                           </td>
                           <td className={`crv-c-time crv-avg${r.average != null && r.average < 0 ? ' crv-dnf' : ''}`}>
-                            {fmtTime(r.average)}<Badge badge={badgeOf(r, 'average')} />
+                            <TimeCell value={fmtTime(r.average)} badge={badgeOf(r, 'average')} />
                           </td>
                           <td className={`crv-c-time${r.single != null && r.single < 0 ? ' crv-dnf' : ''}`}>
-                            {fmtTime(r.single)}<Badge badge={badgeOf(r, 'single')} />
+                            <TimeCell value={fmtTime(r.single)} badge={badgeOf(r, 'single')} />
                           </td>
                           {[0, 1, 2, 3, 4].map(si => {
                             const sv = r.solves?.[si] ?? null;
@@ -390,8 +402,8 @@ export function CompetitionResultsView({ comp, results, athletes, wcaRecords, cl
                         <tr key={r.id} className={`crv-row crv-ph${isClub(r) ? ' crv-club' : ''}`}>
                           <td className="crv-c-rank">—</td>
                           <td className="crv-c-name"><span className="crv-name">{displayName(r)}</span></td>
-                          <td className="crv-c-time">—</td>
-                          <td className="crv-c-time">—</td>
+                          <td className="crv-c-time"><TimeCell value="—" badge={null} /></td>
+                          <td className="crv-c-time"><TimeCell value="—" badge={null} /></td>
                           {[0, 1, 2, 3, 4].map(si => <td key={si} className="crv-c-att">—</td>)}
                         </tr>
                       ))}
@@ -532,7 +544,13 @@ export function CompetitionResultsView({ comp, results, athletes, wcaRecords, cl
           color: var(--muted); text-align: left; border-bottom-color: var(--crv-line);
         }
         .crv-table .crv-c-rank { width: 34px; padding: 0; text-align: center; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
-        .crv-table .crv-c-time { width: 70px; text-align: right; font-variant-numeric: tabular-nums; }
+        /* Time columns: value + a 16px badge slot in every row. The header
+           is padded by the slot's width so it sits over the digits. */
+        .crv-table .crv-c-time { width: 76px; padding: 0 4px; text-align: right; font-variant-numeric: tabular-nums; }
+        .crv-table th.crv-c-time { padding-right: 22px; }
+        .crv-val { font-variant-numeric: tabular-nums; }
+        .crv-bslot { display: inline-block; width: 16px; margin-left: 2px; text-align: left; vertical-align: baseline; }
+        .crv-bslot .crv-badge { margin-left: 0; }
         .crv-table .crv-c-att  { display: none; width: 66px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
         .crv-table td.crv-c-rank.crv-adv { background: #16a34a; color: #fff; }
         .crv-table td.crv-medal-1 { color: #eab308; }
@@ -598,7 +616,7 @@ export function CompetitionResultsView({ comp, results, athletes, wcaRecords, cl
             width: 250px; flex-shrink: 0;
           }
           .crv-table .crv-c-att { display: table-cell; }
-          .crv-table .crv-c-time { width: 84px; }
+          .crv-table .crv-c-time { width: 92px; }
           .crv-title { padding: 14px 14px 8px; }
           .crv-advnote { padding: 0 14px 8px; }
         }

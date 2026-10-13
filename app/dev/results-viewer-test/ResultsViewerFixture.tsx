@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { CompetitionResultsView } from '@/components/shared/CompetitionResultsViewer';
 import type { Athlete, Competition, Result, WcaRecords } from '@/lib/types';
 import type { ClubBests } from '@/lib/club-bests';
+import RecordCelebration from '@/components/admin/RecordCelebration';
 
 // Dev-only fixture page for the live results viewer's layout (like the other
 // app/dev/* pages): renders CompetitionResultsView with made-up data and no
@@ -98,9 +99,25 @@ const CLUB_BESTS: ClubBests = {
   club: { '333': { s: 740, a: 760 }, '666': { s: 14500, a: 15000 } },
 };
 
-export default function ResultsViewerFixture() {
+export default function ResultsViewerFixture({ mode }: { mode: 'overlay' | 'embedded' | 'celebrate' }) {
   const [open, setOpen] = useState(true);
-  const embedded = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('embedded');
+  const embedded = mode === 'embedded';
+  // `?celebrate=1`: the record-break card on its own, with a long name and
+  // both single and average broken — the widest it gets.
+  if (mode === 'celebrate') {
+    return (
+      <RecordCelebration
+        onClose={() => {}}
+        text={{
+          title: 'Шинэ клубын рекорд!',
+          items: [
+            { level: 'TR', headline: 'Temuulen Tserendagva-Batbayar Ganzorigiin — 2x2x2 нэг 1.98', previous: 'Өмнөх рекорд: 2.10 — Uuganbayar Bayalagnasan, 2026-09-01', gap: '42 хоногийн дараа шинэчлэгдлээ (−0.12)' },
+            { level: 'TR', headline: 'Temuulen Tserendagva-Batbayar Ganzorigiin — 2x2x2 дундаж 2.63', previous: 'Өмнөх рекорд: 2.80 — Tergel Batzorig, өнөөдөр', gap: 'Шинэчлэгдлээ (−0.17)' },
+          ],
+        }}
+      />
+    );
+  }
   if (!open) {
     return <div style={{ padding: '1rem' }}><button className="btn-sm-primary" onClick={() => setOpen(true)}>Open viewer</button></div>;
   }

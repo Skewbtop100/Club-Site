@@ -16,20 +16,57 @@ import type { Result } from './types';
  *  there is no valid result of that kind. */
 export interface BestPair { s?: number; a?: number }
 
+/** Who holds a club record, and where and when it was set. */
+export interface RecordHolder {
+  athleteId: string;
+  name: string;
+  competitionId: string;
+  competitionName: string;
+  /** When the record was set, epoch ms (the result's submission time, else
+   *  the competition's date). Absent when neither is known. */
+  at?: number;
+}
+
 export interface ClubBests {
   /** athleteId → eventId → that athlete's bests. */
   athletes: Record<string, Record<string, BestPair>>;
   /** eventId → the club's bests (the TR). */
   club: Record<string, BestPair>;
+  /** eventId → who holds each club record (`s` single, `a` average) — for
+   *  the "previous record" line of the record-break card. Absent on
+   *  summaries computed before holders were stored. */
+  holders?: Record<string, { s?: RecordHolder; a?: RecordHolder }>;
 }
 
-type BestResult = Pick<Result, 'id' | 'athleteId' | 'eventId' | 'competitionId' | 'single' | 'average'> &
-  Partial<Pick<Result, 'round' | 'status' | 'source' | 'isPlaceholder'>>;
+export type BestResult = Pick<Result, 'id' | 'athleteId' | 'eventId' | 'competitionId' | 'single' | 'average'> &
+  Partial<Pick<Result, 'round' | 'status' | 'source' | 'isPlaceholder' | 'submittedAt' | 'athleteName' | 'competitionName'>>;
+
+/** Names and competition details computeClubBests can't get from results alone. */
+export interface BestsMeta {
+  /** athleteId → full name. */
+  athleteNames?: Record<string, string>;
+  /** competitionId → name and date. */
+  competitions?: Record<string, { name?: string; date?: unknown }>;
+}
+
+/** Firestore Timestamp | { seconds } | Date | ISO string | number → epoch ms; 0 when unknown. */
+export function toMillis(ts: unknown): number {
+  if (!ts) return 0;
+  if (typeof ts === 'number') return ts;
+  if (ts instanceof Date) return ts.getTime() || 0;
+  if (typeof ts === 'string') return new Date(ts).getTime() || 0;
+  if (typeof ts === 'object') {
+    const o = ts as { toDate?: () => Date; seconds?: number };
+    if (typeof o.toDate === 'function') return o.toDate().getTime() || 0;
+    if (typeof o.seconds === 'number') return o.seconds * 1000;
+  }
+  return 0;
+}
 
 const KEY = { single: 's', average: 'a' } as const;
 
 /** A club athlete's own, real, published result (not imported, not a placeholder). */
-function isClubResult(r: BestResult, clubAthleteIds: Set<string>): boolean {
+export function isClubResult(r: BestResult, clubAthleteIds: Set<string>): boolean {
   return !!r.athleteId && clubAthleteIds.has(r.athleteId)
     && r.status === 'published' && !r.isPlaceholder
     && r.source !== 'imported' && r.source !== 'import';
@@ -38,7 +75,7 @@ function isClubResult(r: BestResult, clubAthleteIds: Set<string>): boolean {
 /** A time that can count as a best: positive (not DNF/DNS/missing) and not
  *  below the event's plausibility floor — the same guard the records tab
  *  uses so a dropped-digit typo ("0.55") can't become a record. */
-function countable(value: number | null | undefined, eventId: string): value is number {
+export function countable(value: number | null | undefined, eventId: string): value is number {
   return typeof value === 'number' && value >= getMinPlausibleSolveCs(eventId);
 }
 
@@ -53,9 +90,10 @@ function lower(current: number | undefined, value: number): number {
  * makes it "bests from before this competition" for the live viewer.
  */
 export function computeClubBests(
-  results: BestResult[], finishedCompetitionIds: Set<string>, clubAthleteIds: Set<string>,
+  results: BestResult[], finishedCompetitionIds: Set<string>, clubAthleteIds: Set<string>, meta: BestsMeta = {},
 ): ClubBests {
-  const bests: ClubBests = { athletes: {}, club: {} };
+  const holders: NonNullable<ClubBests['holders']> = {};
+  const bests: ClubBests = { athletes: {}, club: {}, holders };
   for (const r of results) {
     if (!isClubResult(r, clubAthleteIds) || !finishedCompetitionIds.has(r.competitionId)) continue;
     for (const type of ['single', 'average'] as const) {
@@ -64,8 +102,24 @@ export function computeClubBests(
       const k = KEY[type];
       const athlete = ((bests.athletes[r.athleteId] ??= {})[r.eventId] ??= {});
       athlete[k] = lower(athlete[k], value);
+
+      // The club record, and who holds it. A later result that only TIES the
+      // record does not take it over: the holder is whoever set it first.
       const club = (bests.club[r.eventId] ??= {});
-      club[k] = lower(club[k], value);
+      const comp = meta.competitions?.[r.competitionId];
+      const at = toMillis(r.submittedAt) || toMillis(comp?.date);
+      const current = holders[r.eventId]?.[k];
+      const takes = club[k] === undefined || value < club[k]
+        || (value === club[k] && at > 0 && (!current?.at || at < current.at));
+      if (!takes) continue;
+      club[k] = value;
+      (holders[r.eventId] ??= {})[k] = {
+        athleteId: r.athleteId,
+        name: meta.athleteNames?.[r.athleteId] || r.athleteName || r.athleteId,
+        competitionId: r.competitionId,
+        competitionName: comp?.name || r.competitionName || '',
+        ...(at > 0 ? { at } : {}),
+      };
     }
   }
   return bests;

@@ -67,7 +67,30 @@ const tag = (badges: ReturnType<typeof computeLocalBadges>, id: string, type: 's
   eq('summary: no average → only the single is stored (no null/undefined keys)', [bests.athletes.D['666'], bests.club['666']], [{ s: 1500 }, { s: 1500 }]);
   check('summary: values are integer centiseconds exactly as stored (nothing rounded)',
     Object.values(bests.athletes).every(ev => Object.values(ev).every(p => Object.values(p).every(v => Number.isInteger(v)))));
-  eq('summary: nothing finished → empty', computeClubBests(results, new Set(), CLUB), { athletes: {}, club: {} });
+  eq('summary: nothing finished → empty', computeClubBests(results, new Set(), CLUB), { athletes: {}, club: {}, holders: {} });
+
+  // Holders of the club records.
+  const day = (d: string) => new Date(d).getTime();
+  const held = computeClubBests([
+    res('A', 900, 1000, { competitionId: 'old1', submittedAt: day('2026-03-01') }),
+    res('B', 800, 1100, { competitionId: 'old1', submittedAt: { toDate: () => new Date('2026-03-01T10:00:00') } }), // Firestore Timestamp shape
+    res('A', 800, 950, { competitionId: 'old2', submittedAt: day('2026-06-10') }),                               // ties B's single later; takes the average
+    res('C', 45, 60, { competitionId: 'old2', eventId: '222' }),                                                  // no submittedAt → competition date
+    res('D', 1500, null, { competitionId: 'old3', eventId: '666', athleteName: 'Stored Name', competitionName: 'Stored Comp' }),
+  ], new Set(['old1', 'old2', 'old3']), CLUB, {
+    athleteNames: { A: 'Anu Bat', B: 'Bold Dorj', C: 'Chimeg Enkh' },
+    competitions: { old1: { name: 'Spring Open', date: '2026-03-01' }, old2: { name: 'Summer Open', date: '2026-06-10' } },
+  });
+  eq('holders: the single record stays with whoever set it FIRST when a later result only ties it',
+    [held.holders?.['333']?.s?.athleteId, held.holders?.['333']?.s?.name, held.holders?.['333']?.s?.competitionName], ['B', 'Bold Dorj', 'Spring Open']);
+  eq('holders: single and average can be held by different athletes, from different competitions',
+    [held.holders?.['333']?.a?.name, held.holders?.['333']?.a?.competitionName, held.holders?.['333']?.a?.at], ['Anu Bat', 'Summer Open', day('2026-06-10')]);
+  eq('holders: the value they point at is the club record', [held.club['333'], held.club['222']], [{ s: 800, a: 950 }, { s: 45, a: 60 }]);
+  eq('holders: no submission time → the competition\'s date', held.holders?.['222']?.s?.at, day('2026-06-10'));
+  eq('holders: names fall back to what the result itself carries; an unknown date is simply absent',
+    [held.holders?.['666']?.s?.name, held.holders?.['666']?.s?.competitionName, 'at' in (held.holders?.['666']?.s ?? {})], ['Stored Name', 'Stored Comp', false]);
+  check('holders: no undefined fields (Firestore would refuse them)',
+    Object.values(held.holders ?? {}).every(ev => Object.values(ev).every(h => Object.values(h ?? {}).every(v => v !== undefined))));
 }
 
 // ═══ PR / TR badges ══════════════════════════════════════════════════════════

@@ -23,7 +23,11 @@ export async function getClubBests(): Promise<ClubBestsDoc | null> {
   if (!snap.exists()) return null;
   const data = snap.data();
   const updatedAt = data.updatedAt as { toDate?: () => Date } | undefined;
-  return { athletes: data.athletes || {}, club: data.club || {}, updatedAt: updatedAt?.toDate?.() ?? null };
+  return {
+    athletes: data.athletes || {}, club: data.club || {},
+    ...(data.holders ? { holders: data.holders } : {}),
+    updatedAt: updatedAt?.toDate?.() ?? null,
+  };
 }
 
 /**
@@ -40,6 +44,10 @@ export async function recomputeClubBests(): Promise<{ athletes: number; events: 
     results,
     new Set(competitions.filter(c => c.status === 'finished').map(c => c.id)),
     new Set(athletes.map(a => a.id)),
+    {
+      athleteNames: Object.fromEntries(athletes.map(a => [a.id, `${a.name || ''}${a.lastName ? ' ' + a.lastName : ''}`.trim()])),
+      competitions: Object.fromEntries(competitions.map(c => [c.id, { name: c.name, date: c.clubDate || c.date }])),
+    },
   );
   await setDoc(clubBestsDoc, { ...bests, updatedAt: Timestamp.now() });
   return { athletes: Object.keys(bests.athletes).length, events: Object.keys(bests.club).length };

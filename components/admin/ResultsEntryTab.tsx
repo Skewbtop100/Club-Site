@@ -12,6 +12,12 @@ import StagedImportPanel from '@/components/admin/StagedImportPanel';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { groupLetter, groupOptions, scrambleFor, nextExtraSource } from '@/lib/scramble-import';
 import { isSelfJudging, groupAvailability } from '@/lib/judge-conflict';
+import { getClubBests } from '@/lib/firebase/services/club-bests';
+import { useWcaRecords } from '@/lib/hooks/useWcaRecords';
+import { getResultBadgesPair } from '@/lib/record-badges';
+import type { ClubBests } from '@/lib/club-bests';
+import { findCelebration, buildCelebrationText, type CelebrationText, type WcaLevel } from '@/lib/record-celebration';
+import RecordCelebration from '@/components/admin/RecordCelebration';
 import ScramblePreview from '@/components/shared/ScramblePreview';
 import { useLang, type TranslationKey } from '@/lib/i18n';
 import type { Athlete, Competition, Result, ScrambleSets, ScrambleSource } from '@/lib/types';
@@ -234,6 +240,17 @@ export default function ResultsEntryTab({ judgeCompetitionId }: { judgeCompetiti
       setScrambleSets({});
     });
   }, [compId]);
+
+  // Record-break celebration. The bests from before this competition
+  // (settings/clubBests, one document) and the WCA record thresholds are
+  // loaded ONCE when the panel opens — saving a result then costs no extra
+  // read to decide whether it broke a record.
+  const [clubBests, setClubBests] = useState<ClubBests | null>(null);
+  const wcaRecords = useWcaRecords();
+  const [celebration, setCelebration] = useState<CelebrationText | null>(null);
+  useEffect(() => {
+    getClubBests().then(setClubBests).catch(() => setClubBests(null));
+  }, []);
 
   // Staged imports of the selected competition (admin-only private docs), by
   // event. Drives the staged-import panel's status lines, and tells submit()
@@ -506,6 +523,40 @@ export default function ResultsEntryTab({ judgeCompetitionId }: { judgeCompetiti
         ? `✓ ${t('admin.results.msg.updated-for')} ${fullName} — ${t('admin.results.single')}: ${fmtTime(single)} Ao5: ${fmtTime(average)}`
         : `✓ ${t('result.saved')}! ${t('admin.results.single')}: ${fmtTime(single)} Ao5: ${fmtTime(average)}`;
       updatePanel(panelId, { msg, msgType: 'success', needsConfirm: false });
+
+      // Did that break a club record (or better)? Same chronological logic
+      // as the TR badge in live results, on data the panel already holds.
+      if (!isDailyPractice) {
+        const saved: Result = {
+          id: docId, athleteId: panel.athleteId, athleteName: ath?.name || '', competitionId: compId,
+          eventId: panel.eventId, round: panel.round, single, average,
+          status: 'published', source: 'entry', submittedAt: Date.now(),
+        };
+        const wcaPair = getResultBadgesPair(saved, [], wcaRecords);
+        const wcaLevel = (type: 'single' | 'average'): WcaLevel | null => {
+          const level = (['WR', 'CR', 'NR'] as const).find(b => wcaPair[type].includes(b));
+          if (!level) return null;
+          const threshold = wcaRecords[panel.eventId]?.[type]?.[level]?.value;
+          // Thresholds are stored in seconds; back to whole centiseconds.
+          return { level, ...(typeof threshold === 'number' ? { previousValue: Math.round(threshold * 100) } : {}) };
+        };
+        const found = findCelebration({
+          saved, competitionResults: compResults, bests: clubBests,
+          clubAthleteIds: new Set(athletes.map(a => a.id)),
+          athleteNames: Object.fromEntries(athletes.map(a => [a.id, `${a.name || ''}${a.lastName ? ' ' + a.lastName : ''}`.trim()])),
+          eventName: (WCA_EVENTS.find(e => e.id === panel.eventId)?.name || panel.eventId).replace(/ Cube$/, ''),
+          wca: { single: wcaLevel('single'), average: wcaLevel('average') },
+        });
+        if (found) {
+          setCelebration(buildCelebrationText(found, {
+            title: { TR: t('celebrate.title.TR'), NR: t('celebrate.title.NR'), CR: t('celebrate.title.CR'), WR: t('celebrate.title.WR') },
+            single: t('celebrate.single'), average: t('celebrate.average'),
+            previous: t('celebrate.previous'), today: t('celebrate.today'),
+            afterDays: t('celebrate.after-days'), renewed: t('celebrate.renewed'),
+            tied: t('celebrate.tied'), first: t('celebrate.first'),
+          }, Date.now()));
+        }
+      }
 
       // A club athlete just finished this round: have the server reveal the
       // share of the event's staged imported results that calls for. An
@@ -1893,6 +1944,8 @@ export default function ResultsEntryTab({ judgeCompetitionId }: { judgeCompetiti
         )}
       </div>
       )}
+
+      {celebration && <RecordCelebration text={celebration} onClose={() => setCelebration(null)} />}
 
       {/* Discard/switch confirmation — shared by "Clear", the per-panel "×",
           the top toolbar's "Remove", and switching Athlete/Event mid-entry. */}

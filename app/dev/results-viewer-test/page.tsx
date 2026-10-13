@@ -2,10 +2,17 @@ import { notFound } from 'next/navigation';
 import ResultsViewerFixture from './ResultsViewerFixture';
 
 // Local-development only: a fixture page for the live results viewer's
-// layout. In a production build (Vercel production AND preview) this route
-// is a 404 — it is prerendered at build time, when NODE_ENV is already
-// 'production', so the fixture is never served there.
-export default function ResultsViewerTestPage() {
+// layout (and, with ?celebrate=1, the record-break card). In a production
+// build (Vercel production AND preview) this route is a 404.
+//
+// The query string is read HERE, on the server, and handed down as a prop —
+// reading it inside the client component would render one thing on the
+// server and another in the browser.
+export default async function ResultsViewerTestPage({ searchParams }: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   if (process.env.NODE_ENV === 'production') notFound();
-  return <ResultsViewerFixture />;
+  const params = await searchParams;
+  const mode = 'celebrate' in params ? 'celebrate' : 'embedded' in params ? 'embedded' : 'overlay';
+  return <ResultsViewerFixture mode={mode} />;
 }
