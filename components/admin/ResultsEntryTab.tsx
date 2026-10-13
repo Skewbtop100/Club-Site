@@ -5,7 +5,10 @@ import { subscribeCompetitions, subscribeScrambleSets, ensureDailyPracticeCompet
 import { getAthletes } from '@/lib/firebase/services/athletes';
 import { saveResult, getResultsByComp, subscribeResultsByComp } from '@/lib/firebase/services/results';
 import { fmtTime, parseTime, getMinPlausibleSolveCs, todayDateStr } from '@/lib/time-utils';
-import { calcAo5, bestOf, timeToRawDigits, formatRawDigits } from '@/lib/results-entry-helpers';
+import { calcAo5, bestOf, compareRoundResults, timeToRawDigits, formatRawDigits } from '@/lib/results-entry-helpers';
+import { subscribeStagedEvents, syncStagedEvent } from '@/lib/firebase/services/staged-results';
+import type { StagedEvent } from '@/lib/staged-reveal';
+import StagedImportPanel from '@/components/admin/StagedImportPanel';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { groupLetter, groupOptions, scrambleFor, nextExtraSource } from '@/lib/scramble-import';
 import ScramblePreview from '@/components/shared/ScramblePreview';
@@ -63,27 +66,17 @@ interface ImportRow {
 
 // ── shared advancement helpers (kept local; mirror logic in CompResultsTab) ──
 
-function reWcaSort(a: { single: number | null; average: number | null }, b: typeof a): number {
-  const score = (r: typeof a): [number, number] => {
-    const avg = r.average != null && r.average > 0 ? r.average : null;
-    const sng = r.single  != null && r.single  > 0 ? r.single  : null;
-    return [avg ?? Infinity, sng ?? Infinity];
-  };
-  const [pa, sa] = score(a), [pb, sb] = score(b);
-  return pa !== pb ? pa - pb : sa - sb;
-}
-
 interface AdvLite { type: 'fixed' | 'percent'; value: number }
 
 function reComputeAdvancingNames(
-  priorRoundResults: { athleteId?: string; athleteName?: string; single: number | null; average: number | null; status?: string; isPlaceholder?: boolean }[],
+  priorRoundResults: { eventId?: string; athleteId?: string; athleteName?: string; single: number | null; average: number | null; status?: string; isPlaceholder?: boolean }[],
   advCfg: AdvLite | undefined,
   athleteIdToFullName: Record<string, string>,
 ): Set<string> {
   if (!advCfg) return new Set();
   const sorted = [...priorRoundResults]
     .filter(r => !r.isPlaceholder && r.status !== 'withdrawn')
-    .sort(reWcaSort);
+    .sort(compareRoundResults);
   const rawCount = advCfg.type === 'fixed' ? advCfg.value : Math.floor(sorted.length * advCfg.value / 100);
   const count = Math.min(Math.max(0, rawCount), sorted.length);
   const advancing = sorted.slice(0, count);
@@ -157,6 +150,9 @@ export default function ResultsEntryTab() {
   const [importMsgType, setImportMsgType] = useState('');
   const [importLoading, setImportLoading] = useState(false);
   const [checkLoading,  setCheckLoading]  = useState(false);
+  // 'single' = the original one-round immediate import; 'staged' = every
+  // round of an event, stored privately and revealed gradually.
+  const [importMode,    setImportMode]    = useState<'single' | 'staged'>('single');
 
   // Inspection timer state. showTimer is the one genuinely global bit — a
   // toolbar toggle for whether every panel shows its timer widget at all.
@@ -198,6 +194,19 @@ export default function ResultsEntryTab() {
     return subscribeScrambleSets(compId, setScrambleSets, (err) => {
       console.error('[ResultsEntryTab] scramble sets unavailable', err);
       setScrambleSets({});
+    });
+  }, [compId]);
+
+  // Staged imports of the selected competition (admin-only private docs), by
+  // event. Drives the staged-import panel's status lines, and tells submit()
+  // which events need a reveal pass after a club result is saved.
+  const [stagedEvents, setStagedEvents] = useState<Record<string, StagedEvent>>({});
+  useEffect(() => {
+    setStagedEvents({});
+    if (!compId || compId === DAILY_PRACTICE_COMPETITION_ID) return;
+    return subscribeStagedEvents(compId, setStagedEvents, (err) => {
+      console.error('[ResultsEntryTab] staged imports unavailable', err);
+      setStagedEvents({});
     });
   }, [compId]);
 
@@ -429,6 +438,21 @@ export default function ResultsEntryTab() {
         ? `✓ ${t('admin.results.msg.updated-for')} ${fullName} — ${t('admin.results.single')}: ${fmtTime(single)} Ao5: ${fmtTime(average)}`
         : `✓ ${t('result.saved')}! ${t('admin.results.single')}: ${fmtTime(single)} Ao5: ${fmtTime(average)}`;
       updatePanel(panelId, { msg, msgType: 'success', needsConfirm: false });
+
+      // A club athlete just finished this round: reveal the share of the
+      // event's staged imported results that calls for. Only for events that
+      // have a staged import; failing here must not look like a failed save
+      // (the result IS saved) — the next save or Mark Round Complete catches up.
+      if (comp && !isDailyPractice && stagedEvents[panel.eventId]) {
+        const saved: Result = {
+          id: docId, athleteId: panel.athleteId, competitionId: compId, eventId: panel.eventId,
+          round: panel.round, single, average, status: 'published', source: 'entry',
+        };
+        syncStagedEvent({
+          comp, eventId: panel.eventId,
+          results: [...compResults.filter(r => r.id !== docId), saved],
+        }).catch(err => console.error('[ResultsEntryTab] staged import reveal failed', err));
+      }
     } catch (e: unknown) {
       updatePanel(panelId, { msg: t('admin.msg.error-prefix') + (e instanceof Error ? e.message : String(e)), msgType: 'error', needsConfirm: false });
     }
@@ -1439,6 +1463,41 @@ export default function ResultsEntryTab() {
 
         {importOpen && (
           <div style={{ marginTop: '1rem' }}>
+            {/* Mode: one round straight away, or all rounds revealed gradually */}
+            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+              {(['single', 'staged'] as const).map(mode => (
+                <button
+                  key={mode}
+                  onClick={() => setImportMode(mode)}
+                  style={{
+                    padding: '0.4rem 0.9rem', borderRadius: '8px', cursor: 'pointer',
+                    fontFamily: 'inherit', fontSize: '0.82rem', fontWeight: 600,
+                    background: importMode === mode ? 'rgba(124,58,237,0.22)' : 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${importMode === mode ? 'rgba(124,58,237,0.5)' : 'rgba(255,255,255,0.1)'}`,
+                    color: importMode === mode ? '#a78bfa' : 'var(--muted)',
+                  }}
+                >
+                  {t(mode === 'single' ? 'admin.results.staged.mode-single' : 'admin.results.staged.mode-staged')}
+                </button>
+              ))}
+            </div>
+
+            {importMode === 'staged' && (
+              <>
+                <div className="form-group" style={{ maxWidth: '340px' }}>
+                  <label>{t('admin.results.competition')}</label>
+                  <select value={compId} onChange={e => { setCompId(e.target.value); setPanels([emptyPanel(0)]); nextPanelIdRef.current = 1; resetAllTimers(); setShowTimer(false); }}>
+                    <option value="">{t('admin.results.select-comp')}</option>
+                    {importableComps.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+                {selComp && !selComp.isDailyPractice && (
+                  <StagedImportPanel key={selComp.id} comp={selComp} athletes={athletes} stagedEvents={stagedEvents} />
+                )}
+              </>
+            )}
+
+            {importMode === 'single' && (<>
             {/* Part 1: Selectors */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: '0.5rem', marginBottom: '1rem' }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
@@ -1699,6 +1758,7 @@ export default function ResultsEntryTab() {
                 {importMsg}
               </div>
             )}
+            </>)}
           </div>
         )}
       </div>

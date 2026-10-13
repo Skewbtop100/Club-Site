@@ -11,6 +11,9 @@ emulator. Nothing here touches the real database.
 - `competition-scrambles.test.mjs` — a competition's imported WCA scrambles
   (`competitions/{id}/private/scrambles`): admin-only read and write, while
   the competition document itself stays public.
+- `competition-staged-results.test.mjs` — the staged import of a past
+  competition's results (`competitions/{id}/private/importedResults_{eventId}`):
+  admin-only until a row is revealed as an ordinary public result.
 
 ## Running
 

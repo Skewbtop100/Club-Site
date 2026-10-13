@@ -6,6 +6,8 @@ import { useWcaRecords } from '@/lib/hooks/useWcaRecords';
 import { getResultRecordBadges } from '@/lib/record-badges';
 import { fmtTime, formatDate } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
+import { compareRoundResults } from '@/lib/results-entry-helpers';
+import WcaResultChip from '@/components/shared/WcaResultChip';
 import AthleteProfileOverlay from '@/components/shared/AthleteProfileOverlay';
 import type { Competition, Result, Athlete, AdvancementConfig } from '@/lib/types';
 
@@ -34,13 +36,7 @@ function getSolveHint(solves: (number | null)[], idx: number): 'best' | 'worst' 
 }
 
 function wcaSort(a: Result, b: Result) {
-  const s = (r: Result): [number, number] => {
-    const avg = r.average != null && r.average > 0 ? r.average : null;
-    const sng = r.single != null && r.single > 0 ? r.single : null;
-    return [avg ?? Infinity, sng ?? Infinity];
-  };
-  const [pa, sa] = s(a), [pb, sb] = s(b);
-  return pa !== pb ? pa - pb : sa - sb;
+  return compareRoundResults(a, b);
 }
 
 function formatCompDate(date: Competition['date']): string {
@@ -761,7 +757,7 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
                                     {i + 1}
                                   </td>
                                   <td className="wca-td-name">
-                                    <div className={`wca-name${isClub ? ' ch-club-name' : ''}`}>{displayName}</div>
+                                    <div className={`wca-name${isClub ? ' ch-club-name' : ''}`}>{displayName}<WcaResultChip result={r} /></div>
                                   </td>
                                   <td className="wca-td-country">{displayCountry}</td>
                                   {([0, 1, 2, 3, 4] as const).map(si => {

@@ -220,6 +220,18 @@ export interface Result {
    *  was entered against imported scrambles; `group` is saved alongside it so
    *  the exact scramble can be looked up again. */
   scrambleSources?: ScrambleSource[];
+  /** Set on imported results revealed from a staged import
+   *  (lib/staged-reveal.ts): the id of the staged row this was revealed from.
+   *  Such rows get no next-round placeholder — their later rounds only ever
+   *  appear through the reveal. */
+  importRowId?: string;
+  /** Imported results only: the athlete's name in local script, when the
+   *  pasted name carried one in parentheses. */
+  localName?: string;
+  /** Imported results only: the club athlete of this competition whose name
+   *  this imported athlete shares. Purely a display hint (the "WCA" chip) —
+   *  the row is NOT that athlete's result and never links to their profile. */
+  matchedClubAthleteId?: string;
 }
 
 export interface WcaRecordEntry {

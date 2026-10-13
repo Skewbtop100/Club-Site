@@ -6,6 +6,8 @@ import { getAthletes } from '@/lib/firebase/services/athletes';
 import type { Competition, Result, AdvancementConfig, Athlete } from '@/lib/types';
 import { fmtTime } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
+import { compareRoundResults } from '@/lib/results-entry-helpers';
+import WcaResultChip from '@/components/shared/WcaResultChip';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -34,13 +36,7 @@ function getSolveHint(solves: (number | null)[], idx: number): 'best' | 'worst' 
 const rKey = (evId: string, r: number) => `${evId}_r${r}`;
 
 function wcaSort(a: Result, b: Result) {
-  const s = (r: Result): [number, number] => {
-    const avg = r.average != null && r.average > 0 ? r.average : null;
-    const sng = r.single  != null && r.single  > 0 ? r.single  : null;
-    return [avg ?? Infinity, sng ?? Infinity];
-  };
-  const [pa, sa] = s(a), [pb, sb] = s(b);
-  return pa !== pb ? pa - pb : sa - sb;
+  return compareRoundResults(a, b);
 }
 
 // ── component ─────────────────────────────────────────────────────────────────
@@ -342,6 +338,7 @@ export default function CompetitionResultsViewer({ comp, onClose, isLive }: Prop
                               <td className="wca-td-name">
                                 <div className="wca-name">
                                   {athleteNameMap[r.athleteId] || r.athleteName || r.athleteId}
+                                  <WcaResultChip result={r} />
                                 </div>
                               </td>
 

@@ -2,7 +2,10 @@
 
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { subscribeCompetitions, updateCompetition, finishCompetition } from '@/lib/firebase/services/competitions';
-import { subscribeResultsByComp, saveResult, deleteResult as deleteResultFn } from '@/lib/firebase/services/results';
+import { subscribeResultsByComp, getResultsByComp, saveResult, deleteResult as deleteResultFn } from '@/lib/firebase/services/results';
+import { syncStagedEvent } from '@/lib/firebase/services/staged-results';
+import { compareRoundResults } from '@/lib/results-entry-helpers';
+import WcaResultChip from '@/components/shared/WcaResultChip';
 import { getAthletes } from '@/lib/firebase/services/athletes';
 import type { Competition, Result, AdvancementConfig, Athlete } from '@/lib/types';
 import { fmtTime, parseTime } from '@/lib/time-utils';
@@ -168,9 +171,13 @@ export default function CompResultsTab() {
       const editedRound = editRow.round || 1;
       const roundKey = rKey(editRow.eventId, editedRound);
       const isRoundComplete = (selComp?.roundStatus ?? {})[roundKey] === 'complete';
+      const merged = results.map(r => r.id === editRow.id ? { ...updated, id: editRow.id } : r);
+      // Filling in a club athlete's solves here counts as finishing the
+      // round, same as saving from Results Entry: reveal the staged imported
+      // rows that calls for (no-op for events without a staged import).
+      const current = await syncStaged(editRow.eventId, merged);
       if (isRoundComplete) {
-        const merged = results.map(r => r.id === editRow.id ? { ...updated, id: editRow.id } : r);
-        await applyAdvancement(editRow.eventId, editedRound, merged);
+        await applyAdvancement(editRow.eventId, editedRound, current);
       }
     } catch (e) {
       setEditError(e instanceof Error ? e.message : String(e));
@@ -210,11 +217,41 @@ export default function CompResultsTab() {
       if (newStatus === null) delete updated[key]; else updated[key] = newStatus;
       await updateCompetition(compId, { roundStatus: updated });
 
-      // On transition to 'complete', auto-create next-round placeholders.
+      // On transition to 'complete': first reveal the rest of this round's
+      // staged imported rows (and settle who is eligible for the next round),
+      // THEN auto-create next-round placeholders — advancement ranks club and
+      // imported results together, so it has to see all of them.
       if (newStatus === 'complete') {
-        await applyAdvancement(ev, r, results);
+        const current = await syncStaged(ev, undefined, updated);
+        await applyAdvancement(ev, r, current);
       }
     } catch { /* ignore */ } finally { setStatusWorking(false); }
+  }
+
+  /** Sync an event's staged import (lib/firebase/services/staged-results.ts)
+   *  and return the competition's results as they stand afterwards — the
+   *  given/live ones when the event has no staged import (nothing is fetched
+   *  then, so behaviour for ordinary competitions is unchanged).
+   *  `currentResults` undefined = fetch them fresh; `roundStatus` = the
+   *  status map just written, since `selComp` hasn't caught up yet. */
+  async function syncStaged(
+    eventId: string,
+    currentResults?: Result[],
+    roundStatus?: Record<string, 'complete' | 'ongoing'>,
+  ): Promise<Result[]> {
+    const fallback = currentResults ?? results;
+    if (!selComp) return fallback;
+    try {
+      const plan = await syncStagedEvent({
+        comp: roundStatus ? { ...selComp, roundStatus } : selComp,
+        eventId, results: currentResults,
+      });
+      if (!plan) return fallback;
+      return plan.reveals.length > 0 || !currentResults ? await getResultsByComp(selComp.id) : currentResults;
+    } catch (e) {
+      console.error('[CompResultsTab] staged import sync failed', e);
+      return fallback;
+    }
   }
 
   // ── advancement helpers ──────────────────────────────────────────────────────
@@ -269,8 +306,10 @@ export default function CompResultsTab() {
     const nextRoundByKey = new Map<string, Result>();
     for (const nr of nextRoundResults) nextRoundByKey.set(advancementKey(nr), nr);
 
-    // To create: advancing rows that have no next-round row at all.
-    const toCreate = advancing.filter(r => !nextRoundByKey.has(advancementKey(r)));
+    // To create: advancing rows that have no next-round row at all. Rows
+    // revealed from a staged import get no placeholder: their next-round row
+    // is already staged and only ever appears through the reveal.
+    const toCreate = advancing.filter(r => !r.importRowId && !nextRoundByKey.has(advancementKey(r)));
 
     // To delete: existing PLACEHOLDER (not real solves) but no longer advancing.
     // Real round-N results (non-placeholder) are NEVER deleted here.
@@ -358,13 +397,7 @@ export default function CompResultsTab() {
 
   // WCA ranking: average first, then single; negatives = worst
   function wcaSort(a: Result, b: Result) {
-    const s = (r: Result): [number, number] => {
-      const avg = r.average != null && r.average > 0 ? r.average : null;
-      const sng = r.single  != null && r.single  > 0 ? r.single  : null;
-      return [avg ?? Infinity, sng ?? Infinity];
-    };
-    const [pa, sa] = s(a), [pb, sb] = s(b);
-    return pa !== pb ? pa - pb : sa - sb;
+    return compareRoundResults(a, b);
   }
 
   const tableRows = results
@@ -731,6 +764,7 @@ export default function CompResultsTab() {
                             <td className="wca-td-name">
                               <div className="wca-name">
                                 {athleteNameMap[r.athleteId] || r.athleteName || r.athleteId}
+                                <WcaResultChip result={r} />
                               </div>
                             </td>
 

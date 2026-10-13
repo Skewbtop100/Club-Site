@@ -19,7 +19,7 @@ export interface ParsedRound {
 
 /** A round as named in the paste: an explicit number, or a name whose number
  *  depends on how many rounds the event has. */
-type RoundRef = number | 'semi' | 'final';
+export type RoundRef = number | 'semi' | 'final';
 
 interface Block {
   eventId: string;
@@ -58,7 +58,7 @@ for (const ev of WCA_EVENTS) {
   EVENT_BY_NAME[ev.id] = ev.id;
 }
 
-function startsWithEventName(line: string): boolean {
+export function startsWithEventName(line: string): boolean {
   const lower = line.toLowerCase();
   return WCA_EVENTS.some(ev => {
     const name = ev.name.toLowerCase();
@@ -75,15 +75,28 @@ function parseRoundRef(text: string, roundNumber: string | undefined): RoundRef 
   return s.startsWith('semi') ? 'semi' : 'final';
 }
 
+/** A "<Event name> <Round name>" header line (shared with
+ *  lib/results-import.ts). null when the line doesn't end in a round name;
+ *  `eventId` is null when it does but the event isn't recognised. */
+export function parseRoundHeader(line: string): { eventId: string | null; round: RoundRef; roundName: string } | null {
+  const header = ROUND_SUFFIX_RE.exec(line);
+  if (!header) return null;
+  return {
+    eventId: EVENT_BY_NAME[normalizeName(header[1])] ?? null,
+    round: parseRoundRef(header[2], header[3]),
+    roundName: header[2],
+  };
+}
+
 /** Total rounds implied by the round names pasted for one event — only used
  *  when the caller has no eventConfig to say how many rounds there really are. */
-function inferTotalRounds(refs: RoundRef[]): number {
+export function inferTotalRounds(refs: RoundRef[]): number {
   const base = Math.max(0, ...refs.filter((r): r is number => typeof r === 'number'));
   if (refs.includes('semi')) return base + 2;
   return refs.includes('final') ? base + 1 : base;
 }
 
-function resolveRound(ref: RoundRef, totalRounds: number): number | null {
+export function resolveRound(ref: RoundRef, totalRounds: number): number | null {
   const n = ref === 'final' ? totalRounds : ref === 'semi' ? totalRounds - 1 : ref;
   return n >= 1 && n <= totalRounds ? n : null;
 }

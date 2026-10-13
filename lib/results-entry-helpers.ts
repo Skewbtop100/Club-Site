@@ -15,6 +15,35 @@ export function calcAo5(solves: (number | null)[]): number | null {
   return Math.round(mid.reduce((s, v) => s + v, 0) / 3);
 }
 
+/** Mean of 3: plain mean of exactly 3 solves, DNF if any of them is DNF/DNS.
+ *  Only used for imported 3-solve rounds — club entry is always Ao5. */
+export function calcMo3(solves: (number | null)[]): number | null {
+  const vals = solves.filter(v => v !== null) as number[];
+  if (vals.length !== 3) return null;
+  if (vals.some(v => v < 0)) return -1;
+  return Math.round(vals.reduce((s, v) => s + v, 0) / 3);
+}
+
+/** Events WCA ranks by best single; their mean is shown but doesn't rank. */
+const SINGLE_RANKED_EVENTS = new Set(['444bf', '555bf', '333mbf']);
+
+/** WCA round ranking, shared by every round table and by advancement:
+ *  average first, then single — or single first, then average, for the
+ *  single-ranked events above. DNF/DNS/missing sort last. Both results must
+ *  be from the same event. */
+export function compareRoundResults(
+  a: { eventId?: string; single: number | null; average: number | null },
+  b: { eventId?: string; single: number | null; average: number | null },
+): number {
+  const key = (r: typeof a): [number, number] => {
+    const avg = r.average != null && r.average > 0 ? r.average : Infinity;
+    const sng = r.single  != null && r.single  > 0 ? r.single  : Infinity;
+    return SINGLE_RANKED_EVENTS.has(r.eventId || '') ? [sng, avg] : [avg, sng];
+  };
+  const [pa, sa] = key(a), [pb, sb] = key(b);
+  return pa !== pb ? pa - pb : sa === sb ? 0 : sa - sb;
+}
+
 /** Best (lowest) valid solve, or -1 (DNF) if none. */
 export function bestOf(solves: (number | null)[]): number {
   const v = solves.filter(x => x !== null && Number(x) > 0) as number[];

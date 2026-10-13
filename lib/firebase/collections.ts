@@ -105,6 +105,19 @@ export function competitionScramblesDoc(id: string) {
   return doc(db, COL.COMPETITIONS, id, 'private', 'scrambles');
 }
 
+/** competitions/{id}/private — the admin-only subcollection (scrambles,
+ *  staged imported results). */
+export function competitionPrivateCol(id: string) {
+  return collection(db, COL.COMPETITIONS, id, 'private');
+}
+
+/** competitions/{id}/private/importedResults_{eventId} — one event's staged
+ *  import ({ kind: 'importedResults', eventId, rounds }), admin-only. One
+ *  document per event: a whole competition's rows could pass the 1 MB limit. */
+export function competitionStagedResultsDoc(id: string, eventId: string) {
+  return doc(db, COL.COMPETITIONS, id, 'private', `importedResults_${eventId}`);
+}
+
 export function resultDoc(id: string): DocumentReference<Result> {
   return doc(db, COL.RESULTS, id).withConverter(makeConverter<Result>()) as DocumentReference<Result>;
 }

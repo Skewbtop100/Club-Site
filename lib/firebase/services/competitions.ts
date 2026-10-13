@@ -10,7 +10,7 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { competitionsCol, competitionDoc, competitionScramblesDoc } from '@/lib/firebase/collections';
+import { competitionsCol, competitionDoc, competitionScramblesDoc, competitionPrivateCol } from '@/lib/firebase/collections';
 import type { Competition, ScrambleSets } from '@/lib/types';
 
 /** Fixed id of the singleton Daily Practice pseudo-competition (see
@@ -103,11 +103,13 @@ export function subscribeScrambleSets(
   );
 }
 
-/** Delete a competition permanently, along with its private scrambles
- *  (deleting a document does not delete its subcollections). */
+/** Delete a competition permanently, along with everything in its private
+ *  subcollection — scrambles, staged imported results (deleting a document
+ *  does not delete its subcollections). */
 export async function deleteCompetition(id: string): Promise<void> {
+  const priv = await getDocs(competitionPrivateCol(id));
   const batch = writeBatch(db);
-  batch.delete(competitionScramblesDoc(id));
+  priv.docs.forEach((d) => batch.delete(d.ref));
   batch.delete(competitionDoc(id));
   await batch.commit();
 }
