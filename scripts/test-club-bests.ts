@@ -69,26 +69,55 @@ const tag = (badges: ReturnType<typeof computeLocalBadges>, id: string, type: 's
     Object.values(bests.athletes).every(ev => Object.values(ev).every(p => Object.values(p).every(v => Number.isInteger(v)))));
   eq('summary: nothing finished → empty', computeClubBests(results, new Set(), CLUB), { athletes: {}, club: {}, holders: {} });
 
-  // Holders of the club records.
-  const day = (d: string) => new Date(d).getTime();
+  // Holders of the club records. The record's date is the competition's
+  // OFFICIAL date, not when the club got round to entering the result.
+  const localDay = (y: number, m: number, d: number, h = 0) => new Date(y, m - 1, d, h).getTime();
   const held = computeClubBests([
-    res('A', 900, 1000, { competitionId: 'old1', submittedAt: day('2026-03-01') }),
-    res('B', 800, 1100, { competitionId: 'old1', submittedAt: { toDate: () => new Date('2026-03-01T10:00:00') } }), // Firestore Timestamp shape
-    res('A', 800, 950, { competitionId: 'old2', submittedAt: day('2026-06-10') }),                               // ties B's single later; takes the average
-    res('C', 45, 60, { competitionId: 'old2', eventId: '222' }),                                                  // no submittedAt → competition date
-    res('D', 1500, null, { competitionId: 'old3', eventId: '666', athleteName: 'Stored Name', competitionName: 'Stored Comp' }),
-  ], new Set(['old1', 'old2', 'old3']), CLUB, {
+    res('A', 900, 1000, { competitionId: 'old1', submittedAt: localDay(2026, 4, 5, 9) }),                          // entered five weeks after the competition
+    res('B', 800, 1100, { competitionId: 'old1', submittedAt: { toDate: () => new Date(2026, 3, 5, 10) } }),      // Firestore Timestamp shape, entered an hour later
+    res('A', 800, 950, { competitionId: 'old2', submittedAt: localDay(2026, 6, 20, 9) }),                          // ties B's single at a later competition; takes the average
+    res('C', 45, 60, { competitionId: 'old2', eventId: '222' }),                                                   // no entry time at all
+    res('D', 1500, 1700, { competitionId: 'old3', eventId: '666', athleteName: 'Stored Name', competitionName: 'Stored Comp', submittedAt: localDay(2026, 7, 4, 15) }), // competition without a date
+    res('D', 9000, null, { competitionId: 'old4', eventId: '777', athleteName: 'Stored Name' }),                   // no date anywhere
+  ], new Set(['old1', 'old2', 'old3', 'old4']), CLUB, {
     athleteNames: { A: 'Anu Bat', B: 'Bold Dorj', C: 'Chimeg Enkh' },
-    competitions: { old1: { name: 'Spring Open', date: '2026-03-01' }, old2: { name: 'Summer Open', date: '2026-06-10' } },
+    competitions: { old1: { name: 'Spring Open', date: '2026-03-01' }, old2: { name: 'Summer Open', date: '2026-06-10' }, old3: { name: 'Undated Open', date: '' } },
   });
-  eq('holders: the single record stays with whoever set it FIRST when a later result only ties it',
+  eq('holders: the record is dated by the competition\'s official date, not the (later) day it was entered',
+    [held.holders?.['333']?.s?.at, held.holders?.['333']?.a?.at], [localDay(2026, 3, 1), localDay(2026, 6, 10)]);
+  eq('holders: a date-only string is that day in LOCAL time (never the evening before)',
+    new Date(held.holders!['333'].s!.at!).getDate(), 1);
+  eq('holders: the single record stays with whoever set it FIRST when a later competition only ties it',
     [held.holders?.['333']?.s?.athleteId, held.holders?.['333']?.s?.name, held.holders?.['333']?.s?.competitionName], ['B', 'Bold Dorj', 'Spring Open']);
   eq('holders: single and average can be held by different athletes, from different competitions',
-    [held.holders?.['333']?.a?.name, held.holders?.['333']?.a?.competitionName, held.holders?.['333']?.a?.at], ['Anu Bat', 'Summer Open', day('2026-06-10')]);
+    [held.holders?.['333']?.a?.name, held.holders?.['333']?.a?.competitionName], ['Anu Bat', 'Summer Open']);
   eq('holders: the value they point at is the club record', [held.club['333'], held.club['222']], [{ s: 800, a: 950 }, { s: 45, a: 60 }]);
-  eq('holders: no submission time → the competition\'s date', held.holders?.['222']?.s?.at, day('2026-06-10'));
-  eq('holders: names fall back to what the result itself carries; an unknown date is simply absent',
-    [held.holders?.['666']?.s?.name, held.holders?.['666']?.s?.competitionName, 'at' in (held.holders?.['666']?.s ?? {})], ['Stored Name', 'Stored Comp', false]);
+  eq('holders: no entry time is no problem when the competition has a date', held.holders?.['222']?.s?.at, localDay(2026, 6, 10));
+  eq('holders: a competition with NO date falls back to when the result was entered',
+    [held.holders?.['666']?.s?.at, held.holders?.['666']?.a?.at, held.holders?.['666']?.s?.competitionName], [localDay(2026, 7, 4, 15), localDay(2026, 7, 4, 15), 'Undated Open']);
+  eq('holders: names fall back to what the result itself carries; with no date anywhere the date is simply absent',
+    [held.holders?.['777']?.s?.name, 'at' in (held.holders?.['777']?.s ?? {})], ['Stored Name', false]);
+
+  // Ties: who "set it first" goes by official date; within one competition, by entry order.
+  const meta = { competitions: { early: { name: 'Early', date: '2026-01-10' }, late: { name: 'Late', date: '2026-05-10' } } };
+  const tieAcross = computeClubBests([
+    res('A', 800, 900, { competitionId: 'late', submittedAt: localDay(2026, 5, 10, 12) }),   // entered FIRST…
+    res('B', 800, 900, { competitionId: 'early', submittedAt: localDay(2026, 5, 20, 12) }),  // …but this competition was held earlier
+  ], new Set(['early', 'late']), CLUB, meta);
+  eq('ties across competitions: the earlier COMPETITION holds the record, even if its results were entered later',
+    [tieAcross.holders?.['333']?.s?.athleteId, tieAcross.holders?.['333']?.s?.competitionName], ['B', 'Early']);
+  const tieWithin = (order: 'ab' | 'ba') => {
+    const a = res('A', 800, 900, { competitionId: 'early', submittedAt: localDay(2026, 1, 10, 15) });
+    const b = res('B', 800, 900, { competitionId: 'early', submittedAt: localDay(2026, 1, 10, 11) });
+    return computeClubBests(order === 'ab' ? [a, b] : [b, a], new Set(['early']), CLUB, meta).holders?.['333']?.s?.athleteId;
+  };
+  eq('ties within one competition: the result entered first holds it, whatever order the results arrive in', [tieWithin('ab'), tieWithin('ba')], ['B', 'B']);
+  const better = computeClubBests([
+    res('A', 800, 900, { competitionId: 'early', submittedAt: localDay(2026, 1, 10, 12) }),
+    res('B', 790, 890, { competitionId: 'late', submittedAt: localDay(2026, 5, 10, 12) }),
+  ], new Set(['early', 'late']), CLUB, meta);
+  eq('a faster result always takes the record, with ITS competition\'s date',
+    [better.holders?.['333']?.s?.athleteId, better.holders?.['333']?.s?.at], ['B', localDay(2026, 5, 10)]);
   check('holders: no undefined fields (Firestore would refuse them)',
     Object.values(held.holders ?? {}).every(ev => Object.values(ev).every(h => Object.values(h ?? {}).every(v => v !== undefined))));
 }

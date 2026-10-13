@@ -55,8 +55,14 @@ export default function WcaImportTab() {
   // correcting results of a finished competition).
   const [bestsUpdatedAt, setBestsUpdatedAt] = useState<Date | null | undefined>(undefined);
   const [bestsWorking, setBestsWorking] = useState(false);
+  // A summary stored before record holders were added has the values but not
+  // who set them or when — the record-break card then can't show the
+  // previous holder. Nothing is wrong with the data; it needs recalculating.
+  const [bestsStale, setBestsStale] = useState(false);
   useEffect(() => {
-    getClubBests().then(b => setBestsUpdatedAt(b?.updatedAt ?? null)).catch(() => setBestsUpdatedAt(null));
+    getClubBests()
+      .then(b => { setBestsUpdatedAt(b?.updatedAt ?? null); setBestsStale(!!b && !b.holders); })
+      .catch(() => setBestsUpdatedAt(null));
   }, []);
 
   async function recalcBests() {
@@ -64,6 +70,7 @@ export default function WcaImportTab() {
     try {
       const done = await recomputeClubBests();
       setBestsUpdatedAt(new Date());
+      setBestsStale(false);
       showMsg('success', t('admin.wca.bests.done').replace('{a}', String(done.athletes)).replace('{e}', String(done.events)));
     } catch (err) {
       showMsg('error', t('admin.msg.error-prefix') + (err instanceof Error ? err.message : String(err)));
@@ -283,6 +290,9 @@ export default function WcaImportTab() {
             : bestsUpdatedAt === null ? t('admin.wca.bests.never')
             : `${t('admin.wca.bests.updated')} ${bestsUpdatedAt.toLocaleString()}`}
         </span>
+        {bestsStale && (
+          <span style={{ fontSize: '0.75rem', color: '#fbbf24', flexBasis: '100%' }}>⚠️ {t('admin.wca.bests.stale')}</span>
+        )}
         <span style={{ fontSize: '0.72rem', color: 'var(--muted)', flexBasis: '100%' }}>{t('admin.wca.bests.help')}</span>
       </div>
 

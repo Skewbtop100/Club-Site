@@ -22,8 +22,9 @@ export interface RecordHolder {
   name: string;
   competitionId: string;
   competitionName: string;
-  /** When the record was set, epoch ms (the result's submission time, else
-   *  the competition's date). Absent when neither is known. */
+  /** When the record was set, epoch ms: the competition's official date
+   *  (start of that day, local time), or — only when the competition has no
+   *  date — the moment the result was entered. Absent when neither is known. */
   at?: number;
 }
 
@@ -45,16 +46,24 @@ export type BestResult = Pick<Result, 'id' | 'athleteId' | 'eventId' | 'competit
 export interface BestsMeta {
   /** athleteId → full name. */
   athleteNames?: Record<string, string>;
-  /** competitionId → name and date. */
+  /** competitionId → name and OFFICIAL date (the competition's own date,
+   *  not the day the club ran or entered it). */
   competitions?: Record<string, { name?: string; date?: unknown }>;
 }
 
-/** Firestore Timestamp | { seconds } | Date | ISO string | number → epoch ms; 0 when unknown. */
+/** Firestore Timestamp | { seconds } | Date | ISO string | number → epoch ms; 0 when unknown.
+ *  A date-only string ("2026-08-07", how competitions store their date) is
+ *  that day in LOCAL time — `new Date('2026-08-07')` would be UTC midnight,
+ *  which is the evening before in timezones west of Greenwich. */
 export function toMillis(ts: unknown): number {
   if (!ts) return 0;
   if (typeof ts === 'number') return ts;
   if (ts instanceof Date) return ts.getTime() || 0;
-  if (typeof ts === 'string') return new Date(ts).getTime() || 0;
+  if (typeof ts === 'string') {
+    const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ts.trim());
+    if (day) return new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3])).getTime() || 0;
+    return new Date(ts).getTime() || 0;
+  }
   if (typeof ts === 'object') {
     const o = ts as { toDate?: () => Date; seconds?: number };
     if (typeof o.toDate === 'function') return o.toDate().getTime() || 0;
@@ -93,6 +102,9 @@ export function computeClubBests(
   results: BestResult[], finishedCompetitionIds: Set<string>, clubAthleteIds: Set<string>, meta: BestsMeta = {},
 ): ClubBests {
   const holders: NonNullable<ClubBests['holders']> = {};
+  // Entry time of the result each holder's record came from — only to order
+  // two results of the SAME competition (same official date) that tie.
+  const holderEnteredAt: Record<string, number> = {};
   const bests: ClubBests = { athletes: {}, club: {}, holders };
   for (const r of results) {
     if (!isClubResult(r, clubAthleteIds) || !finishedCompetitionIds.has(r.competitionId)) continue;
@@ -107,12 +119,18 @@ export function computeClubBests(
       // record does not take it over: the holder is whoever set it first.
       const club = (bests.club[r.eventId] ??= {});
       const comp = meta.competitions?.[r.competitionId];
-      const at = toMillis(r.submittedAt) || toMillis(comp?.date);
+      // The record's date is the competition's official date; the entry time
+      // only stands in when the competition has none.
+      const enteredAt = toMillis(r.submittedAt);
+      const at = toMillis(comp?.date) || enteredAt;
       const current = holders[r.eventId]?.[k];
-      const takes = club[k] === undefined || value < club[k]
-        || (value === club[k] && at > 0 && (!current?.at || at < current.at));
+      const slot = `${r.eventId}:${k}`;
+      const earlier = at > 0 && (!current?.at || at < current.at
+        || (at === current.at && enteredAt > 0 && enteredAt < (holderEnteredAt[slot] || Infinity)));
+      const takes = club[k] === undefined || value < club[k] || (value === club[k] && earlier);
       if (!takes) continue;
       club[k] = value;
+      holderEnteredAt[slot] = enteredAt;
       (holders[r.eventId] ??= {})[k] = {
         athleteId: r.athleteId,
         name: meta.athleteNames?.[r.athleteId] || r.athleteName || r.athleteId,

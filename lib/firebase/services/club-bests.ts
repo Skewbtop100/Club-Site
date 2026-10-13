@@ -46,7 +46,9 @@ export async function recomputeClubBests(): Promise<{ athletes: number; events: 
     new Set(athletes.map(a => a.id)),
     {
       athleteNames: Object.fromEntries(athletes.map(a => [a.id, `${a.name || ''}${a.lastName ? ' ' + a.lastName : ''}`.trim()])),
-      competitions: Object.fromEntries(competitions.map(c => [c.id, { name: c.name, date: c.clubDate || c.date }])),
+      // `date` is the competition's official date; `clubDate` (when the
+      // club ran its own session of it) is deliberately not used here.
+      competitions: Object.fromEntries(competitions.map(c => [c.id, { name: c.name, date: c.date }])),
     },
   );
   await setDoc(clubBestsDoc, { ...bests, updatedAt: Timestamp.now() });

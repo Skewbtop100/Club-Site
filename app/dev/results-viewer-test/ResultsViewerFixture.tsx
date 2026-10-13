@@ -5,6 +5,7 @@ import { CompetitionResultsView } from '@/components/shared/CompetitionResultsVi
 import type { Athlete, Competition, Result, WcaRecords } from '@/lib/types';
 import type { ClubBests } from '@/lib/club-bests';
 import RecordCelebration from '@/components/admin/RecordCelebration';
+import type { CelebrationText, CelebrationItem } from '@/lib/record-celebration';
 
 // Dev-only fixture page for the live results viewer's layout (like the other
 // app/dev/* pages): renders CompetitionResultsView with made-up data and no
@@ -99,24 +100,59 @@ const CLUB_BESTS: ClubBests = {
   club: { '333': { s: 740, a: 760 }, '666': { s: 14500, a: 15000 } },
 };
 
-export default function ResultsViewerFixture({ mode }: { mode: 'overlay' | 'embedded' | 'celebrate' }) {
+// The record-break card's cases, `?celebrate=<name>`:
+//   tr     club record with holder, date and competition (the common case)
+//   own    the athlete improving their own record
+//   tie    equalling the record
+//   first  first record ever in the event
+//   nr     national record from the WCA thresholds — no holder, no date
+//   today  the record already broken earlier the same day
+//   both   single + average at once, with the longest names (stress test)
+const NEW = (value: string, name = 'Tergel Batzorig') => ({ label: 'Шинэ', value, name, when: 'өнөөдөр' });
+const TR_AVERAGE: CelebrationItem = {
+  level: 'TR', type: 'average', chip: 'Клубын рекорд · дундаж', next: NEW('2.63'),
+  previous: { label: 'Өмнөх', value: '2.80', name: 'Mandakh Davaasuren', date: '2026.06.07', competition: 'BC Championship 2026' },
+  improvement: '−0.17 сек', stat: { days: 128, unit: 'хоног', caption: 'хадгалагдсан рекорд шинэчлэгдлээ' },
+};
+const CELEBRATIONS: Record<string, CelebrationText> = {
+  tr: { title: 'Шинэ клубын рекорд!', eventName: '2x2x2', items: [TR_AVERAGE] },
+  own: { title: 'Шинэ клубын рекорд!', eventName: '2x2x2', items: [{
+    level: 'TR', type: 'single', chip: 'Клубын рекорд · нэг', next: NEW('0.98', 'Mandakh Davaasuren'),
+    previous: { label: 'Өмнөх', value: '1.01', name: 'Mandakh Davaasuren', date: '2026.04.05', competition: 'Dębica Cubing Winter 2026' },
+    improvement: '−0.03 сек', stat: { days: 191, unit: 'хоног', caption: 'Өөрийн рекордыг ахиуллаа' },
+  }] },
+  tie: { title: 'Шинэ клубын рекорд!', eventName: '2x2x2', items: [{
+    level: 'TR', type: 'average', chip: 'Клубын рекорд · дундаж', next: NEW('2.80'),
+    previous: { label: 'Өмнөх', value: '2.80', name: 'Mandakh Davaasuren', date: '2026.06.07', competition: 'BC Championship 2026' },
+    tied: 'Рекордтой тэнцлээ',
+  }] },
+  first: { title: 'Шинэ клубын рекорд!', eventName: '5x5x5', items: [{
+    level: 'TR', type: 'average', chip: 'Клубын рекорд · дундаж', next: NEW('1:12.45'), first: 'Энэ төрлийн анхны рекорд',
+  }] },
+  nr: { title: 'Шинэ үндэсний рекорд!', eventName: '3x3x3', items: [{
+    level: 'NR', type: 'single', chip: 'Үндэсний рекорд · нэг', next: NEW('5.41', 'Gegeenbileg Naranchimeg'),
+    previous: { label: 'Өмнөх', value: '5.83' }, improvement: '−0.42 сек',
+  }] },
+  today: { title: 'Шинэ клубын рекорд!', eventName: '2x2x2', items: [{
+    level: 'TR', type: 'average', chip: 'Клубын рекорд · дундаж', next: NEW('2.63'),
+    previous: { label: 'Өмнөх', value: '2.70', name: 'Uuganbayar Bayalagnasan', date: 'өнөөдөр', competition: 'Mongolian Open 2026' },
+    improvement: '−0.07 сек', stat: { caption: 'Өнөөдөр 2 дахь удаагаа шинэчлэгдлээ' },
+  }] },
+  both: { title: 'Шинэ клубын рекорд!', eventName: '4x4x4', items: [
+    { level: 'TR', type: 'single', chip: 'Клубын рекорд · нэг', next: NEW('1:28.04', 'Temuulen Tserendagva-Batbayar Ganzorigiin'),
+      previous: { label: 'Өмнөх', value: '1:31.08', name: 'Uuganbayar Bayalagnasan', date: '2026.04.05', competition: 'Dębica Cubing Winter 2026' },
+      improvement: '−3.04 сек', stat: { days: 191, unit: 'хоног', caption: 'хадгалагдсан рекорд шинэчлэгдлээ' } },
+    { level: 'TR', type: 'average', chip: 'Клубын рекорд · дундаж', next: NEW('1:33.10', 'Temuulen Tserendagva-Batbayar Ganzorigiin'),
+      previous: { label: 'Өмнөх', value: '1:34.43', name: 'Temuulen Tserendagva-Batbayar Ganzorigiin', date: 'өнөөдөр', competition: 'Mongolian Championship Mirror Open 2026 — Ulaanbaatar' },
+      improvement: '−1.33 сек', stat: { caption: 'Өөрийн рекордыг ахиуллаа' } },
+  ] },
+};
+
+export default function ResultsViewerFixture({ mode, celebrate }: { mode: 'overlay' | 'embedded' | 'celebrate'; celebrate?: string }) {
   const [open, setOpen] = useState(true);
   const embedded = mode === 'embedded';
-  // `?celebrate=1`: the record-break card on its own, with a long name and
-  // both single and average broken — the widest it gets.
   if (mode === 'celebrate') {
-    return (
-      <RecordCelebration
-        onClose={() => {}}
-        text={{
-          title: 'Шинэ клубын рекорд!',
-          items: [
-            { level: 'TR', headline: 'Temuulen Tserendagva-Batbayar Ganzorigiin — 2x2x2 нэг 1.98', previous: 'Өмнөх рекорд: 2.10 — Uuganbayar Bayalagnasan, 2026-09-01', gap: '42 хоногийн дараа шинэчлэгдлээ (−0.12)' },
-            { level: 'TR', headline: 'Temuulen Tserendagva-Batbayar Ganzorigiin — 2x2x2 дундаж 2.63', previous: 'Өмнөх рекорд: 2.80 — Tergel Batzorig, өнөөдөр', gap: 'Шинэчлэгдлээ (−0.17)' },
-          ],
-        }}
-      />
-    );
+    return <RecordCelebration onClose={() => {}} text={CELEBRATIONS[celebrate || ''] ?? CELEBRATIONS.tr} />;
   }
   if (!open) {
     return <div style={{ padding: '1rem' }}><button className="btn-sm-primary" onClick={() => setOpen(true)}>Open viewer</button></div>;

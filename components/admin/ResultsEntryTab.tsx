@@ -545,14 +545,18 @@ export default function ResultsEntryTab({ judgeCompetitionId }: { judgeCompetiti
           clubAthleteIds: new Set(athletes.map(a => a.id)),
           athleteNames: Object.fromEntries(athletes.map(a => [a.id, `${a.name || ''}${a.lastName ? ' ' + a.lastName : ''}`.trim()])),
           eventName: (WCA_EVENTS.find(e => e.id === panel.eventId)?.name || panel.eventId).replace(/ Cube$/, ''),
+          competitionName: comp?.name,
           wca: { single: wcaLevel('single'), average: wcaLevel('average') },
         });
         if (found) {
           setCelebration(buildCelebrationText(found, {
             title: { TR: t('celebrate.title.TR'), NR: t('celebrate.title.NR'), CR: t('celebrate.title.CR'), WR: t('celebrate.title.WR') },
+            levelName: { TR: t('celebrate.level.TR'), NR: t('celebrate.level.NR'), CR: t('celebrate.level.CR'), WR: t('celebrate.level.WR') },
             single: t('celebrate.single'), average: t('celebrate.average'),
-            previous: t('celebrate.previous'), today: t('celebrate.today'),
-            afterDays: t('celebrate.after-days'), renewed: t('celebrate.renewed'),
+            previousLabel: t('celebrate.prev-label'), newLabel: t('celebrate.new-label'),
+            today: t('celebrate.today'), seconds: t('celebrate.seconds'),
+            daysUnit: t('celebrate.days-unit'), daysCaption: t('celebrate.days-caption'),
+            sameDay: t('celebrate.same-day'), ownRecord: t('celebrate.own-record'),
             tied: t('celebrate.tied'), first: t('celebrate.first'),
           }, Date.now()));
         }

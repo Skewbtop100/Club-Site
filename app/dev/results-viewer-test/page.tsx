@@ -2,7 +2,7 @@ import { notFound } from 'next/navigation';
 import ResultsViewerFixture from './ResultsViewerFixture';
 
 // Local-development only: a fixture page for the live results viewer's
-// layout (and, with ?celebrate=1, the record-break card). In a production
+// layout (and, with ?celebrate=<variant>, the record-break card). In a production
 // build (Vercel production AND preview) this route is a 404.
 //
 // The query string is read HERE, on the server, and handed down as a prop —
@@ -14,5 +14,6 @@ export default async function ResultsViewerTestPage({ searchParams }: {
   if (process.env.NODE_ENV === 'production') notFound();
   const params = await searchParams;
   const mode = 'celebrate' in params ? 'celebrate' : 'embedded' in params ? 'embedded' : 'overlay';
-  return <ResultsViewerFixture mode={mode} />;
+  const variant = typeof params.celebrate === 'string' ? params.celebrate : '';
+  return <ResultsViewerFixture mode={mode} celebrate={variant} />;
 }
