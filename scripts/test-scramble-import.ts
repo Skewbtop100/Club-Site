@@ -9,6 +9,7 @@ import {
   parseWcaScrambles,
   mergeScrambleSets,
   groupLetter,
+  groupOptions,
   scrambleFor,
   nextExtraSource,
 } from '../lib/scramble-import';
@@ -134,6 +135,26 @@ const CONFIG = { '333': { rounds: 2 }, '666': { rounds: 1 }, 'minx': { rounds: 1
   eq('count: a 3-scramble 3x3 block is kept as given', short.sets[0]?.groups.A.main.length, 3);
   check('count: ...and warns that 5 were expected', short.warnings.length === 1 && short.warnings[0].includes('5'), short.warnings);
 
+  // Expected count per event: 3x3 Blindfolded is 5 (Ao5); the other
+  // three-attempt events stay at 3.
+  const rows = (n: number) => ['A\t1\tR U F', '2\tU R F', '3\tF R U', '4\tL U B', '5\tD B L'].slice(0, n).join('\n');
+  const countWarnings = (header: string, eventId: string, n: number) =>
+    parseWcaScrambles(`${header} Final\n${rows(n)}`, { [eventId]: { rounds: 1 } });
+  const bf5 = countWarnings('3x3x3 Blindfolded', '333bf', 5);
+  eq('count: 333bf with 5 scrambles — kept, no warning', [bf5.sets[0]?.groups.A.main.length, bf5.warnings], [5, []]);
+  const bf3 = countWarnings('3x3x3 Blindfolded', '333bf', 3);
+  check('count: 333bf with 3 scrambles warns that 5 were expected',
+    bf3.sets[0]?.groups.A.main.length === 3 && bf3.warnings.length === 1 && bf3.warnings[0].includes('(5 '), bf3.warnings);
+  const threeAttempt: [string, string][] = [
+    ['4x4x4 Blindfolded', '444bf'], ['5x5x5 Blindfolded', '555bf'], ['3x3x3 Multi-Blind', '333mbf'],
+    ['3x3x3 Fewest Moves', '333fm'], ['6x6x6 Cube', '666'], ['7x7x7 Cube', '777'],
+  ];
+  for (const [header, eventId] of threeAttempt) {
+    eq(`count: ${eventId} with 3 scrambles — no warning`, countWarnings(header, eventId, 3).warnings, []);
+    const five = countWarnings(header, eventId, 5).warnings;
+    check(`count: ${eventId} with 5 scrambles warns that 3 were expected`, five.length === 1 && five[0].includes('(3 '), five);
+  }
+
   const bo1 = parseWcaScrambles('3x3x3 Cube Final\nA\t1\tR U F', { '333': { rounds: 1 } });
   eq('count: a single-scramble (Bo1) block is kept', bo1.sets[0]?.groups.A.main, ['R U F']);
 }
@@ -234,6 +255,14 @@ const CONFIG = { '333': { rounds: 2 }, '666': { rounds: 1 }, 'minx': { rounds: 1
   eq('merge: into nothing', Object.keys(mergeScrambleSets(undefined, final)), ['333']);
 
   eq('groupLetter', [groupLetter(1), groupLetter(2), groupLetter(10)], ['A', 'B', 'J']);
+
+  const grp = { main: ['m'], extra: [] };
+  const nine = Object.fromEntries('ABCDEFGHI'.split('').map(l => [l, grp]));
+  eq('groupOptions: no import → configured groups only', [groupOptions(1), groupOptions(3), groupOptions(2, {})], [[1], [1, 2, 3], [1, 2]]);
+  eq('groupOptions: config 0/invalid still offers group A', groupOptions(0), [1]);
+  eq('groupOptions: 1 configured + 9 imported (A–I) → all nine', groupOptions(1, nine), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  eq('groupOptions: union keeps configured groups the import lacks', groupOptions(3, { A: grp }), [1, 2, 3]);
+  eq('groupOptions: sorted even when stored out of order, gaps kept as-is', groupOptions(1, { D: grp, B: grp }), [1, 2, 4]);
 
   const g = { main: ['m1', 'm2', 'm3', 'm4', 'm5'], extra: ['e1', 'e2'] };
   eq('scrambleFor: main by slot', [scrambleFor(g, 0), scrambleFor(g, 4, 'main')], ['m1', 'm5']);

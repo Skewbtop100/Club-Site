@@ -312,6 +312,7 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'admin.comp.scrambles.groups-suffix': 'бүлэг',
   'admin.comp.scrambles.scrambles-suffix': 'холилт',
   'admin.comp.scrambles.replaces': 'хадгалагдсаныг солино',
+  'admin.comp.scrambles.more-groups': 'Холилт {imported} бүлэгтэй, харин энэ төрлийн тохиргоо үе бүрд {configured} бүлэг байна. Үр дүн оруулахад бүх {imported} бүлэг сонгогдох боломжтой.',
   'admin.comp.scrambles.warnings': 'Анхааруулга',
   'admin.comp.scrambles.msg.none': 'Танигдах холилт олдсонгүй.',
   'admin.comp.scrambles.msg.saved': 'Холилт хадгалагдлаа.',

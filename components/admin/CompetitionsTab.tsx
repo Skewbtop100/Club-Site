@@ -174,6 +174,18 @@ export default function CompetitionsTab() {
     return `${short} · ${scrambleRoundLabel(eventId, roundId)} · ${Object.keys(groups).length} ${t('admin.comp.scrambles.groups-suffix')} · ${scrambleCounts(groups)} ${t('admin.comp.scrambles.scrambles-suffix')}`;
   }
 
+  /** Note for a round whose import has more groups than the event's
+   *  "groups per round" setting ('' otherwise). Informational only — results
+   *  entry offers every imported group regardless. */
+  function scrambleGroupNote(eventId: string, groups: Record<string, ScrambleGroup>): string {
+    const imported = Object.keys(groups).length;
+    const configured = eventConfig[eventId]?.groups ?? 1;
+    if (imported <= configured) return '';
+    return t('admin.comp.scrambles.more-groups')
+      .replace(/\{imported\}/g, String(imported))
+      .replace(/\{configured\}/g, String(configured));
+  }
+
   function toggleAthlete(athleteId: string) {
     setAthleteReg(prev => {
       const existing = prev[athleteId];
@@ -496,6 +508,11 @@ export default function CompetitionsTab() {
               </span>
             ))}
           </div>
+          {savedScrambleRounds.filter(r => scrambleGroupNote(r.eventId, r.groups)).map(r => (
+            <div key={`${r.eventId}-${r.roundId}`} style={{ fontSize: '0.72rem', color: '#fbbf24', marginBottom: '0.4rem' }}>
+              {WCA_EVENTS.find(ev => ev.id === r.eventId)?.short ?? r.eventId} · {scrambleRoundLabel(r.eventId, r.roundId)}: {scrambleGroupNote(r.eventId, r.groups)}
+            </div>
+          ))}
           <textarea
             value={scrambleText}
             rows={6}
@@ -523,6 +540,9 @@ export default function CompetitionsTab() {
                       {scrambleSummary(s.eventId, s.roundId, s.groups)}
                       {scrambleSets[s.eventId]?.[s.roundId] && (
                         <span style={{ fontSize: '0.72rem', color: '#fbbf24', marginLeft: '0.4rem' }}>({t('admin.comp.scrambles.replaces')})</span>
+                      )}
+                      {scrambleGroupNote(s.eventId, s.groups) && (
+                        <div style={{ fontSize: '0.72rem', color: '#fbbf24', lineHeight: 1.4 }}>{scrambleGroupNote(s.eventId, s.groups)}</div>
                       )}
                     </div>
                   ))}

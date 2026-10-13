@@ -251,6 +251,7 @@ const en = {
   'admin.comp.scrambles.groups-suffix': 'group(s)',
   'admin.comp.scrambles.scrambles-suffix': 'scrambles',
   'admin.comp.scrambles.replaces': 'replaces saved',
+  'admin.comp.scrambles.more-groups': 'The import has {imported} groups but this event is set to {configured} per round. Results entry will offer all {imported}.',
   'admin.comp.scrambles.warnings': 'Warnings',
   'admin.comp.scrambles.msg.none': 'No recognisable scrambles found.',
   'admin.comp.scrambles.msg.saved': 'Scrambles saved.',

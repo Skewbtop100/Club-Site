@@ -37,12 +37,12 @@ const GROUP_LINE_RE = /^([A-Z])\s+(\d+)\s+(\S.*)$/;
 const EXTRA_LINE_RE = /^Extra\s+(\d+)\s+(\S.*)$/i;
 const NUM_LINE_RE   = /^(\d+)\s+(\S.*)$/;
 
-/** Events WCA runs as Mo3/Bo3 by default; everything else is Ao5. The project
- *  stores no per-round format, so this is only used for the count warning. */
-const THREE_ATTEMPT_EVENTS = new Set(['666', '777', '333bf', '333fm', '444bf', '555bf']);
+/** Events run with 3 attempts (Mo3/Bo3); everything else is 5 (Ao5) —
+ *  including 3x3 Blindfolded, which moved from Bo3 to Ao5. The project stores
+ *  no per-round format, so this is only used for the count warning. */
+const THREE_ATTEMPT_EVENTS = new Set(['666', '777', '333fm', '444bf', '555bf', '333mbf']);
 
-function expectedScrambleCount(eventId: string): number | null {
-  if (eventId === '333mbf') return null;
+function expectedScrambleCount(eventId: string): number {
   return THREE_ATTEMPT_EVENTS.has(eventId) ? 3 : 5;
 }
 
@@ -195,7 +195,7 @@ export function parseWcaScrambles(
     const expected = expectedScrambleCount(b.eventId);
     for (const letter of letters) {
       const count = b.groups[letter].main.length;
-      if (expected !== null && count !== expected) {
+      if (count !== expected) {
         warnings.push(`${label}, ${letter} бүлэг: ${count} холилт байна (${expected} байх ёстой).`);
       }
     }
@@ -226,6 +226,21 @@ export function mergeScrambleSets(existing: ScrambleSets | undefined, parsed: Pa
 /** Group number as the entry panel stores it (1, 2, …) → scramble-set key ("A", "B", …). */
 export function groupLetter(group: number): string {
   return String.fromCharCode(64 + group);
+}
+
+/**
+ * Group numbers to offer for a round: the union of the event's configured
+ * groups (1..configuredCount) and the groups its imported scrambles actually
+ * have, ascending (A, B, C, …). So a round configured with 1 group but
+ * imported with A–I offers all nine; with no import it's just the config.
+ */
+export function groupOptions(configuredCount: number, imported?: Record<string, ScrambleGroup>): number[] {
+  const groups = new Set<number>();
+  for (let n = 1; n <= Math.max(1, configuredCount); n++) groups.add(n);
+  for (const letter of Object.keys(imported || {})) {
+    if (/^[A-Z]$/.test(letter)) groups.add(letter.charCodeAt(0) - 64);
+  }
+  return [...groups].sort((a, b) => a - b);
 }
 
 /** The scramble for a solve slot, honouring an extra if one was swapped in.

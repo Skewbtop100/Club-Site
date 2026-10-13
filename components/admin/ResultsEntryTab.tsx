@@ -7,7 +7,7 @@ import { saveResult, getResultsByComp, subscribeResultsByComp } from '@/lib/fire
 import { fmtTime, parseTime, getMinPlausibleSolveCs, todayDateStr } from '@/lib/time-utils';
 import { calcAo5, bestOf, timeToRawDigits, formatRawDigits } from '@/lib/results-entry-helpers';
 import { WCA_EVENTS } from '@/lib/wca-events';
-import { groupLetter, scrambleFor, nextExtraSource } from '@/lib/scramble-import';
+import { groupLetter, groupOptions, scrambleFor, nextExtraSource } from '@/lib/scramble-import';
 import ScramblePreview from '@/components/shared/ScramblePreview';
 import { useLang, type TranslationKey } from '@/lib/i18n';
 import type { Athlete, Competition, Result, ScrambleSets, ScrambleSource } from '@/lib/types';
@@ -796,7 +796,13 @@ export default function ResultsEntryTab() {
           {panels.map((panel, panelIdx) => {
             const cfg        = eventConfig[panel.eventId] || { rounds: 1, groups: 1 };
             const roundNames = getRoundNames(cfg.rounds, t);
-            const groupCount = cfg.groups;
+            // Groups offered = the event's configured groups plus whatever
+            // groups the imported scrambles have for this round — an import
+            // with groups A–I must be selectable even if the config says 1.
+            // With no import this is just the configured 1..N, as before.
+            const groupsForRound = (round: number) =>
+              groupOptions(cfg.groups, scrambleSets[panel.eventId]?.[String(round)]);
+            const groupList = groupsForRound(panel.round);
             // In edit mode we're not "all entered" even if currentSolveIdx reached 5
             const allEntered = panel.currentSolveIdx >= 5 && panel.editReturnIdx === null;
             const { single, average } = computeResult(panel);
@@ -942,7 +948,15 @@ export default function ResultsEntryTab() {
                     <div>
                       <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.2rem', paddingLeft: '0.1rem' }}>{t('admin.results.round')}</div>
                       <select className="compact-select" value={panel.round} style={{ marginBottom: 0 }}
-                        onChange={e => updatePanel(panel.id, { round: Number(e.target.value), scrambleSources: freshScrambleSources() })}>
+                        onChange={e => {
+                          const round = Number(e.target.value);
+                          // The new round may have fewer groups (its own import, or none).
+                          const groups = groupsForRound(round);
+                          updatePanel(panel.id, {
+                            round, scrambleSources: freshScrambleSources(),
+                            group: groups.includes(panel.group) ? panel.group : groups[0],
+                          });
+                        }}>
                         {roundNames.map((name, idx) => {
                           const roundNum = idx + 1;
                           const isLocked = completedRounds.has(roundNum);
@@ -958,8 +972,8 @@ export default function ResultsEntryTab() {
                       <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.2rem', paddingLeft: '0.1rem' }}>{t('admin.results.group')}</div>
                       <select className="compact-select" value={panel.group} style={{ marginBottom: 0 }}
                         onChange={e => updatePanel(panel.id, { group: Number(e.target.value), scrambleSources: freshScrambleSources() })}>
-                        {Array.from({ length: Math.max(1, groupCount) }, (_, i) => (
-                          <option key={i} value={i + 1}>{t('admin.results.group')} {String.fromCharCode(65 + i)}</option>
+                        {groupList.map(g => (
+                          <option key={g} value={g}>{t('admin.results.group')} {groupLetter(g)}</option>
                         ))}
                       </select>
                     </div>
