@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useRef } from 'react';
 import { subscribeCompetitions, updateCompetition, finishCompetition } from '@/lib/firebase/services/competitions';
 import { subscribeResultsByComp, getResultsByComp, saveResult, deleteResult as deleteResultFn } from '@/lib/firebase/services/results';
 import { syncStagedEvent } from '@/lib/firebase/services/staged-results';
+import { recomputeClubBests } from '@/lib/firebase/services/club-bests';
 import { compareRoundResults } from '@/lib/results-entry-helpers';
 import WcaResultChip from '@/components/shared/WcaResultChip';
 import JudgedBy from '@/components/shared/JudgedBy';
@@ -350,6 +351,18 @@ export default function CompResultsTab() {
     try {
       await finishCompetition(compId);
       setFinishConfirm(false);
+      // The competition now counts toward personal bests and club records:
+      // rebuild the summary the live viewer's PR/TR badges read
+      // (settings/clubBests). The competition IS finished whatever happens
+      // here — a failure only means the summary is stale until someone
+      // presses "recalculate" in the WCA Records tab, so say so, don't fail.
+      try {
+        await recomputeClubBests();
+      } catch (e) {
+        console.error('[CompResultsTab] club bests recompute failed', e);
+        setAdvanceMsg(t('admin.wca.bests.finish-failed'));
+        setTimeout(() => setAdvanceMsg(''), 8000);
+      }
     } catch (e) {
       setFinishError(e instanceof Error ? e.message : String(e));
     } finally {

@@ -7,6 +7,7 @@ import { COL } from '@/lib/firebase/collections';
 import { getAllResults } from '@/lib/firebase/services/results';
 import { getAthletes } from '@/lib/firebase/services/athletes';
 import { getCompetitions } from '@/lib/firebase/services/competitions';
+import { getClubBests, recomputeClubBests } from '@/lib/firebase/services/club-bests';
 import { fmtTime, getMinPlausibleSolveCs } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { useLang } from '@/lib/i18n';
@@ -47,6 +48,29 @@ export default function WcaImportTab() {
   const [tab, setTab] = useState<TabKey>('WR');
   const [msg, setMsg] = useState('');
   const [msgType, setMsgType] = useState('');
+
+  // settings/clubBests — the personal-bests / club-records summary behind
+  // the live viewer's PR/TR badges. Rebuilt automatically when a competition
+  // is finished; this is the manual rebuild (first-time backfill, or after
+  // correcting results of a finished competition).
+  const [bestsUpdatedAt, setBestsUpdatedAt] = useState<Date | null | undefined>(undefined);
+  const [bestsWorking, setBestsWorking] = useState(false);
+  useEffect(() => {
+    getClubBests().then(b => setBestsUpdatedAt(b?.updatedAt ?? null)).catch(() => setBestsUpdatedAt(null));
+  }, []);
+
+  async function recalcBests() {
+    setBestsWorking(true);
+    try {
+      const done = await recomputeClubBests();
+      setBestsUpdatedAt(new Date());
+      showMsg('success', t('admin.wca.bests.done').replace('{a}', String(done.athletes)).replace('{e}', String(done.events)));
+    } catch (err) {
+      showMsg('error', t('admin.msg.error-prefix') + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setBestsWorking(false);
+    }
+  }
 
   const [clubResults, setClubResults] = useState<Result[]>([]);
   const [athletes, setAthletes] = useState<Athlete[]>([]);
@@ -243,6 +267,23 @@ export default function WcaImportTab() {
             {t('admin.wca.last-updated')} {lastFetched.toLocaleTimeString()}
           </span>
         )}
+      </div>
+
+      {/* Personal bests / club records summary (PR/TR badges in live results) */}
+      <div style={{
+        display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '1rem',
+        padding: '0.6rem 0.8rem', borderRadius: '8px',
+        border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)',
+      }}>
+        <button className="btn-sm-secondary" onClick={recalcBests} disabled={bestsWorking}>
+          {bestsWorking ? t('admin.wca.bests.working') : t('admin.wca.bests.recalc')}
+        </button>
+        <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>
+          {bestsUpdatedAt === undefined ? ''
+            : bestsUpdatedAt === null ? t('admin.wca.bests.never')
+            : `${t('admin.wca.bests.updated')} ${bestsUpdatedAt.toLocaleString()}`}
+        </span>
+        <span style={{ fontSize: '0.72rem', color: 'var(--muted)', flexBasis: '100%' }}>{t('admin.wca.bests.help')}</span>
       </div>
 
       {msg && <div className={`msg ${msgType}`} style={{ display: 'block', marginBottom: '0.8rem' }}>{msg}</div>}
