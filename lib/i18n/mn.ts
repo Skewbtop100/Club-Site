@@ -302,6 +302,21 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'admin.comp.country.search': 'Улс хайх…',
   'admin.comp.date.placeholder': 'Огноо сонгох…',
   'admin.comp.date.today': 'Өнөөдөр',
+  'admin.comp.scrambles.label': 'WCA холилт оруулах',
+  'admin.comp.scrambles.help': 'WCA-ийн холилтын хуудаснаас хуулсан хүснэгтийг энд буулгана уу (нэг эсвэл хэд хэдэн төрөл/үе). Зөвхөн буулгасан текстэд байгаа үеийн холилт солигдоно.',
+  'admin.comp.scrambles.placeholder': '3x3x3 Cube Final\nGroup\t#\tScramble\nA\t1\tD\' L D2 B2 ...',
+  'admin.comp.scrambles.parse': 'Задлах',
+  'admin.comp.scrambles.preview': 'Урьдчилан харах',
+  'admin.comp.scrambles.saved': 'Хадгалагдсан холилт',
+  'admin.comp.scrambles.none-saved': 'Холилт хадгалагдаагүй байна.',
+  'admin.comp.scrambles.groups-suffix': 'бүлэг',
+  'admin.comp.scrambles.scrambles-suffix': 'холилт',
+  'admin.comp.scrambles.replaces': 'хадгалагдсаныг солино',
+  'admin.comp.scrambles.warnings': 'Анхааруулга',
+  'admin.comp.scrambles.msg.none': 'Танигдах холилт олдсонгүй.',
+  'admin.comp.scrambles.msg.saved': 'Холилт хадгалагдлаа.',
+  'admin.comp.scrambles.msg.staged': 'Тэмцээнийг үүсгэх үед холилт хадгалагдана.',
+  'admin.comp.scrambles.msg.create-failed': 'Гэвч холилтыг хадгалж чадсангүй — тэмцээнээ засах горимд нээж, холилтоо дахин оруулна уу:',
 
   // ADMIN — RESULTS ENTRY
   'admin.results.title': 'Үр дүн оруулах',
@@ -365,6 +380,8 @@ const mn: Partial<Record<TranslationKey, string>> = {
   'admin.results.already-logged-today': 'өнөөдөр бүртгэсэн',
   'admin.results.scramble-loading': 'Холилт үүсгэж байна…',
   'admin.results.scramble-unavailable': 'Холилт боломжгүй',
+  'admin.results.extra-scramble': 'Нөөц холилт',
+  'admin.results.extra-label': 'Нөөц',
   'admin.results.btn.confirm-anyway': 'Баталгаажуулаад хадгалах',
 
   // ADMIN — COMPETITION RESULTS

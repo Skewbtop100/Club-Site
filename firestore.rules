@@ -60,9 +60,20 @@ service cloud.firestore {
       }
     }
 
+    // The competition document itself is public (every public page reads it).
+    // Anything that must not be seen before a round is held lives in
+    // competitions/{id}/private/* — today the imported WCA scrambles at
+    // private/scrambles (lib/firebase/services/competitions.ts). Admin-only,
+    // read and write: an athlete who could read it would know the scrambles
+    // in advance. Rules don't cascade, so the parent's `allow read: if true`
+    // grants nothing here.
     match /competitions/{doc} {
       allow read: if true;
       allow write: if isAdmin();
+
+      match /private/{docId} {
+        allow read, write: if isAdmin();
+      }
     }
 
     match /results/{doc} {

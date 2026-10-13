@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:rules": "firebase emulators:exec --only firestore \"node tests/firestore-rules/users.test.mjs && node tests/firestore-rules/athlete-privacy.test.mjs\""
+    "test:rules": "firebase emulators:exec --only firestore \"node tests/firestore-rules/users.test.mjs && node tests/firestore-rules/athlete-privacy.test.mjs && node tests/firestore-rules/competition-scrambles.test.mjs\""
   },
   "dependencies": {
     "@cubing/icons": "^3.0.5",

@@ -98,6 +98,13 @@ export function competitionDoc(id: string): DocumentReference<Competition> {
   return doc(db, COL.COMPETITIONS, id).withConverter(makeConverter<Competition>()) as DocumentReference<Competition>;
 }
 
+/** competitions/{id}/private/scrambles — imported WCA scrambles
+ *  ({ scrambleSets }), admin-only. Kept off the public competition document
+ *  so nobody can read a round's scrambles before it is held. */
+export function competitionScramblesDoc(id: string) {
+  return doc(db, COL.COMPETITIONS, id, 'private', 'scrambles');
+}
+
 export function resultDoc(id: string): DocumentReference<Result> {
   return doc(db, COL.RESULTS, id).withConverter(makeConverter<Result>()) as DocumentReference<Result>;
 }

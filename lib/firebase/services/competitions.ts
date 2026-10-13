@@ -3,13 +3,15 @@ import {
   getDocs,
   setDoc,
   updateDoc,
-  deleteDoc,
+  writeBatch,
   onSnapshot,
   getCountFromServer,
+  FieldPath,
   Timestamp,
 } from 'firebase/firestore';
-import { competitionsCol, competitionDoc } from '@/lib/firebase/collections';
-import type { Competition } from '@/lib/types';
+import { db } from '@/lib/firebase';
+import { competitionsCol, competitionDoc, competitionScramblesDoc } from '@/lib/firebase/collections';
+import type { Competition, ScrambleSets } from '@/lib/types';
 
 /** Fixed id of the singleton Daily Practice pseudo-competition (see
  *  ensureDailyPracticeCompetition below). One evergreen doc, not one per
@@ -57,9 +59,57 @@ export async function updateCompetition(
   await updateDoc(competitionDoc(id), { ...data, updatedAt: Timestamp.now() });
 }
 
-/** Delete a competition permanently. */
+// ── Imported WCA scrambles — competitions/{id}/private/scrambles ─────────────
+//
+// Admin-only (firestore.rules), and deliberately NOT on the competition
+// document: that one is public, so scrambles stored there could be read
+// before the round is held. Only admin screens may call these — for anyone
+// else the read is refused.
+
+/**
+ * Save imported WCA scrambles for a competition. Merges: each event+round
+ * block in `sets` replaces that block wholesale (mergeFields, so a group
+ * dropped from a re-import really goes away), and every other event/round
+ * already stored is left untouched. Creates the document if it's missing.
+ */
+export async function saveScrambleSets(id: string, sets: ScrambleSets): Promise<void> {
+  const blocks = Object.entries(sets).flatMap(([eventId, rounds]) =>
+    Object.keys(rounds).map(roundId => new FieldPath('scrambleSets', eventId, roundId)),
+  );
+  if (blocks.length === 0) return;
+  await setDoc(
+    competitionScramblesDoc(id),
+    { scrambleSets: sets, updatedAt: Timestamp.now() },
+    { mergeFields: [...blocks, 'updatedAt'] },
+  );
+}
+
+/** One-time fetch of a competition's imported scrambles ({} if none). */
+export async function getScrambleSets(id: string): Promise<ScrambleSets> {
+  const snap = await getDoc(competitionScramblesDoc(id));
+  return (snap.data()?.scrambleSets as ScrambleSets | undefined) ?? {};
+}
+
+/** Real-time subscription to a competition's imported scrambles ({} if none). */
+export function subscribeScrambleSets(
+  id: string,
+  onData: (sets: ScrambleSets) => void,
+  onError?: (err: Error) => void,
+): () => void {
+  return onSnapshot(
+    competitionScramblesDoc(id),
+    (snap) => onData((snap.data()?.scrambleSets as ScrambleSets | undefined) ?? {}),
+    (err) => onError?.(err),
+  );
+}
+
+/** Delete a competition permanently, along with its private scrambles
+ *  (deleting a document does not delete its subcollections). */
 export async function deleteCompetition(id: string): Promise<void> {
-  await deleteDoc(competitionDoc(id));
+  const batch = writeBatch(db);
+  batch.delete(competitionScramblesDoc(id));
+  batch.delete(competitionDoc(id));
+  await batch.commit();
 }
 
 /** Officially finish a competition: set status='finished' and finishedAt=now. */

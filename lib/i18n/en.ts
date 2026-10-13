@@ -241,6 +241,21 @@ const en = {
   'admin.comp.country.search': 'Search country…',
   'admin.comp.date.placeholder': 'Select date…',
   'admin.comp.date.today': 'Today',
+  'admin.comp.scrambles.label': 'Import WCA scrambles',
+  'admin.comp.scrambles.help': 'Paste the scramble tables copied from the WCA scramble page (one or more event/round blocks). Only the rounds in the pasted text are replaced.',
+  'admin.comp.scrambles.placeholder': '3x3x3 Cube Final\nGroup\t#\tScramble\nA\t1\tD\' L D2 B2 ...',
+  'admin.comp.scrambles.parse': 'Parse',
+  'admin.comp.scrambles.preview': 'Preview',
+  'admin.comp.scrambles.saved': 'Saved scrambles',
+  'admin.comp.scrambles.none-saved': 'No scrambles saved yet.',
+  'admin.comp.scrambles.groups-suffix': 'group(s)',
+  'admin.comp.scrambles.scrambles-suffix': 'scrambles',
+  'admin.comp.scrambles.replaces': 'replaces saved',
+  'admin.comp.scrambles.warnings': 'Warnings',
+  'admin.comp.scrambles.msg.none': 'No recognisable scrambles found.',
+  'admin.comp.scrambles.msg.saved': 'Scrambles saved.',
+  'admin.comp.scrambles.msg.staged': 'Scrambles will be saved when the competition is created.',
+  'admin.comp.scrambles.msg.create-failed': 'But its scrambles could not be saved — open the competition for editing and import them again:',
 
   // ADMIN — RESULTS ENTRY
   'admin.results.title': 'Results Entry',
@@ -304,6 +319,8 @@ const en = {
   'admin.results.already-logged-today': 'already logged today',
   'admin.results.scramble-loading': 'Generating scramble…',
   'admin.results.scramble-unavailable': 'Scramble unavailable',
+  'admin.results.extra-scramble': 'Extra scramble',
+  'admin.results.extra-label': 'Extra',
   'admin.results.btn.confirm-anyway': 'Confirm & Save Anyway',
 
   // ADMIN — COMPETITION RESULTS

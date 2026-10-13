@@ -6,10 +6,13 @@ import {
   addCompetition,
   updateCompetition,
   deleteCompetition,
+  saveScrambleSets,
+  getScrambleSets,
 } from '@/lib/firebase/services/competitions';
 import { getAthletes } from '@/lib/firebase/services/athletes';
-import type { Athlete, Competition, CompetitionAthlete, EventConfig, AdvancementConfig } from '@/lib/types';
+import type { Athlete, Competition, CompetitionAthlete, EventConfig, AdvancementConfig, ScrambleGroup, ScrambleSets } from '@/lib/types';
 import { WCA_EVENTS } from '@/lib/wca-events';
+import { parseWcaScrambles, mergeScrambleSets, type ParsedRound } from '@/lib/scramble-import';
 import { useLang } from '@/lib/i18n';
 import COUNTRIES from '@/lib/countries';
 
@@ -28,6 +31,14 @@ const emptyForm: FormShape = { name: '', country: '', date: '', clubDate: '', im
 
 type AthleteReg = { selected: boolean; events: Record<string, boolean> };
 
+/** "5+2" (main+extra) for a round's groups, or per group ("A 5+2, B 4+2")
+ *  when they don't all have the same counts. */
+function scrambleCounts(groups: Record<string, ScrambleGroup>): string {
+  const counts = Object.entries(groups).map(([letter, g]) => ({ letter, count: `${g.main.length}+${g.extra.length}` }));
+  if (counts.every(c => c.count === counts[0].count)) return counts[0]?.count ?? '0+0';
+  return counts.map(c => `${c.letter} ${c.count}`).join(', ');
+}
+
 export default function CompetitionsTab() {
   const { t } = useLang();
   const [comps, setComps] = useState<Competition[]>([]);
@@ -43,6 +54,18 @@ export default function CompetitionsTab() {
   const [deleteModal, setDeleteModal] = useState<{ id: string; name: string } | null>(null);
   const [deleteInput, setDeleteInput] = useState('');
   const [deleteMsg, setDeleteMsg] = useState('');
+  // WCA scramble import. `scrambleSets` mirrors what's saved in the private
+  // scrambles doc of the competition being edited (or, for a new competition,
+  // what's staged to be written right after it's created); `scrambleParsed`
+  // is the unsaved preview.
+  const [scrambleSets, setScrambleSets] = useState<ScrambleSets>({});
+  const [scrambleText, setScrambleText] = useState('');
+  const [scrambleParsed, setScrambleParsed] = useState<{ sets: ParsedRound[]; warnings: string[] } | null>(null);
+  const [scrambleMsg, setScrambleMsg] = useState('');
+  const [scrambleMsgType, setScrambleMsgType] = useState('');
+  const [scrambleSaving, setScrambleSaving] = useState(false);
+  const [scrambleLoading, setScrambleLoading] = useState(false);
+  const scrambleLoadIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     getAthletes().then(data => setAllAthletes([...data].sort((a, b) => a.name.localeCompare(b.name))));
@@ -76,9 +99,80 @@ export default function CompetitionsTab() {
       });
     }
     setAthleteReg(reg);
+    resetScrambleImport();
+    // Saved scrambles live in the competition's admin-only private doc, not
+    // on `c` — fetch them for the one competition being edited. Saving an
+    // import waits for this (scrambleLoading), and a reply that arrives after
+    // the admin moved on to another competition is dropped.
+    scrambleLoadIdRef.current = c.id;
+    setScrambleLoading(true);
+    getScrambleSets(c.id)
+      .then(saved => { if (scrambleLoadIdRef.current === c.id) setScrambleSets(saved); })
+      .catch((e: unknown) => {
+        if (scrambleLoadIdRef.current !== c.id) return;
+        setScrambleMsgType('error');
+        setScrambleMsg(t('admin.msg.error-prefix') + (e instanceof Error ? e.message : String(e)));
+      })
+      .finally(() => { if (scrambleLoadIdRef.current === c.id) setScrambleLoading(false); });
   }
 
-  function cancelEdit() { setEditId(null); setForm({ ...emptyForm }); setEvents({}); setEventConfig({}); setAthleteReg({}); }
+  function cancelEdit() { setEditId(null); setForm({ ...emptyForm }); setEvents({}); setEventConfig({}); setAthleteReg({}); resetScrambleImport(); }
+
+  function resetScrambleImport() {
+    scrambleLoadIdRef.current = null;
+    setScrambleLoading(false);
+    setScrambleSets({}); setScrambleText(''); setScrambleParsed(null); setScrambleMsg('');
+  }
+
+  function parseScrambles() {
+    // Only the events this competition runs — their round count is what
+    // decides which round number "Final" means.
+    const activeConfig: Record<string, { rounds: number }> = {};
+    WCA_EVENTS.forEach(ev => {
+      if (events[ev.id]) activeConfig[ev.id] = { rounds: eventConfig[ev.id]?.rounds ?? 1 };
+    });
+    const parsed = parseWcaScrambles(scrambleText, activeConfig);
+    setScrambleParsed(parsed);
+    if (parsed.sets.length === 0 && parsed.warnings.length === 0) {
+      setScrambleMsgType('error'); setScrambleMsg(t('admin.comp.scrambles.msg.none'));
+    } else {
+      setScrambleMsg('');
+    }
+  }
+
+  async function saveScrambles() {
+    const rounds = scrambleParsed?.sets ?? [];
+    if (rounds.length === 0) return;
+    setScrambleSaving(true);
+    try {
+      // An existing competition is written straight away; a new one has no
+      // document yet, so the import is staged and goes out with submitComp.
+      if (editId) await saveScrambleSets(editId, mergeScrambleSets(undefined, rounds));
+      setScrambleSets(prev => mergeScrambleSets(prev, rounds));
+      setScrambleText(''); setScrambleParsed(null);
+      setScrambleMsgType('success');
+      setScrambleMsg(t(editId ? 'admin.comp.scrambles.msg.saved' : 'admin.comp.scrambles.msg.staged'));
+    } catch (e: unknown) {
+      setScrambleMsgType('error');
+      setScrambleMsg(t('admin.msg.error-prefix') + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setScrambleSaving(false);
+    }
+  }
+
+  function scrambleRoundLabel(eventId: string, roundId: string): string {
+    const total = eventConfig[eventId]?.rounds ?? 1;
+    const n = Number(roundId);
+    if (n > total) return `${t('admin.round.generic')} ${n}`;
+    if (n === total) return t('admin.round.final');
+    if (n === 1) return t('admin.round.first');
+    return n === 2 ? t('admin.round.second') : t('admin.round.semi');
+  }
+
+  function scrambleSummary(eventId: string, roundId: string, groups: Record<string, ScrambleGroup>): string {
+    const short = WCA_EVENTS.find(ev => ev.id === eventId)?.short ?? eventId;
+    return `${short} · ${scrambleRoundLabel(eventId, roundId)} · ${Object.keys(groups).length} ${t('admin.comp.scrambles.groups-suffix')} · ${scrambleCounts(groups)} ${t('admin.comp.scrambles.scrambles-suffix')}`;
+  }
 
   function toggleAthlete(athleteId: string) {
     setAthleteReg(prev => {
@@ -119,8 +213,18 @@ export default function CompetitionsTab() {
         await updateCompetition(editId, { ...form, events, athletes: athletesData, eventConfig });
         showMsg('success', t('admin.comp.msg.updated'));
       } else {
-        await addCompetition({ ...form, events, athletes: athletesData, eventConfig });
-        showMsg('success', t('admin.comp.msg.created'));
+        const newId = await addCompetition({ ...form, events, athletes: athletesData, eventConfig });
+        // Scrambles staged before the competition existed go to its private
+        // doc now. The competition is already created at this point, so a
+        // failure here is reported on its own rather than as a failed create
+        // (which would invite a second click and a duplicate competition).
+        let scrambleError = '';
+        if (Object.keys(scrambleSets).length > 0) {
+          try { await saveScrambleSets(newId, scrambleSets); }
+          catch (e: unknown) { scrambleError = e instanceof Error ? e.message : String(e); }
+        }
+        if (scrambleError) showMsg('error', `${t('admin.comp.msg.created')} ${t('admin.comp.scrambles.msg.create-failed')} ${scrambleError}`);
+        else showMsg('success', t('admin.comp.msg.created'));
       }
       cancelEdit();
     } catch (e: unknown) {
@@ -160,6 +264,12 @@ export default function CompetitionsTab() {
     live:     'rgba(34,197,94,0.4)',
     finished: 'rgba(100,116,139,0.35)',
   };
+
+  const savedScrambleRounds = WCA_EVENTS.flatMap(ev =>
+    Object.entries(scrambleSets[ev.id] || {})
+      .sort(([a], [b]) => Number(a) - Number(b))
+      .map(([roundId, groups]) => ({ eventId: ev.id, roundId, groups })),
+  );
 
   // ── render ──────────────────────────────────────────────────────────────────
   return (
@@ -365,6 +475,79 @@ export default function CompetitionsTab() {
               </div>
             ))}
           </div>
+        </div>
+
+        {/* WCA scramble import */}
+        <div className="form-group">
+          <label>{t('admin.comp.scrambles.label')}</label>
+          <div style={{ fontSize: '0.73rem', color: 'var(--muted)', marginBottom: '0.5rem' }}>
+            {t('admin.comp.scrambles.help')}
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.3rem', marginBottom: '0.6rem', fontSize: '0.75rem', color: 'var(--muted)' }}>
+            <span>{t('admin.comp.scrambles.saved')}:</span>
+            {scrambleLoading && <span style={{ fontStyle: 'italic' }}>{t('admin.loading')}</span>}
+            {!scrambleLoading && savedScrambleRounds.length === 0 && <span style={{ fontStyle: 'italic' }}>{t('admin.comp.scrambles.none-saved')}</span>}
+            {savedScrambleRounds.map(r => (
+              <span key={`${r.eventId}-${r.roundId}`} style={{
+                padding: '0.15rem 0.5rem', borderRadius: '999px', fontSize: '0.7rem',
+                border: '1px solid rgba(124,58,237,0.6)', background: 'rgba(124,58,237,0.22)', color: '#c4b5fd',
+              }}>
+                {scrambleSummary(r.eventId, r.roundId, r.groups)}
+              </span>
+            ))}
+          </div>
+          <textarea
+            value={scrambleText}
+            rows={6}
+            placeholder={t('admin.comp.scrambles.placeholder')}
+            onChange={e => { setScrambleText(e.target.value); setScrambleParsed(null); }}
+            style={{ resize: 'vertical', fontSize: '0.82rem', fontFamily: 'monospace', lineHeight: 1.5 }}
+          />
+          <div style={{ marginTop: '0.5rem' }}>
+            <button type="button" className="btn-sm-secondary" onClick={parseScrambles} disabled={!scrambleText.trim()}>
+              {t('admin.comp.scrambles.parse')}
+            </button>
+          </div>
+          {scrambleParsed && (scrambleParsed.sets.length > 0 || scrambleParsed.warnings.length > 0) && (
+            <div style={{
+              marginTop: '0.6rem', padding: '0.6rem 0.8rem', borderRadius: '8px',
+              border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)',
+            }}>
+              {scrambleParsed.sets.length > 0 && (
+                <>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.3rem', opacity: 0.7 }}>
+                    {t('admin.comp.scrambles.preview')}
+                  </div>
+                  {scrambleParsed.sets.map(s => (
+                    <div key={`${s.eventId}-${s.roundId}`} style={{ fontSize: '0.85rem', color: 'var(--text)', lineHeight: 1.6 }}>
+                      {scrambleSummary(s.eventId, s.roundId, s.groups)}
+                      {scrambleSets[s.eventId]?.[s.roundId] && (
+                        <span style={{ fontSize: '0.72rem', color: '#fbbf24', marginLeft: '0.4rem' }}>({t('admin.comp.scrambles.replaces')})</span>
+                      )}
+                    </div>
+                  ))}
+                </>
+              )}
+              {scrambleParsed.warnings.length > 0 && (
+                <div style={{ marginTop: scrambleParsed.sets.length > 0 ? '0.5rem' : 0 }}>
+                  <div style={{ fontSize: '0.7rem', color: '#fbbf24', marginBottom: '0.2rem' }}>
+                    ⚠️ {t('admin.comp.scrambles.warnings')}
+                  </div>
+                  {scrambleParsed.warnings.map((w, i) => (
+                    <div key={i} style={{ fontSize: '0.78rem', color: '#fbbf24', lineHeight: 1.5 }}>{w}</div>
+                  ))}
+                </div>
+              )}
+              {scrambleParsed.sets.length > 0 && (
+                <div style={{ marginTop: '0.6rem' }}>
+                  <button type="button" className="btn-sm-primary" onClick={saveScrambles} disabled={scrambleSaving || scrambleLoading}>
+                    {t('admin.btn.save')}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          {scrambleMsg && <div className={`msg ${scrambleMsgType}`} style={{ display: 'block' }}>{scrambleMsg}</div>}
         </div>
 
         {/* Athletes Registration */}

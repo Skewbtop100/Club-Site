@@ -1,15 +1,16 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { subscribeCompetitions, ensureDailyPracticeCompetition, DAILY_PRACTICE_COMPETITION_ID } from '@/lib/firebase/services/competitions';
+import { subscribeCompetitions, subscribeScrambleSets, ensureDailyPracticeCompetition, DAILY_PRACTICE_COMPETITION_ID } from '@/lib/firebase/services/competitions';
 import { getAthletes } from '@/lib/firebase/services/athletes';
 import { saveResult, getResultsByComp, subscribeResultsByComp } from '@/lib/firebase/services/results';
 import { fmtTime, parseTime, getMinPlausibleSolveCs, todayDateStr } from '@/lib/time-utils';
 import { calcAo5, bestOf, timeToRawDigits, formatRawDigits } from '@/lib/results-entry-helpers';
 import { WCA_EVENTS } from '@/lib/wca-events';
+import { groupLetter, scrambleFor, nextExtraSource } from '@/lib/scramble-import';
 import ScramblePreview from '@/components/shared/ScramblePreview';
 import { useLang, type TranslationKey } from '@/lib/i18n';
-import type { Athlete, Competition, Result } from '@/lib/types';
+import type { Athlete, Competition, Result, ScrambleSets, ScrambleSource } from '@/lib/types';
 
 interface PanelState {
   id: number; athleteId: string; eventId: string; round: number; group: number;
@@ -27,6 +28,11 @@ interface PanelState {
   scrambles: string[];
   /** True while a scramble is being generated for the current solve slot. */
   scrambleLoading: boolean;
+  /** Real competitions with imported WCA scrambles only: which of the group's
+   *  scrambles each solve slot uses, parallel to `solves` — 'main' unless the
+   *  judge swapped in an extra. The scramble text itself isn't copied here;
+   *  it's looked up from the competition's private scrambleSets on render. */
+  scrambleSources: ScrambleSource[];
   /** Inspection timer, kept per-panel so starting it on one panel can't
    *  affect another's — each panel renders and drives its own timer. */
   timerMs: number; timerRunning: boolean; timerStopped: boolean;
@@ -89,6 +95,10 @@ function reComputeAdvancingNames(
   return names;
 }
 
+function freshScrambleSources(): ScrambleSource[] {
+  return ['main', 'main', 'main', 'main', 'main'];
+}
+
 /** The solve-entry portion of a panel's state — everything that needs to
  *  reset when the admin starts a fresh attempt (a new panel, or an existing
  *  panel's athlete/event changing mid-flow). Athlete/event/round/group are
@@ -100,6 +110,7 @@ function freshSolveState(): Omit<PanelState, 'id' | 'athleteId' | 'eventId' | 'r
     selectedChip: null, editReturnIdx: null, postEditMode: false,
     msg: '', msgType: '', needsConfirm: false,
     scrambles: ['', '', '', '', ''], scrambleLoading: false,
+    scrambleSources: freshScrambleSources(),
     timerMs: 0, timerRunning: false, timerStopped: false,
   };
 }
@@ -175,6 +186,20 @@ export default function ResultsEntryTab() {
   useEffect(() => {
     return () => { Object.values(timerIntervalRefs.current).forEach(id => { if (id) clearInterval(id); }); };
   }, []);
+
+  // Imported WCA scrambles of the selected competition, from its admin-only
+  // private doc (never part of the public competition document). Live, so an
+  // import made mid-competition shows up without a reload. Daily Practice
+  // generates its own scrambles and has none to load.
+  const [scrambleSets, setScrambleSets] = useState<ScrambleSets>({});
+  useEffect(() => {
+    setScrambleSets({});
+    if (!compId || compId === DAILY_PRACTICE_COMPETITION_ID) return;
+    return subscribeScrambleSets(compId, setScrambleSets, (err) => {
+      console.error('[ResultsEntryTab] scramble sets unavailable', err);
+      setScrambleSets({});
+    });
+  }, [compId]);
 
   // Daily Practice: generate a WCA-quality scramble for whichever solve slot
   // is currently active, per panel. Fetched from /api/scramble (server-side,
@@ -262,6 +287,16 @@ export default function ResultsEntryTab() {
     }));
   }
 
+  // Swap the current solve's imported scramble for one of the group's extras.
+  function applyExtraScramble(panelId: number, source: ScrambleSource) {
+    setPanels(prev => prev.map(p => {
+      if (p.id !== panelId || p.currentSolveIdx >= 5) return p;
+      const sources = [...p.scrambleSources];
+      sources[p.currentSolveIdx] = source;
+      return { ...p, scrambleSources: sources };
+    }));
+  }
+
   function advanceSolve(panelId: number) {
     setPanels(prev => prev.map(p => {
       if (p.id !== panelId) return p;
@@ -342,6 +377,10 @@ export default function ResultsEntryTab() {
 
     const comp = comps.find(c => c.id === compId);
     const ath  = athletes.find(a => a.id === panel.athleteId);
+    // Entered against imported WCA scrambles? Then record the group and which
+    // scramble (main / extra) each solve used, so it can be looked up later.
+    const usedImportedScrambles = !isDailyPractice &&
+      (scrambleSets[panel.eventId]?.[String(panel.round)]?.[groupLetter(panel.group)]?.main.length ?? 0) > 0;
     // Daily Practice always writes round 1, date-stamped in the docId — that's
     // what enforces "one Ao5 per athlete per event per day". A same-day
     // resubmission is blocked above now, so this path only ever creates a
@@ -383,6 +422,7 @@ export default function ResultsEntryTab() {
         solves: parsed, status: 'published', source: 'entry',
         penalties: panel.penalties,
         ...(isDailyPractice ? { practiceDate: today, scrambles: panel.scrambles } : {}),
+        ...(usedImportedScrambles ? { group: panel.group, scrambleSources: panel.scrambleSources } : {}),
       });
       const fullName = `${ath?.name || ''}${ath?.lastName ? ' ' + ath.lastName : ''}`.trim() || panel.athleteId;
       const msg = existing
@@ -811,6 +851,20 @@ export default function ResultsEntryTab() {
             const canAdvance = curPenalty === 'dnf' || panel.rawInput.length > 0;
             const isEditMode = panel.editReturnIdx !== null;
 
+            // Imported WCA scrambles for this athlete's event/round/group, if
+            // the competition has any. When it doesn't, nothing below changes:
+            // real competitions show no scramble, Daily Practice generates its own.
+            const importedSet = !isDailyPracticeSelected && panel.athleteId && panel.eventId
+              ? scrambleSets[panel.eventId]?.[String(panel.round)]?.[groupLetter(panel.group)]
+              : undefined;
+            const importedGroup = importedSet && importedSet.main.length > 0 ? importedSet : null;
+            const curSource: ScrambleSource = (curIdx < 5 && panel.scrambleSources[curIdx]) || 'main';
+            const curScramble = importedGroup
+              ? scrambleFor(importedGroup, curIdx, curSource)
+              : isDailyPracticeSelected ? panel.scrambles[curIdx] : '';
+            const showScramble = (isDailyPracticeSelected || !!importedGroup) && !!panel.eventId;
+            const nextExtra = importedGroup ? nextExtraSource(importedGroup, panel.scrambleSources) : null;
+
             return (
               <div className="compact-panel" key={panel.id}>
                 <div className="compact-panel-header">
@@ -888,7 +942,7 @@ export default function ResultsEntryTab() {
                     <div>
                       <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.2rem', paddingLeft: '0.1rem' }}>{t('admin.results.round')}</div>
                       <select className="compact-select" value={panel.round} style={{ marginBottom: 0 }}
-                        onChange={e => updatePanel(panel.id, { round: Number(e.target.value) })}>
+                        onChange={e => updatePanel(panel.id, { round: Number(e.target.value), scrambleSources: freshScrambleSources() })}>
                         {roundNames.map((name, idx) => {
                           const roundNum = idx + 1;
                           const isLocked = completedRounds.has(roundNum);
@@ -903,7 +957,7 @@ export default function ResultsEntryTab() {
                     <div>
                       <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.2rem', paddingLeft: '0.1rem' }}>{t('admin.results.group')}</div>
                       <select className="compact-select" value={panel.group} style={{ marginBottom: 0 }}
-                        onChange={e => updatePanel(panel.id, { group: Number(e.target.value) })}>
+                        onChange={e => updatePanel(panel.id, { group: Number(e.target.value), scrambleSources: freshScrambleSources() })}>
                         {Array.from({ length: Math.max(1, groupCount) }, (_, i) => (
                           <option key={i} value={i + 1}>{t('admin.results.group')} {String.fromCharCode(65 + i)}</option>
                         ))}
@@ -976,19 +1030,27 @@ export default function ResultsEntryTab() {
                       {isEditMode ? `${t('admin.results.editing-solve')} ${curIdx + 1}` : `${t('admin.results.solve-prefix')} ${curIdx + 1} ${t('admin.results.solve-of')}`}
                     </div>
 
-                    {/* Scramble — Daily Practice only; read aloud to the athlete before they solve */}
-                    {isDailyPracticeSelected && panel.eventId && (
+                    {/* Scramble — Daily Practice (generated), or a real competition
+                        with imported WCA scrambles; read aloud to the athlete
+                        before they solve */}
+                    {showScramble && (
                       <div style={{
                         marginBottom: '0.6rem', padding: '0.55rem 0.8rem', borderRadius: '10px',
                         background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.18)',
                         textAlign: 'center', minHeight: '2.3rem',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                       }}>
+                        {importedGroup && curSource !== 'main' && curScramble && (
+                          <span style={{ fontSize: '0.65rem', fontWeight: 700, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.2rem' }}>
+                            {t('admin.results.extra-label')} {curSource.slice('extra'.length)}
+                          </span>
+                        )}
                         {panel.scrambleLoading ? (
                           <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>{t('admin.results.scramble-loading')}</span>
-                        ) : panel.scrambles[curIdx] ? (
-                          <span style={{ fontFamily: 'monospace', fontSize: '0.9rem', color: 'var(--text)', letterSpacing: '0.02em', lineHeight: 1.5 }}>
-                            {panel.scrambles[curIdx]}
+                        ) : curScramble ? (
+                          // pre-line: imported Megaminx scrambles are multi-line
+                          <span style={{ fontFamily: 'monospace', fontSize: '0.9rem', color: 'var(--text)', letterSpacing: '0.02em', lineHeight: 1.5, whiteSpace: 'pre-line' }}>
+                            {curScramble}
                           </span>
                         ) : (
                           <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>{t('admin.results.scramble-unavailable')}</span>
@@ -1002,15 +1064,34 @@ export default function ResultsEntryTab() {
                         string actually exists (skipped during loading/failure,
                         same guard as the text above), and unmounts along with the
                         text once the admin moves off this solve slot. */}
-                    {isDailyPracticeSelected && panel.eventId && panel.scrambles[curIdx] && (
+                    {showScramble && curScramble && (
                       <div style={{
                         marginBottom: '0.6rem', height: '140px',
                         borderRadius: '10px', overflow: 'hidden',
                         background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.18)',
                         display: 'flex',
                       }}>
-                        <ScramblePreview eventId={panel.eventId} scramble={panel.scrambles[curIdx]} />
+                        <ScramblePreview eventId={panel.eventId} scramble={curScramble} />
                       </div>
+                    )}
+
+                    {/* Extra scramble — imported scrambles only. Replaces this
+                        solve's scramble with the group's next unused extra. */}
+                    {importedGroup && (
+                      <button
+                        onClick={() => nextExtra && applyExtraScramble(panel.id, nextExtra)}
+                        disabled={!nextExtra}
+                        style={{
+                          width: '100%', padding: '0.45rem 0', borderRadius: '8px', fontSize: '0.8rem',
+                          fontFamily: 'inherit', fontWeight: 600, marginBottom: '0.6rem',
+                          cursor: nextExtra ? 'pointer' : 'not-allowed',
+                          background: nextExtra ? 'rgba(251,191,36,0.1)' : 'rgba(255,255,255,0.02)',
+                          border: `1px solid ${nextExtra ? 'rgba(251,191,36,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                          color: nextExtra ? '#fbbf24' : 'rgba(255,255,255,0.25)',
+                        }}
+                      >
+                        {t('admin.results.extra-scramble')}{nextExtra ? ` (${nextExtra.slice('extra'.length)}/${importedGroup.extra.length})` : ''}
+                      </button>
                     )}
 
                     {/* Large input */}

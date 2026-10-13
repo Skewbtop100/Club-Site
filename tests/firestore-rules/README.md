@@ -8,6 +8,9 @@ emulator. Nothing here touches the real database.
 - `athlete-privacy.test.mjs` — what an athlete's data exposes: the public
   `athletes/{id}` profile, the admin/owner-only `athletes/{id}/private/identity`,
   and `users/{uid}`.
+- `competition-scrambles.test.mjs` — a competition's imported WCA scrambles
+  (`competitions/{id}/private/scrambles`): admin-only read and write, while
+  the competition document itself stays public.
 
 ## Running
 
@@ -16,7 +19,7 @@ npm run test:rules
 ```
 
 That wraps `firebase emulators:exec --only firestore`, which starts a throwaway
-emulator, runs both suites against `firestore.rules` as it stands in the repo,
+emulator, runs every suite against `firestore.rules` as it stands in the repo,
 and shuts the emulator down. Exit code is non-zero if any assertion fails.
 
 Requirements: the `firebase` CLI on your PATH and a JDK (the Firestore emulator
