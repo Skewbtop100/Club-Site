@@ -37,6 +37,11 @@ export const COL = {
   ATHLETE_REQUESTS: 'athleteRequests',
   MATCH_HISTORY:    'matchHistory',
   POINT_TRANSACTIONS: 'pointTransactions',
+  // Coach challenge (docs/challenge-plan.md). rooms/{id}/members is a
+  // subcollection; roomCodes is server-only and never read by clients.
+  COACHES:          'coaches',
+  ROOMS:            'rooms',
+  ROOM_MEMBERS:     'members',
 } as const;
 
 export const DOC = {

@@ -454,6 +454,13 @@ An RTDB alternative is still possible (the project already uses RTDB for presenc
 - **Rules:** `coaches`, `rooms`, `roomCodes`, `members` → `firebase deploy --only firestore:rules`.
 - **Tests:** rules part 1; Playwright admin → coach → room → join → approve → remove/re-add.
 - **What the user sees:** the admin marks coaches (admins already are). A coach creates rooms with a 6-character code and can regenerate it. Students join several rooms by code. The coach approves, removes and re-adds.
+- **As built (2026-10-16).** These points replace the Phase 2 parts of B3 where they differ:
+  - **All room writes are server routes:** `app/api/rooms/{create,rename,regenerate-code,join,member}`, built on `lib/server/rooms.ts`. Clients have **no** write access to `rooms`, `members` or `roomCodes`, and `roomCodes` is not client-readable at all (join looks the code up on the server). This is stricter than B3's client-write rules.
+  - **Reject** (not in the earlier plan) deletes the pending request, since there's no history yet, so the student can ask again. **Remove** sets `status: 'removed'` and never deletes.
+  - **Re-add:** a coach can't see removed students (decision 24), so re-adding = the removed student enters the code again (the same document goes back to `pending`) and the coach approves it.
+  - **Membership fields:** members also carry `roomId`, `roomName` and `coachName`. A student's "my rooms" list is then one collection-group query and still works after removal (N4). It needs the `members.uid` collection-group index in `firestore.indexes.json`.
+  - **Rooms** also carry `coachName`.
+  - **Test-only emulator login:** `lib/firebase.ts` `EMULATOR_MODE`, guarded by `NODE_ENV !== 'production'` and `NEXT_PUBLIC_FIREBASE_EMULATORS=1`, and proven absent from production builds by `npm run test:emulator-guard`.
 
 **Phase 3: challenge creation and assignment**
 - **Add:**

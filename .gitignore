@@ -73,6 +73,7 @@ serviceAccountKey.json
 
 # Next.js build output
 .next/
+.next-guard/
 
 # dataconnect generated files
 .dataconnect

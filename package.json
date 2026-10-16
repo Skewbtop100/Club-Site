@@ -8,9 +8,11 @@
     "start": "next start",
     "lint": "eslint",
     "test:averages": "tsc lib/timer-engine.ts scripts/test-averages.ts --outDir .tmp-averages-build --module commonjs --target es2020 --esModuleInterop --skipLibCheck --jsx react-jsx --types node && node .tmp-averages-build/scripts/test-averages.js",
-    "test:shared-scramble":"tsc lib/shared-scramble.ts lib/scramble.ts scripts/test-shared-scramble.ts --outDir .tmp-shared-scramble-build --module commonjs --target es2020 --esModuleInterop --skipLibCheck --types node && node .tmp-shared-scramble-build/scripts/test-shared-scramble.js",
-    "test:routes": "next build && firebase emulators:exec --only firestore,auth \"node tests/server-routes/judge-routes.test.mjs\"",
-    "test:rules": "firebase emulators:exec --only firestore \"node tests/firestore-rules/users.test.mjs && node tests/firestore-rules/athlete-privacy.test.mjs && node tests/firestore-rules/competition-scrambles.test.mjs && node tests/firestore-rules/competition-staged-results.test.mjs && node tests/firestore-rules/judge-access.test.mjs\""
+    "test:shared-scramble": "tsc lib/shared-scramble.ts lib/scramble.ts scripts/test-shared-scramble.ts --outDir .tmp-shared-scramble-build --module commonjs --target es2020 --esModuleInterop --skipLibCheck --types node && node .tmp-shared-scramble-build/scripts/test-shared-scramble.js",
+    "test:routes": "next build && firebase emulators:exec --only firestore,auth \"node tests/server-routes/judge-routes.test.mjs && node tests/server-routes/rooms-routes.test.mjs\"",
+    "test:e2e:rooms": "firebase emulators:exec --only firestore,auth,database \"node tests/e2e/challenge-rooms.e2e.mjs\"",
+    "test:emulator-guard": "node tests/e2e/emulator-guard.mjs",
+    "test:rules":"firebase emulators:exec --only firestore \"node tests/firestore-rules/users.test.mjs && node tests/firestore-rules/athlete-privacy.test.mjs && node tests/firestore-rules/competition-scrambles.test.mjs && node tests/firestore-rules/competition-staged-results.test.mjs && node tests/firestore-rules/judge-access.test.mjs && node tests/firestore-rules/rooms.test.mjs\""
   },
   "dependencies": {
     "@cubing/icons": "^3.0.5",
@@ -39,6 +41,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.3",
+    "playwright-core": "1.63.0",
     "sharp": "^0.35.3",
     "tailwindcss": "^4",
     "typescript": "^5"

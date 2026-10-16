@@ -216,6 +216,70 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // ─── Coach challenge: coaches and rooms (docs/challenge-plan.md, phase 2) ─
+    //
+    // coaches/{uid} — the coach list, granted by the club admin from the
+    // admin users tab. Admins are coaches automatically and need no
+    // document (lib/server/firebase-admin.ts isCoachUid). Nobody can grant
+    // themselves: only isAdmin() writes, and isAdmin() itself fails closed.
+    match /coaches/{uid} {
+      allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    // roomCodes/{code} → roomId. Server-only: a student joins through
+    // app/api/rooms/join, which looks the code up itself, so codes can't be
+    // listed or probed from a client.
+    match /roomCodes/{code} {
+      allow read, write: if false;
+    }
+
+    // rooms/{roomId} and rooms/{roomId}/members/{uid}: every WRITE goes
+    // through app/api/rooms/* (create, rename, regenerate-code, join,
+    // member) with the Admin SDK, which bypasses these rules. No client may
+    // create a room, approve itself, change a status or pick a code.
+    //
+    // Reads:
+    //   room     — its coach; a pending or active member. A removed member
+    //              no longer reads the room (they keep their own membership,
+    //              below, which carries the room's name).
+    //   members  — the student reads their OWN membership always, removed
+    //              included (plan N4: a removed student still sees their
+    //              history). The room's coach reads pending and active
+    //              members only — never a removed one (plan decision 24:
+    //              name/photo only for coaches of rooms they belong to);
+    //              re-adding = the student asks again and the coach approves.
+    match /rooms/{roomId} {
+      function myMembership() {
+        return /databases/$(database)/documents/rooms/$(roomId)/members/$(request.auth.uid);
+      }
+      function isRoomCoach() {
+        return get(/databases/$(database)/documents/rooms/$(roomId)).data.coachUid == request.auth.uid;
+      }
+
+      allow get: if isSignedIn() &&
+                    (resource.data.coachUid == request.auth.uid ||
+                     (exists(myMembership()) && get(myMembership()).data.status in ['pending', 'active']));
+      // "My rooms" for a coach: where('coachUid', '==', me).
+      allow list: if isSignedIn() && resource.data.coachUid == request.auth.uid;
+      allow write: if false;
+
+      match /members/{uid} {
+        allow get: if isSignedIn() &&
+                      (request.auth.uid == uid ||
+                       (isRoomCoach() && resource.data.status in ['pending', 'active']));
+        // The coach's list must filter status in ['pending', 'active'].
+        allow list: if isSignedIn() && isRoomCoach() && resource.data.status in ['pending', 'active'];
+        allow write: if false;
+      }
+    }
+
+    // A student's own memberships across all rooms:
+    // collectionGroup('members').where('uid', '==', me).
+    match /{path=**}/members/{uid} {
+      allow list: if isSignedIn() && resource.data.uid == request.auth.uid;
+    }
+
     // ─── Virtual Competitions ─────────────────────────────────────────────────
 
     match /virtualCompetitions/{compId} {

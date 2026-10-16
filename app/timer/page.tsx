@@ -2237,6 +2237,26 @@ export default function TimerPage() {
                 <span style={{ fontSize: '0.62rem', fontWeight: 500 }}>Удахгүй</span>
               </button>
             )}
+            {/* Coach challenges (docs/challenge-plan.md) — desktop entry;
+                mobile reaches it from the Community tab tile. */}
+            {TIMER_FEATURES.challenge && (
+              <button
+                onClick={() => router.push('/timer/challenge')}
+                aria-label="Challenge"
+                title="Challenge"
+                style={{
+                  width: 36, height: 36, borderRadius: RADIUS,
+                  background: 'transparent', border: 'none',
+                  color: C.muted, cursor: 'pointer',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  transition: 'background 0.15s, color 0.15s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = C.cardAlt; e.currentTarget.style.color = C.text; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.muted; }}
+              >
+                <IconFlag size={18} />
+              </button>
+            )}
             <GanButton
               state={gan.state}
               onConnect={gan.connect}
@@ -4548,6 +4568,7 @@ interface ToolTile {
 const ACTIVE_TILES: ToolTile[] = [
   { id: 'race',        name: 'Race',        Icon: IconStopwatch, route: '/timer/multiplayer',   feature: 'racing' },
   { id: 'competition', name: 'Competition', Icon: IconTrophy,    route: '/timer/competitions', feature: 'competition' },
+  { id: 'challenge',   name: 'Challenge',   Icon: IconFlag,      route: '/timer/challenge',    feature: 'challenge' },
 ];
 
 const SOON_TILES: ToolTile[] = [

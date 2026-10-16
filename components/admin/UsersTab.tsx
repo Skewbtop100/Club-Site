@@ -16,6 +16,7 @@ import { db } from '@/lib/firebase';
 import { useAuth, type UserRole } from '@/lib/auth-context';
 import { getAthletes } from '@/lib/firebase/services/athletes';
 import { rejectOrphansForAthlete } from '@/lib/firebase/services/athleteRequests';
+import { setCoach, subscribeCoachFlags } from '@/lib/firebase/services/coaches';
 import type { Athlete } from '@/lib/types';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -43,7 +44,12 @@ const ROLE_BADGE: Record<UserRole, { label: string; fg: string; bg: string; bord
   admin:   { label: 'Админ',    fg: '#ef4444', bg: 'rgba(239,68,68,0.15)',   border: 'rgba(239,68,68,0.45)'  },
 };
 const ALL_ROLES: UserRole[] = ['member', 'athlete', 'admin'];
-type RoleFilter = 'all' | UserRole;
+type RoleFilter = 'all' | UserRole | 'coach';
+type UserAction = 'role' | 'add' | 'sub' | 'link' | 'unlink' | 'view' | 'coach';
+
+// Coach challenge (docs/challenge-plan.md): admins are coaches automatically;
+// anyone else is a coach while coaches/{uid}.active is true.
+const COACH_BADGE = { label: 'Coach', fg: '#EDEDED', bg: 'rgba(255,255,255,0.06)', border: 'rgba(255,255,255,0.18)' };
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 function tsToMs(value: unknown): number | null {
@@ -82,6 +88,9 @@ export default function UsersTab() {
   // Modal state — exactly one open at a time.
   type ModalKind = null | { kind: 'role' | 'points-add' | 'points-sub' | 'link'; user: UserRow } | { kind: 'unlink'; user: UserRow };
   const [modal, setModal] = useState<ModalKind>(null);
+  // uid → coaches/{uid}.active (admin-only collection).
+  const [coachFlags, setCoachFlags] = useState<Map<string, boolean>>(new Map());
+  const isCoachRow = (u: UserRow) => u.role === 'admin' || coachFlags.get(u.id) === true;
 
   const showToast = (msg: string, tone: 'ok' | 'err' = 'ok') => {
     setToast({ msg, tone });
@@ -130,7 +139,11 @@ export default function UsersTab() {
         showToast('Жагсаалт ачаалахад алдаа гарлаа.', 'err');
       },
     );
-    return () => unsub();
+    const unsubCoaches = subscribeCoachFlags(
+      setCoachFlags,
+      (err) => console.error('[users-tab] coaches', err),
+    );
+    return () => { unsub(); unsubCoaches(); };
   }, [isAdmin]);
 
   const athleteById = useMemo(() => {
@@ -146,14 +159,15 @@ export default function UsersTab() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return users.filter(u => {
-      if (roleFilter !== 'all' && u.role !== roleFilter) return false;
+      if (roleFilter === 'coach') { if (u.role !== 'admin' && coachFlags.get(u.id) !== true) return false; }
+      else if (roleFilter !== 'all' && u.role !== roleFilter) return false;
       if (!q) return true;
       return (
         u.displayName.toLowerCase().includes(q) ||
         u.email.toLowerCase().includes(q)
       );
     });
-  }, [users, search, roleFilter]);
+  }, [users, search, roleFilter, coachFlags]);
 
   const stats = useMemo(() => {
     const counts = { total: users.length, member: 0, athlete: 0, admin: 0 };
@@ -216,6 +230,18 @@ export default function UsersTab() {
     }
   };
 
+  // Grant / revoke the coach role (coaches/{uid}, admin-only by rules).
+  // Admins are coaches automatically — the menu hides the toggle for them.
+  const onToggleCoach = async (u: UserRow) => {
+    const next = !(coachFlags.get(u.id) === true);
+    try {
+      await setCoach(u.id, u.displayName, next, currentUser?.uid ?? 'admin');
+      showToast(next ? 'Coach эрх олгогдлоо' : 'Coach эрх цуцлагдлаа');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), 'err');
+    }
+  };
+
   const onUnlinkAthlete = async (uid: string, athleteId: string) => {
     try {
       const batch = writeBatch(db);
@@ -242,7 +268,7 @@ export default function UsersTab() {
 
   // Single dispatcher used by both the table row and the mobile card so the
   // action wiring lives in one place.
-  const handleAction = (u: UserRow, action: 'role' | 'add' | 'sub' | 'link' | 'unlink' | 'view') => {
+  const handleAction = (u: UserRow, action: UserAction) => {
     setOpenMenuId(null);
     if (action === 'role')        setModal({ kind: 'role', user: u });
     else if (action === 'add')    setModal({ kind: 'points-add', user: u });
@@ -250,6 +276,7 @@ export default function UsersTab() {
     else if (action === 'link')   setModal({ kind: 'link', user: u });
     else if (action === 'unlink') setModal({ kind: 'unlink', user: u });
     else if (action === 'view')   window.open(`/profile?uid=${encodeURIComponent(u.id)}`, '_blank', 'noopener');
+    else if (action === 'coach')  onToggleCoach(u);
   };
 
   return (
@@ -290,6 +317,7 @@ export default function UsersTab() {
             <FilterChip label="Гишүүн"   active={roleFilter === 'member'}  onClick={() => setRoleFilter('member')} />
             <FilterChip label="Тамирчин" active={roleFilter === 'athlete'} onClick={() => setRoleFilter('athlete')} />
             <FilterChip label="Админ"    active={roleFilter === 'admin'}   onClick={() => setRoleFilter('admin')} />
+            <FilterChip label="Coach"    active={roleFilter === 'coach'}   onClick={() => setRoleFilter('coach')} />
           </div>
         </div>
       </div>
@@ -324,6 +352,7 @@ export default function UsersTab() {
                     <UserRowView
                       key={u.id}
                       u={u}
+                      isCoach={isCoachRow(u)}
                       athleteName={u.athleteId ? athleteNameOf(athleteById.get(u.athleteId)) : null}
                       menuOpen={openMenuId === u.id}
                       onToggleMenu={(e) => {
@@ -342,6 +371,7 @@ export default function UsersTab() {
                 <UserCardView
                   key={u.id}
                   u={u}
+                  isCoach={isCoachRow(u)}
                   athleteName={u.athleteId ? athleteNameOf(athleteById.get(u.athleteId)) : null}
                   menuOpen={openMenuId === u.id}
                   onToggleMenu={(e) => {
@@ -454,13 +484,14 @@ function athleteNameOf(a: Athlete | undefined): string | null {
 }
 
 function UserRowView({
-  u, athleteName, menuOpen, onToggleMenu, onAction,
+  u, isCoach, athleteName, menuOpen, onToggleMenu, onAction,
 }: {
   u: UserRow;
+  isCoach: boolean;
   athleteName: string | null;
   menuOpen: boolean;
   onToggleMenu: (e: React.MouseEvent) => void;
-  onAction: (action: 'role' | 'add' | 'sub' | 'link' | 'unlink' | 'view') => void;
+  onAction: (action: UserAction) => void;
 }) {
   const badge = ROLE_BADGE[u.role];
   return (
@@ -478,6 +509,7 @@ function UserRowView({
           fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.04em',
           background: badge.bg, color: badge.fg, border: `1px solid ${badge.border}`,
         }}>{badge.label}</span>
+        {isCoach && <CoachBadge auto={u.role === 'admin'} />}
       </td>
       <td style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>{u.points}</td>
       <td className="td-muted">{athleteName ?? '—'}</td>
@@ -519,12 +551,25 @@ function UserRowView({
             <MenuItem onClick={() => onAction('sub')}>Point хасах</MenuItem>
             <MenuItem onClick={() => onAction('link')}>Тамирчинтай холбох</MenuItem>
             {u.athleteId && <MenuItem onClick={() => onAction('unlink')} danger>Холбоо тасалах</MenuItem>}
+            {u.role !== 'admin' && (
+              <MenuItem onClick={() => onAction('coach')}>{isCoach ? 'Coach эрх цуцлах' : 'Coach эрх олгох'}</MenuItem>
+            )}
             <div style={{ height: 1, background: 'rgba(255,255,255,0.08)', margin: '3px 6px' }} />
             <MenuItem onClick={() => onAction('view')}>Профайл харах</MenuItem>
           </div>
         )}
       </td>
     </tr>
+  );
+}
+
+function CoachBadge({ auto }: { auto: boolean }) {
+  return (
+    <span title={auto ? 'Админ автоматаар coach' : undefined} style={{
+      display: 'inline-block', marginLeft: '0.35rem', padding: '0.15rem 0.55rem', borderRadius: 999,
+      fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.04em',
+      background: COACH_BADGE.bg, color: COACH_BADGE.fg, border: `1px solid ${COACH_BADGE.border}`,
+    }}>{auto ? 'Coach (авто)' : COACH_BADGE.label}</span>
   );
 }
 
@@ -552,13 +597,14 @@ function FilterChip({ label, active, onClick }: { label: string; active: boolean
 
 // Mobile card variant of UserRowView. Same data, same menu, vertical layout.
 function UserCardView({
-  u, athleteName, menuOpen, onToggleMenu, onAction,
+  u, isCoach, athleteName, menuOpen, onToggleMenu, onAction,
 }: {
   u: UserRow;
+  isCoach: boolean;
   athleteName: string | null;
   menuOpen: boolean;
   onToggleMenu: (e: React.MouseEvent) => void;
-  onAction: (action: 'role' | 'add' | 'sub' | 'link' | 'unlink' | 'view') => void;
+  onAction: (action: UserAction) => void;
 }) {
   const badge = ROLE_BADGE[u.role];
   return (
@@ -609,6 +655,7 @@ function UserCardView({
             fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.04em',
             background: badge.bg, color: badge.fg, border: `1px solid ${badge.border}`,
           }}>{badge.label}</span>
+          {isCoach && <CoachBadge auto={u.role === 'admin'} />}
         </CardField>
         <CardField label="Point">
           <span style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>{u.points}</span>
@@ -643,6 +690,9 @@ function UserCardView({
           <MenuItem onClick={() => onAction('sub')}>Point хасах</MenuItem>
           <MenuItem onClick={() => onAction('link')}>Тамирчинтай холбох</MenuItem>
           {u.athleteId && <MenuItem onClick={() => onAction('unlink')} danger>Холбоо тасалах</MenuItem>}
+            {u.role !== 'admin' && (
+              <MenuItem onClick={() => onAction('coach')}>{isCoach ? 'Coach эрх цуцлах' : 'Coach эрх олгох'}</MenuItem>
+            )}
           <div style={{ height: 1, background: 'rgba(255,255,255,0.08)', margin: '3px 6px' }} />
           <MenuItem onClick={() => onAction('view')}>Профайл харах</MenuItem>
         </div>

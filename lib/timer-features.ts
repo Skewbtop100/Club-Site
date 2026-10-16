@@ -12,6 +12,9 @@ export const TIMER_FEATURES = {
   racing: false,
   /** Virtual competitions — /timer/competitions/** */
   competition: false,
+  /** Coach challenges — /timer/challenge/** (docs/challenge-plan.md).
+   *  Phase 2: coaches, rooms and join requests. */
+  challenge: true,
 } as const satisfies Record<string, boolean>;
 
 export type TimerFeature = keyof typeof TIMER_FEATURES;

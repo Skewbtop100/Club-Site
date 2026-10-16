@@ -56,6 +56,15 @@ export async function isAdminUid(uid: string): Promise<boolean> {
   return snap.exists && snap.get('role') === 'admin';
 }
 
+/** A coach (docs/challenge-plan.md, decision 2): the club admin, who is a
+ *  coach automatically, or an account with an active coaches/{uid}
+ *  document (written only by the admin). Fails closed. */
+export async function isCoachUid(uid: string): Promise<boolean> {
+  if (await isAdminUid(uid)) return true;
+  const snap = await adminDb().doc(`coaches/${uid}`).get();
+  return snap.exists && snap.get('active') === true;
+}
+
 /** Whether a decoded token is a live judge session for `competitionId` —
  *  the same checks firestore.rules' isJudgeOf() makes: right competition,
  *  not expired, competition not finished, and issued for the PIN that is
