@@ -3435,7 +3435,9 @@ export default function TimerPage() {
                         WebkitTapHighlightColor: 'transparent',
                       }}
                     >
-                      <div style={{ width: '80%', aspectRatio: '1 / 1', display: 'flex' }}>
+                      {/* Square-1's SVG viewBox is fit tightly to the drawing,
+                          so it takes the full card; the 3D players keep 80%. */}
+                      <div style={{ width: eventId === 'sq1' ? '100%' : '80%', aspectRatio: '1 / 1', display: 'flex' }}>
                         <ScramblePreview eventId={eventId} scramble={scramble} />
                       </div>
                     </button>

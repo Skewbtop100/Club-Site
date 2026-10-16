@@ -5,6 +5,7 @@ import { useEffect, useRef } from 'react';
 // access during Next.js server rendering.
 import type { TwistyPlayer as TwistyPlayerType } from 'cubing/twisty';
 import type { Visualizer as SrVisualizer } from 'sr-puzzlegen';
+import { layoutSquare1, paddedViewBox, type Box, type Square1Part } from './square1Layout';
 
 // Map an event id → TwistyPlayer puzzle id. Two id schemes reach this
 // component from different callers — lib/wca-events.ts's WCA-standard ids
@@ -36,19 +37,19 @@ const PUZZLE_MAP: Record<string, string> = {
 type Visualization = '3D' | '2D';
 type SrObject3D = SrVisualizer['puzzleGeometry']['group']['objects'][number];
 
-// Square-1 net layout, in sr-puzzlegen's pre-scale puzzle units. The stock
-// 'square1-net' stacks top layer / middle slice / bottom layer only
-// outerHalfSide apart, but a layer's corners reach outerHalfSide·√2 from its
-// centre, so rotated layers overlap each other and the middle slice. We
-// instead place the layers side by side (top left, bottom right) with a gap,
-// and the middle slice centred underneath — a ~1.6:1 drawing that fills the
-// roughly-square preview cards far better than a tall 1:2 stack.
-const SQ1_LAYER_X = 0.72;   // |x| of each layer centre (layer radius ≈ 0.594)
-const SQ1_MIDDLE_Y = 0.84;  // y of the middle slice (positive = below on screen)
-// Rendered bounds of that layout, measured programmatically over 300 random
-// legal scrambles: x in [-1.035, 1.035], y in [-0.459, 0.742]. The viewBox
-// adds ~0.08 of padding on every side so strokes never touch the edge.
-const SQ1_VIEWBOX = { minx: -1.12, miny: -0.54, svgWidth: 2.24, svgHeight: 1.37 } as const;
+// sr-puzzlegen internals reached by the Square-1 layout. A part is either a
+// Group (top/bottom layer: `objects`) or a Geometry (pieces, middle slice:
+// `faces`); HtmlSvgRenderer keeps one <polygon> per face uid.
+interface SrNode { objects?: SrNode[]; faces?: { uid: number | string }[] }
+interface SrSvgRenderer {
+  domElement: HTMLDivElement;
+  svgElement: SVGSVGElement;
+  uidToPolygon: Record<string, SVGPolygonElement | undefined>;
+  strokeWidth: string;
+}
+
+// Padding around the measured drawing, as a fraction of its larger side.
+const SQ1_PAD_RATIO = 0.04;
 
 /** Moves an sr-puzzlegen object to (x, y) without touching its rotation —
  *  each Square-1 net part's matrix is T·R, so the translation column is
@@ -58,9 +59,30 @@ function placeAt(object: SrObject3D, x: number, y: number): void {
   object.matrix.values[13] = y;
 }
 
+function collectFaceUids(node: SrNode, out: string[] = []): string[] {
+  node.faces?.forEach((f) => out.push(String(f.uid)));
+  node.objects?.forEach((child) => collectFaceUids(child, out));
+  return out;
+}
+
+/** Bounds of the given polygons' points, in SVG user units. */
+function polygonBounds(polygons: readonly SVGPolygonElement[]): Box | null {
+  let box: Box | null = null;
+  for (const polygon of polygons) {
+    const pts = polygon.points;
+    for (let i = 0; i < pts.numberOfItems; i++) {
+      const { x, y } = pts.getItem(i);
+      box = box
+        ? { minX: Math.min(box.minX, x), minY: Math.min(box.minY, y), maxX: Math.max(box.maxX, x), maxY: Math.max(box.maxY, y) }
+        : { minX: x, minY: y, maxX: x, maxY: y };
+    }
+  }
+  return box;
+}
+
 /** Static/interactive cube-state preview for a given scramble string.
- *  Square-1 uses sr-puzzlegen (static SVG net, re-laid-out side by side —
- *  see SQ1_* above) — @cubing/twisty's own Square-1 3D rendering wasn't
+ *  Square-1 uses sr-puzzlegen (static SVG net, re-stacked vertically by
+ *  square1Layout.ts) — @cubing/twisty's own Square-1 3D rendering wasn't
  *  reliable enough, so this one puzzle deliberately gets a different
  *  renderer. Every other puzzle uses @cubing/twisty's TwistyPlayer (3D WebGL
  *  with native drag).
@@ -137,10 +159,14 @@ function PuzzlePreview({
   useEffect(() => { scrambleRef.current = scramble; }, [scramble]);
 
   // Square-1: sr-puzzlegen SVG, re-rendered per scramble (cheap, no WebGL).
-  // SVG() gives the <svg> fixed width/height attributes and wraps it in its
-  // own unsized <div class="svg-renderer">; both get h-full/w-full so the
-  // svg's default preserveAspectRatio="xMidYMid meet" letterboxes the
-  // viewBox into the container, uniformly scaled.
+  // The stock 'square1-net' spaces its parts too tightly (turned corners
+  // overlap), so layoutSquare1 re-stacks top / middle / bottom using each
+  // part's measured bounds for THIS scramble, and the viewBox is then fit
+  // to the whole drawing plus padding. SVG() gives the <svg> fixed
+  // width/height attributes and wraps it in its own unsized
+  // <div class="svg-renderer">; the attributes are dropped and both get
+  // h-full/w-full so preserveAspectRatio="xMidYMid meet" centres the drawing
+  // as large as the container allows.
   useEffect(() => {
     const mount = mountRef.current;
     if (!isSq1 || !mount) return;
@@ -151,18 +177,31 @@ function PuzzlePreview({
         if (token !== tokenRef.current) return;
         mount.replaceChildren();
         const vis = SVG(mount, 'square1-net' as Parameters<typeof SVG>[1], {
-          width: 448, height: 274,
-          ...SQ1_VIEWBOX,
           puzzle: { alg: scramble },
         });
+        const renderer = (vis as unknown as { renderer: SrSvgRenderer }).renderer;
         const [top, bottom, middle] = vis.puzzleGeometry.group.objects;
-        placeAt(top, -SQ1_LAYER_X, 0);
-        placeAt(bottom, SQ1_LAYER_X, 0);
-        placeAt(middle, 0, SQ1_MIDDLE_Y);
-        vis.render();
-        const { domElement, svgElement } = (vis as unknown as {
-          renderer: { domElement: HTMLElement; svgElement: SVGElement };
-        }).renderer;
+        const parts: Record<Square1Part, SrObject3D> = { top, middle, bottom };
+        const uids: Record<Square1Part, string[]> = {
+          top: collectFaceUids(top as unknown as SrNode),
+          middle: collectFaceUids(middle as unknown as SrNode),
+          bottom: collectFaceUids(bottom as unknown as SrNode),
+        };
+        const bounds = layoutSquare1({
+          place: (part, x, y) => placeAt(parts[part], x, y),
+          render: () => vis.render(),
+          measure: (part) => polygonBounds(
+            uids[part].flatMap((uid) => renderer.uidToPolygon[uid] ?? []),
+          ),
+        });
+        const { domElement, svgElement } = renderer;
+        if (bounds) {
+          const vb = paddedViewBox(bounds, SQ1_PAD_RATIO, parseFloat(renderer.strokeWidth) || 0);
+          svgElement.setAttribute('viewBox', `${vb.minX} ${vb.minY} ${vb.width} ${vb.height}`);
+        }
+        svgElement.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+        svgElement.removeAttribute('width');
+        svgElement.removeAttribute('height');
         domElement.classList.add('h-full', 'w-full');
         svgElement.classList.add('block', 'h-full', 'w-full');
       } catch (err) {
@@ -220,9 +259,7 @@ function PuzzlePreview({
     <div className="flex min-h-0 w-full flex-auto items-center justify-center overflow-hidden">
       <div
         ref={mountRef}
-        className={isSq1
-          ? 'flex h-full w-full items-center justify-center p-1'
-          : 'flex h-full w-full items-center justify-center'}
+        className="flex h-full w-full items-center justify-center"
       />
     </div>
   );
