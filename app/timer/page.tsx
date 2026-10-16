@@ -3170,88 +3170,79 @@ export default function TimerPage() {
                               border: `1px solid ${cardBorder}`,
                               borderLeft: leftAccent ? `3px solid ${leftAccent}` : `1px solid ${cardBorder}`,
                               borderRadius: 12,
-                              padding: '0.5rem 0.7rem',
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              minHeight: 48,
+                              padding: '0.35rem 0.5rem 0.45rem',
+                              display: 'flex', flexDirection: 'column', alignItems: 'stretch',
+                              gap: '0.15rem',
+                              minWidth: 0,
+                              // Makes the card a size container so the time
+                              // below can scale with the card's width (cqw).
+                              containerType: 'inline-size',
                               boxShadow: glowColor ? `0 0 16px ${glowColor}` : 'none',
                               transition: 'transform 0.12s, border-color 0.12s, box-shadow 0.2s',
                             }}
                           >
-                            {/* Date pinned absolutely to the top-left so
-                                it never affects the centered time group
-                                below. Empty span for legacy solves that
-                                pre-date the `ts` field — no placeholder,
-                                so the corner reads as intentionally
-                                empty. */}
-                            <span style={{
-                              position: 'absolute', top: 6, left: 8,
-                              fontSize: '0.65rem', fontWeight: 500,
-                              color: 'rgba(255,255,255,0.35)',
-                              letterSpacing: '0.04em',
+                            {/* Header line, in normal flow so it can never
+                                sit on top of the time: date on the left,
+                                state badges (PB / +2 / DNF), comment icon,
+                                or the select checkbox on the right. Fixed
+                                height keeps every card's time on the same
+                                baseline whether or not badges are present.
+                                Date is empty for legacy solves without `ts`. */}
+                            <div style={{
+                              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                              gap: '0.25rem', height: 16, minWidth: 0,
+                              fontSize: '0.62rem', letterSpacing: '0.04em',
                               fontVariantNumeric: 'tabular-nums',
                               pointerEvents: 'none',
-                            }}>{formatSolveDate(s.ts)}</span>
-
-                            {selectMode && (
+                            }}>
                               <span style={{
-                                position: 'absolute', top: 4, right: 4,
-                                width: 16, height: 16, borderRadius: 999,
-                                background: selected ? C.accent : 'rgba(255,255,255,0.06)',
-                                border: `1px solid ${selected ? C.accent : C.border}`,
-                                color: selected ? '#0a0a0a' : 'transparent',
-                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                                zIndex: 1,
-                              }}>
-                                {selected && <IconCheck size={11} />}
-                              </span>
-                            )}
+                                fontWeight: 500, color: 'rgba(255,255,255,0.35)',
+                                whiteSpace: 'nowrap', overflow: 'hidden', minWidth: 0,
+                              }}>{formatSolveDate(s.ts)}</span>
 
-                            {/* Top-right corner stack — state badges
-                                (PB / +2 / DNF) on top, comment indicator
-                                below. Plain colored text per badge type,
-                                no pill chrome. Hidden in select mode so
-                                it doesn't fight the selection checkbox
-                                for the same corner. */}
-                            {!selectMode && (isBest || s.penalty === '+2' || dnf || hasComment) && (
-                              <div style={{
-                                position: 'absolute', top: 6, right: 8,
-                                display: 'flex', flexDirection: 'column',
-                                alignItems: 'flex-end', gap: 2,
-                                fontSize: '0.65rem', fontWeight: 700,
-                                letterSpacing: '0.04em',
-                                fontVariantNumeric: 'tabular-nums',
-                                pointerEvents: 'none',
-                              }}>
-                                {(isBest || s.penalty === '+2' || dnf) && (
-                                  <div style={{
-                                    display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
-                                  }}>
-                                    {isBest && !dnf && <span style={{ color: C.success }}>PB</span>}
-                                    {s.penalty === '+2' && !dnf && <span style={{ color: C.warn }}>+2</span>}
-                                    {dnf && <span style={{ color: C.danger }}>DNF</span>}
-                                  </div>
-                                )}
-                                {hasComment && (
-                                  <span aria-label="Has comment" style={{
-                                    display: 'inline-flex', color: C.muted,
-                                  }}>
-                                    <IconComment size={11} />
-                                  </span>
-                                )}
-                              </div>
-                            )}
+                              {selectMode ? (
+                                <span style={{
+                                  flexShrink: 0,
+                                  width: 16, height: 16, borderRadius: 999,
+                                  background: selected ? C.accent : 'rgba(255,255,255,0.06)',
+                                  border: `1px solid ${selected ? C.accent : C.border}`,
+                                  color: selected ? '#0a0a0a' : 'transparent',
+                                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                }}>
+                                  {selected && <IconCheck size={11} />}
+                                </span>
+                              ) : (isBest || s.penalty === '+2' || dnf || hasComment) && (
+                                <span style={{
+                                  flexShrink: 0,
+                                  display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
+                                  fontWeight: 700,
+                                }}>
+                                  {isBest && !dnf && <span style={{ color: C.success }}>PB</span>}
+                                  {s.penalty === '+2' && !dnf && <span style={{ color: C.warn }}>+2</span>}
+                                  {dnf && <span style={{ color: C.danger }}>DNF</span>}
+                                  {hasComment && (
+                                    <span aria-label="Has comment" style={{
+                                      display: 'inline-flex', color: C.muted,
+                                    }}>
+                                      <IconComment size={11} />
+                                    </span>
+                                  )}
+                                </span>
+                              )}
+                            </div>
 
-                            {/* Centered row — time only. PB/+2/DNF/
-                                comment lifted to the corner stack above
-                                so the time anchors at the same column
-                                regardless of which badges are present. */}
+                            {/* Time line. Font scales with the card's
+                                content width (19cqw ≈ 8 monospace chars,
+                                e.g. "1:03.604"), clamped so it never gets
+                                tiny or oversized. */}
                             <div style={{
                               display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              width: '100%',
+                              width: '100%', minWidth: 0,
                             }}>
                               <span style={{
                                 fontFamily: '"JetBrains Mono", monospace',
-                                fontSize: '1.05rem', fontWeight: 700,
+                                fontSize: 'clamp(0.72rem, 19cqw, 1.15rem)', fontWeight: 700,
+                                whiteSpace: 'nowrap',
                                 color: dnf ? C.danger
                                      : isBest ? C.success
                                      : isWorst ? '#fca5a5'
@@ -3367,24 +3358,25 @@ export default function TimerPage() {
             <div style={{ flexShrink: 0 }}>
               {mobileTab === 'timer' && (() => {
                 const last12 = solves.slice(-12).reverse();
-                const cardStyle: React.CSSProperties = {
-                  background: C.card,
-                  border: `1px solid ${C.border}`,
-                  borderRadius: 12,
-                  minWidth: 0,
-                  aspectRatio: '1 / 1',
-                  overflow: 'hidden',
-                };
+                // Frameless columns that blend into the page. No fixed
+                // aspect-ratio/height: the row is as tall as its tallest
+                // in-flow column (cube square or stats list), so the stats
+                // never clip. The last-solves list is absolutely positioned
+                // so it fills that height and scrolls instead of growing it.
                 return (
                   <div className="pv-mobile-stats" style={{
                     display: 'grid', gridTemplateColumns: '1fr 1fr 1fr',
-                    gap: 6, padding: '0.15rem 0.5rem 0.3rem',
+                    gap: 6, padding: '0.25rem 0.75rem 0.4rem',
                   }}>
-                    {/* Left card: last solves, scrollable square */}
-                    <div style={{ ...cardStyle, padding: '0.4rem 0.45rem' }}>
+                    {/* Left column: last solves, scrollable */}
+                    <div style={{ position: 'relative', minWidth: 0 }}>
                       <div className="pv-last12" style={{
-                        height: '100%', overflowY: 'auto',
+                        position: 'absolute', inset: 0, overflowY: 'auto',
                         display: 'flex', flexDirection: 'column',
+                        // Soft fade on the bottom edge so the row cut by the
+                        // scroll boundary reads as "more below", not clipped.
+                        maskImage: 'linear-gradient(to bottom, #000 calc(100% - 14px), transparent)',
+                        WebkitMaskImage: 'linear-gradient(to bottom, #000 calc(100% - 14px), transparent)',
                       }}>
                         {last12.length === 0 ? (
                           <div style={{
@@ -3423,13 +3415,12 @@ export default function TimerPage() {
                       </div>
                     </div>
 
-                    {/* Center card: cube preview, centered in square */}
+                    {/* Center column: cube preview, centered */}
                     <button
                       onClick={() => setCubeFullscreenOpen(true)}
                       aria-label="Enlarge cube"
                       style={{
-                        ...cardStyle,
-                        padding: 6,
+                        background: 'none', border: 'none', padding: 0, minWidth: 0,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         cursor: 'pointer', fontFamily: 'inherit',
                         WebkitTapHighlightColor: 'transparent',
@@ -3442,16 +3433,15 @@ export default function TimerPage() {
                       </div>
                     </button>
 
-                    {/* Right card: stats grid in square */}
+                    {/* Right column: stats, right-aligned */}
                     <div style={{
-                      ...cardStyle,
-                      padding: '0.4rem 0.5rem',
+                      minWidth: 0,
                       display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
                     }}>
                       <div style={{
                         display: 'grid',
                         gridTemplateColumns: 'auto auto',
-                        columnGap: '0.35rem', rowGap: '0.1rem',
+                        columnGap: '0.35rem', rowGap: '0.05rem',
                         justifyContent: 'end',
                       }}>
                         {([
@@ -3459,20 +3449,19 @@ export default function TimerPage() {
                           ['Best',  fmtMs(stats.best, false, precision)],
                           ['Ao5',   fmtMs(stats.ao5,  false, precision)],
                           ['Ao12',  fmtMs(stats.ao12, false, precision)],
-                          ['Ao50',  fmtMs(ao50,       false, precision)],
                           ['Ao100', fmtMs(ao100,      false, precision)],
                           ['Count', String(totalCount)],
                         ] as const).map(([label, val]) => (
                           <Fragment key={label}>
                             <span style={{
                               fontSize: '0.62rem', color: C.muted,
-                              textAlign: 'right', lineHeight: 1.3,
+                              textAlign: 'right', lineHeight: 1.25,
                             }}>{label}:</span>
                             <span style={{
                               fontFamily: '"JetBrains Mono", monospace',
                               fontSize: '0.7rem', fontWeight: 600,
                               fontVariantNumeric: 'tabular-nums',
-                              textAlign: 'right', lineHeight: 1.3,
+                              textAlign: 'right', lineHeight: 1.25,
                               color: val === '—' ? C.muted : C.text,
                             }}>{val}</span>
                           </Fragment>
