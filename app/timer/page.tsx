@@ -6694,15 +6694,11 @@ function ToolsViewMenu({ value, onChange, sharedActive }: {
         onClick={() => setOpen(o => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
-        style={{
-          display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
-          background: open ? C.cardAlt : 'transparent', border: 'none',
-          borderRadius: RADIUS_SM, padding: '0.25rem 0.45rem',
-          color: C.text, fontFamily: 'inherit', fontSize: '0.8rem', fontWeight: 500,
-          cursor: 'pointer', maxWidth: '100%',
-        }}
-        onMouseEnter={e => { e.currentTarget.style.background = C.cardAlt; }}
-        onMouseLeave={e => { if (!open) e.currentTarget.style.background = 'transparent'; }}
+        // Same pill as the desktop event picker ("3x3x3 Cube"): shared
+        // ghost-button style, same gap, same hover / open shade.
+        style={{ ...ghostButtonStyle(open), gap: '0.5rem', maxWidth: '100%' }}
+        onMouseEnter={e => { e.currentTarget.style.background = C.border; }}
+        onMouseLeave={e => { if (!open) e.currentTarget.style.background = C.cardAlt; }}
       >
         <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {TOOLS_VIEW_LABELS[value]}
