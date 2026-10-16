@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import TimerProfileMenu from '@/components/timer/TimerProfileMenu';
@@ -9,6 +9,7 @@ import { generateScramble } from '@/lib/scramble';
 import { useSmartTimer } from './useSmartTimer';
 import { type QiyiPacket } from './useQiyiTimer';
 import { useWakeLock } from './useWakeLock';
+import { monotonePath, segmentsOf, type Pt } from './monotonePath';
 import { useAuth } from '@/lib/auth-context';
 import { useLang, type Lang } from '@/lib/i18n';
 import { awardSolvePointIfUnderLimit, awardAo5PbIfEligible } from '@/lib/points';
@@ -103,7 +104,9 @@ const THEMES: Record<ThemeId, Theme> = {
       borderHi: '#3A3A3F',
       text: '#EDEDED',
       muted: '#8B8B90',
-      mutedDim: '#5C5C61',
+      // Tertiary: the dimmest grey that still clears 4.5:1 for small text
+      // on page (#0B0B0C), surface (#141416) and selected (#1C1C1F).
+      mutedDim: '#848489',
       accent: '#EDEDED',
       accent2: '#EDEDED',
       accentDim: '#1C1C1F',
@@ -2559,7 +2562,7 @@ export default function TimerPage() {
                   precision={precision}
                 />
 
-                {/* 2x2 stats in ONE surface: Ao5 | Ao12 / Mean | Count.
+                {/* 2x2 stats in ONE surface: Ao5 | Ao12 / Mean | σ.
                     The 1px grid gap over a border-coloured background
                     draws the dividers between cells. */}
                 <div style={{
@@ -2582,13 +2585,22 @@ export default function TimerPage() {
                     value={fmtMs(stats.mean, false, precision)}
                   />
                   <DesktopStatCard
-                    label="Count"
-                    value={String(solves.length)}
+                    label="σ"
+                    value={stats.stdDev == null ? '—' : (stats.stdDev / 1000).toFixed(2)}
                   />
                 </div>
 
-                {/* Sparkline — last 20 valid solves, no axes */}
-                <Sparkline solves={solves} count={20} c={C} />
+                {/* Session chart — last 20 solves (DNFs skipped), no axes */}
+                <div style={{
+                  background: C.card, border: `1px solid ${C.border}`,
+                  borderRadius: RADIUS, overflow: 'hidden',
+                }}>
+                  <SmoothChart
+                    values={solves.slice(-20).map(s => isDnf(s) ? null : finalMs(s))}
+                    height={88}
+                    c={C}
+                  />
+                </div>
 
                 {/* Session info: count + best/worst on a compact row */}
                 <div style={{
@@ -3224,38 +3236,33 @@ export default function TimerPage() {
                   <div style={{ fontSize: '1rem', fontWeight: 700 }}>Stats</div>
                 </div>
 
-                {/* Chart card — fixed 200px height, last 50 solves only */}
+                {/* Chart card — fixed 160px plot height, fills the width,
+                    last 50 solves only */}
                 <div style={{ padding: '0 0.7rem 0.5rem', flex: '0 0 auto' }}>
                   <div style={{
                     background: C.card, border: `1px solid ${C.border}`,
                     borderRadius: RADIUS, padding: '0.6rem',
                     display: 'flex', flexDirection: 'column', gap: '0.4rem',
                   }}>
-                    <div style={{ height: 200, width: '100%' }}>
-                      <MobileLineChart
-                        all={chartSeries.all.slice(-50)}
-                        best={chartSeries.best.slice(-50)}
-                        ao5={chartSeries.ao5s.slice(-50)}
-                        ao12={chartSeries.ao12s.slice(-50)}
-                        pbIndices={(() => {
-                          // Re-index PB markers relative to the trailing 50 window.
-                          const offset = Math.max(0, chartSeries.all.length - 50);
-                          return chartSeries.pbIndices
-                            .filter(i => i >= offset)
-                            .map(i => i - offset);
-                        })()}
-                        C={C}
-                      />
-                    </div>
+                    <SmoothChart
+                      values={chartSeries.all.slice(-50)}
+                      trends={[
+                        { values: chartSeries.ao5s.slice(-50) },
+                        { values: chartSeries.ao12s.slice(-50), dashed: true },
+                      ]}
+                      height={160}
+                      axis
+                      c={C}
+                    />
                     <div style={{
-                      display: 'flex', flexWrap: 'wrap', gap: '0.6rem',
+                      display: 'flex', flexWrap: 'wrap', gap: '0.75rem',
                       fontSize: '0.68rem', color: C.muted,
-                      paddingTop: '0.2rem', borderTop: `1px solid ${C.border}`,
+                      paddingTop: '0.3rem', borderTop: `1px solid ${C.border}`,
                     }}>
-                      <ChartLegendDot color="#9ca3af" label="Solves" />
-                      <ChartLegendDot color="#fbbf24" label="PB" />
-                      <ChartLegendDot color={C.accent}  label="Ao5" />
-                      <ChartLegendDot color={C.success} label="Ao12" />
+                      <ChartLegendItem swatch="line" color={C.muted} label="Solves" />
+                      <ChartLegendItem swatch="line" color={C.text} opacity={0.6} label="Ao5" />
+                      <ChartLegendItem swatch="dashed" color={C.text} opacity={0.4} label="Ao12" />
+                      <ChartLegendItem swatch="dot" color={C.success} label="Best" />
                     </div>
                   </div>
                 </div>
@@ -4006,45 +4013,128 @@ function DesktopStatCard({ label, value, trend }: {
   );
 }
 
-// Tiny line chart, last N valid solves. No axes/labels — pure spark.
-function Sparkline({ solves, count, c }: { solves: Solve[]; count: number; c: typeof C }) {
-  const valid = solves.filter(s => !isDnf(s)).slice(-count).map(finalMs);
-  if (valid.length < 2) {
+interface ChartTrend {
+  values: (number | null)[];
+  dashed?: boolean;
+}
+
+/** Monochrome session chart shared by the desktop panel and the mobile
+ *  Stats tab. The main series (solve times, ms) is a smooth monotone
+ *  cubic curve in secondary grey with a faint fading area under it; DNFs
+ *  arrive as null and are skipped by connecting their neighbours. Optional
+ *  trend series (Ao5/Ao12) are thinner primary-at-low-opacity curves that
+ *  break into segments where they're null. The best solve gets one small
+ *  green dot.
+ *
+ *  Drawn in real pixels: the width is measured with a ResizeObserver and
+ *  the height is fixed, so lines, dots and labels are never stretched the
+ *  way a preserveAspectRatio="none" viewBox would stretch them. */
+function SmoothChart({ values, trends = [], height, axis = false, c }: {
+  values: (number | null)[];
+  trends?: ChartTrend[];
+  height: number;
+  axis?: boolean;
+  c: typeof C;
+}) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState<number>(0);
+  const fillId = `pv-chart-fill-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
+
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      setWidth(Math.round(w));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const finite = (v: number | null): v is number => v != null && Number.isFinite(v);
+  const validCount = values.filter(finite).length;
+
+  if (validCount < 2) {
     return (
-      <div style={{
-        height: 80, borderRadius: RADIUS,
-        background: c.card, border: `1px solid ${c.border}`,
+      <div ref={wrapRef} style={{
+        height, width: '100%',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        color: c.mutedDim, fontSize: '0.7rem',
+        color: c.mutedDim, fontSize: '0.72rem', textAlign: 'center',
       }}>
-        Last {count} solves will appear here.
+        Need at least 2 solves to chart progress.
       </div>
     );
   }
-  const W = 280, H = 80, pad = 6;
-  const innerW = W - pad * 2;
-  const innerH = H - pad * 2;
-  const minV = Math.min(...valid);
-  const maxV = Math.max(...valid);
-  const span = maxV - minV || 1;
-  const xAt = (i: number) => pad + (i / (valid.length - 1)) * innerW;
-  const yAt = (v: number) => pad + (1 - (v - minV) / span) * innerH;
-  let d = '';
-  valid.forEach((v, i) => {
-    d += (i === 0 ? 'M ' : ' L ') + xAt(i).toFixed(1) + ' ' + yAt(v).toFixed(1);
+
+  const n = values.length;
+  const plotted = [...values, ...trends.flatMap(t => t.values)].filter(finite);
+  const minMs = Math.min(...plotted);
+  const maxMs = Math.max(...plotted);
+  const span = maxMs - minMs || 1000;
+  const yMin = minMs - span * 0.08;
+  const yMax = maxMs + span * 0.08;
+
+  const padL = axis ? 36 : 6, padR = 8, padT = 8, padB = axis ? 8 : 6;
+  const innerW = Math.max(1, width - padL - padR);
+  const innerH = Math.max(1, height - padT - padB);
+  const xAt = (i: number) => padL + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
+  const yAt = (ms: number) => padT + (1 - (ms - yMin) / (yMax - yMin)) * innerH;
+
+  // Main series: drop DNFs and join the remaining points into one curve.
+  const mainPts: Pt[] = [];
+  let bestIdx = -1;
+  values.forEach((v, i) => {
+    if (!finite(v)) return;
+    mainPts.push({ x: xAt(i), y: yAt(v) });
+    if (bestIdx < 0 || v < (values[bestIdx] as number)) bestIdx = i;
   });
-  // Improving if last < first.
-  const improving = valid[valid.length - 1] < valid[0];
-  const stroke = improving ? c.success : c.text;
+  const mainD = monotonePath(mainPts);
+  const bottom = padT + innerH;
+  const areaD = `${mainD}L${mainPts[mainPts.length - 1].x.toFixed(2)},${bottom}L${mainPts[0].x.toFixed(2)},${bottom}Z`;
+
+  const ticks = [yMin + span * 0.08, (yMin + yMax) / 2, yMax - span * 0.08];
+
   return (
-    <div style={{
-      height: 80, borderRadius: 10,
-      background: c.card, border: `1px solid ${c.border}`,
-      padding: 0, overflow: 'hidden',
-    }}>
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%', display: 'block' }}>
-        <path d={d} fill="none" stroke={stroke} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
-      </svg>
+    <div ref={wrapRef} style={{ height, width: '100%' }}>
+      {width > 0 && (
+        <svg width={width} height={height} style={{ display: 'block' }} aria-hidden="true">
+          <defs>
+            <linearGradient id={fillId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={c.muted} stopOpacity={0.12} />
+              <stop offset="100%" stopColor={c.muted} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+
+          {axis && ticks.map((t, i) => (
+            <g key={i}>
+              <line x1={padL} x2={width - padR} y1={yAt(t)} y2={yAt(t)} stroke={c.border} strokeWidth={1} />
+              <text x={4} y={yAt(t) + 3.5} fontSize={10} fill={c.mutedDim} fontFamily='"JetBrains Mono", monospace'>
+                {(t / 1000).toFixed(1)}s
+              </text>
+            </g>
+          ))}
+
+          <path d={areaD} fill={`url(#${fillId})`} stroke="none" />
+
+          {trends.map((tr, ti) =>
+            segmentsOf(tr.values, xAt, yAt).map((seg, si) => (
+              <path
+                key={`${ti}-${si}`}
+                d={monotonePath(seg)}
+                fill="none" stroke={c.text} strokeOpacity={tr.dashed ? 0.4 : 0.6}
+                strokeWidth={1.25} strokeDasharray={tr.dashed ? '4 3' : undefined}
+                strokeLinejoin="round" strokeLinecap="round"
+              />
+            )),
+          )}
+
+          <path d={mainD} fill="none" stroke={c.muted} strokeWidth={1.75} strokeLinejoin="round" strokeLinecap="round" />
+
+          {bestIdx >= 0 && (
+            <circle cx={xAt(bestIdx)} cy={yAt(values[bestIdx] as number)} r={3} fill={c.success} />
+          )}
+        </svg>
+      )}
     </div>
   );
 }
@@ -5121,107 +5211,24 @@ function SortPicker({ sortMode, onChange }: {
   );
 }
 
-function ChartLegendDot({ color, label }: { color: string; label: string }) {
+/** Legend entry matching SmoothChart: a short line, dashed line or dot. */
+function ChartLegendItem({ swatch, color, opacity = 1, label }: {
+  swatch: 'line' | 'dashed' | 'dot';
+  color: string;
+  opacity?: number;
+  label: string;
+}) {
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
-      <span style={{ width: 8, height: 8, borderRadius: 999, background: color, display: 'inline-block' }} />
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+      <svg width={16} height={8} aria-hidden="true" style={{ display: 'block' }}>
+        {swatch === 'dot'
+          ? <circle cx={8} cy={4} r={3} fill={color} />
+          : <line x1={1} x2={15} y1={4} y2={4} stroke={color} strokeOpacity={opacity}
+              strokeWidth={1.75} strokeLinecap="round"
+              strokeDasharray={swatch === 'dashed' ? '3 3' : undefined} />}
+      </svg>
       <span style={{ color: C.muted }}>{label}</span>
     </span>
-  );
-}
-
-function MobileLineChart({
-  all, best, ao5, ao12, pbIndices, C: c,
-}: {
-  all: (number | null)[];
-  best: (number | null)[];
-  ao5:  (number | null)[];
-  ao12: (number | null)[];
-  pbIndices: number[];
-  C: typeof C;
-}) {
-  const n = all.length;
-  if (n < 2) {
-    return (
-      <div style={{
-        height: '100%', minHeight: 160,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        color: c.mutedDim, fontSize: '0.78rem', textAlign: 'center',
-      }}>
-        Need at least 2 solves to chart progress.
-      </div>
-    );
-  }
-
-  // Find global y range (ms, lower = faster).
-  const allValues: number[] = [];
-  [all, ao5, ao12, best].forEach(arr => arr.forEach(v => { if (v != null) allValues.push(v); }));
-  const minMs = Math.min(...allValues);
-  const maxMs = Math.max(...allValues);
-  const pad = (maxMs - minMs) * 0.08 || 100;
-  const yMin = Math.max(0, minMs - pad);
-  const yMax = maxMs + pad;
-
-  // viewBox scaled units. Aspect roughly matches a 200px-tall mobile chart.
-  // preserveAspectRatio="none" stretches X/Y independently to fill the parent
-  // box exactly; for line charts the "distortion" only changes line angles,
-  // not data correctness.
-  const W = 400, H = 200, padL = 28, padR = 8, padT = 8, padB = 18;
-  const innerW = W - padL - padR;
-  const innerH = H - padT - padB;
-  const xAt = (i: number) => padL + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
-  const yAt = (ms: number) => padT + (yMax === yMin ? innerH / 2 : (1 - (ms - yMin) / (yMax - yMin)) * innerH);
-
-  const pathFor = (arr: (number | null)[]) => {
-    let d = '';
-    let started = false;
-    arr.forEach((v, i) => {
-      if (v == null) { started = false; return; }
-      const x = xAt(i).toFixed(1);
-      const y = yAt(v).toFixed(1);
-      d += (started ? ' L ' : 'M ') + x + ' ' + y;
-      started = true;
-    });
-    return d;
-  };
-
-  // Y-axis ticks (3 levels)
-  const ticks = [yMin, (yMin + yMax) / 2, yMax];
-  const fmtTick = (ms: number) => (ms / 1000).toFixed(1) + 's';
-
-  return (
-    <svg
-      viewBox={`0 0 ${W} ${H}`}
-      preserveAspectRatio="none"
-      style={{ width: '100%', height: '100%', display: 'block' }}
-    >
-      {/* horizontal gridlines + tick labels */}
-      {ticks.map((t, i) => (
-        <g key={i}>
-          <line
-            x1={padL} x2={W - padR}
-            y1={yAt(t)} y2={yAt(t)}
-            stroke={c.border} strokeWidth={1}
-          />
-          <text x={4} y={yAt(t) + 3} fontSize={9} fill={c.mutedDim} fontFamily="monospace">
-            {fmtTick(t)}
-          </text>
-        </g>
-      ))}
-
-      {/* Series — order: everything (back), ao12, ao5, best (front) */}
-      <path d={pathFor(all)}  fill="none" stroke="#9ca3af" strokeWidth={1}   strokeLinejoin="round" strokeLinecap="round" opacity={0.55} />
-      <path d={pathFor(ao12)} fill="none" stroke={c.success} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
-      <path d={pathFor(ao5)}  fill="none" stroke={c.accent}  strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
-      <path d={pathFor(best)} fill="none" stroke="#fbbf24"  strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
-
-      {/* PB markers — gold dots */}
-      {pbIndices.map(i => {
-        const v = all[i];
-        if (v == null) return null;
-        return <circle key={i} cx={xAt(i)} cy={yAt(v)} r={2.4} fill="#fbbf24" />;
-      })}
-    </svg>
   );
 }
 
