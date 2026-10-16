@@ -155,9 +155,15 @@ try {
   await C.page.getByTestId(`member-${studentA.uid}`).waitFor();
   check('approved student moves to the member list', await C.page.getByTestId(`member-${studentA.uid}`).getByText('Сурагч Болд').isVisible());
   await C.page.screenshot({ path: path.join(OUT, 'coach-room-member.png'), fullPage: true });
-  await S.page.getByRole('button', { name: 'Шинэчлэх' }).click();
+  // No refresh: the student's list is live.
   await S.page.getByTestId('my-rooms').getByText('Нэгдсэн').waitFor();
-  check('student: status becomes "Нэгдсэн"', true);
+  check('student: status becomes "Нэгдсэн" live (no refresh)', true);
+  await S.page.getByText('хүсэлт илгээлээ', { exact: false }).waitFor({ state: 'detached' });
+  check('the green "хүсэлт илгээлээ" message is gone after approval', true);
+  check('no "Шинэчлэх" button any more', await S.page.getByRole('button', { name: 'Шинэчлэх' }).count() === 0);
+  // (The seeded coach is *named* "Coach Батаа" — only the UI labels changed.)
+  check('student hub labels say "Багш", not "Coach"', await S.page.evaluate(() => !/Coach(:|-ийн| баталгаа)/.test(document.body.innerText)) &&
+    await S.page.getByText('Багш: Coach Батаа').isVisible());
 
   console.log('\n=== coach removes, student re-requests, coach re-adds ===');
   const memberRow = C.page.getByTestId(`member-${studentA.uid}`);
@@ -167,7 +173,6 @@ try {
   check('removed student disappears from the coach view', true);
   const removedDoc = (await db.doc(`rooms/${(await C.page.url()).split('/').pop()}/members/${studentA.uid}`).get());
   check('membership kept with status removed (not deleted)', removedDoc.exists && removedDoc.get('status') === 'removed');
-  await S.page.getByRole('button', { name: 'Шинэчлэх' }).click();
   await S.page.getByTestId('my-rooms').getByText('Хасагдсан').waitFor();
   check('student still sees the room in their own list as "Хасагдсан"', true);
   await S.page.getByLabel('Өрөөний код').fill(code1);

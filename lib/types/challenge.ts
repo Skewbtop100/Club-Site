@@ -1,5 +1,6 @@
 // Types and constants for the coach Challenge system (docs/challenge-plan.md).
-// Phase 2 covers coaches, rooms, room codes and memberships only.
+// Phase 2: coaches, rooms, room codes, memberships. Phase 3: challenges
+// and assignments.
 //
 // Shared by client code, server routes (lib/server/rooms.ts) and tests, so
 // it must stay free of firebase / firebase-admin imports.
@@ -68,3 +69,53 @@ export function cleanRoomName(input: unknown): string | null {
 }
 
 export type MemberAction = 'approve' | 'reject' | 'remove';
+
+// ── Phase 3: challenges and assignments ───────────────────────────────────
+
+export type ChallengeMetric = 'single' | 'mo3' | 'ao5' | 'ao12' | 'ao25' | 'ao50' | 'ao100';
+export type AssignmentStatus = 'assigned' | 'in-progress' | 'completed' | 'archived';
+
+/** The template a challenge is made of (plan A3). Copied into every
+ *  assignment so the student side never reads challenges/*. */
+export interface ChallengeTemplate {
+  event: string;
+  metric: ChallengeMetric;
+  /** Target in ms, a multiple of 10 (centiseconds); passing is strict "<". */
+  targetMs: number;
+  /** M — complete blocks in a row, 1 … 100. */
+  streak: number;
+  /** Coach's title, or the generated one ("2x2 Ao5 < 2.00 × 5"). */
+  title: string;
+  /** Optional note from the coach, '' when none. */
+  note: string;
+}
+
+/** challenges/{id} — written only by the server routes (app/api/challenge/*). */
+export interface Challenge extends ChallengeTemplate {
+  id: string;
+  coachUid: string;
+  roomId: string;
+  /** Set by the server at the first start (phase 4); then no edit/delete. */
+  locked: boolean;
+  duplicatedFrom: string | null;
+  archived: boolean;
+  createdAt: number | null;
+}
+
+/** challengeAssignments/{challengeId}_{studentUid} — server-written only. */
+export interface ChallengeAssignment {
+  id: string;
+  challengeId: string;
+  roomId: string;
+  coachUid: string;
+  studentUid: string;
+  studentName: string;
+  template: ChallengeTemplate;
+  status: AssignmentStatus;
+  /** false while the student's membership is 'removed' (plan decision 24):
+   *  the coach's reads filter on it. Kept in step by lib/server/rooms.ts. */
+  visibleToCoach: boolean;
+  firstStartedAt: number | null;
+  completedAt: number | null;
+  assignedAt: number | null;
+}

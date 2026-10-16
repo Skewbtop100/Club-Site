@@ -4,8 +4,8 @@ import { verifyBearer, AdminNotConfiguredError } from './firebase-admin';
 import { RoomError } from './rooms';
 
 /**
- * Shared wrapper for app/api/rooms/* — the same shape as the judge and
- * staged-sync routes: a verified `Authorization: Bearer <ID token>` caller
+ * Shared wrapper for app/api/rooms/* and app/api/challenge/* — the same
+ * shape as the judge and staged-sync routes: a verified `Authorization: Bearer <ID token>` caller
  * (401 otherwise), never a judge session (403 — a judge is not a club
  * account), JSON body, RoomError → its status, missing Admin env → 503.
  */
@@ -28,7 +28,7 @@ export function roomsRoute(
       if (e instanceof AdminNotConfiguredError) {
         return NextResponse.json({ error: 'not-configured', detail: e.message }, { status: 503 });
       }
-      console.error(`[api/rooms/${name}]`, e);
+      console.error(`[api/${name}]`, e);
       return NextResponse.json({ error: 'server-error' }, { status: 500 });
     }
   };

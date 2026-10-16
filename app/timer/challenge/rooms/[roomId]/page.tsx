@@ -1,9 +1,11 @@
 'use client';
 
-// /timer/challenge/rooms/[roomId] (docs/challenge-plan.md, phase 2).
+// /timer/challenge/rooms/[roomId] (docs/challenge-plan.md, phases 2–3).
 //   Coach of the room: code (copy / regenerate), rename, pending requests
-//   (approve / reject), members (remove). Members are live while this page
-//   is open; everything else is a one-time read.
+//   (approve / reject), members (remove), and challenges (create, assign,
+//   edit until started, duplicate, delete — components/timer/challenge/
+//   CoachChallenges.tsx). Members are live while this page is open;
+//   everything else is a one-time read.
 //   Anyone else: their own status in the room, or "not found".
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
@@ -17,6 +19,7 @@ import {
   Avatar, Button, Card, MONO, Muted, Note, PageShell, Row, StatusChip, T, TextInput,
 } from '@/components/timer/challenge/ui';
 import SignInPrompt from '@/components/timer/challenge/SignInPrompt';
+import CoachChallenges from '@/components/timer/challenge/CoachChallenges';
 
 const BACK = { href: '/timer/challenge', label: 'Challenge' };
 
@@ -56,7 +59,7 @@ export default function RoomPage() {
         <Card testId="room-student-view">
           {myMembership ? (
             <>
-              <Muted>Coach: {myMembership.coachName}</Muted>
+              <Muted>Багш: {myMembership.coachName}</Muted>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <Muted>Таны төлөв:</Muted>
                 <StatusChip
@@ -193,7 +196,9 @@ function CoachRoomView({ room, onRoomChange }: { room: Room; onRoomChange: (r: R
         <Note text="Хасагдсан сурагчийн түүх хадгалагдана. Дахин нэмэхийн тулд сурагч кодоор дахин хүсэлт илгээж, та зөвшөөрнө." />
       </Card>
 
-      <span style={{ color: T.dim, fontSize: '0.75rem' }}>Coach: {room.coachName}</span>
+      <CoachChallenges roomId={room.id} coachUid={room.coachUid} members={members} />
+
+      <span style={{ color: T.dim, fontSize: '0.75rem' }}>Багш: {room.coachName}</span>
     </PageShell>
   );
 }

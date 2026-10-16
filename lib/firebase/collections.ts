@@ -42,6 +42,9 @@ export const COL = {
   COACHES:          'coaches',
   ROOMS:            'rooms',
   ROOM_MEMBERS:     'members',
+  // Phase 3: both server-written only (app/api/challenge/*).
+  CHALLENGES:       'challenges',
+  CHALLENGE_ASSIGNMENTS: 'challengeAssignments',
 } as const;
 
 export const DOC = {

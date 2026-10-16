@@ -280,6 +280,37 @@ service cloud.firestore {
       allow list: if isSignedIn() && resource.data.uid == request.auth.uid;
     }
 
+    // ─── Coach challenge: challenges and assignments (phase 3) ───────────────
+    //
+    // Every WRITE goes through app/api/challenge/* (create, update, delete,
+    // duplicate, assign, unassign) with the Admin SDK. No client — not the
+    // coach, not the admin — may create, edit, lock/unlock, assign or touch
+    // progress. The edit lock after the first start (decision 9) is
+    // enforced in lib/server/challenges.ts, which refuses update/delete
+    // while `locked` is true.
+    //
+    // challenges/{id} — read by its coach only. Students never read it: the
+    // template is copied into their assignment.
+    match /challenges/{challengeId} {
+      allow read: if isSignedIn() && resource.data.coachUid == request.auth.uid;
+      allow write: if false;
+    }
+
+    // challengeAssignments/{challengeId}_{studentUid}
+    //   the student — always, removed or not (plan N4);
+    //   the coach   — only while visibleToCoach == true, i.e. the student's
+    //                 membership is not 'removed' (decision 24). The server
+    //                 flips it on remove / re-approve (lib/server/rooms.ts);
+    //                 a rule can't get() the membership per document in a
+    //                 list query, hence the copied flag. The coach's queries
+    //                 must filter visibleToCoach == true.
+    match /challengeAssignments/{assignmentId} {
+      allow read: if isSignedIn() &&
+                     (resource.data.studentUid == request.auth.uid ||
+                      (resource.data.coachUid == request.auth.uid && resource.data.visibleToCoach == true));
+      allow write: if false;
+    }
+
     // ─── Virtual Competitions ─────────────────────────────────────────────────
 
     match /virtualCompetitions/{compId} {

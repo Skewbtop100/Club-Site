@@ -161,14 +161,23 @@ export async function decideMember(callerUid: string, roomId: unknown, memberUid
   const db = adminDb();
   const { ref } = await ownedRoom(db, callerUid, roomId);
   const memberRef = ref.collection('members').doc(memberUid);
+  // The student's assignments in this room: hidden from the coach while
+  // removed, visible again on re-add (decisions 10, 24 — phase 3).
+  const assignmentsQuery = db.collection('challengeAssignments')
+    .where('roomId', '==', ref.id).where('studentUid', '==', memberUid);
   return db.runTransaction(async (tx) => {
     const member = await tx.get(memberRef);
     if (!member.exists) throw new RoomError(404, 'no-member');
     const status = member.get('status') as MemberStatus;
     const act = action as MemberAction;
+    const assignments = act === 'reject' ? null : await tx.get(assignmentsQuery);
+    const setVisible = (visibleToCoach: boolean) => {
+      for (const a of assignments?.docs ?? []) tx.update(a.ref, { visibleToCoach });
+    };
     if (act === 'approve') {
       if (status !== 'pending') throw new RoomError(409, 'not-pending');
       tx.update(memberRef, { status: 'active', decidedAt: FieldValue.serverTimestamp() });
+      setVisible(true);
       return { status: 'active' as const };
     }
     if (act === 'reject') {
@@ -178,6 +187,7 @@ export async function decideMember(callerUid: string, roomId: unknown, memberUid
     }
     if (status !== 'active') throw new RoomError(409, 'not-active');
     tx.update(memberRef, { status: 'removed', decidedAt: FieldValue.serverTimestamp() });
+    setVisible(false);
     return { status: 'removed' as const };
   });
 }

@@ -73,14 +73,14 @@ export function Button({ kind = 'primary', disabled, onClick, children, type = '
   );
 }
 
-export function TextInput({ value, onChange, placeholder, label, mono, maxLength, id }: {
+export function TextInput({ value, onChange, placeholder, label, mono, maxLength, id, inputMode }: {
   value: string; onChange: (v: string) => void; placeholder?: string; label: string;
-  mono?: boolean; maxLength?: number; id: string;
+  mono?: boolean; maxLength?: number; id: string; inputMode?: 'text' | 'decimal' | 'numeric';
 }) {
   return (
     <input
       id={id} aria-label={label} value={value} placeholder={placeholder} maxLength={maxLength}
-      autoComplete="off" spellCheck={false}
+      autoComplete="off" spellCheck={false} inputMode={inputMode}
       onChange={e => onChange(e.target.value)}
       style={{
         flex: '1 1 auto', minWidth: 0,
@@ -142,4 +142,50 @@ export function Row({ children, testId }: { children: React.ReactNode; testId?: 
 
 export function Muted({ children }: { children: React.ReactNode }) {
   return <span style={{ color: T.muted, fontSize: '0.8rem' }}>{children}</span>;
+}
+
+/** Native select with the arrow removed (no chevrons on popup triggers). */
+export function Select<V extends string>({ id, label, value, onChange, options }: {
+  id: string; label: string; value: V; onChange: (v: V) => void;
+  options: readonly { value: V; label: string }[];
+}) {
+  return (
+    <select
+      id={id} aria-label={label} value={value}
+      onChange={e => onChange(e.target.value as V)}
+      style={{
+        width: '100%', appearance: 'none', WebkitAppearance: 'none', colorScheme: 'dark',
+        background: T.bg, color: T.text,
+        border: `1px solid ${T.borderHi}`, borderRadius: RADIUS_SM,
+        padding: '0.5rem 0.7rem', outline: 'none', fontFamily: 'inherit', fontSize: '0.9rem',
+        cursor: 'pointer',
+      }}
+    >
+      {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  );
+}
+
+/** A visible caption above a control (the control keeps its aria-label). */
+export function Field({ caption, htmlFor, children, grow = 1 }: {
+  caption: string; htmlFor: string; children: React.ReactNode; grow?: number;
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', flex: `${grow} 1 8rem`, minWidth: 0 }}>
+      <label htmlFor={htmlFor} style={{ color: T.muted, fontSize: '0.75rem' }}>{caption}</label>
+      <div style={{ display: 'flex' }}>{children}</div>
+    </div>
+  );
+}
+
+export function Checkbox({ checked, onChange, label, testId }: {
+  checked: boolean; onChange: (v: boolean) => void; label: string; testId?: string;
+}) {
+  return (
+    <label data-testid={testId} style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', cursor: 'pointer', minWidth: 0, padding: '0.2rem 0' }}>
+      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)}
+        style={{ accentColor: T.text, width: 16, height: 16, flexShrink: 0 }} />
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.88rem' }}>{label}</span>
+    </label>
+  );
 }

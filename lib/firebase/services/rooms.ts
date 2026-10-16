@@ -52,12 +52,21 @@ export async function fetchCoachRooms(uid: string): Promise<Room[]> {
     .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
 }
 
-/** The user's own memberships in every room (one collection-group query). */
-export async function fetchMyMemberships(uid: string): Promise<RoomMember[]> {
-  const snap = await getDocs(query(collectionGroup(db, COL.ROOM_MEMBERS), where('uid', '==', uid)));
-  return snap.docs
-    .map(d => toMember(d.data()))
-    .sort((a, b) => (b.requestedAt ?? 0) - (a.requestedAt ?? 0));
+/** The user's own memberships in every room (one collection-group query),
+ *  live — the hub shows an approval the moment it happens. One read per
+ *  membership on open, then one per change. */
+export function subscribeMyMemberships(
+  uid: string,
+  onData: (members: RoomMember[]) => void,
+  onError?: (err: Error) => void,
+): () => void {
+  return onSnapshot(
+    query(collectionGroup(db, COL.ROOM_MEMBERS), where('uid', '==', uid)),
+    (snap) => onData(snap.docs
+      .map(d => toMember(d.data()))
+      .sort((a, b) => (b.requestedAt ?? 0) - (a.requestedAt ?? 0))),
+    (err) => onError?.(err),
+  );
 }
 
 /** The user's own membership in one room (readable even when removed). */
@@ -95,10 +104,12 @@ export class RoomsApiError extends Error {
   constructor(readonly status: number, readonly code: string) { super(code); }
 }
 
-async function post<T>(route: string, body: object): Promise<T> {
+/** POST to one of our server routes (`rooms/join`, `challenge/create`, …)
+ *  with the caller's ID token; a refusal throws RoomsApiError(code). */
+export async function postApi<T>(route: string, body: object): Promise<T> {
   const user = auth.currentUser;
   if (!user) throw new RoomsApiError(401, 'unauthenticated');
-  const res = await fetch(`/api/rooms/${route}`, {
+  const res = await fetch(`/api/${route}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${await user.getIdToken()}` },
     body: JSON.stringify(body),
@@ -109,15 +120,15 @@ async function post<T>(route: string, body: object): Promise<T> {
 }
 
 export const createRoom = (name: string) =>
-  post<{ roomId: string; code: string; name: string }>('create', { name });
+  postApi<{ roomId: string; code: string; name: string }>('rooms/create', { name });
 export const renameRoom = (roomId: string, name: string) =>
-  post<{ name: string }>('rename', { roomId, name });
+  postApi<{ name: string }>('rooms/rename', { roomId, name });
 export const regenerateRoomCode = (roomId: string) =>
-  post<{ code: string }>('regenerate-code', { roomId });
+  postApi<{ code: string }>('rooms/regenerate-code', { roomId });
 export const joinRoomByCode = (code: string) =>
-  post<{ roomId: string; roomName: string; status: MemberStatus }>('join', { code });
+  postApi<{ roomId: string; roomName: string; status: MemberStatus }>('rooms/join', { code });
 export const decideMember = (roomId: string, uid: string, action: MemberAction) =>
-  post<{ status: MemberStatus | 'deleted' }>('member', { roomId, uid, action });
+  postApi<{ status: MemberStatus | 'deleted' }>('rooms/member', { roomId, uid, action });
 
 /** Mongolian message for an API error code. */
 export function roomsErrorText(e: unknown): string {
@@ -127,8 +138,8 @@ export function roomsErrorText(e: unknown): string {
     case 'no-room':         return 'Ийм кодтой өрөө олдсонгүй.';
     case 'own-room':        return 'Энэ бол таны өөрийн өрөө.';
     case 'bad-name':        return 'Өрөөний нэр 1–40 тэмдэгт байна.';
-    case 'not-coach':       return 'Зөвхөн coach өрөө үүсгэнэ.';
-    case 'not-room-coach':  return 'Энэ өрөөг зөвхөн түүний coach удирдана.';
+    case 'not-coach':       return 'Зөвхөн багш өрөө үүсгэнэ.';
+    case 'not-room-coach':  return 'Энэ өрөөг зөвхөн түүний багш удирдана.';
     case 'no-member':       return 'Сурагч олдсонгүй.';
     case 'not-pending':     return 'Хүсэлт аль хэдийн шийдэгдсэн байна.';
     case 'not-active':      return 'Сурагч өрөөнд байхгүй байна.';

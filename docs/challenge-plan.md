@@ -472,6 +472,19 @@ An RTDB alternative is still possible (the project already uses RTDB for presenc
 - **Indexes:** `challenges(coachUid, createdAt)`, `challengeAssignments(studentUid, assignedAt)`.
 - **Tests:** template validation unit tests; rules part 2.
 - **What the user sees:** the coach builds "2x2 Ao5 < 2.00 × 5", ticks several students, and can edit it until it's first started (then only duplicate). Students see it as "Эхлээгүй".
+- **As built (2026-10-16).** These points replace the Phase 3 parts of B2/B3 where they differ:
+  - **All challenge and assignment writes are server routes:** `app/api/challenge/{create,update,delete,duplicate,assign,unassign}`, built on `lib/server/challenges.ts`. Clients have **no** write access to `challenges` or `challengeAssignments` (rules: `allow write: if false`). This is stricter than B3's client-write rules, as for rooms in phase 2.
+  - **Edit lock:** `update` and `delete` return `409 locked` when `challenges.locked == true` **or** any assignment has started (`firstStartedAt` set or status not `assigned`). Phase 4's start route must set `locked: true` in the same transaction that starts the first session.
+  - **Delete** (not in B3, which said archive only): allowed only while never started; it removes the challenge and its unstarted assignments. **Unassign:** deletes one assignment, only while it has never started. **Duplicate:** a new unlocked, unassigned copy (`duplicatedFrom` set), allowed locked or not; the UI opens it straight in the edit form.
+  - **Assign:** all-or-nothing. Every uid must be an **active** member (`409 not-active-member`). Students already assigned are skipped (deterministic id). Assigning more students to a locked challenge is allowed, since the template is fixed. Cap: 200 assignments per challenge, so an edit fits in one transaction.
+  - **Extra fields:** `challenges.note` and `updatedAt`. The assignment's `template` also carries `note`. `title` is the coach's title or the generated one.
+  - **`challengeAssignments.visibleToCoach`** (new): a rule can't `get()` the membership per document in a list query, so the coach's read is `coachUid == me && visibleToCoach == true`. `lib/server/rooms.ts` sets it `false` on remove and `true` on approve (re-add), in the same transaction. The student always reads their own (N4).
+  - **Events:** the timer's event ids except `333fm` and `333mbf`, since their result isn't a single time (`CHALLENGE_EVENTS` in `lib/challenge.ts`). Target input: `2`, `2.5`, `2.00`, `1:05.30`, `65.3`; at most 2 decimals; max 59:59.99.
+  - **Status words:** `assigned` → "Оноогдсон", `in-progress` → "Идэвхтэй", `completed` → "Биелсэн". The student sees "Багш эхлүүлэхийг хүлээнэ үү" until the coach starts it.
+  - **Hub reads (changes B2's table):** the student's memberships and assignments are **onSnapshot** listeners while the hub is open (one read per document on open, then one per change), so an approval or a new assignment shows at once. The "Шинэчлэх" button is gone. The coach room page reads challenges and assignments once and re-reads after each action.
+  - **Wording:** student- and coach-facing text says "Багш", not "Coach". The admin users tab keeps "Coach эрх".
+  - **Indexes:** as planned, `challenges(coachUid, createdAt desc)` and `challengeAssignments(studentUid, assignedAt desc)`. The coach's room queries are equality-only and need no composite index.
+  - **Tests:** `npm run test:challenge` (unit), `tests/firestore-rules/challenge.test.mjs` (in `test:rules`), `tests/server-routes/challenge-routes.test.mjs` (in `test:routes`), `npm run test:e2e:challenges` (Playwright coach + 3 students).
 
 **Phase 4: challenge mode on the timer**
 - **Add:**
