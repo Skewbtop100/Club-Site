@@ -85,25 +85,30 @@ interface Theme {
 // stays consistent for users tracking 8s/12s/15s thresholds.
 const ORANGE_WARNING = '#f97316';
 
+// Monochrome design tokens. There is deliberately no accent colour: the
+// `accent` slot is the primary text colour and `accentDim` is the
+// surface-selected fill, so "selected" / "primary" reads through contrast,
+// not hue. `cardAlt` = surface hover/selected, `borderHi` = selected border.
+// Colour is reserved for semantics: success (PB / best) and danger (DNF/+2).
 const THEMES: Record<ThemeId, Theme> = {
   black: {
     id: 'black',
     name: 'Black',
-    preview: '#0a0a0a',
+    preview: '#0B0B0C',
     colors: {
-      bg: '#0a0a0a',
-      card: '#1a1a1a',
-      cardAlt: '#242424',
-      border: 'rgba(255,255,255,0.1)',
-      borderHi: 'rgba(167,139,250,0.4)',
-      text: '#ffffff',
-      muted: 'rgba(255,255,255,0.55)',
-      mutedDim: 'rgba(255,255,255,0.3)',
-      accent: '#A78BFA',
-      accent2: '#c4b5fd',
-      accentDim: 'rgba(167,139,250,0.15)',
+      bg: '#0B0B0C',
+      card: '#141416',
+      cardAlt: '#1C1C1F',
+      border: '#232326',
+      borderHi: '#3A3A3F',
+      text: '#EDEDED',
+      muted: '#8B8B90',
+      mutedDim: '#5C5C61',
+      accent: '#EDEDED',
+      accent2: '#EDEDED',
+      accentDim: '#1C1C1F',
       success: '#34D399',
-      danger: '#f87171',
+      danger: '#E5484D',
       warning: '#fbbf24',
       warn: '#fbbf24',
       orange: ORANGE_WARNING,
@@ -118,13 +123,13 @@ const THEMES: Record<ThemeId, Theme> = {
       card: '#f5f5f7',
       cardAlt: '#ebebed',
       border: 'rgba(0,0,0,0.1)',
-      borderHi: 'rgba(124,58,237,0.4)',
+      borderHi: 'rgba(0,0,0,0.25)',
       text: '#111111',
       muted: 'rgba(0,0,0,0.55)',
       mutedDim: 'rgba(0,0,0,0.3)',
-      accent: '#7c3aed',
-      accent2: '#5b21b6',
-      accentDim: 'rgba(124,58,237,0.12)',
+      accent: '#111111',
+      accent2: '#111111',
+      accentDim: 'rgba(0,0,0,0.06)',
       success: '#059669',
       danger: '#dc2626',
       warning: '#d97706',
@@ -209,6 +214,10 @@ const THEMES: Record<ThemeId, Theme> = {
   },
 };
 
+// Single corner radius for cards/buttons, smaller one for chips.
+const RADIUS = 10;
+const RADIUS_SM = 8;
+
 const DEFAULT_THEME_ID: ThemeId = 'black';
 const THEME_KEY = 'pv.timer.theme';
 
@@ -219,6 +228,23 @@ const THEME_KEY = 'pv.timer.theme';
 // reference each theme switch (module-scope helpers like ModalShell capture
 // the binding once at definition time).
 const C: ThemeColors = { ...THEMES[DEFAULT_THEME_ID].colors };
+
+/** Neutral ghost button (event picker, New Scramble, …): surface-selected
+ *  fill, primary text, no border; callers step the fill to C.border on
+ *  hover. `pressed` keeps the hover shade while a popover is open. */
+function ghostButtonStyle(pressed: boolean): React.CSSProperties {
+  return {
+    background: pressed ? C.border : C.cardAlt,
+    color: C.text,
+    border: 'none',
+    borderRadius: RADIUS,
+    padding: '0.45rem 1rem',
+    fontSize: '0.85rem', fontWeight: 500, fontFamily: 'inherit',
+    cursor: 'pointer',
+    display: 'inline-flex', alignItems: 'center',
+    transition: 'background 0.15s ease',
+  };
+}
 
 // ── Events ──────────────────────────────────────────────────────────────────
 interface EventDef { id: string; name: string; short: string }
@@ -1873,13 +1899,6 @@ export default function TimerPage() {
     return C.text;
   })();
 
-  // Whether to paint the green glow behind the digits — same conditions
-  // as a green color above (armed-ready, stop-flash, BT get-set, PB).
-  const timerGlow =
-    (timer.state === 'armed' && timer.armedReady) ||
-    (timer.state === 'stopped' && (timer.stopFlashing || lastSolveIsPB)) ||
-    (ganConnected && gan.liveState === 'getSet');
-
   // ── Render ───────────────────────────────────────────────────────────────
   // Focus mode: fade the surrounding chrome (sidebars, scramble, stats,
   // nav, BT indicator, Ao5 projection) for the entire inspection →
@@ -1923,13 +1942,6 @@ export default function TimerPage() {
           >✕</button>
         </div>
       )}
-
-      {/* Subtle grain background */}
-      <div style={{
-        position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none',
-        backgroundImage: 'radial-gradient(rgba(255,255,255,0.025) 1px, transparent 1px)',
-        backgroundSize: '3px 3px', opacity: 0.7,
-      }} />
 
       {/* Fullscreen tap-to-stop overlay. Mounted on `overlayActive`
           rather than `timer.state === 'running'` so it lingers ~300 ms
@@ -2009,7 +2021,7 @@ export default function TimerPage() {
         <aside className="pv-sidebar" style={{
           flex: '0 0 260px',
           background: C.card, border: `1px solid ${C.border}`,
-          borderRadius: 18,
+          borderRadius: RADIUS,
           display: 'flex', flexDirection: 'column',
           minHeight: 0,
           overflow: 'hidden',
@@ -2026,23 +2038,19 @@ export default function TimerPage() {
               aria-label="Settings"
               title="Settings"
               style={{
-                width: 36, height: 36, borderRadius: 10,
-                background: 'transparent', border: `1px solid ${C.border}`,
+                width: 36, height: 36, borderRadius: RADIUS,
+                background: 'transparent', border: 'none',
                 color: C.muted, cursor: 'pointer', fontSize: '1.05rem',
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                transition: 'background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s',
+                transition: 'background 0.15s, color 0.15s',
               }}
               onMouseEnter={e => {
-                e.currentTarget.style.background = C.accentDim;
-                e.currentTarget.style.color = C.accent;
-                e.currentTarget.style.borderColor = C.borderHi;
-                e.currentTarget.style.boxShadow = '0 0 0 3px rgba(167,139,250,0.12)';
+                e.currentTarget.style.background = C.cardAlt;
+                e.currentTarget.style.color = C.text;
               }}
               onMouseLeave={e => {
                 e.currentTarget.style.background = 'transparent';
                 e.currentTarget.style.color = C.muted;
-                e.currentTarget.style.borderColor = C.border;
-                e.currentTarget.style.boxShadow = 'none';
               }}
             >⚙</button>
             {/* Race — matches the cog's 36×36 icon-only style. Icon-only
@@ -2054,14 +2062,14 @@ export default function TimerPage() {
               aria-label="Multiplayer Racing"
               title="Multiplayer Racing"
               style={{
-                width: 36, height: 36, borderRadius: 10,
-                background: 'transparent', border: `1px solid ${C.border}`,
+                width: 36, height: 36, borderRadius: RADIUS,
+                background: 'transparent', border: 'none',
                 color: C.muted, cursor: 'pointer',
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+                transition: 'background 0.15s, color 0.15s',
               }}
-              onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; e.currentTarget.style.borderColor = C.borderHi; }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.muted; e.currentTarget.style.borderColor = C.border; }}
+              onMouseEnter={e => { e.currentTarget.style.background = C.cardAlt; e.currentTarget.style.color = C.text; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.muted; }}
             >
               <IconUsers size={18} />
             </button>
@@ -2088,9 +2096,11 @@ export default function TimerPage() {
               aria-haspopup="listbox"
               style={{
                 width: '100%',
-                background: sessionDropdownOpen ? C.accentDim : C.cardAlt,
-                border: `1px solid ${sessionDropdownOpen ? C.borderHi : C.border}`,
-                borderRadius: 10,
+                // Fill only — it sits inside the sidebar panel, so no
+                // second border.
+                background: C.cardAlt,
+                border: 'none',
+                borderRadius: RADIUS,
                 padding: '0.55rem 0.7rem',
                 display: 'grid', gridTemplateColumns: 'auto 1fr auto',
                 alignItems: 'center', gap: '0.55rem',
@@ -2100,7 +2110,7 @@ export default function TimerPage() {
               }}
             >
               <span style={{
-                color: sessionDropdownOpen ? C.accent : C.muted,
+                color: sessionDropdownOpen ? C.text : C.muted,
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                 transition: 'color 0.15s ease',
               }}>
@@ -2111,15 +2121,15 @@ export default function TimerPage() {
                 </svg>
               </span>
               <span style={{
-                fontSize: '0.9rem', fontWeight: 700,
-                color: sessionDropdownOpen ? C.accent : C.text,
+                fontSize: '0.9rem', fontWeight: 600,
+                color: C.text,
                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                 transition: 'color 0.15s ease',
               }}>
                 {currentSession?.name ?? 'Default'}
               </span>
               <span style={{
-                color: sessionDropdownOpen ? C.accent : C.mutedDim,
+                color: sessionDropdownOpen ? C.text : C.mutedDim,
                 fontSize: '0.62rem',
                 transform: sessionDropdownOpen ? 'rotate(180deg)' : 'none',
                 transition: 'transform 0.18s ease, color 0.15s ease',
@@ -2149,8 +2159,8 @@ export default function TimerPage() {
             padding: '0.4rem 0.7rem 0.5rem', gap: '0.5rem',
           }}>
             <span style={{
-              fontSize: '0.78rem', letterSpacing: '0.06em',
-              color: C.muted, fontWeight: 700,
+              fontSize: '0.78rem',
+              color: C.muted, fontWeight: 600,
             }}>
               Эвлүүлэлт ({solves.length})
             </span>
@@ -2179,17 +2189,11 @@ export default function TimerPage() {
                   const priorSet = solves.slice(0, idx - 1).filter(x => !isDnf(x));
                   const priorBest = priorSet.length ? Math.min(...priorSet.map(finalMs)) : Infinity;
                   const isPB = !dnf && finalMs(s) < priorBest;
-                  // The most recent solve sits at the top of the reversed list
-                  // (i === 0). It gets a faint lavender wash so the user can
-                  // spot it at a glance without it competing with PB green.
-                  const isLatest = i === 0;
                   const hovered  = hoveredSolveId === s.id;
-                  // Hover wins; otherwise PB tint, latest tint, then base.
-                  const rowBg = hovered
-                    ? 'rgba(255,255,255,0.05)'
-                    : isPB     ? 'rgba(52,211,153,0.06)'
-                    : isLatest ? 'rgba(167,139,250,0.06)'
-                    :            C.cardAlt;
+                  // One neutral row fill (no border — rows sit inside the
+                  // sidebar panel); hover steps one shade lighter. PB is
+                  // signalled by green time text + "PB" badge only.
+                  const rowBg = hovered ? C.border : C.cardAlt;
                   return (
                     <div
                       key={s.id}
@@ -2201,9 +2205,8 @@ export default function TimerPage() {
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         padding: '0.5rem 0.7rem',
                         minHeight: 48,
-                        borderRadius: 10,
+                        borderRadius: RADIUS,
                         background: rowBg,
-                        borderLeft: isPB ? `3px solid ${C.success}` : '3px solid transparent',
                         cursor: 'pointer',
                         transition: 'background 0.15s ease',
                       }}
@@ -2215,8 +2218,7 @@ export default function TimerPage() {
                       <span style={{
                         position: 'absolute', top: 6, left: 8,
                         fontSize: '0.65rem', fontWeight: 500,
-                        color: 'rgba(255,255,255,0.35)',
-                        letterSpacing: '0.04em',
+                        color: C.mutedDim,
                         fontVariantNumeric: 'tabular-nums',
                         pointerEvents: 'none',
                       }}>{formatSolveDate(s.ts)}</span>
@@ -2231,8 +2233,7 @@ export default function TimerPage() {
                           position: 'absolute', top: 6, right: 8,
                           display: 'flex', flexDirection: 'column',
                           alignItems: 'flex-end', gap: 2,
-                          fontSize: '0.65rem', fontWeight: 700,
-                          letterSpacing: '0.04em',
+                          fontSize: '0.65rem', fontWeight: 600,
                           fontVariantNumeric: 'tabular-nums',
                           pointerEvents: 'none',
                           opacity: hovered ? 0 : 1,
@@ -2243,7 +2244,7 @@ export default function TimerPage() {
                               display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
                             }}>
                               {isPB && !dnf && <span style={{ color: C.success }}>PB</span>}
-                              {s.penalty === '+2' && !dnf && <span style={{ color: C.warn }}>+2</span>}
+                              {s.penalty === '+2' && !dnf && <span style={{ color: C.danger }}>+2</span>}
                               {dnf && <span style={{ color: C.danger }}>DNF</span>}
                             </div>
                           )}
@@ -2313,8 +2314,7 @@ export default function TimerPage() {
         }}>
           <section className="pv-scramble" style={{
               background: C.card, border: `1px solid ${C.border}`,
-              borderRadius: 18, padding: '1.25rem 1.5rem',
-              boxShadow: '0 1px 0 rgba(255,255,255,0.02) inset, 0 4px 16px rgba(0,0,0,0.2)',
+              borderRadius: RADIUS, padding: '1.25rem 1.5rem',
               backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
             }}>
               {/* Picker row — event picker pill + "New Scramble" pill,
@@ -2341,18 +2341,11 @@ export default function TimerPage() {
                     aria-expanded={desktopEventPickerOpen}
                     aria-label="Pick event"
                     style={{
-                      background: desktopEventPickerOpen ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.04)',
-                      color: C.text,
-                      border: `1px solid ${desktopEventPickerOpen ? C.borderHi : C.border}`,
-                      borderRadius: 999,
-                      padding: '0.4rem 1rem',
-                      fontSize: '0.85rem', fontWeight: 600, fontFamily: 'inherit',
-                      cursor: 'pointer',
-                      display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
-                      transition: 'background 0.15s ease, border-color 0.15s ease, color 0.15s ease',
+                      ...ghostButtonStyle(desktopEventPickerOpen),
+                      gap: '0.5rem',
                     }}
-                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; e.currentTarget.style.borderColor = C.borderHi; }}
-                    onMouseLeave={e => { if (!desktopEventPickerOpen) { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.borderColor = C.border; } }}
+                    onMouseEnter={e => { e.currentTarget.style.background = C.border; }}
+                    onMouseLeave={e => { if (!desktopEventPickerOpen) e.currentTarget.style.background = C.cardAlt; }}
                   >
                     <WcaEventIcon eventId={eventId} size={18} />
                     <span>{sessionEvent.name}</span>
@@ -2374,17 +2367,9 @@ export default function TimerPage() {
                 <button
                   onClick={newScramble}
                   aria-label="New Scramble"
-                  style={{
-                    background: 'transparent', color: C.accent,
-                    border: `1px solid ${C.borderHi}`, borderRadius: 999,
-                    padding: '0.4rem 1rem',
-                    fontSize: '0.85rem', fontWeight: 600, fontFamily: 'inherit',
-                    cursor: 'pointer',
-                    display: 'inline-flex', alignItems: 'center', gap: '0.45rem',
-                    transition: 'background 0.15s ease',
-                  }}
-                  onMouseEnter={e => (e.currentTarget.style.background = C.accentDim)}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                  style={{ ...ghostButtonStyle(false), gap: '0.45rem' }}
+                  onMouseEnter={e => (e.currentTarget.style.background = C.border)}
+                  onMouseLeave={e => (e.currentTarget.style.background = C.cardAlt)}
                 >
                   <IconRefresh size={16} /> New Scramble
                 </button>
@@ -2424,8 +2409,7 @@ export default function TimerPage() {
               flex: '1 1 auto', minHeight: 0,
               background: C.card,
               border: `1px solid ${C.border}`,
-              borderRadius: 18, padding: '1.5rem 1.5rem',
-              boxShadow: '0 1px 0 rgba(255,255,255,0.02) inset, 0 4px 16px rgba(0,0,0,0.2)',
+              borderRadius: RADIUS, padding: '1.5rem 1.5rem',
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
               touchAction: 'manipulation',
               cursor: 'pointer', textAlign: 'center',
@@ -2435,14 +2419,15 @@ export default function TimerPage() {
             {connectedTimerName && (
               <div className="pv-bt-indicator" style={{
                 display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
-                fontSize: '0.6rem', letterSpacing: '0.15em', textTransform: 'uppercase',
-                color: C.success, marginBottom: '0.5rem', fontWeight: 700,
+                fontSize: '0.72rem',
+                color: C.muted, marginBottom: '0.5rem', fontWeight: 500,
               }}>
-                <IconBluetooth size={11} /> {connectedTimerName.toUpperCase()} CONNECTED
+                <span style={{ color: C.success, display: 'inline-flex' }}><IconBluetooth size={12} /></span>
+                {connectedTimerName} connected
               </div>
             )}
             {timer.state === 'inspecting' && (
-              <div style={{ fontSize: '0.62rem', letterSpacing: '0.15em', textTransform: 'uppercase', color: C.warn, marginBottom: '0.6rem', fontWeight: 700 }}>
+              <div style={{ fontSize: '0.75rem', color: C.warn, marginBottom: '0.6rem', fontWeight: 600 }}>
                 Inspection
               </div>
             )}
@@ -2464,8 +2449,8 @@ export default function TimerPage() {
                     fontSize: '1.15rem', fontWeight: 700,
                     fontVariantNumeric: 'tabular-nums', lineHeight: 1,
                   }}>
-                    <span style={{ color: '#34d399' }}>{fmtMs(ao5Projection.best, false, precision)}</span>
-                    <span style={{ color: '#ef4444' }}>{fmtMs(ao5Projection.worst, false, precision)}</span>
+                    <span style={{ color: C.success }}>{fmtMs(ao5Projection.best, false, precision)}</span>
+                    <span style={{ color: C.danger }}>{fmtMs(ao5Projection.worst, false, precision)}</span>
                   </div>
                 )}
                 <div style={{
@@ -2476,11 +2461,6 @@ export default function TimerPage() {
                   letterSpacing: '-0.01em',
                   color: timerColor,
                   transition: `color ${timer.state === 'stopped' ? 0.3 : 0.12}s, font-size 0.12s`,
-                  textShadow: timerGlow
-                    ? `0 0 30px ${C.success}55`
-                    : timer.state === 'stopped'
-                      ? '0 0 20px rgba(255,255,255,0.08)'
-                      : 'none',
                 }}>
                   {timerDisplay}
                 </div>
@@ -2535,14 +2515,14 @@ export default function TimerPage() {
                 </div>
               );
             })()}
-            <div className="pv-instruction" style={{ fontSize: '0.72rem', fontWeight: 400, color: C.muted, marginTop: '1.25rem', letterSpacing: '0.06em', minHeight: '1.1rem' }}>
+            <div className="pv-instruction" style={{ fontSize: '0.72rem', fontWeight: 400, color: C.muted, marginTop: '1.25rem', minHeight: '1.1rem' }}>
               {ganConnected && timer.state !== 'running' && timer.state !== 'inspecting' && timer.state !== 'armed' && 'Use the GAN timer pads'}
               {timer.state === 'inspecting' && 'Hold SPACE to arm, release to start'}
               {timer.state === 'armed' && !timer.armedReady && (
-                <span style={{ color: C.danger, fontWeight: 700 }}>HOLD…</span>
+                <span style={{ color: C.danger, fontWeight: 600 }}>Hold…</span>
               )}
               {timer.state === 'armed' && timer.armedReady && (
-                <span style={{ color: C.success, fontWeight: 700 }}>RELEASE TO START</span>
+                <span style={{ color: C.success, fontWeight: 600 }}>Release to start</span>
               )}
               {!ganConnected && timer.state === 'running' && 'Press SPACE / tap to stop'}
             </div>
@@ -2572,25 +2552,29 @@ export default function TimerPage() {
               : null;
             return (
               <>
-                {/* PB card — gradient-border (mint→lavender), large green time */}
+                {/* PB card — plain surface, large green time */}
                 <DesktopPbCard
                   pbMs={stats.pbMs}
                   gapFromMean={gapFromMean}
                   precision={precision}
                 />
 
-                {/* 2x2 stats grid: Ao5 | Ao12 / Mean | σ */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                {/* 2x2 stats in ONE surface: Ao5 | Ao12 / Mean | Count.
+                    The 1px grid gap over a border-coloured background
+                    draws the dividers between cells. */}
+                <div style={{
+                  display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1,
+                  background: C.border, border: `1px solid ${C.border}`,
+                  borderRadius: RADIUS, overflow: 'hidden',
+                }}>
                   <DesktopStatCard
                     label="Ao5"
                     value={stats.ao5  == null ? '—' : fmtMs(stats.ao5,  false, precision)}
-                    accent={stats.ao5 != null}
                     trend={trendDir(stats.ao5,  prevAo5)}
                   />
                   <DesktopStatCard
                     label="Ao12"
                     value={stats.ao12 == null ? '—' : fmtMs(stats.ao12, false, precision)}
-                    accent={stats.ao12 != null}
                     trend={trendDir(stats.ao12, prevAo12)}
                   />
                   <DesktopStatCard
@@ -2598,8 +2582,8 @@ export default function TimerPage() {
                     value={fmtMs(stats.mean, false, precision)}
                   />
                   <DesktopStatCard
-                    label="σ"
-                    value={stats.stdDev == null ? '—' : (stats.stdDev / 1000).toFixed(2)}
+                    label="Count"
+                    value={String(solves.length)}
                   />
                 </div>
 
@@ -2637,16 +2621,15 @@ export default function TimerPage() {
             maxHeight: 280,
             alignSelf: 'center',
             background: C.card, border: `1px solid ${C.border}`,
-            borderRadius: 14, padding: '0.5rem',
+            borderRadius: RADIUS, padding: '0.5rem',
             display: 'flex', flexDirection: 'column',
             flexShrink: 0,
           }}>
             <div style={{
-              fontSize: '0.62rem', letterSpacing: '0.12em',
-              textTransform: 'uppercase', color: C.muted, fontWeight: 600,
+              fontSize: '0.75rem', color: C.muted, fontWeight: 500,
               padding: '0.2rem 0.45rem 0.4rem',
             }}>
-              Scramble Preview
+              Scramble preview
             </div>
             <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
               <ScramblePreview eventId={eventId} scramble={scramble} />
@@ -2672,12 +2655,10 @@ export default function TimerPage() {
           return time.includes(q) || date.includes(q) || s.scramble.toLowerCase().includes(q);
         });
 
-        // Identify best/worst solve ids for grid styling
+        // Identify the best solve id for grid styling (PB text + badge)
         const validSolves = solves.filter(s => !isDnf(s));
         const bestId = validSolves.length
           ? validSolves.reduce((a, b) => finalMs(a) <= finalMs(b) ? a : b).id : null;
-        const worstId = validSolves.length
-          ? validSolves.reduce((a, b) => finalMs(a) >= finalMs(b) ? a : b).id : null;
 
         // Extra averages for the Stats tab
         const ao50 = avgOfN(solves, 50);
@@ -2731,7 +2712,7 @@ export default function TimerPage() {
               flexShrink: 0,
               margin: '0.7rem 0.7rem 0.5rem',
               background: C.card, border: `1px solid ${C.border}`,
-              borderRadius: 999, padding: '0.45rem 0.55rem',
+              borderRadius: RADIUS, padding: '0.45rem 0.55rem',
               display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: '0.45rem',
               backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
               position: 'relative', zIndex: 10,
@@ -2741,7 +2722,7 @@ export default function TimerPage() {
                   onClick={() => setSettingsOpen(true)}
                   aria-label="Settings"
                   style={{
-                    width: 36, height: 36, borderRadius: 999,
+                    width: 36, height: 36, borderRadius: RADIUS,
                     background: 'transparent', border: 'none',
                     color: C.muted, cursor: 'pointer',
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -2784,8 +2765,8 @@ export default function TimerPage() {
                     <div
                       title={currentSession?.name ?? 'Default'}
                       style={{
-                        fontSize: '0.6rem', color: C.mutedDim,
-                        letterSpacing: '0.05em', fontWeight: 600,
+                        fontSize: '0.65rem', color: C.muted,
+                        fontWeight: 500,
                         lineHeight: 1, paddingBottom: '0.2rem',
                         maxWidth: '140px', overflow: 'hidden',
                         textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -2802,14 +2783,14 @@ export default function TimerPage() {
                   aria-label="Шинэ session"
                   title="Шинэ session"
                   style={{
-                    width: 36, height: 36, borderRadius: '50%',
-                    background: 'transparent', border: `1px solid ${C.border}`,
+                    width: 36, height: 36, borderRadius: RADIUS,
+                    background: 'transparent', border: 'none',
                     color: C.muted, cursor: 'pointer',
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+                    transition: 'background 0.15s, color 0.15s',
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.background = C.accentDim; e.currentTarget.style.color = C.accent; e.currentTarget.style.borderColor = C.borderHi; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.muted; e.currentTarget.style.borderColor = C.border; }}
+                  onMouseEnter={e => { e.currentTarget.style.background = C.cardAlt; e.currentTarget.style.color = C.text; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.muted; }}
                 ><IconPlus size={18} /></button>
                 <TimerProfileMenu
                   size={36}
@@ -2916,14 +2897,15 @@ export default function TimerPage() {
                   {connectedTimerName && (
                     <div className="pv-bt-indicator" style={{
                       display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
-                      fontSize: '0.6rem', letterSpacing: '0.15em', textTransform: 'uppercase',
-                      color: C.success, marginBottom: '0.5rem', fontWeight: 700,
+                      fontSize: '0.72rem',
+                      color: C.muted, marginBottom: '0.5rem', fontWeight: 500,
                     }}>
-                      <IconBluetooth size={11} /> {connectedTimerName.toUpperCase()} CONNECTED
+                      <span style={{ color: C.success, display: 'inline-flex' }}><IconBluetooth size={12} /></span>
+                      {connectedTimerName} connected
                     </div>
                   )}
                   {timer.state === 'inspecting' && (
-                    <div style={{ fontSize: '0.65rem', letterSpacing: '0.15em', textTransform: 'uppercase', color: C.warn, marginBottom: '0.6rem', fontWeight: 700 }}>
+                    <div style={{ fontSize: '0.75rem', color: C.warn, marginBottom: '0.6rem', fontWeight: 600 }}>
                       Inspection
                     </div>
                   )}
@@ -2945,8 +2927,8 @@ export default function TimerPage() {
                           fontSize: '1.15rem', fontWeight: 700,
                           fontVariantNumeric: 'tabular-nums', lineHeight: 1,
                         }}>
-                          <span style={{ color: '#34d399' }}>{fmtMs(ao5Projection.best, false, precision)}</span>
-                          <span style={{ color: '#ef4444' }}>{fmtMs(ao5Projection.worst, false, precision)}</span>
+                          <span style={{ color: C.success }}>{fmtMs(ao5Projection.best, false, precision)}</span>
+                          <span style={{ color: C.danger }}>{fmtMs(ao5Projection.worst, false, precision)}</span>
                         </div>
                       )}
                       <div style={{
@@ -2956,7 +2938,6 @@ export default function TimerPage() {
                         fontVariantNumeric: 'tabular-nums',
                         color: timerColor,
                         transition: `color ${timer.state === 'stopped' ? 0.3 : 0.12}s, font-size 0.12s`,
-                        textShadow: timerGlow ? `0 0 30px ${C.success}55` : 'none',
                       }}>
                         {timerDisplay}
                       </div>
@@ -2997,16 +2978,16 @@ export default function TimerPage() {
                       </div>
                     );
                   })()}
-                  <div className="pv-instruction" style={{ fontSize: '0.7rem', color: C.muted, marginTop: '0.7rem', letterSpacing: '0.06em', minHeight: '1rem' }}>
+                  <div className="pv-instruction" style={{ fontSize: '0.7rem', color: C.muted, marginTop: '0.7rem', minHeight: '1rem' }}>
                     {ganConnected && timer.state !== 'running' && timer.state !== 'inspecting' && timer.state !== 'armed' && 'Use the GAN timer pads'}
                     {timer.state === 'inspecting' && 'Hold to arm, release to start'}
                     {timer.state === 'armed' && !timer.armedReady && (
-                      <span style={{ color: C.danger, fontWeight: 700 }}>HOLD…</span>
+                      <span style={{ color: C.danger, fontWeight: 600 }}>Hold…</span>
                     )}
                     {timer.state === 'armed' && timer.armedReady && (
-                      <span style={{ color: C.success, fontWeight: 700 }}>RELEASE TO START</span>
+                      <span style={{ color: C.success, fontWeight: 600 }}>Release to start</span>
                     )}
-                    {!ganConnected && timer.state === 'running' && 'TAP TO STOP'}
+                    {!ganConnected && timer.state === 'running' && 'Tap to stop'}
                   </div>
                 </section>
               </div>
@@ -3028,30 +3009,28 @@ export default function TimerPage() {
                     display: 'grid', gridTemplateColumns: 'auto 1fr auto auto',
                     alignItems: 'center', gap: '0.4rem',
                     padding: '0.5rem 0.7rem 0.4rem',
-                    background: C.accentDim,
-                    borderBottom: `1px solid ${C.borderHi}`,
+                    borderBottom: `1px solid ${C.border}`,
                   }}>
                     <button
                       onClick={exitSelectMode}
                       aria-label="Cancel select"
                       style={{
-                        width: 34, height: 34, borderRadius: 8,
-                        background: 'transparent', border: `1px solid ${C.border}`,
+                        width: 34, height: 34, borderRadius: RADIUS_SM,
+                        background: 'transparent', border: 'none',
                         color: C.text, cursor: 'pointer',
                         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                       }}
                     ><IconClose size={16} /></button>
-                    <div style={{ fontSize: '0.92rem', fontWeight: 700, color: C.accent }}>
+                    <div style={{ fontSize: '0.92rem', fontWeight: 600, color: C.text }}>
                       {selectedSolveIds.size} selected
                     </div>
                     <button
                       onClick={() => selectAllVisible(solvesFiltered.map(x => x.id))}
                       style={{
-                        padding: '0.4rem 0.7rem', borderRadius: 8,
-                        fontSize: '0.74rem', fontWeight: 700, fontFamily: 'inherit',
-                        letterSpacing: '0.04em',
-                        background: 'transparent', color: C.accent,
-                        border: `1px solid ${C.borderHi}`, cursor: 'pointer',
+                        padding: '0.4rem 0.7rem', borderRadius: RADIUS_SM,
+                        fontSize: '0.74rem', fontWeight: 500, fontFamily: 'inherit',
+                        background: C.cardAlt, color: C.text,
+                        border: 'none', cursor: 'pointer',
                       }}
                     >Select all</button>
                     <button
@@ -3059,12 +3038,12 @@ export default function TimerPage() {
                       disabled={selectedSolveIds.size === 0}
                       aria-label="Delete selected"
                       style={{
-                        padding: '0.4rem 0.6rem', borderRadius: 8,
-                        fontSize: '0.74rem', fontWeight: 700, fontFamily: 'inherit',
-                        letterSpacing: '0.04em',
-                        background: 'rgba(239,68,68,0.12)',
-                        color: selectedSolveIds.size === 0 ? 'rgba(248,113,113,0.4)' : '#f87171',
-                        border: '1px solid rgba(239,68,68,0.3)',
+                        padding: '0.4rem 0.6rem', borderRadius: RADIUS_SM,
+                        fontSize: '0.74rem', fontWeight: 500, fontFamily: 'inherit',
+                        background: C.cardAlt,
+                        color: C.danger,
+                        opacity: selectedSolveIds.size === 0 ? 0.45 : 1,
+                        border: 'none',
                         cursor: selectedSolveIds.size === 0 ? 'not-allowed' : 'pointer',
                         display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
                       }}
@@ -3080,7 +3059,7 @@ export default function TimerPage() {
                       display: 'grid', gridTemplateColumns: 'auto 1fr auto',
                       gap: '0.4rem', alignItems: 'center',
                       background: C.card, border: `1px solid ${C.border}`,
-                      borderRadius: 999, padding: '0.25rem 0.45rem 0.25rem 0.85rem',
+                      borderRadius: RADIUS, padding: '0.25rem 0.45rem 0.25rem 0.85rem',
                     }}>
                       <span style={{ color: C.muted, display: 'inline-flex' }}><IconSearch size={16} /></span>
                       <input
@@ -3115,45 +3094,14 @@ export default function TimerPage() {
                       {solvesFiltered.map((s, idx) => {
                         const dnf = isDnf(s);
                         const isBest  = !dnf && s.id === bestId  && validSolves.length > 1;
-                        const isWorst = !dnf && s.id === worstId && validSolves.length > 1;
-                        // solvesFiltered is newest-first; idx 0 is the most-
-                        // recent solve. Suppress the "latest" highlight while
-                        // searching so the top match doesn't masquerade as
-                        // the freshest solve.
-                        const isLatest = idx === 0 && !mobileSearch;
                         const selected = selectedSolveIds.has(s.id);
                         const hasComment = !!(s.comment && s.comment.trim());
 
-                        // Tier the card visuals — selection wins, then PB,
-                        // then worst, then DNF, then "latest", else neutral.
-                        // Each tier has its own bg, border, and (optionally)
-                        // a 3px left rail and a soft outer glow.
-                        let cardBg: string;
-                        let cardBorder: string;
-                        let leftAccent: string | null = null;
-                        let glowColor: string | null = null;
-                        if (selected) {
-                          cardBg = C.accentDim;
-                          cardBorder = C.borderHi;
-                          leftAccent = C.accent;
-                        } else if (isBest && !dnf) {
-                          cardBg = 'linear-gradient(135deg, rgba(52,211,153,0.18) 0%, rgba(52,211,153,0.04) 100%)';
-                          cardBorder = 'rgba(52,211,153,0.4)';
-                          leftAccent = C.success;
-                          glowColor = 'rgba(52,211,153,0.25)';
-                        } else if (isWorst && !dnf) {
-                          cardBg = 'linear-gradient(135deg, rgba(239,68,68,0.08) 0%, rgba(239,68,68,0.02) 100%)';
-                          cardBorder = 'rgba(239,68,68,0.25)';
-                        } else if (dnf) {
-                          cardBg = 'linear-gradient(135deg, rgba(239,68,68,0.06) 0%, rgba(239,68,68,0) 100%)';
-                          cardBorder = 'rgba(239,68,68,0.2)';
-                        } else if (isLatest) {
-                          cardBg = 'linear-gradient(135deg, rgba(167,139,250,0.12) 0%, rgba(167,139,250,0.02) 100%)';
-                          cardBorder = 'rgba(167,139,250,0.3)';
-                        } else {
-                          cardBg = C.card;
-                          cardBorder = C.border;
-                        }
+                        // Every card is the same plain surface; only the
+                        // selected state changes the frame. PB / DNF / +2
+                        // are signalled through text colour alone.
+                        const cardBg = selected ? C.cardAlt : C.card;
+                        const cardBorder = selected ? C.borderHi : C.border;
 
                         return (
                           <button
@@ -3168,8 +3116,7 @@ export default function TimerPage() {
                               textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit',
                               background: cardBg,
                               border: `1px solid ${cardBorder}`,
-                              borderLeft: leftAccent ? `3px solid ${leftAccent}` : `1px solid ${cardBorder}`,
-                              borderRadius: 12,
+                              borderRadius: RADIUS,
                               padding: '0.35rem 0.5rem 0.45rem',
                               display: 'flex', flexDirection: 'column', alignItems: 'stretch',
                               gap: '0.15rem',
@@ -3177,8 +3124,7 @@ export default function TimerPage() {
                               // Makes the card a size container so the time
                               // below can scale with the card's width (cqw).
                               containerType: 'inline-size',
-                              boxShadow: glowColor ? `0 0 16px ${glowColor}` : 'none',
-                              transition: 'transform 0.12s, border-color 0.12s, box-shadow 0.2s',
+                              transition: 'transform 0.12s, border-color 0.12s, background 0.12s',
                             }}
                           >
                             {/* Header line, in normal flow so it can never
@@ -3191,12 +3137,12 @@ export default function TimerPage() {
                             <div style={{
                               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                               gap: '0.25rem', height: 16, minWidth: 0,
-                              fontSize: '0.62rem', letterSpacing: '0.04em',
+                              fontSize: '0.62rem',
                               fontVariantNumeric: 'tabular-nums',
                               pointerEvents: 'none',
                             }}>
                               <span style={{
-                                fontWeight: 500, color: 'rgba(255,255,255,0.35)',
+                                fontWeight: 500, color: C.mutedDim,
                                 whiteSpace: 'nowrap', overflow: 'hidden', minWidth: 0,
                               }}>{formatSolveDate(s.ts)}</span>
 
@@ -3204,9 +3150,9 @@ export default function TimerPage() {
                                 <span style={{
                                   flexShrink: 0,
                                   width: 16, height: 16, borderRadius: 999,
-                                  background: selected ? C.accent : 'rgba(255,255,255,0.06)',
-                                  border: `1px solid ${selected ? C.accent : C.border}`,
-                                  color: selected ? '#0a0a0a' : 'transparent',
+                                  background: selected ? C.text : 'transparent',
+                                  border: `1px solid ${selected ? C.text : C.borderHi}`,
+                                  color: selected ? C.bg : 'transparent',
                                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                                 }}>
                                   {selected && <IconCheck size={11} />}
@@ -3215,10 +3161,10 @@ export default function TimerPage() {
                                 <span style={{
                                   flexShrink: 0,
                                   display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
-                                  fontWeight: 700,
+                                  fontWeight: 600,
                                 }}>
                                   {isBest && !dnf && <span style={{ color: C.success }}>PB</span>}
-                                  {s.penalty === '+2' && !dnf && <span style={{ color: C.warn }}>+2</span>}
+                                  {s.penalty === '+2' && !dnf && <span style={{ color: C.danger }}>+2</span>}
                                   {dnf && <span style={{ color: C.danger }}>DNF</span>}
                                   {hasComment && (
                                     <span aria-label="Has comment" style={{
@@ -3245,11 +3191,8 @@ export default function TimerPage() {
                                 whiteSpace: 'nowrap',
                                 color: dnf ? C.danger
                                      : isBest ? C.success
-                                     : isWorst ? '#fca5a5'
-                                     : isLatest ? C.accent
                                      : C.text,
                                 fontVariantNumeric: 'tabular-nums',
-                                letterSpacing: '-0.005em',
                                 lineHeight: 1.1,
                               }}>
                                 {fmtMs(finalMs(s), dnf, precision)}
@@ -3285,7 +3228,7 @@ export default function TimerPage() {
                 <div style={{ padding: '0 0.7rem 0.5rem', flex: '0 0 auto' }}>
                   <div style={{
                     background: C.card, border: `1px solid ${C.border}`,
-                    borderRadius: 12, padding: '0.6rem',
+                    borderRadius: RADIUS, padding: '0.6rem',
                     display: 'flex', flexDirection: 'column', gap: '0.4rem',
                   }}>
                     <div style={{ height: 200, width: '100%' }}>
@@ -3306,7 +3249,7 @@ export default function TimerPage() {
                     </div>
                     <div style={{
                       display: 'flex', flexWrap: 'wrap', gap: '0.6rem',
-                      fontSize: '0.62rem', color: C.muted, letterSpacing: '0.04em',
+                      fontSize: '0.68rem', color: C.muted,
                       paddingTop: '0.2rem', borderTop: `1px solid ${C.border}`,
                     }}>
                       <ChartLegendDot color="#9ca3af" label="Solves" />
@@ -3324,8 +3267,8 @@ export default function TimerPage() {
                 }}>
                   <MobileStatCard label="Best" value={fmtMs(stats.best, false, precision)} accent={C.success} />
                   <MobileStatCard label="Mean" value={fmtMs(stats.mean, false, precision)} />
-                  <MobileStatCard label="Ao5"  value={stats.ao5  == null ? '—' : fmtMs(stats.ao5,  false, precision)} accent={stats.ao5  == null ? undefined : C.accent} />
-                  <MobileStatCard label="Ao12" value={stats.ao12 == null ? '—' : fmtMs(stats.ao12, false, precision)} accent={stats.ao12 == null ? undefined : C.accent} />
+                  <MobileStatCard label="Ao5"  value={stats.ao5  == null ? '—' : fmtMs(stats.ao5,  false, precision)} />
+                  <MobileStatCard label="Ao12" value={stats.ao12 == null ? '—' : fmtMs(stats.ao12, false, precision)} />
                 </div>
 
                 {/* Compact secondary row: Ao50 | Ao100 | Count | σ */}
@@ -3506,11 +3449,11 @@ export default function TimerPage() {
           style={{
             position: 'fixed', top: '1rem', left: '50%', transform: 'translateX(-50%)',
             zIndex: 9700,
-            background: C.card, border: `1px solid ${C.borderHi}`,
+            background: C.card, border: `1px solid ${C.border}`,
             color: C.text,
-            borderRadius: 999,
+            borderRadius: RADIUS,
             padding: '0.55rem 1rem',
-            fontSize: '0.82rem', fontWeight: 600,
+            fontSize: '0.82rem', fontWeight: 500,
             boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
             display: 'flex', alignItems: 'center', gap: '0.4rem',
           }}
@@ -3518,10 +3461,10 @@ export default function TimerPage() {
           Clear session?
           <kbd style={{
             fontFamily: '"JetBrains Mono", monospace',
-            fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.04em',
-            padding: '0.15rem 0.45rem', borderRadius: 5,
-            background: C.accentDim, color: C.accent,
-            border: `1px solid ${C.borderHi}`,
+            fontSize: '0.7rem', fontWeight: 600,
+            padding: '0.15rem 0.45rem', borderRadius: RADIUS_SM,
+            background: C.cardAlt, color: C.text,
+            border: 'none',
           }}>Alt+D</kbd>
           <span style={{ color: C.muted }}>again to confirm</span>
         </div>
@@ -3543,8 +3486,8 @@ export default function TimerPage() {
             aria-label="Close"
             style={{
               position: 'absolute', top: '1rem', right: '1rem',
-              width: 38, height: 38, borderRadius: 999,
-              background: 'rgba(255,255,255,0.06)', border: `1px solid ${C.border}`,
+              width: 38, height: 38, borderRadius: RADIUS,
+              background: C.cardAlt, border: 'none',
               color: C.text, cursor: 'pointer',
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             }}
@@ -3555,7 +3498,7 @@ export default function TimerPage() {
               width: 'min(86vw, 86vh, 480px)',
               height: 'min(86vw, 86vh, 480px)',
               background: C.card, border: `1px solid ${C.border}`,
-              borderRadius: 16, padding: '0.75rem',
+              borderRadius: RADIUS, padding: '0.75rem',
               display: 'flex',
             }}
           >
@@ -3641,9 +3584,9 @@ export default function TimerPage() {
         // as the same kind of affordance as 💬 / share — equal sizing,
         // 0.4rem gap. Penalty buttons get tone tints when active.
         const penaltyOpts: { value: Penalty; label: string; color: string }[] = [
-          { value: 'none', label: 'OK',  color: C.success },
-          { value: '+2',   label: '+2',  color: C.warn    },
-          { value: 'dnf',  label: 'DNF', color: C.danger  },
+          { value: 'none', label: 'OK',  color: C.text   },
+          { value: '+2',   label: '+2',  color: C.danger },
+          { value: 'dnf',  label: 'DNF', color: C.danger },
         ];
         return (
           <ModalShell onClose={() => setDetailSolveId(null)}>
@@ -3682,8 +3625,8 @@ export default function TimerPage() {
                 fontFamily: '"JetBrains Mono", monospace',
                 fontSize: '0.92rem', lineHeight: 1.6,
                 color: C.text, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                background: C.cardAlt, border: `1px solid ${C.border}`,
-                borderRadius: 8, padding: '0.75rem 0.85rem',
+                background: C.cardAlt,
+                borderRadius: RADIUS_SM, padding: '0.75rem 0.85rem',
               }}>
                 {s.scramble}
               </div>
@@ -3705,12 +3648,11 @@ export default function TimerPage() {
                       onClick={() => setSolvePenalty(s.id, o.value)}
                       aria-pressed={active}
                       style={{
-                        height: 44, borderRadius: 9,
-                        background: active ? `${o.color}26` : 'rgba(255,255,255,0.04)',
-                        border: `1px solid ${active ? o.color : 'rgba(255,255,255,0.08)'}`,
+                        height: 44, borderRadius: RADIUS,
+                        background: active ? C.cardAlt : 'transparent',
+                        border: `1px solid ${active ? C.borderHi : C.border}`,
                         color: active ? o.color : C.muted,
-                        fontSize: '0.82rem', fontWeight: 700, fontFamily: 'inherit',
-                        letterSpacing: '0.04em',
+                        fontSize: '0.82rem', fontWeight: 600, fontFamily: 'inherit',
                         cursor: 'pointer',
                         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                         transition: 'background 0.12s, color 0.12s, border-color 0.12s',
@@ -3730,10 +3672,10 @@ export default function TimerPage() {
                   title={hasComment ? 'Edit comment' : 'Add comment'}
                   style={{
                     position: 'relative',
-                    height: 44, borderRadius: 9,
-                    background: detailCommentOpen ? C.accentDim : 'rgba(255,255,255,0.04)',
-                    border: `1px solid ${detailCommentOpen ? C.borderHi : 'rgba(255,255,255,0.08)'}`,
-                    color: detailCommentOpen ? C.accent : C.muted,
+                    height: 44, borderRadius: RADIUS,
+                    background: detailCommentOpen ? C.cardAlt : 'transparent',
+                    border: `1px solid ${detailCommentOpen ? C.borderHi : C.border}`,
+                    color: detailCommentOpen ? C.text : C.muted,
                     cursor: 'pointer',
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                     transition: 'background 0.12s, color 0.12s, border-color 0.12s',
@@ -3741,12 +3683,12 @@ export default function TimerPage() {
                 >
                   <IconComment size={18} />
                   {hasComment && (
-                    // Lavender corner dot signalling "comment exists" —
+                    // Corner dot signalling "comment exists" —
                     // visible whether the panel is open or not.
                     <span aria-hidden="true" style={{
                       position: 'absolute', top: 6, right: 6,
                       width: 6, height: 6, borderRadius: 999,
-                      background: C.accent,
+                      background: C.text,
                     }} />
                   )}
                 </button>
@@ -3755,16 +3697,16 @@ export default function TimerPage() {
                   aria-label="Share solve"
                   title="Share"
                   style={{
-                    height: 44, borderRadius: 9,
-                    background: 'rgba(255,255,255,0.04)',
-                    border: '1px solid rgba(255,255,255,0.08)',
+                    height: 44, borderRadius: RADIUS,
+                    background: 'transparent',
+                    border: `1px solid ${C.border}`,
                     color: C.muted,
                     cursor: 'pointer',
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                     transition: 'background 0.12s, color 0.12s, border-color 0.12s',
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.color = C.text; e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.color = C.muted; e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                  onMouseEnter={e => { e.currentTarget.style.color = C.text; e.currentTarget.style.background = C.cardAlt; }}
+                  onMouseLeave={e => { e.currentTarget.style.color = C.muted; e.currentTarget.style.background = 'transparent'; }}
                 >
                   <IconShareOut size={18} />
                 </button>
@@ -3776,8 +3718,6 @@ export default function TimerPage() {
               {detailCommentOpen && (
                 <div style={{
                   display: 'flex', flexDirection: 'column', gap: '0.5rem',
-                  background: C.cardAlt, border: `1px solid ${C.border}`,
-                  borderRadius: 8, padding: '0.7rem 0.8rem',
                 }}>
                   <textarea
                     value={detailCommentDraft}
@@ -3786,8 +3726,8 @@ export default function TimerPage() {
                     rows={3}
                     style={{
                       width: '100%', resize: 'vertical', minHeight: 64,
-                      background: C.card, color: C.text,
-                      border: `1px solid ${C.border}`, borderRadius: 7,
+                      background: C.cardAlt, color: C.text,
+                      border: `1px solid ${C.border}`, borderRadius: RADIUS_SM,
                       padding: '0.5rem 0.65rem',
                       fontFamily: 'inherit', fontSize: '0.9rem', lineHeight: 1.5,
                       outline: 'none',
@@ -3797,10 +3737,10 @@ export default function TimerPage() {
                     <button
                       onClick={() => setDetailCommentOpen(false)}
                       style={{
-                        padding: '0.4rem 0.85rem', borderRadius: 7,
+                        padding: '0.4rem 0.85rem', borderRadius: RADIUS,
                         background: 'transparent', color: C.muted,
-                        border: `1px solid ${C.border}`,
-                        fontSize: '0.78rem', fontWeight: 600, fontFamily: 'inherit',
+                        border: 'none',
+                        fontSize: '0.78rem', fontWeight: 500, fontFamily: 'inherit',
                         cursor: 'pointer',
                       }}
                     >Болих</button>
@@ -3810,10 +3750,10 @@ export default function TimerPage() {
                         setDetailCommentOpen(false);
                       }}
                       style={{
-                        padding: '0.4rem 0.85rem', borderRadius: 7,
-                        background: C.accentDim, color: C.accent,
+                        padding: '0.4rem 0.85rem', borderRadius: RADIUS,
+                        background: C.cardAlt, color: C.text,
                         border: `1px solid ${C.borderHi}`,
-                        fontSize: '0.78rem', fontWeight: 700, fontFamily: 'inherit',
+                        fontSize: '0.78rem', fontWeight: 600, fontFamily: 'inherit',
                         cursor: 'pointer',
                       }}
                     >Хадгалах</button>
@@ -3829,10 +3769,10 @@ export default function TimerPage() {
                 <button
                   onClick={() => { deleteSolve(s.id); setDetailSolveId(null); }}
                   style={{
-                    padding: '0.45rem 0.85rem', borderRadius: 7,
-                    fontSize: '0.78rem', fontWeight: 600, fontFamily: 'inherit',
-                    background: 'rgba(239,68,68,0.1)', color: '#f87171',
-                    border: '1px solid rgba(239,68,68,0.3)', cursor: 'pointer',
+                    padding: '0.45rem 0.85rem', borderRadius: RADIUS,
+                    fontSize: '0.78rem', fontWeight: 500, fontFamily: 'inherit',
+                    background: 'transparent', color: C.danger,
+                    border: 'none', cursor: 'pointer',
                   }}
                 >Delete</button>
               </div>
@@ -3991,24 +3931,20 @@ function DesktopPbCard({ pbMs, gapFromMean, precision }: {
   gapFromMean: number | null;  // seconds, positive = PB faster than mean
   precision: Precision;
 }) {
-  // Gradient border via the "two background-images" trick: padding-box gets
-  // the card fill, border-box gets the gradient.
-  const borderGrad = `linear-gradient(135deg, ${C.success}, ${C.accent})`;
   return (
     <div style={{
-      borderRadius: 14, padding: '1rem 1.1rem',
-      background: `linear-gradient(${C.cardAlt}, ${C.card}) padding-box, ${borderGrad} border-box`,
-      border: '1px solid transparent',
+      borderRadius: RADIUS, padding: '1rem 1.1rem',
+      background: C.card,
+      border: `1px solid ${C.border}`,
     }}>
       <div style={{
-        fontSize: '0.66rem', letterSpacing: '0.12em',
-        textTransform: 'uppercase', color: C.muted, fontWeight: 700,
+        fontSize: '0.75rem', color: C.muted, fontWeight: 500,
       }}>
-        Personal Best
+        Personal best
       </div>
       <div style={{
         fontFamily: '"JetBrains Mono", monospace',
-        fontSize: '2.4rem', fontWeight: 800, color: C.success,
+        fontSize: '2.4rem', fontWeight: 700, color: C.success,
         marginTop: '0.35rem', fontVariantNumeric: 'tabular-nums',
         lineHeight: 1.0,
       }}>
@@ -4028,41 +3964,31 @@ function DesktopPbCard({ pbMs, gapFromMean, precision }: {
   );
 }
 
-function DesktopStatCard({ label, value, accent, trend }: {
+/** One cell of the desktop stats surface. No border/radius of its own —
+ *  the parent grid draws the dividers and the outer frame. */
+function DesktopStatCard({ label, value, trend }: {
   label: string;
   value: string;
-  accent?: boolean;
   trend?: 'up' | 'down' | null;
 }) {
-  const trendColor = trend === 'down' ? C.success : trend === 'up' ? '#f87171' : C.mutedDim;
+  const trendColor = trend === 'down' ? C.success : trend === 'up' ? C.danger : C.mutedDim;
   const trendChar  = trend === 'down' ? '↓' : trend === 'up' ? '↑' : '';
   return (
     <div
       style={{
-        background: accent ? 'linear-gradient(135deg, rgba(167,139,250,0.10), rgba(167,139,250,0.02))' : C.card,
-        border: `1px solid ${accent ? 'rgba(167,139,250,0.25)' : C.border}`,
-        borderRadius: 12, padding: '0.7rem 0.85rem',
+        background: C.card,
+        padding: '0.7rem 0.85rem',
         display: 'flex', flexDirection: 'column', gap: '0.25rem',
-        transition: 'background 0.15s, border-color 0.15s',
-      }}
-      onMouseEnter={e => {
-        e.currentTarget.style.borderColor = accent ? 'rgba(167,139,250,0.45)' : 'rgba(255,255,255,0.16)';
-      }}
-      onMouseLeave={e => {
-        e.currentTarget.style.borderColor = accent ? 'rgba(167,139,250,0.25)' : C.border;
       }}
     >
       <div style={{
         display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
       }}>
-        <span style={{
-          fontSize: '0.6rem', letterSpacing: '0.12em',
-          textTransform: 'uppercase', color: C.muted, fontWeight: 600,
-        }}>
+        <span style={{ fontSize: '0.75rem', color: C.muted, fontWeight: 500 }}>
           {label}
         </span>
         {trendChar && (
-          <span style={{ color: trendColor, fontSize: '0.78rem', fontWeight: 700, lineHeight: 1 }}>
+          <span style={{ color: trendColor, fontSize: '0.78rem', fontWeight: 600, lineHeight: 1 }}>
             {trendChar}
           </span>
         )}
@@ -4070,7 +3996,7 @@ function DesktopStatCard({ label, value, accent, trend }: {
       <div style={{
         fontFamily: '"JetBrains Mono", monospace',
         fontSize: '1.55rem', fontWeight: 700,
-        color: accent ? C.accent : C.text,
+        color: C.text,
         fontVariantNumeric: 'tabular-nums',
         lineHeight: 1.05,
       }}>
@@ -4086,7 +4012,7 @@ function Sparkline({ solves, count, c }: { solves: Solve[]; count: number; c: ty
   if (valid.length < 2) {
     return (
       <div style={{
-        height: 80, borderRadius: 10,
+        height: 80, borderRadius: RADIUS,
         background: c.card, border: `1px solid ${c.border}`,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         color: c.mutedDim, fontSize: '0.7rem',
@@ -4141,7 +4067,7 @@ function GanButton({
   const isConnecting = state === 'connecting';
   const isUnsupported = state === 'unsupported';
   const color = isConnected ? C.success
-    : isConnecting ? C.accent
+    : isConnecting ? C.text
     : isUnsupported ? C.mutedDim
     : C.muted;
   const title = isUnsupported ? 'Web Bluetooth not supported in this browser'
@@ -4164,21 +4090,19 @@ function GanButton({
       aria-label={title}
       title={title}
       style={{
-        width: size, height: size, borderRadius: 8,
-        background: isConnected ? 'rgba(52,211,153,0.12)'
-          : isConnecting ? C.accentDim
-          : 'transparent',
-        border: `1px solid ${
-          isConnected ? 'rgba(52,211,153,0.4)'
-          : isConnecting ? C.borderHi
-          : C.border
-        }`,
+        // Ghost icon: no frame; state shows through the icon colour
+        // (green when connected), hover = surface-selected.
+        width: size, height: size, borderRadius: RADIUS,
+        background: isConnecting ? C.cardAlt : 'transparent',
+        border: 'none',
         color, cursor: isUnsupported ? 'help' : 'pointer',
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
         animation: isConnecting ? 'pv-ble-pulse 1.1s ease-in-out infinite' : undefined,
-        transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+        transition: 'background 0.15s, color 0.15s',
         fontFamily: 'inherit',
       }}
+      onMouseEnter={e => { e.currentTarget.style.background = C.cardAlt; }}
+      onMouseLeave={e => { e.currentTarget.style.background = isConnecting ? C.cardAlt : 'transparent'; }}
     ><IconBluetooth size={iconSize} /></button>
   );
 }
@@ -4190,8 +4114,8 @@ function MobileActionIcon({ label, icon, onClick }: { label: string; icon: React
       aria-label={label}
       title={label}
       style={{
-        flex: 1, height: 38, borderRadius: 10,
-        background: C.card, border: `1px solid ${C.border}`,
+        flex: 1, height: 38, borderRadius: RADIUS,
+        background: C.card, border: 'none',
         color: C.muted, cursor: 'pointer',
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       }}
@@ -4201,17 +4125,16 @@ function MobileActionIcon({ label, icon, onClick }: { label: string; icon: React
 
 // Tiles for the mobile Stats tab — bigger card style for the 2x2 main grid.
 function MobileStatCard({ label, value, accent }: { label: string; value: string; accent?: string }) {
+  // `accent` only tints the value text (e.g. green PB) — the card itself
+  // is always the plain surface.
   return (
     <div style={{
-      background: accent ? `linear-gradient(135deg, ${accent}1A, ${accent}05)` : C.card,
-      border: `1px solid ${accent ? `${accent}33` : C.border}`,
-      borderRadius: 10, padding: '0.6rem 0.75rem',
+      background: C.card,
+      border: `1px solid ${C.border}`,
+      borderRadius: RADIUS, padding: '0.6rem 0.75rem',
       display: 'flex', flexDirection: 'column', gap: '0.25rem',
     }}>
-      <div style={{
-        fontSize: '0.58rem', letterSpacing: '0.12em',
-        textTransform: 'uppercase', color: C.muted, fontWeight: 600,
-      }}>
+      <div style={{ fontSize: '0.72rem', color: C.muted, fontWeight: 500 }}>
         {label}
       </div>
       <div style={{
@@ -4231,15 +4154,12 @@ function MobileStatCard({ label, value, accent }: { label: string; value: string
 function MobileStatMini({ label, value }: { label: string; value: string }) {
   return (
     <div style={{
-      background: C.cardAlt, border: `1px solid ${C.border}`,
-      borderRadius: 8, padding: '0.4rem 0.5rem',
+      background: C.card, border: `1px solid ${C.border}`,
+      borderRadius: RADIUS_SM, padding: '0.4rem 0.5rem',
       display: 'flex', flexDirection: 'column', gap: '0.1rem',
       alignItems: 'center', textAlign: 'center', minWidth: 0,
     }}>
-      <div style={{
-        fontSize: '0.55rem', letterSpacing: '0.1em',
-        textTransform: 'uppercase', color: C.muted, fontWeight: 600,
-      }}>
+      <div style={{ fontSize: '0.68rem', color: C.muted, fontWeight: 500 }}>
         {label}
       </div>
       <div style={{
@@ -4261,16 +4181,13 @@ function MobileMicroStat({ label, value, accent }: { label: string; value: strin
       display: 'grid', gridTemplateColumns: '2.6rem 1fr',
       alignItems: 'baseline', gap: '0.4rem',
     }}>
-      <div style={{
-        fontSize: '0.55rem', letterSpacing: '0.1em',
-        textTransform: 'uppercase', color: C.muted, fontWeight: 600,
-      }}>
+      <div style={{ fontSize: '0.68rem', color: C.muted, fontWeight: 500 }}>
         {label}
       </div>
       <div style={{
         fontFamily: '"JetBrains Mono", monospace',
         fontSize: '0.85rem', fontWeight: 700, lineHeight: 1.3,
-        color: accent ? C.accent : C.text,
+        color: C.text,
         fontVariantNumeric: 'tabular-nums',
         textAlign: 'right',
       }}>
@@ -4291,20 +4208,18 @@ interface ToolTile {
   id: string;
   name: string;
   Icon: (p: IconProps) => React.ReactElement;
-  /** Tint used for the icon container background + border. */
-  tint: string;
   /** Undefined route means the tile is a "Soon" stub (rendered dimmed). */
   route?: string;
 }
 
 const ACTIVE_TILES: ToolTile[] = [
-  { id: 'race',        name: 'Race',        Icon: IconStopwatch, tint: '#A78BFA', route: '/timer/multiplayer' },
-  { id: 'competition', name: 'Competition', Icon: IconTrophy,    tint: '#fbbf24', route: '/timer/competitions' },
+  { id: 'race',        name: 'Race',        Icon: IconStopwatch, route: '/timer/multiplayer' },
+  { id: 'competition', name: 'Competition', Icon: IconTrophy,    route: '/timer/competitions' },
 ];
 
 const SOON_TILES: ToolTile[] = [
-  { id: 'community',  name: 'Community',  Icon: IconUsers, tint: '#60a5fa' },
-  { id: 'algorithms', name: 'Algorithms', Icon: IconCube,  tint: '#22d3ee' },
+  { id: 'community',  name: 'Community',  Icon: IconUsers },
+  { id: 'algorithms', name: 'Algorithms', Icon: IconCube  },
 ];
 
 const ROLE_LABEL_MN: Record<'member' | 'athlete' | 'admin', string> = {
@@ -4379,10 +4294,10 @@ function ToolsTab({
             justifyContent: 'space-between',
             width: '100%',
             padding: '0.85rem 1rem',
-            background: 'var(--card)',
-            border: '1px solid var(--border)',
-            borderRadius: '12px',
-            color: 'var(--text)',
+            background: C.card,
+            border: `1px solid ${C.border}`,
+            borderRadius: RADIUS,
+            color: C.text,
             fontSize: '0.9rem',
             fontWeight: 600,
             textDecoration: 'none',
@@ -4413,11 +4328,10 @@ function ToolsTab({
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <div style={{
-      fontSize: '0.65rem', fontWeight: 700,
-      letterSpacing: '0.16em', textTransform: 'uppercase',
-      color: C.mutedDim,
-      margin: '0.6rem 0',
-      padding: '0 1rem 0 1.5rem',
+      fontSize: '0.75rem', fontWeight: 500,
+      color: C.muted,
+      margin: '0.75rem 0 0.5rem',
+      padding: '0 1rem 0 1.1rem',
     }}>{children}</div>
   );
 }
@@ -4448,16 +4362,16 @@ function ProfileCard({
         width: '100%',
         display: 'flex', alignItems: 'center', gap: '0.85rem',
         padding: '0.85rem 1rem',
-        background: `linear-gradient(135deg, rgba(167,139,250,0.04), ${C.card})`,
-        border: '1px solid rgba(167,139,250,0.15)',
-        borderRadius: 16,
+        background: C.card,
+        border: `1px solid ${C.border}`,
+        borderRadius: RADIUS,
         color: C.text, fontFamily: 'inherit',
         cursor: 'pointer',
-        transition: 'transform 0.12s ease, border-color 0.15s ease',
+        transition: 'transform 0.12s ease, background 0.15s ease',
         WebkitTapHighlightColor: 'transparent',
       }}
-      onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(167,139,250,0.4)'; }}
-      onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(167,139,250,0.15)'; }}
+      onMouseEnter={e => { e.currentTarget.style.background = C.cardAlt; }}
+      onMouseLeave={e => { e.currentTarget.style.background = C.card; }}
       onMouseDown={e => { e.currentTarget.style.transform = 'scale(0.99)'; }}
       onMouseUp={e => { e.currentTarget.style.transform = 'scale(1)'; }}
       onTouchStart={e => { e.currentTarget.style.transform = 'scale(0.99)'; }}
@@ -4466,8 +4380,8 @@ function ProfileCard({
     >
       <span style={{
         width: 48, height: 48, borderRadius: '50%',
-        background: `linear-gradient(135deg, ${C.accent}, #ec4899)`,
-        color: '#fff', fontSize: 20, fontWeight: 800, lineHeight: 1,
+        background: C.cardAlt,
+        color: C.text, fontSize: 20, fontWeight: 600, lineHeight: 1,
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
         overflow: 'hidden', flexShrink: 0,
       }}>
@@ -4499,12 +4413,11 @@ function ProfileCard({
         }}>
           <span style={{
             padding: '0.05rem 0.4rem',
-            borderRadius: 999,
-            background: 'rgba(167,139,250,0.1)',
-            color: C.accent,
-            fontWeight: 700,
-            fontSize: '0.65rem',
-            letterSpacing: '0.02em',
+            borderRadius: RADIUS_SM,
+            background: C.cardAlt,
+            color: C.muted,
+            fontWeight: 500,
+            fontSize: '0.68rem',
           }}>{roleLabel}</span>
           <span aria-hidden="true">·</span>
           <span>{solveCount} эвлүүлэлт</span>
@@ -4540,11 +4453,11 @@ function ToolTileBtn({
         aspectRatio: '1 / 1',
         minHeight: 70,
         padding: '0.7rem',
-        background: 'rgba(255,255,255,0.05)',
+        background: C.card,
         backdropFilter: 'blur(12px)',
         WebkitBackdropFilter: 'blur(12px)',
         border: `1px solid ${C.border}`,
-        borderRadius: 18,
+        borderRadius: RADIUS,
         display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center',
         gap: '6px',
@@ -4558,8 +4471,8 @@ function ToolTileBtn({
         transition: 'transform 0.12s ease, border-color 0.15s ease, background 0.15s ease',
         WebkitTapHighlightColor: 'transparent',
       }}
-      onMouseEnter={e => { if (!isSoon) { e.currentTarget.style.transform = 'scale(1.04)'; e.currentTarget.style.borderColor = 'rgba(167,139,250,0.4)'; } }}
-      onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.borderColor = C.border; }}
+      onMouseEnter={e => { if (!isSoon) { e.currentTarget.style.transform = 'scale(1.04)'; e.currentTarget.style.background = C.cardAlt; } }}
+      onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.background = C.card; }}
       onMouseDown={e => { if (!isSoon) e.currentTarget.style.transform = 'scale(0.96)'; }}
       onMouseUp={e => { if (!isSoon) e.currentTarget.style.transform = 'scale(1.04)'; }}
       onTouchStart={e => { if (!isSoon) e.currentTarget.style.transform = 'scale(0.96)'; }}
@@ -4568,27 +4481,25 @@ function ToolTileBtn({
     >
       <span
         aria-hidden="true"
+        // Monochrome icons — primary text, muted for "Soon" stubs.
         style={{
-          color: tile.tint,
+          color: isSoon ? C.muted : C.text,
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          filter: isSoon ? 'saturate(0.5)' : 'none',
         }}
       >
         <Icon size={28} />
       </span>
       <span style={{
-        fontSize: '0.7rem', fontWeight: 600,
-        letterSpacing: '0.01em',
+        fontSize: '0.7rem', fontWeight: 500,
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         maxWidth: '100%',
       }}>{tile.name}</span>
       {isSoon && (
         <span style={{
           position: 'absolute', top: 6, right: 8,
-          fontSize: '0.55rem', fontWeight: 700,
-          letterSpacing: '0.1em', textTransform: 'uppercase',
-          padding: '0.15rem 0.4rem', borderRadius: 4,
-          background: 'rgba(255,255,255,0.05)',
+          fontSize: '0.6rem', fontWeight: 500,
+          padding: '0.1rem 0.4rem', borderRadius: RADIUS_SM,
+          background: C.cardAlt,
           color: C.muted,
         }}>Soon</span>
       )}
@@ -4607,16 +4518,16 @@ function BottomTab({ label, icon, active, onClick, C: c }: { label: string; icon
         gap: '0.2rem',
         padding: '0.4rem 0',
         position: 'relative',
-        color: active ? c.accent : c.muted,
+        color: active ? c.text : c.mutedDim,
         transition: 'color 0.12s',
       }}
     >
       <span style={{ display: 'inline-flex', lineHeight: 1 }}>{icon}</span>
-      <span style={{ fontSize: '0.62rem', fontWeight: 600, letterSpacing: '0.04em' }}>{label}</span>
+      <span style={{ fontSize: '0.62rem', fontWeight: 600 }}>{label}</span>
       {active && (
         <span style={{
           position: 'absolute', bottom: 0, left: '30%', right: '30%',
-          height: 2, background: c.accent, borderRadius: 2,
+          height: 2, background: c.text, borderRadius: 2,
         }} />
       )}
     </button>
@@ -4677,15 +4588,15 @@ function SessionsPanel({
         borderBottom: `1px solid ${C.border}`,
         gap: '0.5rem',
       }}>
-        <div style={{ fontSize: '0.85rem', fontWeight: 700, color: C.text }}>
+        <div style={{ fontSize: '0.85rem', fontWeight: 600, color: C.text }}>
           Sessions
         </div>
         <button
           onClick={onClose}
           aria-label="Close"
           style={{
-            width: 28, height: 28, borderRadius: 7,
-            background: 'transparent', border: `1px solid ${C.border}`,
+            width: 28, height: 28, borderRadius: RADIUS_SM,
+            background: 'transparent', border: 'none',
             color: C.muted, cursor: 'pointer',
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           }}
@@ -4718,13 +4629,12 @@ function SessionsPanel({
               style={{
                 position: 'relative',
                 padding: '0.75rem 0.85rem',
-                borderRadius: 10,
-                background: isCurrent ? 'rgba(167,139,250,0.1)' : 'transparent',
-                border: `1px solid ${isCurrent ? 'rgba(167,139,250,0.3)' : 'transparent'}`,
-                transition: 'background 0.15s ease, border-color 0.15s ease',
+                borderRadius: RADIUS,
+                background: isCurrent ? C.cardAlt : 'transparent',
+                transition: 'background 0.15s ease',
               }}
               onMouseEnter={e => {
-                if (!isCurrent) e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+                if (!isCurrent) e.currentTarget.style.background = C.cardAlt;
               }}
               onMouseLeave={e => {
                 if (!isCurrent) e.currentTarget.style.background = 'transparent';
@@ -4750,8 +4660,8 @@ function SessionsPanel({
                       }
                     }}
                     style={{
-                      background: C.cardAlt, color: C.text,
-                      border: `1px solid ${C.borderHi}`, borderRadius: 7,
+                      background: C.bg, color: C.text,
+                      border: `1px solid ${C.borderHi}`, borderRadius: RADIUS_SM,
                       padding: '0.4rem 0.6rem', fontSize: '0.9rem',
                       fontFamily: 'inherit', outline: 'none', minWidth: 0,
                     }}
@@ -4760,9 +4670,9 @@ function SessionsPanel({
                     onClick={() => { onRename(s.id, renameValue); setRenamingId(null); }}
                     aria-label="Хадгалах"
                     style={{
-                      width: 30, height: 30, borderRadius: 7,
-                      background: C.accentDim, color: C.accent,
-                      border: `1px solid ${C.borderHi}`, cursor: 'pointer',
+                      width: 30, height: 30, borderRadius: RADIUS_SM,
+                      background: C.cardAlt, color: C.text,
+                      border: 'none', cursor: 'pointer',
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                     }}
                   ><IconCheck size={14} /></button>
@@ -4770,9 +4680,9 @@ function SessionsPanel({
                     onClick={() => setRenamingId(null)}
                     aria-label="Болих"
                     style={{
-                      width: 30, height: 30, borderRadius: 7,
+                      width: 30, height: 30, borderRadius: RADIUS_SM,
                       background: 'transparent', color: C.muted,
-                      border: `1px solid ${C.border}`, cursor: 'pointer',
+                      border: 'none', cursor: 'pointer',
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                     }}
                   ><IconClose size={14} /></button>
@@ -4789,21 +4699,19 @@ function SessionsPanel({
                     alignItems: 'center', gap: '0.7rem',
                   }}
                 >
-                  {/* Active = filled circle, inactive = outlined. Keeps
-                      the row scannable at a glance without relying on
-                      colour alone. */}
+                  {/* Active session = small check; others keep an empty
+                      slot of the same width so names stay aligned. */}
                   <span aria-hidden style={{
+                    width: 14,
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    color: isCurrent ? C.accent : C.mutedDim,
+                    color: C.text,
                   }}>
-                    <svg width={14} height={14} viewBox="0 0 24 24" aria-hidden="true">
-                      <circle cx={12} cy={12} r={6} fill={isCurrent ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={1.8} />
-                    </svg>
+                    {isCurrent && <IconCheck size={14} />}
                   </span>
                   <span style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', minWidth: 0 }}>
                     <span style={{
-                      fontSize: '0.95rem', fontWeight: 600,
-                      color: isCurrent ? C.accent : C.text,
+                      fontSize: '0.95rem', fontWeight: isCurrent ? 600 : 500,
+                      color: C.text,
                       whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                     }}>
                       {s.name}
@@ -4826,9 +4734,9 @@ function SessionsPanel({
                       setMenuId(prev => (prev === s.id ? null : s.id));
                     }}
                     style={{
-                      width: 28, height: 28, borderRadius: 7,
-                      background: isMenuOpen ? C.accentDim : 'transparent',
-                      color: isMenuOpen ? C.accent : C.muted,
+                      width: 28, height: 28, borderRadius: RADIUS_SM,
+                      background: isMenuOpen ? C.border : 'transparent',
+                      color: isMenuOpen ? C.text : C.muted,
                       cursor: 'pointer',
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                       flexShrink: 0,
@@ -4866,7 +4774,7 @@ function SessionsPanel({
                       transform: 'translateY(-50%)',
                       zIndex: 53,
                       background: C.card, border: `1px solid ${C.border}`,
-                      borderRadius: 10, padding: '0.2rem',
+                      borderRadius: RADIUS, padding: '0.2rem',
                       minWidth: 140,
                       boxShadow: '0 12px 30px rgba(0,0,0,0.55)',
                       display: 'flex', flexDirection: 'column', gap: '0.05rem',
@@ -4882,11 +4790,11 @@ function SessionsPanel({
                       style={{
                         background: 'transparent', border: 'none', cursor: 'pointer',
                         color: C.text, fontFamily: 'inherit', textAlign: 'left',
-                        fontSize: '0.8rem', fontWeight: 600,
-                        padding: '0.4rem 0.55rem', borderRadius: 7,
+                        fontSize: '0.8rem', fontWeight: 500,
+                        padding: '0.4rem 0.55rem', borderRadius: RADIUS_SM,
                         display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
                       }}
-                      onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                      onMouseEnter={e => { e.currentTarget.style.background = C.cardAlt; }}
                       onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
                     >
                       <IconPencil size={14} /> Нэр өөрчлөх
@@ -4903,13 +4811,14 @@ function SessionsPanel({
                       style={{
                         background: 'transparent', border: 'none',
                         cursor: list.length > 1 ? 'pointer' : 'not-allowed',
-                        color: list.length > 1 ? '#f87171' : 'rgba(248,113,113,0.4)',
+                        color: C.danger,
+                        opacity: list.length > 1 ? 1 : 0.45,
                         fontFamily: 'inherit', textAlign: 'left',
-                        fontSize: '0.8rem', fontWeight: 600,
-                        padding: '0.4rem 0.55rem', borderRadius: 7,
+                        fontSize: '0.8rem', fontWeight: 500,
+                        padding: '0.4rem 0.55rem', borderRadius: RADIUS_SM,
                         display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
                       }}
-                      onMouseEnter={e => { if (list.length > 1) e.currentTarget.style.background = 'rgba(239,68,68,0.08)'; }}
+                      onMouseEnter={e => { if (list.length > 1) e.currentTarget.style.background = C.cardAlt; }}
                       onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
                     >
                       <IconTrash size={14} /> Устгах
@@ -4951,8 +4860,8 @@ function SessionsPanel({
               }}
               placeholder="New session name"
               style={{
-                background: C.cardAlt, color: C.text,
-                border: `1px solid ${C.borderHi}`, borderRadius: 8,
+                background: C.bg, color: C.text,
+                border: `1px solid ${C.borderHi}`, borderRadius: RADIUS_SM,
                 padding: '0.55rem 0.7rem', fontSize: '0.9rem',
                 fontFamily: 'inherit', outline: 'none', minWidth: 0,
               }}
@@ -4966,9 +4875,9 @@ function SessionsPanel({
               }}
               aria-label="Үүсгэх"
               style={{
-                width: 36, height: 36, borderRadius: 8,
-                background: C.accentDim, color: C.accent,
-                border: `1px solid ${C.borderHi}`, cursor: 'pointer',
+                width: 36, height: 36, borderRadius: RADIUS_SM,
+                background: C.cardAlt, color: C.text,
+                border: 'none', cursor: 'pointer',
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
               }}
             ><IconCheck size={16} /></button>
@@ -4976,30 +4885,31 @@ function SessionsPanel({
               onClick={() => { setCreating(false); setNewName(''); }}
               aria-label="Болих"
               style={{
-                width: 36, height: 36, borderRadius: 8,
+                width: 36, height: 36, borderRadius: RADIUS_SM,
                 background: 'transparent', color: C.muted,
-                border: `1px solid ${C.border}`, cursor: 'pointer',
+                border: 'none', cursor: 'pointer',
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
               }}
             ><IconClose size={16} /></button>
           </div>
         ) : (
+          /* Plain text button with a + icon — no fill, no dashed frame. */
           <button
             onClick={() => { setCreating(true); setNewName(''); }}
             style={{
               width: '100%',
-              background: 'rgba(167,139,250,0.1)',
-              color: C.accent,
-              border: '1px dashed rgba(167,139,250,0.3)',
-              borderRadius: 10,
-              padding: '0.7rem',
-              fontSize: '0.88rem', fontWeight: 600, fontFamily: 'inherit',
+              background: 'transparent',
+              color: C.text,
+              border: 'none',
+              borderRadius: RADIUS,
+              padding: '0.6rem 0.7rem',
+              fontSize: '0.88rem', fontWeight: 500, fontFamily: 'inherit',
               cursor: 'pointer',
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.45rem',
-              transition: 'background 0.15s ease, border-color 0.15s ease',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-start', gap: '0.5rem',
+              transition: 'background 0.15s ease',
             }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(167,139,250,0.16)'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(167,139,250,0.1)'; }}
+            onMouseEnter={e => { e.currentTarget.style.background = C.cardAlt; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
           >
             <IconPlus size={14} /> New Session
           </button>
@@ -5008,14 +4918,12 @@ function SessionsPanel({
     </>
   );
 
-  // The new-design glass container — same chrome in both shells so the
-  // popup reads as one component regardless of how it was triggered.
+  // Neutral surface container — same chrome in both shells so the popup
+  // reads as one component regardless of how it was triggered.
   const container = (extraStyle: React.CSSProperties = {}) => ({
-    background: 'rgba(20,20,30,0.95)',
-    backdropFilter: 'blur(20px)',
-    WebkitBackdropFilter: 'blur(20px)',
-    border: '1px solid rgba(255,255,255,0.08)',
-    borderRadius: 16,
+    background: C.card,
+    border: `1px solid ${C.border}`,
+    borderRadius: RADIUS,
     boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
     maxHeight: '70vh',
     display: 'flex', flexDirection: 'column' as const,
@@ -5111,9 +5019,9 @@ function SortPicker({ sortMode, onChange }: {
         aria-label="More options"
         title="More options"
         style={{
-          width: 32, height: 32, borderRadius: 8,
-          background: open ? C.accentDim : 'transparent',
-          color: open ? C.accent : C.muted,
+          width: 32, height: 32, borderRadius: RADIUS_SM,
+          background: open ? C.cardAlt : 'transparent',
+          color: open ? C.text : C.muted,
           border: 'none',
           cursor: 'pointer',
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -5147,7 +5055,7 @@ function SortPicker({ sortMode, onChange }: {
             style={{
               position: 'absolute', top: 'calc(100% + 0.3rem)', right: 0, zIndex: 51,
               background: C.card, border: `1px solid ${C.border}`,
-              borderRadius: 10, padding: '0.25rem 0',
+              borderRadius: RADIUS, padding: '0.25rem 0',
               minWidth: 200,
               boxShadow: '0 12px 30px rgba(0,0,0,0.55)',
               display: 'flex', flexDirection: 'column',
@@ -5163,8 +5071,7 @@ function SortPicker({ sortMode, onChange }: {
                   }} />
                 )}
                 <div style={{
-                  fontSize: '0.55rem', letterSpacing: '0.16em',
-                  textTransform: 'uppercase', color: C.mutedDim, fontWeight: 700,
+                  fontSize: '0.7rem', color: C.muted, fontWeight: 500,
                   padding: '0.45rem 0.85rem 0.25rem',
                 }}>
                   {group.header}
@@ -5183,15 +5090,15 @@ function SortPicker({ sortMode, onChange }: {
                           // whether or not it has the leading checkmark.
                           display: 'grid', gridTemplateColumns: '14px 1fr',
                           alignItems: 'center', gap: '0.25rem',
-                          background: active ? C.accentDim : 'transparent',
-                          color: active ? C.accent : C.text,
-                          border: 'none', borderRadius: 7,
+                          background: active ? C.cardAlt : 'transparent',
+                          color: C.text,
+                          border: 'none', borderRadius: RADIUS_SM,
                           padding: '0.45rem 0.65rem',
-                          fontSize: '0.82rem', fontWeight: 600, fontFamily: 'inherit',
+                          fontSize: '0.82rem', fontWeight: active ? 600 : 500, fontFamily: 'inherit',
                           cursor: 'pointer', textAlign: 'left',
                           transition: 'background 0.12s, color 0.12s',
                         }}
-                        onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                        onMouseEnter={e => { if (!active) e.currentTarget.style.background = C.cardAlt; }}
                         onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent'; }}
                       >
                         <span aria-hidden style={{
@@ -5475,10 +5382,9 @@ function SettingsPanel(props: SettingsPanelProps) {
                   {t('timer.bt.connected')}
                   {brandBadge && (
                     <span style={{
-                      fontSize: '0.7rem', fontWeight: 700, color: c.muted,
-                      background: 'rgba(255,255,255,0.06)',
-                      padding: '0.1rem 0.4rem', borderRadius: 999,
-                      letterSpacing: '0.04em',
+                      fontSize: '0.7rem', fontWeight: 500, color: c.muted,
+                      background: c.cardAlt,
+                      padding: '0.1rem 0.4rem', borderRadius: RADIUS_SM,
                     }}>{brandBadge}</span>
                   )}
                 </>
@@ -5505,12 +5411,11 @@ function SettingsPanel(props: SettingsPanelProps) {
             }}
             disabled={unsupported || connecting}
             style={{
-              padding: '0.5rem 0.95rem', borderRadius: 8,
-              fontSize: '0.78rem', fontWeight: 700, fontFamily: 'inherit',
-              letterSpacing: '0.04em',
-              background: connected ? 'rgba(239,68,68,0.1)' : c.accentDim,
-              color: connected ? '#f87171' : c.accent,
-              border: `1px solid ${connected ? 'rgba(239,68,68,0.3)' : c.borderHi}`,
+              padding: '0.5rem 0.95rem', borderRadius: RADIUS,
+              fontSize: '0.78rem', fontWeight: 600, fontFamily: 'inherit',
+              background: c.cardAlt,
+              color: connected ? c.danger : c.text,
+              border: 'none',
               cursor: unsupported || connecting ? 'not-allowed' : 'pointer',
               opacity: unsupported || connecting ? 0.5 : 1,
               whiteSpace: 'nowrap', flexShrink: 0,
@@ -5523,16 +5428,14 @@ function SettingsPanel(props: SettingsPanelProps) {
         {unsupported ? (
           <div
             style={{
-              border: `1px solid ${c.borderHi}`,
-              background: c.accentDim,
-              borderRadius: 10,
+              background: c.cardAlt,
+              borderRadius: RADIUS,
               padding: '0.7rem 0.85rem',
               display: 'flex', flexDirection: 'column', gap: '0.45rem',
             }}
           >
             <div style={{
-              fontSize: '0.82rem', fontWeight: 700, color: c.accent,
-              letterSpacing: '0.01em',
+              fontSize: '0.82rem', fontWeight: 600, color: c.text,
             }}>
               {isIOS ? 'iOS дээр Bluetooth ашиглах' : 'Web Bluetooth not available'}
             </div>
@@ -5550,14 +5453,12 @@ function SettingsPanel(props: SettingsPanelProps) {
                   alignSelf: 'flex-start',
                   marginTop: '0.25rem',
                   padding: '0.65rem 1.1rem',
-                  borderRadius: 10,
-                  background: c.accent,
-                  color: '#0a0a0a',
-                  fontSize: '0.9rem', fontWeight: 800,
-                  letterSpacing: '0.02em',
+                  borderRadius: RADIUS,
+                  background: c.card,
+                  color: c.text,
+                  fontSize: '0.9rem', fontWeight: 600,
                   textDecoration: 'none',
-                  border: `1px solid ${c.accent}`,
-                  boxShadow: '0 4px 14px rgba(167,139,250,0.35)',
+                  border: `1px solid ${c.borderHi}`,
                   display: 'inline-flex', alignItems: 'center', gap: '0.45rem',
                 }}
               >
@@ -5602,11 +5503,10 @@ function SettingsPanel(props: SettingsPanelProps) {
       {/* ── Desktop keyboard shortcuts ── */}
       <div>
         <div style={{
-          fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.14em',
-          textTransform: 'uppercase', color: c.muted, marginBottom: '0.6rem',
+          fontSize: '0.75rem', fontWeight: 500, color: c.muted, marginBottom: '0.6rem',
           display: 'flex', alignItems: 'center', gap: '0.4rem',
         }}>
-          <IconKeyboard size={13} /> КОМПЬЮТЕР
+          <IconKeyboard size={13} /> Компьютер
         </div>
         <div style={{
           display: 'grid',
@@ -5635,11 +5535,10 @@ function SettingsPanel(props: SettingsPanelProps) {
       {/* ── Mobile two-finger gestures ── */}
       <div>
         <div style={{
-          fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.14em',
-          textTransform: 'uppercase', color: c.muted, marginBottom: '0.6rem',
+          fontSize: '0.75rem', fontWeight: 500, color: c.muted, marginBottom: '0.6rem',
           display: 'flex', alignItems: 'center', gap: '0.4rem',
         }}>
-          <IconPhone size={13} /> УТАС
+          <IconPhone size={13} /> Утас
         </div>
         <div style={{
           fontSize: '0.72rem', color: c.muted, marginBottom: '0.55rem',
@@ -5710,7 +5609,7 @@ function SettingsPanel(props: SettingsPanelProps) {
         style={{
           background: 'transparent', border: 'none', cursor: 'pointer',
           color: c.mutedDim, fontSize: '0.74rem', fontFamily: 'inherit',
-          letterSpacing: '0.04em', padding: '0.2rem 0.45rem',
+          padding: '0.2rem 0.45rem',
           transition: 'color 0.15s',
         }}
         onMouseEnter={e => (e.currentTarget.style.color = c.muted)}
@@ -5880,8 +5779,7 @@ function SettingsPanel(props: SettingsPanelProps) {
             overflowY: 'auto',
           }}>
             <div style={{
-              fontSize: '0.66rem', letterSpacing: '0.12em',
-              textTransform: 'uppercase', color: c.muted, fontWeight: 700,
+              fontSize: '0.8rem', color: c.muted, fontWeight: 500,
               marginBottom: '0.85rem',
             }}>
               {(() => {
@@ -5912,9 +5810,9 @@ function SegmentedRow<T extends string>({
       <span style={{ color: c.text }}>{label}</span>
       <div style={{
         display: 'inline-flex',
-        background: 'rgba(255,255,255,0.04)',
+        background: c.bg,
         border: `1px solid ${c.border}`,
-        borderRadius: 8, padding: 2, gap: 2,
+        borderRadius: RADIUS_SM, padding: 2, gap: 2,
       }}>
         {options.map(o => {
           const active = value === o.value;
@@ -5926,8 +5824,8 @@ function SegmentedRow<T extends string>({
               style={{
                 padding: '0.3rem 0.7rem', borderRadius: 6,
                 fontFamily: 'inherit', fontSize: '0.74rem', fontWeight: 600,
-                background: active ? c.accentDim : 'transparent',
-                color: active ? c.accent : c.muted,
+                background: active ? c.cardAlt : 'transparent',
+                color: active ? c.text : c.muted,
                 border: `1px solid ${active ? c.borderHi : 'transparent'}`,
                 cursor: 'pointer', transition: 'all 0.12s',
               }}
@@ -5945,9 +5843,9 @@ function ShortcutCell({ label, kbd, c }: { label: string; kbd: string; c: typeof
       <span style={{ color: c.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
       <kbd style={{
         fontFamily: '"JetBrains Mono", monospace',
-        fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.04em',
-        padding: '0.2rem 0.5rem', borderRadius: 6,
-        background: 'rgba(255,255,255,0.06)', border: `1px solid ${c.border}`,
+        fontSize: '0.7rem', fontWeight: 600,
+        padding: '0.2rem 0.5rem', borderRadius: RADIUS_SM,
+        background: c.cardAlt, border: 'none',
         color: c.text, whiteSpace: 'nowrap',
       }}>{kbd}</kbd>
     </div>
@@ -6054,11 +5952,9 @@ function QiyiDebugOverlay({ packets, C: c }: { packets: QiyiPacket[]; C: typeof 
     >
       <div style={{
         fontFamily: 'inherit',
-        fontSize: '0.6rem',
-        letterSpacing: '0.12em',
-        textTransform: 'uppercase',
-        fontWeight: 700,
-        color: c.accent,
+        fontSize: '0.66rem',
+        fontWeight: 600,
+        color: c.muted,
         marginBottom: '0.35rem',
       }}>
         QiYi DEBUG — last {packets.length}/10 packets
@@ -6102,7 +5998,7 @@ function HoldTimeSlider({
   onChange: (n: number) => void;
   c: typeof C;
 }) {
-  // Track-fill percentage for the lavender accent overlay.
+  // Track-fill percentage for the filled (primary-text) part of the track.
   const pct = Math.max(0, Math.min(100,
     ((value - HOLD_TIME_MIN) / (HOLD_TIME_MAX - HOLD_TIME_MIN)) * 100,
   ));
@@ -6196,9 +6092,8 @@ function ThemePicker({
   return (
     <div>
       <div style={{
-        fontSize: '0.7rem', fontWeight: 700,
-        letterSpacing: '0.08em', textTransform: 'uppercase',
-        color: c.mutedDim, marginBottom: '0.5rem',
+        fontSize: '0.75rem', fontWeight: 500,
+        color: c.muted, marginBottom: '0.5rem',
       }}>
         Загвар
       </div>
@@ -6272,7 +6167,7 @@ function ToggleRow({ label, value, onChange }: { label: string; value: boolean; 
         <span style={{
           position: 'absolute', top: 2, left: value ? 20 : 2,
           width: 16, height: 16, borderRadius: '50%',
-          background: value ? '#fff' : C.muted,
+          background: value ? C.bg : C.muted,
           transition: 'left 0.18s, background 0.18s',
         }} />
       </button>
@@ -6282,9 +6177,9 @@ function ToggleRow({ label, value, onChange }: { label: string; value: boolean; 
 
 function PenaltyRow({ penalty, onSet }: { penalty: Penalty; onSet: (p: Penalty) => void }) {
   const opts: { label: string; value: Penalty; color: string }[] = [
-    { label: 'OK',  value: 'none', color: C.muted   },
-    { label: '+2',  value: '+2',   color: C.warn    },
-    { label: 'DNF', value: 'dnf',  color: C.danger  },
+    { label: 'OK',  value: 'none', color: C.text   },
+    { label: '+2',  value: '+2',   color: C.danger },
+    { label: 'DNF', value: 'dnf',  color: C.danger },
   ];
   return (
     <div
@@ -6298,11 +6193,10 @@ function PenaltyRow({ penalty, onSet }: { penalty: Penalty; onSet: (p: Penalty) 
             key={o.value}
             onClick={() => onSet(o.value)}
             style={{
-              padding: '0.4rem 0.85rem', borderRadius: 7,
-              fontSize: '0.78rem', fontWeight: 700, fontFamily: 'inherit',
-              letterSpacing: '0.04em',
-              background: active ? `${o.color}26` : 'rgba(255,255,255,0.04)',
-              border: `1px solid ${active ? o.color : 'rgba(255,255,255,0.08)'}`,
+              padding: '0.4rem 0.85rem', borderRadius: RADIUS_SM,
+              fontSize: '0.78rem', fontWeight: 600, fontFamily: 'inherit',
+              background: active ? C.cardAlt : 'transparent',
+              border: `1px solid ${active ? C.borderHi : C.border}`,
               color: active ? o.color : C.muted,
               cursor: 'pointer', transition: 'all 0.12s',
             }}
@@ -6401,9 +6295,9 @@ function ActionIconBtn({
   ariaLabel: string;
   onClick: () => void;
   active?: boolean;
-  /** Tint used for the filled/active background and ring. Defaults to
-   *  the lavender accent so the Delete button (no semantic colour) and
-   *  Comment-on-hover land on the same hue. */
+  /** Tint used for the filled/active background. Defaults to the
+   *  neutral primary-text colour so the Delete button (no semantic
+   *  colour) and Comment-on-hover share the same monochrome fill. */
   activeColor?: string;
 }) {
   const tint = activeColor ?? C.accent;
@@ -6698,7 +6592,7 @@ function MaterialDialog({
           width: '100%', maxWidth: width,
           background: '#ffffff',
           color: '#222',
-          borderRadius: 8,
+          borderRadius: RADIUS,
           boxShadow: '0 24px 48px rgba(0,0,0,0.55), 0 8px 16px rgba(0,0,0,0.35)',
           padding: '1.4rem 1.5rem 0.6rem',
           fontFamily: 'inherit',
@@ -6715,14 +6609,14 @@ function MaterialTextBtn({
   label, tone = 'neutral', autoFocus, onClick,
 }: {
   label: string;
-  /** neutral = grey, primary = lavender accent, danger = red. */
+  /** neutral = grey, primary = near-black (no accent hue), danger = red. */
   tone?: 'neutral' | 'primary' | 'danger';
   autoFocus?: boolean;
   onClick: () => void;
 }) {
   const color =
     tone === 'danger'  ? '#d32f2f' :
-    tone === 'primary' ? '#5a4cd8' :
+    tone === 'primary' ? '#111111' :
     '#666';
   return (
     <button
@@ -6731,10 +6625,9 @@ function MaterialTextBtn({
       onClick={onClick}
       style={{
         background: 'transparent', border: 'none', cursor: 'pointer',
-        color, fontFamily: 'inherit', fontWeight: 700,
-        letterSpacing: '0.06em', fontSize: '0.82rem',
-        padding: '0.55rem 0.7rem', borderRadius: 4,
-        textTransform: 'uppercase',
+        color, fontFamily: 'inherit', fontWeight: 600,
+        fontSize: '0.85rem',
+        padding: '0.55rem 0.7rem', borderRadius: RADIUS_SM,
         transition: 'background 0.12s',
         WebkitTapHighlightColor: 'transparent',
       }}
@@ -6815,7 +6708,7 @@ function CommentModal({
           width: '100%', boxSizing: 'border-box',
           background: 'transparent', color: '#222',
           border: 'none',
-          borderBottom: `${focused ? '2px' : '1px'} solid ${focused ? '#5a4cd8' : 'rgba(0,0,0,0.42)'}`,
+          borderBottom: `${focused ? '2px' : '1px'} solid ${focused ? '#111111' : 'rgba(0,0,0,0.42)'}`,
           padding: '0.4rem 0',
           fontSize: '1rem', fontFamily: 'inherit',
           outline: 'none',
@@ -6837,9 +6730,9 @@ function Row({ label, kbd }: { label: string; kbd: string }) {
       <span style={{ color: C.text }}>{label}</span>
       <kbd style={{
         fontFamily: '"JetBrains Mono", monospace',
-        fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.05em',
-        padding: '0.2rem 0.55rem', borderRadius: 6,
-        background: 'rgba(255,255,255,0.06)', border: `1px solid ${C.border}`,
+        fontSize: '0.72rem', fontWeight: 600,
+        padding: '0.2rem 0.55rem', borderRadius: RADIUS_SM,
+        background: C.cardAlt, border: 'none',
         color: C.text,
       }}>{kbd}</kbd>
     </div>
@@ -6906,14 +6799,14 @@ function EventTile({
       onClick={onClick}
       style={{
         padding: '0.85rem 0.5rem',
-        background: active ? C.accentDim : C.cardAlt,
+        background: active ? C.cardAlt : C.card,
         border: `1px solid ${active ? C.borderHi : C.border}`,
-        borderRadius: 12,
+        borderRadius: RADIUS,
         display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center',
         gap: '0.4rem',
         cursor: 'pointer', fontFamily: 'inherit',
-        color: active ? C.accent : C.text,
+        color: C.text,
         transition: 'background 0.12s, border-color 0.12s',
         minHeight: 80,
       }}
@@ -6921,7 +6814,6 @@ function EventTile({
       <WcaEventIcon eventId={event.id} size={28} />
       <span style={{
         fontSize: '0.72rem', fontWeight: 600,
-        letterSpacing: '0.02em',
       }}>
         {event.short}
       </span>
@@ -7031,9 +6923,8 @@ function EventPickerSheet({
               }}
             >
               <span style={{
-                fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.06em',
-                color: specialOpen ? C.accent : C.muted,
-                textTransform: 'uppercase',
+                fontSize: '0.78rem', fontWeight: 500,
+                color: specialOpen ? C.text : C.muted,
               }}>
                 Тусгай төрлүүд (BLD / FMC)
               </span>

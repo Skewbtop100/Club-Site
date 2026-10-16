@@ -32,7 +32,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#A78BFA',
+  themeColor: '#0B0B0C',
   width: 'device-width',
   initialScale: 1,
   // Pinch-zoom is hostile to a stopwatch UI: an accidental two-finger

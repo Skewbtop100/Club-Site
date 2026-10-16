@@ -4,19 +4,17 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 
-// Shared dark-theme palette — matches the timer page's local C constant
-// without coupling this component to that file. Kept inline so this
-// component is self-contained and drop-in across all timer routes.
+// Shared dark-theme palette — mirrors the timer page's monochrome tokens
+// (no accent hue) without coupling this component to that file. Kept
+// inline so this component is self-contained across all timer routes.
 const C = {
-  card:    '#141414',
-  cardAlt: '#1a1a1a',
-  border:  'rgba(255,255,255,0.08)',
-  borderHi:'rgba(167,139,250,0.45)',
-  text:    '#e8e8ed',
-  muted:   '#8b8d98',
-  accent:  '#a78bfa',
-  accent2: '#ec4899',
-  danger:  '#ef4444',
+  card:    '#141416',
+  cardAlt: '#1C1C1F',
+  border:  '#232326',
+  borderHi:'#3A3A3F',
+  text:    '#EDEDED',
+  muted:   '#8B8B90',
+  danger:  '#E5484D',
 } as const;
 
 function initialOf(name: string | null | undefined): string {
@@ -144,18 +142,18 @@ export default function TimerProfileMenu({
         style={{
           height: size,
           padding: '0 0.7rem',
-          background: 'transparent',
-          color: C.muted,
-          border: `1px solid ${C.border}`,
-          borderRadius: 999,
-          fontSize: '0.78rem', fontWeight: 700,
+          background: C.cardAlt,
+          color: C.text,
+          border: 'none',
+          borderRadius: 10,
+          fontSize: '0.78rem', fontWeight: 500,
           fontFamily: 'inherit', cursor: 'pointer',
           display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
-          transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+          transition: 'background 0.15s, color 0.15s',
           whiteSpace: 'nowrap',
         }}
-        onMouseEnter={e => { e.currentTarget.style.color = C.accent; e.currentTarget.style.borderColor = C.borderHi; }}
-        onMouseLeave={e => { e.currentTarget.style.color = C.muted; e.currentTarget.style.borderColor = C.border; }}
+        onMouseEnter={e => { e.currentTarget.style.background = C.border; }}
+        onMouseLeave={e => { e.currentTarget.style.background = C.cardAlt; }}
       >
         Login
       </button>
@@ -192,14 +190,13 @@ export default function TimerProfileMenu({
           cursor: 'pointer',
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           overflow: 'hidden',
-          transition: 'border-color 0.15s, box-shadow 0.15s',
-          boxShadow: open ? `0 0 0 2px ${C.borderHi}` : 'none',
+          transition: 'border-color 0.15s',
         }}
       >
         <span style={{
           width: '100%', height: '100%', borderRadius: '50%',
-          background: `linear-gradient(135deg, ${C.accent}, ${C.accent2})`,
-          color: '#fff', fontSize: size * 0.42, fontWeight: 800, lineHeight: 1,
+          background: C.cardAlt,
+          color: C.text, fontSize: size * 0.42, fontWeight: 600, lineHeight: 1,
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           overflow: 'hidden',
         }}>
@@ -229,7 +226,7 @@ export default function TimerProfileMenu({
             minWidth: 240,
             background: C.card,
             border: `1px solid ${C.border}`,
-            borderRadius: 12,
+            borderRadius: 10,
             padding: 5,
             boxShadow: '0 18px 44px rgba(0,0,0,0.55)',
             display: 'flex', flexDirection: 'column', gap: 2,
@@ -254,8 +251,8 @@ export default function TimerProfileMenu({
             }}>{user.email}</div>
             <div title="Point" style={{
               display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
-              fontSize: '0.74rem', fontWeight: 700,
-              color: C.accent,
+              fontSize: '0.74rem', fontWeight: 600,
+              color: C.text,
               marginTop: '0.1rem',
             }}>
               <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.8rem', fontWeight: 800 }}>
@@ -300,7 +297,6 @@ export default function TimerProfileMenu({
         }
         .timer-profile-avatar:hover {
           border-color: ${C.borderHi} !important;
-          box-shadow: 0 0 0 2px ${C.borderHi} !important;
         }
       `}</style>
     </span>
@@ -325,7 +321,7 @@ function MenuItem({
         cursor: 'pointer',
         transition: 'background 0.12s',
       }}
-      onMouseEnter={e => (e.currentTarget.style.background = danger ? 'rgba(239,68,68,0.1)' : 'rgba(167,139,250,0.1)')}
+      onMouseEnter={e => (e.currentTarget.style.background = C.cardAlt)}
       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
     >
       {icon && <span style={{ display: 'inline-flex', flexShrink: 0, color: 'currentColor', opacity: 0.85 }}>{icon}</span>}
