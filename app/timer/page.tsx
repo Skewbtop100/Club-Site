@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import TimerProfileMenu from '@/components/timer/TimerProfileMenu';
@@ -452,6 +452,8 @@ function getDesktopScrambleFontSize(pref: 'sm' | 'md' | 'lg'): string {
 // Shared-scramble mode: { code, per-event index }. Absent = normal random.
 const SHARED_KEY = 'pv.timer.shared.v1';
 const SHARED_INDEX_MAX = 9999;
+// Remembered view of the preview/tools panel: 'preview' | 'shared'.
+const TOOLS_TAB_KEY = 'pv.timer.toolsTab';
 interface SharedMode {
   code: string;
   /** eventId → current scramble number (1-based); missing = #1. */
@@ -1370,13 +1372,25 @@ export default function TimerPage() {
     });
   }, [historyIdx, scrambleHistory, newScramble, sharedCode, stepShared]);
 
-  // Shared-mode entry / exit (used by the "Хамт" panel and the bar).
-  const [sharedPanelOpen, setSharedPanelOpen] = useState(false);
+  // Shared-mode ("Ижил холилт") entry / exit — used by the tools panel
+  // (desktop right panel, mobile enlarged preview) and the active bar.
   const enterSharedMode = useCallback((code: string) => {
     if (!isValidSharedCode(code)) return;
     updateShared(prev => (prev?.code === code ? prev : { code, indexes: {} }));
-    setSharedPanelOpen(false);
   }, [updateShared]);
+
+  // Which view the preview/tools panel shows; remembered across visits.
+  const [toolsTab, setToolsTabState] = useState<ToolsTab>('preview');
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(TOOLS_TAB_KEY);
+      if (saved === 'preview' || saved === 'shared') setToolsTabState(saved);
+    } catch { /* ignore */ }
+  }, []);
+  const setToolsTab = useCallback((tab: ToolsTab) => {
+    setToolsTabState(tab);
+    try { localStorage.setItem(TOOLS_TAB_KEY, tab); } catch { /* ignore */ }
+  }, []);
   const leaveSharedMode = useCallback(() => {
     updateShared(() => null);
     // Back to normal: start from a fresh random scramble.
@@ -1547,7 +1561,7 @@ export default function TimerPage() {
         && timer.state === 'stopped'
         && solves.length > 0
         && !settingsOpen && !detailSolveId && commentSolveId == null
-        && !sessionPanelOpen && !cubeFullscreenOpen && !sharedPanelOpen
+        && !sessionPanelOpen && !cubeFullscreenOpen
       ) {
         const target = e.target as HTMLElement | null;
         const inEditable = !!target && (
@@ -1588,7 +1602,7 @@ export default function TimerPage() {
         !e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey
         && (timer.state === 'idle' || timer.state === 'stopped')
         && !settingsOpen && !detailSolveId && commentSolveId == null
-        && !sessionPanelOpen && !cubeFullscreenOpen && !sharedPanelOpen
+        && !sessionPanelOpen && !cubeFullscreenOpen
       ) {
         const tgt = e.target as HTMLElement | null;
         const inEditable = !!tgt && (
@@ -1668,7 +1682,7 @@ export default function TimerPage() {
     // last-solve / modal state so D/X/2/C hit the right target.
     solves, togglePenaltyOnLast, deleteLastSolve,
     settingsOpen, detailSolveId, commentSolveId,
-    sessionPanelOpen, cubeFullscreenOpen, sharedPanelOpen,
+    sessionPanelOpen, cubeFullscreenOpen,
     timeEntryMode,
     goPrevScramble, goNextScramble, newScramble,
   ]);
@@ -2014,6 +2028,44 @@ export default function TimerPage() {
     timer.state === 'inspecting' ||
     timer.state === 'armed' ||
     timer.state === 'running';
+
+  // Focus-mode centring: while timing, the digits (with the "Inspection"
+  // label riding along) are translated so their centre sits exactly on
+  // the viewport centre. A transform never affects layout, so nothing
+  // jumps, and it animates via the wrapper's transition. The base
+  // (untransformed) position is the measured rect minus the transform
+  // currently applied — read from the computed style so a measurement
+  // taken mid-animation still yields the right target. Re-measured
+  // whenever the display text changes (font steps down for long times)
+  // and on resize.
+  const focusShiftRef = useRef<HTMLDivElement | null>(null);
+  const focusDigitsRef = useRef<HTMLDivElement | null>(null);
+  const [focusShift, setFocusShift] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [viewportTick, setViewportTick] = useState(0);
+  useEffect(() => {
+    const onResize = () => setViewportTick(t => t + 1);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  useLayoutEffect(() => {
+    if (!focusMode) {
+      setFocusShift(s => (s.x === 0 && s.y === 0 ? s : { x: 0, y: 0 }));
+      return;
+    }
+    const wrap = focusShiftRef.current;
+    const digits = focusDigitsRef.current;
+    if (!wrap || !digits) return;
+    const r = digits.getBoundingClientRect();
+    const t = getComputedStyle(wrap).transform;
+    const applied = new DOMMatrixReadOnly(t && t !== 'none' ? t : undefined);
+    const x = window.innerWidth / 2 - (r.left + r.width / 2 - applied.m41);
+    const y = window.innerHeight / 2 - (r.top + r.height / 2 - applied.m42);
+    setFocusShift(s => (Math.abs(s.x - x) < 0.5 && Math.abs(s.y - y) < 0.5 ? s : { x, y }));
+  }, [focusMode, timerDisplay, isMobile, viewportTick]);
+  const focusShiftStyle: React.CSSProperties = {
+    transform: `translate(${focusShift.x}px, ${focusShift.y}px)`,
+    transition: 'transform 0.15s ease',
+  };
 
 
   return (
@@ -2497,15 +2549,6 @@ export default function TimerPage() {
                 >
                   <IconRefresh size={16} /> New Scramble
                 </button>
-                <button
-                  onClick={() => setSharedPanelOpen(true)}
-                  aria-label="Хамт — shared scramble code"
-                  style={ghostButtonStyle(!!sharedCode)}
-                  onMouseEnter={e => (e.currentTarget.style.background = C.border)}
-                  onMouseLeave={e => (e.currentTarget.style.background = sharedCode ? C.border : C.cardAlt)}
-                >
-                  Хамт
-                </button>
               </div>
 
               {sharedCode && sharedIndex != null && (
@@ -2550,6 +2593,7 @@ export default function TimerPage() {
             // tap-to-arm flow is unaffected — context menu fires on
             // long-press / right-click only.
             onContextMenu={e => e.preventDefault()}
+            className="pv-timer-card"
             style={{
               flex: '1 1 auto', minHeight: 0,
               background: C.card,
@@ -2571,6 +2615,8 @@ export default function TimerPage() {
                 {connectedTimerName} connected
               </div>
             )}
+            {/* Label + digits shift to the viewport centre in focus mode. */}
+            <div ref={focusShiftRef} style={focusShiftStyle}>
             {timer.state === 'inspecting' && (
               <div style={{ fontSize: '0.75rem', color: C.warn, marginBottom: '0.6rem', fontWeight: 600 }}>
                 Inspection
@@ -2598,7 +2644,7 @@ export default function TimerPage() {
                     <span style={{ color: C.danger }}>{fmtMs(ao5Projection.worst, false, precision)}</span>
                   </div>
                 )}
-                <div style={{
+                <div ref={focusDigitsRef} className="pv-timer-digits" style={{
                   fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
                   fontSize: getTimerFontSize(timerDisplay, false),
                   fontWeight: 700, lineHeight: 0.95,
@@ -2611,6 +2657,7 @@ export default function TimerPage() {
                 </div>
               </>
             )}
+            </div>
             {/* Action row visibility is now opacity-driven so the fade
                 between 'stopped' (visible) and 'armed' / 'inspecting'
                 / 'running' (hidden) is smooth. The wrapper stays
@@ -2763,10 +2810,12 @@ export default function TimerPage() {
             );
           })()}
 
-          {/* Scramble preview — pinned to the bottom of the right panel.
-              marginTop: auto pushes it past the stat cards; aspect-ratio
-              keeps it square between the 180–280px size bounds. */}
-          <div style={{
+          {/* Tools panel — pinned to the bottom of the right panel.
+              "Холилтын зураг" (scramble preview, default) | "Ижил холилт"
+              (shared scramble code). marginTop: auto pushes it past the
+              stat cards; aspect-ratio keeps it square between the
+              180–280px size bounds. */}
+          <div className="pv-tools-panel" style={{
             marginTop: 'auto',
             width: '100%',
             maxWidth: 280,
@@ -2779,14 +2828,26 @@ export default function TimerPage() {
             display: 'flex', flexDirection: 'column',
             flexShrink: 0,
           }}>
-            <div style={{
-              fontSize: '0.75rem', color: C.muted, fontWeight: 500,
-              padding: '0.2rem 0.45rem 0.4rem',
-            }}>
-              Scramble preview
+            <div style={{ paddingBottom: '0.45rem' }}>
+              <ToolsTabSwitch
+                value={toolsTab}
+                onChange={setToolsTab}
+                labels={{ preview: 'Холилтын зураг', shared: 'Ижил холилт' }}
+              />
             </div>
             <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-              <ScramblePreview eventId={eventId} scramble={scramble} />
+              {toolsTab === 'preview' ? (
+                <ScramblePreview eventId={eventId} scramble={scramble} />
+              ) : (
+                <SharedCodeTools
+                  code={sharedCode}
+                  index={sharedIndex}
+                  onEnter={enterSharedMode}
+                  onLeave={leaveSharedMode}
+                  onStep={stepShared}
+                  onJump={setSharedIndexTo}
+                />
+              )}
             </div>
           </div>
 
@@ -2960,13 +3021,13 @@ export default function TimerPage() {
                 picker in the capsule above is enough context. */}
             {mobileTab === 'timer' && (
               <div className="pv-scramble" style={{ flexShrink: 0 }}>
-                {/* Shared-code strip (or the "Хамт" entry chip) sits on
-                    its own line right above the scramble text. */}
-                <div style={{
-                  display: 'flex', justifyContent: 'center', alignItems: 'center',
-                  minHeight: 28, padding: '0 0.7rem',
-                }}>
-                  {sharedCode && sharedIndex != null ? (
+                {/* Active "Ижил холилт" strip — only while a code is
+                    active; entry lives in the enlarged-preview sheet. */}
+                {sharedCode && sharedIndex != null && (
+                  <div style={{
+                    display: 'flex', justifyContent: 'center', alignItems: 'center',
+                    minHeight: 28, padding: '0 0.7rem',
+                  }}>
                     <SharedCodeBar
                       code={sharedCode}
                       index={sharedIndex}
@@ -2974,19 +3035,8 @@ export default function TimerPage() {
                       onJump={setSharedIndexTo}
                       onLeave={leaveSharedMode}
                     />
-                  ) : (
-                    <button
-                      onClick={() => setSharedPanelOpen(true)}
-                      aria-label="Хамт — shared scramble code"
-                      style={{
-                        background: C.cardAlt, color: C.text, border: 'none',
-                        borderRadius: RADIUS_SM, padding: '0.2rem 0.65rem',
-                        fontSize: '0.75rem', fontWeight: 500, fontFamily: 'inherit',
-                        cursor: 'pointer',
-                      }}
-                    >Хамт</button>
-                  )}
-                </div>
+                  </div>
+                )}
                 <SwipeScrambleRow
                   scramble={scramble}
                   scrambleFontPx={getScrambleFontSize(scramble, scrambleFontSize)}
@@ -3064,6 +3114,7 @@ export default function TimerPage() {
                   // a hold-tap during inspection would otherwise pop up
                   // Circle-to-Search and steal focus from the solve.
                   onContextMenu={e => e.preventDefault()}
+                  className="pv-timer-card"
                   style={{
                     flex: '1 1 auto', minHeight: 0,
                     display: 'flex', flexDirection: 'column',
@@ -3085,6 +3136,8 @@ export default function TimerPage() {
                       {connectedTimerName} connected
                     </div>
                   )}
+                  {/* Label + digits shift to the viewport centre in focus mode. */}
+                  <div ref={focusShiftRef} style={focusShiftStyle}>
                   {timer.state === 'inspecting' && (
                     <div style={{ fontSize: '0.75rem', color: C.warn, marginBottom: '0.6rem', fontWeight: 600 }}>
                       Inspection
@@ -3112,7 +3165,7 @@ export default function TimerPage() {
                           <span style={{ color: C.danger }}>{fmtMs(ao5Projection.worst, false, precision)}</span>
                         </div>
                       )}
-                      <div style={{
+                      <div ref={focusDigitsRef} className="pv-timer-digits" style={{
                         fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
                         fontSize: getTimerFontSize(timerDisplay, true),
                         fontWeight: 700, lineHeight: 0.95,
@@ -3124,6 +3177,7 @@ export default function TimerPage() {
                       </div>
                     </>
                   )}
+                  </div>
                   {/* Same opacity/visibility wrapper as the desktop
                       branch — see the comment there for the rationale. */}
                   {lastSolve && (() => {
@@ -3668,29 +3722,38 @@ export default function TimerPage() {
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             }}
           ><IconClose size={18} /></button>
+          {/* Enlarged preview doubles as the mobile tools sheet:
+              "Зураг" (preview) | "Ижил холилт" (shared code). */}
           <div
             onClick={(e) => e.stopPropagation()}
             style={{
-              width: 'min(86vw, 86vh, 480px)',
-              height: 'min(86vw, 86vh, 480px)',
+              width: 'min(86vw, 80vh, 480px)',
               background: C.card, border: `1px solid ${C.border}`,
               borderRadius: RADIUS, padding: '0.75rem',
-              display: 'flex',
+              display: 'flex', flexDirection: 'column', gap: '0.6rem',
             }}
           >
-            <ScramblePreview eventId={eventId} scramble={scramble} />
+            <ToolsTabSwitch
+              value={toolsTab}
+              onChange={setToolsTab}
+              labels={{ preview: 'Зураг', shared: 'Ижил холилт' }}
+            />
+            <div style={{ width: '100%', aspectRatio: '1 / 1', display: 'flex' }}>
+              {toolsTab === 'preview' ? (
+                <ScramblePreview eventId={eventId} scramble={scramble} />
+              ) : (
+                <SharedCodeTools
+                  code={sharedCode}
+                  index={sharedIndex}
+                  onEnter={enterSharedMode}
+                  onLeave={leaveSharedMode}
+                  onStep={stepShared}
+                  onJump={setSharedIndexTo}
+                />
+              )}
+            </div>
           </div>
         </div>
-      )}
-
-      {/* Shared scramble code panel ("Хамт") */}
-      {sharedPanelOpen && (
-        <SharedCodePanel
-          currentCode={sharedCode}
-          onEnter={enterSharedMode}
-          onLeave={leaveSharedMode}
-          onClose={() => setSharedPanelOpen(false)}
-        />
       )}
 
       {/* Sessions panel modal (mobile + button in header) */}
@@ -3803,7 +3866,7 @@ export default function TimerPage() {
                   <span>{formatSolveTime(s.ts)}</span>
                   {s.sharedCode && s.sharedIndex != null && (
                     <span
-                      title="Хамт код · scramble дугаар"
+                      title="Ижил холилт код · scramble дугаар"
                       style={{
                         marginLeft: '0.25rem',
                         padding: '0.05rem 0.45rem', borderRadius: RADIUS_SM,
@@ -4077,7 +4140,17 @@ export default function TimerPage() {
         .timer-page .pv-bt-indicator,
         .timer-page .pv-instruction,
         .timer-page .pv-ao5-inline {
-          transition: opacity 0.18s ease;
+          transition: opacity 0.15s ease;
+        }
+        /* The timer card itself drops its fill + border in focus mode so
+           the digits (translated to the viewport centre, see focusShift)
+           sit on the plain page background. */
+        .timer-page .pv-timer-card {
+          transition: background-color 0.15s ease, border-color 0.15s ease;
+        }
+        .timer-page.focus-mode .pv-timer-card {
+          background-color: transparent !important;
+          border-color: transparent !important;
         }
         .timer-page.focus-mode .pv-sidebar,
         .timer-page.focus-mode .pv-right-panel,
@@ -4091,12 +4164,12 @@ export default function TimerPage() {
           opacity: 0;
           pointer-events: none;
         }
-        /* Force pure black behind the digits during a solve, regardless of
-           theme. The themed bg is great for browsing but during the actual
-           running state the goal is for the time to pop — coloured panels
-           drained to opacity 0 still leave a coloured backdrop otherwise. */
+        /* Plain page background behind the digits during a solve — the
+           theme's solid bg (#0B0B0C on the default theme) instead of any
+           gradient, so drained-to-0 panels can't leave a coloured backdrop
+           and the digits keep their contrast on every theme. */
         .timer-page.focus-mode {
-          background: #000 !important;
+          background: ${C.bg} !important;
         }
 
         .pv-ao5-inline {
@@ -6583,99 +6656,63 @@ function ActionIconBtn({
   );
 }
 
-// Swipeable scramble row used on mobile. Left swipe → next scramble
-// (history's index 0 → fresh random), right swipe → previous scramble
-// (older history). Threshold is intentionally generous (>50 px) so the
-// solver's vertical scrolls don't accidentally rotate the scramble.
-// ── Shared scramble code UI ─────────────────────────────────────────────
+// ── Tools panel + shared scramble code ("Ижил холилт") UI ───────────────
 
-/** "Хамт" panel: create a random 4-digit code or type one in. */
-function SharedCodePanel({ currentCode, onEnter, onLeave, onClose }: {
-  currentCode: string | null;
-  onEnter: (code: string) => void;
-  onLeave: () => void;
-  onClose: () => void;
+type ToolsTab = 'preview' | 'shared';
+
+/** Two-option segmented control heading the tools panel (desktop right
+ *  panel, mobile enlarged-preview sheet). */
+function ToolsTabSwitch({ value, onChange, labels }: {
+  value: ToolsTab;
+  onChange: (tab: ToolsTab) => void;
+  labels: Record<ToolsTab, string>;
 }) {
-  const [draft, setDraft] = useState('');
-  const valid = isValidSharedCode(draft);
-  const actionBtn = (enabled: boolean): React.CSSProperties => ({
-    ...ghostButtonStyle(false),
-    justifyContent: 'center',
-    opacity: enabled ? 1 : 0.45,
-    cursor: enabled ? 'pointer' : 'default',
-  });
+  const tabs: ToolsTab[] = ['preview', 'shared'];
   return (
-    <ModalShell title="Хамт" onClose={onClose}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-        <div style={{ fontSize: '0.8rem', color: C.muted, lineHeight: 1.5 }}>
-          Ижил код оруулсан хүмүүс ижил дарааллын scramble (#1, #2, …) авна.
-        </div>
-
-        {currentCode && (
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem',
-            background: C.cardAlt, borderRadius: RADIUS, padding: '0.55rem 0.75rem',
-          }}>
-            <span style={{ fontSize: '0.85rem', color: C.muted }}>
-              Одоогийн код{' '}
-              <span style={{ color: C.text, fontFamily: '"JetBrains Mono", monospace', fontWeight: 600 }}>{currentCode}</span>
-            </span>
-            <button
-              type="button"
-              onClick={() => { onLeave(); onClose(); }}
-              style={{ ...ghostButtonStyle(false), background: 'transparent', padding: '0.3rem 0.5rem' }}
-            >Гарах</button>
-          </div>
-        )}
-
-        <button
-          type="button"
-          onClick={() => onEnter(randomSharedCode())}
-          style={{ ...actionBtn(true), width: '100%' }}
-        >Код үүсгэх</button>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-          <label htmlFor="pv-shared-code" style={{ fontSize: '0.75rem', color: C.muted }}>Код оруулах</label>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.4rem' }}>
-            <input
-              id="pv-shared-code"
-              inputMode="numeric"
-              autoComplete="off"
-              maxLength={4}
-              placeholder="0000"
-              value={draft}
-              onChange={e => setDraft(e.target.value.replace(/\D/g, '').slice(0, 4))}
-              onKeyDown={e => { if (e.key === 'Enter' && valid) onEnter(draft); }}
-              style={{
-                background: C.bg, color: C.text,
-                border: `1px solid ${C.borderHi}`, borderRadius: RADIUS_SM,
-                padding: '0.5rem 0.7rem', minWidth: 0,
-                fontFamily: '"JetBrains Mono", monospace', fontSize: '1rem',
-                letterSpacing: '0.2em', outline: 'none',
-              }}
-            />
-            <button
-              type="button"
-              disabled={!valid}
-              onClick={() => onEnter(draft)}
-              style={actionBtn(valid)}
-            >Нэгдэх</button>
-          </div>
-        </div>
-      </div>
-    </ModalShell>
+    <div role="tablist" style={{
+      display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2,
+      background: C.bg, border: `1px solid ${C.border}`,
+      borderRadius: RADIUS_SM, padding: 2,
+    }}>
+      {tabs.map(tab => {
+        const active = tab === value;
+        return (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(tab)}
+            style={{
+              padding: '0.3rem 0.4rem', borderRadius: 6,
+              background: active ? C.cardAlt : 'transparent',
+              color: active ? C.text : C.muted,
+              border: 'none', cursor: 'pointer',
+              fontFamily: 'inherit', fontSize: '0.74rem', fontWeight: active ? 600 : 500,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              transition: 'background 0.12s, color 0.12s',
+            }}
+          >{labels[tab]}</button>
+        );
+      })}
+    </div>
   );
 }
 
-/** Shared-mode strip above the scramble: "Код 4827 · ‹ #5 › · Гарах".
- *  Tapping the code copies it; tapping "#5" turns it into a number input
- *  so a friend can jump straight to someone else's position. */
-function SharedCodeBar({ code, index, onStep, onJump, onLeave }: {
-  code: string;
+async function copySharedCode(code: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(code);
+    showToast({ msg: 'Хуулагдлаа ✓', tone: 'success' });
+  } catch { /* clipboard blocked — the code is visible anyway */ }
+}
+
+/** "‹ #5 ›" stepper. Tapping "#5" turns it into a number input so a
+ *  friend can jump straight to someone else's position. */
+function SharedIndexControl({ index, onStep, onJump, large = false }: {
   index: number;
   onStep: (delta: number) => void;
   onJump: (index: number) => void;
-  onLeave: () => void;
+  large?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
@@ -6684,38 +6721,20 @@ function SharedCodeBar({ code, index, onStep, onJump, onLeave }: {
     if (Number.isFinite(n) && n >= 1) onJump(n);
     setEditing(false);
   };
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(code);
-      showToast({ msg: 'Хуулагдлаа ✓', tone: 'success' });
-    } catch { /* clipboard blocked — the code is visible anyway */ }
-  };
+  const fs = large ? '1rem' : '0.8rem';
   const plain: React.CSSProperties = {
     background: 'transparent', border: 'none', cursor: 'pointer',
-    color: C.muted, fontFamily: 'inherit', fontSize: '0.8rem',
-    padding: '0.2rem 0.3rem', borderRadius: RADIUS_SM,
+    color: C.text, fontFamily: '"JetBrains Mono", monospace', fontSize: fs, fontWeight: 600,
+    padding: large ? '0.3rem 0.5rem' : '0.2rem 0.3rem', borderRadius: RADIUS_SM,
     display: 'inline-flex', alignItems: 'center',
   };
   const arrow = (enabled: boolean): React.CSSProperties => ({
-    ...plain, fontSize: '1rem', lineHeight: 1, padding: '0.1rem 0.4rem',
+    ...plain, fontFamily: 'inherit', fontSize: large ? '1.25rem' : '1rem', lineHeight: 1,
+    padding: large ? '0.2rem 0.6rem' : '0.1rem 0.4rem',
     color: enabled ? C.text : C.mutedDim, cursor: enabled ? 'pointer' : 'default',
   });
-  // Touch/pointer events must not reach the swipe row or timer underneath.
-  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
   return (
-    <div
-      className="pv-shared-bar"
-      onTouchStart={stop} onTouchEnd={stop} onPointerDown={stop}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: '0.15rem',
-        fontSize: '0.8rem', color: C.muted,
-        fontVariantNumeric: 'tabular-nums',
-      }}
-    >
-      <button type="button" onClick={copy} title="Код хуулах" style={plain}>
-        Код&nbsp;<span style={{ color: C.text, fontFamily: '"JetBrains Mono", monospace', fontWeight: 600 }}>{code}</span>
-      </button>
-      <span aria-hidden="true">·</span>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.15rem', fontVariantNumeric: 'tabular-nums' }}>
       <button type="button" aria-label="Өмнөх scramble" disabled={index <= 1} onClick={() => onStep(-1)} style={arrow(index > 1)}>‹</button>
       {editing ? (
         <input
@@ -6730,10 +6749,10 @@ function SharedCodeBar({ code, index, onStep, onJump, onLeave }: {
           }}
           onBlur={commit}
           style={{
-            width: '3.6rem', background: C.bg, color: C.text,
+            width: large ? '4.5rem' : '3.6rem', background: C.bg, color: C.text,
             border: `1px solid ${C.borderHi}`, borderRadius: RADIUS_SM,
             padding: '0.1rem 0.35rem', fontFamily: '"JetBrains Mono", monospace',
-            fontSize: '0.8rem', outline: 'none', textAlign: 'center',
+            fontSize: fs, outline: 'none', textAlign: 'center',
           }}
         />
       ) : (
@@ -6741,16 +6760,148 @@ function SharedCodeBar({ code, index, onStep, onJump, onLeave }: {
           type="button"
           title="Дугаар руу үсрэх"
           onClick={() => { setDraft(String(index)); setEditing(true); }}
-          style={{ ...plain, color: C.text, fontFamily: '"JetBrains Mono", monospace', fontWeight: 600 }}
+          style={plain}
         >#{index}</button>
       )}
       <button type="button" aria-label="Дараагийн scramble" onClick={() => onStep(1)} style={arrow(true)}>›</button>
+    </span>
+  );
+}
+
+/** "Ижил холилт" view of the tools panel. Inactive: create a random
+ *  4-digit code or type one in. Active: big code (tap to copy), the
+ *  ‹ #n › stepper with jump, and "Гарах". */
+function SharedCodeTools({ code, index, onEnter, onLeave, onStep, onJump }: {
+  code: string | null;
+  index: number | null;
+  onEnter: (code: string) => void;
+  onLeave: () => void;
+  onStep: (delta: number) => void;
+  onJump: (index: number) => void;
+}) {
+  const [draft, setDraft] = useState('');
+  const valid = isValidSharedCode(draft);
+  const actionBtn = (enabled: boolean): React.CSSProperties => ({
+    ...ghostButtonStyle(false),
+    justifyContent: 'center',
+    opacity: enabled ? 1 : 0.45,
+    cursor: enabled ? 'pointer' : 'default',
+  });
+  const wrap: React.CSSProperties = {
+    flex: 1, minWidth: 0,
+    display: 'flex', flexDirection: 'column', justifyContent: 'center',
+    gap: '0.7rem', padding: '0.25rem 0.35rem',
+  };
+
+  if (code && index != null) {
+    return (
+      <div className="pv-shared-tools" style={{ ...wrap, alignItems: 'center', textAlign: 'center' }}>
+        <div style={{ fontSize: '0.75rem', color: C.muted }}>Код</div>
+        <button
+          type="button"
+          onClick={() => copySharedCode(code)}
+          title="Код хуулах"
+          style={{
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            color: C.text, fontFamily: '"JetBrains Mono", monospace',
+            fontSize: '2.2rem', fontWeight: 700, letterSpacing: '0.12em',
+            lineHeight: 1, padding: '0.1rem 0.3rem', borderRadius: RADIUS_SM,
+          }}
+        >{code}</button>
+        <SharedIndexControl index={index} onStep={onStep} onJump={onJump} large />
+        <button
+          type="button"
+          onClick={onLeave}
+          style={{ ...ghostButtonStyle(false), background: 'transparent', color: C.muted, padding: '0.3rem 0.7rem' }}
+        >Гарах</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="pv-shared-tools" style={wrap}>
+      <div style={{ fontSize: '0.75rem', color: C.muted, lineHeight: 1.45 }}>
+        Ижил код оруулсан хүмүүс ижил дарааллын холилт (#1, #2, …) авна.
+      </div>
+      <button
+        type="button"
+        onClick={() => onEnter(randomSharedCode())}
+        style={{ ...actionBtn(true), width: '100%' }}
+      >Код үүсгэх</button>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+        <label htmlFor="pv-shared-code" style={{ fontSize: '0.72rem', color: C.muted }}>Код оруулах</label>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: '0.4rem' }}>
+          <input
+            id="pv-shared-code"
+            inputMode="numeric"
+            autoComplete="off"
+            maxLength={4}
+            placeholder="0000"
+            value={draft}
+            onChange={e => setDraft(e.target.value.replace(/\D/g, '').slice(0, 4))}
+            onKeyDown={e => { if (e.key === 'Enter' && valid) onEnter(draft); }}
+            style={{
+              background: C.bg, color: C.text,
+              border: `1px solid ${C.borderHi}`, borderRadius: RADIUS_SM,
+              padding: '0.45rem 0.6rem', minWidth: 0, width: '100%',
+              fontFamily: '"JetBrains Mono", monospace', fontSize: '1rem',
+              letterSpacing: '0.2em', outline: 'none',
+            }}
+          />
+          <button
+            type="button"
+            disabled={!valid}
+            onClick={() => onEnter(draft)}
+            style={actionBtn(valid)}
+          >Нэгдэх</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Active-code strip above the scramble: "Код 4827 · ‹ #5 › · Гарах".
+ *  Only rendered while a code is active. Tapping the code copies it. */
+function SharedCodeBar({ code, index, onStep, onJump, onLeave }: {
+  code: string;
+  index: number;
+  onStep: (delta: number) => void;
+  onJump: (index: number) => void;
+  onLeave: () => void;
+}) {
+  const plain: React.CSSProperties = {
+    background: 'transparent', border: 'none', cursor: 'pointer',
+    color: C.muted, fontFamily: 'inherit', fontSize: '0.8rem',
+    padding: '0.2rem 0.3rem', borderRadius: RADIUS_SM,
+    display: 'inline-flex', alignItems: 'center',
+  };
+  // Touch/pointer events must not reach the swipe row or timer underneath.
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  return (
+    <div
+      className="pv-shared-bar"
+      onTouchStart={stop} onTouchEnd={stop} onPointerDown={stop}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: '0.15rem',
+        fontSize: '0.8rem', color: C.muted,
+        fontVariantNumeric: 'tabular-nums',
+      }}
+    >
+      <button type="button" onClick={() => copySharedCode(code)} title="Код хуулах" style={plain}>
+        Код&nbsp;<span style={{ color: C.text, fontFamily: '"JetBrains Mono", monospace', fontWeight: 600 }}>{code}</span>
+      </button>
+      <span aria-hidden="true">·</span>
+      <SharedIndexControl index={index} onStep={onStep} onJump={onJump} />
       <span aria-hidden="true">·</span>
       <button type="button" onClick={onLeave} style={plain}>Гарах</button>
     </div>
   );
 }
 
+// Swipeable scramble row used on mobile. Left swipe → next scramble
+// (history's index 0 → fresh random), right swipe → previous scramble
+// (older history). Threshold is intentionally generous (>50 px) so the
+// solver's vertical scrolls don't accidentally rotate the scramble.
 function SwipeScrambleRow({
   scramble, scrambleFontPx, onNext, onPrev, showHint, onDismissHint,
 }: {
