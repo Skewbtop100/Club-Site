@@ -1,4 +1,5 @@
 import { Scrambow } from 'scrambow';
+import { seededRandom } from './shared-scramble';
 
 // ── Scramble generation (via scrambow) ───────────────────────────────────────
 // scrambow supports: 222, 333, 444, 555, 666, 777, 333fm, pyram, skewb, sq1,
@@ -26,15 +27,46 @@ export const SCRAMBOW_TYPE: Record<string, string> = {
   'minx':   'minx',
 };
 
+// Collapse runs of whitespace and trim — scrambow pads cells in NxN output.
+function cleanScramble(s: string | undefined): string {
+  return (s ?? '').replace(/[ \t]+/g, ' ').trim();
+}
+
 export function generateScramble(eventId: string): string {
   const type = SCRAMBOW_TYPE[eventId] ?? '333';
   try {
     const result = new Scrambow().setType(type).get(1);
-    const s = result[0]?.scramble_string ?? '';
-    // Collapse runs of whitespace and trim — scrambow pads cells in NxN output.
-    return s.replace(/[ \t]+/g, ' ').trim();
+    return cleanScramble(result[0]?.scramble_string);
   } catch {
     return '';
+  }
+}
+
+/** Deterministic scramble: the same (eventId, seedKey) gives the same
+ *  scramble on every device. Used by the timer's shared-code mode — see
+ *  lib/shared-scramble.ts for the PRNG and why it's engine-independent.
+ *
+ *  scrambow hands its scramblers `this.seed` on init(), and every random
+ *  draw goes through that object. We point it at a seeded PRNG for this one
+ *  synchronous call. Math.random is also swapped for the same stream for
+ *  the duration of the call as a safety net (scrambow never calls it, but a
+ *  future version might), and restored in `finally`. The next plain
+ *  generateScramble() constructs a new Scrambow whose seed is Math again,
+ *  so normal mode is unaffected. */
+export function generateSeededScramble(eventId: string, seedKey: string): string {
+  const type = SCRAMBOW_TYPE[eventId] ?? '333';
+  const random = seededRandom(seedKey);
+  const originalRandom = Math.random;
+  try {
+    Math.random = random;
+    const s = new Scrambow().setType(type);
+    s.seed = { random };
+    s.init();
+    return cleanScramble(s.get(1)[0]?.scramble_string);
+  } catch {
+    return '';
+  } finally {
+    Math.random = originalRandom;
   }
 }
 

@@ -5,7 +5,8 @@ import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import TimerProfileMenu from '@/components/timer/TimerProfileMenu';
 import ScramblePreview from '@/components/shared/ScramblePreview';
-import { generateScramble } from '@/lib/scramble';
+import { generateScramble, generateSeededScramble } from '@/lib/scramble';
+import { isValidSharedCode, randomSharedCode, sharedSeedKey } from '@/lib/shared-scramble';
 import { useSmartTimer } from './useSmartTimer';
 import { type QiyiPacket } from './useQiyiTimer';
 import { useWakeLock } from './useWakeLock';
@@ -13,7 +14,7 @@ import { monotonePath, segmentsOf, type Pt } from './monotonePath';
 import { useAuth } from '@/lib/auth-context';
 import { useLang, type Lang } from '@/lib/i18n';
 import { awardSolvePointIfUnderLimit, awardAo5PbIfEligible } from '@/lib/points';
-import { showToast } from '@/lib/toast';
+import { showToast, useToastVariant } from '@/lib/toast';
 import { TIMER_FEATURES, COMING_SOON_TOAST, type TimerFeature } from '@/lib/timer-features';
 import {
   trackPresence, updatePresenceEvent,
@@ -448,6 +449,30 @@ function getDesktopScrambleFontSize(pref: 'sm' | 'md' | 'lg'): string {
 
 // ── Main page ───────────────────────────────────────────────────────────────
 
+// Shared-scramble mode: { code, per-event index }. Absent = normal random.
+const SHARED_KEY = 'pv.timer.shared.v1';
+const SHARED_INDEX_MAX = 9999;
+interface SharedMode {
+  code: string;
+  /** eventId → current scramble number (1-based); missing = #1. */
+  indexes: Record<string, number>;
+}
+function clampSharedIndex(n: number): number {
+  return Math.min(SHARED_INDEX_MAX, Math.max(1, Math.floor(Number.isFinite(n) ? n : 1)));
+}
+/** Validates persisted shared mode; anything malformed → null (normal mode). */
+function parseSharedMode(raw: string): SharedMode | null {
+  const p = JSON.parse(raw) as { code?: unknown; indexes?: unknown };
+  if (typeof p.code !== 'string' || !isValidSharedCode(p.code)) return null;
+  const indexes: Record<string, number> = {};
+  if (p.indexes && typeof p.indexes === 'object') {
+    for (const [ev, n] of Object.entries(p.indexes as Record<string, unknown>)) {
+      if (typeof n === 'number' && Number.isFinite(n)) indexes[ev] = clampSharedIndex(n);
+    }
+  }
+  return { code: p.code, indexes };
+}
+
 const STORAGE_KEY = 'pv.timer.session.v1';
 const PREFS_KEY = 'pv.timer.prefs.v1';
 const SESSIONS_KEY = 'pv.timer.sessions.v2';
@@ -506,13 +531,62 @@ function makeDefaultSession(solves: Solve[] = []): Session {
 export default function TimerPage() {
   const router = useRouter();
   const { user } = useAuth();
+  // Monochrome toasts while the timer is open (other pages keep theirs).
+  useToastVariant('mono');
   const [eventId, setEventId] = useState<string>('333');
   // Empty initial value so server and client first-render match. The
   // existing eventId-change effect runs on mount and fills in the real
   // scramble — generating one in the useState initializer would call
   // Math.random() and produce different markup on the server vs the
   // client (React hydration error #418).
-  const [scramble, setScramble] = useState<string>('');
+  const [randomScramble, setScramble] = useState<string>('');
+
+  // ── Shared scramble code ────────────────────────────────────────────────
+  // While a code is active, the displayed scramble is a pure function of
+  // (code, event, index) — see lib/shared-scramble.ts — so everyone with
+  // the same code sees the same #1, #2, … per event. The random scramble
+  // above keeps updating underneath and is shown again on "Гарах".
+  // Persisted to SHARED_KEY on every change (inside the state updater, so
+  // there's no load/save effect race on mount).
+  const [shared, setShared] = useState<SharedMode | null>(null);
+  const updateShared = useCallback((fn: (prev: SharedMode | null) => SharedMode | null) => {
+    setShared(prev => {
+      const next = fn(prev);
+      try {
+        if (next) localStorage.setItem(SHARED_KEY, JSON.stringify(next));
+        else localStorage.removeItem(SHARED_KEY);
+      } catch { /* storage unavailable — mode just won't survive refresh */ }
+      return next;
+    });
+  }, []);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SHARED_KEY);
+      if (raw) setShared(parseSharedMode(raw));
+    } catch { /* ignore */ }
+  }, []);
+  const sharedCode = shared?.code ?? null;
+  const sharedIndex = shared ? (shared.indexes[eventId] ?? 1) : null;
+  const sharedScramble = useMemo(
+    () => (sharedCode && sharedIndex != null
+      ? generateSeededScramble(eventId, sharedSeedKey(sharedCode, eventId, sharedIndex))
+      : ''),
+    [sharedCode, eventId, sharedIndex],
+  );
+  const scramble = sharedCode ? sharedScramble : randomScramble;
+  /** Moves the current event's shared index to `to` (clamped to 1…MAX). */
+  const setSharedIndexTo = useCallback((to: number) => {
+    updateShared(prev => prev && {
+      ...prev,
+      indexes: { ...prev.indexes, [eventId]: clampSharedIndex(to) },
+    });
+  }, [eventId, updateShared]);
+  const stepShared = useCallback((delta: number) => {
+    updateShared(prev => prev && {
+      ...prev,
+      indexes: { ...prev.indexes, [eventId]: clampSharedIndex((prev.indexes[eventId] ?? 1) + delta) },
+    });
+  }, [eventId, updateShared]);
   // Sessions store: per-event list of sessions, plus the active session id.
   // `solves` derives from the active session.
   const [sessions, setSessions] = useState<SessionStore>({});
@@ -1025,6 +1099,7 @@ export default function TimerPage() {
           id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
           ms, penalty,
           scramble, event: eventId, ts: Date.now(),
+          ...(sharedCode && sharedIndex != null ? { sharedCode, sharedIndex } : {}),
         },
       ];
       // Ao5-PB candidate detection. Walk every rolling 5-solve window
@@ -1053,7 +1128,9 @@ export default function TimerPage() {
       }
       return next;
     });
-    setScramble(generateScramble(eventId));
+    // Shared mode: the next scramble is simply the next index.
+    if (sharedCode) stepShared(1);
+    else setScramble(generateScramble(eventId));
 
     const uid = user?.uid;
     if (!uid) return;
@@ -1077,7 +1154,7 @@ export default function TimerPage() {
         })
         .catch(err => console.warn('[points] Ao5 PB award failed', err));
     }
-  }, [scramble, eventId, user?.uid]);
+  }, [scramble, eventId, user?.uid, sharedCode, sharedIndex, stepShared]);
 
   const timer = useTimer(onSolveCommit, holdTimeMs);
 
@@ -1251,7 +1328,11 @@ export default function TimerPage() {
   const [historyIdx, setHistoryIdx] = useState<number>(-1);
   const SCRAMBLE_HISTORY_MAX = 10;
 
+  // In shared mode "new" / "next" / "previous" just move the shared
+  // index (the scramble itself is derived from it); the random history
+  // below is only used in normal mode.
   const newScramble = useCallback(() => {
+    if (sharedCode) { stepShared(1); return; }
     const next = generateScramble(eventId);
     setScramble(next);
     setScrambleHistory(prev => {
@@ -1259,11 +1340,12 @@ export default function TimerPage() {
       return dedup.slice(0, SCRAMBLE_HISTORY_MAX);
     });
     setHistoryIdx(0);
-  }, [eventId]);
+  }, [eventId, sharedCode, stepShared]);
   // Swipe-right / ← arrow: walk back through history. Caps at the
   // oldest entry (no auto-generate of a "back" scramble — that would be
   // meaningless, you'd just be peeking at a fresh random instead).
   const goPrevScramble = useCallback(() => {
+    if (sharedCode) { stepShared(-1); return; }
     setHistoryIdx(idx => {
       const next = Math.min(idx + 1, scrambleHistory.length - 1);
       if (next === idx) return idx;
@@ -1271,10 +1353,11 @@ export default function TimerPage() {
       if (target) setScramble(target);
       return next;
     });
-  }, [scrambleHistory]);
+  }, [scrambleHistory, sharedCode, stepShared]);
   // Swipe-left / → arrow: forward. If we're at the newest entry already
   // (idx === 0), generate a fresh one. Otherwise walk towards 0.
   const goNextScramble = useCallback(() => {
+    if (sharedCode) { stepShared(1); return; }
     if (historyIdx <= 0) {
       newScramble();
       return;
@@ -1285,7 +1368,23 @@ export default function TimerPage() {
       if (target) setScramble(target);
       return next;
     });
-  }, [historyIdx, scrambleHistory, newScramble]);
+  }, [historyIdx, scrambleHistory, newScramble, sharedCode, stepShared]);
+
+  // Shared-mode entry / exit (used by the "Хамт" panel and the bar).
+  const [sharedPanelOpen, setSharedPanelOpen] = useState(false);
+  const enterSharedMode = useCallback((code: string) => {
+    if (!isValidSharedCode(code)) return;
+    updateShared(prev => (prev?.code === code ? prev : { code, indexes: {} }));
+    setSharedPanelOpen(false);
+  }, [updateShared]);
+  const leaveSharedMode = useCallback(() => {
+    updateShared(() => null);
+    // Back to normal: start from a fresh random scramble.
+    const fresh = generateScramble(eventId);
+    setScramble(fresh);
+    setScrambleHistory([fresh]);
+    setHistoryIdx(0);
+  }, [updateShared, eventId]);
 
   // When event changes (dropdown, Alt+key, etc.), regenerate scramble
   // and reset history — cross-event history would mix puzzle types.
@@ -1448,7 +1547,7 @@ export default function TimerPage() {
         && timer.state === 'stopped'
         && solves.length > 0
         && !settingsOpen && !detailSolveId && commentSolveId == null
-        && !sessionPanelOpen && !cubeFullscreenOpen
+        && !sessionPanelOpen && !cubeFullscreenOpen && !sharedPanelOpen
       ) {
         const target = e.target as HTMLElement | null;
         const inEditable = !!target && (
@@ -1489,7 +1588,7 @@ export default function TimerPage() {
         !e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey
         && (timer.state === 'idle' || timer.state === 'stopped')
         && !settingsOpen && !detailSolveId && commentSolveId == null
-        && !sessionPanelOpen && !cubeFullscreenOpen
+        && !sessionPanelOpen && !cubeFullscreenOpen && !sharedPanelOpen
       ) {
         const tgt = e.target as HTMLElement | null;
         const inEditable = !!tgt && (
@@ -1569,7 +1668,7 @@ export default function TimerPage() {
     // last-solve / modal state so D/X/2/C hit the right target.
     solves, togglePenaltyOnLast, deleteLastSolve,
     settingsOpen, detailSolveId, commentSolveId,
-    sessionPanelOpen, cubeFullscreenOpen,
+    sessionPanelOpen, cubeFullscreenOpen, sharedPanelOpen,
     timeEntryMode,
     goPrevScramble, goNextScramble, newScramble,
   ]);
@@ -2398,7 +2497,28 @@ export default function TimerPage() {
                 >
                   <IconRefresh size={16} /> New Scramble
                 </button>
+                <button
+                  onClick={() => setSharedPanelOpen(true)}
+                  aria-label="Хамт — shared scramble code"
+                  style={ghostButtonStyle(!!sharedCode)}
+                  onMouseEnter={e => (e.currentTarget.style.background = C.border)}
+                  onMouseLeave={e => (e.currentTarget.style.background = sharedCode ? C.border : C.cardAlt)}
+                >
+                  Хамт
+                </button>
               </div>
+
+              {sharedCode && sharedIndex != null && (
+                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '0.5rem' }}>
+                  <SharedCodeBar
+                    code={sharedCode}
+                    index={sharedIndex}
+                    onStep={stepShared}
+                    onJump={setSharedIndexTo}
+                    onLeave={leaveSharedMode}
+                  />
+                </div>
+              )}
 
             <div
               className="pv-scramble-text"
@@ -2840,6 +2960,33 @@ export default function TimerPage() {
                 picker in the capsule above is enough context. */}
             {mobileTab === 'timer' && (
               <div className="pv-scramble" style={{ flexShrink: 0 }}>
+                {/* Shared-code strip (or the "Хамт" entry chip) sits on
+                    its own line right above the scramble text. */}
+                <div style={{
+                  display: 'flex', justifyContent: 'center', alignItems: 'center',
+                  minHeight: 28, padding: '0 0.7rem',
+                }}>
+                  {sharedCode && sharedIndex != null ? (
+                    <SharedCodeBar
+                      code={sharedCode}
+                      index={sharedIndex}
+                      onStep={stepShared}
+                      onJump={setSharedIndexTo}
+                      onLeave={leaveSharedMode}
+                    />
+                  ) : (
+                    <button
+                      onClick={() => setSharedPanelOpen(true)}
+                      aria-label="Хамт — shared scramble code"
+                      style={{
+                        background: C.cardAlt, color: C.text, border: 'none',
+                        borderRadius: RADIUS_SM, padding: '0.2rem 0.65rem',
+                        fontSize: '0.75rem', fontWeight: 500, fontFamily: 'inherit',
+                        cursor: 'pointer',
+                      }}
+                    >Хамт</button>
+                  )}
+                </div>
                 <SwipeScrambleRow
                   scramble={scramble}
                   scrambleFontPx={getScrambleFontSize(scramble, scrambleFontSize)}
@@ -3536,6 +3683,16 @@ export default function TimerPage() {
         </div>
       )}
 
+      {/* Shared scramble code panel ("Хамт") */}
+      {sharedPanelOpen && (
+        <SharedCodePanel
+          currentCode={sharedCode}
+          onEnter={enterSharedMode}
+          onLeave={leaveSharedMode}
+          onClose={() => setSharedPanelOpen(false)}
+        />
+      )}
+
       {/* Sessions panel modal (mobile + button in header) */}
       {sessionPanelOpen && (
         <SessionsPanel
@@ -3644,6 +3801,17 @@ export default function TimerPage() {
                 }}>
                   <IconClock />
                   <span>{formatSolveTime(s.ts)}</span>
+                  {s.sharedCode && s.sharedIndex != null && (
+                    <span
+                      title="Хамт код · scramble дугаар"
+                      style={{
+                        marginLeft: '0.25rem',
+                        padding: '0.05rem 0.45rem', borderRadius: RADIUS_SM,
+                        background: C.cardAlt, color: C.muted,
+                        fontFamily: '"JetBrains Mono", monospace', fontSize: '0.72rem',
+                      }}
+                    >{s.sharedCode} #{s.sharedIndex}</span>
+                  )}
                 </div>
               </div>
 
@@ -6419,6 +6587,170 @@ function ActionIconBtn({
 // (history's index 0 → fresh random), right swipe → previous scramble
 // (older history). Threshold is intentionally generous (>50 px) so the
 // solver's vertical scrolls don't accidentally rotate the scramble.
+// ── Shared scramble code UI ─────────────────────────────────────────────
+
+/** "Хамт" panel: create a random 4-digit code or type one in. */
+function SharedCodePanel({ currentCode, onEnter, onLeave, onClose }: {
+  currentCode: string | null;
+  onEnter: (code: string) => void;
+  onLeave: () => void;
+  onClose: () => void;
+}) {
+  const [draft, setDraft] = useState('');
+  const valid = isValidSharedCode(draft);
+  const actionBtn = (enabled: boolean): React.CSSProperties => ({
+    ...ghostButtonStyle(false),
+    justifyContent: 'center',
+    opacity: enabled ? 1 : 0.45,
+    cursor: enabled ? 'pointer' : 'default',
+  });
+  return (
+    <ModalShell title="Хамт" onClose={onClose}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+        <div style={{ fontSize: '0.8rem', color: C.muted, lineHeight: 1.5 }}>
+          Ижил код оруулсан хүмүүс ижил дарааллын scramble (#1, #2, …) авна.
+        </div>
+
+        {currentCode && (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem',
+            background: C.cardAlt, borderRadius: RADIUS, padding: '0.55rem 0.75rem',
+          }}>
+            <span style={{ fontSize: '0.85rem', color: C.muted }}>
+              Одоогийн код{' '}
+              <span style={{ color: C.text, fontFamily: '"JetBrains Mono", monospace', fontWeight: 600 }}>{currentCode}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => { onLeave(); onClose(); }}
+              style={{ ...ghostButtonStyle(false), background: 'transparent', padding: '0.3rem 0.5rem' }}
+            >Гарах</button>
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => onEnter(randomSharedCode())}
+          style={{ ...actionBtn(true), width: '100%' }}
+        >Код үүсгэх</button>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+          <label htmlFor="pv-shared-code" style={{ fontSize: '0.75rem', color: C.muted }}>Код оруулах</label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.4rem' }}>
+            <input
+              id="pv-shared-code"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={4}
+              placeholder="0000"
+              value={draft}
+              onChange={e => setDraft(e.target.value.replace(/\D/g, '').slice(0, 4))}
+              onKeyDown={e => { if (e.key === 'Enter' && valid) onEnter(draft); }}
+              style={{
+                background: C.bg, color: C.text,
+                border: `1px solid ${C.borderHi}`, borderRadius: RADIUS_SM,
+                padding: '0.5rem 0.7rem', minWidth: 0,
+                fontFamily: '"JetBrains Mono", monospace', fontSize: '1rem',
+                letterSpacing: '0.2em', outline: 'none',
+              }}
+            />
+            <button
+              type="button"
+              disabled={!valid}
+              onClick={() => onEnter(draft)}
+              style={actionBtn(valid)}
+            >Нэгдэх</button>
+          </div>
+        </div>
+      </div>
+    </ModalShell>
+  );
+}
+
+/** Shared-mode strip above the scramble: "Код 4827 · ‹ #5 › · Гарах".
+ *  Tapping the code copies it; tapping "#5" turns it into a number input
+ *  so a friend can jump straight to someone else's position. */
+function SharedCodeBar({ code, index, onStep, onJump, onLeave }: {
+  code: string;
+  index: number;
+  onStep: (delta: number) => void;
+  onJump: (index: number) => void;
+  onLeave: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const commit = () => {
+    const n = parseInt(draft, 10);
+    if (Number.isFinite(n) && n >= 1) onJump(n);
+    setEditing(false);
+  };
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      showToast({ msg: 'Хуулагдлаа ✓', tone: 'success' });
+    } catch { /* clipboard blocked — the code is visible anyway */ }
+  };
+  const plain: React.CSSProperties = {
+    background: 'transparent', border: 'none', cursor: 'pointer',
+    color: C.muted, fontFamily: 'inherit', fontSize: '0.8rem',
+    padding: '0.2rem 0.3rem', borderRadius: RADIUS_SM,
+    display: 'inline-flex', alignItems: 'center',
+  };
+  const arrow = (enabled: boolean): React.CSSProperties => ({
+    ...plain, fontSize: '1rem', lineHeight: 1, padding: '0.1rem 0.4rem',
+    color: enabled ? C.text : C.mutedDim, cursor: enabled ? 'pointer' : 'default',
+  });
+  // Touch/pointer events must not reach the swipe row or timer underneath.
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  return (
+    <div
+      className="pv-shared-bar"
+      onTouchStart={stop} onTouchEnd={stop} onPointerDown={stop}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: '0.15rem',
+        fontSize: '0.8rem', color: C.muted,
+        fontVariantNumeric: 'tabular-nums',
+      }}
+    >
+      <button type="button" onClick={copy} title="Код хуулах" style={plain}>
+        Код&nbsp;<span style={{ color: C.text, fontFamily: '"JetBrains Mono", monospace', fontWeight: 600 }}>{code}</span>
+      </button>
+      <span aria-hidden="true">·</span>
+      <button type="button" aria-label="Өмнөх scramble" disabled={index <= 1} onClick={() => onStep(-1)} style={arrow(index > 1)}>‹</button>
+      {editing ? (
+        <input
+          autoFocus
+          inputMode="numeric"
+          aria-label="Scramble дугаар"
+          value={draft}
+          onChange={e => setDraft(e.target.value.replace(/\D/g, '').slice(0, 4))}
+          onKeyDown={e => {
+            if (e.key === 'Enter') commit();
+            if (e.key === 'Escape') { e.stopPropagation(); setEditing(false); }
+          }}
+          onBlur={commit}
+          style={{
+            width: '3.6rem', background: C.bg, color: C.text,
+            border: `1px solid ${C.borderHi}`, borderRadius: RADIUS_SM,
+            padding: '0.1rem 0.35rem', fontFamily: '"JetBrains Mono", monospace',
+            fontSize: '0.8rem', outline: 'none', textAlign: 'center',
+          }}
+        />
+      ) : (
+        <button
+          type="button"
+          title="Дугаар руу үсрэх"
+          onClick={() => { setDraft(String(index)); setEditing(true); }}
+          style={{ ...plain, color: C.text, fontFamily: '"JetBrains Mono", monospace', fontWeight: 600 }}
+        >#{index}</button>
+      )}
+      <button type="button" aria-label="Дараагийн scramble" onClick={() => onStep(1)} style={arrow(true)}>›</button>
+      <span aria-hidden="true">·</span>
+      <button type="button" onClick={onLeave} style={plain}>Гарах</button>
+    </div>
+  );
+}
+
 function SwipeScrambleRow({
   scramble, scrambleFontPx, onNext, onPrev, showHint, onDismissHint,
 }: {

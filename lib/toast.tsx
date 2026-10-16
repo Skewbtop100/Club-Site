@@ -54,14 +54,47 @@ const TONE_COLORS: Record<ToastTone, { border: string; bg: string; text: string 
   info:    { border: 'rgba(167,139,250,0.45)', bg: 'rgba(28,22,42,0.96)', text: '#e8e8ed' },
 };
 
+// ── Per-page visual variant ─────────────────────────────────────────────
+// The host lives in the root layout, so a page that wants a different
+// look opts in with useToastVariant(); it reverts to 'default' when that
+// page unmounts, leaving every other page's toasts unchanged.
+//   'mono' — the timer's monochrome tokens: surface #141416, border
+//            #232326, primary text, for every tone.
+export type ToastVariant = 'default' | 'mono';
+
+const MONO_COLORS = { border: '#232326', bg: '#141416', text: '#EDEDED' } as const;
+
+let variant: ToastVariant = 'default';
+const variantListeners = new Set<(v: ToastVariant) => void>();
+
+function setToastVariant(v: ToastVariant): void {
+  variant = v;
+  for (const l of variantListeners) l(v);
+}
+
+/** Use the given toast look while the calling component is mounted. */
+export function useToastVariant(v: ToastVariant): void {
+  useEffect(() => {
+    setToastVariant(v);
+    return () => setToastVariant('default');
+  }, [v]);
+}
+
 export function ToastHost() {
   const [items, setItems] = useState<ToastItem[]>([]);
   const [isMobile, setIsMobile] = useState(false);
+  const [look, setLook] = useState<ToastVariant>(variant);
 
   useEffect(() => {
     listeners.add(setItems);
     setItems(queue);
     return () => { listeners.delete(setItems); };
+  }, []);
+
+  useEffect(() => {
+    variantListeners.add(setLook);
+    setLook(variant);
+    return () => { variantListeners.delete(setLook); };
   }, []);
 
   useEffect(() => {
@@ -94,7 +127,8 @@ export function ToastHost() {
   return (
     <div style={containerStyle} aria-live="polite" role="status">
       {items.map(t => {
-        const c = TONE_COLORS[t.tone ?? 'info'];
+        const mono = look === 'mono';
+        const c = mono ? MONO_COLORS : TONE_COLORS[t.tone ?? 'info'];
         return (
           <button
             key={t.id}
@@ -104,11 +138,11 @@ export function ToastHost() {
               pointerEvents: 'auto',
               background: c.bg,
               border: `1px solid ${c.border}`,
-              borderRadius: 12,
+              borderRadius: mono ? 10 : 12,
               color: c.text,
               padding: '0.65rem 0.85rem',
               fontSize: '0.86rem',
-              fontWeight: 700,
+              fontWeight: mono ? 500 : 700,
               fontFamily: 'inherit',
               cursor: 'pointer',
               textAlign: 'left',

@@ -36,6 +36,11 @@ export interface Solve {
    *  bad LL"). Trimmed string when present; absent for solves created
    *  before the field was added. */
   comment?: string;
+  /** Shared-scramble code (4 digits) the solve was made under, if any.
+   *  Absent for solves made with normal random scrambles. */
+  sharedCode?: string;
+  /** Scramble number (#1, #2, …) within `sharedCode` for this event. */
+  sharedIndex?: number;
 }
 
 export const PENALTY_ADD: Record<Penalty, number> = { none: 0, '+2': 2000, dnf: 0 };
