@@ -81,6 +81,15 @@ export function fmtMs(
 // ── Stats helpers ───────────────────────────────────────────────────────────
 
 /** Mean of the middle of last n solves (drop best+worst). DNF in middle = DNF. */
+/** Solves dropped from EACH end of an AoN: 5% (rounded up) for N ≥ 100
+ *  — Ao100 drops the 5 best and 5 worst — otherwise 1 (Ao5, Ao12, Ao50). */
+export function trimCount(n: number): number {
+  return n >= 100 ? Math.ceil(n * 0.05) : 1;
+}
+
+/** Trimmed mean of the last `n` solves. DNFs sort as the worst results,
+ *  so up to trimCount(n) DNFs are simply trimmed away; one more and the
+ *  average is DNF (returned as null, shown as "—"). */
 export function avgOfN(solves: Solve[], n: number): number | null {
   if (solves.length < n) return null;
   const last = solves.slice(-n);
@@ -90,7 +99,8 @@ export function avgOfN(solves: Solve[], n: number): number | null {
     const bV = isDnf(b) ? Infinity : finalMs(b);
     return aV - bV;
   });
-  const middle = sorted.slice(1, -1);
+  const trim = trimCount(n);
+  const middle = sorted.slice(trim, sorted.length - trim);
   if (middle.some(isDnf)) return null;  // DNF in the middle → no average
   const sum = middle.reduce((acc, s) => acc + finalMs(s), 0);
   return Math.round(sum / middle.length);

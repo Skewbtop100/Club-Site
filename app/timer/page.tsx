@@ -712,18 +712,6 @@ export default function TimerPage() {
   // who want to type a time directly do so via the timer area itself
   // after picking "Гараар" in Settings.
   const [manualInline, setManualInline] = useState('');
-  // First-visit hint pointing the user at the swipe gesture on the
-  // scramble row. Persisted under its own localStorage key so once the
-  // user dismisses (or swipes once), they never see it again.
-  const SWIPE_HINT_KEY = 'pv.timer.swipeHint.dismissed';
-  const [swipeHintDismissed, setSwipeHintDismissed] = useState<boolean>(true);
-  useEffect(() => {
-    try { setSwipeHintDismissed(localStorage.getItem(SWIPE_HINT_KEY) === '1'); } catch { /* ignore */ }
-  }, []);
-  const dismissSwipeHint = useCallback(() => {
-    setSwipeHintDismissed(true);
-    try { localStorage.setItem(SWIPE_HINT_KEY, '1'); } catch { /* ignore */ }
-  }, []);
   const [sessionPanelOpen, setSessionPanelOpen] = useState(false);
   const [newSessionName, setNewSessionName] = useState('');
   const [cubeFullscreenOpen, setCubeFullscreenOpen] = useState(false);
@@ -2274,16 +2262,19 @@ export default function TimerPage() {
                 width: '100%',
                 // Fill only — it sits inside the sidebar panel, so no
                 // second border.
-                background: C.cardAlt,
+                // Affordance is the hover/open shade — no chevron.
+                background: sessionDropdownOpen ? C.border : C.cardAlt,
                 border: 'none',
                 borderRadius: RADIUS,
                 padding: '0.55rem 0.7rem',
-                display: 'grid', gridTemplateColumns: 'auto 1fr auto',
+                display: 'grid', gridTemplateColumns: 'auto 1fr',
                 alignItems: 'center', gap: '0.55rem',
                 cursor: 'pointer', fontFamily: 'inherit',
                 color: C.text, textAlign: 'left',
                 transition: 'background 0.15s ease, border-color 0.15s ease, color 0.15s ease',
               }}
+              onMouseEnter={e => { e.currentTarget.style.background = C.border; }}
+              onMouseLeave={e => { if (!sessionDropdownOpen) e.currentTarget.style.background = C.cardAlt; }}
             >
               <span style={{
                 color: sessionDropdownOpen ? C.text : C.muted,
@@ -2304,12 +2295,6 @@ export default function TimerPage() {
               }}>
                 {currentSession?.name ?? 'Default'}
               </span>
-              <span style={{
-                color: sessionDropdownOpen ? C.text : C.mutedDim,
-                fontSize: '0.62rem',
-                transform: sessionDropdownOpen ? 'rotate(180deg)' : 'none',
-                transition: 'transform 0.18s ease, color 0.15s ease',
-              }}>▾</span>
             </button>
 
             {sessionDropdownOpen && (
@@ -2489,6 +2474,9 @@ export default function TimerPage() {
           height: '100%', overflow: 'hidden',
         }}>
           <section className="pv-scramble" style={{
+              // Height = content (picker row + scramble); never squeezed —
+              // the timer card below takes whatever space is left.
+              flexShrink: 0,
               background: C.card, border: `1px solid ${C.border}`,
               borderRadius: RADIUS, padding: '1.25rem 1.5rem',
               backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
@@ -2525,11 +2513,6 @@ export default function TimerPage() {
                   >
                     <WcaEventIcon eventId={eventId} size={18} />
                     <span>{sessionEvent.name}</span>
-                    <span aria-hidden style={{
-                      color: C.mutedDim, fontSize: '0.62rem', marginLeft: '0.1rem',
-                      transform: desktopEventPickerOpen ? 'rotate(180deg)' : 'none',
-                      transition: 'transform 0.18s ease',
-                    }}>▾</span>
                   </button>
                   {desktopEventPickerOpen && eventPickerTriggerRect && (
                     <EventPickerDropdown
@@ -2559,7 +2542,10 @@ export default function TimerPage() {
                 fontWeight: 500, lineHeight: 1.7,
                 letterSpacing: '0.02em', color: C.text,
                 textAlign: 'center', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                minHeight: '5rem',
+                // Card height = content. One line (1.7em = this line-height)
+                // only so the card never collapses while the scramble is
+                // momentarily empty on load.
+                minHeight: '1.7em',
               }}
             >
               {scramble}
@@ -2724,6 +2710,8 @@ export default function TimerPage() {
             // ago. Lower = faster = "improving" (down-arrow, green).
             const prevAo5  = avgOfN(solves.slice(0, -5), 5);
             const prevAo12 = avgOfN(solves.slice(0, -12), 12);
+            // Same calculation as the mobile stats column's Ao100.
+            const ao100Desktop = avgOfN(solves, 100);
             const validNow = solves.filter(s => !isDnf(s));
             const validCnt = validNow.length;
             const worstMs  = validCnt ? Math.max(...validNow.map(finalMs)) : null;
@@ -2739,7 +2727,7 @@ export default function TimerPage() {
                   precision={precision}
                 />
 
-                {/* 2x2 stats in ONE surface: Ao5 | Ao12 / Mean | σ.
+                {/* 2x2 stats in ONE surface: Ao5 | Ao12 / Mean | Ao100.
                     The 1px grid gap over a border-coloured background
                     draws the dividers between cells. */}
                 <div style={{
@@ -2762,8 +2750,8 @@ export default function TimerPage() {
                     value={fmtMs(stats.mean, false, precision)}
                   />
                   <DesktopStatCard
-                    label="σ"
-                    value={stats.stdDev == null ? '—' : (stats.stdDev / 1000).toFixed(2)}
+                    label="Ao100"
+                    value={ao100Desktop == null ? '—' : fmtMs(ao100Desktop, false, precision)}
                   />
                 </div>
 
@@ -3010,8 +2998,6 @@ export default function TimerPage() {
                   scrambleFontPx={getScrambleFontSize(scramble, scrambleFontSize)}
                   onNext={goNextScramble}
                   onPrev={goPrevScramble}
-                  showHint={!swipeHintDismissed}
-                  onDismissHint={dismissSwipeHint}
                 />
               </div>
             )}
@@ -3570,8 +3556,11 @@ export default function TimerPage() {
                     >
                       {/* "Ижил холилт" is active — the only on-screen hint
                           now that there's no bar above the scramble. */}
+                      {/* Top-right corner; top: 4 centres the 7px dot on
+                          the row's first text line (≈15px tall), the same
+                          top line the side columns start on. */}
                       {sharedCode && (
-                        <span style={{ position: 'absolute', top: 2, right: 2, display: 'inline-flex' }}>
+                        <span style={{ position: 'absolute', top: 4, right: 2, display: 'inline-flex' }}>
                           <SharedActiveDot />
                         </span>
                       )}
@@ -3582,10 +3571,12 @@ export default function TimerPage() {
                       </div>
                     </button>
 
-                    {/* Right column: stats, right-aligned */}
+                    {/* Right column: stats, right-aligned. Top-anchored so
+                        its first row shares the top line with the last-
+                        solves list (left) and the cube card's dot (middle). */}
                     <div style={{
                       minWidth: 0,
-                      display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+                      display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end',
                     }}>
                       <div style={{
                         display: 'grid',
@@ -5958,11 +5949,7 @@ function SettingsPanel(props: SettingsPanelProps) {
                       <span style={{ color: open ? c.accent : c.muted, display: 'inline-flex' }}>{s.icon}</span>
                       <span style={{ fontSize: '0.92rem', fontWeight: 700 }}>{t(s.labelKey)}</span>
                     </span>
-                    <span style={{
-                      color: c.muted, fontSize: '0.72rem',
-                      transform: open ? 'rotate(180deg)' : 'none',
-                      transition: 'transform 0.15s',
-                    }}>▾</span>
+                    <DisclosureChevron open={open} />
                   </button>
                   {open && (
                     <div style={{
@@ -6668,7 +6655,8 @@ function SharedActiveDot() {
   );
 }
 
-/** Tools-panel header: the current view's label + chevron; clicking it
+/** Tools-panel header: the current view's label (no chevron — hover
+ *  shade + pointer are the affordance); clicking it
  *  opens a small menu to switch views (closes on outside click / Esc).
  *  Used by the desktop right panel and the mobile enlarged-preview sheet.
  *  While a shared code is active a green dot sits next to the label
@@ -6720,10 +6708,6 @@ function ToolsViewMenu({ value, onChange, sharedActive }: {
           {TOOLS_VIEW_LABELS[value]}
         </span>
         {sharedActive && <SharedActiveDot />}
-        <span aria-hidden="true" style={{
-          color: C.mutedDim, fontSize: '0.62rem',
-          transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease',
-        }}>▾</span>
       </button>
 
       {open && (
@@ -6940,7 +6924,7 @@ function SharedCodeTools({ code, index, onEnter, onLeave, onStep, onJump }: {
 // (older history). Threshold is intentionally generous (>50 px) so the
 // solver's vertical scrolls don't accidentally rotate the scramble.
 function SwipeScrambleRow({
-  scramble, scrambleFontPx, onNext, onPrev, showHint, onDismissHint,
+  scramble, scrambleFontPx, onNext, onPrev,
 }: {
   scramble: string;
   // Final px value — already accounts for both the scramble's character
@@ -6948,8 +6932,6 @@ function SwipeScrambleRow({
   scrambleFontPx: number;
   onNext: () => void;
   onPrev: () => void;
-  showHint: boolean;
-  onDismissHint: () => void;
 }) {
   const SWIPE_THRESHOLD = 50;
   const startRef = useRef<{ x: number; y: number } | null>(null);
@@ -6975,7 +6957,6 @@ function SwipeScrambleRow({
     if (Math.abs(dx) < Math.abs(dy)) return; // mostly vertical — let it scroll
     if (dx < 0) onNext(); else onPrev();
     triggerFade();
-    if (showHint) onDismissHint();
   };
   return (
     <div
@@ -7009,16 +6990,6 @@ function SwipeScrambleRow({
       >
         {scramble}
       </div>
-      {showHint && (
-        <div style={{
-          marginTop: '0.45rem',
-          fontSize: '0.66rem', color: C.mutedDim,
-          textAlign: 'center', letterSpacing: '0.04em',
-          fontStyle: 'italic',
-        }}>
-          ← Хуруугаараа татна уу →
-        </div>
-      )}
     </div>
   );
 }
@@ -7307,6 +7278,27 @@ function Row({ label, kbd }: { label: string; kbd: string }) {
 
 // ── SVG icons (mobile UI) ───────────────────────────────────────────────────
 type IconProps = { size?: number; strokeWidth?: number };
+/** Open/closed indicator for expand-collapse sections only (Settings
+ *  accordion, "Тусгай төрлүүд"): points right when closed, rotates 90°
+ *  to point down when open. Popup/menu triggers deliberately have none. */
+function DisclosureChevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      className="pv-disclosure-chevron"
+      width={14} height={14} viewBox="0 0 24 24" fill="none"
+      stroke={C.mutedDim} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+      aria-hidden="true"
+      style={{
+        flexShrink: 0, display: 'block',
+        transform: open ? 'rotate(90deg)' : 'none',
+        transition: 'transform 0.15s ease',
+      }}
+    >
+      <path d="M9 6l6 6-6 6" />
+    </svg>
+  );
+}
+
 function IconBase({ size = 18, strokeWidth = 1.8, children }: IconProps & { children: React.ReactNode }) {
   return (
     <svg
@@ -7494,12 +7486,7 @@ function EventPickerSheet({
               }}>
                 Тусгай төрлүүд (BLD / FMC)
               </span>
-              <span style={{
-                color: specialOpen ? C.accent : C.muted,
-                fontSize: '0.72rem',
-                transform: specialOpen ? 'rotate(180deg)' : 'none',
-                transition: 'transform 0.18s',
-              }}>▾</span>
+              <DisclosureChevron open={specialOpen} />
             </button>
             {specialOpen && (
               <div style={{
