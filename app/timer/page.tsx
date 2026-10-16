@@ -14,6 +14,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useLang, type Lang } from '@/lib/i18n';
 import { awardSolvePointIfUnderLimit, awardAo5PbIfEligible } from '@/lib/points';
 import { showToast } from '@/lib/toast';
+import { TIMER_FEATURES, COMING_SOON_TOAST, type TimerFeature } from '@/lib/timer-features';
 import {
   trackPresence, updatePresenceEvent,
 } from '@/lib/firebase/services/presence';
@@ -2059,23 +2060,44 @@ export default function TimerPage() {
             {/* Race — matches the cog's 36×36 icon-only style. Icon-only
                 because the sidebar is 260px wide and a labeled button
                 would push the avatar off the row. Tooltip carries the
-                action name. */}
-            <button
-              onClick={() => router.push('/timer/multiplayer')}
-              aria-label="Multiplayer Racing"
-              title="Multiplayer Racing"
-              style={{
-                width: 36, height: 36, borderRadius: RADIUS,
-                background: 'transparent', border: 'none',
-                color: C.muted, cursor: 'pointer',
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                transition: 'background 0.15s, color 0.15s',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = C.cardAlt; e.currentTarget.style.color = C.text; }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.muted; }}
-            >
-              <IconUsers size={18} />
-            </button>
+                action name. While racing is closed (TIMER_FEATURES) it
+                renders dimmed with a small "Удахгүй" label and only
+                toasts on click. */}
+            {TIMER_FEATURES.racing ? (
+              <button
+                onClick={() => router.push('/timer/multiplayer')}
+                aria-label="Multiplayer Racing"
+                title="Multiplayer Racing"
+                style={{
+                  width: 36, height: 36, borderRadius: RADIUS,
+                  background: 'transparent', border: 'none',
+                  color: C.muted, cursor: 'pointer',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  transition: 'background 0.15s, color 0.15s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = C.cardAlt; e.currentTarget.style.color = C.text; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.muted; }}
+              >
+                <IconUsers size={18} />
+              </button>
+            ) : (
+              <button
+                onClick={() => showToast({ msg: COMING_SOON_TOAST })}
+                aria-disabled="true"
+                aria-label="Multiplayer Racing — Удахгүй"
+                title="Multiplayer Racing — Удахгүй"
+                style={{
+                  height: 36, borderRadius: RADIUS, padding: '0 0.35rem',
+                  background: 'transparent', border: 'none',
+                  color: C.mutedDim, cursor: 'default',
+                  display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+                  fontFamily: 'inherit',
+                }}
+              >
+                <IconUsers size={18} />
+                <span style={{ fontSize: '0.62rem', fontWeight: 500 }}>Удахгүй</span>
+              </button>
+            )}
             <GanButton
               state={gan.state}
               onConnect={gan.connect}
@@ -4290,9 +4312,10 @@ function MobileMicroStat({ label, value, accent }: { label: string; value: strin
 // ── Community tab (mobile, internal id 'tools') ─────────────────────────
 //
 // Layout: wide Profile card at the top, then two grouped 3-column grids —
-// "Идэвхтэй" (live destinations, currently just Race) and "Удахгүй"
-// (placeholder tiles rendered dimmed with a SOON badge). Each tile is
-// glass-bordered, square, with a single SVG icon + short label.
+// "Идэвхтэй" (live destinations; hidden when none are open) and "Удахгүй"
+// (stub tiles in tertiary text with an "Удахгүй" badge; tapping toasts).
+// Race / Competition join the stubs while their TIMER_FEATURES flag is
+// off. Each tile is square, with a single SVG icon + short label.
 
 interface ToolTile {
   id: string;
@@ -4300,11 +4323,14 @@ interface ToolTile {
   Icon: (p: IconProps) => React.ReactElement;
   /** Undefined route means the tile is a "Soon" stub (rendered dimmed). */
   route?: string;
+  /** Feature switch gating this tile; while it's off the tile is shown
+   *  as an "Удахгүй" stub instead (see lib/timer-features.ts). */
+  feature?: TimerFeature;
 }
 
 const ACTIVE_TILES: ToolTile[] = [
-  { id: 'race',        name: 'Race',        Icon: IconStopwatch, route: '/timer/multiplayer' },
-  { id: 'competition', name: 'Competition', Icon: IconTrophy,    route: '/timer/competitions' },
+  { id: 'race',        name: 'Race',        Icon: IconStopwatch, route: '/timer/multiplayer',   feature: 'racing' },
+  { id: 'competition', name: 'Competition', Icon: IconTrophy,    route: '/timer/competitions', feature: 'competition' },
 ];
 
 const SOON_TILES: ToolTile[] = [
@@ -4325,6 +4351,14 @@ function ToolsTab({
   solveCount: number;
   currentUserId?: string;
 }) {
+  // Tiles whose feature is switched off move to the "Удахгүй" group as
+  // route-less stubs; the "Идэвхтэй" group hides when nothing is left.
+  const isOpen = (t: ToolTile) => !t.feature || TIMER_FEATURES[t.feature];
+  const openTiles = ACTIVE_TILES.filter(isOpen);
+  const soonTiles: ToolTile[] = [
+    ...ACTIVE_TILES.filter(t => !isOpen(t)).map(t => ({ ...t, route: undefined })),
+    ...SOON_TILES,
+  ];
   return (
     <div style={{
       flex: '1 1 auto', minHeight: 0, overflowY: 'auto',
@@ -4337,23 +4371,27 @@ function ToolsTab({
         />
       </div>
 
-      <SectionLabel>Идэвхтэй</SectionLabel>
-      <div style={{
-        padding: '0 1rem',
-        display: 'grid',
-        gridTemplateColumns: 'repeat(3, 1fr)',
-        gap: '0.6rem',
-        justifyItems: 'stretch',
-      }}>
-        {ACTIVE_TILES.map((tile, i) => (
-          <ToolTileBtn
-            key={tile.id}
-            tile={tile}
-            index={i}
-            onClick={() => tile.route && onNavigate(tile.route)}
-          />
-        ))}
-      </div>
+      {openTiles.length > 0 && (
+        <>
+          <SectionLabel>Идэвхтэй</SectionLabel>
+          <div style={{
+            padding: '0 1rem',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: '0.6rem',
+            justifyItems: 'stretch',
+          }}>
+            {openTiles.map((tile, i) => (
+              <ToolTileBtn
+                key={tile.id}
+                tile={tile}
+                index={i}
+                onClick={() => tile.route && onNavigate(tile.route)}
+              />
+            ))}
+          </div>
+        </>
+      )}
 
       <SectionLabel>Удахгүй</SectionLabel>
       <div style={{
@@ -4363,12 +4401,12 @@ function ToolsTab({
         gap: '0.6rem',
         justifyItems: 'stretch',
       }}>
-        {SOON_TILES.map((tile, i) => (
+        {soonTiles.map((tile, i) => (
           <ToolTileBtn
             key={tile.id}
             tile={tile}
-            index={i + ACTIVE_TILES.length}
-            onClick={() => { /* no-op: opens soon */ }}
+            index={i + openTiles.length}
+            onClick={() => showToast({ msg: COMING_SOON_TOAST })}
           />
         ))}
       </div>
@@ -4536,8 +4574,10 @@ function ToolTileBtn({
     <button
       type="button"
       onClick={onClick}
-      disabled={isSoon}
-      aria-label={tile.name}
+      // Stubs stay clickable (the parent shows a "coming soon" toast) but
+      // are announced as disabled and get no hover/press feedback.
+      aria-disabled={isSoon || undefined}
+      aria-label={isSoon ? `${tile.name} — Удахгүй` : tile.name}
       style={{
         position: 'relative',
         aspectRatio: '1 / 1',
@@ -4551,9 +4591,8 @@ function ToolTileBtn({
         display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center',
         gap: '6px',
-        color: C.text, fontFamily: 'inherit',
-        cursor: isSoon ? 'not-allowed' : 'pointer',
-        opacity: isSoon ? 0.5 : 1,
+        color: isSoon ? C.mutedDim : C.text, fontFamily: 'inherit',
+        cursor: isSoon ? 'default' : 'pointer',
         // Press feedback + entrance stagger (30 ms per tile) so the
         // grid feels like a native home-screen.
         animation: `pv-tile-fade 0.28s ease-out both`,
@@ -4571,9 +4610,9 @@ function ToolTileBtn({
     >
       <span
         aria-hidden="true"
-        // Monochrome icons — primary text, muted for "Soon" stubs.
+        // Monochrome icons — primary text, tertiary for "Удахгүй" stubs.
         style={{
-          color: isSoon ? C.muted : C.text,
+          color: isSoon ? C.mutedDim : C.text,
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
         }}
       >
@@ -4591,7 +4630,7 @@ function ToolTileBtn({
           padding: '0.1rem 0.4rem', borderRadius: RADIUS_SM,
           background: C.cardAlt,
           color: C.muted,
-        }}>Soon</span>
+        }}>Удахгүй</span>
       )}
     </button>
   );
