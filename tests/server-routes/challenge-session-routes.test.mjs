@@ -1,11 +1,14 @@
 // End-to-end test of the challenge SESSION routes (docs/challenge-plan.md,
-// phase 4a: app/api/challenge/{start,solve,comment,end}) against the LOCAL
-// Firestore + Auth emulators — never production. Same harness as the other
-// route tests: `next start` on the built app with a throwaway service-
-// account key. Run via `npm run test:routes`.
+// phases 4a–4b: app/api/challenge/{start,solve,comment,end,close-stale})
+// against the LOCAL Firestore + Auth emulators — never production. Same
+// harness as the other route tests: `next start` on the built app with a
+// throwaway service-account key. Run via `npm run test:routes`.
 //
-// The end-time rule depends on the Ulaanbaatar clock (same UB day, ≤ 23:59,
-// ≥ now + 10 min), so this suite needs to run before 23:45 UB.
+// Clock: the challenge rules read the test-only clock (lib/server/clock.ts,
+// PV_TEST_CLOCK_OFFSET_MS — emulator only). The main server is pinned to
+// 12:00 UB on today's UB date, so the suite runs at any real hour; a second
+// server pinned to 23:50 UB checks the late-night rules (no valid end time
+// is left — N2 — while running sessions and the end logic still work).
 import { spawn } from 'node:child_process';
 import { generateKeyPairSync } from 'node:crypto';
 import path from 'node:path';
@@ -24,15 +27,19 @@ if (!process.env.FIRESTORE_EMULATOR_HOST || !process.env.FIREBASE_AUTH_EMULATOR_
   process.exit(1);
 }
 
-// UB clock helpers (UTC+8, no DST).
+// UB clock helpers (UTC+8, no DST) and the two pinned test clocks.
 const UB = 8 * 3600_000, DAY = 86_400_000;
 const ubDayStart = (ms) => Math.floor((ms + UB) / DAY) * DAY - UB;
-const ubAt = (hh, mm) => ubDayStart(Date.now()) + (hh * 60 + mm) * 60_000;
 const ubDate = (ms) => new Date(ms + UB).toISOString().slice(0, 10);
-if (Date.now() > ubAt(23, 45)) {
-  console.error('It is after 23:45 in Ulaanbaatar: no valid end time is left today. Run this suite earlier.');
-  process.exit(1);
-}
+const REAL_START = Date.now();
+const TODAY = ubDayStart(REAL_START);
+const OFFSET = TODAY + 12 * 3600_000 - REAL_START;              // 12:00 UB
+const LATE_OFFSET = TODAY + (23 * 60 + 50) * 60_000 - REAL_START; // 23:50 UB
+/** The app's "now" on the main server (advances in real time). */
+const now = () => Date.now() + OFFSET;
+const lateNow = () => Date.now() + LATE_OFFSET;
+const ubAt = (hh, mm) => TODAY + (hh * 60 + mm) * 60_000;
+const CRON_SECRET = 'test-cron-secret-0123456789';
 
 const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } });
 const env = {
@@ -40,7 +47,14 @@ const env = {
   NEXT_PUBLIC_FIREBASE_PROJECT_ID: PROJECT,
   FIREBASE_ADMIN_CLIENT_EMAIL: `smoke@${PROJECT}.iam.gserviceaccount.com`,
   FIREBASE_ADMIN_PRIVATE_KEY: privateKey.replace(/\n/g, '\\n'),
+  PV_TEST_CLOCK_OFFSET_MS: String(OFFSET),
+  CRON_SECRET,
 };
+// The late server: 23:50 UB, and no CRON_SECRET (the cron must refuse).
+const lateEnv = { ...env, PV_TEST_CLOCK_OFFSET_MS: String(LATE_OFFSET) };
+delete lateEnv.CRON_SECRET;
+const LATE_PORT = 3990;
+const LATE = `http://127.0.0.1:${LATE_PORT}`;
 
 admin.initializeApp({ projectId: PROJECT });
 const db = admin.firestore();
@@ -51,8 +65,8 @@ function check(name, ok, detail) {
   if (ok) pass++; else fail++;
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : '  -> ' + JSON.stringify(detail)}`);
 }
-async function post(route, body, token) {
-  const res = await fetch(`${BASE}/api/${route}`, {
+async function post(route, body, token, base = BASE) {
+  const res = await fetch(`${base}/api/${route}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
     body: JSON.stringify(body),
@@ -67,12 +81,17 @@ const signUp = (email) => authPost('signUp', { email, password: 'password123', r
 const doc = (p) => db.doc(p).get();
 
 let serverLog = '';
-const server = spawn(process.execPath, [path.join(ROOT, 'node_modules/next/dist/bin/next'), 'start', '-p', String(PORT)], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
-server.stdout.on('data', d => { serverLog += d; });
-server.stderr.on('data', d => { serverLog += d; });
-async function waitForServer() {
+const startServer = (port, serverEnv) => {
+  const p = spawn(process.execPath, [path.join(ROOT, 'node_modules/next/dist/bin/next'), 'start', '-p', String(port)], { cwd: ROOT, env: serverEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+  p.stdout.on('data', d => { serverLog += d; });
+  p.stderr.on('data', d => { serverLog += d; });
+  return p;
+};
+const server = startServer(PORT, env);
+const lateServer = startServer(LATE_PORT, lateEnv);
+async function waitForServer(base = BASE) {
   for (let i = 0; i < 80; i++) {
-    try { await fetch(`${BASE}/api/challenge/start`, { method: 'POST', body: '{}' }); return; } catch { await new Promise(r => setTimeout(r, 500)); }
+    try { await fetch(`${base}/api/challenge/start`, { method: 'POST', body: '{}' }); return; } catch { await new Promise(r => setTimeout(r, 500)); }
   }
   throw new Error('server did not start:\n' + serverLog);
 }
@@ -85,10 +104,11 @@ const solveBody = (sessionId, seq, ms, penalty = 'none', extra = {}) => {
 };
 /** Lets a test submit solves right after a start: the "total solve time
  *  can't exceed time since start" check reads startedAt. */
-const backdate = (sessionId) => db.doc(`challengeSessions/${sessionId}`).update({ startedAt: Ts.fromMillis(Date.now() - 10 * 60_000) });
+const backdate = (sessionId) => db.doc(`challengeSessions/${sessionId}`).update({ startedAt: Ts.fromMillis(now() - 10 * 60_000) });
 
 try {
   await waitForServer();
+  await waitForServer(LATE);
 
   const [adminU, coachU, coach2U, s1U, s2U, strangerU] = await Promise.all(
     ['adm', 'coach', 'coach2', 's1', 's2', 'stranger'].map(n => signUp(`cs-${n}@example.com`)));
@@ -131,8 +151,8 @@ try {
     const r = await post('challenge/start', { assignmentId: A1, endsAt }, COACH);
     check(`${label} → 400 ${code}`, r.status === 400 && r.body.error === code, r);
   };
-  await endCase('in the past', Date.now() - 60_000, 'end-too-soon');
-  await endCase('5 minutes from now', Date.now() + 5 * 60_000, 'end-too-soon');
+  await endCase('in the past', now() - 60_000, 'end-too-soon');
+  await endCase('5 minutes from now', now() + 5 * 60_000, 'end-too-soon');
   await endCase('tomorrow 00:30', ubAt(24, 30), 'end-other-day');
   await endCase('after 23:59', latest + 30_000, 'end-too-late');
   await endCase('not a number', '18:00', 'bad-end-time');
@@ -145,14 +165,14 @@ try {
   const sess = (await doc(`challengeSessions/${SID}`)).data();
   check('session: active, ids, template, endsAt, UB date, empty progress', sess.status === 'active' && sess.studentUid === s1 &&
     sess.coachUid === coachU.localId && sess.assignmentId === A1 && sess.template.metric === 'mo3' && sess.endsAt.toMillis() === latest &&
-    sess.ubDate === ubDate(Date.now()) && sess.solves.length === 0 && sess.currentStreak === 0 && sess.visibleToCoach === true, sess);
+    sess.ubDate === ubDate(now()) && sess.solves.length === 0 && sess.currentStreak === 0 && sess.visibleToCoach === true, sess);
   const live = (await doc(`challengeLive/${s1}`)).data();
   check('challengeLive points the student\'s timer at it', live.sessionId === SID && live.assignmentId === A1 &&
     live.template.event === '222' && live.endsAt.toMillis() === latest, live);
   check('the challenge is now locked', (await doc(`challenges/${C1}`)).get('locked') === true);
   const a1 = (await doc(`challengeAssignments/${A1}`)).data();
   check('assignment: in-progress, first start recorded, 1 session, active pointer', a1.status === 'in-progress' &&
-    a1.firstStartedUbDate === ubDate(Date.now()) && a1.firstStartedAt != null && a1.sessionsCount === 1 && a1.activeSessionId === SID, a1);
+    a1.firstStartedUbDate === ubDate(now()) && a1.firstStartedAt != null && a1.sessionsCount === 1 && a1.activeSessionId === SID, a1);
   check('editing the started challenge → 409 locked', (await post('challenge/update', { challengeId: C1, event: '222', metric: 'mo3', targetMs: 2000, streak: 2 }, COACH)).status === 409);
   const busy = await post('challenge/start', { assignmentId: A2 }, COACH);
   check('a second running session for the same student → 409 student-busy', busy.status === 409 && busy.body.error === 'student-busy', busy);
@@ -227,7 +247,7 @@ try {
   console.log('\n=== end time passed (lazy close) ===');
   const st3 = await post('challenge/start', { assignmentId: A1 }, COACH);
   const SID3 = st3.body.sessionId;
-  await db.doc(`challengeSessions/${SID3}`).update({ endsAt: Ts.fromMillis(Date.now() - 1000), startedAt: Ts.fromMillis(Date.now() - 600_000) });
+  await db.doc(`challengeSessions/${SID3}`).update({ endsAt: Ts.fromMillis(now() - 1000), startedAt: Ts.fromMillis(now() - 600_000) });
   const late = await solve(S1, solveBody(SID3, 1, 1000));
   check('a solve after the end time → 409 ended', late.status === 409 && late.body.error === 'ended', late);
   check('…and the session is auto-closed, pointer cleared', (await doc(`challengeSessions/${SID3}`)).get('status') === 'auto-closed' &&
@@ -235,7 +255,7 @@ try {
   // A pointer left on an expired session (student never came back) does
   // not block the next start: start closes it first.
   const st4 = await post('challenge/start', { assignmentId: A2 }, COACH);
-  await db.doc(`challengeSessions/${st4.body.sessionId}`).update({ endsAt: Ts.fromMillis(Date.now() - 1000) });
+  await db.doc(`challengeSessions/${st4.body.sessionId}`).update({ endsAt: Ts.fromMillis(now() - 1000) });
   const st5 = await post('challenge/start', { assignmentId: A1 }, COACH);
   check('start over an expired running session → closes it, starts the new one', st5.status === 200 &&
     (await doc(`challengeSessions/${st4.body.sessionId}`)).get('status') === 'auto-closed' &&
@@ -250,9 +270,12 @@ try {
   let last;
   for (let i = 1; i <= 6; i++) last = await solve(S1, solveBody(SID6, i, 1500));
   check('2 passing Mo3 blocks in a row → completed', last.status === 200 && last.body.completed === true && last.body.status === 'completed', last);
+  const res = last.body.result;
+  check('the completing solve returns the celebration numbers', res && res.daysTaken === 1 && res.sessionsCount === 5 &&
+    res.blocksAttempted === 4 && res.bestStreak === 2 && res.completedUbDate === ubDate(now()), res);
   const done = (await doc(`challengeAssignments/${A1}`)).data();
   check('assignment: completed, dates, days taken 1, sessions, blocks, best streak', done.status === 'completed' && done.completedAt != null &&
-    done.completedUbDate === ubDate(Date.now()) && done.daysTaken === 1 && done.sessionsCount === 5 &&
+    done.completedUbDate === ubDate(now()) && done.daysTaken === 1 && done.sessionsCount === 5 &&
     done.blocksAttempted === 2 + 0 + 0 + 0 + 2 && done.bestStreak === 2 && done.activeSessionId === null, done);
   check('session completed, pointer cleared', (await doc(`challengeSessions/${SID6}`)).get('status') === 'completed' &&
     (await doc(`challengeLive/${s1}`)).get('sessionId') === null);
@@ -270,11 +293,77 @@ try {
   check('s2\'s room1 session hidden from the coach', (await doc(`challengeSessions/${stB.body.sessionId}`)).get('visibleToCoach') === false);
   check('s2\'s roomA session untouched', (await doc(`challengeSessions/${stA.body.sessionId}`)).get('visibleToCoach') === true);
   check('starting for a removed student → 409', (await post('challenge/start', { assignmentId: A1b }, COACH)).body.error === 'not-active-member');
+
+  console.log('\n=== daily cleanup cron (close-stale) ===');
+  const cron = async (method, authorization, base = BASE) => {
+    const res = await fetch(`${base}/api/challenge/close-stale`, { method, headers: authorization ? { authorization } : {} });
+    return { status: res.status, body: await res.json().catch(() => ({})) };
+  };
+  check('no Authorization → 401', (await cron('GET')).status === 401);
+  check('wrong secret → 401', (await cron('GET', 'Bearer nope')).status === 401);
+  check('secret without "Bearer " → 401', (await cron('GET', CRON_SECRET)).status === 401);
+  check('a student\'s ID token is not the secret → 401', (await cron('GET', `Bearer ${S1}`)).status === 401);
+  // An expired session the student never came back to (4 Mo3 solves: one
+  // passing block + one unfinished), one still running, one already ended.
+  const C3 = await mk(COACH, 'room1', { event: '222', metric: 'mo3', targetMs: 3000, streak: 5 });
+  await post('challenge/assign', { challengeId: C3, uids: [s1] }, COACH);
+  const A3 = `${C3}_${s1}`;
+  const tpl = { event: '222', metric: 'mo3', targetMs: 3000, streak: 5, title: 't', note: '' };
+  const seedSession = (id, status, endsAt, extra = {}) => db.doc(`challengeSessions/${id}`).set({
+    assignmentId: A3, challengeId: C3, roomId: 'room1', coachUid: coachU.localId, studentUid: s1,
+    template: tpl, startedAt: Ts.fromMillis(now() - 3 * 3600_000), endsAt: Ts.fromMillis(endsAt),
+    ubDate: ubDate(now()), status, endedAt: null, solves: [], blocks: [], currentStreak: 0, bestStreak: 0,
+    blocksAttempted: 0, flags: [], visibleToCoach: true, ...extra,
+  });
+  const fourSolves = [1, 2, 3, 4].map(i => ({ seq: i, ms: 1000, penalty: 'none', stoppedAt: 1000 * i }));
+  await seedSession('staleA', 'active', now() - 3600_000, {
+    solves: fourSolves, blocks: [{ resultMs: 1000, displayCs: 100, pass: true }], currentStreak: 1, bestStreak: 1, blocksAttempted: 1,
+  });
+  await seedSession('freshB', 'active', now() + 3600_000);
+  await seedSession('oldC', 'ended', now() - 7200_000);
+  await db.doc(`challengeLive/${s1}`).set({ sessionId: 'staleA', assignmentId: A3, template: tpl, endsAt: Ts.fromMillis(now() - 3600_000) });
+  await db.doc(`challengeAssignments/${A3}`).update({ status: 'in-progress', sessionsCount: 1, activeSessionId: 'staleA', activeEndsAt: Ts.fromMillis(now() - 3600_000) });
+  const run1 = await cron('GET', `Bearer ${CRON_SECRET}`);
+  check('the cron (GET, as Vercel calls it) closes exactly the expired session', run1.status === 200 && run1.body.closed === 1, run1);
+  const stale = (await doc('challengeSessions/staleA')).data();
+  check('expired → auto-closed; the unfinished block dropped (1 complete block)', stale.status === 'auto-closed' && stale.blocksAttempted === 1 && stale.endedAt != null, stale);
+  check('a still-running session is left alone', (await doc('challengeSessions/freshB')).get('status') === 'active');
+  check('an already-ended session is left alone', (await doc('challengeSessions/oldC')).get('status') === 'ended' && (await doc('challengeSessions/oldC')).get('endedAt') === null);
+  check('the student\'s pointer is cleared', (await doc(`challengeLive/${s1}`)).get('sessionId') === null);
+  const a3 = (await doc(`challengeAssignments/${A3}`)).data();
+  check('assignment rolled up: 1 block, best streak 1, no active session, still in progress', a3.blocksAttempted === 1 &&
+    a3.bestStreak === 1 && a3.activeSessionId === null && a3.status === 'in-progress', a3);
+  const run2 = await cron('GET', `Bearer ${CRON_SECRET}`);
+  check('running it again closes nothing (idempotent)', run2.status === 200 && run2.body.closed === 0, run2);
+  check('…and changes nothing (blocks not counted twice)', (await doc(`challengeAssignments/${A3}`)).get('blocksAttempted') === 1);
+  const run3 = await cron('POST', `Bearer ${CRON_SECRET}`);
+  check('a manual POST run works too', run3.status === 200 && run3.body.closed === 0, run3);
+  await db.doc('challengeSessions/freshB').update({ status: 'ended' }); // tidy
+
+  console.log('\n=== 23:50 UB (late server): rules still hold, nothing depends on the real clock ===');
+  const lateStart = await post('challenge/start', { assignmentId: A3 }, COACH, LATE);
+  check('at 23:50 the default 23:59 end is < 10 min away → 400 end-too-soon', lateStart.status === 400 && lateStart.body.error === 'end-too-soon', lateStart);
+  const lateDay = ubDayStart(lateNow());
+  check('23:59 explicitly → 400 end-too-soon', (await post('challenge/start', { assignmentId: A3, endsAt: lateDay + (23 * 60 + 59) * 60_000 }, COACH, LATE)).body.error === 'end-too-soon');
+  check('00:30 tomorrow → 400 end-other-day', (await post('challenge/start', { assignmentId: A3, endsAt: lateDay + DAY + 30 * 60_000 }, COACH, LATE)).body.error === 'end-other-day');
+  // A session started earlier that ends at 23:55 is still running at 23:50.
+  await seedSession('lateRun', 'active', lateDay + (23 * 60 + 55) * 60_000, { startedAt: Ts.fromMillis(lateNow() - 20 * 60_000) });
+  await db.doc(`challengeLive/${s1}`).set({ sessionId: 'lateRun', assignmentId: A3, template: tpl, endsAt: Ts.fromMillis(lateDay + (23 * 60 + 55) * 60_000) });
+  await db.doc(`challengeAssignments/${A3}`).update({ activeSessionId: 'lateRun' });
+  const lateSolve = await post('challenge/solve', solveBody('lateRun', 1, 1000), S1, LATE);
+  check('a solve at 23:50 in a session ending 23:55 → accepted', lateSolve.status === 200 && lateSolve.body.status === 'active', lateSolve);
+  const lateEnd = await post('challenge/end', { sessionId: 'lateRun' }, S1, LATE);
+  check('the student ends it at 23:50 → ended (not expired yet)', lateEnd.body.status === 'ended', lateEnd);
+  await seedSession('lateGone', 'active', lateDay + (23 * 60 + 45) * 60_000);
+  const goneEnd = await post('challenge/end', { sessionId: 'lateGone' }, S1, LATE);
+  check('a session that ended at 23:45 → closed as auto-closed', goneEnd.body.status === 'auto-closed', goneEnd);
+  check('the cron refuses to run without CRON_SECRET configured → 503', (await cron('GET', `Bearer ${CRON_SECRET}`, LATE)).status === 503);
 } catch (e) {
   fail++;
   console.error('SESSION ROUTES ERROR', e, '\n--- server log ---\n' + serverLog.slice(-3000));
 } finally {
   server.kill();
+  lateServer.kill();
 }
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 if (fail > 0) console.log('--- server log ---\n' + serverLog.slice(-2000));

@@ -7,6 +7,7 @@
 // My memberships and my assignments are live while the hub is open (an
 // approval or a new assignment shows at once: one read per document on
 // open, then one per change); the coach's room list is a one-time read.
+import { appNow } from '@/lib/clock';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -207,7 +208,7 @@ const fmtDate = (ms: number | null) => (ms == null ? '—' : ubDate(ms));
 /** One of my assigned challenges, under its room. The coach starts each
  *  session in class; while one runs the timer is in challenge mode. */
 function MyAssignment({ a }: { a: ChallengeAssignment }) {
-  const running = a.activeSessionId != null && a.activeEndsAt != null && a.activeEndsAt > Date.now();
+  const running = a.activeSessionId != null && a.activeEndsAt != null && a.activeEndsAt > appNow();
   return (
     <div data-testid={`my-assignment-${a.challengeId}`} style={{
       margin: '0 0 0.55rem 0.2rem', padding: '0.55rem 0.7rem', borderRadius: 8, background: T.cardAlt,

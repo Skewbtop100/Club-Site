@@ -19,6 +19,7 @@
 //   • the end time: a local timer flips `active` off at endsAt, and an
 //     expired pointer found on open is closed through /api/challenge/end
 //     (lazy enforcement, decision 20).
+import { appNow } from '@/lib/clock';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { computeProgress } from '@/lib/challenge-progress';
 import { TIMER_FEATURES } from '@/lib/timer-features';
@@ -26,6 +27,7 @@ import { RoomsApiError } from '@/lib/firebase/services/rooms';
 import {
   commentChallengeSolve, endChallengeSession, submitChallengeSolve, subscribeChallengeLive,
 } from '@/lib/firebase/services/challengeSessions';
+import type { CompletionResult } from '@/lib/firebase/services/challengeSessions';
 import type { ChallengeLive, ChallengeTemplate } from '@/lib/types/challenge';
 import type { Penalty } from '@/lib/timer-engine';
 
@@ -74,10 +76,11 @@ export function useChallenge(uid: string | null, handlers: ChallengeHandlers) {
   handlersRef.current = handlers;
 
   const [live, setLive] = useState<ChallengeLive | null>(null);
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(() => appNow());
   const [store, setStore] = useState<Stored | null>(null);
   const storeRef = useRef<Stored | null>(null);
-  const [completed, setCompleted] = useState<{ title: string } | null>(null);
+  // The celebration screen's data (4b): the challenge and its final numbers.
+  const [completed, setCompleted] = useState<{ template: ChallengeTemplate; result: CompletionResult | null } | null>(null);
   const [refusedAt, setRefusedAt] = useState(0);
 
   const commit = useCallback((next: Stored | null) => {
@@ -103,16 +106,16 @@ export function useChallenge(uid: string | null, handlers: ChallengeHandlers) {
   const closedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!live?.sessionId || live.endsAt == null) return;
-    const left = live.endsAt - Date.now();
+    const left = live.endsAt - appNow();
     if (left <= 0) {
-      setNow(Date.now());
+      setNow(appNow());
       if (closedRef.current !== live.sessionId) {
         closedRef.current = live.sessionId;
         endChallengeSession(live.sessionId).catch(() => { /* next action closes it */ });
       }
       return;
     }
-    const id = window.setTimeout(() => setNow(Date.now()), Math.min(left + 50, 2 ** 31 - 1));
+    const id = window.setTimeout(() => setNow(appNow()), Math.min(left + 50, 2 ** 31 - 1));
     return () => window.clearTimeout(id);
   }, [live]);
 
@@ -143,7 +146,7 @@ export function useChallenge(uid: string | null, handlers: ChallengeHandlers) {
           if (cur?.sessionId === s.sessionId) {
             commit({ ...cur, solves: cur.solves.map(x => (x.localId === item.localId ? { ...x, sent: true } : x)) });
           }
-          if (r.completed) setCompleted({ title: live?.template?.title ?? '' });
+          if (r.completed && live?.template) setCompleted({ template: live.template, result: r.result });
         } catch (e) {
           const code = e instanceof RoomsApiError ? e.code : '';
           if (code === 'too-fast' || code === 'too-close') {
@@ -157,7 +160,7 @@ export function useChallenge(uid: string | null, handlers: ChallengeHandlers) {
             });
             commit({ ...cur, solves });
             handlersRef.current.onRefused(item.localId, renumber);
-            setRefusedAt(Date.now());
+            setRefusedAt(appNow());
             continue;
           }
           if (e instanceof RoomsApiError && e.status < 500 && e.status !== 401) {

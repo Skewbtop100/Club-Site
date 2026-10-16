@@ -217,6 +217,31 @@ await check('SR7. the coach lists the room\'s visible sessions', 'ALLOW', () =>
 await check('SR8. another coach cannot read it', 'DENY', () => getDoc(doc(as(COACH2), 'challengeSessions', 'sess1')));
 await check('SR9. listing all sessions is refused', 'DENY', () => getDocs(sessions(as(ADMIN))));
 
+console.log('\n=== coach live view queries (4b) ===\n');
+const liveQuery = (db, roomId, coachUid) => query(sessions(db),
+  where('roomId', '==', roomId), where('coachUid', '==', coachUid),
+  where('visibleToCoach', '==', true), where('status', '==', 'active'));
+await check('LV1. the coach listens to their room\'s running sessions', 'ALLOW', () => getDocs(liveQuery(as(COACH), 'room1', COACH)));
+await check('LV2. …and the result never contains a removed student\'s session', 'ALLOW', async () => {
+  const snap = await getDocs(query(sessions(as(COACH)),
+    where('roomId', '==', 'room1'), where('coachUid', '==', COACH), where('visibleToCoach', '==', true)));
+  if (snap.docs.some(d => d.id === 'sessR')) throw new Error('removed student\'s session delivered');
+  if (!snap.docs.some(d => d.id === 'sess1')) throw new Error('own visible session missing');
+  return snap;
+});
+await check('LV3. the live query without visibleToCoach is refused', 'DENY', () =>
+  getDocs(query(sessions(as(COACH)), where('roomId', '==', 'room1'), where('coachUid', '==', COACH), where('status', '==', 'active'))));
+await check('LV4. another coach cannot listen to this room', 'DENY', () => getDocs(liveQuery(as(COACH2), 'room1', COACH)));
+await check('LV5. another coach\'s own-uid query on this room returns nothing of it', 'ALLOW', async () => {
+  const snap = await getDocs(liveQuery(as(COACH2), 'room1', COACH2));
+  if (!snap.empty) throw new Error('foreign sessions delivered');
+  return snap;
+});
+await check('LV6. a student cannot listen to the room\'s sessions', 'DENY', () => getDocs(liveQuery(as(S1), 'room1', COACH)));
+await check('LV7. the coach listens to the room\'s visible assignments', 'ALLOW', () =>
+  getDocs(query(assignments(as(COACH)), where('roomId', '==', 'room1'), where('coachUid', '==', COACH), where('visibleToCoach', '==', true))));
+await check('LV8. a judge cannot listen', 'DENY', () => getDocs(liveQuery(asJudge(), 'room1', COACH)));
+
 console.log('\n=== challengeSessions — every client write refused ===\n');
 await check('SW1. a student cannot start their own challenge (create a session)', 'DENY', () =>
   setDoc(doc(as(S1), 'challengeSessions', 'mine'), session('mine', S1, 'active', true)));

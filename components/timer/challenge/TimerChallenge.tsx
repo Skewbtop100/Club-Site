@@ -1,13 +1,15 @@
 'use client';
 
 // Challenge-mode pieces of the solo timer (docs/challenge-plan.md, B4,
-// phase 4a): the progress strip above the digits, the mandatory
-// OK / +2 / DNF row, and the simple "✅ Challenge биеллээ" notice (the full
-// celebration screen is phase 4b). Colours come from the timer's active
-// theme (`c`), so they follow the user's palette; monochrome except the
-// semantic success / danger.
+// phases 4a–4b): the progress strip above the digits, the mandatory
+// OK / +2 / DNF row, and the full-screen celebration on completion
+// (decision 17). The strip and the row take the timer's active theme
+// (`c`); the celebration uses the challenge pages' monochrome tokens with
+// the one green accent.
 import { useState } from 'react';
-import { METRIC_LABEL, formatTarget } from '@/lib/challenge';
+import { METRIC_LABEL, formatTarget, previewSentence } from '@/lib/challenge';
+import { T } from './ui';
+import type { CompletionResult } from '@/lib/firebase/services/challengeSessions';
 import { ubClock } from '@/lib/challenge-progress';
 import type { ChallengeTemplate, SessionProgress } from '@/lib/types/challenge';
 import type { Penalty } from '@/lib/timer-engine';
@@ -134,23 +136,86 @@ export function ChallengeConfirmRow({ isMobile, c, onConfirm }: {
   );
 }
 
-/** Phase 4a's simple completion notice (the celebration screen is 4b). */
-export function ChallengeCompleted({ title, c, onClose }: { title: string; c: TimerColors; onClose: () => void }) {
+/** Green accent — the only colour on the celebration screen. */
+const ACCENT = '#34D399';
+/** ✅ in text presentation (U+FE0E), so it takes ACCENT instead of the
+ *  platform's colour-emoji green. */
+const CHECK = '\u2705\uFE0E';
+
+/**
+ * Full-screen celebration when the streak reaches M (decision 17, A8):
+ * "✅ Challenge биеллээ", the challenge sentence, days taken, sessions,
+ * total blocks and the completion date. One calm entrance — the backdrop
+ * fades, the card rises, the ✅ settles in, the lines follow in a short
+ * stagger — and nothing at all with prefers-reduced-motion. No confetti.
+ * The ✅ is drawn in text presentation (U+FE0E) so it takes the accent
+ * colour instead of the platform's emoji green.
+ * "Үргэлжлүүлэх" closes it; the timer is already back in normal mode.
+ */
+export function ChallengeCelebration({ template, result, onContinue }: {
+  template: ChallengeTemplate; result: CompletionResult | null; onContinue: () => void;
+}) {
+  const stats: [string, string][] = result ? [
+    ['Зарцуулсан өдөр', String(result.daysTaken)],
+    ['Session', String(result.sessionsCount)],
+    ['Нийт блок', String(result.blocksAttempted)],
+    ['Биелсэн огноо', result.completedUbDate],
+  ] : [];
   return (
-    <div role="dialog" aria-label="Challenge биеллээ" data-testid="challenge-completed" style={{
-      position: 'fixed', inset: 0, zIndex: 9600, background: 'rgba(0,0,0,0.6)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem',
-    }}>
-      <div style={{
-        background: c.card, border: `1px solid ${c.border}`, borderRadius: 12, padding: '1.4rem 1.6rem',
-        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.6rem', textAlign: 'center', maxWidth: 360,
+    <div role="dialog" aria-modal="true" aria-label="Challenge биеллээ" data-testid="challenge-celebration"
+      className="pv-celebrate" {...absorb} style={{
+        position: 'fixed', inset: 0, zIndex: 9600, background: T.bg, color: T.text,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem',
       }}>
-        <div style={{ fontSize: '1.15rem', fontWeight: 700, color: c.text }}>✅ Challenge биеллээ</div>
-        {title && <div style={{ fontSize: '0.88rem', color: c.muted }}>{title}</div>}
-        <button type="button" onClick={onClose} style={{
-          marginTop: '0.4rem', background: c.cardAlt, border: 'none', color: c.text, borderRadius: 10,
-          padding: '0.5rem 1.1rem', fontFamily: 'inherit', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
-        }}>Хаах</button>
+      <style>{`
+        .pv-celebrate { animation: pv-cel-fade 0.35s ease-out both; }
+        .pv-celebrate .pv-cel-card { animation: pv-cel-rise 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) 0.05s both; }
+        .pv-celebrate .pv-cel-mark { animation: pv-cel-pop 0.6s cubic-bezier(0.2, 0.9, 0.3, 1.2) 0.2s both; }
+        .pv-celebrate .pv-cel-line { animation: pv-cel-rise 0.45s ease-out both; }
+        @keyframes pv-cel-fade { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes pv-cel-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+        @keyframes pv-cel-pop { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: none; } }
+        @media (prefers-reduced-motion: reduce) {
+          .pv-celebrate, .pv-celebrate .pv-cel-card, .pv-celebrate .pv-cel-line, .pv-celebrate .pv-cel-mark { animation: none; }
+        }
+      `}</style>
+      <div className="pv-cel-card" style={{
+        width: 'min(100%, 420px)', display: 'flex', flexDirection: 'column', alignItems: 'center',
+        gap: '1.1rem', textAlign: 'center',
+      }}>
+        <h2 data-testid="celebration-title" style={{
+          margin: 0, fontSize: '1.45rem', fontWeight: 700,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.9rem',
+        }}>
+          <span className="pv-cel-mark" style={{
+            width: 72, height: 72, borderRadius: '50%', border: `2px solid ${ACCENT}`,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            color: ACCENT, fontSize: '2.1rem', lineHeight: 1,
+          }}>{CHECK}</span>
+          <span className="pv-cel-line" style={{ animationDelay: '0.45s' }}>Challenge биеллээ</span>
+        </h2>
+        <p className="pv-cel-line" data-testid="celebration-sentence" style={{
+          margin: 0, fontSize: '0.98rem', color: T.text, lineHeight: 1.5, animationDelay: '0.55s',
+        }}>{previewSentence(template)}</p>
+        {stats.length > 0 && (
+          <div className="pv-cel-line" data-testid="celebration-stats" style={{
+            width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1,
+            background: T.border, border: `1px solid ${T.border}`, borderRadius: 10, overflow: 'hidden',
+            animationDelay: '0.65s',
+          }}>
+            {stats.map(([label, value]) => (
+              <div key={label} style={{ background: T.card, padding: '0.7rem 0.6rem', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                <span style={{ fontSize: '0.72rem', color: T.muted }}>{label}</span>
+                <span style={{ fontSize: '1.05rem', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{value}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <button type="button" className="pv-cel-line" onClick={onContinue} style={{
+          marginTop: '0.3rem', background: T.cardAlt, color: T.text, border: `1px solid ${T.borderHi}`,
+          borderRadius: 10, padding: '0.65rem 1.4rem', fontFamily: 'inherit', fontSize: '0.92rem',
+          fontWeight: 600, cursor: 'pointer', animationDelay: '0.75s',
+        }}>Үргэлжлүүлэх</button>
       </div>
     </div>
   );

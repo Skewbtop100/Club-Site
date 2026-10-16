@@ -1,5 +1,7 @@
-// Proves the test-only emulator login (lib/firebase.ts EMULATOR_MODE) is
-// impossible in a production build, even when someone sets the flag.
+// Proves the test-only emulator login (lib/firebase.ts EMULATOR_MODE) and
+// the test-only challenge clock (lib/clock.ts in the browser,
+// lib/server/clock.ts on the server) are impossible in production, even
+// when someone sets the flags.
 //
 //   npm run test:emulator-guard
 //
@@ -10,7 +12,11 @@
 //    search is looking for the right thing.
 // 3. Runtime: `next start` on that build; the page has no window.__pvTestAuth
 //    and makes no request to an emulator port (9099 / 8080 / 9000).
+// 4. Server clock: lib/server/clock.ts, compiled on its own, only shifts
+//    time with FIRESTORE_EMULATOR_HOST set (emulator data only) and never
+//    on Vercel (VERCEL set), whatever PV_TEST_CLOCK_OFFSET_MS says.
 import { spawn, spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
@@ -19,7 +25,7 @@ const ROOT = process.cwd();
 const DIST = '.next-guard';
 const PORT = 3994;
 const BASE = `http://localhost:${PORT}`;
-const MARKERS = ['__pvTestAuth', '__pvEmulatorsConnected', '127.0.0.1:9099'];
+const MARKERS = ['__pvTestAuth', '__pvEmulatorsConnected', '127.0.0.1:9099', '__pvTestClockOffset'];
 
 // next build / next dev rewrite these two files (types path, include list);
 // snapshot them and put them back so a test run leaves the tree clean.
@@ -32,12 +38,12 @@ function check(name, ok, detail) {
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : '  -> ' + JSON.stringify(detail)}`);
 }
 
-const env = { ...process.env, NEXT_DIST_DIR: DIST, NEXT_PUBLIC_FIREBASE_EMULATORS: '1' };
+const env = { ...process.env, NEXT_DIST_DIR: DIST, NEXT_PUBLIC_FIREBASE_EMULATORS: '1', PV_TEST_CLOCK_OFFSET_MS: '36000000' };
 delete env.NODE_ENV; // let `next build` / `next start` set production themselves
 
 console.log('\n=== sanity: the markers exist in the source ===');
-const src = fs.readFileSync(path.join(ROOT, 'lib/firebase.ts'), 'utf8');
-for (const m of MARKERS) check(`lib/firebase.ts contains "${m}"`, src.includes(m));
+const src = ['lib/firebase.ts', 'lib/clock.ts'].map(f => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n');
+for (const m of MARKERS) check(`lib/firebase.ts / lib/clock.ts contain "${m}"`, src.includes(m));
 
 console.log('\n=== production build WITH NEXT_PUBLIC_FIREBASE_EMULATORS=1 ===');
 const build = spawnSync(process.execPath, [path.join(ROOT, 'node_modules/next/dist/bin/next'), 'build'], { cwd: ROOT, env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
@@ -90,6 +96,29 @@ try {
   if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(server.pid), '/T', '/F']);
   else server.kill('SIGTERM');
   restoreConfigs();
+}
+
+console.log('\n=== server clock (lib/server/clock.ts) ===');
+const clockOut = path.join(ROOT, '.tmp-clock-guard-build');
+const tsc = spawnSync(process.execPath, [path.join(ROOT, 'node_modules/typescript/bin/tsc'), 'lib/server/clock.ts',
+  '--outDir', clockOut, '--module', 'commonjs', '--target', 'es2020', '--skipLibCheck', '--types', 'node'], { cwd: ROOT, encoding: 'utf8' });
+check('lib/server/clock.ts compiles on its own', tsc.status === 0, tsc.stdout + tsc.stderr);
+if (tsc.status === 0) {
+  const { testClockActive, serverNow } = createRequire(import.meta.url)(path.join(clockOut, 'clock.js'));
+  const OFF = '36000000';
+  const EMU = '127.0.0.1:8080';
+  const shifted = (e) => serverNow(e) - Date.now() > 35_000_000;
+  const real = (e) => Math.abs(serverNow(e) - Date.now()) < 1000;
+  check('sanity: emulator host + offset, not on Vercel → shifted',
+    testClockActive({ FIRESTORE_EMULATOR_HOST: EMU, PV_TEST_CLOCK_OFFSET_MS: OFF }) && shifted({ FIRESTORE_EMULATOR_HOST: EMU, PV_TEST_CLOCK_OFFSET_MS: OFF }));
+  check('offset WITHOUT the emulator (real Firestore) → real clock',
+    !testClockActive({ PV_TEST_CLOCK_OFFSET_MS: OFF }) && real({ PV_TEST_CLOCK_OFFSET_MS: OFF }));
+  check('on Vercel (VERCEL=1), even with emulator host + offset → real clock',
+    !testClockActive({ VERCEL: '1', FIRESTORE_EMULATOR_HOST: EMU, PV_TEST_CLOCK_OFFSET_MS: OFF }) &&
+    real({ VERCEL: '1', FIRESTORE_EMULATOR_HOST: EMU, PV_TEST_CLOCK_OFFSET_MS: OFF }));
+  check('a non-numeric offset → real clock', !testClockActive({ FIRESTORE_EMULATOR_HOST: EMU, PV_TEST_CLOCK_OFFSET_MS: 'abc' }));
+  check('no offset → real clock', !testClockActive({ FIRESTORE_EMULATOR_HOST: EMU }) && real({ FIRESTORE_EMULATOR_HOST: EMU }));
+  fs.rmSync(clockOut, { recursive: true, force: true });
 }
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);

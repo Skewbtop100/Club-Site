@@ -534,7 +534,52 @@ An RTDB alternative is still possible (the project already uses RTDB for presenc
     - `tests/firestore-rules/challenge.test.mjs`: adds sessions, live pointer and progress fields.
     - `tests/server-routes/challenge-session-routes.test.mjs`: in `test:routes`.
     - `npm run test:e2e:challenge-mode`: Playwright, coach and student.
-    - The route and e2e suites need a valid end time today, so they must run **before 23:45 UB**.
+    - The route and e2e suites need a valid end time today, so they must run **before 23:45 UB**. *(Lifted in 4b: the tests now use a test clock.)*
+- **As built, 4b (2026-10-17).** These points replace the Phase 4 parts of B2, B3 and B4 where they differ:
+  - **Coach live view** (decision 13), `components/timer/challenge/CoachLiveView.tsx`, on the room page. It shows one row per running session:
+    - event and metric, block progress (`2/3`), and the streak (●●○, or a bar with `23/50` when M > 10);
+    - the last block's result (`1.61 ✓` / `DNF ✗`), the solve count, and "HH:MM хүртэл";
+    - a **⚑ n** flag when the sanity checks refused solves. Tapping it lists the clock time, the solve time and the reason ("хэт хурдан" / "хэт ойрхон").
+    - A student who completes while the page is open shows as "✅ Биелсэн" at once.
+  - **Listeners on the coach room page.** Both stop when the page unmounts.
+    - **Running sessions:** `challengeSessions where roomId == X, coachUid == me, visibleToCoach == true, status == 'active'`. B2's listener, plus the two filters the rules need. It costs about 1 read per confirmed solve per student, which is B2's ≈1,000 per class.
+    - **The room's assignments,** now live too. B2 had them as a one-time read plus a refresh button. An assignment changes only at start, close and completion (≈3 writes per session, ≈30–60 reads per class), never per solve. That's what makes a start, an end and "Биелсэн" appear without a refresh, so **"Шинэчлэх" is gone**.
+    - **The challenge list** stays a one-time read, re-read after the coach's own actions. Only those actions change it.
+    - **Read budget:** the class estimate stays ≈2,250 reads. The removed refresh button's "≈100" line becomes the assignment listener.
+    - **Expired sessions:** a session past its end time that nothing has closed yet is filtered out client-side.
+  - **Celebration** (decision 17), `ChallengeCelebration` in `components/timer/challenge/TimerChallenge.tsx`.
+    - **Look:** full-screen, using the challenge pages' monochrome tokens with #34D399 as the only colour. It shows "✅ Challenge биеллээ", the challenge sentence, days taken, sessions, total blocks and the completion date.
+    - **The ✅ glyph:** drawn in text presentation (U+FE0E) inside a thin green ring, so it takes the accent colour rather than the platform's emoji green.
+    - **Motion:** one entrance (fade, rise, the ✅ settles, the lines stagger); no confetti; no animation under `prefers-reduced-motion`.
+    - **"Үргэлжлүүлэх"** closes it; the timer is already back in normal mode underneath.
+    - **Where the numbers come from:** the completing solve's response now carries `result` (`daysTaken`, `sessionsCount`, `blocksAttempted`, `bestStreak`, `completedUbDate`).
+  - **Cron:** `vercel.json` runs `/api/challenge/close-stale` daily at `5 16 * * *` UTC (00:05 UB).
+    - **Method:** the route answers **GET**, which is how Vercel calls crons, and also POST for manual runs (B3 listed POST).
+    - **Auth:** `Authorization: Bearer <CRON_SECRET>`, compared in constant time. A missing or wrong header gets 401. If `CRON_SECRET` isn't set, the route answers **503** and does nothing, so it is never open.
+    - **What it closes:** `closeStaleSessions()` (index `challengeSessions(status, endsAt)`) closes every `active` session with `endsAt <= now` as `auto-closed`, using the same `closeInTx` as every other end. Each session is re-checked in its own transaction, so a second run, or a race with the student's own end, closes nothing twice.
+    - **Timing:** on Vercel's Hobby plan a daily cron may fire at any time within its hour. Nothing depends on the exact minute, because every route also closes expired sessions lazily.
+  - **Test clock:** every time rule now reads `serverNow()` (`lib/server/clock.ts`) or `appNow()` (`lib/clock.ts`).
+    - **On the server:** shifted by `PV_TEST_CLOCK_OFFSET_MS` only when `FIRESTORE_EMULATOR_HOST` is set (emulator data only) and `VERCEL` is not.
+    - **In the browser:** shifted by `window.__pvTestClockOffset` only in the emulator test mode. That condition is inlined so production builds drop the branch.
+    - **Proof:** `npm run test:emulator-guard` scans the client bundles for the marker and checks the server-side conditions. Auth token expiry keeps the real clock.
+    - **The tests pin the app to 12:00 UB on today's UB date,** so they pass at any real hour. The 23:45 restriction is gone.
+    - **The 23:50 run** (owner choice, 2026-10-17) proves the late-night rules instead of the full flow:
+      - with rule N2 no valid end time is left, so the picker and the start route refuse (`end-too-soon`);
+      - a session ending at 23:55 still runs and scores;
+      - expired sessions are closed by the timer and by the cron.
+      - It runs as `npm run test:e2e:challenge-mode:late`, and as a second `next start` server pinned to 23:50 inside the session route test.
+  - **Indexes:** `challengeSessions(roomId, status)` and `challengeSessions(status, endsAt)`, as planned.
+  - **Rules:** no new rules; the 4a session rule already covers the live query. New rule tests cover it:
+    - the coach's live query is allowed only with the `visibleToCoach` filter, and never returns a removed student's session;
+    - another coach and students are refused.
+  - **Env:** `CRON_SECRET` (Vercel → Production).
+  - **Fixed along the way** (an existing timer bug the 4b e2e exposed): the timer's localStorage loaders marked "loaded" with a ref, so the save effect ran once with the empty initial state and wrote `{}`. Under React StrictMode in development, the second load then read that `{}` back and the user's sessions were lost; in production it was a brief overwrite that the next render repaired. Sessions, prefs and theme now use a state flag set together with the loaded data.
+  - **Tests:**
+    - `tests/firestore-rules/challenge.test.mjs`: adds the live-view queries.
+    - `tests/server-routes/challenge-session-routes.test.mjs`: adds the test clock, the cron and the 23:50 server.
+    - `npm run test:e2e:challenge-mode`: adds the live view, the flag, the celebration and live "Биелсэн".
+    - `npm run test:e2e:challenge-mode:late`
+    - `npm run test:emulator-guard`: adds the test clock checks.
 
 **Phase 5: progress history**
 - **Add:** history views for the student (per assignment; always visible to the student, even while removed) and the coach (per student / per challenge; hidden while the student is removed). One-time paginated reads.

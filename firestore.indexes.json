@@ -56,6 +56,22 @@
         { "fieldPath": "studentUid", "order": "ASCENDING" },
         { "fieldPath": "assignedAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "challengeSessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "roomId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "challengeSessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "endsAt", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [

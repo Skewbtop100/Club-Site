@@ -15,6 +15,7 @@ import {
   type DocumentData, type DocumentReference, type Firestore, type Transaction,
 } from 'firebase-admin/firestore';
 import { adminDb, isCoachUid } from './firebase-admin';
+import { serverNow } from './clock';
 import { RoomError } from './rooms';
 import { SOLVE_MAX_MS, sanityCheck, type SanityReason } from '../challenge';
 import { computeProgress, daysTaken, ubDate, validateEndsAt } from '../challenge-progress';
@@ -56,7 +57,18 @@ async function readCloseCtx(db: Firestore, tx: Transaction, sessionRef: Document
  * the assignment, and clears the student's pointer if it still points here.
  * `completed` also writes the completion fields (A8).
  */
-function closeInTx(tx: Transaction, c: CloseCtx, status: Exclude<SessionStatus, 'active'>, nowMs: number) {
+/** What the student's celebration screen shows (4b). */
+export interface CompletionResult {
+  completedUbDate: string;
+  daysTaken: number;
+  sessionsCount: number;
+  blocksAttempted: number;
+  bestStreak: number;
+}
+
+function closeInTx(
+  tx: Transaction, c: CloseCtx, status: Exclude<SessionStatus, 'active'>, nowMs: number,
+): CompletionResult | null {
   const now = Timestamp.fromMillis(nowMs);
   tx.update(c.sessionRef, { status, endedAt: now });
   const a = c.assignment;
@@ -65,15 +77,23 @@ function closeInTx(tx: Transaction, c: CloseCtx, status: Exclude<SessionStatus, 
     bestStreak: Math.max(a.bestStreak ?? 0, c.session.bestStreak ?? 0),
   };
   if (a.activeSessionId === c.sessionRef.id) { update.activeSessionId = null; update.activeEndsAt = null; }
+  let result: CompletionResult | null = null;
   if (status === 'completed') {
     const done = ubDate(nowMs);
-    Object.assign(update, {
-      status: 'completed', completedAt: now, completedUbDate: done,
+    result = {
+      completedUbDate: done,
       daysTaken: daysTaken(a.firstStartedUbDate ?? done, done),
+      sessionsCount: a.sessionsCount ?? 1,
+      blocksAttempted: update.blocksAttempted as number,
+      bestStreak: update.bestStreak as number,
+    };
+    Object.assign(update, {
+      status: 'completed', completedAt: now, completedUbDate: done, daysTaken: result.daysTaken,
     });
   }
   tx.update(c.assignmentRef, update);
   if (c.live?.sessionId === c.sessionRef.id) tx.set(c.liveRef, EMPTY_LIVE);
+  return result;
 }
 
 // ── start (coach) ────────────────────────────────────────────────────────
@@ -86,7 +106,7 @@ function closeInTx(tx: Transaction, c: CloseCtx, status: Exclude<SessionStatus, 
  */
 export async function startSession(callerUid: string, body: Record<string, unknown>): Promise<{ sessionId: string; endsAt: number }> {
   const assignmentId = idOf(body.assignmentId);
-  const nowMs = Date.now();
+  const nowMs = serverNow();
   const end = validateEndsAt(nowMs, body.endsAt);
   if ('error' in end) throw new RoomError(400, end.error);
   const db = adminDb();
@@ -184,10 +204,10 @@ export async function submitSolve(callerUid: string, body: Record<string, unknow
   const sessionRef = db.doc(`challengeSessions/${sessionId}`);
 
   type Outcome =
-    | { kind: 'ok'; progress: ReturnType<typeof computeProgress>; status: SessionStatus }
+    | { kind: 'ok'; progress: ReturnType<typeof computeProgress>; status: SessionStatus; result?: CompletionResult | null }
     | { kind: 'refused'; reason: SanityReason }
     | { kind: 'closed' };
-  const nowMs = Date.now();
+  const nowMs = serverNow();
   const out: Outcome = await db.runTransaction(async (tx): Promise<Outcome> => {
     const snap = await tx.get(sessionRef);
     if (!snap.exists) throw new RoomError(404, 'no-session');
@@ -230,15 +250,19 @@ export async function submitSolve(callerUid: string, body: Record<string, unknow
     });
     if (ctx) {
       ctx.session = { ...s, blocksAttempted: progress.blocksAttempted, bestStreak: progress.bestStreak };
-      closeInTx(tx, ctx, 'completed', nowMs);
-      return { kind: 'ok', progress, status: 'completed' };
+      const result = closeInTx(tx, ctx, 'completed', nowMs);
+      return { kind: 'ok', progress, status: 'completed', result };
     }
     return { kind: 'ok', progress, status: 'active' };
   });
 
   if (out.kind === 'refused') throw new RoomError(409, out.reason);
   if (out.kind === 'closed') throw new RoomError(409, 'ended');
-  return { progress: out.progress, status: out.status, completed: out.status === 'completed' };
+  return {
+    progress: out.progress, status: out.status, completed: out.status === 'completed',
+    // The celebration screen's numbers (only on the completing solve).
+    result: out.result ?? null,
+  };
 }
 
 // ── comment (student) ────────────────────────────────────────────────────
@@ -279,7 +303,7 @@ export async function endSession(callerUid: string, body: Record<string, unknown
   const sessionId = idOf(body.sessionId);
   const db = adminDb();
   const ref = db.doc(`challengeSessions/${sessionId}`);
-  const nowMs = Date.now();
+  const nowMs = serverNow();
   return db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists) throw new RoomError(404, 'no-session');
@@ -290,4 +314,37 @@ export async function endSession(callerUid: string, body: Record<string, unknown
     closeInTx(tx, await readCloseCtx(db, tx, ref, s), status, nowMs);
     return { status };
   });
+}
+
+// ── daily cleanup (Vercel cron, 4b) ──────────────────────────────────────
+
+/**
+ * Closes every session still marked active whose end time has passed —
+ * students who never came back to the timer (decision 20; the lazy end in
+ * every route handles the rest). Same close as everywhere else:
+ * 'auto-closed', only complete blocks rolled up (decision 5), pointer
+ * cleared; unconfirmed solves never reached the server (N3). Each session
+ * is re-checked inside its own transaction, so running twice — or racing a
+ * student's own "end" — closes nothing twice.
+ */
+export async function closeStaleSessions(): Promise<{ closed: number; checked: number }> {
+  const db = adminDb();
+  const nowMs = serverNow();
+  // Index: challengeSessions(status, endsAt).
+  const stale = await db.collection('challengeSessions')
+    .where('status', '==', 'active')
+    .where('endsAt', '<=', Timestamp.fromMillis(nowMs))
+    .get();
+  let closed = 0;
+  for (const d of stale.docs) {
+    const didClose = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(d.ref);
+      const s = snap.data();
+      if (!s || s.status !== 'active' || toMs(s.endsAt) > nowMs) return false;
+      closeInTx(tx, await readCloseCtx(db, tx, d.ref, s), 'auto-closed', nowMs);
+      return true;
+    });
+    if (didClose) closed++;
+  }
+  return { closed, checked: stale.size };
 }

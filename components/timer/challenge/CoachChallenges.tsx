@@ -1,15 +1,19 @@
 'use client';
 
-// Coach room page → "Challenge-үүд" (docs/challenge-plan.md, phases 3–4a).
+// Coach room page → "Challenge-үүд" (docs/challenge-plan.md, phases 3–4b).
 //   Create from the template [event] + [metric] + [< target] + [M in a row]
 //   with a live Mongolian preview; assign to one or many active members;
 //   unassign before start; edit / delete until the first start (locked),
 //   after that only "Хуулбарлах". Per student: "Эхлүүлэх" with an end time
 //   (today, ≤ 23:59, ≥ 10 min ahead) and "Зогсоох" while it runs.
-// Every write is a server route. Challenges and assignments are one-time
-// reads, re-read after each action and on "Шинэчлэх" (plan B2); the member
-// list comes live from the room page.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+// Every write is a server route. Reads (4b): the room's assignments and its
+// running sessions are LIVE while this page is open (the live view, a
+// start, an end or a completion show at once, no refresh button); the
+// challenge list itself only changes through the coach's own actions, so it
+// is a one-time read, re-read after each action. Both listeners stop when
+// the coach leaves the page. The member list comes live from the room page.
+import { appNow } from '@/lib/clock';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   CHALLENGE_EVENTS, METRICS, METRIC_LABEL, NOTE_MAX, STREAK_MAX, STREAK_MIN, TITLE_MAX,
   defaultTitle, formatTarget, isDefaultTitle, parseTargetTime, previewSentence,
@@ -18,8 +22,11 @@ import {
   assignChallenge, challengeErrorText, createChallenge, deleteChallenge, duplicateChallenge,
   fetchRoomChallenges, unassignChallenge, updateChallenge, type TemplateInput,
 } from '@/lib/firebase/services/challenges';
-import { ASSIGNMENT_STATUS_TEXT, fetchRoomAssignments } from '@/lib/firebase/services/challengeAssignments';
-import { endChallengeSession, startChallengeSession } from '@/lib/firebase/services/challengeSessions';
+import { ASSIGNMENT_STATUS_TEXT, subscribeRoomAssignments } from '@/lib/firebase/services/challengeAssignments';
+import {
+  endChallengeSession, startChallengeSession, subscribeRoomLiveSessions, type LiveSession,
+} from '@/lib/firebase/services/challengeSessions';
+import CoachLiveView from './CoachLiveView';
 import { END_LATEST_MIN, ubClock, ubTimeToday, validateEndsAt } from '@/lib/challenge-progress';
 import type { Challenge, ChallengeAssignment, ChallengeMetric, RoomMember } from '@/lib/types/challenge';
 import {
@@ -40,15 +47,36 @@ export default function CoachChallenges({ roomId, coachUid, members }: {
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  const [sessions, setSessions] = useState<LiveSession[]>([]);
+  // Re-render every 15 s so "running until HH:MM" turns off on its own.
+  const [now, setNow] = useState(() => appNow());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(appNow()), 15_000);
+    return () => window.clearInterval(id);
+  }, []);
+  const openedAt = useRef(appNow());
+
   const reload = useCallback(async () => {
-    const [c, a] = await Promise.all([fetchRoomChallenges(roomId, coachUid), fetchRoomAssignments(roomId, coachUid)]);
-    setChallenges(c);
-    setAssignments(a);
+    setChallenges(await fetchRoomChallenges(roomId, coachUid));
   }, [roomId, coachUid]);
 
   useEffect(() => {
     reload().catch((e) => { console.error('[room] challenges', e); setError('Challenge-үүдийг ачаалж чадсангүй.'); });
   }, [reload]);
+
+  // Live: assignments (start / end / completion) and running sessions (every
+  // confirmed solve). Unsubscribed when the page unmounts.
+  useEffect(() => {
+    const fail = (what: string) => (e: Error) => { console.error(`[room] ${what}`, e); setError('Шууд мэдээлэл ачаалж чадсангүй.'); };
+    const offA = subscribeRoomAssignments(roomId, coachUid, (rows) => { setAssignments(rows); setNow(appNow()); }, fail('assignments'));
+    const offS = subscribeRoomLiveSessions(roomId, coachUid, (rows) => { setSessions(rows); setNow(appNow()); }, fail('sessions'));
+    return () => { offA(); offS(); };
+  }, [roomId, coachUid]);
+
+  const justCompleted = useMemo(
+    () => assignments.filter(a => a.status === 'completed' && (a.completedAt ?? 0) >= openedAt.current - 60_000),
+    [assignments],
+  );
 
   const run = useCallback(async (key: string, fn: () => Promise<string | void>) => {
     setBusy(key); setError(null); setInfo(null);
@@ -66,6 +94,8 @@ export default function CoachChallenges({ roomId, coachUid, members }: {
   const active = useMemo(() => (members ?? []).filter(m => m.status === 'active'), [members]);
 
   return (
+    <>
+    <CoachLiveView sessions={sessions} completed={justCompleted} members={members} now={now} />
     <Card title={`Challenge-үүд (${challenges?.length ?? 0})`} testId="challenges-card">
       {error && <Note text={error} tone="danger" />}
       {info && <Note text={info} tone="success" />}
@@ -81,10 +111,7 @@ export default function CoachChallenges({ roomId, coachUid, members }: {
           })}
         />
       ) : (
-        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-          <Button onClick={() => { setCreating(true); setEditingId(null); }}>Шинэ challenge</Button>
-          <Button kind="plain" disabled={busy !== null} onClick={() => run('reload', async () => {})}>Шинэчлэх</Button>
-        </div>
+        <div><Button onClick={() => { setCreating(true); setEditingId(null); }}>Шинэ challenge</Button></div>
       )}
 
       {challenges === null ? <Muted>Уншиж байна…</Muted>
@@ -103,7 +130,7 @@ export default function CoachChallenges({ roomId, coachUid, members }: {
           </div>
         ) : (
           <ChallengeItem
-            key={c.id} challenge={c} busy={busy}
+            key={c.id} challenge={c} busy={busy} now={now}
             assignments={assignments.filter(a => a.challengeId === c.id)}
             activeMembers={active}
             onEdit={() => { setEditingId(c.id); setCreating(false); }}
@@ -130,6 +157,7 @@ export default function CoachChallenges({ roomId, coachUid, members }: {
           />
         ))}
     </Card>
+    </>
   );
 }
 
@@ -213,10 +241,10 @@ function ChallengeForm({ initial, submitLabel, busy, onSubmit, onCancel }: {
 // ── One challenge ───────────────────────────────────────────────────────
 
 function ChallengeItem({
-  challenge: c, assignments, activeMembers, busy,
+  challenge: c, assignments, activeMembers, busy, now,
   onEdit, onDuplicate, onDelete, onAssign, onUnassign, onStart, onStop,
 }: {
-  challenge: Challenge; assignments: ChallengeAssignment[]; activeMembers: RoomMember[]; busy: string | null;
+  challenge: Challenge; assignments: ChallengeAssignment[]; activeMembers: RoomMember[]; busy: string | null; now: number;
   onEdit: () => void; onDuplicate: () => void; onDelete: () => void;
   onAssign: (uids: string[]) => void; onUnassign: (uid: string) => void;
   onStart: (a: ChallengeAssignment, endsAt: number) => void; onStop: (a: ChallengeAssignment) => void;
@@ -253,7 +281,7 @@ function ChallengeItem({
           .sort((a, b) => nameOf(a.studentUid, a.studentName).localeCompare(nameOf(b.studentUid, b.studentName)))
           .map(a => {
             const canUnassign = a.status === 'assigned' && a.firstStartedAt === null;
-            const running = isRunning(a);
+            const running = isRunning(a, now);
             const canStart = !running && (a.status === 'assigned' || a.status === 'in-progress');
             return (
               <div key={a.id} data-testid={`assignment-${a.studentUid}`} style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: 0 }}>
@@ -335,8 +363,8 @@ function ChallengeItem({
 
 /** A session is running while it has a pointer and its end time is ahead
  *  (an expired one is closed on the server at the next action). */
-function isRunning(a: ChallengeAssignment): boolean {
-  return a.activeSessionId != null && a.activeEndsAt != null && a.activeEndsAt > Date.now();
+function isRunning(a: ChallengeAssignment, now: number): boolean {
+  return a.activeSessionId != null && a.activeEndsAt != null && a.activeEndsAt > now;
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -348,8 +376,8 @@ function StartPanel({ busy, onStart, onCancel }: {
 }) {
   const [value, setValue] = useState(`${pad(Math.floor(END_LATEST_MIN / 60))}:${pad(END_LATEST_MIN % 60)}`);
   const m = /^(\d{2}):(\d{2})$/.exec(value);
-  const endsAt = m ? ubTimeToday(Date.now(), Number(m[1]), Number(m[2])) : NaN;
-  const check = validateEndsAt(Date.now(), Number.isFinite(endsAt) ? endsAt : 'bad');
+  const endsAt = m ? ubTimeToday(appNow(), Number(m[1]), Number(m[2])) : NaN;
+  const check = validateEndsAt(appNow(), Number.isFinite(endsAt) ? endsAt : 'bad');
   const hint = 'error' in check
     ? (check.error === 'end-too-soon' ? 'Одооноос дор хаяж 10 минутын дараа байх ёстой.'
       : check.error === 'end-too-late' ? 'Хамгийн оройдоо 23:59.' : 'Цагаа шалгана уу.')

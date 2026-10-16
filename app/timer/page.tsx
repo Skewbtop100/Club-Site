@@ -11,7 +11,7 @@ import { useSmartTimer } from './useSmartTimer';
 import { type QiyiPacket } from './useQiyiTimer';
 import { useWakeLock } from './useWakeLock';
 import { useChallenge } from './useChallenge';
-import { ChallengeCompleted, ChallengeConfirmRow, ChallengeStrip } from '@/components/timer/challenge/TimerChallenge';
+import { ChallengeCelebration, ChallengeConfirmRow, ChallengeStrip } from '@/components/timer/challenge/TimerChallenge';
 import { monotonePath, segmentsOf, type Pt } from './monotonePath';
 import { useAuth } from '@/lib/auth-context';
 import { useLang, type Lang } from '@/lib/i18n';
@@ -931,9 +931,13 @@ export default function TimerPage() {
     return () => clearInterval(id);
   }, []);
 
-  // Load session from localStorage on mount
   // Load sessions store on mount, with one-time migration from v1 storage.
-  const sessionsLoadedRef = useRef(false);
+  // "Loaded" is STATE, set in the same batch as the loaded store, so the
+  // save effect below first runs with the loaded data. (It was a ref: the
+  // save effect then ran in the same pass with the still-empty initial
+  // state and wrote `{}` — and under React StrictMode's double effect run
+  // in development the second load read that `{}` back, losing the store.)
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
   useEffect(() => {
     try {
       const raw = localStorage.getItem(SESSIONS_KEY);
@@ -963,13 +967,13 @@ export default function TimerPage() {
       console.error('[solve-load] failed', msg);
       setSaveError('Load: ' + msg.slice(0, 120));
     }
-    sessionsLoadedRef.current = true;
+    setSessionsLoaded(true);
   }, []);
 
   // Persist sessions store + active event whenever they change.
   const [saveError, setSaveError] = useState<string | null>(null);
   useEffect(() => {
-    if (!sessionsLoadedRef.current) return;
+    if (!sessionsLoaded) return;
     try {
       const payload = JSON.stringify({ store: sessions, currentEventId: eventId });
       localStorage.setItem(SESSIONS_KEY, payload);
@@ -978,7 +982,7 @@ export default function TimerPage() {
       console.error('[solve-save] localStorage FAILED', msg);
       setSaveError('LS: ' + msg.slice(0, 120));
     }
-  }, [sessions, eventId]);
+  }, [sessions, eventId, sessionsLoaded]);
   useEffect(() => {
     if (!saveError) return;
     const t = setTimeout(() => setSaveError(null), 8000);
@@ -986,7 +990,7 @@ export default function TimerPage() {
   }, [saveError]);
 
   // Load preferences on mount
-  const prefsLoadedRef = useRef(false);
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
   useEffect(() => {
     try {
       const raw = localStorage.getItem(PREFS_KEY);
@@ -1032,32 +1036,32 @@ export default function TimerPage() {
         }
       }
     } catch { /* ignore */ }
-    prefsLoadedRef.current = true;
+    setPrefsLoaded(true);
   }, []);
 
   // Persist preferences (skip the very first render before load completes)
   useEffect(() => {
-    if (!prefsLoadedRef.current) return;
+    if (!prefsLoaded) return;
     try {
       localStorage.setItem(PREFS_KEY, JSON.stringify({ inspectionEnabled, precision, holdToStart, holdTimeMs, hideTimeWhileRunning, showAo5Projection, scrambleFontSize, qiyiDebugMode, timeEntryMode, sortMode }));
     } catch { /* ignore */ }
-  }, [inspectionEnabled, precision, holdToStart, holdTimeMs, hideTimeWhileRunning, showAo5Projection, scrambleFontSize, qiyiDebugMode, timeEntryMode, sortMode]);
+  }, [prefsLoaded, inspectionEnabled, precision, holdToStart, holdTimeMs, hideTimeWhileRunning, showAo5Projection, scrambleFontSize, qiyiDebugMode, timeEntryMode, sortMode]);
 
   // Load/persist active theme. Kept in its own slot rather than inside
   // PREFS_KEY so an older device with stale prefs JSON doesn't accidentally
   // wipe a freshly-picked theme on the next save.
-  const themeLoadedRef = useRef(false);
+  const [themeLoaded, setThemeLoaded] = useState(false);
   useEffect(() => {
     try {
       const raw = localStorage.getItem(THEME_KEY);
       if (raw && raw in THEMES) setThemeId(raw as ThemeId);
     } catch { /* ignore */ }
-    themeLoadedRef.current = true;
+    setThemeLoaded(true);
   }, []);
   useEffect(() => {
-    if (!themeLoadedRef.current) return;
+    if (!themeLoaded) return;
     try { localStorage.setItem(THEME_KEY, themeId); } catch { /* ignore */ }
-  }, [themeId]);
+  }, [themeId, themeLoaded]);
 
   // Mirror the theme's bg onto <body> and <html> so the overscroll /
   // rubber-band area on mobile, and any 100vh measurement gap, blend with
@@ -4281,10 +4285,15 @@ export default function TimerPage() {
         );
       })()}
 
-      {/* Challenge completed (phase 4a: a simple notice; the celebration
-          screen comes in 4b). */}
+      {/* Challenge completed: full-screen celebration (decision 17). The
+          timer is already back in normal mode underneath; "Үргэлжлүүлэх"
+          just closes it. */}
       {challenge.completed && (
-        <ChallengeCompleted title={challenge.completed.title} c={C} onClose={challenge.dismissCompleted} />
+        <ChallengeCelebration
+          template={challenge.completed.template}
+          result={challenge.completed.result}
+          onContinue={challenge.dismissCompleted}
+        />
       )}
 
       {/* Delete confirmation — Material-style compact dialog. The X
