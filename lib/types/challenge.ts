@@ -1,6 +1,6 @@
 // Types and constants for the coach Challenge system (docs/challenge-plan.md).
 // Phase 2: coaches, rooms, room codes, memberships. Phase 3: challenges
-// and assignments.
+// and assignments. Phase 4: sessions and the live pointer.
 //
 // Shared by client code, server routes (lib/server/rooms.ts) and tests, so
 // it must stay free of firebase / firebase-admin imports.
@@ -118,4 +118,38 @@ export interface ChallengeAssignment {
   firstStartedAt: number | null;
   completedAt: number | null;
   assignedAt: number | null;
+  /** Rolled up by the server when a session closes (phase 4). */
+  daysTaken: number | null;
+  sessionsCount: number;
+  blocksAttempted: number;
+  bestStreak: number;
+  /** The running session, if any (cleared when it closes). The coach's
+   *  page shows "Зогсоох" while activeEndsAt is still ahead. */
+  activeSessionId: string | null;
+  activeEndsAt: number | null;
+}
+
+// ── Phase 4: sessions and the student's live pointer ─────────────────────
+
+export type SessionStatus = 'active' | 'ended' | 'auto-closed' | 'completed';
+
+/** challengeLive/{studentUid} — what the student's timer listens to.
+ *  Server-written only; sessionId null = no running session. */
+export interface ChallengeLive {
+  sessionId: string | null;
+  assignmentId: string | null;
+  template: ChallengeTemplate | null;
+  /** Epoch ms; null when no session. */
+  endsAt: number | null;
+}
+
+/** What /api/challenge/solve (and the timer, locally) reports back. */
+export interface SessionProgress {
+  blocks: { resultMs: number | null; displayCs: number | null; pass: boolean }[];
+  currentStreak: number;
+  bestStreak: number;
+  blocksAttempted: number;
+  completed: boolean;
+  inBlock: number;
+  blockSize: number;
 }

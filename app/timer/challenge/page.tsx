@@ -17,6 +17,7 @@ import {
 } from '@/lib/firebase/services/rooms';
 import { ASSIGNMENT_STATUS_TEXT, subscribeMyAssignments } from '@/lib/firebase/services/challengeAssignments';
 import { previewSentence } from '@/lib/challenge';
+import { ubClock, ubDate } from '@/lib/challenge-progress';
 import {
   ROOM_CODE_LENGTH, ROOM_NAME_MAX, isRoomCode, normalizeRoomCode,
   type ChallengeAssignment, type MemberStatus, type Room, type RoomMember,
@@ -201,9 +202,12 @@ export default function ChallengeHubPage() {
   );
 }
 
-/** One of my assigned challenges, under its room. In phase 3 the coach
- *  starts it in class (phase 4), so the student only waits. */
+const fmtDate = (ms: number | null) => (ms == null ? '—' : ubDate(ms));
+
+/** One of my assigned challenges, under its room. The coach starts each
+ *  session in class; while one runs the timer is in challenge mode. */
 function MyAssignment({ a }: { a: ChallengeAssignment }) {
+  const running = a.activeSessionId != null && a.activeEndsAt != null && a.activeEndsAt > Date.now();
   return (
     <div data-testid={`my-assignment-${a.challengeId}`} style={{
       margin: '0 0 0.55rem 0.2rem', padding: '0.55rem 0.7rem', borderRadius: 8, background: T.cardAlt,
@@ -215,7 +219,21 @@ function MyAssignment({ a }: { a: ChallengeAssignment }) {
       </div>
       <span data-testid="my-assignment-sentence" style={{ fontSize: '0.86rem' }}>{previewSentence(a.template)}</span>
       {a.template.note && <Muted>{a.template.note}</Muted>}
-      {a.status === 'assigned' && <Muted>Багш эхлүүлэхийг хүлээнэ үү</Muted>}
+      {running ? (
+        <span data-testid="my-assignment-running" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <Muted>Явагдаж байна · {ubClock(a.activeEndsAt!)} хүртэл</Muted>
+          <Link href="/timer" style={{ color: T.text, fontSize: '0.8rem' }}>Timer нээх</Link>
+        </span>
+      ) : a.status === 'completed' ? (
+        <div data-testid="my-assignment-done" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: '0.6rem', rowGap: '0.1rem', fontSize: '0.78rem', color: T.muted }}>
+          <span>Эхэлсэн</span><span style={{ color: T.text }}>{fmtDate(a.firstStartedAt)}</span>
+          <span>Биелсэн</span><span style={{ color: T.text }}>{fmtDate(a.completedAt)}</span>
+          <span>Зарцуулсан</span><span style={{ color: T.text }}>{a.daysTaken ?? '—'} өдөр · {a.sessionsCount} session</span>
+          <span>Блок</span><span style={{ color: T.text }}>{a.blocksAttempted} · хамгийн их дараалал {a.bestStreak}</span>
+        </div>
+      ) : (
+        <Muted>Багш эхлүүлэхийг хүлээнэ үү</Muted>
+      )}
     </div>
   );
 }

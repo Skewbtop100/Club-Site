@@ -10,6 +10,8 @@ import { isValidSharedCode, randomSharedCode, sharedSeedKey } from '@/lib/shared
 import { useSmartTimer } from './useSmartTimer';
 import { type QiyiPacket } from './useQiyiTimer';
 import { useWakeLock } from './useWakeLock';
+import { useChallenge } from './useChallenge';
+import { ChallengeCompleted, ChallengeConfirmRow, ChallengeStrip } from '@/components/timer/challenge/TimerChallenge';
 import { monotonePath, segmentsOf, type Pt } from './monotonePath';
 import { useAuth } from '@/lib/auth-context';
 import { useLang, type Lang } from '@/lib/i18n';
@@ -530,6 +532,13 @@ function makeDefaultSession(solves: Solve[] = []): Session {
   return { id: newSessionId(), name: 'Default', createdAt: Date.now(), solves };
 }
 
+// Coach challenge (docs/challenge-plan.md B4): challenge solves go to their
+// own local session per event, so normal sessions and their stats are never
+// touched. Fixed id → found again after a refresh.
+const CHALLENGE_SESSION_ID = 'challenge';
+// What to go back to when the challenge ends: { eventId, event, currentId }.
+const CHALLENGE_PREV_KEY = 'pv.timer.challenge.prev.v1';
+
 export default function TimerPage() {
   const router = useRouter();
   const { user } = useAuth();
@@ -542,6 +551,44 @@ export default function TimerPage() {
   // Math.random() and produce different markup on the server vs the
   // client (React hydration error #418).
   const [randomScramble, setScramble] = useState<string>('');
+
+  // ── Coach challenge mode (docs/challenge-plan.md B4, phase 4a) ──────────
+  // While the coach has a session running for this student, the timer is
+  // locked to the challenge: its event, a separate "Challenge" session, no
+  // inspection, no shared scramble, no Bluetooth / manual entry, and every
+  // solve must be confirmed OK / +2 / DNF before it counts or the next one
+  // can start. Confirmed solves are final. useChallenge owns the server
+  // side; the rest of this page only switches its own behaviour on
+  // `challengeMode` (the prefs themselves are never changed, so leaving the
+  // challenge needs no restore of them).
+  const challenge = useChallenge(user?.uid ?? null, {
+    // A solve the server refused ("Цаг хэт хурдан байна"): remove it from the
+    // Challenge session and renumber the later ones. setSessions is
+    // declared below; this only runs after mount.
+    onRefused: (localId, renumber) => {
+      setSessions(prev => {
+        const out: SessionStore = { ...prev };
+        for (const [ev, entry] of Object.entries(prev)) {
+          const list = entry.sessions.map(s => s.id !== CHALLENGE_SESSION_ID ? s : {
+            ...s,
+            solves: s.solves
+              .filter(x => x.id !== localId)
+              .map(x => (x.challenge && renumber[x.id] ? { ...x, challenge: { ...x.challenge, seq: renumber[x.id] } } : x)),
+          });
+          out[ev] = { ...entry, sessions: list };
+        }
+        return out;
+      });
+    },
+  });
+  const challengeMode = !!challenge.active;
+  const challengeModeRef = useRef(challengeMode);
+  challengeModeRef.current = challengeMode;
+  const challengeRef = useRef(challenge);
+  challengeRef.current = challenge;
+  const challengeLockedToast = useCallback(() => {
+    showToast({ msg: 'Challenge-ийн үед боломжгүй', tone: 'info' });
+  }, []);
 
   // ── Shared scramble code ────────────────────────────────────────────────
   // While a code is active, the displayed scramble is a pure function of
@@ -567,8 +614,10 @@ export default function TimerPage() {
       if (raw) setShared(parseSharedMode(raw));
     } catch { /* ignore */ }
   }, []);
-  const sharedCode = shared?.code ?? null;
-  const sharedIndex = shared ? (shared.indexes[eventId] ?? 1) : null;
+  // Suspended (not cleared) during a challenge: scrambles are random there
+  // (decision 23), and the code is back as soon as the challenge ends.
+  const sharedCode = challengeMode ? null : (shared?.code ?? null);
+  const sharedIndex = sharedCode && shared ? (shared.indexes[eventId] ?? 1) : null;
   const sharedScramble = useMemo(
     () => (sharedCode && sharedIndex != null
       ? generateSeededScramble(eventId, sharedSeedKey(sharedCode, eventId, sharedIndex))
@@ -744,6 +793,11 @@ export default function TimerPage() {
     return ev.sessions.find(s => s.id === ev.currentId) ?? ev.sessions[0] ?? null;
   }, [sessions, eventId]);
   const solves: Solve[] = currentSession?.solves ?? [];
+  // Latest values for effects that must not re-run on every change.
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
+  const eventIdRef = useRef(eventId);
+  eventIdRef.current = eventId;
 
   const setSolves = useCallback(
     (updater: Solve[] | ((prev: Solve[]) => Solve[])) => {
@@ -772,7 +826,61 @@ export default function TimerPage() {
     });
   }, [eventId]);
 
+  // Enter / leave challenge mode. Entering remembers where the user was
+  // (kept in localStorage, so a refresh mid-challenge doesn't overwrite
+  // it), locks the event to the challenge's and selects its Challenge
+  // session (created if missing). Leaving puts both back.
+  const challengeSessionId = challenge.active?.sessionId ?? null;
+  const challengeEvent = challenge.active?.template.event ?? null;
+  useEffect(() => {
+    if (challengeSessionId && challengeEvent) {
+      try {
+        if (!localStorage.getItem(CHALLENGE_PREV_KEY)) {
+          const cur = sessionsRef.current[challengeEvent]?.currentId ?? null;
+          localStorage.setItem(CHALLENGE_PREV_KEY, JSON.stringify({ eventId: eventIdRef.current, event: challengeEvent, currentId: cur }));
+        }
+      } catch { /* ignore */ }
+      setEventId(challengeEvent);
+      setSessions(prev => {
+        const ev = prev[challengeEvent];
+        const list = ev?.sessions ?? [];
+        const has = list.some(s => s.id === CHALLENGE_SESSION_ID);
+        const sessionsList = has ? list : [...list, { id: CHALLENGE_SESSION_ID, name: 'Challenge', createdAt: Date.now(), solves: [] }];
+        if (has && ev?.currentId === CHALLENGE_SESSION_ID) return prev;
+        return { ...prev, [challengeEvent]: { sessions: sessionsList, currentId: CHALLENGE_SESSION_ID } };
+      });
+      return;
+    }
+    let saved: { eventId?: string; event?: string; currentId?: string | null } | null = null;
+    try {
+      const raw = localStorage.getItem(CHALLENGE_PREV_KEY);
+      saved = raw ? JSON.parse(raw) : null;
+      localStorage.removeItem(CHALLENGE_PREV_KEY);
+    } catch { /* ignore */ }
+    if (!saved) return;
+    const { event, currentId, eventId: prevEvent } = saved;
+    if (event) {
+      setSessions(prev => {
+        const ev = prev[event];
+        if (!ev || ev.currentId !== CHALLENGE_SESSION_ID) return prev;
+        const back = ev.sessions.find(s => s.id === currentId && s.id !== CHALLENGE_SESSION_ID)
+          ?? ev.sessions.find(s => s.id !== CHALLENGE_SESSION_ID);
+        if (!back) return prev;
+        return { ...prev, [event]: { ...ev, currentId: back.id } };
+      });
+    }
+    if (prevEvent && EVENTS.some(e => e.id === prevEvent)) setEventId(prevEvent);
+  }, [challengeSessionId, challengeEvent]);
+
+  /** Event change from a picker / shortcut — refused during a challenge
+   *  (decision 12: the event is locked to the challenge's). */
+  const pickEvent = useCallback((id: string) => {
+    if (challengeModeRef.current) { challengeLockedToast(); return; }
+    setEventId(id);
+  }, [challengeLockedToast]);
+
   const switchSession = useCallback((sessionId: string) => {
+    if (challengeModeRef.current) { challengeLockedToast(); return; }
     setSessions(prev => {
       const ev = prev[eventId];
       if (!ev) return prev;
@@ -782,6 +890,7 @@ export default function TimerPage() {
   }, [eventId]);
 
   const createSession = useCallback((rawName: string) => {
+    if (challengeModeRef.current) { challengeLockedToast(); return; }
     const name = rawName.trim() || `Session ${Date.now().toString(36).slice(-4)}`;
     const ds = makeDefaultSession();
     ds.name = name;
@@ -793,6 +902,7 @@ export default function TimerPage() {
   }, [eventId]);
 
   const deleteSession = useCallback((sessionId: string) => {
+    if (challengeModeRef.current) { challengeLockedToast(); return; }
     setSessions(prev => {
       const ev = prev[eventId];
       if (!ev) return prev;
@@ -1027,7 +1137,7 @@ export default function TimerPage() {
   // Returns null when projection isn't meaningful (fewer than 4 solves,
   // any DNF in the trailing window, or the user has it toggled off).
   const ao5Projection = useMemo(() => {
-    if (!showAo5Projection) return null;
+    if (!showAo5Projection || challengeMode) return null;
     if (solves.length < 4) return null;
     // Show only on solves 4, 9, 14, 19… — i.e. right before a 5-solve
     // window completes. Once the Ao5 lands (5, 10, 15…) it disappears
@@ -1041,7 +1151,7 @@ export default function TimerPage() {
       best:  (t1 + t2 + t3) / 3,
       worst: (t2 + t3 + t4) / 3,
     };
-  }, [solves, showAo5Projection]);
+  }, [solves, showAo5Projection, challengeMode]);
   const sessionEvent = useMemo(() => EVENTS.find(e => e.id === eventId) ?? EVENTS[0], [eventId]);
 
   // Presence: register the user as online in /presence/timer/{uid}.
@@ -1081,6 +1191,14 @@ export default function TimerPage() {
   //     ≥100 lifetime solves. Single-solve PBs no longer award (UI still
   //     highlights them; this is just about the points).
   const onSolveCommit = useCallback((ms: number, penalty: Penalty) => {
+    // Challenge: the solve is only PENDING until the student confirms it
+    // OK / +2 / DNF (decision 4) — nothing is saved yet, no points, no PB
+    // award (decision 11). Scrambles stay random (decision 23).
+    if (challengeModeRef.current) {
+      challengeRef.current.setPending({ ms, stoppedAt: Date.now(), scramble });
+      setScramble(generateScramble(eventId));
+      return;
+    }
     let candidateAo5: number | null = null;
     setSolves(prev => {
       const next: Solve[] = [
@@ -1147,6 +1265,41 @@ export default function TimerPage() {
   }, [scramble, eventId, user?.uid, sharedCode, sharedIndex, stepShared]);
 
   const timer = useTimer(onSolveCommit, holdTimeMs);
+
+  // Effective input settings: a challenge forces inspection off (decision
+  // 22), the keyboard / touch timer (decision 3: no manual entry, a
+  // connected smart timer is ignored). The saved prefs stay as they are.
+  const effInspection = inspectionEnabled && !challengeMode;
+  const effEntryMode: typeof timeEntryMode = challengeMode ? 'default' : timeEntryMode;
+  /** Arming is blocked while a challenge solve waits for OK / +2 / DNF. */
+  const awaitingConfirm = challengeMode && !!challenge.pending;
+
+  // OK / +2 / DNF on the pending challenge solve: final from here on. It is
+  // stored in the Challenge session (marked, so it can't be edited or
+  // deleted) and queued for the server.
+  const confirmChallengeSolve = useCallback((p: Penalty) => {
+    const r = challengeRef.current.confirm(p);
+    if (!r) return;
+    setSolves(prev => [...prev, {
+      id: r.localId, ms: r.ms, penalty: r.penalty, scramble: r.scramble,
+      event: eventId, ts: Date.now(), challenge: { sessionId: r.sessionId, seq: r.seq },
+    }]);
+  }, [setSolves, eventId]);
+
+  // The challenge ended (end time, coach, student, completion) — possibly
+  // with an unconfirmed solve on screen, which is dropped (N3): reset the
+  // display so nothing from the challenge lingers.
+  const wasChallengeRef = useRef(false);
+  useEffect(() => {
+    if (wasChallengeRef.current && !challengeMode) timer.reset();
+    wasChallengeRef.current = challengeMode;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [challengeMode]);
+
+  // "Цаг хэт хурдан байна" (N5) when the server refuses a confirmed solve.
+  useEffect(() => {
+    if (challenge.refusedAt) showToast({ msg: 'Цаг хэт хурдан байна', tone: 'error' });
+  }, [challenge.refusedAt]);
 
   // Keep the screen on while the user is actively solving (inspecting /
   // armed / running). We deliberately drop the lock on 'stopped' and 'idle'
@@ -1261,7 +1414,10 @@ export default function TimerPage() {
     ganStartTimeRef.current = null;
   }, []);
 
+  // Bluetooth smart timers are not allowed in a challenge (decision 3): their
+  // events are ignored there, so only the on-screen timer can make a solve.
   const handleBtSolveStart = useCallback(() => {
+    if (challengeModeRef.current) return;
     ganStartTimeRef.current = Date.now();
     setGanDisplayMs(0);
     if (ganIntervalRef.current != null) {
@@ -1274,11 +1430,13 @@ export default function TimerPage() {
     ganTimerRef.current.startRunning();
   }, []);
   const handleBtSolveStop = useCallback((finalMs: number) => {
+    if (challengeModeRef.current) return;
     stopGanInterval();
     setGanDisplayMs(finalMs);
     ganTimerRef.current.finishExternal(finalMs);
   }, [stopGanInterval]);
   const handleBtIdle = useCallback(() => {
+    if (challengeModeRef.current) return;
     stopGanInterval();
     setGanDisplayMs(0);
     ganTimerRef.current.reset();
@@ -1294,19 +1452,23 @@ export default function TimerPage() {
     onSolveStop: handleBtSolveStop,
     onIdle: handleBtIdle,
   });
-  const ganConnected = gan.state === 'connected';
+  const ganConnectedRaw = gan.state === 'connected';
+  // A connected smart timer drives the engine — except in a challenge,
+  // where the keyboard / touch timer takes over again.
+  const ganConnected = ganConnectedRaw && !challengeMode;
   // Human-readable label for whichever brand is currently connected.
   // Falls back to the persisted last-connected brand so the
   // "Last: GAN HALO-…" hint reads correctly between sessions.
   const connectedTimerName: string | null = ganConnected
     ? `${gan.brand === 'qiyi' ? 'QiYi' : 'GAN'} Timer`
     : null;
+  const btBlockedNote = ganConnectedRaw && challengeMode;
 
   // Safety net: clear the interval on unmount or if the connection drops.
   useEffect(() => {
-    if (!ganConnected) stopGanInterval();
+    if (!ganConnectedRaw) stopGanInterval();
     return () => stopGanInterval();
-  }, [ganConnected, stopGanInterval]);
+  }, [ganConnectedRaw, stopGanInterval]);
 
   // Scramble history — last 10 scrambles for the active event, newest
   // first. Swipe (mobile) or ← → arrow keys (desktop) move through it.
@@ -1401,17 +1563,25 @@ export default function TimerPage() {
   // (Declared before the keyboard useEffect so the D/X/2/C shortcuts
   //  can call togglePenaltyOnLast / deleteLastSolve without a TDZ
   //  binding violation.)
+  // A confirmed challenge solve is final (decision 4): its time and penalty
+  // never change and it can't be deleted — whichever button, shortcut or
+  // gesture asks. Only its comment may change (N7).
+  const isLockedSolve = useCallback((id: string) => !!solves.find(s => s.id === id)?.challenge, [solves]);
   const deleteSolve = useCallback((id: string) => {
-    setSolves(prev => prev.filter(s => s.id !== id));
-  }, [setSolves]);
+    if (isLockedSolve(id)) { challengeLockedToast(); return; }
+    setSolves(prev => prev.filter(s => s.id !== id || !!s.challenge));
+  }, [setSolves, isLockedSolve, challengeLockedToast]);
   const setSolvePenalty = useCallback((id: string, p: Penalty) => {
-    setSolves(prev => prev.map(s => s.id === id ? { ...s, penalty: p } : s));
-  }, [setSolves]);
+    if (isLockedSolve(id)) { challengeLockedToast(); return; }
+    setSolves(prev => prev.map(s => s.id === id && !s.challenge ? { ...s, penalty: p } : s));
+  }, [setSolves, isLockedSolve, challengeLockedToast]);
   // Comment is stored as `undefined` when cleared so the field doesn't
   // serialize as an empty string in JSON snapshots / exports. Trimmed
   // before save to keep accidental whitespace out of the data.
   const setSolveComment = useCallback((id: string, comment: string) => {
     const trimmed = comment.trim();
+    const target = solves.find(s => s.id === id);
+    if (target?.challenge) challengeRef.current.comment(target.challenge.sessionId, target.challenge.seq, trimmed);
     setSolves(prev => prev.map(s => {
       if (s.id !== id) return s;
       const next: Solve = { ...s };
@@ -1419,7 +1589,7 @@ export default function TimerPage() {
       else delete next.comment;
       return next;
     }));
-  }, [setSolves]);
+  }, [setSolves, solves]);
 
   // Whenever the Solve Detail modal closes (or swaps to a different
   // solve), drop the inline comment-panel state so a fresh open seeds
@@ -1494,8 +1664,9 @@ export default function TimerPage() {
   // change shape.
   const deleteLastSolve = useCallback(() => {
     if (!lastSolve) return;
+    if (lastSolve.challenge) { challengeLockedToast(); return; }
     setDeleteConfirmOpen(true);
-  }, [lastSolve]);
+  }, [lastSolve, challengeLockedToast]);
 
   // ── Keyboard handlers ────────────────────────────────────────────────────
   // SPACE: state machine driver
@@ -1512,7 +1683,7 @@ export default function TimerPage() {
         // In manual-entry mode SPACE is reserved for the numeric input
         // (and shouldn't arm anything). If the user happens to be in
         // an input/textarea, also let SPACE through for normal typing.
-        if (timeEntryMode === 'manual') return;
+        if (effEntryMode === 'manual') return;
         const tgt = e.target as HTMLElement | null;
         if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable)) return;
         e.preventDefault();
@@ -1524,8 +1695,10 @@ export default function TimerPage() {
           timer.stop();
           return;
         }
+        // Challenge: no next solve until the last one is confirmed.
+        if (awaitingConfirm) return;
         if (timer.state === 'idle' || timer.state === 'stopped') {
-          if (inspectionEnabled) {
+          if (effInspection) {
             timer.beginInspection();
           } else if (holdToStart) {
             timer.startArming();
@@ -1618,9 +1791,10 @@ export default function TimerPage() {
       // Alt+key combinations: event switching + session clear.
       // Only handle when timer isn't running to avoid disrupting an active solve.
       if (e.altKey && !e.metaKey && !e.ctrlKey && (timer.state === 'idle' || timer.state === 'stopped')) {
-        // Alt+D — two-step clear current session
+        // Alt+D — two-step clear current session (never during a challenge)
         if (e.code === 'KeyD') {
           e.preventDefault();
+          if (challengeMode) { challengeLockedToast(); return; }
           if (clearPending) {
             setSolves([]);
             setClearPending(false);
@@ -1644,7 +1818,7 @@ export default function TimerPage() {
         const target = ALT_EVENT_KEYS[e.code];
         if (target) {
           e.preventDefault();
-          setEventId(target);
+          pickEvent(target);
           return;
         }
       }
@@ -1665,13 +1839,14 @@ export default function TimerPage() {
       window.removeEventListener('keyup', onKeyUp);
     };
   }, [
-    timer, inspectionEnabled, holdToStart, clearPending, setSolves, ganConnected,
+    timer, effInspection, holdToStart, clearPending, setSolves, ganConnected,
+    awaitingConfirm, challengeMode, challengeLockedToast, pickEvent,
     // Quick-action shortcut deps — keep handler current with the latest
     // last-solve / modal state so D/X/2/C hit the right target.
     solves, togglePenaltyOnLast, deleteLastSolve,
     settingsOpen, detailSolveId, commentSolveId,
     sessionPanelOpen, cubeFullscreenOpen,
-    timeEntryMode,
+    effEntryMode,
     goPrevScramble, goNextScramble, newScramble,
   ]);
 
@@ -1689,9 +1864,10 @@ export default function TimerPage() {
   // Also disabled in 'manual' mode — the timer area is an input field
   // there, and the user's tap goes into the input, not into arming.
   const onTimerTouchStart = useCallback((e: React.TouchEvent) => {
-    if (timeEntryMode === 'manual') return;
+    if (effEntryMode === 'manual') return;
     if (ganConnected) return;
     if (timer.state === 'running') { timer.stop(); return; }
+    if (awaitingConfirm) return;
     // Cooldown window after a solve ends: the action row (✕ / DNF / +2
     // / 💬) is now visible and the user is most likely aiming at one
     // of those buttons. Drop taps that bubble up here from the timer
@@ -1718,14 +1894,14 @@ export default function TimerPage() {
       if (gestureDelayRef.current != null) window.clearTimeout(gestureDelayRef.current);
       gestureDelayRef.current = window.setTimeout(() => {
         gestureDelayRef.current = null;
-        if (inspectionEnabled) timer.beginInspection();
+        if (effInspection) timer.beginInspection();
         else if (holdToStart) timer.startArming();
         else timer.startRunning();
       }, 80);
       return;
     }
     if (timer.state === 'idle' || timer.state === 'stopped') {
-      if (inspectionEnabled) {
+      if (effInspection) {
         timer.beginInspection();
       } else if (holdToStart) {
         timer.startArming();
@@ -1738,12 +1914,12 @@ export default function TimerPage() {
       if (holdToStart) timer.startArming();
       else timer.startRunning();
     }
-  }, [timer, inspectionEnabled, holdToStart, ganConnected, timeEntryMode, actionsArmed, lastSolve, isMobile]);
+  }, [timer, effInspection, holdToStart, ganConnected, effEntryMode, actionsArmed, lastSolve, isMobile, awaitingConfirm]);
 
   const onTimerTouchEnd = useCallback(() => {
-    if (timeEntryMode === 'manual') return;
+    if (effEntryMode === 'manual') return;
     if (timer.state === 'armed') timer.fireRunning();
-  }, [timer, timeEntryMode]);
+  }, [timer, effEntryMode]);
 
   // ── Two-finger gesture shortcuts (mobile only) ───────────────────────
   // Tap = open delete confirm, swipe-up = toggle +2, swipe-down = toggle DNF.
@@ -1770,7 +1946,7 @@ export default function TimerPage() {
     if (!el || !isMobile) return;
 
     const onStart = (e: TouchEvent) => {
-      const canGesture = timerStateRef.current === 'stopped' && !!lastSolveRef.current;
+      const canGesture = timerStateRef.current === 'stopped' && !!lastSolveRef.current && !lastSolveRef.current.challenge;
       if (e.touches.length === 2 && canGesture) {
         e.preventDefault();
         if (gestureDelayRef.current != null) {
@@ -1834,6 +2010,7 @@ export default function TimerPage() {
   // finished, which appends the solve and rolls a fresh scramble. The
   // input clears so the user can type the next time straight away.
   const commitManualInline = useCallback(() => {
+    if (challengeModeRef.current) return; // no manual times in a challenge
     const ms = parseManualTime(manualInline);
     if (ms == null) return;
     timer.finishExternal(ms);
@@ -1911,7 +2088,8 @@ export default function TimerPage() {
     const count = selectedSolveIds.size;
     if (count === 0) return;
     if (!confirm(`Delete ${count} solve${count === 1 ? '' : 's'}? This cannot be undone.`)) return;
-    setSolves(prev => prev.filter(s => !selectedSolveIds.has(s.id)));
+    // Confirmed challenge solves stay (decision 4).
+    setSolves(prev => prev.filter(s => !selectedSolveIds.has(s.id) || !!s.challenge));
     exitSelectMode();
   };
 
@@ -1959,6 +2137,10 @@ export default function TimerPage() {
     if (timer.state === 'running' && hideTimeWhileRunning) {
       return 'Solving...';
     }
+    // Challenge: the stopped time waits for OK / +2 / DNF.
+    if (timer.state === 'stopped' && challengeMode && challenge.pending) {
+      return fmtMs(challenge.pending.ms, false, precision);
+    }
     if (timer.state === 'stopped' && lastSolve) {
       if (lastSolve.penalty === 'dnf') return 'DNF';
       if (lastSolve.penalty === '+2') return `${fmtMs(lastSolve.ms + 2000, false, precision)}+`;
@@ -1994,6 +2176,7 @@ export default function TimerPage() {
       if (gan.liveState === 'handsOn') return C.danger;
       if (gan.liveState === 'getSet')  return C.success;
     }
+    if (timer.state === 'stopped' && awaitingConfirm) return C.text;
     if (timer.state === 'stopped') {
       // Highlight DNF in red so the post-solve display reads as a
       // failed solve, not a regular result that happens to say "DNF".
@@ -2098,7 +2281,7 @@ export default function TimerPage() {
           z-index 9998 sits above the page content but is comfortably
           below the ModalShell stack so an open modal still receives
           taps. */}
-      {overlayActive && !ganConnected && timeEntryMode !== 'manual' && (
+      {overlayActive && !ganConnected && effEntryMode !== 'manual' && (
         <div
           aria-label="Tap to stop timer"
           role="button"
@@ -2443,8 +2626,9 @@ export default function TimerPage() {
                       {/* Hover-revealed delete × pinned to the same
                           top-right slot. Inversely tied to the badge
                           opacity so badges and × never compete for the
-                          corner — info on rest, action on hover. */}
-                      <button
+                          corner — info on rest, action on hover.
+                          Not offered on a final challenge solve. */}
+                      {!s.challenge && <button
                         onClick={(e) => { e.stopPropagation(); deleteSolve(s.id); }}
                         aria-label="Delete solve"
                         title="Delete"
@@ -2458,7 +2642,7 @@ export default function TimerPage() {
                         }}
                         onMouseEnter={(e) => { e.currentTarget.style.color = C.text; }}
                         onMouseLeave={(e) => { e.currentTarget.style.color = C.mutedDim; }}
-                      >×</button>
+                      >×</button>}
 
                       {/* Centered row — time only. With PB/+2 lifted
                           to the corner, a PB solve and a non-PB solve
@@ -2516,6 +2700,7 @@ export default function TimerPage() {
                   <button
                     ref={eventPickerTriggerRef}
                     onClick={() => {
+                      if (challengeMode) { challengeLockedToast(); return; }
                       if (!desktopEventPickerOpen && eventPickerTriggerRef.current) {
                         setEventPickerTriggerRect(eventPickerTriggerRef.current.getBoundingClientRect());
                       }
@@ -2537,7 +2722,7 @@ export default function TimerPage() {
                   {desktopEventPickerOpen && eventPickerTriggerRect && (
                     <EventPickerDropdown
                       currentEventId={eventId}
-                      onSelect={setEventId}
+                      onSelect={pickEvent}
                       onClose={() => setDesktopEventPickerOpen(false)}
                       triggerRect={eventPickerTriggerRect}
                     />
@@ -2609,6 +2794,25 @@ export default function TimerPage() {
                 {connectedTimerName} connected
               </div>
             )}
+            {/* Challenge strip (decision 21): just above the digits; fades
+                while timing with the rest of the UI (N6). */}
+            {challenge.active && (
+              <ChallengeStrip
+                template={challenge.active.template}
+                endsAt={challenge.active.endsAt}
+                progress={challenge.progress}
+                c={C}
+                onEnd={async () => {
+                  try { await challenge.endSession(); }
+                  catch { showToast({ msg: 'Дуусгаж чадсангүй. Дахин оролдоно уу.', tone: 'error' }); }
+                }}
+              />
+            )}
+            {btBlockedNote && (
+              <div className="pv-bt-indicator" style={{ fontSize: '0.72rem', color: C.muted, marginBottom: '0.5rem' }}>
+                Bluetooth timer challenge-ийн үед ашиглагдахгүй
+              </div>
+            )}
             {/* Label + digits shift to the viewport centre in focus mode. */}
             <div ref={focusShiftRef} style={focusShiftStyle}>
             {timer.state === 'inspecting' && (
@@ -2616,7 +2820,7 @@ export default function TimerPage() {
                 Inspection
               </div>
             )}
-            {timeEntryMode === 'manual' ? (
+            {effEntryMode === 'manual' ? (
               <ManualInlineInput
                 value={manualInline}
                 onChange={setManualInline}
@@ -2668,7 +2872,10 @@ export default function TimerPage() {
                 solve replaces the old one with a fresh mount → the
                 pv-actionrow-fade entrance plays once per real solve,
                 not on every armed/stopped flicker. */}
-            {lastSolve && (() => {
+            {awaitingConfirm && timer.state === 'stopped' && (
+              <ChallengeConfirmRow isMobile={isMobile} c={C} onConfirm={confirmChallengeSolve} />
+            )}
+            {lastSolve && !awaitingConfirm && (() => {
               const showActionRow = timer.state === 'stopped' || timer.state === 'idle';
               return (
                 <div
@@ -2680,12 +2887,13 @@ export default function TimerPage() {
                     transition: 'opacity 0.2s ease, visibility 0.2s ease',
                   }}
                 >
-                  {lastSolve.penalty === 'none' ? (
+                  {lastSolve.penalty === 'none' || lastSolve.challenge ? (
                     <SolveActionRow
                       key={lastSolve.id}
                       solve={lastSolve}
                       isMobile={isMobile}
                       disabled={false}
+                      commentOnly={!!lastSolve.challenge}
                       onDelete={() => setDeleteConfirmOpen(true)}
                       onSetPenalty={setPenaltyOnLast}
                       onOpenComment={() => setCommentSolveId(lastSolve.id)}
@@ -2830,6 +3038,8 @@ export default function TimerPage() {
             <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
               {toolsTab === 'preview' ? (
                 <ScramblePreview eventId={eventId} scramble={scramble} />
+              ) : challengeMode ? (
+                <ChallengeSharedOff />
               ) : (
                 <SharedCodeTools
                   code={sharedCode}
@@ -2953,7 +3163,7 @@ export default function TimerPage() {
                 {mobileTab !== 'tools' && (
                   <>
                     <button
-                      onClick={() => setEventPickerOpen(true)}
+                      onClick={() => { if (challengeMode) challengeLockedToast(); else setEventPickerOpen(true); }}
                       aria-label="Төрөл сонгох"
                       style={{
                         width: '100%', appearance: 'none',
@@ -3110,6 +3320,23 @@ export default function TimerPage() {
                       {connectedTimerName} connected
                     </div>
                   )}
+                  {challenge.active && (
+                    <ChallengeStrip
+                      template={challenge.active.template}
+                      endsAt={challenge.active.endsAt}
+                      progress={challenge.progress}
+                      c={C}
+                      onEnd={async () => {
+                        try { await challenge.endSession(); }
+                        catch { showToast({ msg: 'Дуусгаж чадсангүй. Дахин оролдоно уу.', tone: 'error' }); }
+                      }}
+                    />
+                  )}
+                  {btBlockedNote && (
+                    <div className="pv-bt-indicator" style={{ fontSize: '0.72rem', color: C.muted, marginBottom: '0.5rem' }}>
+                      Bluetooth timer challenge-ийн үед ашиглагдахгүй
+                    </div>
+                  )}
                   {/* Label + digits shift to the viewport centre in focus mode. */}
                   <div ref={focusShiftRef} style={focusShiftStyle}>
                   {timer.state === 'inspecting' && (
@@ -3117,7 +3344,7 @@ export default function TimerPage() {
                       Inspection
                     </div>
                   )}
-                  {timeEntryMode === 'manual' ? (
+                  {effEntryMode === 'manual' ? (
                     <ManualInlineInput
                       value={manualInline}
                       onChange={setManualInline}
@@ -3154,7 +3381,10 @@ export default function TimerPage() {
                   </div>
                   {/* Same opacity/visibility wrapper as the desktop
                       branch — see the comment there for the rationale. */}
-                  {lastSolve && (() => {
+                  {awaitingConfirm && timer.state === 'stopped' && (
+                    <ChallengeConfirmRow isMobile={isMobile} c={C} onConfirm={confirmChallengeSolve} />
+                  )}
+                  {lastSolve && !awaitingConfirm && (() => {
                     const showActionRow = timer.state === 'stopped' || timer.state === 'idle';
                     return (
                       <div
@@ -3166,12 +3396,13 @@ export default function TimerPage() {
                           transition: 'opacity 0.2s ease, visibility 0.2s ease',
                         }}
                       >
-                        {lastSolve.penalty === 'none' ? (
+                        {lastSolve.penalty === 'none' || lastSolve.challenge ? (
                           <SolveActionRow
                             key={lastSolve.id}
                             solve={lastSolve}
                             isMobile={isMobile}
                             disabled={false}
+                            commentOnly={!!lastSolve.challenge}
                             onDelete={() => setDeleteConfirmOpen(true)}
                             onSetPenalty={setPenaltyOnLast}
                             onOpenComment={() => setCommentSolveId(lastSolve.id)}
@@ -3725,6 +3956,8 @@ export default function TimerPage() {
             <div style={{ width: '100%', aspectRatio: '1 / 1', display: 'flex' }}>
               {toolsTab === 'preview' ? (
                 <ScramblePreview eventId={eventId} scramble={scramble} />
+              ) : challengeMode ? (
+                <ChallengeSharedOff />
               ) : (
                 <SharedCodeTools
                   code={sharedCode}
@@ -3764,7 +3997,7 @@ export default function TimerPage() {
       {eventPickerOpen && (
         <EventPickerSheet
           currentEventId={eventId}
-          onSelect={setEventId}
+          onSelect={pickEvent}
           onClose={() => setEventPickerOpen(false)}
         />
       )}
@@ -3884,7 +4117,12 @@ export default function TimerPage() {
                 display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)',
                 gap: '0.4rem',
               }}>
-                {penaltyOpts.map(o => {
+                {s.challenge ? (
+                  <div style={{
+                    gridColumn: 'span 3', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '0.75rem', color: C.muted, border: `1px solid ${C.border}`, borderRadius: RADIUS,
+                  }}>Challenge · баталгаажсан</div>
+                ) : penaltyOpts.map(o => {
                   const active = s.penalty === o.value;
                   return (
                     <button
@@ -4009,7 +4247,7 @@ export default function TimerPage() {
                   so the destructive action doesn't sit next to the
                   reversible penalty buttons. The modal's own × close
                   in the corner covers the dismiss path. */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              {!s.challenge && <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                 <button
                   onClick={() => { deleteSolve(s.id); setDetailSolveId(null); }}
                   style={{
@@ -4019,7 +4257,7 @@ export default function TimerPage() {
                     border: 'none', cursor: 'pointer',
                   }}
                 >Delete</button>
-              </div>
+              </div>}
             </div>
           </ModalShell>
         );
@@ -4042,6 +4280,12 @@ export default function TimerPage() {
           />
         );
       })()}
+
+      {/* Challenge completed (phase 4a: a simple notice; the celebration
+          screen comes in 4b). */}
+      {challenge.completed && (
+        <ChallengeCompleted title={challenge.completed.title} c={C} onClose={challenge.dismissCompleted} />
+      )}
 
       {/* Delete confirmation — Material-style compact dialog. The X
           button under the timer (and the X keyboard shortcut) routes
@@ -4123,7 +4367,8 @@ export default function TimerPage() {
         .timer-page .pv-mobile-nav,
         .timer-page .pv-bt-indicator,
         .timer-page .pv-instruction,
-        .timer-page .pv-ao5-inline {
+        .timer-page .pv-ao5-inline,
+        .timer-page .pv-challenge-strip {
           transition: opacity 0.15s ease;
         }
         /* The timer card itself drops its fill + border in focus mode so
@@ -4144,7 +4389,8 @@ export default function TimerPage() {
         .timer-page.focus-mode .pv-mobile-nav,
         .timer-page.focus-mode .pv-bt-indicator,
         .timer-page.focus-mode .pv-instruction,
-        .timer-page.focus-mode .pv-ao5-inline {
+        .timer-page.focus-mode .pv-ao5-inline,
+        .timer-page.focus-mode .pv-challenge-strip {
           opacity: 0;
           pointer-events: none;
         }
@@ -6495,10 +6741,12 @@ function PenaltyRow({ penalty, onSet }: { penalty: Penalty; onSet: (p: Penalty) 
 // for `UndoActionRow` so the user has a single, prominent way to back
 // out. Delete opens a confirm dialog (parent handles).
 function SolveActionRow({
-  solve, isMobile, disabled, onDelete, onSetPenalty, onOpenComment,
+  solve, isMobile, disabled, onDelete, onSetPenalty, onOpenComment, commentOnly = false,
 }: {
   solve: Solve;
   isMobile: boolean;
+  /** A confirmed challenge solve: only the comment button (decision 4, N7). */
+  commentOnly?: boolean;
   // True during the brief post-stop cooldown — the row is rendered for
   // continuity with the fade-in but absorbs no input until armed.
   disabled: boolean;
@@ -6530,29 +6778,33 @@ function SolveActionRow({
         transition: 'opacity 0.22s ease-out',
       }}
     >
-      <ActionIconBtn
-        size={size}
-        title="Solve устгах (X)"
-        ariaLabel="Delete solve"
-        icon={<IconClose size={isMobile ? 18 : 15} />}
-        onClick={onDelete}
-      />
-      <ActionIconBtn
-        size={size}
-        title="DNF (D)"
-        ariaLabel="Mark DNF"
-        activeColor={C.danger}
-        icon={<IconBan size={isMobile ? 18 : 15} />}
-        onClick={() => onSetPenalty('dnf')}
-      />
-      <ActionIconBtn
-        size={size}
-        title="+2 (2)"
-        ariaLabel="Apply +2 penalty"
-        activeColor={C.warn}
-        icon={<IconFlag size={isMobile ? 18 : 15} />}
-        onClick={() => onSetPenalty('+2')}
-      />
+      {!commentOnly && (
+        <>
+          <ActionIconBtn
+            size={size}
+            title="Solve устгах (X)"
+            ariaLabel="Delete solve"
+            icon={<IconClose size={isMobile ? 18 : 15} />}
+            onClick={onDelete}
+          />
+          <ActionIconBtn
+            size={size}
+            title="DNF (D)"
+            ariaLabel="Mark DNF"
+            activeColor={C.danger}
+            icon={<IconBan size={isMobile ? 18 : 15} />}
+            onClick={() => onSetPenalty('dnf')}
+          />
+          <ActionIconBtn
+            size={size}
+            title="+2 (2)"
+            ariaLabel="Apply +2 penalty"
+            activeColor={C.warn}
+            icon={<IconFlag size={isMobile ? 18 : 15} />}
+            onClick={() => onSetPenalty('+2')}
+          />
+        </>
+      )}
       <ActionIconBtn
         size={size}
         title="Тайлбар (C)"
@@ -6933,6 +7185,17 @@ function SharedCodeTools({ code, index, onEnter, onLeave, onStep, onJump }: {
         </div>
       </div>
     </div>
+  );
+}
+
+// "Ижил холилт" while a coach challenge runs: suspended, scrambles are
+// random (decision 23). The code comes back when the challenge ends.
+function ChallengeSharedOff() {
+  return (
+    <div className="pv-shared-tools" style={{
+      flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+      textAlign: 'center', fontSize: '0.78rem', color: C.muted, padding: '0.5rem',
+    }}>Challenge-ийн үед идэвхгүй</div>
   );
 }
 

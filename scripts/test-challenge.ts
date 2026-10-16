@@ -1,12 +1,16 @@
-// Unit checks for lib/challenge.ts (docs/challenge-plan.md, phase 3):
-// target-time parsing, the generated title, the preview sentence and the
-// template validator. No emulator. Run via:
+// Unit checks for lib/challenge.ts and lib/challenge-progress.ts
+// (docs/challenge-plan.md, phases 3–4): target-time parsing, title and
+// preview sentence, the template validator, block / streak scoring, UB
+// dates, the end-time rule and the sanity checks. No emulator. Run via:
 //   npm run test:challenge
 
 import {
   METRICS, STREAK_MAX, defaultTitle, formatTarget, isDefaultTitle, parseTargetTime,
-  previewSentence, validateTemplate,
+  previewSentence, sanityCheck, validateTemplate,
 } from '../lib/challenge';
+import {
+  computeProgress, daysTaken, passesTarget, ubDate, ubTimeToday, validateEndsAt, type ScoredSolve,
+} from '../lib/challenge-progress';
 
 let failures = 0;
 function check(label: string, pass: boolean, detail?: unknown) {
@@ -77,6 +81,102 @@ eq('note over 300 → bad-note', err({ ...base, note: 'x'.repeat(301) }), 'bad-n
 eq('title not a string → bad-title', err({ ...base, title: 5 }), 'bad-title');
 check('isDefaultTitle: generated title', ok.ok && isDefaultTitle(ok.value));
 check('isDefaultTitle: custom title', titled.ok && !isDefaultTitle(titled.value));
+
+console.log('\n=== computeProgress: blocks, truncation, streak ===');
+const ok_ = (ms: number): ScoredSolve => ({ ms, penalty: 'none' });
+const p2 = (ms: number): ScoredSolve => ({ ms, penalty: '+2' });
+const dnf = (ms = 1000): ScoredSolve => ({ ms, penalty: 'dnf' });
+type M = 'single' | 'mo3' | 'ao5' | 'ao12' | 'ao25' | 'ao50' | 'ao100';
+const T = (metric: M, targetMs: number, streak: number) => ({ metric, targetMs, streak });
+
+check('truncation: 1999 ms passes "< 2.00"', passesTarget(1999, 2000));
+check('exact target: 2000 ms fails "< 2.00"', !passesTarget(2000, 2000));
+check('truncated equal: 2009 ms (shows 2.00) fails', !passesTarget(2009, 2000));
+check('DNF never passes', !passesTarget(null, 2000));
+
+let pr = computeProgress(T('single', 2000, 3), [ok_(1990), ok_(1500), ok_(2009), ok_(1000)]);
+check('Single: every solve is a block; 2.009 fails and resets', pr.blocksAttempted === 4 &&
+  pr.blocks.map(b => b.pass).join() === 'true,true,false,true' && pr.currentStreak === 1 && pr.bestStreak === 2 &&
+  !pr.completed && pr.inBlock === 0, pr);
+pr = computeProgress(T('single', 2000, 3), [ok_(1990), ok_(1500), ok_(1000)]);
+check('Single: completion exactly at M', pr.completed && pr.currentStreak === 3, pr);
+pr = computeProgress(T('single', 2000, 2), [ok_(1000), dnf(500), ok_(1000)]);
+check('Single: a DNF fails the block', pr.blocks[1].pass === false && pr.blocks[1].resultMs === null && pr.currentStreak === 1, pr);
+pr = computeProgress(T('single', 3000, 1), [p2(900)]);
+check('Single: +2 counts (0.90 + 2 = 2.90 < 3.00)', pr.completed && pr.blocks[0].resultMs === 2900, pr);
+
+pr = computeProgress(T('mo3', 3000, 2), [ok_(1000), p2(1000), ok_(1000)]);
+check('Mo3: mean with a +2 = 1.66 → pass', pr.blocks[0].pass && pr.blocks[0].displayCs === 166 && pr.currentStreak === 1, pr);
+pr = computeProgress(T('mo3', 3000, 2), [ok_(1000), ok_(1000), dnf()]);
+check('Mo3: any DNF → DNF block, fails', pr.blocks[0].resultMs === null && !pr.blocks[0].pass && pr.currentStreak === 0, pr);
+
+pr = computeProgress(T('ao5', 2000, 2), [ok_(1900), ok_(1800), ok_(1950), ok_(5000), ok_(1700)]);
+check('Ao5: best and worst trimmed (1.88 passes)', pr.blocks[0].resultMs === 1883 && pr.blocks[0].pass, pr);
+pr = computeProgress(T('ao5', 2000, 2), [ok_(1900), ok_(1800), dnf(), ok_(1950), ok_(1700)]);
+check('Ao5: one DNF is trimmed away', pr.blocks[0].resultMs === 1883 && pr.blocks[0].pass, pr);
+pr = computeProgress(T('ao5', 2000, 2), [ok_(1900), dnf(), dnf(), ok_(1950), ok_(1700)]);
+check('Ao5: two DNFs → DNF', pr.blocks[0].resultMs === null && !pr.blocks[0].pass, pr);
+pr = computeProgress(T('ao5', 2000, 2), [...Array(5)].map(() => ok_(2000)));
+check('Ao5: exactly the target fails', !pr.blocks[0].pass && pr.blocks[0].displayCs === 200, pr);
+
+const twelve = [1500, 1600, 1700, 1800, 1900, 1950, 1980, 1990, 1600, 1700, 1800, 1900].map(ok_);
+pr = computeProgress(T('ao12', 2000, 1), [...twelve.slice(0, 11), dnf()]);
+check('Ao12: one DNF trimmed → pass', pr.blocks.length === 1 && pr.blocks[0].pass && pr.completed, pr);
+pr = computeProgress(T('ao12', 2000, 1), [...twelve.slice(0, 10), dnf(), dnf()]);
+check('Ao12: two DNFs → DNF', pr.blocks[0].resultMs === null && !pr.completed, pr);
+
+const hundred = [...Array(100)].map((_, i) => ok_(1000 + i * 10));
+pr = computeProgress(T('ao100', 2000, 1), hundred);
+check('Ao100: 5 trimmed each end (mean of 1.05 … 1.94)', pr.blocks[0].resultMs === 1495 && pr.completed, pr);
+pr = computeProgress(T('ao100', 2000, 1), [...hundred.slice(0, 95), ...[...Array(5)].map(() => dnf())]);
+check('Ao100: 5 DNFs still trimmed away', pr.blocks[0].resultMs !== null, pr);
+pr = computeProgress(T('ao100', 2000, 1), [...hundred.slice(0, 94), ...[...Array(6)].map(() => dnf())]);
+check('Ao100: 6 DNFs → DNF', pr.blocks[0].resultMs === null, pr);
+
+pr = computeProgress(T('ao5', 2000, 3), [...Array(8)].map(() => ok_(1500)));
+check('unfinished block not scored: 8 solves = 1 block + 3 in the next', pr.blocksAttempted === 1 && pr.inBlock === 3 && pr.currentStreak === 1, pr);
+const runs = [ok_(1000), ok_(1000), ok_(3000), ok_(1000), ok_(1000), ok_(1000), ok_(3000), ok_(1000)];
+pr = computeProgress(T('single', 2000, 5), runs);
+check('several streak runs: best 3, current 1', pr.bestStreak === 3 && pr.currentStreak === 1 && pr.blocksAttempted === 8, pr);
+pr = computeProgress(T('single', 2000, 2), [ok_(1000), ok_(1000), ok_(1000)]);
+check('nothing is scored after completion', pr.completed && pr.blocksAttempted === 2, pr);
+pr = computeProgress(T('single', 2000, 100), [...Array(100)].map(() => ok_(1000)));
+check('M = 100 completes at the 100th block', pr.completed && pr.currentStreak === 100, pr);
+pr = computeProgress(T('ao5', 2000, 1), []);
+check('no solves → empty progress', pr.blocksAttempted === 0 && pr.inBlock === 0 && pr.blockSize === 5, pr);
+
+console.log('\n=== UB dates, days taken, end time ===');
+// 2026-10-16 16:00 UTC is 00:00 on 2026-10-17 in Ulaanbaatar (UTC+8).
+const ubMidnight = Date.UTC(2026, 9, 16, 16, 0);
+eq('ubDate just before UB midnight', ubDate(ubMidnight - 1), '2026-10-16');
+eq('ubDate at UB midnight', ubDate(ubMidnight), '2026-10-17');
+eq('daysTaken same day = 1', daysTaken('2026-10-16', '2026-10-16'), 1);
+eq('daysTaken Mon → Wed = 3', daysTaken('2026-10-12', '2026-10-14'), 3);
+eq('daysTaken across a month end', daysTaken('2026-10-31', '2026-11-01'), 2);
+const noon = Date.UTC(2026, 9, 16, 4, 0); // 12:00 UB
+const endErr = (r: ReturnType<typeof validateEndsAt>) => ('error' in r ? r.error : 'ok');
+const defEnd = validateEndsAt(noon, undefined);
+check('end time omitted → 23:59 today', 'endsAtMs' in defEnd && defEnd.endsAtMs === ubTimeToday(noon, 23, 59), defEnd);
+eq('18:00 today is fine', endErr(validateEndsAt(noon, ubTimeToday(noon, 18, 0))), 'ok');
+eq('23:59 today is the latest allowed', endErr(validateEndsAt(noon, ubTimeToday(noon, 23, 59))), 'ok');
+eq('after 23:59 → end-too-late', endErr(validateEndsAt(noon, ubTimeToday(noon, 23, 59) + 30_000)), 'end-too-late');
+eq('tomorrow → end-other-day', endErr(validateEndsAt(noon, ubTimeToday(noon, 24, 30))), 'end-other-day');
+eq('in the past → end-too-soon', endErr(validateEndsAt(noon, noon - 60_000)), 'end-too-soon');
+eq('9 minutes ahead → end-too-soon', endErr(validateEndsAt(noon, noon + 9 * 60_000)), 'end-too-soon');
+eq('10 minutes ahead is fine', endErr(validateEndsAt(noon, noon + 10 * 60_000)), 'ok');
+eq('not a number → bad-end-time', endErr(validateEndsAt(noon, '18:00')), 'bad-end-time');
+eq('at 23:55 the default 23:59 is too soon', endErr(validateEndsAt(ubTimeToday(noon, 23, 55), undefined)), 'end-too-soon');
+
+console.log('\n=== sanity checks ===');
+eq('3x3 2.40 → too-fast', sanityCheck('333', { ms: 2400, stoppedAt: 100_000 }, null, 0, 60_000), 'too-fast');
+eq('3x3 2.60 → ok', sanityCheck('333', { ms: 2600, stoppedAt: 100_000 }, null, 0, 60_000), null);
+eq('2x2 0.39 → too-fast', sanityCheck('222', { ms: 390, stoppedAt: 100_000 }, null, 0, 60_000), 'too-fast');
+eq('stopped 5 s after the previous stop but lasted 8 s → too-close',
+  sanityCheck('333', { ms: 8000, stoppedAt: 105_000 }, { stoppedAt: 100_000 }, 0, 60_000), 'too-close');
+eq('gap just inside the tolerance → ok',
+  sanityCheck('333', { ms: 8000, stoppedAt: 107_800 }, { stoppedAt: 100_000 }, 0, 60_000), null);
+eq('more solve time than has passed since the start → too-close',
+  sanityCheck('333', { ms: 9000, stoppedAt: 200_000 }, { stoppedAt: 100_000 }, 50_000, 50_000), 'too-close');
 
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');
 process.exit(failures ? 1 : 0);

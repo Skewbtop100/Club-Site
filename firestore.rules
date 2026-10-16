@@ -311,6 +311,30 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ─── Coach challenge: sessions and the live pointer (phase 4) ────────────
+    //
+    // Both are written ONLY by app/api/challenge/{start,solve,comment,end}
+    // (lib/server/challenge-sessions.ts). No client may start a session —
+    // not even its own student — log a solve, change progress, or point
+    // the timer at a session.
+    //
+    // challengeSessions/{id} — the student always (removed or not, N4);
+    // the coach while visibleToCoach == true (same flag and reason as for
+    // assignments; lib/server/rooms.ts keeps both in step).
+    match /challengeSessions/{sessionId} {
+      allow read: if isSignedIn() &&
+                     (resource.data.studentUid == request.auth.uid ||
+                      (resource.data.coachUid == request.auth.uid && resource.data.visibleToCoach == true));
+      allow write: if false;
+    }
+
+    // challengeLive/{studentUid} — the student's timer listens to its own
+    // pointer; nobody else reads it.
+    match /challengeLive/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+
     // ─── Virtual Competitions ─────────────────────────────────────────────────
 
     match /virtualCompetitions/{compId} {

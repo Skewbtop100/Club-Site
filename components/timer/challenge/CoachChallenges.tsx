@@ -1,12 +1,14 @@
 'use client';
 
-// Coach room page → "Challenge-үүд" (docs/challenge-plan.md, phase 3).
+// Coach room page → "Challenge-үүд" (docs/challenge-plan.md, phases 3–4a).
 //   Create from the template [event] + [metric] + [< target] + [M in a row]
 //   with a live Mongolian preview; assign to one or many active members;
 //   unassign before start; edit / delete until the first start (locked),
-//   after that only "Хуулбарлах". Every write is a server route.
-// Challenges and assignments are one-time reads, re-read after each action
-// (plan B2); the member list comes live from the room page.
+//   after that only "Хуулбарлах". Per student: "Эхлүүлэх" with an end time
+//   (today, ≤ 23:59, ≥ 10 min ahead) and "Зогсоох" while it runs.
+// Every write is a server route. Challenges and assignments are one-time
+// reads, re-read after each action and on "Шинэчлэх" (plan B2); the member
+// list comes live from the room page.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CHALLENGE_EVENTS, METRICS, METRIC_LABEL, NOTE_MAX, STREAK_MAX, STREAK_MIN, TITLE_MAX,
@@ -17,6 +19,8 @@ import {
   fetchRoomChallenges, unassignChallenge, updateChallenge, type TemplateInput,
 } from '@/lib/firebase/services/challenges';
 import { ASSIGNMENT_STATUS_TEXT, fetchRoomAssignments } from '@/lib/firebase/services/challengeAssignments';
+import { endChallengeSession, startChallengeSession } from '@/lib/firebase/services/challengeSessions';
+import { END_LATEST_MIN, ubClock, ubTimeToday, validateEndsAt } from '@/lib/challenge-progress';
 import type { Challenge, ChallengeAssignment, ChallengeMetric, RoomMember } from '@/lib/types/challenge';
 import {
   Avatar, Button, Card, Checkbox, Field, Muted, Note, Row, Select, StatusChip, T, TextInput,
@@ -77,7 +81,10 @@ export default function CoachChallenges({ roomId, coachUid, members }: {
           })}
         />
       ) : (
-        <div><Button onClick={() => { setCreating(true); setEditingId(null); }}>Шинэ challenge</Button></div>
+        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+          <Button onClick={() => { setCreating(true); setEditingId(null); }}>Шинэ challenge</Button>
+          <Button kind="plain" disabled={busy !== null} onClick={() => run('reload', async () => {})}>Шинэчлэх</Button>
+        </div>
       )}
 
       {challenges === null ? <Muted>Уншиж байна…</Muted>
@@ -112,6 +119,14 @@ export default function CoachChallenges({ roomId, coachUid, members }: {
               return `${r.assigned.length} сурагчид оноолоо.`;
             })}
             onUnassign={(uid) => run(`unassign:${c.id}:${uid}`, async () => { await unassignChallenge(c.id, uid); })}
+            onStart={(a, endsAt) => run(`start:${a.id}`, async () => {
+              const r = await startChallengeSession(a.id, endsAt);
+              return `${a.studentName}: эхэллээ (${ubClock(r.endsAt)} хүртэл).`;
+            })}
+            onStop={(a) => run(`stop:${a.id}`, async () => {
+              if (a.activeSessionId) await endChallengeSession(a.activeSessionId);
+              return `${a.studentName}: зогслоо.`;
+            })}
           />
         ))}
     </Card>
@@ -199,12 +214,14 @@ function ChallengeForm({ initial, submitLabel, busy, onSubmit, onCancel }: {
 
 function ChallengeItem({
   challenge: c, assignments, activeMembers, busy,
-  onEdit, onDuplicate, onDelete, onAssign, onUnassign,
+  onEdit, onDuplicate, onDelete, onAssign, onUnassign, onStart, onStop,
 }: {
   challenge: Challenge; assignments: ChallengeAssignment[]; activeMembers: RoomMember[]; busy: string | null;
   onEdit: () => void; onDuplicate: () => void; onDelete: () => void;
   onAssign: (uids: string[]) => void; onUnassign: (uid: string) => void;
+  onStart: (a: ChallengeAssignment, endsAt: number) => void; onStop: (a: ChallengeAssignment) => void;
 }) {
+  const [startingId, setStartingId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [assigning, setAssigning] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -236,16 +253,37 @@ function ChallengeItem({
           .sort((a, b) => nameOf(a.studentUid, a.studentName).localeCompare(nameOf(b.studentUid, b.studentName)))
           .map(a => {
             const canUnassign = a.status === 'assigned' && a.firstStartedAt === null;
+            const running = isRunning(a);
+            const canStart = !running && (a.status === 'assigned' || a.status === 'in-progress');
             return (
-              <div key={a.id} data-testid={`assignment-${a.studentUid}`} style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', minWidth: 0 }}>
-                <Avatar name={nameOf(a.studentUid, a.studentName)} url={photoOf(a.studentUid)} size={24} />
-                <span style={{ flex: '1 1 auto', minWidth: 0, fontSize: '0.86rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {nameOf(a.studentUid, a.studentName)}
-                </span>
-                <StatusChip text={ASSIGNMENT_STATUS_TEXT[a.status]} tone={a.status === 'completed' ? 'text' : 'muted'} />
-                {canUnassign && (
-                  <Button kind="plain" disabled={busy !== null} onClick={() => onUnassign(a.studentUid)}
-                    ariaLabel={`${nameOf(a.studentUid, a.studentName)}-г хасах`}>Хасах</Button>
+              <div key={a.id} data-testid={`assignment-${a.studentUid}`} style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', minWidth: 0, flexWrap: 'wrap' }}>
+                  <Avatar name={nameOf(a.studentUid, a.studentName)} url={photoOf(a.studentUid)} size={24} />
+                  <span style={{ flex: '1 1 6rem', minWidth: 0, fontSize: '0.86rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {nameOf(a.studentUid, a.studentName)}
+                  </span>
+                  <StatusChip text={ASSIGNMENT_STATUS_TEXT[a.status]} tone={a.status === 'completed' ? 'text' : 'muted'} />
+                  {running && <Muted>{ubClock(a.activeEndsAt!)} хүртэл</Muted>}
+                  {a.status === 'completed' && a.daysTaken != null && <Muted>{a.daysTaken} өдөр</Muted>}
+                  {running && (
+                    <Button kind="danger" disabled={busy !== null} onClick={() => onStop(a)}
+                      ariaLabel={`${nameOf(a.studentUid, a.studentName)}-ийн session зогсоох`}>Зогсоох</Button>
+                  )}
+                  {canStart && startingId !== a.id && (
+                    <Button disabled={busy !== null} onClick={() => setStartingId(a.id)}
+                      ariaLabel={`${nameOf(a.studentUid, a.studentName)}-д эхлүүлэх`}>Эхлүүлэх</Button>
+                  )}
+                  {canUnassign && (
+                    <Button kind="plain" disabled={busy !== null} onClick={() => onUnassign(a.studentUid)}
+                      ariaLabel={`${nameOf(a.studentUid, a.studentName)}-г хасах`}>Хасах</Button>
+                  )}
+                </div>
+                {startingId === a.id && (
+                  <StartPanel
+                    busy={busy !== null}
+                    onCancel={() => setStartingId(null)}
+                    onStart={(endsAt) => { setStartingId(null); onStart(a, endsAt); }}
+                  />
                 )}
               </div>
             );
@@ -291,6 +329,53 @@ function ChallengeItem({
         ))}
       </div>
       {c.locked && <Note text="Эхэлсэн challenge-ийг засах, устгах боломжгүй. Өөрчлөх бол «Хуулбарлах»." />}
+    </div>
+  );
+}
+
+/** A session is running while it has a pointer and its end time is ahead
+ *  (an expired one is closed on the server at the next action). */
+function isRunning(a: ChallengeAssignment): boolean {
+  return a.activeSessionId != null && a.activeEndsAt != null && a.activeEndsAt > Date.now();
+}
+
+const pad = (n: number) => String(n).padStart(2, '0');
+
+/** "Эхлүүлэх": pick the end time — today in Ulaanbaatar, at the latest 23:59,
+ *  at least 10 minutes from now (decision 16, N2). Default 23:59. */
+function StartPanel({ busy, onStart, onCancel }: {
+  busy: boolean; onStart: (endsAt: number) => void; onCancel: () => void;
+}) {
+  const [value, setValue] = useState(`${pad(Math.floor(END_LATEST_MIN / 60))}:${pad(END_LATEST_MIN % 60)}`);
+  const m = /^(\d{2}):(\d{2})$/.exec(value);
+  const endsAt = m ? ubTimeToday(Date.now(), Number(m[1]), Number(m[2])) : NaN;
+  const check = validateEndsAt(Date.now(), Number.isFinite(endsAt) ? endsAt : 'bad');
+  const hint = 'error' in check
+    ? (check.error === 'end-too-soon' ? 'Одооноос дор хаяж 10 минутын дараа байх ёстой.'
+      : check.error === 'end-too-late' ? 'Хамгийн оройдоо 23:59.' : 'Цагаа шалгана уу.')
+    : null;
+  return (
+    <div data-testid="start-panel" style={{
+      background: T.cardAlt, borderRadius: 8, padding: '0.55rem 0.7rem',
+      display: 'flex', flexDirection: 'column', gap: '0.45rem',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <label htmlFor="ch-end-time" style={{ fontSize: '0.8rem', color: T.muted }}>Дуусах цаг (өнөөдөр)</label>
+        <input
+          id="ch-end-time" type="time" aria-label="Дуусах цаг" value={value}
+          onChange={e => setValue(e.target.value)}
+          style={{
+            background: T.bg, color: T.text, colorScheme: 'dark',
+            border: `1px solid ${T.borderHi}`, borderRadius: 8, padding: '0.35rem 0.5rem',
+            fontFamily: 'inherit', fontSize: '0.9rem',
+          }}
+        />
+      </div>
+      {hint && <Note text={hint} tone="danger" />}
+      <div style={{ display: 'flex', gap: '0.4rem' }}>
+        <Button disabled={busy || hint !== null} onClick={() => onStart(endsAt)}>Эхлүүлэх</Button>
+        <Button kind="plain" onClick={onCancel}>Болих</Button>
+      </div>
     </div>
   );
 }

@@ -138,3 +138,44 @@ export function validateTemplate(raw: Record<string, unknown>):
 /** Whether a stored title is the generated one (the edit form then leaves
  *  the title box empty, so the title keeps following the template). */
 export const isDefaultTitle = (t: ChallengeTemplate) => t.title === defaultTitle(t);
+
+// ── Sanity checks on challenge solves (decision 1, N5) ────────────────────
+// Tune here. A refused solve shows the student "Цаг хэт хурдан байна".
+
+/** Per-event floor, slightly below the world-record single (N5). Raise a
+ *  value only after checking the current WR; lower it when a WR falls
+ *  below it. */
+export const MIN_SOLVE_MS: Record<string, number> = {
+  '333': 2500, '222': 400, '444': 12000, '555': 28000, '666': 50000, '777': 80000,
+  '333oh': 5000, '333bld': 10000, '444bld': 45000, '555bld': 100000,
+  pyram: 700, skewb: 700, sq1: 3000, clock: 1800, minx: 20000,
+};
+/** Clock slack for the "too close together" checks. */
+export const SOLVE_GAP_TOLERANCE_MS = 300;
+export const SESSION_TIME_TOLERANCE_MS = 5000;
+/** Longest single solve a session accepts (1 h). */
+export const SOLVE_MAX_MS = 3_600_000;
+
+export type SanityReason = 'too-fast' | 'too-close';
+
+/**
+ * Checks one confirmed solve against the event floor and the solves before
+ * it in the session:
+ *   too-fast  — raw time below the event's floor;
+ *   too-close — its stop came sooner after the previous stop than the solve
+ *               itself lasted (both `stoppedAt` are the client's clock), or
+ *               the session's solves add up to more time than has passed
+ *               on the server since the session started.
+ */
+export function sanityCheck(
+  event: string,
+  solve: { ms: number; stoppedAt: number },
+  prev: { stoppedAt: number } | null,
+  totalMsBefore: number,
+  elapsedSinceStartMs: number,
+): SanityReason | null {
+  if (solve.ms < (MIN_SOLVE_MS[event] ?? 0)) return 'too-fast';
+  if (prev && solve.stoppedAt - prev.stoppedAt < solve.ms - SOLVE_GAP_TOLERANCE_MS) return 'too-close';
+  if (totalMsBefore + solve.ms > elapsedSinceStartMs + SESSION_TIME_TOLERANCE_MS) return 'too-close';
+  return null;
+}

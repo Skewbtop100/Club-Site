@@ -94,7 +94,20 @@ async function seed() {
     await setDoc(doc(db, 'challengeAssignments', `ch1_${REMOVED}`), assignment('ch1', 'room1', COACH, REMOVED, false));
     await setDoc(doc(db, 'challengeAssignments', `ch2_${S1}`), assignment('ch2', 'room1', COACH, S1, true,
       { status: 'in-progress', firstStartedAt: null, sessionsCount: 1 }));
+    // Phase 4: a running session for S1, a closed one for REMOVED (hidden
+    // from the coach), and S1's live pointer.
+    await setDoc(doc(db, 'challengeSessions', 'sess1'), session('sess1', S1, 'active', true));
+    await setDoc(doc(db, 'challengeSessions', 'sessR'), session('sessR', REMOVED, 'ended', false));
+    await setDoc(doc(db, 'challengeLive', S1), { sessionId: 'sess1', assignmentId: `ch2_${S1}`, template, endsAt: null });
   });
+}
+
+function session(id, studentUid, status, visibleToCoach) {
+  return {
+    assignmentId: `ch2_${studentUid}`, challengeId: 'ch2', roomId: 'room1', coachUid: COACH, studentUid,
+    template, startedAt: null, endsAt: null, ubDate: '2026-10-16', status, endedAt: null,
+    solves: [], blocks: [], currentStreak: 0, bestStreak: 0, blocksAttempted: 0, flags: [], visibleToCoach,
+  };
 }
 
 const as = (uid) => testEnv.authenticatedContext(uid).firestore();
@@ -190,7 +203,62 @@ await check('AW12. another coach cannot assign into a room they don\'t coach', '
 await check('AW13. the admin cannot write assignments from the client', 'DENY', () =>
   setDoc(doc(as(ADMIN), 'challengeAssignments', `ch1_${ADMIN}`), assignment('ch1', 'room1', COACH, ADMIN)));
 
+console.log('\n=== challengeSessions — reads (phase 4) ===\n');
+const sessions = (db) => collection(db, 'challengeSessions');
+await check('SR1. the student reads their own session', 'ALLOW', () => getDoc(doc(as(S1), 'challengeSessions', 'sess1')));
+await check('SR2. the student lists their own sessions', 'ALLOW', () =>
+  getDocs(query(sessions(as(S1)), where('studentUid', '==', S1))));
+await check('SR3. another student cannot read it', 'DENY', () => getDoc(doc(as(S2), 'challengeSessions', 'sess1')));
+await check('SR4. a REMOVED student still reads their own session (N4)', 'ALLOW', () => getDoc(doc(as(REMOVED), 'challengeSessions', 'sessR')));
+await check('SR5. the coach reads a visible session', 'ALLOW', () => getDoc(doc(as(COACH), 'challengeSessions', 'sess1')));
+await check('SR6. the coach cannot read a removed student\'s session', 'DENY', () => getDoc(doc(as(COACH), 'challengeSessions', 'sessR')));
+await check('SR7. the coach lists the room\'s visible sessions', 'ALLOW', () =>
+  getDocs(query(sessions(as(COACH)), where('roomId', '==', 'room1'), where('coachUid', '==', COACH), where('visibleToCoach', '==', true))));
+await check('SR8. another coach cannot read it', 'DENY', () => getDoc(doc(as(COACH2), 'challengeSessions', 'sess1')));
+await check('SR9. listing all sessions is refused', 'DENY', () => getDocs(sessions(as(ADMIN))));
+
+console.log('\n=== challengeSessions — every client write refused ===\n');
+await check('SW1. a student cannot start their own challenge (create a session)', 'DENY', () =>
+  setDoc(doc(as(S1), 'challengeSessions', 'mine'), session('mine', S1, 'active', true)));
+await check('SW2. a student cannot append a solve', 'DENY', () =>
+  updateDoc(doc(as(S1), 'challengeSessions', 'sess1'), { solves: [{ seq: 1, ms: 100, penalty: 'none', stoppedAt: 1 }] }));
+await check('SW3. a student cannot set their streak / progress', 'DENY', () =>
+  updateDoc(doc(as(S1), 'challengeSessions', 'sess1'), { currentStreak: 5, bestStreak: 5 }));
+await check('SW4. a student cannot extend the end time', 'DENY', () =>
+  updateDoc(doc(as(S1), 'challengeSessions', 'sess1'), { endsAt: null }));
+await check('SW5. a student cannot mark it completed', 'DENY', () =>
+  updateDoc(doc(as(S1), 'challengeSessions', 'sess1'), { status: 'completed' }));
+await check('SW6. a student cannot delete a session (e.g. a bad one)', 'DENY', () => deleteDoc(doc(as(S1), 'challengeSessions', 'sess1')));
+await check('SW7. the coach cannot start a session from the client', 'DENY', () =>
+  setDoc(doc(as(COACH), 'challengeSessions', 'byCoach'), session('byCoach', S2, 'active', true)));
+await check('SW8. the coach cannot edit a session', 'DENY', () =>
+  updateDoc(doc(as(COACH), 'challengeSessions', 'sess1'), { status: 'ended' }));
+await check('SW9. the admin cannot write a session from the client', 'DENY', () =>
+  setDoc(doc(as(ADMIN), 'challengeSessions', 'byAdmin'), session('byAdmin', S1, 'active', true)));
+
+console.log('\n=== challengeLive — own read only, no writes ===\n');
+await check('L1. the student reads their own pointer', 'ALLOW', () => getDoc(doc(as(S1), 'challengeLive', S1)));
+await check('L2. another student cannot read it', 'DENY', () => getDoc(doc(as(S2), 'challengeLive', S1)));
+await check('L3. the coach cannot read it', 'DENY', () => getDoc(doc(as(COACH), 'challengeLive', S1)));
+await check('L4. nobody lists pointers', 'DENY', () => getDocs(collection(as(ADMIN), 'challengeLive')));
+await check('L5. a student cannot point their own timer at a session (self-start)', 'DENY', () =>
+  setDoc(doc(as(S2), 'challengeLive', S2), { sessionId: 'sess1', assignmentId: `ch1_${S2}`, template, endsAt: null }));
+await check('L6. a student cannot clear / extend their pointer', 'DENY', () =>
+  updateDoc(doc(as(S1), 'challengeLive', S1), { endsAt: null, sessionId: null }));
+await check('L7. the coach cannot write a pointer', 'DENY', () =>
+  setDoc(doc(as(COACH), 'challengeLive', S2), { sessionId: 'x', assignmentId: 'y', template, endsAt: null }));
+
+console.log('\n=== progress on the assignment stays server-only ===\n');
+await check('P1. a student cannot write completion fields', 'DENY', () =>
+  updateDoc(doc(as(S1), 'challengeAssignments', `ch2_${S1}`), { status: 'completed', completedAt: null, daysTaken: 1 }));
+await check('P2. a student cannot set sessionsCount / blocksAttempted', 'DENY', () =>
+  updateDoc(doc(as(S1), 'challengeAssignments', `ch2_${S1}`), { sessionsCount: 0, blocksAttempted: 99 }));
+await check('P3. the coach cannot set an active session pointer on the assignment', 'DENY', () =>
+  updateDoc(doc(as(COACH), 'challengeAssignments', `ch2_${S1}`), { activeSessionId: 'x' }));
+
 console.log('\n=== judge sessions get nothing ===\n');
+await check('J4. a judge cannot read a challenge session', 'DENY', () => getDoc(doc(asJudge(), 'challengeSessions', 'sess1')));
+await check('J5. a judge cannot read a live pointer', 'DENY', () => getDoc(doc(asJudge(), 'challengeLive', S1)));
 await check('J1. a judge cannot read a challenge', 'DENY', () => getDoc(doc(asJudge(), 'challenges', 'ch1')));
 await check('J2. a judge cannot read an assignment', 'DENY', () => getDoc(doc(asJudge(), 'challengeAssignments', `ch1_${S1}`)));
 await check('J3. a judge cannot write a challenge', 'DENY', () =>

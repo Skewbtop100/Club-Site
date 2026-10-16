@@ -34,6 +34,12 @@ function toAssignment(id: string, d: Record<string, unknown>): ChallengeAssignme
     firstStartedAt: tsToMs(d.firstStartedAt),
     completedAt: tsToMs(d.completedAt),
     assignedAt: tsToMs(d.assignedAt),
+    daysTaken: typeof d.daysTaken === 'number' ? d.daysTaken : null,
+    sessionsCount: Number(d.sessionsCount ?? 0),
+    blocksAttempted: Number(d.blocksAttempted ?? 0),
+    bestStreak: Number(d.bestStreak ?? 0),
+    activeSessionId: typeof d.activeSessionId === 'string' ? d.activeSessionId : null,
+    activeEndsAt: tsToMs(d.activeEndsAt),
   };
 }
 

@@ -161,9 +161,11 @@ export async function decideMember(callerUid: string, roomId: unknown, memberUid
   const db = adminDb();
   const { ref } = await ownedRoom(db, callerUid, roomId);
   const memberRef = ref.collection('members').doc(memberUid);
-  // The student's assignments in this room: hidden from the coach while
-  // removed, visible again on re-add (decisions 10, 24 — phase 3).
+  // The student's assignments and sessions in this room: hidden from the
+  // coach while removed, visible again on re-add (decisions 10, 24).
   const assignmentsQuery = db.collection('challengeAssignments')
+    .where('roomId', '==', ref.id).where('studentUid', '==', memberUid);
+  const sessionsQuery = db.collection('challengeSessions')
     .where('roomId', '==', ref.id).where('studentUid', '==', memberUid);
   return db.runTransaction(async (tx) => {
     const member = await tx.get(memberRef);
@@ -171,8 +173,9 @@ export async function decideMember(callerUid: string, roomId: unknown, memberUid
     const status = member.get('status') as MemberStatus;
     const act = action as MemberAction;
     const assignments = act === 'reject' ? null : await tx.get(assignmentsQuery);
+    const sessions = act === 'reject' ? null : await tx.get(sessionsQuery);
     const setVisible = (visibleToCoach: boolean) => {
-      for (const a of assignments?.docs ?? []) tx.update(a.ref, { visibleToCoach });
+      for (const d of [...(assignments?.docs ?? []), ...(sessions?.docs ?? [])]) tx.update(d.ref, { visibleToCoach });
     };
     if (act === 'approve') {
       if (status !== 'pending') throw new RoomError(409, 'not-pending');

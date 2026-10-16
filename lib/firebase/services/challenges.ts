@@ -81,6 +81,16 @@ export function challengeErrorText(e: unknown): string {
     case 'too-many':            return 'Хэт олон сурагч сонгосон байна.';
     case 'not-active-member':   return 'Сонгосон сурагч өрөөнд идэвхтэй гишүүн биш байна.';
     case 'not-challenge-coach': return 'Энэ challenge-ийг зөвхөн түүний багш удирдана.';
+    case 'end-too-soon':        return 'Дуусах цаг одооноос дор хаяж 10 минутын дараа байна.';
+    case 'end-too-late':        return 'Дуусах цаг хамгийн оройдоо 23:59.';
+    case 'end-other-day':       return 'Дуусах цаг өнөөдөр (Улаанбаатарын цагаар) байна.';
+    case 'bad-end-time':        return 'Дуусах цаг буруу байна.';
+    case 'student-busy':        return 'Энэ сурагч өөр challenge-ийг яг одоо хийж байна.';
+    case 'completed':           return 'Энэ challenge аль хэдийн биелсэн.';
+    case 'too-fast':
+    case 'too-close':           return 'Цаг хэт хурдан байна';
+    case 'ended':
+    case 'not-active':          return 'Session дууссан байна.';
     default:                    return roomsErrorText(e);
   }
 }

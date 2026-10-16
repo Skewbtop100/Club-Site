@@ -504,6 +504,37 @@ An RTDB alternative is still possible (the project already uses RTDB for presenc
 - **Env:** `CRON_SECRET`.
 - **Tests:** `test:challenge`, `challenge-routes`, Playwright two-context flow.
 - **What the user sees:** the coach presses Эхлүүлэх and picks an end time (today, ≤ 23:59, at least 10 minutes ahead). The student's timer locks into the challenge with ●●○○○ above the digits (hidden while timing). The student confirms each solve and can comment on it; a refused time shows "Цаг хэт хурдан байна". They get ✅ and a celebration on completion, and the session closes at the end time or with "Өнөөдрийг дуусгах". The coach watches every student live.
+- **Split (owner, 2026-10-16):** phase 4 is built in two parts. **4a** is core challenge mode: start/stop, the timer locks, confirm, scoring, sanity checks, end rules, completion with a simple "✅ Challenge биеллээ", and statuses. **4b** is the coach live view, the celebration screen, the Vercel cron (`close-stale`, `CRON_SECRET`), the coach's flag list, and the two `challengeSessions` indexes those need.
+- **As built, 4a (2026-10-16).** These points replace the Phase 4 parts of A6, B2, B3 and B4 where they differ:
+  - **Routes:** `app/api/challenge/{start,solve,comment,end}` on `lib/server/challenge-sessions.ts`. Clients have **no** write access to `challengeSessions` or `challengeLive`, as for every other challenge collection. `close-stale` is 4b.
+  - **Default end time is 23:59 UB** (owner, 4a brief), not 00:00. It's the latest time N2 allows. The coach's picker defaults to 23:59; omitting `endsAt` on the route also means 23:59. After 23:49 UB no valid end time is left for that day, so the start returns `400 end-too-soon`.
+  - **Shared scoring:** `lib/challenge-progress.ts` holds `computeProgress`, UB dates, `daysTaken` and `validateEndsAt`. The sanity checks are in `lib/challenge.ts` (`MIN_SOLVE_MS`, `sanityCheck`). The pure solve and stats helpers (`avgOfN`, `trimCount`, `fmtMs`, `Solve` …) moved from `lib/timer-engine.ts` to the new `lib/solve-stats.ts`, because the engine is a `'use client'` module the server can't import. The engine re-exports them, so existing imports are unchanged.
+  - **Per-event floors (N5)** in `MIN_SOLVE_MS`, in ms: 333 2500, 222 400, 444 12000, 555 28000, 666 50000, 777 80000, 333oh 5000, 333bld 10000, 444bld 45000, 555bld 100000, pyram 700, skewb 700, sq1 3000, clock 1800, minx 20000.
+  - **Too close together:** refused when `stoppedAt − previous stoppedAt < ms − 300 ms`, or when the session's solve times add up to more than the server time since `startedAt` plus 5 s. A refusal answers `409 too-fast` / `409 too-close` and is appended to the session's `flags`; the coach's flag list is 4b. The route also requires `input: 'timer'` (B3's "on-screen-timer solves only" sanity flag).
+  - **Lazy end (decision 20):** every route closes an expired session first. When `start` finds the student's pointer on an expired session, it closes that one (`auto-closed`) and then starts. When the timer opens on an expired pointer, it calls `/api/challenge/end`, which closes it as `auto-closed`. With no cron yet, an expired session that nobody touches stays `active` with a past `endsAt`. Every reader treats it as not running.
+  - **Extra fields:**
+    - **Assignment:** `activeSessionId` and `activeEndsAt` (so the coach's page can offer "Зогсоох" without reading sessions), and `completedUbDate`. Stats roll up into the assignment when a session closes (`blocksAttempted` added, `bestStreak` max).
+    - **Session:** `visibleToCoach`, the same flag and rule as assignments; `lib/server/rooms.ts` flips it on remove / re-approve.
+    - **Live pointer:** its `template` also carries `title` and `note`.
+  - **Rules:**
+    - `challengeSessions`: the student reads their own; the coach reads while `visibleToCoach == true`.
+    - `challengeLive/{uid}`: only that student reads it.
+    - Both collections: no client writes.
+  - **Indexes:** none added in 4a. Its only queries are server-side equality queries, which need no composite index. `challengeSessions(roomId, status)` and `(status, endsAt)` come with 4b's live view and cron.
+  - **Timer (B4):**
+    - **Challenge session:** a local session with the fixed id `challenge` per event, named "Challenge". It stays in the session list afterwards.
+    - **What is overridden:** inspection, time-entry mode, shared scramble and Bluetooth are overridden while the mode is on, not written to the user's prefs. Nothing needs restoring except the event and the selected session, which are kept in `localStorage` (`pv.timer.challenge.prev.v1`).
+    - **Blocked during the mode:** event pickers, Alt+key, and session switch / create / delete show "Challenge-ийн үед боломжгүй".
+    - **Final solves:** a confirmed challenge solve is marked `solve.challenge = { sessionId, seq }` and can never be edited or deleted. That holds on every path (action row, shortcuts, two-finger gestures, detail modal, bulk delete, the sidebar ×), and also after the mode ends. Only its comment can change. Comments are limited to 280 characters, the timer's comment box limit.
+    - **Refused solve:** removed from the Challenge session; the later queued solves are renumbered.
+  - **Statuses:** `in-progress` shows as "Идэвхтэй" from the first start until completion. While a session runs, the student also sees "Явагдаж байна · HH:MM хүртэл" with a link to the timer, and the coach sees "HH:MM хүртэл" plus "Зогсоох". "Биелсэн" shows the first-started and completed dates, days taken, sessions, blocks and best streak. The coach's room page gained "Шинэчлэх", as B2 planned.
+  - **Found, not changed:** a normal solve's club point only reaches the database for admins. `awardSolvePointIfUnderLimit` writes a `pointTransactions` row, and the rules make that collection admin-write only, so the whole transaction fails for other users. This is outside the challenge scope; the 4a e2e uses an admin student so its "no points from challenge solves" check has a real baseline.
+  - **Tests:**
+    - `npm run test:challenge`: adds scoring, UB dates, end time and sanity checks.
+    - `tests/firestore-rules/challenge.test.mjs`: adds sessions, live pointer and progress fields.
+    - `tests/server-routes/challenge-session-routes.test.mjs`: in `test:routes`.
+    - `npm run test:e2e:challenge-mode`: Playwright, coach and student.
+    - The route and e2e suites need a valid end time today, so they must run **before 23:45 UB**.
 
 **Phase 5: progress history**
 - **Add:** history views for the student (per assignment; always visible to the student, even while removed) and the coach (per student / per challenge; hidden while the student is removed). One-time paginated reads.
