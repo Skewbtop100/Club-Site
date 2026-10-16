@@ -2551,18 +2551,6 @@ export default function TimerPage() {
                 </button>
               </div>
 
-              {sharedCode && sharedIndex != null && (
-                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '0.5rem' }}>
-                  <SharedCodeBar
-                    code={sharedCode}
-                    index={sharedIndex}
-                    onStep={stepShared}
-                    onJump={setSharedIndexTo}
-                    onLeave={leaveSharedMode}
-                  />
-                </div>
-              )}
-
             <div
               className="pv-scramble-text"
               style={{
@@ -2828,12 +2816,8 @@ export default function TimerPage() {
             display: 'flex', flexDirection: 'column',
             flexShrink: 0,
           }}>
-            <div style={{ paddingBottom: '0.45rem' }}>
-              <ToolsTabSwitch
-                value={toolsTab}
-                onChange={setToolsTab}
-                labels={{ preview: 'Холилтын зураг', shared: 'Ижил холилт' }}
-              />
+            <div style={{ paddingBottom: '0.35rem' }}>
+              <ToolsViewMenu value={toolsTab} onChange={setToolsTab} sharedActive={!!sharedCode} />
             </div>
             <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
               {toolsTab === 'preview' ? (
@@ -3021,22 +3005,6 @@ export default function TimerPage() {
                 picker in the capsule above is enough context. */}
             {mobileTab === 'timer' && (
               <div className="pv-scramble" style={{ flexShrink: 0 }}>
-                {/* Active "Ижил холилт" strip — only while a code is
-                    active; entry lives in the enlarged-preview sheet. */}
-                {sharedCode && sharedIndex != null && (
-                  <div style={{
-                    display: 'flex', justifyContent: 'center', alignItems: 'center',
-                    minHeight: 28, padding: '0 0.7rem',
-                  }}>
-                    <SharedCodeBar
-                      code={sharedCode}
-                      index={sharedIndex}
-                      onStep={stepShared}
-                      onJump={setSharedIndexTo}
-                      onLeave={leaveSharedMode}
-                    />
-                  </div>
-                )}
                 <SwipeScrambleRow
                   scramble={scramble}
                   scrambleFontPx={getScrambleFontSize(scramble, scrambleFontSize)}
@@ -3593,12 +3561,20 @@ export default function TimerPage() {
                       onClick={() => setCubeFullscreenOpen(true)}
                       aria-label="Enlarge cube"
                       style={{
+                        position: 'relative',
                         background: 'none', border: 'none', padding: 0, minWidth: 0,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         cursor: 'pointer', fontFamily: 'inherit',
                         WebkitTapHighlightColor: 'transparent',
                       }}
                     >
+                      {/* "Ижил холилт" is active — the only on-screen hint
+                          now that there's no bar above the scramble. */}
+                      {sharedCode && (
+                        <span style={{ position: 'absolute', top: 2, right: 2, display: 'inline-flex' }}>
+                          <SharedActiveDot />
+                        </span>
+                      )}
                       {/* Square-1's SVG viewBox is fit tightly to the drawing,
                           so it takes the full card; the 3D players keep 80%. */}
                       <div style={{ width: eventId === 'sq1' ? '100%' : '80%', aspectRatio: '1 / 1', display: 'flex' }}>
@@ -3723,7 +3699,8 @@ export default function TimerPage() {
             }}
           ><IconClose size={18} /></button>
           {/* Enlarged preview doubles as the mobile tools sheet:
-              "Зураг" (preview) | "Ижил холилт" (shared code). */}
+              "Холилтын зураг" (preview) | "Ижил холилт" (shared code),
+              picked from the header menu. */}
           <div
             onClick={(e) => e.stopPropagation()}
             style={{
@@ -3733,11 +3710,7 @@ export default function TimerPage() {
               display: 'flex', flexDirection: 'column', gap: '0.6rem',
             }}
           >
-            <ToolsTabSwitch
-              value={toolsTab}
-              onChange={setToolsTab}
-              labels={{ preview: 'Зураг', shared: 'Ижил холилт' }}
-            />
+            <ToolsViewMenu value={toolsTab} onChange={setToolsTab} sharedActive={!!sharedCode} />
             <div style={{ width: '100%', aspectRatio: '1 / 1', display: 'flex' }}>
               {toolsTab === 'preview' ? (
                 <ScramblePreview eventId={eventId} scramble={scramble} />
@@ -4174,6 +4147,18 @@ export default function TimerPage() {
 
         .pv-ao5-inline {
           animation: ao5-fade-in 0.2s ease-out both;
+        }
+        /* "Ижил холилт is active" dot — slow soft pulse, static for users
+           who prefer reduced motion. */
+        .pv-active-dot {
+          animation: pv-dot-pulse 2s ease-in-out infinite;
+        }
+        @keyframes pv-dot-pulse {
+          0%, 100% { opacity: 1; }
+          50%      { opacity: 0.35; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .pv-active-dot { animation: none; }
         }
         @keyframes ao5-fade-in {
           from { opacity: 0; }
@@ -6660,41 +6645,131 @@ function ActionIconBtn({
 
 type ToolsTab = 'preview' | 'shared';
 
-/** Two-option segmented control heading the tools panel (desktop right
- *  panel, mobile enlarged-preview sheet). */
-function ToolsTabSwitch({ value, onChange, labels }: {
+// Same labels on desktop and mobile.
+const TOOLS_VIEW_LABELS: Record<ToolsTab, string> = {
+  preview: 'Холилтын зураг',
+  shared: 'Ижил холилт',
+};
+
+/** Green "Ижил холилт is active" dot. Slow soft pulse via the
+ *  .pv-active-dot keyframes in the page <style>; static when the user
+ *  prefers reduced motion. */
+function SharedActiveDot() {
+  return (
+    <span
+      className="pv-active-dot"
+      role="status"
+      aria-label="Ижил холилт идэвхтэй"
+      style={{
+        display: 'inline-block', width: 7, height: 7, flexShrink: 0,
+        borderRadius: '50%', background: C.success,
+      }}
+    />
+  );
+}
+
+/** Tools-panel header: the current view's label + chevron; clicking it
+ *  opens a small menu to switch views (closes on outside click / Esc).
+ *  Used by the desktop right panel and the mobile enlarged-preview sheet.
+ *  While a shared code is active a green dot sits next to the label
+ *  (whatever view is shown) and before "Ижил холилт" in the menu. */
+function ToolsViewMenu({ value, onChange, sharedActive }: {
   value: ToolsTab;
   onChange: (tab: ToolsTab) => void;
-  labels: Record<ToolsTab, string>;
+  sharedActive: boolean;
 }) {
-  const tabs: ToolsTab[] = ['preview', 'shared'];
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    // Capture phase so Esc closes only this menu, not a surrounding sheet.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); }
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('keydown', onKey, true);
+    };
+  }, [open]);
+
+  const views: ToolsTab[] = ['preview', 'shared'];
   return (
-    <div role="tablist" style={{
-      display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2,
-      background: C.bg, border: `1px solid ${C.border}`,
-      borderRadius: RADIUS_SM, padding: 2,
-    }}>
-      {tabs.map(tab => {
-        const active = tab === value;
-        return (
-          <button
-            key={tab}
-            type="button"
-            role="tab"
-            aria-selected={active}
-            onClick={() => onChange(tab)}
-            style={{
-              padding: '0.3rem 0.4rem', borderRadius: 6,
-              background: active ? C.cardAlt : 'transparent',
-              color: active ? C.text : C.muted,
-              border: 'none', cursor: 'pointer',
-              fontFamily: 'inherit', fontSize: '0.74rem', fontWeight: active ? 600 : 500,
-              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-              transition: 'background 0.12s, color 0.12s',
-            }}
-          >{labels[tab]}</button>
-        );
-      })}
+    <div ref={rootRef} className="pv-tools-menu" style={{ position: 'relative' }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
+          background: open ? C.cardAlt : 'transparent', border: 'none',
+          borderRadius: RADIUS_SM, padding: '0.25rem 0.45rem',
+          color: C.text, fontFamily: 'inherit', fontSize: '0.8rem', fontWeight: 500,
+          cursor: 'pointer', maxWidth: '100%',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.background = C.cardAlt; }}
+        onMouseLeave={e => { if (!open) e.currentTarget.style.background = 'transparent'; }}
+      >
+        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {TOOLS_VIEW_LABELS[value]}
+        </span>
+        {sharedActive && <SharedActiveDot />}
+        <span aria-hidden="true" style={{
+          color: C.mutedDim, fontSize: '0.62rem',
+          transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease',
+        }}>▾</span>
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          style={{
+            position: 'absolute', top: 'calc(100% + 0.3rem)', left: 0, zIndex: 20,
+            minWidth: 190,
+            background: C.card, border: `1px solid ${C.border}`,
+            borderRadius: RADIUS, padding: '0.25rem',
+            boxShadow: '0 12px 30px rgba(0,0,0,0.55)',
+            display: 'flex', flexDirection: 'column', gap: '0.1rem',
+          }}
+        >
+          {views.map(view => {
+            const current = view === value;
+            return (
+              <button
+                key={view}
+                type="button"
+                role="menuitemradio"
+                aria-checked={current}
+                onClick={() => { onChange(view); setOpen(false); }}
+                style={{
+                  display: 'grid', gridTemplateColumns: '14px 1fr auto',
+                  alignItems: 'center', gap: '0.45rem',
+                  background: current ? C.cardAlt : 'transparent', border: 'none',
+                  borderRadius: RADIUS_SM, padding: '0.45rem 0.55rem',
+                  color: C.text, fontFamily: 'inherit', fontSize: '0.82rem',
+                  fontWeight: current ? 600 : 500, textAlign: 'left', cursor: 'pointer',
+                }}
+                onMouseEnter={e => { if (!current) e.currentTarget.style.background = C.cardAlt; }}
+                onMouseLeave={e => { if (!current) e.currentTarget.style.background = 'transparent'; }}
+              >
+                <span aria-hidden="true" style={{ display: 'inline-flex', justifyContent: 'center' }}>
+                  {view === 'shared' && sharedActive && <SharedActiveDot />}
+                </span>
+                <span>{TOOLS_VIEW_LABELS[view]}</span>
+                <span aria-hidden="true" style={{ display: 'inline-flex', width: 14 }}>
+                  {current && <IconCheck size={13} />}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -6856,44 +6931,6 @@ function SharedCodeTools({ code, index, onEnter, onLeave, onStep, onJump }: {
           >Нэгдэх</button>
         </div>
       </div>
-    </div>
-  );
-}
-
-/** Active-code strip above the scramble: "Код 4827 · ‹ #5 › · Гарах".
- *  Only rendered while a code is active. Tapping the code copies it. */
-function SharedCodeBar({ code, index, onStep, onJump, onLeave }: {
-  code: string;
-  index: number;
-  onStep: (delta: number) => void;
-  onJump: (index: number) => void;
-  onLeave: () => void;
-}) {
-  const plain: React.CSSProperties = {
-    background: 'transparent', border: 'none', cursor: 'pointer',
-    color: C.muted, fontFamily: 'inherit', fontSize: '0.8rem',
-    padding: '0.2rem 0.3rem', borderRadius: RADIUS_SM,
-    display: 'inline-flex', alignItems: 'center',
-  };
-  // Touch/pointer events must not reach the swipe row or timer underneath.
-  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
-  return (
-    <div
-      className="pv-shared-bar"
-      onTouchStart={stop} onTouchEnd={stop} onPointerDown={stop}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: '0.15rem',
-        fontSize: '0.8rem', color: C.muted,
-        fontVariantNumeric: 'tabular-nums',
-      }}
-    >
-      <button type="button" onClick={() => copySharedCode(code)} title="Код хуулах" style={plain}>
-        Код&nbsp;<span style={{ color: C.text, fontFamily: '"JetBrains Mono", monospace', fontWeight: 600 }}>{code}</span>
-      </button>
-      <span aria-hidden="true">·</span>
-      <SharedIndexControl index={index} onStep={onStep} onJump={onJump} />
-      <span aria-hidden="true">·</span>
-      <button type="button" onClick={onLeave} style={plain}>Гарах</button>
     </div>
   );
 }
