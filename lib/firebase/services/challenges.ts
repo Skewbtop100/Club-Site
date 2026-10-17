@@ -10,7 +10,7 @@ import { COL } from '@/lib/firebase/collections';
 import { postApi, roomsErrorText, RoomsApiError } from '@/lib/firebase/services/rooms';
 import type { Challenge, ChallengeMetric } from '@/lib/types/challenge';
 
-function toChallenge(id: string, d: Record<string, unknown>): Challenge {
+export function toChallenge(id: string, d: Record<string, unknown>): Challenge {
   return {
     id,
     coachUid: String(d.coachUid ?? ''),

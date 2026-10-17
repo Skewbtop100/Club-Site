@@ -1,6 +1,7 @@
 // Types and constants for the coach Challenge system (docs/challenge-plan.md).
 // Phase 2: coaches, rooms, room codes, memberships. Phase 3: challenges
-// and assignments. Phase 4: sessions and the live pointer.
+// and assignments. Phase 4: sessions and the live pointer. Phase 5: the
+// session record the history pages read.
 //
 // Shared by client code, server routes (lib/server/rooms.ts) and tests, so
 // it must stay free of firebase / firebase-admin imports.
@@ -132,6 +133,9 @@ export interface ChallengeAssignment {
 // ── Phase 4: sessions and the student's live pointer ─────────────────────
 
 export type SessionStatus = 'active' | 'ended' | 'auto-closed' | 'completed';
+/** Who closed an 'ended' session (phase 5; absent on sessions closed
+ *  before the field existed, and on the other statuses). */
+export type SessionEndedBy = 'student' | 'coach';
 
 /** challengeLive/{studentUid} — what the student's timer listens to.
  *  Server-written only; sessionId null = no running session. */
@@ -152,4 +156,35 @@ export interface SessionProgress {
   completed: boolean;
   inBlock: number;
   blockSize: number;
+}
+
+// ── Phase 5: history ──────────────────────────────────────────────────────
+
+/** One stored solve in a session (only confirmed solves reach the server). */
+export interface SessionSolve {
+  seq: number;
+  /** Raw timer ms, without the +2. */
+  ms: number;
+  penalty: 'none' | '+2' | 'dnf';
+  comment?: string;
+}
+
+/** challengeSessions/{id} as the history pages read it. */
+export interface ChallengeSessionRecord {
+  id: string;
+  assignmentId: string;
+  studentUid: string;
+  template: { event: string; metric: ChallengeMetric; targetMs: number; streak: number };
+  /** Epoch ms. */
+  startedAt: number;
+  endsAt: number;
+  endedAt: number | null;
+  /** 'YYYY-MM-DD' (UB) at start. */
+  ubDate: string;
+  status: SessionStatus;
+  endedBy: SessionEndedBy | null;
+  solves: SessionSolve[];
+  blocks: { resultMs: number | null; displayCs: number | null; pass: boolean }[];
+  blocksAttempted: number;
+  bestStreak: number;
 }

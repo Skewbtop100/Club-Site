@@ -13,6 +13,7 @@
 // is a one-time read, re-read after each action. Both listeners stop when
 // the coach leaves the page. The member list comes live from the room page.
 import { appNow } from '@/lib/clock';
+import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   CHALLENGE_EVENTS, METRICS, METRIC_LABEL, NOTE_MAX, STREAK_MAX, STREAK_MIN, TITLE_MAX,
@@ -269,7 +270,8 @@ function ChallengeItem({
       borderTop: `1px solid ${T.border}`, paddingTop: '0.7rem', display: 'flex', flexDirection: 'column', gap: '0.5rem',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
-        <span style={{ fontWeight: 600, flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</span>
+        <Link href={`/timer/challenge/rooms/${c.roomId}/challenges/${c.id}`} data-testid={`challenge-overview-${c.id}`}
+          style={{ fontWeight: 600, flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: T.text, textDecoration: 'none' }}>{c.title}</Link>
         {c.locked && <StatusChip text="Эхэлсэн · түгжигдсэн" />}
       </div>
       <div data-testid="challenge-sentence" style={{ fontSize: '0.88rem' }}>{previewSentence(c)}</div>

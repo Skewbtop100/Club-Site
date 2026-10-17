@@ -586,6 +586,50 @@ An RTDB alternative is still possible (the project already uses RTDB for presenc
 - **Indexes:** `challengeSessions(assignmentId, startedAt)`.
 - **Tests:** Playwright history check; server test that stats roll up across 3 sessions, including two on the same day.
 - **What the user sees:** first started, completed, days taken, sessions, complete blocks attempted, best streak, plus a list of each session (date, end reason, blocks, best streak).
+- **As built, 5 (2026-10-17).** These points replace the Phase 5 parts of B2, B3 and B7 where they differ:
+  - **Pages:**
+    - `app/timer/challenge/history/[assignmentId]` is **one history page for both sides**. The student sees their own; the coach sees it while the student is in the room. It reads the assignment, and `studentUid == me` decides which session query it runs.
+      - **Header:** the challenge sentence, status (Оноогдсон / Идэвхтэй / Биелсэн), first started, completed, days taken, sessions, total blocks, best streak.
+      - **Sessions:** newest first, 10 per page, then "Цааш үзэх". Each row shows the date, start–end time, how it ended (дуусгасан / цаг дууссан / багш зогсоосон / биелсэн; "Явагдаж байна" while one runs), blocks, best streak and the solve count.
+      - **Tapping a session** expands it **in place** rather than opening a new URL. The session document already holds its solves, so this costs no read. It shows each block's result ("Mo3 1.80 ✓", "Mo3 DNF ✗") and its solves ("3.50+" for a +2, "DNF") with their comments. An unfinished last block is shown as "Дуусаагүй блок · тооцогдоогүй" (decision 5).
+    - `app/timer/challenge/rooms/[roomId]/students/[uid]` (coach): one student's challenges in this room, each with its status and the same numbers. It opens from the student's name in the room's member list.
+    - `app/timer/challenge/rooms/[roomId]/challenges/[challengeId]` (coach): the per-challenge overview. It opens from the challenge title on the room page. Each student shows status, completion date and days taken, sessions and best streak. **Completed students come first, earliest completion on top; then Идэвхтэй, then Оноогдсон; names A–Я within each group.** Days taken is "—" until completed.
+    - **Student entry:** on the hub, the challenge title, plus a "Түүх харах" link once it has been started. A removed student still has both, because the hub's own lists never filtered on membership (N4).
+  - **New field: `challengeSessions.endedBy`** (`'student' | 'coach'`), written by `/api/challenge/end` on an `ended` session.
+    - **Why:** 4a stored both the student's "Өнөөдрийг дуусгах" and the coach's "Зогсоох" as `status: 'ended'`, so the history couldn't tell "дуусгасан" from "багш зогсоосон".
+    - **Older sessions:** an `ended` session without the field reads as "дуусгасан".
+    - **Other statuses:** `auto-closed` = "цаг дууссан", `completed` = "биелсэн". A session still `active` past its end time also shows "цаг дууссан".
+  - **Shown end time:** for a session that closed by its end time, the history shows `endsAt`, not `endedAt`. The cron or a lazy close can record `endedAt` hours later.
+  - **Results are the server's stored `blocks`, not recomputed,** so the history always matches the rolled-up stats.
+  - **Header totals:** blocks and best streak are rolled up when a session closes (4a). A running session is in the session list but not yet in the header numbers.
+  - **Helpers:** the pure helpers are in `lib/challenge-history.ts` (`endReason`, `shownEndMs`, `sessionBlocks`, `solveText`, `blockText`, `sortOverview`). The client reads are in `lib/firebase/services/challengeHistory.ts`. The UI is in `components/timer/challenge/History.tsx`.
+  - **Reads:** one-time `getDoc` / `getDocs` only, no listeners. Estimates per page view:
+    - **history page:** 1 (assignment) + up to 10 (one session page). Each "Цааш үзэх" costs up to 10 more, and session detail costs 0;
+    - **coach, one student:** 1 (membership) + 1 (the rules' `get` of the room) + that student's assignments in the room (usually 1–5);
+    - **coach, one challenge:** 1 (challenge) + one per visible student (≈ class size).
+    - The assignment and session rules use no `get()`, so they add no reads. A session page downloads at most about 100 KB (10 sessions of up to ~10 KB).
+  - **Indexes** (this changes B7's `challengeSessions(assignmentId, startedAt)`). A query must carry the rules' filters, so each side needs its own index:
+    - `challengeSessions(assignmentId, studentUid, startedAt desc)` for the student;
+    - `challengeSessions(assignmentId, coachUid, visibleToCoach, startedAt desc)` for the coach.
+    - The coach's per-student and per-challenge assignment queries are equality-only and need no composite index.
+  - **Rules:** **no changes.** The phase 3 and 4 assignment and session rules already allow exactly these reads. New rule tests (H1–H20) prove them:
+    - the student reads their own history, including the next page and including while removed;
+    - the coach reads it only with `visibleToCoach == true`, and never gets a removed student's sessions or assignments;
+    - every query without the right filter is refused;
+    - other coaches, classmates and judges are refused;
+    - the coach can't read a removed student's membership, so that student's page is hidden.
+  - **Tests:**
+    - `npm run test:challenge`: adds the history helpers.
+    - `tests/firestore-rules/challenge.test.mjs`: adds H1–H20.
+    - `tests/server-routes/challenge-session-routes.test.mjs`:
+      - `endedBy` for a student end, a coach stop and an auto-close;
+      - the roll-up across sessions: B7 asked for 3 sessions with two on the same day. The suite's existing 5 same-day sessions now also check, newest first, how each ended, and that the per-session blocks and best streak add up to the assignment's.
+    - `npm run test:e2e:history` (new, Playwright, test clock at 12:00 UB):
+      - **Data:** every session runs through the real routes; the earlier days' sessions are then moved back in time.
+      - **Student, at 360 px:** 3 sessions — closed by the end time (cron) 2 days ago, ended by the student yesterday, completed today. Checked: the summary (3 days, 3 sessions, 6 blocks, best streak 2), the session list, and block and solve details including +2, DNF, the comment and the uncounted block.
+      - **Coach:** the same through the per-student page, and the per-challenge order.
+      - **Removed student:** hidden from the coach, still seeing their own history.
+      - **Pagination:** 12 sessions → 10, then "Цааш үзэх" → 12.
 
 ### B8. Open questions
 

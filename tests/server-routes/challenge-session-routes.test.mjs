@@ -222,6 +222,7 @@ try {
   check('"Өнөөдрийг дуусгах" → ended', en.status === 200 && en.body.status === 'ended', en);
   const ended = (await doc(`challengeSessions/${SID}`)).data();
   check('the unfinished block (1 of 3) is dropped: 2 complete blocks', ended.blocksAttempted === 2 && ended.status === 'ended' && ended.endedAt != null, ended);
+  check('the history can tell who ended it: endedBy student (phase 5)', ended.endedBy === 'student', ended.endedBy);
   check('pointer cleared', (await doc(`challengeLive/${s1}`)).get('sessionId') === null);
   const a1e = (await doc(`challengeAssignments/${A1}`)).data();
   check('assignment rolled up: 2 blocks, best streak 1, no active session', a1e.blocksAttempted === 2 && a1e.bestStreak === 1 &&
@@ -243,6 +244,7 @@ try {
   check('another coach cannot stop it → 403', (await post('challenge/end', { sessionId: SID2 }, COACH2)).status === 403);
   const stop = await post('challenge/end', { sessionId: SID2 }, COACH);
   check('the coach stops it → ended, pointer cleared', stop.body.status === 'ended' && (await doc(`challengeLive/${s1}`)).get('sessionId') === null, stop);
+  check('…endedBy coach (phase 5)', (await doc(`challengeSessions/${SID2}`)).get('endedBy') === 'coach');
 
   console.log('\n=== end time passed (lazy close) ===');
   const st3 = await post('challenge/start', { assignmentId: A1 }, COACH);
@@ -252,6 +254,7 @@ try {
   check('a solve after the end time → 409 ended', late.status === 409 && late.body.error === 'ended', late);
   check('…and the session is auto-closed, pointer cleared', (await doc(`challengeSessions/${SID3}`)).get('status') === 'auto-closed' &&
     (await doc(`challengeLive/${s1}`)).get('sessionId') === null);
+  check('an auto-closed session has no endedBy', (await doc(`challengeSessions/${SID3}`)).get('endedBy') === undefined);
   // A pointer left on an expired session (student never came back) does
   // not block the next start: start closes it first.
   const st4 = await post('challenge/start', { assignmentId: A2 }, COACH);
@@ -279,6 +282,25 @@ try {
     done.blocksAttempted === 2 + 0 + 0 + 0 + 2 && done.bestStreak === 2 && done.activeSessionId === null, done);
   check('session completed, pointer cleared', (await doc(`challengeSessions/${SID6}`)).get('status') === 'completed' &&
     (await doc(`challengeLive/${s1}`)).get('sessionId') === null);
+  // Phase 5: what the history page reads — the assignment's sessions,
+  // newest first (this suite backdates some startedAt, so the order isn't
+  // the creation order; each is matched by id). 5 sessions on the same UB
+  // day, each keeping its own numbers; their sum / max is exactly what the
+  // assignment rolled up.
+  const histDocs = (await db.collection('challengeSessions').where('assignmentId', '==', A1)
+    .where('studentUid', '==', s1).orderBy('startedAt', 'desc').get()).docs;
+  const hist = histDocs.map(d => d.data());
+  const byId = Object.fromEntries(histDocs.map(d => [d.id, d.data()]));
+  const howEnded = (id) => byId[id] ? `${byId[id].status}${byId[id].endedBy ? ':' + byId[id].endedBy : ''}:${byId[id].blocksAttempted}:${byId[id].bestStreak}` : 'missing';
+  check('history: 5 sessions newest first, same UB day, each with how it ended and its own numbers', hist.length === 5 &&
+    hist.every((h, i) => i === 0 || h.startedAt.toMillis() <= hist[i - 1].startedAt.toMillis()) &&
+    hist.every(h => h.ubDate === ubDate(now())) &&
+    [SID, SID2, SID3, st5.body.sessionId, SID6].map(howEnded).join() ===
+      'ended:student:2:1,ended:coach:0:0,auto-closed:0:0,ended:coach:0:0,completed:2:2',
+    [SID, SID2, SID3, st5.body.sessionId, SID6].map(howEnded));
+  check('history: per-session blocks and best streak add up to the assignment\'s',
+    hist.reduce((n, h) => n + h.blocksAttempted, 0) === done.blocksAttempted &&
+    Math.max(...hist.map(h => h.bestStreak)) === done.bestStreak, hist.map(h => [h.blocksAttempted, h.bestStreak]));
   check('no more solves after completion → 409', (await solve(S1, solveBody(SID6, 7, 1500))).status === 409);
   check('starting a completed challenge → 409 completed', (await post('challenge/start', { assignmentId: A1 }, COACH)).body.error === 'completed');
 

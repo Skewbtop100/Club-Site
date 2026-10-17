@@ -72,6 +72,25 @@
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "endsAt", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "challengeSessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "assignmentId", "order": "ASCENDING" },
+        { "fieldPath": "studentUid", "order": "ASCENDING" },
+        { "fieldPath": "startedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "challengeSessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "assignmentId", "order": "ASCENDING" },
+        { "fieldPath": "coachUid", "order": "ASCENDING" },
+        { "fieldPath": "visibleToCoach", "order": "ASCENDING" },
+        { "fieldPath": "startedAt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [

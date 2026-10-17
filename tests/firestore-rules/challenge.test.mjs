@@ -5,7 +5,7 @@ import {
   assertFails,
 } from '@firebase/rules-unit-testing';
 import {
-  collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, updateDoc, where,
+  collection, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, setDoc, startAfter, Timestamp, updateDoc, where,
 } from 'firebase/firestore';
 
 // Rules tests for the coach challenge, phase 3 (docs/challenge-plan.md):
@@ -18,6 +18,7 @@ import {
 //   challenge   — its coach only
 //   assignment  — the student always (removed included, plan N4); the
 //                 coach only while visibleToCoach == true (decision 24)
+//   session     — the same; phase 5 adds the history pages' queries
 //
 // Same conventions as rooms.test.mjs: RULES_PATH overrides the rules file,
 // the emulator is assumed to be up (npm run test:rules wraps that).
@@ -96,8 +97,10 @@ async function seed() {
       { status: 'in-progress', firstStartedAt: null, sessionsCount: 1 }));
     // Phase 4: a running session for S1, a closed one for REMOVED (hidden
     // from the coach), and S1's live pointer.
-    await setDoc(doc(db, 'challengeSessions', 'sess1'), session('sess1', S1, 'active', true));
-    await setDoc(doc(db, 'challengeSessions', 'sessR'), session('sessR', REMOVED, 'ended', false));
+    await setDoc(doc(db, 'challengeSessions', 'sess1'), { ...session('sess1', S1, 'active', true), startedAt: Timestamp.fromMillis(2_000_000) });
+    await setDoc(doc(db, 'challengeSessions', 'sessR'), { ...session('sessR', REMOVED, 'ended', false), startedAt: Timestamp.fromMillis(1_000_000) });
+    // Phase 5: an older closed session of S1, for the history pages.
+    await setDoc(doc(db, 'challengeSessions', 'sessOld'), { ...session('sessOld', S1, 'ended', true), startedAt: Timestamp.fromMillis(1_000_000) });
     await setDoc(doc(db, 'challengeLive', S1), { sessionId: 'sess1', assignmentId: `ch2_${S1}`, template, endsAt: null });
   });
 }
@@ -241,6 +244,86 @@ await check('LV6. a student cannot listen to the room\'s sessions', 'DENY', () =
 await check('LV7. the coach listens to the room\'s visible assignments', 'ALLOW', () =>
   getDocs(query(assignments(as(COACH)), where('roomId', '==', 'room1'), where('coachUid', '==', COACH), where('visibleToCoach', '==', true))));
 await check('LV8. a judge cannot listen', 'DENY', () => getDocs(liveQuery(asJudge(), 'room1', COACH)));
+
+console.log('\n=== history reads (phase 5) ===\n');
+// The history pages' one-time reads, exactly as
+// lib/firebase/services/challengeHistory.ts builds them.
+const studentHistory = (db, assignmentId, uid) => query(sessions(db),
+  where('assignmentId', '==', assignmentId), where('studentUid', '==', uid),
+  orderBy('startedAt', 'desc'), limit(10));
+const coachHistory = (db, assignmentId, coachUid) => query(sessions(db),
+  where('assignmentId', '==', assignmentId), where('coachUid', '==', coachUid),
+  where('visibleToCoach', '==', true), orderBy('startedAt', 'desc'), limit(10));
+const studentChallenges = (db, coachUid, uid) => query(assignments(db),
+  where('roomId', '==', 'room1'), where('coachUid', '==', coachUid),
+  where('visibleToCoach', '==', true), where('studentUid', '==', uid));
+const overview = (db, challengeId, coachUid) => query(assignments(db),
+  where('challengeId', '==', challengeId), where('coachUid', '==', coachUid), where('visibleToCoach', '==', true));
+const ids = (snap) => snap.docs.map(d => d.id).sort().join(',');
+const orderedIds = (snap) => snap.docs.map(d => d.id).join(',');
+
+await check('H1. the student pages through their own sessions, newest first', 'ALLOW', async () => {
+  const snap = await getDocs(studentHistory(as(S1), `ch2_${S1}`, S1));
+  if (orderedIds(snap) !== 'sess1,sessOld') throw new Error(`got ${orderedIds(snap)}`);
+  return snap;
+});
+await check('H2. …and the next page (startAfter)', 'ALLOW', async () => {
+  const page = (after) => query(sessions(as(S1)), where('assignmentId', '==', `ch2_${S1}`), where('studentUid', '==', S1),
+    orderBy('startedAt', 'desc'), ...(after ? [startAfter(after)] : []), limit(1));
+  const first = await getDocs(page(null));
+  const snap = await getDocs(page(first.docs[0]));
+  if (orderedIds(snap) !== 'sessOld') throw new Error(`got ${orderedIds(snap)}`);
+  return snap;
+});
+await check('H3. the student\'s history query without the studentUid filter is refused', 'DENY', () =>
+  getDocs(query(sessions(as(S1)), where('assignmentId', '==', `ch2_${S1}`), orderBy('startedAt', 'desc'), limit(10))));
+await check('H4. a student cannot read another student\'s history', 'DENY', () => getDocs(studentHistory(as(S2), `ch2_${S1}`, S1)));
+await check('H5. a REMOVED student still reads their own history (N4)', 'ALLOW', async () => {
+  const snap = await getDocs(studentHistory(as(REMOVED), `ch2_${REMOVED}`, REMOVED));
+  if (ids(snap) !== 'sessR') throw new Error(`got ${ids(snap)}`);
+  return snap;
+});
+await check('H6. the coach reads a visible student\'s history, newest first', 'ALLOW', async () => {
+  const snap = await getDocs(coachHistory(as(COACH), `ch2_${S1}`, COACH));
+  if (orderedIds(snap) !== 'sess1,sessOld') throw new Error(`got ${orderedIds(snap)}`);
+  return snap;
+});
+await check('H7. the coach\'s history query never returns a removed student\'s sessions', 'ALLOW', async () => {
+  const snap = await getDocs(coachHistory(as(COACH), `ch2_${REMOVED}`, COACH));
+  if (!snap.empty) throw new Error('removed student\'s session delivered');
+  return snap;
+});
+await check('H8. the coach\'s history query without visibleToCoach is refused', 'DENY', () =>
+  getDocs(query(sessions(as(COACH)), where('assignmentId', '==', `ch2_${REMOVED}`), where('coachUid', '==', COACH),
+    orderBy('startedAt', 'desc'), limit(10))));
+await check('H9. another coach cannot read this room\'s history', 'DENY', () => getDocs(coachHistory(as(COACH2), `ch2_${S1}`, COACH)));
+await check('H10. a classmate cannot use the coach\'s query', 'DENY', () => getDocs(coachHistory(as(S2), `ch2_${S1}`, COACH)));
+await check('H11. the coach lists one student\'s challenges in the room', 'ALLOW', async () => {
+  const snap = await getDocs(studentChallenges(as(COACH), COACH, S1));
+  if (ids(snap) !== `ch1_${S1},ch2_${S1}`) throw new Error(`got ${ids(snap)}`);
+  return snap;
+});
+await check('H12. …a removed student\'s list comes back empty', 'ALLOW', async () => {
+  const snap = await getDocs(studentChallenges(as(COACH), COACH, REMOVED));
+  if (!snap.empty) throw new Error('removed student\'s assignment delivered');
+  return snap;
+});
+await check('H13. the per-student list without visibleToCoach is refused', 'DENY', () =>
+  getDocs(query(assignments(as(COACH)), where('roomId', '==', 'room1'), where('coachUid', '==', COACH), where('studentUid', '==', REMOVED))));
+await check('H14. the coach\'s per-challenge overview lists visible students only', 'ALLOW', async () => {
+  const snap = await getDocs(overview(as(COACH), 'ch1', COACH));
+  if (ids(snap) !== [`ch1_${S1}`, `ch1_${S2}`].sort().join(',')) throw new Error(`got ${ids(snap)}`);
+  return snap;
+});
+await check('H15. the overview without visibleToCoach is refused', 'DENY', () =>
+  getDocs(query(assignments(as(COACH)), where('challengeId', '==', 'ch1'), where('coachUid', '==', COACH))));
+await check('H16. another coach cannot read the overview', 'DENY', () => getDocs(overview(as(COACH2), 'ch1', COACH)));
+await check('H17. a student cannot read the overview', 'DENY', () => getDocs(overview(as(S1), 'ch1', COACH)));
+await check('H18. the coach reads an active student\'s membership (student page)', 'ALLOW', () =>
+  getDoc(doc(as(COACH), 'rooms', 'room1', 'members', S1)));
+await check('H19. the coach cannot read a removed student\'s membership (student page hidden)', 'DENY', () =>
+  getDoc(doc(as(COACH), 'rooms', 'room1', 'members', REMOVED)));
+await check('H20. a judge cannot read any history', 'DENY', () => getDocs(studentHistory(asJudge(), `ch2_${S1}`, S1)));
 
 console.log('\n=== challengeSessions — every client write refused ===\n');
 await check('SW1. a student cannot start their own challenge (create a session)', 'DENY', () =>

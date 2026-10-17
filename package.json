@@ -14,6 +14,7 @@
     "test:e2e:challenges": "firebase emulators:exec --only firestore,auth,database \"node tests/e2e/challenge-assign.e2e.mjs\"",
     "test:e2e:challenge-mode": "firebase emulators:exec --only firestore,auth,database \"node tests/e2e/challenge-mode.e2e.mjs\"",
     "test:e2e:challenge-mode:late": "firebase emulators:exec --only firestore,auth,database \"node tests/e2e/challenge-mode.e2e.mjs --ub-time=23:50\"",
+    "test:e2e:history": "firebase emulators:exec --only firestore,auth,database \"node tests/e2e/challenge-history.e2e.mjs\"",
     "test:emulator-guard": "node tests/e2e/emulator-guard.mjs",
     "test:rules": "firebase emulators:exec --only firestore \"node tests/firestore-rules/users.test.mjs && node tests/firestore-rules/athlete-privacy.test.mjs && node tests/firestore-rules/competition-scrambles.test.mjs && node tests/firestore-rules/competition-staged-results.test.mjs && node tests/firestore-rules/judge-access.test.mjs && node tests/firestore-rules/rooms.test.mjs && node tests/firestore-rules/challenge.test.mjs\"",
     "test:challenge": "tsc lib/challenge.ts scripts/test-challenge.ts --outDir .tmp-challenge-build --module commonjs --target es2020 --esModuleInterop --skipLibCheck --types node && node .tmp-challenge-build/scripts/test-challenge.js"

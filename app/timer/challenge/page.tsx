@@ -1,8 +1,9 @@
 'use client';
 
-// /timer/challenge — hub (docs/challenge-plan.md, phases 2–3).
+// /timer/challenge — hub (docs/challenge-plan.md, phases 2–5).
 //   Student: join a room by code; my rooms with status, and under each
-//   room my assigned challenges (phase 3: waiting for the coach to start).
+//   room my assigned challenges; tapping one opens its history (phase 5,
+//   also after being removed from the room).
 //   Coach (admin or coaches/{uid}): my rooms + create room.
 // My memberships and my assignments are live while the hub is open (an
 // approval or a new assignment shows at once: one read per document on
@@ -215,7 +216,7 @@ function MyAssignment({ a }: { a: ChallengeAssignment }) {
       display: 'flex', flexDirection: 'column', gap: '0.3rem', minWidth: 0,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
-        <span style={{ fontWeight: 600, fontSize: '0.88rem', flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.template.title}</span>
+        <Link href={`/timer/challenge/history/${a.id}`} data-testid="my-assignment-history" style={{ fontWeight: 600, fontSize: '0.88rem', flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: T.text, textDecoration: 'none' }}>{a.template.title}</Link>
         <StatusChip text={ASSIGNMENT_STATUS_TEXT[a.status]} tone={a.status === 'completed' ? 'text' : 'muted'} />
       </div>
       <span data-testid="my-assignment-sentence" style={{ fontSize: '0.86rem' }}>{previewSentence(a.template)}</span>
@@ -234,6 +235,9 @@ function MyAssignment({ a }: { a: ChallengeAssignment }) {
         </div>
       ) : (
         <Muted>Багш эхлүүлэхийг хүлээнэ үү</Muted>
+      )}
+      {a.firstStartedAt != null && (
+        <Link href={`/timer/challenge/history/${a.id}`} style={{ color: T.muted, fontSize: '0.8rem', alignSelf: 'flex-start' }}>Түүх харах</Link>
       )}
     </div>
   );

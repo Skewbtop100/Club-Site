@@ -19,7 +19,7 @@ import { serverNow } from './clock';
 import { RoomError } from './rooms';
 import { SOLVE_MAX_MS, sanityCheck, type SanityReason } from '../challenge';
 import { computeProgress, daysTaken, ubDate, validateEndsAt } from '../challenge-progress';
-import type { SessionStatus } from '../types/challenge';
+import type { SessionEndedBy, SessionStatus } from '../types/challenge';
 
 const ID_RE = /^[A-Za-z0-9_-]{1,160}$/;
 const COMMENT_MAX = 280; // the timer's comment box limit
@@ -51,12 +51,6 @@ async function readCloseCtx(db: Firestore, tx: Transaction, sessionRef: Document
   return { sessionRef, session, assignmentRef, assignment: a.data() ?? {}, liveRef, live: l.data() };
 }
 
-/**
- * Closes a session inside `tx` (writes only — reads were done by
- * readCloseCtx): marks it, rolls its complete blocks and best streak up into
- * the assignment, and clears the student's pointer if it still points here.
- * `completed` also writes the completion fields (A8).
- */
 /** What the student's celebration screen shows (4b). */
 export interface CompletionResult {
   completedUbDate: string;
@@ -66,11 +60,20 @@ export interface CompletionResult {
   bestStreak: number;
 }
 
+/**
+ * Closes a session inside `tx` (writes only — reads were done by
+ * readCloseCtx): marks it, rolls its complete blocks and best streak up into
+ * the assignment, and clears the student's pointer if it still points here.
+ * `completed` also writes the completion fields (A8). `endedBy` (phase 5)
+ * is set on an 'ended' session so the history can tell "дуусгасан" from
+ * "багш зогсоосон".
+ */
 function closeInTx(
   tx: Transaction, c: CloseCtx, status: Exclude<SessionStatus, 'active'>, nowMs: number,
+  endedBy?: SessionEndedBy,
 ): CompletionResult | null {
   const now = Timestamp.fromMillis(nowMs);
-  tx.update(c.sessionRef, { status, endedAt: now });
+  tx.update(c.sessionRef, { status, endedAt: now, ...(endedBy ? { endedBy } : {}) });
   const a = c.assignment;
   const update: Record<string, unknown> = {
     blocksAttempted: (a.blocksAttempted ?? 0) + (c.session.blocksAttempted ?? 0),
@@ -311,7 +314,8 @@ export async function endSession(callerUid: string, body: Record<string, unknown
     if (s.studentUid !== callerUid && s.coachUid !== callerUid) throw new RoomError(403, 'not-your-session');
     if (s.status !== 'active') return { status: s.status as SessionStatus };
     const status = nowMs >= toMs(s.endsAt) ? 'auto-closed' : 'ended';
-    closeInTx(tx, await readCloseCtx(db, tx, ref, s), status, nowMs);
+    const by: SessionEndedBy = s.studentUid === callerUid ? 'student' : 'coach';
+    closeInTx(tx, await readCloseCtx(db, tx, ref, s), status, nowMs, status === 'ended' ? by : undefined);
     return { status };
   });
 }

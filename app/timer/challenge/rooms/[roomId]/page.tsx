@@ -5,8 +5,11 @@
 //   (approve / reject), members (remove), and challenges (create, assign,
 //   edit until started, duplicate, delete — components/timer/challenge/
 //   CoachChallenges.tsx). Members are live while this page is open;
-//   everything else is a one-time read.
+//   everything else is a one-time read. Phase 5: a student's name opens
+//   their challenges here (…/students/[uid]); a challenge's title opens the
+//   per-student overview (…/challenges/[challengeId]).
 //   Anyone else: their own status in the room, or "not found".
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
@@ -182,7 +185,10 @@ function CoachRoomView({ room, onRoomChange }: { room: Room; onRoomChange: (r: R
           : active.map(m => (
             <Row key={m.uid} testId={`member-${m.uid}`}>
               <Avatar name={m.displayName} url={m.photoURL} />
-              <span style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.displayName}</span>
+              <Link href={`/timer/challenge/rooms/${room.id}/students/${m.uid}`} data-testid={`member-history-${m.uid}`}
+                style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: T.text, textDecoration: 'none' }}>
+                {m.displayName}
+              </Link>
               {confirmRemove === m.uid ? (
                 <>
                   <Button kind="danger" disabled={busy !== null} onClick={() => act(m.uid, 'remove')}>Тийм, хасах</Button>

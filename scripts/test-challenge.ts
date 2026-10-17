@@ -1,7 +1,9 @@
-// Unit checks for lib/challenge.ts and lib/challenge-progress.ts
-// (docs/challenge-plan.md, phases 3–4): target-time parsing, title and
-// preview sentence, the template validator, block / streak scoring, UB
-// dates, the end-time rule and the sanity checks. No emulator. Run via:
+// Unit checks for lib/challenge.ts, lib/challenge-progress.ts and
+// lib/challenge-history.ts (docs/challenge-plan.md, phases 3–5): target-time
+// parsing, title and preview sentence, the template validator, block /
+// streak scoring, UB dates, the end-time rule, the sanity checks, and the
+// history helpers (end reason, shown end time, blocks with their solves,
+// solve / block text, the coach's per-challenge order). No emulator. Run via:
 //   npm run test:challenge
 
 import {
@@ -11,6 +13,9 @@ import {
 import {
   computeProgress, daysTaken, passesTarget, ubDate, ubTimeToday, validateEndsAt, type ScoredSolve,
 } from '../lib/challenge-progress';
+import {
+  blockText, endReason, sessionBlocks, shownEndMs, solveText, sortOverview,
+} from '../lib/challenge-history';
 
 let failures = 0;
 function check(label: string, pass: boolean, detail?: unknown) {
@@ -177,6 +182,55 @@ eq('gap just inside the tolerance → ok',
   sanityCheck('333', { ms: 8000, stoppedAt: 107_800 }, { stoppedAt: 100_000 }, 0, 60_000), null);
 eq('more solve time than has passed since the start → too-close',
   sanityCheck('333', { ms: 9000, stoppedAt: 200_000 }, { stoppedAt: 100_000 }, 50_000, 50_000), 'too-close');
+
+console.log('\n=== history: how a session ended ===');
+const T0 = Date.UTC(2026, 9, 16, 4, 0);
+const times = (status: 'active' | 'ended' | 'auto-closed' | 'completed', endedBy: 'student' | 'coach' | null = null) =>
+  ({ status, endedBy, endsAt: T0 + 3600_000, endedAt: status === 'active' ? null : T0 + 1800_000 });
+eq('ended by the student → student', endReason(times('ended', 'student'), T0), 'student');
+eq('ended by the coach → coach', endReason(times('ended', 'coach'), T0), 'coach');
+eq('ended before endedBy existed → student', endReason(times('ended'), T0), 'student');
+eq('auto-closed → time', endReason(times('auto-closed'), T0), 'time');
+eq('completed → completed', endReason(times('completed'), T0), 'completed');
+eq('active, end time ahead → running', endReason(times('active'), T0), 'running');
+eq('active, end time passed (not closed yet) → time', endReason(times('active'), T0 + 7200_000), 'time');
+eq('shown end: ended → endedAt', shownEndMs(times('ended', 'coach'), T0), T0 + 1800_000);
+eq('shown end: auto-closed by the cron hours later → the end time', shownEndMs({ ...times('auto-closed'), endedAt: T0 + 86_400_000 }, T0), T0 + 3600_000);
+eq('shown end: running → null', shownEndMs(times('active'), T0), null);
+
+console.log('\n=== history: solve and block text ===');
+eq('plain solve', solveText({ ms: 1957, penalty: 'none' }), '1.95');
+eq('+2 shows the time with the penalty and a "+"', solveText({ ms: 1957, penalty: '+2' }), '3.95+');
+eq('DNF', solveText({ ms: 1957, penalty: 'dnf' }), 'DNF');
+eq('block pass', blockText('ao5', { resultMs: 1873, pass: true }), 'Ao5 1.87 ✓');
+eq('block fail', blockText('ao5', { resultMs: 2030, pass: false }), 'Ao5 2.03 ✗');
+eq('DNF block', blockText('mo3', { resultMs: null, pass: false }), 'Mo3 DNF ✗');
+eq('single over a minute', blockText('single', { resultMs: 65300, pass: true }), 'Single 1:05.30 ✓');
+
+console.log('\n=== history: blocks with their solves ===');
+const mo3 = { metric: 'mo3' as const, targetMs: 2000, streak: 2, event: '222' };
+const hs = [1500, 1600, 1700, 1800, 2500, 1000, 1200].map((ms, i) => ({ seq: i + 1, ms, penalty: (i === 5 ? 'dnf' : 'none') as 'none' | 'dnf' }));
+const hp = computeProgress(mo3, hs);
+const hb = sessionBlocks({ template: mo3, solves: [...hs].reverse(), blocks: hp.blocks });
+check('2 blocks of 3 solves each, in seq order (input order ignored)', hb.blocks.length === 2 &&
+  hb.blocks[0].solves.map(x => x.seq).join() === '1,2,3' && hb.blocks[1].solves.map(x => x.seq).join() === '4,5,6', hb);
+check('results are the stored ones: 1.60 ✓, DNF ✗', hb.blocks[0].resultMs === 1600 && hb.blocks[0].pass && hb.blocks[1].resultMs === null && !hb.blocks[1].pass, hb.blocks);
+check('the unfinished 3rd block is the leftover (never scored)', hb.leftover.length === 1 && hb.leftover[0].seq === 7, hb.leftover);
+const hs1 = sessionBlocks({ template: { ...mo3, metric: 'single' }, solves: hs.slice(0, 2), blocks: [{ resultMs: 1500, displayCs: 150, pass: true }, { resultMs: 1600, displayCs: 160, pass: true }] });
+check('Single: one solve per block, no leftover', hs1.blocks.length === 2 && hs1.blocks[1].solves[0].seq === 2 && hs1.leftover.length === 0, hs1);
+const hs0 = sessionBlocks({ template: mo3, solves: [], blocks: [] });
+check('no solves → nothing', hs0.blocks.length === 0 && hs0.leftover.length === 0);
+
+console.log('\n=== history: the coach\'s per-challenge order ===');
+const ov = sortOverview([
+  { studentName: 'Дэлгэр', status: 'assigned' as const, completedAt: null },
+  { studentName: 'Анар', status: 'completed' as const, completedAt: 3000 },
+  { studentName: 'Ганаа', status: 'in-progress' as const, completedAt: null },
+  { studentName: 'Болд', status: 'completed' as const, completedAt: 1000 },
+  { studentName: 'Бат', status: 'in-progress' as const, completedAt: null },
+]);
+eq('completed first by completion date, then active, then not started (names A–Я within)',
+  ov.map(r => r.studentName).join(', '), 'Болд, Анар, Бат, Ганаа, Дэлгэр');
 
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASSED');
 process.exit(failures ? 1 : 0);

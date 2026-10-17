@@ -12,7 +12,7 @@ import type { AssignmentStatus, ChallengeAssignment, ChallengeMetric } from '@/l
 
 const tsToMs = (v: unknown) => (v instanceof Timestamp ? v.toMillis() : null);
 
-function toAssignment(id: string, d: Record<string, unknown>): ChallengeAssignment {
+export function toAssignment(id: string, d: Record<string, unknown>): ChallengeAssignment {
   const t = (d.template ?? {}) as Record<string, unknown>;
   return {
     id,
