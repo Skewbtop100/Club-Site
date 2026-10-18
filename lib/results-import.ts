@@ -104,7 +104,7 @@ export function parseWcaResults(
       block = null;
       warnedOrphan = true; // rows of a skipped block are covered by its own warning
       if (!header) {
-        warnings.push(`"${line}": үе танигдсангүй — алгаслаа.`);
+        warnings.push(`"${line}": раунд танигдсангүй — алгаслаа.`);
         return;
       }
       if (!header.eventId) {
@@ -185,7 +185,7 @@ export function parseWcaResults(
     }
     const round = resolveRound(b.round, totalRounds);
     if (round === null) {
-      warnings.push(`${blockLabel}: тэмцээний тохиргоонд ийм үе алга (нийт ${totalRounds} үе) — алгаслаа.`);
+      warnings.push(`${blockLabel}: тэмцээний тохиргоонд ийм раунд алга (нийт ${totalRounds} раунд) — алгаслаа.`);
       continue;
     }
     if (b.rows.length === 0) {
