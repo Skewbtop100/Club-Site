@@ -206,7 +206,17 @@ try {
   const tile = S.page.getByRole('button', { name: 'Challenge', exact: true });
   await tile.waitFor();
   check('mobile Community tab: "Challenge" tile is open (not "Удахгүй")', !(await tile.innerText()).includes('Удахгүй'));
-  check('Racing / Competition stay "Удахгүй"', await S.page.getByRole('button', { name: 'Race — Удахгүй' }).isVisible() && await S.page.getByRole('button', { name: 'Competition — Удахгүй' }).isVisible());
+  const raceTile = S.page.getByRole('button', { name: 'Race', exact: true });
+  check('Racing is open again (not "Удахгүй")', await raceTile.isVisible() && !(await raceTile.innerText()).includes('Удахгүй'));
+  check('Competition stays "Удахгүй"', await S.page.getByRole('button', { name: 'Competition — Удахгүй' }).isVisible());
+  {
+    // The route itself renders the real racing page, not the coming-soon screen.
+    const p = await S.ctx.newPage();
+    await p.goto(`${BASE}/timer/multiplayer`);
+    await p.waitForLoadState('load');
+    check('/timer/multiplayer is no longer the "Удахгүй" screen', (await p.getByText('Энэ хэсэг удахгүй нээгдэнэ.').count()) === 0);
+    await p.close();
+  }
   await S.page.screenshot({ path: path.join(OUT, 'mobile-community.png') });
   await tile.click();
   await S.page.waitForURL(/\/timer\/challenge$/);

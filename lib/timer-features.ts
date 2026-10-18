@@ -9,7 +9,7 @@
 // The section's pages, routes and Firebase logic are untouched.
 export const TIMER_FEATURES = {
   /** Multiplayer racing — /timer/multiplayer */
-  racing: false,
+  racing: true,
   /** Virtual competitions — /timer/competitions/** */
   competition: false,
   /** Coach challenges — /timer/challenge/** (docs/challenge-plan.md).
