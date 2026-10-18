@@ -140,7 +140,11 @@ export interface AdvancementConfig {
 
 export interface EventConfig {
   rounds: number;
-  groups: number;
+  /** Legacy manual "Groups/Round" setting. No longer edited: a round's
+   *  groups come from its imported WCA scrambles (lib/scramble-import.ts
+   *  groupOptions). Kept only as the fallback for older competitions whose
+   *  round has no imported scrambles. */
+  groups?: number;
   advancement?: Record<string, AdvancementConfig>;
 }
 
@@ -169,6 +173,12 @@ export interface Competition {
   imageUrl?: string;
   events?: Record<string, boolean>;
   athletes?: CompetitionAthlete[];
+  /** athleteId → eventId → true: the same registrations as `athletes`,
+   *  written alongside it by the competition form. Derived, for
+   *  firestore.rules only — a rule cannot search the `athletes` list, so this
+   *  is what lets it refuse a judge's round-1 result for an athlete not
+   *  registered for that event. Absent on competitions not saved since. */
+  registrations?: Record<string, Record<string, boolean>>;
   eventConfig?: Record<string, EventConfig>;
   roundStatus?: Record<string, 'complete' | 'ongoing'>;
   finishedAt?: { toDate: () => Date } | string | number;
@@ -197,6 +207,11 @@ export interface Result {
   submittedAt?: unknown;
   /** True when this is an auto-created next-round placeholder awaiting solves. */
   isPlaceholder?: boolean;
+  /** Did Not Start — set by "DNS болгох" when the admin marks a round
+   *  complete without this athlete's result. Every solve is stored as DNS
+   *  (-2), `single` -2, `average` null. Ranked last, never advances, never a
+   *  PR/record/ranking entry (lib/results-entry-helpers.ts isDnsResult). */
+  dns?: boolean;
   /** Club-local YYYY-MM-DD this was entered on. Only set for Daily Practice
    *  results (competitionId === DAILY_PRACTICE_COMPETITION_ID) — lets the
    *  live feed and the "already recorded today" check query by day without

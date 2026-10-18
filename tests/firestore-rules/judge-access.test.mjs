@@ -52,7 +52,10 @@ async function seed() {
     await setDoc(doc(db, 'users', ADMIN), { uid: ADMIN, role: 'admin' });
     await setDoc(doc(db, 'users', MEMBER), { uid: MEMBER, role: 'member' });
     for (const [id, status] of [['comp1', 'live'], ['comp2', 'live'], ['compDone', 'finished'], ['compOff', 'live'], ['compNoPin', 'live']]) {
-      await setDoc(doc(db, 'competitions', id), { name: id, status, events: { '333': true }, athletes: [] });
+      await setDoc(doc(db, 'competitions', id), {
+        name: id, status, events: { '333': true, '444': true }, athletes: [],
+        roundStatus: { '444_r1': 'complete' },
+      });
       await setDoc(doc(db, 'competitions', id, 'private', 'scrambles'), { scrambleSets: { '333': { '1': { A: { main: ['R U F'], extra: [] } } } } });
       await setDoc(doc(db, 'competitions', id, 'private', 'importedResults_333'), { kind: 'importedResults', eventId: '333', rounds: { '1': [] } });
     }
@@ -64,8 +67,8 @@ async function seed() {
 
     // An existing finished club result, a next-round placeholder, an imported row.
     await setDoc(doc(db, 'results', 'comp1_333_r1_athDone'), { ...entry('athDone'), single: 900, average: 950 });
-    await setDoc(doc(db, 'results', 'comp1_333_r2_athAdv'), {
-      competitionId: 'comp1', eventId: '333', round: 2, athleteId: 'athAdv', athleteName: 'Adv',
+    await setDoc(doc(db, 'results', 'comp1_444_r2_athAdv'), {
+      competitionId: 'comp1', eventId: '444', round: 2, athleteId: 'athAdv', athleteName: 'Adv',
       single: null, average: null, solves: [], status: 'draft', source: 'entry', isPlaceholder: true,
     });
     await setDoc(doc(db, 'results', 'impst_comp1_row0'), {
@@ -73,8 +76,39 @@ async function seed() {
       single: 700, average: 720, status: 'published', source: 'imported', importRowId: 'row0',
     });
     await setDoc(doc(db, 'results', 'comp2_333_r1_athX'), { ...entry('athX', { competitionId: 'comp2' }) });
+
+    // Round gating fixture (testdata- prefix: isolated, never a real competition).
+    //   333: round 1 open.  444: round 1 complete, ath1 advanced (placeholder).
+    //   555: round 1 NOT complete, yet a stale round-2 placeholder for ath2.
+    await setDoc(doc(db, 'competitions', TD_COMP), {
+      name: TD_COMP, status: 'live',
+      events: { '333': true, '222': true, '444': true, '555': true },
+      athletes: [
+        { id: TD_ATH1, name: 'Test One', events: ['333', '444'] },
+        { id: TD_ATH2, name: 'Test Two', events: ['333', '444', '555'] },
+      ],
+      registrations: {
+        [TD_ATH1]: { '333': true, '444': true },
+        [TD_ATH2]: { '333': true, '444': true, '555': true },
+      },
+      roundStatus: { '444_r1': 'complete', '555_r1': 'ongoing' },
+    });
+    await setDoc(doc(db, 'competitions', TD_COMP, 'private', 'judgeAccess'), { enabled: true, version: 'v1', pinHash: 'h', salt: 's' });
+    await setDoc(doc(db, 'results', `${TD_COMP}_444_r1_${TD_ATH1}`), { ...entry(TD_ATH1, { competitionId: TD_COMP, eventId: '444' }) });
+    await setDoc(doc(db, 'results', `${TD_COMP}_444_r2_${TD_ATH1}`), {
+      competitionId: TD_COMP, eventId: '444', round: 2, athleteId: TD_ATH1, athleteName: 'Test One',
+      single: null, average: null, solves: [], status: 'draft', source: 'entry', isPlaceholder: true,
+    });
+    await setDoc(doc(db, 'results', `${TD_COMP}_555_r2_${TD_ATH2}`), {
+      competitionId: TD_COMP, eventId: '555', round: 2, athleteId: TD_ATH2, athleteName: 'Test Two',
+      single: null, average: null, solves: [], status: 'draft', source: 'entry', isPlaceholder: true,
+    });
   });
 }
+
+const TD_COMP = 'testdata-rounds-comp';
+const TD_ATH1 = 'testdata-ath1';
+const TD_ATH2 = 'testdata-ath2';
 
 /** A club result as the entry panel saves it. */
 function entry(athleteId, over = {}) {
@@ -103,7 +137,7 @@ await check('J1. reads their competition\'s scrambles', 'ALLOW', async () => {
 });
 await check('J2. creates a club result for their competition, with a judge named', 'ALLOW', () => create(judge(), entry('athA')));
 await check('J3. fills a next-round placeholder (an advanced athlete\'s round-2 result)', 'ALLOW', () =>
-  create(judge(), entry('athAdv', { round: 2 })));
+  create(judge(), entry('athAdv', { eventId: '444', round: 2 })));
 await check('J4. reads results and the public competition like anyone', 'ALLOW', async () => {
   await getDocs(query(collection(judge(), 'results'), where('competitionId', '==', 'comp1')));
   return getDoc(doc(judge(), 'competitions', 'comp1'));
@@ -130,7 +164,7 @@ await check('R1. cannot edit an existing completed result', 'DENY', () =>
   create(judge(), entry('athDone', { single: 100, average: 100 })));
 await check('R2. ...not even one field of it', 'DENY', () => updateDoc(doc(judge(), 'results', 'comp1_333_r1_athDone'), { single: 100 }));
 await check('R3. cannot delete a result', 'DENY', () => deleteDoc(doc(judge(), 'results', 'comp1_333_r1_athDone')));
-await check('R4. cannot delete a placeholder either', 'DENY', () => deleteDoc(doc(judge(), 'results', 'comp1_333_r2_athAdv')));
+await check('R4. cannot delete a placeholder either', 'DENY', () => deleteDoc(doc(judge(), 'results', 'comp1_444_r2_athAdv')));
 await check('R5. cannot create a result for another competition', 'DENY', () => create(judge(), entry('athA', { competitionId: 'comp2' })));
 await check('R6. cannot overwrite another competition\'s result', 'DENY', () => create(judge(), entry('athX', { competitionId: 'comp2' })));
 await check('R7. cannot save a result under another competition\'s id while claiming their own', 'DENY', () =>
@@ -226,6 +260,28 @@ await check('A6. reads and rewrites the PIN document, staged imports and scrambl
   return setDoc(doc(db, 'competitions', 'comp1', 'private', 'importedResults_333'), { kind: 'importedResults', eventId: '333', rounds: {} });
 });
 await check('A7. marks a round complete', 'ALLOW', () => updateDoc(doc(as(ADMIN), 'competitions', 'comp1'), { roundStatus: { '333_r1': 'complete' } }));
+
+console.log('\n=== judge: only the athlete\'s current round (round gating) ===\n');
+const tdJudge = () => judge({ competitionId: TD_COMP, pinVersion: 'v1' }, 'judge_testdata_rounds');
+const tdEntry = (athleteId, over = {}) => entry(athleteId, { competitionId: TD_COMP, competitionName: TD_COMP, ...over });
+await check('G1. round 1 of an event the athlete is registered for', 'ALLOW', () => create(tdJudge(), tdEntry(TD_ATH1)));
+await check('G2. round 1 of an event the athlete is NOT registered for', 'DENY', () => create(tdJudge(), tdEntry(TD_ATH1, { eventId: '222' })));
+await check('G3. an athlete not on the roster at all', 'DENY', () => create(tdJudge(), tdEntry('testdata-stranger')));
+await check('G4. round 2 without having advanced (no placeholder), round 1 complete', 'DENY', () =>
+  create(tdJudge(), tdEntry(TD_ATH2, { eventId: '444', round: 2 })));
+await check('G5. round 2 over their placeholder once round 1 is complete', 'ALLOW', () =>
+  create(tdJudge(), tdEntry(TD_ATH1, { eventId: '444', round: 2 })));
+await check('G6. round 2 over a placeholder while round 1 is NOT complete', 'DENY', () =>
+  create(tdJudge(), tdEntry(TD_ATH2, { eventId: '555', round: 2 })));
+await check('G7. a round already marked complete (missed it, no result)', 'DENY', () =>
+  create(tdJudge(), tdEntry(TD_ATH2, { eventId: '444' })));
+await check('G8. a round 2 created from scratch is never a judge\'s (even claiming round 1 done)', 'DENY', () =>
+  create(tdJudge(), tdEntry(TD_ATH1, { eventId: '333', round: 2 })));
+await check('G9. the admin may still write a DNS into a completed round', 'ALLOW', () =>
+  setDoc(doc(as(ADMIN), 'results', `${TD_COMP}_444_r1_${TD_ATH2}`), {
+    competitionId: TD_COMP, eventId: '444', round: 1, athleteId: TD_ATH2, athleteName: 'Test Two',
+    single: -2, average: null, solves: [-2, -2, -2, -2, -2], status: 'published', source: 'entry', dns: true,
+  }));
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 await testEnv.cleanup();

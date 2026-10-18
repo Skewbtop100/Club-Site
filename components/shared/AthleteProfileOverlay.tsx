@@ -8,6 +8,7 @@ import { useWcaRecords } from '@/lib/hooks/useWcaRecords';
 import { fmtTime, formatDate } from '@/lib/time-utils';
 import { fmtMs } from '@/lib/timer-engine';
 import { WCA_EVENTS } from '@/lib/wca-events';
+import { isDnsResult } from '@/lib/results-entry-helpers';
 import JudgedBy from '@/components/shared/JudgedBy';
 import type { Athlete, Result, Competition } from '@/lib/types';
 import type { RecordBadge } from '@/lib/record-badges';
@@ -386,7 +387,8 @@ export default function AthleteProfileOverlay({ athlete, athletes, onClose }: Pr
       eventIds.forEach(eventId => {
         const evResults = compResults.filter(r => r.eventId === eventId);
         const maxRound = evResults.reduce((m, r) => Math.max(m, r.round || 1), 1);
-        const finalResults = evResults.filter(r => (r.round || 1) === maxRound).sort(wcaSort);
+        // A DNS takes no place, so never a medal.
+        const finalResults = evResults.filter(r => (r.round || 1) === maxRound && !isDnsResult(r)).sort(wcaSort);
         const totalRounds = comp?.eventConfig?.[eventId]?.rounds ?? maxRound;
         const rLabel = getRoundLabel(maxRound, totalRounds);
         finalResults.forEach((r, i) => {
@@ -606,9 +608,10 @@ export default function AthleteProfileOverlay({ athlete, athletes, onClose }: Pr
     const m: Record<string, number> = {};
     if (!allPublishedResults) return m;
     allResults.forEach(r => {
-      if (r.eventId !== historyEvent) return;
+      // A DNS takes no place (and doesn't push anyone down).
+      if (r.eventId !== historyEvent || isDnsResult(r)) return;
       const roundResults = allPublishedResults
-        .filter(gr => gr.competitionId === r.competitionId && gr.eventId === r.eventId && (gr.round || 1) === (r.round || 1))
+        .filter(gr => gr.competitionId === r.competitionId && gr.eventId === r.eventId && (gr.round || 1) === (r.round || 1) && !isDnsResult(gr))
         .sort(wcaSort);
       const idx = roundResults.findIndex(gr => gr.athleteId === r.athleteId);
       if (idx >= 0) m[r.id] = idx + 1;

@@ -7,6 +7,7 @@ import { useLang } from '@/lib/i18n';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { fmtTime, betterTime, formatDate } from '@/lib/time-utils';
 import { DAILY_PRACTICE_COMPETITION_ID } from '@/lib/firebase/services/competitions';
+import { isDnsResult } from '@/lib/results-entry-helpers';
 import CompetitionHistory from '@/components/shared/CompetitionHistory';
 import type { Result, Athlete, Competition, EventVisibility } from '@/lib/types';
 import type { TranslationKey } from '@/lib/i18n';
@@ -109,9 +110,10 @@ export default function RecordsSection({ results, athletes, competitions, eventV
   // a TR that nobody can ever beat. This does NOT touch competition
   // history/podium displays elsewhere, which should still show that the
   // athlete competed — only "who currently holds this club record."
+  // A DNS (did not start) never holds a record.
   const rosterResults = useMemo(() => {
     const rosterIds = new Set(athletes.map((a) => a.id));
-    return results.filter((r) => rosterIds.has(r.athleteId));
+    return results.filter((r) => rosterIds.has(r.athleteId) && !isDnsResult(r));
   }, [results, athletes]);
 
   const { bestSingle, bestAverage } = useMemo(() => {

@@ -5,9 +5,10 @@ import { subscribeCompetitions, updateCompetition, finishCompetition } from '@/l
 import { subscribeResultsByComp, getResultsByComp, saveResult, deleteResult as deleteResultFn } from '@/lib/firebase/services/results';
 import { syncStagedEvent } from '@/lib/firebase/services/staged-results';
 import { recomputeClubBests } from '@/lib/firebase/services/club-bests';
-import { compareRoundResults } from '@/lib/results-entry-helpers';
+import { compareRoundResults, isDnsResult, DNS_VALUE } from '@/lib/results-entry-helpers';
+import { missingAthletes, buildDnsResult } from '@/lib/round-progress';
 import PrevResultChip from '@/components/shared/PrevResultChip';
-import { clubNameMatcher } from '@/lib/staged-reveal';
+import { clubNameMatcher, computeAdvancing } from '@/lib/staged-reveal';
 import JudgedBy from '@/components/shared/JudgedBy';
 import { getAthletes } from '@/lib/firebase/services/athletes';
 import type { Competition, Result, AdvancementConfig, Athlete } from '@/lib/types';
@@ -116,6 +117,12 @@ export default function CompResultsTab() {
   // Advancement notification
   const [advanceMsg, setAdvanceMsg] = useState('');
 
+  // Mark Round Complete with club athletes still missing a result: the
+  // round completes only once each is marked DNS (or the admin goes back).
+  const [missingPrompt, setMissingPrompt] = useState<{ ev: string; round: number; ids: string[] } | null>(null);
+  const [dnsWorking, setDnsWorking] = useState(false);
+  const [dnsError, setDnsError] = useState('');
+
   // ── subscriptions ───────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -161,16 +168,21 @@ export default function CompResultsTab() {
     setEditSaving(true); setEditError('');
     try {
       const parsed = editSolves.map(s => parseTime(s.trim() || null));
-      const newSingle = bestOf(parsed);
-      const newAverage = calcAo5(parsed);
+      // Every attempt DNS = the athlete did not start: no average, and the
+      // DNS flag that keeps them out of advancement and records. Any real
+      // attempt entered over a DNS result clears it.
+      const allDns = parsed.length > 0 && parsed.every(v => v === DNS_VALUE);
+      const newSingle = allDns ? DNS_VALUE : bestOf(parsed);
+      const newAverage = allDns ? null : calcAo5(parsed);
       // Strip placeholder flags when admin enters real solves.
-      const { isPlaceholder: _ip, ...editRest } = editRow;
+      const { isPlaceholder: _ip, dns: _dns, ...editRest } = editRow;
       const updated: Result = {
         ...editRest,
         solves: parsed,
         single: newSingle,
         average: newAverage,
         status: 'published',
+        ...(allDns ? { dns: true } : {}),
       };
       await saveResult(editRow.id, updated);
       setEditRow(null);
@@ -217,7 +229,43 @@ export default function CompResultsTab() {
 
   // ── round status handler ─────────────────────────────────────────────────────
 
-  async function setRoundStatus(ev: string, r: number, newStatus: 'complete' | 'ongoing' | null) {
+  /** "Done" pressed: complete the round straight away, unless club athletes
+   *  who should compete in it still have no result — then ask first. */
+  function requestComplete(ev: string, r: number) {
+    if (!selComp) return;
+    const ids = missingAthletes(selComp, results, ev, r);
+    setDnsError('');
+    if (ids.length > 0) setMissingPrompt({ ev, round: r, ids });
+    else setRoundStatus(ev, r, 'complete');
+  }
+
+  /** "DNS болгох" for some (or all) of the missing athletes. Once nobody is
+   *  left missing, the round is completed. */
+  async function markDns(ids: string[]) {
+    if (!missingPrompt || !selComp) return;
+    const { ev, round: r } = missingPrompt;
+    setDnsWorking(true); setDnsError('');
+    try {
+      const written: Result[] = [];
+      for (const id of ids) {
+        const { id: docId, data } = buildDnsResult(selComp, ev, r, id, allAthletes.find(a => a.id === id)?.name || '');
+        await saveResult(docId, data);
+        written.push({ ...data, id: docId });
+      }
+      const left = missingPrompt.ids.filter(id => !ids.includes(id));
+      if (left.length > 0) { setMissingPrompt({ ...missingPrompt, ids: left }); return; }
+      setMissingPrompt(null);
+      // The live subscription may not have the DNS rows yet — hand them over.
+      const writtenIds = new Set(written.map(w => w.id));
+      await setRoundStatus(ev, r, 'complete', [...results.filter(x => !writtenIds.has(x.id)), ...written]);
+    } catch (e) {
+      setDnsError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDnsWorking(false);
+    }
+  }
+
+  async function setRoundStatus(ev: string, r: number, newStatus: 'complete' | 'ongoing' | null, currentResults?: Result[]) {
     if (!compId || !selComp) return;
     setStatusWorking(true);
     try {
@@ -232,7 +280,7 @@ export default function CompResultsTab() {
       // THEN auto-create next-round placeholders — advancement ranks club and
       // imported results together, so it has to see all of them.
       if (newStatus === 'complete') {
-        const current = await syncStaged(ev);
+        const current = await syncStaged(ev, currentResults);
         await applyAdvancement(ev, r, current);
       }
     } catch { /* ignore */ } finally { setStatusWorking(false); }
@@ -274,16 +322,9 @@ export default function CompResultsTab() {
   }
 
   /** Compute advancing result rows in WCA rank order. Includes BOTH club and
-   *  imported results (athleteId may be empty for imported). */
+   *  imported results (athleteId may be empty for imported); never a DNS. */
   function computeAdvancingResults(roundResults: Result[], advCfg: AdvancementConfig): Result[] {
-    const sorted = [...roundResults]
-      .filter(r => !r.isPlaceholder && r.status !== 'withdrawn')
-      .sort(wcaSort);
-    const rawCount = advCfg.type === 'fixed'
-      ? advCfg.value
-      : Math.floor(sorted.length * advCfg.value / 100);
-    const count = Math.min(Math.max(0, rawCount), sorted.length);
-    return sorted.slice(0, count);
+    return computeAdvancing(roundResults, advCfg);
   }
 
   /** Auto-create / delete next-round placeholders for a just-completed round.
@@ -433,8 +474,9 @@ export default function CompResultsTab() {
   const isFinal     = round >= totalRounds;
   const advCfg: AdvancementConfig | undefined =
     !isFinal ? (evCfg?.advancement?.[String(round)] as AdvancementConfig | undefined) : undefined;
-  // Advancement math should count only real (non-placeholder) results.
-  const realCount = tableRows.filter(r => !r.isPlaceholder).length;
+  // Advancement math should count only real (non-placeholder) results; a
+  // DNS never advances (lib/staged-reveal.ts computeAdvancing).
+  const realCount = tableRows.filter(r => !r.isPlaceholder && !isDnsResult(r)).length;
   const rawAdv  = advCfg
     ? advCfg.type === 'fixed' ? advCfg.value : Math.floor(realCount * advCfg.value / 100)
     : 0;
@@ -652,7 +694,7 @@ export default function CompResultsTab() {
                 />
                 <button
                   disabled={statusWorking}
-                  onClick={() => setRoundStatus(evId, round, curStatus === 'complete' ? null : 'complete')}
+                  onClick={() => curStatus === 'complete' ? setRoundStatus(evId, round, null) : requestComplete(evId, round)}
                   className={`wca-status-btn${curStatus === 'complete' ? ' active-done' : ''}`}
                 >
                   {t('admin.cr.round.done-btn')}
@@ -889,6 +931,44 @@ export default function CompResultsTab() {
               <button onClick={() => setEditRow(null)} disabled={editSaving} className="wca-modal-btn">{t('admin.btn.cancel')}</button>
               <button onClick={saveEdit} disabled={editSaving} className="wca-modal-btn primary" style={{ background: editSaving ? 'rgba(99,102,241,0.3)' : 'rgba(99,102,241,0.7)', borderColor: 'rgba(99,102,241,0.6)' }}>
                 {editSaving ? t('admin.cr.edit.saving') : t('admin.btn.save')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Mark Round Complete: club athletes without a result ──────────── */}
+      {missingPrompt && (
+        <div onClick={() => !dnsWorking && setMissingPrompt(null)} className="wca-modal-backdrop">
+          <div onClick={e => e.stopPropagation()} className="wca-modal" style={{ borderColor: 'rgba(251,191,36,0.4)' }}>
+            <div className="wca-modal-title">{t('admin.cr.missing.title')}</div>
+            <div className="wca-modal-sub" style={{ marginBottom: '0.8rem' }}>
+              {WCA_EVENTS.find(e => e.id === missingPrompt.ev)?.name} · {getRoundLabel(missingPrompt.round, totalRoundsFor(missingPrompt.ev), t)} — {t('admin.cr.missing.body')}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '1rem', maxHeight: '45vh', overflowY: 'auto' }}>
+              {missingPrompt.ids.map(id => (
+                <div key={id} style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap',
+                  padding: '0.45rem 0.65rem', borderRadius: '8px',
+                  background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)',
+                }}>
+                  <span style={{ fontSize: '0.88rem', color: 'var(--text)', fontWeight: 600 }}>{athleteNameMap[id]?.trim() || id}</span>
+                  <span style={{ display: 'flex', gap: '0.4rem' }}>
+                    <button onClick={() => setMissingPrompt(null)} disabled={dnsWorking} className="wca-modal-btn">{t('admin.cr.missing.back')}</button>
+                    <button onClick={() => markDns([id])} disabled={dnsWorking} className="wca-modal-btn danger"
+                      style={{ background: 'rgba(239,68,68,0.55)', borderColor: 'rgba(239,68,68,0.6)' }}>
+                      {t('admin.cr.missing.dns')}
+                    </button>
+                  </span>
+                </div>
+              ))}
+            </div>
+            {dnsError && <div style={{ fontSize: '0.78rem', color: '#f87171', marginBottom: '0.8rem' }}>{dnsError}</div>}
+            <div className="wca-modal-actions">
+              <button onClick={() => setMissingPrompt(null)} disabled={dnsWorking} className="wca-modal-btn">{t('admin.cr.missing.back')}</button>
+              <button onClick={() => markDns(missingPrompt.ids)} disabled={dnsWorking} className="wca-modal-btn danger"
+                style={{ background: dnsWorking ? 'rgba(239,68,68,0.2)' : 'rgba(239,68,68,0.75)', borderColor: 'rgba(239,68,68,0.6)' }}>
+                {dnsWorking ? t('admin.cr.missing.working') : t('admin.cr.missing.dns-all')}
               </button>
             </div>
           </div>

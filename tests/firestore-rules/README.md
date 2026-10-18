@@ -17,7 +17,9 @@ emulator. Nothing here touches the real database.
 - `judge-access.test.mjs` — the per-competition judge (PIN login → custom
   token): what a judge may read and write, when that access ends (expiry, PIN
   regenerated or disabled, competition finished), and `results` writes being
-  admin + judge only.
+  admin + judge only. Also the round gating of a judge's writes: only the
+  athlete's current round (round 1 of a registered event, or round N+1 over
+  their placeholder once round N is complete; never a completed round).
 
 ## Running
 

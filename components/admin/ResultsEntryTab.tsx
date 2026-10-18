@@ -5,7 +5,8 @@ import { subscribeCompetitions, subscribeScrambleSets, ensureDailyPracticeCompet
 import { getAthletes } from '@/lib/firebase/services/athletes';
 import { saveResult, getResultsByComp, subscribeResultsByComp } from '@/lib/firebase/services/results';
 import { fmtTime, parseTime, getMinPlausibleSolveCs, todayDateStr } from '@/lib/time-utils';
-import { calcAo5, bestOf, compareRoundResults, timeToRawDigits, formatRawDigits } from '@/lib/results-entry-helpers';
+import { calcAo5, bestOf, compareRoundResults, isDnsResult, timeToRawDigits, formatRawDigits } from '@/lib/results-entry-helpers';
+import { athleteEventIds, roundStateFor, openRound, type RoundState } from '@/lib/round-progress';
 import { subscribeStagedEvents, syncStagedEvent } from '@/lib/firebase/services/staged-results';
 import type { StagedEvent } from '@/lib/staged-reveal';
 import StagedImportPanel from '@/components/admin/StagedImportPanel';
@@ -80,13 +81,13 @@ interface ImportRow {
 interface AdvLite { type: 'fixed' | 'percent'; value: number }
 
 function reComputeAdvancingNames(
-  priorRoundResults: { eventId?: string; athleteId?: string; athleteName?: string; single: number | null; average: number | null; status?: string; isPlaceholder?: boolean }[],
+  priorRoundResults: { eventId?: string; athleteId?: string; athleteName?: string; single: number | null; average: number | null; status?: string; isPlaceholder?: boolean; dns?: boolean; solves?: (number | null)[] }[],
   advCfg: AdvLite | undefined,
   athleteIdToFullName: Record<string, string>,
 ): Set<string> {
   if (!advCfg) return new Set();
   const sorted = [...priorRoundResults]
-    .filter(r => !r.isPlaceholder && r.status !== 'withdrawn')
+    .filter(r => !r.isPlaceholder && r.status !== 'withdrawn' && !isDnsResult(r))
     .sort(compareRoundResults);
   const rawCount = advCfg.type === 'fixed' ? advCfg.value : Math.floor(sorted.length * advCfg.value / 100);
   const count = Math.min(Math.max(0, rawCount), sorted.length);
@@ -147,6 +148,20 @@ function writeJudgeMemory(compId: string, panelId: number, judgeId: string) {
  *  one) — the signal for "discarding this needs a confirmation." */
 function panelHasProgress(p: PanelState): boolean {
   return p.currentSolveIdx > 0 || p.solves.some(s => s !== '');
+}
+
+/** Why the athlete's chosen round can't take results ('' = it can): only
+ *  their current round is open (lib/round-progress.ts). */
+function roundLockReason(state: RoundState | null, panelRound: number): TranslationKey | '' {
+  if (!state) return '';
+  switch (state.kind) {
+    case 'open': return state.round === panelRound ? '' : 'admin.results.round.changed';
+    case 'not-registered': return 'admin.results.round.not-registered';
+    case 'waiting': return 'admin.results.round.waiting';
+    case 'not-advanced': return 'admin.results.round.not-advanced';
+    case 'missed': return 'admin.results.round.missed';
+    case 'finished': return 'admin.results.round.finished';
+  }
 }
 
 function getRoundNames(totalRounds: number, t: (k: TranslationKey) => string): string[] {
@@ -415,8 +430,12 @@ export default function ResultsEntryTab({ judgeCompetitionId }: { judgeCompetiti
       const fail = (key: TranslationKey) => updatePanel(panelId, { msg: t(key), msgType: 'error', needsConfirm: false });
       if (isJudge && !panel.judgeId) return fail('admin.results.judge.required');
       if (isSelfJudging(panel.judgeId, panel.athleteId)) return fail('admin.results.judge.self');
+      // Only the athlete's current round takes results (firestore.rules
+      // enforces the same for a judge).
+      const lock = roundLockReason(roundStateOf(panel.athleteId, panel.eventId), panel.round);
+      if (lock) return fail(lock);
       const cfg = comps.find(c => c.id === compId)?.eventConfig?.[panel.eventId];
-      const offered = groupOptions(cfg?.groups ?? 1, scrambleSets[panel.eventId]?.[String(panel.round)]);
+      const offered = groupOptions(cfg?.groups, scrambleSets[panel.eventId]?.[String(panel.round)]);
       const avail = groupAvailability(offered, compResults, panel.athleteId, panel.eventId, panel.round);
       if (avail.roundBlocked) return fail('admin.results.judge.round-blocked');
       if (avail.blocked.has(panel.group)) return fail('admin.results.judge.group-blocked-hint');
@@ -854,13 +873,54 @@ export default function ResultsEntryTab({ judgeCompetitionId }: { judgeCompetiti
   const eventConfig = selComp?.eventConfig || {};
   const todayLabel = todayDateStr();
 
+  /** Where the athlete stands in the event (real competitions only; null
+   *  for Daily Practice or before both are chosen). */
+  function roundStateOf(athleteId: string, eventId: string): RoundState | null {
+    if (!selComp || selComp.isDailyPractice || !athleteId || !eventId) return null;
+    return roundStateFor(selComp, compResults, athleteId, eventId);
+  }
+
+  /** Group numbers of an event round — from its imported scrambles. */
+  function groupsFor(eventId: string, round: number): number[] {
+    return groupOptions(eventConfig[eventId]?.groups, scrambleSets[eventId]?.[String(round)]);
+  }
+
+  /** Round/group to put a panel on for this athlete+event: their current
+   *  round (or, when every round is locked, the one the lock is about). */
+  function roundPatch(athleteId: string, eventId: string): Pick<PanelState, 'round' | 'group'> {
+    const state = roundStateOf(athleteId, eventId);
+    const round = state && 'round' in state ? state.round : 1;
+    return { round, group: groupsFor(eventId, round)[0] };
+  }
+
+  // Keep each idle panel on its athlete's current round as results come in
+  // (e.g. the round before was just marked complete). A panel with solves
+  // in progress is left alone — submit() refuses it if its round closed.
+  useEffect(() => {
+    if (!selComp || selComp.isDailyPractice) return;
+    setPanels(prev => {
+      let changed = false;
+      const next = prev.map(p => {
+        if (!p.athleteId || !p.eventId || panelHasProgress(p)) return p;
+        const open = openRound(roundStateFor(selComp, compResults, p.athleteId, p.eventId));
+        if (open === null || open === p.round) return p;
+        changed = true;
+        const groups = groupsFor(p.eventId, open);
+        return { ...p, round: open, group: groups.includes(p.group) ? p.group : groups[0], scrambleSources: freshScrambleSources() };
+      });
+      return changed ? next : prev;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compResults, selComp, scrambleSets]);
+
   // Apply an event/athlete switch, resetting the panel's solve-entry state
   // so a finished event's solves can't linger under the new selection —
   // callers (the dropdowns below, and resolvePendingConfirm) decide whether
   // that reset needs confirming first via panelHasProgress().
   function doSwitchEvent(panelId: number, newEventId: string) {
     resetTimer(panelId);
-    updatePanel(panelId, { eventId: newEventId, round: 1, group: 1, ...freshSolveState() });
+    const panel = panels.find(p => p.id === panelId);
+    updatePanel(panelId, { eventId: newEventId, ...roundPatch(panel?.athleteId || '', newEventId), ...freshSolveState() });
   }
 
   function doSwitchAthlete(panelId: number, newAthleteId: string, panel: PanelState) {
@@ -877,6 +937,13 @@ export default function ResultsEntryTab({ judgeCompetitionId }: { judgeCompetiti
         r.practiceDate === todayLabel,
       );
       if (alreadyLogged) patch.eventId = '';
+    }
+    // A real competition: only the events the new athlete registered for,
+    // and their current round of the event kept.
+    if (!isDailyPracticeSelected && selComp) {
+      const eventId = panel.eventId && athleteEventIds(selComp, newAthleteId, evList.map(e => e.id)).includes(panel.eventId)
+        ? panel.eventId : '';
+      Object.assign(patch, { eventId, ...roundPatch(newAthleteId, eventId) });
     }
     updatePanel(panelId, patch);
   }
@@ -960,15 +1027,20 @@ export default function ResultsEntryTab({ judgeCompetitionId }: { judgeCompetiti
       {compId && (
         <div className="multi-entry-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
           {panels.map((panel, panelIdx) => {
-            const cfg        = eventConfig[panel.eventId] || { rounds: 1, groups: 1 };
+            const cfg        = eventConfig[panel.eventId] || { rounds: 1 };
             const roundNames = getRoundNames(cfg.rounds, t);
-            // Groups offered = the event's configured groups plus whatever
-            // groups the imported scrambles have for this round — an import
-            // with groups A–I must be selectable even if the config says 1.
-            // With no import this is just the configured 1..N, as before.
-            const groupsForRound = (round: number) =>
-              groupOptions(cfg.groups, scrambleSets[panel.eventId]?.[String(round)]);
-            const groupList = groupsForRound(panel.round);
+            // Groups offered = the groups of this round's imported scrambles
+            // (one if none are imported; an older competition's stored
+            // Groups/Round setting when it has no import).
+            const groupList = groupsFor(panel.eventId, panel.round);
+            // Only the athlete's current round is open (lib/round-progress.ts).
+            const roundState = roundStateOf(panel.athleteId, panel.eventId);
+            const openRoundNum = roundState ? openRound(roundState) : null;
+            const lockReason = roundLockReason(roundState, panel.round);
+            // Events offered: once an athlete is chosen, only theirs.
+            const panelEvents = !isDailyPracticeSelected && selComp && panel.athleteId
+              ? evList.filter(e => athleteEventIds(selComp, panel.athleteId, evList.map(x => x.id)).includes(e.id))
+              : evList;
             // In edit mode we're not "all entered" even if currentSolveIdx reached 5
             const allEntered = panel.currentSolveIdx >= 5 && panel.editReturnIdx === null;
             const { single, average } = computeResult(panel);
@@ -983,24 +1055,6 @@ export default function ResultsEntryTab({ judgeCompetitionId }: { judgeCompetiti
                   return ca.events.includes(panel.eventId);
                 })
               : athletes;
-
-            // Rounds where this athlete already has a real (non-placeholder)
-            // result for this comp+event. Used to disable those round options.
-            // Not used for Daily Practice (Round/Group are hidden there), but
-            // still date-scoped for correctness if that ever changes.
-            const completedRounds = new Set<number>(
-              panel.athleteId && panel.eventId
-                ? compResults
-                    .filter(r =>
-                      r.competitionId === compId &&
-                      r.athleteId === panel.athleteId &&
-                      r.eventId === panel.eventId &&
-                      !r.isPlaceholder &&
-                      (!isDailyPracticeSelected || r.practiceDate === todayLabel),
-                    )
-                    .map(r => r.round || 1)
-                : [],
-            );
 
             // Events this athlete already has a Daily Practice entry for today —
             // disabled in the dropdown so a duplicate can't even be selected.
@@ -1037,6 +1091,7 @@ export default function ResultsEntryTab({ judgeCompetitionId }: { judgeCompetiti
               : isJudge && !panel.judgeId ? 'admin.results.judge.required'
               : isSelfJudging(panel.judgeId, panel.athleteId) ? 'admin.results.judge.self'
               : !panel.athleteId || !panel.eventId ? ''
+              : lockReason ? lockReason
               : avail.roundBlocked ? 'admin.results.judge.round-blocked'
               : avail.blocked.has(panel.group) ? 'admin.results.judge.group-blocked-hint'
               : '';
@@ -1045,7 +1100,8 @@ export default function ResultsEntryTab({ judgeCompetitionId }: { judgeCompetiti
             // Imported WCA scrambles for this athlete's event/round/group, if
             // the competition has any. When it doesn't, nothing below changes:
             // real competitions show no scramble, Daily Practice generates its own.
-            const importedSet = !isDailyPracticeSelected && panel.athleteId && panel.eventId
+            // A locked round shows no scrambles: they're the current round's only.
+            const importedSet = !isDailyPracticeSelected && panel.athleteId && panel.eventId && !lockReason
               ? scrambleSets[panel.eventId]?.[String(panel.round)]?.[groupLetter(panel.group)]
               : undefined;
             const importedGroup = importedSet && importedSet.main.length > 0 ? importedSet : null;
@@ -1138,7 +1194,7 @@ export default function ResultsEntryTab({ judgeCompetitionId }: { judgeCompetiti
                     }
                   }}>
                   <option value="">{t('admin.results.select-event')}</option>
-                  {evList.map(e => {
+                  {panelEvents.map(e => {
                     const isLogged = practiceLoggedEventIds.has(e.id);
                     return (
                       <option key={e.id} value={e.id} disabled={isLogged}>
@@ -1154,10 +1210,12 @@ export default function ResultsEntryTab({ judgeCompetitionId }: { judgeCompetiti
                     <div>
                       <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.2rem', paddingLeft: '0.1rem' }}>{t('admin.results.round')}</div>
                       <select className="compact-select" value={panel.round} style={{ marginBottom: 0 }}
+                        disabled={!panel.athleteId || !panel.eventId}
+                        title={!panel.athleteId ? t('admin.results.round.select-athlete-first') : undefined}
                         onChange={e => {
                           const round = Number(e.target.value);
                           // The new round may have fewer groups (its own import, or none).
-                          const groups = groupsForRound(round);
+                          const groups = groupsFor(panel.eventId, round);
                           updatePanel(panel.id, {
                             round, scrambleSources: freshScrambleSources(),
                             group: groups.includes(panel.group) ? panel.group : groups[0],
@@ -1165,9 +1223,11 @@ export default function ResultsEntryTab({ judgeCompetitionId }: { judgeCompetiti
                         }}>
                         {roundNames.map((name, idx) => {
                           const roundNum = idx + 1;
-                          const isLocked = completedRounds.has(roundNum);
+                          // Every round but the athlete's current one is locked
+                          // (the selected one stays selectable so it can show).
+                          const isLocked = !!roundState && openRoundNum !== roundNum;
                           return (
-                            <option key={idx} value={roundNum} disabled={isLocked}>
+                            <option key={idx} value={roundNum} disabled={isLocked && roundNum !== panel.round}>
                               {name}{isLocked ? ' 🔒' : ''}
                             </option>
                           );
@@ -1193,7 +1253,7 @@ export default function ResultsEntryTab({ judgeCompetitionId }: { judgeCompetiti
                 {/* Why entry is blocked: no judge yet, self-judging, or the
                     athlete judged this group (option tooltips don't show on
                     phones, so the reason is spelled out here). */}
-                {blockReason && (
+                {blockReason && !(blockReason === lockReason && allEntered && panel.msgType === 'success') && (
                   <div className="msg warn" style={{ display: 'block', marginTop: '0.3rem', marginBottom: '0.3rem' }}>
                     {t(blockReason)}
                   </div>
@@ -1722,8 +1782,8 @@ export default function ResultsEntryTab({ judgeCompetitionId }: { judgeCompetiti
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label>{t('admin.results.group')}</label>
                 <select value={importGroup} onChange={e => setImportGroup(Number(e.target.value))}>
-                  {Array.from({ length: Math.max(1, (importEventId ? eventConfig[importEventId]?.groups : 0) || 1) }, (_, i) => (
-                    <option key={i} value={i + 1}>{t('admin.results.group')} {String.fromCharCode(65 + i)}</option>
+                  {(importEventId ? groupsFor(importEventId, importRound) : [1]).map(g => (
+                    <option key={g} value={g}>{t('admin.results.group')} {groupLetter(g)}</option>
                   ))}
                 </select>
               </div>

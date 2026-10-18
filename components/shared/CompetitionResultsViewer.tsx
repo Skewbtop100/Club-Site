@@ -10,7 +10,7 @@ import type { Competition, Result, AdvancementConfig, Athlete, WcaRecords } from
 import { fmtTime } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { WcaEventIcon, hasWcaEventIcon } from '@/lib/wca-event-icon';
-import { compareRoundResults } from '@/lib/results-entry-helpers';
+import { compareRoundResults, isDnsResult } from '@/lib/results-entry-helpers';
 import { getResultBadgesPair, BADGE_STYLES, type RecordBadge } from '@/lib/record-badges';
 import PrevResultChip from '@/components/shared/PrevResultChip';
 import { clubNameMatcher } from '@/lib/staged-reveal';
@@ -238,11 +238,13 @@ export function CompetitionResultsView({ comp, results, athletes, wcaRecords, cl
   const isFinal     = curRound >= totalRounds;
   const advCfg: AdvancementConfig | undefined =
     !isFinal ? (comp.eventConfig?.[curEv]?.advancement?.[String(curRound)] as AdvancementConfig | undefined) : undefined;
-  // Advancement math counts only real (non-placeholder) results.
+  // Advancement math counts only real (non-placeholder) results, and never
+  // a DNS (ranked last, so the advancing rows are always the first ones).
+  const competed = ranked.filter(r => !isDnsResult(r)).length;
   const rawAdv = advCfg
-    ? advCfg.type === 'fixed' ? advCfg.value : Math.floor(ranked.length * advCfg.value / 100)
+    ? advCfg.type === 'fixed' ? advCfg.value : Math.floor(competed * advCfg.value / 100)
     : 0;
-  const advanceCount = Math.min(rawAdv, Math.max(0, ranked.length - 1));
+  const advanceCount = Math.min(rawAdv, Math.max(0, competed - 1));
 
   const curStatus = statusOf(curEv, curRound);
   const eventName = WCA_EVENTS.find(e => e.id === curEv)?.name ?? '';

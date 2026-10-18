@@ -6,7 +6,7 @@
 // Imported relatively (not via '@/') so scripts/test-results-import.ts can
 // compile it standalone.
 
-import { compareRoundResults } from './results-entry-helpers';
+import { compareRoundResults, isDnsResult } from './results-entry-helpers';
 import type { AdvancementConfig, Result } from './types';
 import type { ParsedResultRound } from './results-import';
 
@@ -36,7 +36,7 @@ export interface StagedEvent {
 
 /** The fields of a result the reveal logic looks at; `Result` satisfies it. */
 export type RoundResultLite = Pick<Result, 'id' | 'athleteId' | 'eventId' | 'single' | 'average'> &
-  Partial<Pick<Result, 'athleteName' | 'round' | 'status' | 'source' | 'isPlaceholder'>>;
+  Partial<Pick<Result, 'athleteName' | 'round' | 'status' | 'source' | 'isPlaceholder' | 'dns' | 'solves'>>;
 
 // ── names ────────────────────────────────────────────────────────────────────
 
@@ -207,11 +207,12 @@ function advancingKey(r: RoundResultLite): string {
 }
 
 /** Results advancing from a round, from the combined ranking of everything
- *  in it (club + imported), with the existing fixed / percent rule — the same
- *  computation as CompResultsTab's next-round placeholders. */
+ *  in it (club + imported), with the existing fixed / percent rule — also
+ *  what CompResultsTab's next-round placeholders are made from. A DNS never
+ *  advances and doesn't count toward a percent rule's field size. */
 export function computeAdvancing<T extends RoundResultLite>(roundResults: T[], advCfg: AdvancementConfig): T[] {
   const sorted = roundResults
-    .filter(r => !r.isPlaceholder && r.status !== 'withdrawn')
+    .filter(r => !r.isPlaceholder && r.status !== 'withdrawn' && !isDnsResult(r))
     .sort(compareRoundResults);
   const rawCount = advCfg.type === 'fixed' ? advCfg.value : Math.floor(sorted.length * advCfg.value / 100);
   return sorted.slice(0, Math.min(Math.max(0, rawCount), sorted.length));

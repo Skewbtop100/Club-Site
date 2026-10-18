@@ -258,11 +258,12 @@ const CONFIG = { '333': { rounds: 2 }, '666': { rounds: 1 }, 'minx': { rounds: 1
 
   const grp = { main: ['m'], extra: [] };
   const nine = Object.fromEntries('ABCDEFGHI'.split('').map(l => [l, grp]));
-  eq('groupOptions: no import → configured groups only', [groupOptions(1), groupOptions(3), groupOptions(2, {})], [[1], [1, 2, 3], [1, 2]]);
-  eq('groupOptions: config 0/invalid still offers group A', groupOptions(0), [1]);
-  eq('groupOptions: 1 configured + 9 imported (A–I) → all nine', groupOptions(1, nine), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
-  eq('groupOptions: union keeps configured groups the import lacks', groupOptions(3, { A: grp }), [1, 2, 3]);
-  eq('groupOptions: sorted even when stored out of order, gaps kept as-is', groupOptions(1, { D: grp, B: grp }), [1, 2, 4]);
+  eq('groupOptions: no import, no legacy setting → one group', [groupOptions(undefined), groupOptions(undefined, {})], [[1], [1]]);
+  eq('groupOptions: no import → legacy stored groups kept (old competitions)', [groupOptions(1), groupOptions(3), groupOptions(2, {})], [[1], [1, 2, 3], [1, 2]]);
+  eq('groupOptions: legacy 0/invalid still offers group A', [groupOptions(0), groupOptions(NaN)], [[1], [1]]);
+  eq('groupOptions: 9 imported (A–I) → all nine', groupOptions(undefined, nine), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  eq('groupOptions: import decides — legacy count ignored when scrambles exist', [groupOptions(3, { A: grp }), groupOptions(1, nine).length], [[1], 9]);
+  eq('groupOptions: sorted even when stored out of order, gaps kept as-is', groupOptions(undefined, { D: grp, B: grp }), [2, 4]);
 
   const g = { main: ['m1', 'm2', 'm3', 'm4', 'm5'], extra: ['e1', 'e2'] };
   eq('scrambleFor: main by slot', [scrambleFor(g, 0), scrambleFor(g, 4, 'main')], ['m1', 'm5']);

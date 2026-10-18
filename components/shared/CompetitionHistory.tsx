@@ -6,7 +6,7 @@ import { useWcaRecords } from '@/lib/hooks/useWcaRecords';
 import { getResultRecordBadges } from '@/lib/record-badges';
 import { fmtTime, formatDate } from '@/lib/time-utils';
 import { WCA_EVENTS } from '@/lib/wca-events';
-import { compareRoundResults } from '@/lib/results-entry-helpers';
+import { compareRoundResults, isDnsResult } from '@/lib/results-entry-helpers';
 import PrevResultChip from '@/components/shared/PrevResultChip';
 import { clubNameMatcher } from '@/lib/staged-reveal';
 import JudgedBy from '@/components/shared/JudgedBy';
@@ -165,10 +165,12 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
   const isFinal = round >= totalRounds;
   const advCfg: AdvancementConfig | undefined =
     !isFinal ? (evCfg?.advancement?.[String(round)] as AdvancementConfig | undefined) : undefined;
+  // A DNS never advances (ranked last, so the advancing rows come first).
+  const competed = tableRows.filter(r => !isDnsResult(r)).length;
   const rawAdv = advCfg
-    ? advCfg.type === 'fixed' ? advCfg.value : Math.floor(tableRows.length * advCfg.value / 100)
+    ? advCfg.type === 'fixed' ? advCfg.value : Math.floor(competed * advCfg.value / 100)
     : 0;
-  const advanceCount = Math.min(rawAdv, tableRows.length - 1);
+  const advanceCount = Math.min(rawAdv, competed - 1);
 
   // Club athletes summary
   const clubSummary = useMemo(() => {
@@ -222,8 +224,9 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
       const maxRound = results
         .filter(r => r.eventId === eventId)
         .reduce((max, r) => Math.max(max, r.round || 1), 1);
+      // A DNS takes no place, so never a medal.
       const finalResults = results
-        .filter(r => r.eventId === eventId && (r.round || 1) === maxRound)
+        .filter(r => r.eventId === eventId && (r.round || 1) === maxRound && !isDnsResult(r))
         .sort(wcaSort);
       finalResults.forEach((r, i) => {
         const entry = athleteMap.get(r.athleteId);
@@ -286,8 +289,9 @@ export default function CompetitionHistory({ comp, athletes, onClose }: Props) {
         .filter(r => r.eventId === eventId)
         .reduce((max, r) => Math.max(max, r.round || 1), 1);
       const totalR = totalRoundsFor(eventId);
+      // A DNS takes no place, so never a medal.
       const finalResults = results
-        .filter(r => r.eventId === eventId && (r.round || 1) === maxRound)
+        .filter(r => r.eventId === eventId && (r.round || 1) === maxRound && !isDnsResult(r))
         .sort(wcaSort);
       const evName = WCA_EVENTS.find(e => e.id === eventId)?.name || eventId;
       const rLabel = getRoundLabel(maxRound, totalR);

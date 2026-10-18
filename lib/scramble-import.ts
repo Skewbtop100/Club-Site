@@ -242,18 +242,19 @@ export function groupLetter(group: number): string {
 }
 
 /**
- * Group numbers to offer for a round: the union of the event's configured
- * groups (1..configuredCount) and the groups its imported scrambles actually
- * have, ascending (A, B, C, …). So a round configured with 1 group but
- * imported with A–I offers all nine; with no import it's just the config.
+ * Group numbers to offer for a round, ascending (A, B, C, …). The round's
+ * imported WCA scrambles decide: one group per imported scramble group.
+ * With no import for the round, a single group — unless an older
+ * competition still carries the retired manual "Groups/Round" setting
+ * (`legacyCount`), which is then used as before.
  */
-export function groupOptions(configuredCount: number, imported?: Record<string, ScrambleGroup>): number[] {
-  const groups = new Set<number>();
-  for (let n = 1; n <= Math.max(1, configuredCount); n++) groups.add(n);
-  for (const letter of Object.keys(imported || {})) {
-    if (/^[A-Z]$/.test(letter)) groups.add(letter.charCodeAt(0) - 64);
-  }
-  return [...groups].sort((a, b) => a - b);
+export function groupOptions(legacyCount: number | undefined, imported?: Record<string, ScrambleGroup>): number[] {
+  const fromImport = Object.keys(imported || {})
+    .filter(letter => /^[A-Z]$/.test(letter))
+    .map(letter => letter.charCodeAt(0) - 64);
+  if (fromImport.length > 0) return [...new Set(fromImport)].sort((a, b) => a - b);
+  const count = Math.max(1, Math.floor(legacyCount ?? 1) || 1);
+  return Array.from({ length: count }, (_, i) => i + 1);
 }
 
 /** The scramble for a solve slot, honouring an extra if one was swapped in.

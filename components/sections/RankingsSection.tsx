@@ -6,6 +6,7 @@ import { WCA_EVENTS } from '@/lib/wca-events';
 import { fmtTime, compareTime, formatDate } from '@/lib/time-utils';
 import { getResultRecordBadges, getHighestBadge, BADGE_STYLES } from '@/lib/record-badges';
 import { DAILY_PRACTICE_COMPETITION_ID } from '@/lib/firebase/services/competitions';
+import { isDnsResult } from '@/lib/results-entry-helpers';
 import CompetitionHistory from '@/components/shared/CompetitionHistory';
 import type { Result, Athlete, Competition, WcaRecords, EventVisibility } from '@/lib/types';
 
@@ -62,10 +63,11 @@ export default function RankingsSection({ results, athletes, competitions, wcaRe
   // roster — same reasoning as RecordsSection/AthleteProfileOverlay/
   // DailyPracticeSection: an Athlete doc getting deleted shouldn't leave
   // their old times occupying a leaderboard rank or blocking a TR badge
-  // nobody currently on the roster can ever beat.
+  // nobody currently on the roster can ever beat. A DNS (did not start) is
+  // no result at all — it never gives an athlete a place in the rankings.
   const rosterResults = useMemo(() => {
     const rosterIds = new Set(athletes.map((a) => a.id));
-    return results.filter((r) => rosterIds.has(r.athleteId));
+    return results.filter((r) => rosterIds.has(r.athleteId) && !isDnsResult(r));
   }, [results, athletes]);
 
   const rows = useMemo(() => {

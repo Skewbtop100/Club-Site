@@ -127,6 +127,14 @@ service cloud.firestore {
     //            already holds solves cannot be changed by a judge.
     // and may never delete, write an imported result (reveals are written by
     // the server), or touch another competition's results.
+    //
+    // Either way only the athlete's CURRENT round (lib/round-progress.ts):
+    // round 1 — created, for an event the athlete is registered for; round
+    // N+1 — over its placeholder, i.e. they advanced, and only once round N
+    // is marked complete. Never a round already marked complete.
+    // Registration is read from competition.registrations (written with the
+    // roster by the competition form); a competition not saved since that
+    // field was added has none and is not checked for it.
     match /results/{docId} {
       function judgeEntry() {
         let d = request.resource.data;
@@ -141,10 +149,22 @@ service cloud.firestore {
           docId == d.competitionId + '_' + d.eventId + '_r' + string(d.round) + '_' + d.athleteId;
       }
 
+      // Called after judgeEntry(), so competitionId/eventId/round are typed.
+      function judgeRoundOpen() {
+        let d = request.resource.data;
+        let comp = get(/databases/$(database)/documents/competitions/$(d.competitionId)).data;
+        let status = comp.get('roundStatus', {});
+        let registered = !('registrations' in comp) ||
+          comp.registrations.get(d.athleteId, {}).get(d.eventId, false) == true;
+        return status.get(d.eventId + '_r' + string(d.round), '') != 'complete' &&
+          ((d.round == 1 && registered) ||
+           (d.round > 1 && status.get(d.eventId + '_r' + string(d.round - 1), '') == 'complete'));
+      }
+
       allow read: if true;
       allow write: if isAdmin();
-      allow create: if judgeEntry();
-      allow update: if judgeEntry() && resource.data.get('isPlaceholder', false) == true;
+      allow create: if judgeEntry() && request.resource.data.round == 1 && judgeRoundOpen();
+      allow update: if judgeEntry() && resource.data.get('isPlaceholder', false) == true && judgeRoundOpen();
     }
 
     // ── users/{uid} — the club account ───────────────────────────────────

@@ -14,6 +14,7 @@ import type { Athlete, Competition, CompetitionAthlete, EventConfig, Advancement
 import { WCA_EVENTS } from '@/lib/wca-events';
 import { parseWcaScrambles, mergeScrambleSets, type ParsedRound } from '@/lib/scramble-import';
 import JudgePinSection from '@/components/admin/JudgePinSection';
+import { registrationsMap } from '@/lib/round-progress';
 import { useLang } from '@/lib/i18n';
 import COUNTRIES from '@/lib/countries';
 
@@ -175,18 +176,6 @@ export default function CompetitionsTab() {
     return `${short} · ${scrambleRoundLabel(eventId, roundId)} · ${Object.keys(groups).length} ${t('admin.comp.scrambles.groups-suffix')} · ${scrambleCounts(groups)} ${t('admin.comp.scrambles.scrambles-suffix')}`;
   }
 
-  /** Note for a round whose import has more groups than the event's
-   *  "groups per round" setting ('' otherwise). Informational only — results
-   *  entry offers every imported group regardless. */
-  function scrambleGroupNote(eventId: string, groups: Record<string, ScrambleGroup>): string {
-    const imported = Object.keys(groups).length;
-    const configured = eventConfig[eventId]?.groups ?? 1;
-    if (imported <= configured) return '';
-    return t('admin.comp.scrambles.more-groups')
-      .replace(/\{imported\}/g, String(imported))
-      .replace(/\{configured\}/g, String(configured));
-  }
-
   function toggleAthlete(athleteId: string) {
     setAthleteReg(prev => {
       const existing = prev[athleteId];
@@ -221,12 +210,14 @@ export default function CompetitionsTab() {
           .filter(([evId, v]) => v && events[evId])
           .map(([evId]) => evId),
       }));
+    // Same registrations, keyed for firestore.rules (Competition.registrations).
+    const registrations = registrationsMap(athletesData);
     try {
       if (editId) {
-        await updateCompetition(editId, { ...form, events, athletes: athletesData, eventConfig });
+        await updateCompetition(editId, { ...form, events, athletes: athletesData, registrations, eventConfig });
         showMsg('success', t('admin.comp.msg.updated'));
       } else {
-        const newId = await addCompetition({ ...form, events, athletes: athletesData, eventConfig });
+        const newId = await addCompetition({ ...form, events, athletes: athletesData, registrations, eventConfig });
         // Scrambles staged before the competition existed go to its private
         // doc now. The competition is already created at this point, so a
         // failure here is reported on its own rather than as a failed create
@@ -364,7 +355,7 @@ export default function CompetitionsTab() {
                     onChange={e => {
                       setEvents(prev => ({ ...prev, [ev.id]: e.target.checked }));
                       if (e.target.checked) {
-                        setEventConfig(prev => prev[ev.id] ? prev : { ...prev, [ev.id]: { rounds: 1, groups: 1 } });
+                        setEventConfig(prev => prev[ev.id] ? prev : { ...prev, [ev.id]: { rounds: 1 } });
                       }
                     }}
                     style={{ accentColor: 'var(--accent)', width: 15, height: 15, cursor: 'pointer' }}
@@ -383,23 +374,7 @@ export default function CompetitionsTab() {
                         value={eventConfig[ev.id]?.rounds ?? 1}
                         onChange={e => setEventConfig(prev => ({
                           ...prev,
-                          [ev.id]: { ...(prev[ev.id] || { rounds: 1, groups: 1 }), rounds: Math.min(4, Math.max(1, Number(e.target.value))) },
-                        }))}
-                        style={{
-                          width: '3rem', padding: '0.2rem 0.3rem', fontSize: '0.8rem',
-                          borderRadius: '5px', textAlign: 'center', fontFamily: 'inherit',
-                          background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: 'var(--text)',
-                        }}
-                      />
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: 'var(--muted)' }}>
-                      {t('admin.comp.groups')}
-                      <input
-                        type="number" min={1} max={10}
-                        value={eventConfig[ev.id]?.groups ?? 1}
-                        onChange={e => setEventConfig(prev => ({
-                          ...prev,
-                          [ev.id]: { ...(prev[ev.id] || { rounds: 1, groups: 1 }), groups: Math.min(10, Math.max(1, Number(e.target.value))) },
+                          [ev.id]: { ...(prev[ev.id] || { rounds: 1 }), rounds: Math.min(4, Math.max(1, Number(e.target.value))) },
                         }))}
                         style={{
                           width: '3rem', padding: '0.2rem 0.3rem', fontSize: '0.8rem',
@@ -435,7 +410,7 @@ export default function CompetitionsTab() {
                               setEventConfig(prev => ({
                                 ...prev,
                                 [ev.id]: {
-                                  ...(prev[ev.id] || { rounds: 1, groups: 1 }),
+                                  ...(prev[ev.id] || { rounds: 1 }),
                                   advancement: {
                                     ...(prev[ev.id]?.advancement || {}),
                                     [String(r)]: { type: adv?.type || 'fixed', value: val },
@@ -458,7 +433,7 @@ export default function CompetitionsTab() {
                                 onClick={() => setEventConfig(prev => ({
                                   ...prev,
                                   [ev.id]: {
-                                    ...(prev[ev.id] || { rounds: 1, groups: 1 }),
+                                    ...(prev[ev.id] || { rounds: 1 }),
                                     advancement: {
                                       ...(prev[ev.id]?.advancement || {}),
                                       [String(r)]: { type: t, value: adv?.value ?? (t === 'percent' ? 25 : 8) },
@@ -512,11 +487,6 @@ export default function CompetitionsTab() {
               </span>
             ))}
           </div>
-          {savedScrambleRounds.filter(r => scrambleGroupNote(r.eventId, r.groups)).map(r => (
-            <div key={`${r.eventId}-${r.roundId}`} style={{ fontSize: '0.72rem', color: '#fbbf24', marginBottom: '0.4rem' }}>
-              {WCA_EVENTS.find(ev => ev.id === r.eventId)?.short ?? r.eventId} · {scrambleRoundLabel(r.eventId, r.roundId)}: {scrambleGroupNote(r.eventId, r.groups)}
-            </div>
-          ))}
           <textarea
             value={scrambleText}
             rows={6}
@@ -544,9 +514,6 @@ export default function CompetitionsTab() {
                       {scrambleSummary(s.eventId, s.roundId, s.groups)}
                       {scrambleSets[s.eventId]?.[s.roundId] && (
                         <span style={{ fontSize: '0.72rem', color: '#fbbf24', marginLeft: '0.4rem' }}>({t('admin.comp.scrambles.replaces')})</span>
-                      )}
-                      {scrambleGroupNote(s.eventId, s.groups) && (
-                        <div style={{ fontSize: '0.72rem', color: '#fbbf24', lineHeight: 1.4 }}>{scrambleGroupNote(s.eventId, s.groups)}</div>
                       )}
                     </div>
                   ))}
